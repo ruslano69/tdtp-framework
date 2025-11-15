@@ -21,11 +21,17 @@ func main() {
 
 	// 1. Подключаемся к существующей БД с 100,000 записей
 	var dbPath string
+	var targetTable string
+
 	if len(os.Args) > 1 {
 		dbPath = os.Args[1]
+		if len(os.Args) > 2 {
+			targetTable = os.Args[2]
+		}
 	} else {
-		fmt.Println("Usage: go run main.go <path-to-database>")
-		fmt.Println("Example: go run main.go ../../testdata/large.db")
+		fmt.Println("Usage: go run main.go <path-to-database> [table-name]")
+		fmt.Println("Example: go run main.go testdata/large.db users")
+		fmt.Println("         go run main.go testdata/large.db")
 		fmt.Println("\nCreating demo database with 10,000 records...")
 		dbPath = "pagination_demo.db"
 		defer os.Remove(dbPath)
@@ -62,8 +68,28 @@ func main() {
 		fmt.Printf("   - %s\n", table)
 	}
 
-	// Выбираем первую таблицу для демо
-	tableName := tables[0]
+	// Выбираем таблицу
+	var tableName string
+	if targetTable != "" {
+		// Проверяем что указанная таблица существует
+		found := false
+		for _, table := range tables {
+			if table == targetTable {
+				found = true
+				tableName = targetTable
+				break
+			}
+		}
+		if !found {
+			fmt.Printf("\n❌ Table '%s' not found in database\n", targetTable)
+			fmt.Println("Available tables listed above")
+			return
+		}
+	} else {
+		// Используем первую таблицу
+		tableName = tables[0]
+	}
+
 	fmt.Printf("\n🔍 Using table: %s\n", tableName)
 
 	// 3. Получаем схему таблицы
