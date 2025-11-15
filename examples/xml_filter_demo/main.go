@@ -34,7 +34,7 @@ func main() {
 	}
 	defer adapter.Close(ctx)
 
-	// 2. Создаем схему и таблицу
+	// 2. Создаем схему и пакет с тестовыми данными
 	fmt.Println("📋 Creating table Users...")
 	builder := schema.NewBuilder()
 	schemaObj := builder.
@@ -45,11 +45,6 @@ func main() {
 		AddText("city", 50).
 		AddInteger("is_active", false).
 		Build()
-
-	err = adapter.CreateTable(ctx, "Users", schemaObj)
-	if err != nil {
-		panic(err)
-	}
 
 	// 3. Создаем пакет с тестовыми данными
 	fmt.Println("📝 Inserting test data...")
@@ -65,6 +60,7 @@ func main() {
 		},
 	}
 
+	// Импортируем данные (таблица создается автоматически)
 	err = adapter.ImportPacket(ctx, testPacket, adapters.StrategyReplace)
 	if err != nil {
 		panic(err)
@@ -146,18 +142,12 @@ func main() {
 
 	fmt.Printf("   ✅ Parsed %d rows from XML\n\n", len(parsedPacket.Data.Rows))
 
-	// 9. Создаем временную таблицу
-	fmt.Println("🗂️  Creating temporary table...")
-	tempTable := "Users_filtered_temp"
-
-	err = adapter.CreateTable(ctx, tempTable, schemaObj)
-	if err != nil {
-		panic(err)
-	}
-
-	// 10. Импортируем из XML
+	// 9. Импортируем из XML во временную таблицу
 	fmt.Println("📥 Importing from XML to temporary table...")
+	tempTable := "Users_filtered_temp"
 	parsedPacket.Header.TableName = tempTable // Update table name for import
+
+	// ImportPacket создаст таблицу автоматически
 	err = adapter.ImportPacket(ctx, &parsedPacket, adapters.StrategyReplace)
 	if err != nil {
 		panic(err)
@@ -187,11 +177,10 @@ func main() {
 	// 12. Показываем QueryContext
 	if parsedPacket.QueryContext != nil {
 		fmt.Println("\n📊 Query Context from XML:")
-		fmt.Printf("   - Language: %s\n", parsedPacket.QueryContext.QueryLanguage)
+		fmt.Printf("   - Language: %s\n", parsedPacket.QueryContext.OriginalQuery.Language)
 		fmt.Printf("   - Filtered rows: %d\n", parsedPacket.QueryContext.ExecutionResults.RecordsReturned)
 		fmt.Printf("   - Total in table: %d\n", parsedPacket.QueryContext.ExecutionResults.TotalRecordsInTable)
-		fmt.Printf("   - Execution time: %dms\n", parsedPacket.QueryContext.ExecutionResults.ExecutionTimeMs)
-		fmt.Printf("   - Has filters: %v\n", parsedPacket.QueryContext.Filters != nil)
+		fmt.Printf("   - Has filters: %v\n", parsedPacket.QueryContext.OriginalQuery.Filters != nil)
 	}
 
 	fmt.Println("\n✅ Demo completed successfully!")

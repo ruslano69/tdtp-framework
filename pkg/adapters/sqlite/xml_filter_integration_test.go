@@ -30,7 +30,7 @@ func TestXMLFilterIntegration(t *testing.T) {
 	}
 	defer adapter.Close(ctx)
 
-	// 2. Создаем схему и таблицу Users
+	// 2. Создаем схему и пакет с тестовыми данными
 	builder := schema.NewBuilder()
 	schemaObj := builder.
 		AddInteger("id", true).
@@ -40,11 +40,6 @@ func TestXMLFilterIntegration(t *testing.T) {
 		AddText("city", 50).
 		AddInteger("is_active", false).
 		Build()
-
-	err = adapter.CreateTable(ctx, "Users", schemaObj)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
 
 	// 3. Создаем пакет с тестовыми данными
 	testPacket := packet.NewDataPacket(packet.TypeReference, "Users")
@@ -59,7 +54,7 @@ func TestXMLFilterIntegration(t *testing.T) {
 		},
 	}
 
-	// 4. Импортируем тестовые данные
+	// 4. Импортируем тестовые данные (таблица создается автоматически)
 	err = adapter.ImportPacket(ctx, testPacket, adapters.StrategyReplace)
 	if err != nil {
 		t.Fatalf("Failed to import test data: %v", err)
@@ -136,16 +131,11 @@ func TestXMLFilterIntegration(t *testing.T) {
 
 	t.Logf("Parsed %d rows from XML", len(parsedPacket.Data.Rows))
 
-	// 11. Создаем временную таблицу и импортируем данные
+	// 11. Импортируем данные из XML во временную таблицу
 	tempTableName := "Users_temp_filtered"
-
-	err = adapter.CreateTable(ctx, tempTableName, schemaObj)
-	if err != nil {
-		t.Fatalf("Failed to create temp table: %v", err)
-	}
-
-	// 12. Импортируем данные из XML пакета
 	parsedPacket.Header.TableName = tempTableName // Update table name for import
+
+	// ImportPacket создаст таблицу автоматически, если её нет
 	err = adapter.ImportPacket(ctx, &parsedPacket, adapters.StrategyReplace)
 	if err != nil {
 		t.Fatalf("Failed to import to temp table: %v", err)
@@ -203,11 +193,11 @@ func TestXMLFilterIntegration(t *testing.T) {
 		t.Error("QueryContext is missing in XML")
 	} else {
 		t.Logf("QueryContext preserved:")
-		t.Logf("  - Language: %s", parsedPacket.QueryContext.QueryLanguage)
+		t.Logf("  - Language: %s", parsedPacket.QueryContext.OriginalQuery.Language)
 		t.Logf("  - Filtered: %d rows", parsedPacket.QueryContext.ExecutionResults.RecordsReturned)
 		t.Logf("  - Total in table: %d rows", parsedPacket.QueryContext.ExecutionResults.TotalRecordsInTable)
 
-		if parsedPacket.QueryContext.Filters == nil {
+		if parsedPacket.QueryContext.OriginalQuery.Filters == nil {
 			t.Error("Filters not preserved in QueryContext")
 		}
 	}
@@ -232,20 +222,15 @@ func TestXMLComplexFilter(t *testing.T) {
 	}
 	defer adapter.Close(ctx)
 
-	// Создаем схему и таблицу
+	// Создаем схему и пакет с тестовыми данными
 	builder := schema.NewBuilder()
 	schemaObj := builder.
 		AddInteger("id", true).
 		AddText("name", 100).
-		AddReal("price", false).
+		AddReal("price").
 		AddText("category", 50).
 		AddInteger("in_stock", false).
 		Build()
-
-	err = adapter.CreateTable(ctx, "Products", schemaObj)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
 
 	// Создаем пакет с тестовыми данными
 	testPacket := packet.NewDataPacket(packet.TypeReference, "Products")
@@ -261,7 +246,7 @@ func TestXMLComplexFilter(t *testing.T) {
 		},
 	}
 
-	// Импортируем тестовые данные
+	// Импортируем тестовые данные (таблица создается автоматически)
 	err = adapter.ImportPacket(ctx, testPacket, adapters.StrategyReplace)
 	if err != nil {
 		t.Fatalf("Failed to import test data: %v", err)
