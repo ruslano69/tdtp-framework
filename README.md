@@ -39,14 +39,27 @@
 - Статистика выполнения
 - QueryContext для Response
 
-### ✅ Adapters: SQLite Adapter (NEW!)
+### ✅ Adapters: Universal Adapter Interface (v1.0)
+- **Двухуровневая архитектура** (Level 1: Interface, Level 2: Implementations)
+- **Фабрика адаптеров** с автоматической регистрацией
+- **Унифицированный API** для всех БД
+- **Context-aware** операции (context.Context)
+- **Стратегии импорта**: REPLACE, IGNORE, FAIL, COPY
+
+### ✅ Adapters: SQLite Adapter
 - Подключение к SQLite БД
 - Export: БД → TDTP пакеты
 - Import: TDTP пакеты → БД
 - Автоматический маппинг типов
-- 3 стратегии импорта (REPLACE/IGNORE/FAIL)
 - Автоматическое создание таблиц
 - Транзакции для множественных операций
+
+### ✅ Adapters: PostgreSQL Adapter
+- Подключение через pgx/v5 connection pool
+- Export с поддержкой schemas
+- Import с COPY (высокая производительность)
+- Специальные типы: UUID, JSONB, JSON, INET, ARRAY
+- ON CONFLICT для стратегий импорта
 
 ## 🏗️ Архитектура
 
@@ -111,6 +124,44 @@ parser := packet.NewParser()
 pkt, err := parser.ParseFile("reference.xml")
 ```
 
+### Использование адаптеров (v1.0)
+
+```go
+import (
+    "context"
+    "github.com/queuebridge/tdtp/pkg/adapters"
+    _ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"   // Регистрация
+    _ "github.com/queuebridge/tdtp/pkg/adapters/postgres" // Регистрация
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Создаем адаптер через фабрику
+    cfg := adapters.Config{
+        Type: "sqlite",  // или "postgres"
+        DSN:  "database.db",
+    }
+
+    adapter, err := adapters.New(ctx, cfg)
+    if err != nil {
+        panic(err)
+    }
+    defer adapter.Close(ctx)
+
+    // Export: БД → TDTP
+    packets, err := adapter.ExportTable(ctx, "users")
+
+    // Import: TDTP → БД
+    err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
+
+    // Транзакции
+    tx, _ := adapter.BeginTx(ctx)
+    // ... операции ...
+    tx.Commit(ctx)
+}
+```
+
 ### Запуск примера
 
 ```bash
@@ -159,25 +210,50 @@ go test -v ./pkg/core/packet/
 - [x] Сортировка и пагинация
 - [x] QueryContext для Response
 
-### ~~v0.5~~ ✅ Завершено (NEW!)
+### ~~v0.5~~ ✅ Завершено
 - [x] SQLite Adapter
 - [x] Маппинг типов SQLite ↔ TDTP
 - [x] Export: БД → TDTP
 - [x] Import: TDTP → БД
 - [x] Автоматическое создание таблиц
 
-### v0.6 (следующее)
-- [ ] Integration тесты для SQLite
-- [ ] ExportTableWithQuery через TDTQL
-- [ ] Инкрементальный sync (по timestamp)
+### ~~v0.6~~ ✅ Завершено
+- [x] Integration тесты для SQLite
+- [x] ExportTableWithQuery через TDTQL
+- [x] In-memory фильтрация
+
+### ~~v0.7~~ ✅ Завершено
+- [x] TDTQL → SQL трансляция для оптимизации
+- [x] SQL-level фильтрация (WHERE/ORDER BY/LIMIT)
+
+### ~~v0.8~~ ✅ Завершено
+- [x] SQLite benchmark тесты
+- [x] Поддержка subtypes
+
+### ~~v0.9~~ ✅ Завершено
+- [x] PostgreSQL adapter
+- [x] UUID, JSONB, JSON, INET типы
+- [x] COPY для bulk import
+
+### ~~v1.0~~ ✅ Завершено (NEW!)
+- [x] **Двухуровневая архитектура адаптеров**
+- [x] **Фабрика адаптеров с регистрацией**
+- [x] **Context-aware API**
+- [x] **Унифицированные стратегии импорта**
+- [x] **Обновленные интеграционные тесты**
+- [x] **Примеры использования фабрики**
+
+### v1.1 (следующее)
+- [ ] Оптимизация производительности
+- [ ] Расширенная документация
 - [ ] CLI утилита (tdtpcli)
 
-### v0.7 (планируется)
-- [ ] PostgreSQL adapter
+### v1.5 (планируется)
 - [ ] MS SQL Server adapter
 - [ ] Schema migration (ALTER TABLE)
+- [ ] Incremental sync
 
-### v1.0 (планируется)
+### v2.0 (планируется)
 - [ ] RabbitMQ broker integration
 - [ ] Kafka broker integration
 - [ ] Python bindings
@@ -202,5 +278,5 @@ MIT
 
 ---
 
-**Статус:** Beta (v0.5) - Core + SQLite Adapter Complete!  
-**Последнее обновление:** 14.11.2025
+**Статус:** v1.0 - Universal Adapter Architecture Complete!
+**Последнее обновление:** 15.11.2025
