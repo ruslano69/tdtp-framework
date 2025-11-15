@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"testing"
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
@@ -11,11 +12,13 @@ const benchmarkDB = "../../../benchmark_100k.db"
 
 // BenchmarkSimpleFilter_SQL тестирует простой фильтр с SQL
 func BenchmarkSimpleFilter_SQL(b *testing.B) {
+	ctx := context.Background()
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	// SQL запрос: WHERE Balance > 10000
 	translator := tdtql.NewTranslator()
@@ -26,7 +29,7 @@ func BenchmarkSimpleFilter_SQL(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		packets, err := adapter.ExportTableWithQuery("Users", query, "Benchmark", "Test")
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Benchmark", "Test")
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -36,11 +39,12 @@ func BenchmarkSimpleFilter_SQL(b *testing.B) {
 
 // BenchmarkSimpleFilter_InMemory тестирует простой фильтр In-Memory
 func BenchmarkSimpleFilter_InMemory(b *testing.B) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	// Запрос для in-memory фильтрации
 	translator := tdtql.NewTranslator()
@@ -50,7 +54,7 @@ func BenchmarkSimpleFilter_InMemory(b *testing.B) {
 	}
 
 	// Получаем схему один раз (вне бенчмарка)
-	schemaPackets, err := adapter.ExportTableWithQuery("Users", query, "Bench", "Test")
+	schemaPackets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Bench", "Test")
 	if err != nil || len(schemaPackets) == 0 {
 		b.Fatalf("Failed to get schema: %v", err)
 	}
@@ -60,7 +64,7 @@ func BenchmarkSimpleFilter_InMemory(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Выгружаем ВСЕ данные - используем пустой фильтр
 		emptyQuery := &packet.Query{}
-		allPackets, err := adapter.ExportTableWithQuery("Users", emptyQuery, "Bench", "Test")
+		allPackets, err := adapter.ExportTableWithQuery(ctx, "Users", emptyQuery, "Bench", "Test")
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -84,11 +88,12 @@ func BenchmarkSimpleFilter_InMemory(b *testing.B) {
 
 // BenchmarkComplexFilter_SQL тестирует сложный фильтр с SQL
 func BenchmarkComplexFilter_SQL(b *testing.B) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	// SQL: WHERE IsActive = 1 AND Balance > 10000 AND City IN ('Moscow', 'Saint Petersburg', 'Novosibirsk')
 	sql := "SELECT * FROM Users WHERE IsActive = 1 AND Balance > 10000 AND City IN ('Moscow', 'Saint Petersburg', 'Novosibirsk')"
@@ -100,7 +105,7 @@ func BenchmarkComplexFilter_SQL(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		packets, err := adapter.ExportTableWithQuery("Users", query, "Benchmark", "Test")
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Benchmark", "Test")
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -110,11 +115,12 @@ func BenchmarkComplexFilter_SQL(b *testing.B) {
 
 // BenchmarkComplexFilter_InMemory тестирует сложный фильтр In-Memory
 func BenchmarkComplexFilter_InMemory(b *testing.B) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	sql := "SELECT * FROM Users WHERE IsActive = 1 AND Balance > 10000 AND City IN ('Moscow', 'Saint Petersburg', 'Novosibirsk')"
 	translator := tdtql.NewTranslator()
@@ -124,7 +130,7 @@ func BenchmarkComplexFilter_InMemory(b *testing.B) {
 	}
 
 	// Получаем схему один раз
-	schemaPackets, err := adapter.ExportTableWithQuery("Users", query, "Bench", "Test")
+	schemaPackets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Bench", "Test")
 	if err != nil || len(schemaPackets) == 0 {
 		b.Fatalf("Failed to get schema: %v", err)
 	}
@@ -134,7 +140,7 @@ func BenchmarkComplexFilter_InMemory(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Выгружаем ВСЕ данные
 		emptyQuery := &packet.Query{}
-		allPackets, err := adapter.ExportTableWithQuery("Users", emptyQuery, "Bench", "Test")
+		allPackets, err := adapter.ExportTableWithQuery(ctx, "Users", emptyQuery, "Bench", "Test")
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -158,11 +164,12 @@ func BenchmarkComplexFilter_InMemory(b *testing.B) {
 
 // BenchmarkWithPagination_SQL тестирует фильтр с сортировкой и пагинацией (SQL)
 func BenchmarkWithPagination_SQL(b *testing.B) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	// SQL: WHERE Balance > 5000 ORDER BY Balance DESC LIMIT 1000
 	sql := "SELECT * FROM Users WHERE Balance > 5000 ORDER BY Balance DESC LIMIT 1000"
@@ -174,7 +181,7 @@ func BenchmarkWithPagination_SQL(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		packets, err := adapter.ExportTableWithQuery("Users", query, "Benchmark", "Test")
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Benchmark", "Test")
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -184,11 +191,12 @@ func BenchmarkWithPagination_SQL(b *testing.B) {
 
 // BenchmarkWithPagination_InMemory тестирует фильтр с сортировкой и пагинацией (In-Memory)
 func BenchmarkWithPagination_InMemory(b *testing.B) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	sql := "SELECT * FROM Users WHERE Balance > 5000 ORDER BY Balance DESC LIMIT 1000"
 	translator := tdtql.NewTranslator()
@@ -198,7 +206,7 @@ func BenchmarkWithPagination_InMemory(b *testing.B) {
 	}
 
 	// Получаем схему один раз
-	schemaPackets, err := adapter.ExportTableWithQuery("Users", query, "Bench", "Test")
+	schemaPackets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Bench", "Test")
 	if err != nil || len(schemaPackets) == 0 {
 		b.Fatalf("Failed to get schema: %v", err)
 	}
@@ -208,7 +216,7 @@ func BenchmarkWithPagination_InMemory(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Выгружаем ВСЕ данные
 		emptyQuery := &packet.Query{}
-		allPackets, err := adapter.ExportTableWithQuery("Users", emptyQuery, "Bench", "Test")
+		allPackets, err := adapter.ExportTableWithQuery(ctx, "Users", emptyQuery, "Bench", "Test")
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -232,15 +240,16 @@ func BenchmarkWithPagination_InMemory(b *testing.B) {
 
 // BenchmarkFullExport тестирует полный экспорт таблицы (baseline)
 func BenchmarkFullExport(b *testing.B) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		packets, err := adapter.ExportTable("Users")
+		packets, err := adapter.ExportTable(ctx, "Users")
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -282,14 +291,15 @@ func parseRow(rowValue string) []string {
 
 // TestBenchmarkSetup проверяет что БД доступна перед запуском бенчмарков
 func TestBenchmarkSetup(t *testing.T) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		t.Fatalf("Cannot open benchmark DB: %v\nPlease run: python scripts/create_benchmark_db.py", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	// Проверяем что есть данные
-	packets, err := adapter.ExportTable("Users")
+	packets, err := adapter.ExportTable(ctx, "Users")
 	if err != nil {
 		t.Fatalf("Cannot export from benchmark DB: %v", err)
 	}
@@ -308,11 +318,12 @@ func TestBenchmarkSetup(t *testing.T) {
 
 // Benchmark с выводом результатов фильтрации
 func BenchmarkSimpleFilter_SQL_WithStats(b *testing.B) {
+	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	translator := tdtql.NewTranslator()
 	query, _ := translator.Translate("SELECT * FROM Users WHERE Balance > 10000")
@@ -321,7 +332,7 @@ func BenchmarkSimpleFilter_SQL_WithStats(b *testing.B) {
 
 	var totalReturned int
 	for i := 0; i < b.N; i++ {
-		packets, _ := adapter.ExportTableWithQuery("Users", query, "Benchmark", "Test")
+		packets, _ := adapter.ExportTableWithQuery(ctx, "Users", query, "Benchmark", "Test")
 
 		if i == 0 && len(packets) > 0 {
 			// Первый запуск - выводим статистику

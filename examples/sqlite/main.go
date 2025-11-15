@@ -101,7 +101,7 @@ func demonstrateFullCycle() {
 	fmt.Println()
 	fmt.Println("   // Экспортируем обратно")
 	fmt.Println("   // packets, _ := adapter.ExportTable(\"TestTable\")")
-	fmt.Println("   // fmt.Printf(\"Exported %d packets\\n\", len(packets))")
+	fmt.Println(`   // fmt.Printf("Exported %%d packets\n", len(packets))`)
 }
 
 func demonstrateTypesMapping() {
