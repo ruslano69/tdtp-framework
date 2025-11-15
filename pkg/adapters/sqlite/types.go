@@ -12,11 +12,11 @@ import (
 func SQLiteToTDTP(sqliteType string) (schema.DataType, error) {
 	// Нормализуем тип (убираем размеры и модификаторы)
 	sqliteType = strings.ToUpper(strings.TrimSpace(sqliteType))
-	
+
 	// SQLite хранит тип как строку с возможными модификаторами
 	// Например: INTEGER, VARCHAR(100), DECIMAL(18,2)
 	baseType := extractBaseType(sqliteType)
-	
+
 	switch baseType {
 	case "INTEGER", "INT", "TINYINT", "SMALLINT", "MEDIUMINT", "BIGINT":
 		return schema.TypeInteger, nil
@@ -43,7 +43,7 @@ func SQLiteToTDTP(sqliteType string) (schema.DataType, error) {
 // TDTPToSQLite конвертирует TDTP тип в SQLite CREATE TABLE тип
 func TDTPToSQLite(field packet.Field) string {
 	tdtpType := schema.DataType(field.Type)
-	
+
 	switch tdtpType {
 	case schema.TypeInteger, schema.TypeInt:
 		return "INTEGER"
@@ -89,13 +89,13 @@ func extractBaseType(sqliteType string) string {
 // ParseSQLiteType парсит SQLite тип и извлекает параметры
 func ParseSQLiteType(sqliteType string) (baseType string, length, precision, scale int) {
 	sqliteType = strings.ToUpper(strings.TrimSpace(sqliteType))
-	
+
 	baseType = extractBaseType(sqliteType)
-	
+
 	// Извлекаем параметры из скобок
 	if idx := strings.Index(sqliteType, "("); idx != -1 {
 		params := strings.TrimSuffix(sqliteType[idx+1:], ")")
-		
+
 		// Проверяем наличие запятой (для DECIMAL)
 		if strings.Contains(params, ",") {
 			fmt.Sscanf(params, "%d,%d", &precision, &scale)
@@ -104,7 +104,7 @@ func ParseSQLiteType(sqliteType string) (baseType string, length, precision, sca
 			fmt.Sscanf(params, "%d", &length)
 		}
 	}
-	
+
 	return
 }
 
@@ -114,15 +114,15 @@ func BuildFieldFromColumn(name, dataType string, isPK bool) (packet.Field, error
 	if err != nil {
 		return packet.Field{}, err
 	}
-	
+
 	baseType, length, precision, scale := ParseSQLiteType(dataType)
-	
+
 	field := packet.Field{
 		Name: name,
 		Type: string(tdtpType),
 		Key:  isPK,
 	}
-	
+
 	// Устанавливаем параметры в зависимости от типа
 	switch baseType {
 	case "VARCHAR", "CHAR", "TEXT":
@@ -141,6 +141,6 @@ func BuildFieldFromColumn(name, dataType string, isPK bool) (packet.Field, error
 	case "DATETIME", "TIMESTAMP":
 		field.Timezone = "UTC"
 	}
-	
+
 	return field, nil
 }

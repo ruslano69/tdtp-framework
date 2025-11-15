@@ -1,171 +1,169 @@
 package sqlite
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 )
 
-// ImportStrategy стратегия импорта при конфликтах
-type ImportStrategy string
-
-const (
-	StrategyReplace ImportStrategy = "REPLACE" // INSERT OR REPLACE
-	StrategyIgnore  ImportStrategy = "IGNORE"  // INSERT OR IGNORE
-	StrategyFail    ImportStrategy = "FAIL"    // INSERT (ошибка при дубликатах)
-)
-
 // ImportPacket импортирует данные из TDTP пакета в таблицу
-func (a *Adapter) ImportPacket(pkt *packet.DataPacket, strategy ImportStrategy) error {
+// Реализует интерфейс adapters.Adapter
+func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	// Проверяем тип пакета
 	if pkt.Header.Type != packet.TypeReference && pkt.Header.Type != packet.TypeResponse {
 		return fmt.Errorf("can only import reference or response packets, got: %s", pkt.Header.Type)
 	}
-	
+
 	tableName := pkt.Header.TableName
-	
+
 	// Проверяем существование таблицы
-	exists, err := a.TableExists(tableName)
+	exists, err := a.TableExists(ctx, tableName)
 	if err != nil {
 		return err
 	}
-	
+
 	// Если таблицы нет - создаем
 	if !exists {
-		if err := a.CreateTable(tableName, pkt.Schema); err != nil {
+		if err := a.CreateTable(ctx, tableName, pkt.Schema); err != nil {
 			return fmt.Errorf("failed to create table: %w", err)
 		}
 	}
-	
+
 	// Импортируем данные
-	return a.importRows(tableName, pkt.Schema, pkt.Data.Rows, strategy)
+	return a.importRows(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy)
 }
 
 // ImportPackets импортирует несколько пакетов (для многочастных сообщений)
-func (a *Adapter) ImportPackets(packets []*packet.DataPacket, strategy ImportStrategy) error {
+// Реализует интерфейс adapters.Adapter
+func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
 	if len(packets) == 0 {
 		return nil
 	}
-	
+
 	// Начинаем транзакцию для всех пакетов
-	tx, err := a.BeginTx()
+	tx, err := a.BeginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	
+
 	defer func() {
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(ctx)
 		}
 	}()
-	
+
 	// Импортируем каждый пакет
 	for _, pkt := range packets {
-		if err := a.ImportPacket(pkt, strategy); err != nil {
+		if err := a.ImportPacket(ctx, pkt, strategy); err != nil {
 			return err
 		}
 	}
-	
+
 	// Коммитим транзакцию
-	return tx.Commit()
+	return tx.Commit(ctx)
 }
 
 // CreateTable создает таблицу по TDTP схеме
-func (a *Adapter) CreateTable(tableName string, schema packet.Schema) error {
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
 	var columns []string
 	var pkColumns []string
-	
+
 	for _, field := range schema.Fields {
 		sqlType := TDTPToSQLite(field)
 		colDef := fmt.Sprintf("%s %s", field.Name, sqlType)
-		
+
 		columns = append(columns, colDef)
-		
+
 		if field.Key {
 			pkColumns = append(pkColumns, field.Name)
 		}
 	}
-	
+
 	// Добавляем PRIMARY KEY
 	if len(pkColumns) > 0 {
 		pkDef := fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(pkColumns, ", "))
 		columns = append(columns, pkDef)
 	}
-	
-	query := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", 
-		tableName, 
+
+	query := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
+		tableName,
 		strings.Join(columns, ",\n  "))
-	
-	_, err := a.db.Exec(query)
+
+	_, err := a.db.ExecContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to create table: %w", err)
 	}
-	
+
 	return nil
 }
 
 // DropTable удаляет таблицу
-func (a *Adapter) DropTable(tableName string) error {
+func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 	query := fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)
-	_, err := a.db.Exec(query)
+	_, err := a.db.ExecContext(ctx, query)
 	return err
 }
 
 // importRows импортирует строки данных
-func (a *Adapter) importRows(tableName string, pkgSchema packet.Schema, rows []packet.Row, strategy ImportStrategy) error {
+func (a *Adapter) importRows(ctx context.Context, tableName string, pkgSchema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	
+
 	// Формируем INSERT запрос
 	fieldNames := make([]string, len(pkgSchema.Fields))
 	for i, field := range pkgSchema.Fields {
 		fieldNames[i] = field.Name
 	}
-	
+
 	placeholders := make([]string, len(pkgSchema.Fields))
 	for i := range placeholders {
 		placeholders[i] = "?"
 	}
-	
+
 	var insertCmd string
 	switch strategy {
-	case StrategyReplace:
+	case adapters.StrategyReplace:
 		insertCmd = "INSERT OR REPLACE"
-	case StrategyIgnore:
+	case adapters.StrategyIgnore:
 		insertCmd = "INSERT OR IGNORE"
-	case StrategyFail:
+	case adapters.StrategyFail:
 		insertCmd = "INSERT"
+	case adapters.StrategyCopy:
+		// SQLite не поддерживает COPY, используем REPLACE
+		insertCmd = "INSERT OR REPLACE"
 	default:
 		insertCmd = "INSERT OR REPLACE"
 	}
-	
+
 	query := fmt.Sprintf("%s INTO %s (%s) VALUES (%s)",
 		insertCmd,
 		tableName,
 		strings.Join(fieldNames, ", "),
 		strings.Join(placeholders, ", "))
-	
+
 	// Подготавливаем statement
-	stmt, err := a.db.Prepare(query)
+	stmt, err := a.db.PrepareContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer stmt.Close()
-	
+
 	// Вставляем каждую строку
 	converter := schema.NewConverter()
-	
+
 	for rowIdx, row := range rows {
 		// Парсим строку (разделитель |)
 		values := strings.Split(row.Value, "|")
 		if len(values) != len(pkgSchema.Fields) {
-			return fmt.Errorf("row %d: expected %d values, got %d", 
+			return fmt.Errorf("row %d: expected %d values, got %d",
 				rowIdx, len(pkgSchema.Fields), len(values))
 		}
-		
+
 		// Конвертируем значения в типизированные
 		args := make([]interface{}, len(values))
 		for i, value := range values {
@@ -177,23 +175,23 @@ func (a *Adapter) importRows(tableName string, pkgSchema packet.Schema, rows []p
 				Scale:     pkgSchema.Fields[i].Scale,
 				Timezone:  pkgSchema.Fields[i].Timezone,
 			}
-			
+
 			// Парсим значение
 			typedValue, err := converter.ParseValue(value, fieldDef)
 			if err != nil {
 				return fmt.Errorf("row %d, field %s: %w", rowIdx, fieldDef.Name, err)
 			}
-			
+
 			// Конвертируем в SQL значение
 			args[i] = a.typedValueToSQL(*typedValue)
 		}
-		
+
 		// Выполняем INSERT
-		if _, err := stmt.Exec(args...); err != nil {
+		if _, err := stmt.ExecContext(ctx, args...); err != nil {
 			return fmt.Errorf("failed to insert row %d: %w", rowIdx, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -202,7 +200,7 @@ func (a *Adapter) typedValueToSQL(tv schema.TypedValue) interface{} {
 	if tv.IsNull {
 		return nil
 	}
-	
+
 	switch tv.Type {
 	case schema.TypeInteger, schema.TypeInt:
 		if tv.IntValue != nil {
@@ -230,6 +228,6 @@ func (a *Adapter) typedValueToSQL(tv schema.TypedValue) interface{} {
 	case schema.TypeBlob:
 		return tv.BlobValue
 	}
-	
+
 	return tv.RawValue
 }

@@ -318,11 +318,11 @@ func BenchmarkSimpleFilter_SQL_WithStats(b *testing.B) {
 	query, _ := translator.Translate("SELECT * FROM Users WHERE Balance > 10000")
 
 	b.ResetTimer()
-	
+
 	var totalReturned int
 	for i := 0; i < b.N; i++ {
 		packets, _ := adapter.ExportTableWithQuery("Users", query, "Benchmark", "Test")
-		
+
 		if i == 0 && len(packets) > 0 {
 			// Первый запуск - выводим статистику
 			pkt := packets[0]
@@ -331,7 +331,7 @@ func BenchmarkSimpleFilter_SQL_WithStats(b *testing.B) {
 			}
 		}
 	}
-	
+
 	if totalReturned > 0 {
 		b.ReportMetric(float64(totalReturned), "records")
 	}
