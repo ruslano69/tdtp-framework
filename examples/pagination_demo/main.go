@@ -101,7 +101,7 @@ func main() {
 	fmt.Printf("   Schema: %d fields\n", len(schemaObj.Fields))
 	for i, field := range schemaObj.Fields {
 		primaryKey := ""
-		if field.PrimaryKey {
+		if field.Key {
 			primaryKey = " [PK]"
 		}
 		fmt.Printf("     %d. %s (%s)%s\n", i+1, field.Name, field.Type, primaryKey)
@@ -141,8 +141,8 @@ func main() {
 		fmt.Printf("   Packet #%d:\n", i+1)
 		fmt.Printf("     - Rows: %d\n", rowCount)
 		fmt.Printf("     - Size: %.2f KB (%.2f MB)\n", float64(packetSize)/1024, float64(packetSize)/1024/1024)
-		fmt.Printf("     - Sequence: %d\n", pkt.Header.Sequence)
-		fmt.Printf("     - Total sequences: %d\n", pkt.Header.TotalSequences)
+		fmt.Printf("     - Part number: %d\n", pkt.Header.PartNumber)
+		fmt.Printf("     - Total parts: %d\n", pkt.Header.TotalParts)
 
 		if len(pkt.Data.Rows) > 0 {
 			// Показываем первую строку как пример
