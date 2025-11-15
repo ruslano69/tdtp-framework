@@ -5,9 +5,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/core/schema"
 
 	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 )
@@ -32,49 +34,43 @@ func main() {
 	}
 	defer adapter.Close(ctx)
 
-	// 2. Создаем таблицу
+	// 2. Создаем схему и таблицу
 	fmt.Println("📋 Creating table Users...")
-	_, err = adapter.ExecuteSQL(ctx, `
-		CREATE TABLE Users (
-			id INTEGER PRIMARY KEY,
-			name TEXT NOT NULL,
-			email TEXT,
-			age INTEGER,
-			city TEXT,
-			is_active INTEGER
-		)
-	`)
+	builder := schema.NewBuilder()
+	schemaObj := builder.
+		AddInteger("id", true).
+		AddText("name", 100).
+		AddText("email", 100).
+		AddInteger("age", false).
+		AddText("city", 50).
+		AddInteger("is_active", false).
+		Build()
+
+	err = adapter.CreateTable(ctx, "Users", schemaObj)
 	if err != nil {
 		panic(err)
 	}
 
-	// 3. Вставляем тестовые данные
+	// 3. Создаем пакет с тестовыми данными
 	fmt.Println("📝 Inserting test data...")
-	testData := []struct {
-		id        int
-		name      string
-		email     string
-		age       int
-		city      string
-		isActive  int
-	}{
-		{1, "Alice", "alice@example.com", 25, "Moscow", 1},
-		{2, "Bob", "bob@test.com", 30, "London", 1},
-		{3, "Charlie", "charlie@example.com", 35, "Moscow", 0},
-		{4, "Diana", "diana@example.com", 28, "Paris", 1},
-		{5, "Eve", "eve@test.com", 40, "Moscow", 1},
+	testPacket := packet.NewDataPacket(packet.TypeReference, "Users")
+	testPacket.Schema = schemaObj
+	testPacket.Data = packet.Data{
+		Rows: []packet.Row{
+			{Value: "1|Alice|alice@example.com|25|Moscow|1"},
+			{Value: "2|Bob|bob@test.com|30|London|1"},
+			{Value: "3|Charlie|charlie@example.com|35|Moscow|0"},
+			{Value: "4|Diana|diana@example.com|28|Paris|1"},
+			{Value: "5|Eve|eve@test.com|40|Moscow|1"},
+		},
 	}
 
-	for _, data := range testData {
-		_, err = adapter.ExecuteSQL(ctx,
-			`INSERT INTO Users (id, name, email, age, city, is_active) VALUES (?, ?, ?, ?, ?, ?)`,
-			data.id, data.name, data.email, data.age, data.city, data.isActive)
-		if err != nil {
-			panic(err)
-		}
+	err = adapter.ImportPacket(ctx, testPacket, adapters.StrategyReplace)
+	if err != nil {
+		panic(err)
 	}
 
-	fmt.Printf("   ✅ Inserted %d users\n\n", len(testData))
+	fmt.Printf("   ✅ Inserted %d users\n\n", len(testPacket.Data.Rows))
 
 	// 4. Экспортируем с фильтром: активные пользователи из Moscow
 	fmt.Println("🔍 Applying filter: city='Moscow' AND is_active=1")
@@ -154,47 +150,39 @@ func main() {
 	fmt.Println("🗂️  Creating temporary table...")
 	tempTable := "Users_filtered_temp"
 
-	_, err = adapter.ExecuteSQL(ctx, `
-		CREATE TEMPORARY TABLE `+tempTable+` (
-			id INTEGER PRIMARY KEY,
-			name TEXT NOT NULL,
-			email TEXT,
-			age INTEGER,
-			city TEXT,
-			is_active INTEGER
-		)
-	`)
+	err = adapter.CreateTable(ctx, tempTable, schemaObj)
 	if err != nil {
 		panic(err)
 	}
 
 	// 10. Импортируем из XML
 	fmt.Println("📥 Importing from XML to temporary table...")
-	err = adapter.ImportTable(ctx, tempTable, []*packet.DataPacket{&parsedPacket}, adapters.StrategyReplace)
+	parsedPacket.Header.TableName = tempTable // Update table name for import
+	err = adapter.ImportPacket(ctx, &parsedPacket, adapters.StrategyReplace)
 	if err != nil {
 		panic(err)
 	}
-
-	count, err := adapter.GetRowCount(ctx, tempTable)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("   ✅ Imported %d rows into temporary table '%s'\n\n", count, tempTable)
 
 	// 11. Проверяем содержимое временной таблицы
 	fmt.Println("🔎 Verifying temporary table content:")
-	exported, err := adapter.ExportTable(ctx, tempTable, "DemoApp", "TempVerify")
+	exported, err := adapter.ExportTable(ctx, tempTable)
 	if err != nil {
 		panic(err)
 	}
 
+	rowCount := 0
 	for _, pkt := range exported {
+		rowCount += len(pkt.Data.Rows)
 		for _, row := range pkt.Data.Rows {
-			fmt.Printf("   - ID: %s, Name: %s, Email: %s, Age: %s, City: %s, Active: %s\n",
-				row[0], row[1], row[2], row[3], row[4], row[5])
+			fields := strings.Split(row.Value, "|")
+			if len(fields) >= 6 {
+				fmt.Printf("   - ID: %s, Name: %s, Email: %s, Age: %s, City: %s, Active: %s\n",
+					fields[0], fields[1], fields[2], fields[3], fields[4], fields[5])
+			}
 		}
 	}
+
+	fmt.Printf("   ✅ Imported %d rows into temporary table '%s'\n\n", rowCount, tempTable)
 
 	// 12. Показываем QueryContext
 	if parsedPacket.QueryContext != nil {
