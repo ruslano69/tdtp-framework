@@ -31,7 +31,7 @@ Thumbs.db
 
 # Go
 vendor/
-go.sum
+# go.sum should be committed for reproducible builds
 
 # Build artifacts
 dist/
