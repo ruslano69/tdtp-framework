@@ -17,7 +17,7 @@ type Generator struct {
 // NewGenerator создает новый генератор
 func NewGenerator() *Generator {
 	return &Generator{
-		maxMessageSize: 1900000, // ~1.9MB для MSMQ UTF-16
+		maxMessageSize: 3800000, // ~3.8MB для получения ~1.9MB XML (с учетом UTF-16 оценки)
 	}
 }
 
