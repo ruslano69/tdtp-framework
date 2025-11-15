@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tdtp-postgres
+    environment:
+      POSTGRES_USER: tdtp_user
+      POSTGRES_PASSWORD: tdtp_dev_pass_2025
+      POSTGRES_DB: tdtp_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tdtp_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: tdtp-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "TdtpDev@2025!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TdtpDev@2025!' -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: tdtp-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: tdtp
+      RABBITMQ_DEFAULT_PASS: tdtp_dev_2025
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  mssql_data:
+  rabbitmq_data:
+
+networks:
+  default:
+    name: tdtp-network
