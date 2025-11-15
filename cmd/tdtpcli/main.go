@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
 	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
+	"github.com/queuebridge/tdtp/pkg/core/packet"
 )
 
 const version = "1.0.0"
@@ -23,7 +24,8 @@ func main() {
 
 	// Команды
 	listTables := flag.Bool("list", false, "List all tables")
-	exportTable := flag.String("export", "", "Export table to JSON")
+	exportTable := flag.String("export", "", "Export table to TDTP XML/JSON")
+	format := flag.String("format", "xml", "Output format: xml or json")
 	showVersion := flag.Bool("version", false, "Show version")
 	showHelp := flag.Bool("help", false, "Show help")
 
@@ -64,7 +66,7 @@ func main() {
 	if *listTables {
 		handleListTables(ctx, adapter)
 	} else if *exportTable != "" {
-		handleExportTable(ctx, adapter, *exportTable)
+		handleExportTable(ctx, adapter, *exportTable, *format)
 	} else {
 		printHelp()
 	}
@@ -87,7 +89,7 @@ func handleListTables(ctx context.Context, adapter adapters.Adapter) {
 	}
 }
 
-func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName string) {
+func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName string, format string) {
 	// Проверяем существование таблицы
 	exists, err := adapter.TableExists(ctx, tableName)
 	if err != nil {
@@ -111,13 +113,56 @@ func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName 
 		return
 	}
 
-	// Выводим в JSON формате
+	totalRows := 0
+	for _, pkt := range packets {
+		totalRows += len(pkt.Data.Rows)
+	}
+
+	// Выбираем формат вывода
+	switch format {
+	case "xml":
+		exportAsXML(packets)
+		fmt.Fprintf(os.Stderr, "\n✅ Exported %d rows from '%s' in TDTP XML format\n", totalRows, tableName)
+	case "json":
+		exportAsJSON(packets)
+		fmt.Fprintf(os.Stderr, "\n✅ Exported %d rows from '%s' in JSON format\n", totalRows, tableName)
+	default:
+		fmt.Fprintf(os.Stderr, "❌ Unknown format '%s'. Use 'xml' or 'json'\n", format)
+		os.Exit(1)
+	}
+}
+
+func exportAsXML(packets []*packet.DataPacket) {
+	// Выводим TDTP XML пакеты
+	for i, pkt := range packets {
+		xmlData, err := xml.MarshalIndent(pkt, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ XML encoding failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Добавляем XML declaration
+		fmt.Println("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+		fmt.Println(string(xmlData))
+
+		// Разделитель между пакетами
+		if i < len(packets)-1 {
+			fmt.Println()
+			fmt.Println("<!-- Next packet -->")
+			fmt.Println()
+		}
+	}
+}
+
+func exportAsJSON(packets []*packet.DataPacket) {
+	// Конвертируем в JSON (для совместимости)
 	for _, pkt := range packets {
 		data := map[string]interface{}{
-			"table":  pkt.Header.TableName,
-			"type":   pkt.Header.Type,
-			"schema": pkt.Schema,
-			"rows":   pkt.Data.Rows,
+			"protocol": pkt.Protocol,
+			"version":  pkt.Version,
+			"header":   pkt.Header,
+			"schema":   pkt.Schema,
+			"data":     pkt.Data,
 		}
 
 		jsonData, err := json.MarshalIndent(data, "", "  ")
@@ -128,12 +173,6 @@ func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName 
 
 		fmt.Println(string(jsonData))
 	}
-
-	totalRows := 0
-	for _, pkt := range packets {
-		totalRows += len(pkt.Data.Rows)
-	}
-	fmt.Fprintf(os.Stderr, "\n✅ Exported %d rows from '%s'\n", totalRows, tableName)
 }
 
 func printHelp() {
@@ -157,7 +196,7 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  -list              List all tables in database")
-	fmt.Println("  -export <table>    Export table to JSON format")
+	fmt.Println("  -export <table>    Export table to TDTP XML or JSON format")
 	fmt.Println("  -version           Show version information")
 	fmt.Println("  -help              Show this help message")
 	fmt.Println()
@@ -165,19 +204,28 @@ func printHelp() {
 	fmt.Println("  -type      Database type (default: sqlite)")
 	fmt.Println("  -dsn       Data Source Name / connection string (required)")
 	fmt.Println("  -schema    Schema name for PostgreSQL (default: public)")
+	fmt.Println("  -format    Output format: xml (default) or json")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  # List tables in SQLite database")
 	fmt.Println("  tdtpcli -type sqlite -dsn database.db -list")
 	fmt.Println()
-	fmt.Println("  # Export SQLite table to JSON")
+	fmt.Println("  # Export SQLite table to TDTP XML (default)")
 	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users")
+	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users -format xml")
+	fmt.Println()
+	fmt.Println("  # Export SQLite table to JSON (compatibility)")
+	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users -format json")
 	fmt.Println()
 	fmt.Println("  # List PostgreSQL tables")
 	fmt.Println("  tdtpcli -type postgres -dsn \"postgresql://user:pass@localhost/mydb\" -list")
 	fmt.Println()
-	fmt.Println("  # Export PostgreSQL table")
+	fmt.Println("  # Export PostgreSQL table to TDTP XML")
 	fmt.Println("  tdtpcli -type postgres -dsn \"postgresql://user:pass@localhost/mydb\" -export orders")
+	fmt.Println()
+	fmt.Println("  # Redirect to file")
+	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users > users.xml")
+	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users -format json > users.json")
 	fmt.Println()
 	fmt.Println("For more information, visit: https://github.com/queuebridge/tdtp")
 }
