@@ -12,11 +12,11 @@ import (
 func PostgreSQLToTDTP(pgType string) (schema.DataType, string, error) {
 	// Нормализуем тип (убираем размеры и модификаторы)
 	pgType = strings.ToLower(strings.TrimSpace(pgType))
-	
+
 	// Извлекаем базовый тип
 	baseType := extractBaseType(pgType)
 	subtype := ""
-	
+
 	switch baseType {
 	// Integer types
 	case "smallint", "int2":
@@ -29,17 +29,17 @@ func PostgreSQLToTDTP(pgType string) (schema.DataType, string, error) {
 		return schema.TypeInteger, "serial", nil
 	case "bigserial", "serial8":
 		return schema.TypeInteger, "bigserial", nil
-	
+
 	// Floating point types
 	case "real", "float4":
 		return schema.TypeReal, subtype, nil
 	case "double precision", "float8":
 		return schema.TypeReal, subtype, nil
-	
+
 	// Numeric/Decimal
 	case "numeric", "decimal":
 		return schema.TypeDecimal, subtype, nil
-	
+
 	// Text types
 	case "character varying", "varchar":
 		return schema.TypeText, subtype, nil
@@ -47,11 +47,11 @@ func PostgreSQLToTDTP(pgType string) (schema.DataType, string, error) {
 		return schema.TypeText, subtype, nil
 	case "text":
 		return schema.TypeText, subtype, nil
-	
+
 	// Boolean
 	case "boolean", "bool":
 		return schema.TypeBoolean, subtype, nil
-	
+
 	// Date/Time types
 	case "date":
 		return schema.TypeDate, subtype, nil
@@ -61,11 +61,11 @@ func PostgreSQLToTDTP(pgType string) (schema.DataType, string, error) {
 		return schema.TypeTimestamp, subtype, nil
 	case "timestamp with time zone", "timestamptz":
 		return schema.TypeTimestamp, "timestamptz", nil
-	
+
 	// Binary
 	case "bytea":
 		return schema.TypeBlob, subtype, nil
-	
+
 	// PostgreSQL-specific types (stored as TEXT with subtype)
 	case "uuid":
 		return schema.TypeText, "uuid", nil
@@ -81,7 +81,7 @@ func PostgreSQLToTDTP(pgType string) (schema.DataType, string, error) {
 		return schema.TypeText, "macaddr", nil
 	case "xml":
 		return schema.TypeText, "xml", nil
-	
+
 	// Array types
 	default:
 		if strings.HasSuffix(baseType, "[]") {
@@ -96,7 +96,7 @@ func PostgreSQLToTDTP(pgType string) (schema.DataType, string, error) {
 func TDTPToPostgreSQL(field packet.Field) string {
 	tdtpType := schema.DataType(field.Type)
 	subtype := field.Subtype
-	
+
 	// Специальные типы через subtype
 	switch subtype {
 	case "serial":
@@ -124,7 +124,7 @@ func TDTPToPostgreSQL(field packet.Field) string {
 	case "time":
 		return "TIME"
 	}
-	
+
 	// Стандартные типы
 	switch tdtpType {
 	case schema.TypeInteger, schema.TypeInt:
@@ -138,10 +138,10 @@ func TDTPToPostgreSQL(field packet.Field) string {
 			return "BIGINT"
 		}
 		return "INTEGER"
-	
+
 	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble:
 		return "DOUBLE PRECISION"
-	
+
 	case schema.TypeDecimal:
 		precision := field.Precision
 		scale := field.Scale
@@ -152,25 +152,25 @@ func TDTPToPostgreSQL(field packet.Field) string {
 			scale = 2
 		}
 		return fmt.Sprintf("NUMERIC(%d,%d)", precision, scale)
-	
+
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:
 		if field.Length > 0 {
 			return fmt.Sprintf("VARCHAR(%d)", field.Length)
 		}
 		return "TEXT"
-	
+
 	case schema.TypeBoolean, schema.TypeBool:
 		return "BOOLEAN"
-	
+
 	case schema.TypeDate:
 		return "DATE"
-	
+
 	case schema.TypeDatetime, schema.TypeTimestamp:
 		return "TIMESTAMP"
-	
+
 	case schema.TypeBlob:
 		return "BYTEA"
-	
+
 	default:
 		return "TEXT"
 	}
@@ -188,13 +188,13 @@ func extractBaseType(pgType string) string {
 // ParsePostgreSQLType парсит PostgreSQL тип и извлекает параметры
 func ParsePostgreSQLType(pgType string) (baseType string, length, precision, scale int) {
 	pgType = strings.ToLower(strings.TrimSpace(pgType))
-	
+
 	baseType = extractBaseType(pgType)
-	
+
 	// Извлекаем параметры из скобок
 	if idx := strings.Index(pgType, "("); idx != -1 {
 		params := strings.TrimSuffix(pgType[idx+1:], ")")
-		
+
 		// Проверяем наличие запятой (для NUMERIC/DECIMAL)
 		if strings.Contains(params, ",") {
 			fmt.Sscanf(params, "%d,%d", &precision, &scale)
@@ -203,7 +203,7 @@ func ParsePostgreSQLType(pgType string) (baseType string, length, precision, sca
 			fmt.Sscanf(params, "%d", &length)
 		}
 	}
-	
+
 	return
 }
 
@@ -213,16 +213,16 @@ func BuildFieldFromPGColumn(name, dataType string, isNullable bool, isPK bool, d
 	if err != nil {
 		return packet.Field{}, err
 	}
-	
+
 	baseType, length, precision, scale := ParsePostgreSQLType(dataType)
-	
+
 	field := packet.Field{
 		Name:    name,
 		Type:    string(tdtpType),
 		Key:     isPK,
 		Subtype: subtype,
 	}
-	
+
 	// Устанавливаем параметры в зависимости от типа
 	switch baseType {
 	case "character varying", "varchar", "character", "char":
@@ -241,12 +241,12 @@ func BuildFieldFromPGColumn(name, dataType string, isNullable bool, isPK bool, d
 	case "timestamp with time zone", "timestamptz":
 		field.Timezone = "UTC"
 	}
-	
+
 	// Для TEXT типов с subtype устанавливаем length=-1 (неограниченный)
 	if field.Type == "TEXT" && field.Subtype != "" {
 		field.Length = -1
 	}
-	
+
 	return field, nil
 }
 
