@@ -13,7 +13,6 @@ const benchmarkDB = "../../../benchmark_100k.db"
 // BenchmarkSimpleFilter_SQL тестирует простой фильтр с SQL
 func BenchmarkSimpleFilter_SQL(b *testing.B) {
 	ctx := context.Background()
-	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
 		b.Fatalf("Failed to open database: %v", err)
