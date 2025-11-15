@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
+	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/adapters/sqlite"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -228,15 +231,21 @@ func demonstrateWithRealData() {
 	dbFile := "demo_query.db"
 	defer os.Remove(dbFile)
 
-	adapter, err := sqlite.NewAdapter(dbFile)
+	ctx := context.Background()
+
+	cfg := adapters.Config{
+		Type: "sqlite",
+		DSN:  dbFile,
+	}
+	adapter, err := adapters.New(ctx, cfg)
 	if err != nil {
 		fmt.Printf("❌ Failed to create adapter: %v\n", err)
 		fmt.Println("   Install SQLite driver: go get modernc.org/sqlite")
 		return
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
-	// Создаем таблицу
+	// Создаем таблицу (используем type assertion для SQLite-specific метода)
 	builder := schema.NewBuilder()
 	schemaObj := builder.
 		AddInteger("ID", true).
@@ -245,7 +254,14 @@ func demonstrateWithRealData() {
 		AddBoolean("IsActive").
 		Build()
 
-	err = adapter.CreateTable("Users", schemaObj)
+	// Type assertion для доступа к CreateTable (метод не в универсальном интерфейсе)
+	sqliteAdapter, ok := adapter.(*sqlite.Adapter)
+	if !ok {
+		fmt.Printf("❌ Not a SQLite adapter\n")
+		return
+	}
+
+	err = sqliteAdapter.CreateTable(ctx, "Users", schemaObj)
 	if err != nil {
 		fmt.Printf("❌ Failed to create table: %v\n", err)
 		return
@@ -264,7 +280,7 @@ func demonstrateWithRealData() {
 		},
 	}
 
-	err = adapter.ImportPacket(pkt, sqlite.StrategyReplace)
+	err = adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
 	if err != nil {
 		fmt.Printf("❌ Failed to import data: %v\n", err)
 		return
@@ -277,27 +293,27 @@ func demonstrateWithRealData() {
 	fmt.Println("Test 1: Balance > 1000")
 	fmt.Println("──────────────────────")
 	sql1 := "SELECT * FROM Users WHERE Balance > 1000"
-	runQuery(adapter, sql1)
+	runQuery(ctx, adapter, sql1)
 	fmt.Println()
 
 	// Тест 2: С сортировкой
 	fmt.Println("Test 2: Active users, ordered by Balance")
 	fmt.Println("────────────────────────────────────────")
 	sql2 := "SELECT * FROM Users WHERE IsActive = 1 ORDER BY Balance DESC"
-	runQuery(adapter, sql2)
+	runQuery(ctx, adapter, sql2)
 	fmt.Println()
 
 	// Тест 3: С пагинацией
 	fmt.Println("Test 3: Top 2 by Balance")
 	fmt.Println("────────────────────────")
 	sql3 := "SELECT * FROM Users ORDER BY Balance DESC LIMIT 2"
-	runQuery(adapter, sql3)
+	runQuery(ctx, adapter, sql3)
 	fmt.Println()
 
 	fmt.Println("✅ All tests completed successfully!")
 }
 
-func runQuery(adapter *sqlite.Adapter, sql string) {
+func runQuery(ctx context.Context, adapter adapters.Adapter, sql string) {
 	translator := tdtql.NewTranslator()
 	query, err := translator.Translate(sql)
 	if err != nil {
@@ -305,7 +321,7 @@ func runQuery(adapter *sqlite.Adapter, sql string) {
 		return
 	}
 
-	packets, err := adapter.ExportTableWithQuery("Users", query, "Demo", "Test")
+	packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Demo", "Test")
 	if err != nil {
 		fmt.Printf("❌ Export error: %v\n", err)
 		return

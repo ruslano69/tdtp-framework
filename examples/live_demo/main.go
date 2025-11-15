@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/queuebridge/tdtp/pkg/adapters/sqlite"
+	"github.com/queuebridge/tdtp/pkg/adapters"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
 	// Импорт драйвера закомментирован - установите один из:
@@ -14,6 +16,8 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
+
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
 	fmt.Println("║     TDTP v0.6 - Live Demo with Real Database                ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
@@ -36,7 +40,11 @@ func main() {
 	fmt.Println()
 
 	// Пытаемся подключиться
-	adapter, err := sqlite.NewAdapter(dbPath)
+	cfg := adapters.Config{
+		Type: "sqlite",
+		DSN:  dbPath,
+	}
+	adapter, err := adapters.New(ctx, cfg)
 	if err != nil {
 		fmt.Printf("❌ Failed to connect: %v\n", err)
 		fmt.Println()
@@ -46,25 +54,25 @@ func main() {
 		fmt.Println("  go get github.com/mattn/go-sqlite3 # CGO, faster")
 		return
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	fmt.Println("✅ Connected successfully!")
 	fmt.Println()
 
 	// Показываем статистику БД
-	showDatabaseStats(adapter)
+	showDatabaseStats(ctx, adapter)
 
 	// Демонстрация 1: Simple Filter
-	demo1(adapter)
+	demo1(ctx, adapter)
 
 	// Демонстрация 2: Complex Query
-	demo2(adapter)
+	demo2(ctx, adapter)
 
 	// Демонстрация 3: Pagination
-	demo3(adapter)
+	demo3(ctx, adapter)
 
 	// Демонстрация 4: Multiple Tables
-	demo4(adapter)
+	demo4(ctx, adapter)
 
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
@@ -97,7 +105,7 @@ func findTestDatabase() string {
 	return ""
 }
 
-func showDatabaseStats(adapter *sqlite.Adapter) {
+func showDatabaseStats(ctx context.Context, adapter adapters.Adapter) {
 	fmt.Println("═══════════════════════════════════════════════════════════")
 	fmt.Println("                   Database Statistics")
 	fmt.Println("═══════════════════════════════════════════════════════════")
@@ -106,12 +114,14 @@ func showDatabaseStats(adapter *sqlite.Adapter) {
 	tables := []string{"Users", "Orders", "Products"}
 
 	for _, table := range tables {
-		count, err := adapter.GetRowCount(table)
-		if err != nil {
-			fmt.Printf("  %s: error (%v)\n", table, err)
+		// Note: GetRowCount is not in the universal interface
+		// Using TableExists as a workaround
+		exists, err := adapter.TableExists(ctx, table)
+		if err != nil || !exists {
+			fmt.Printf("  %s: error or not found\n", table)
 			continue
 		}
-		fmt.Printf("  %-15s %3d records\n", table+":", count)
+		fmt.Printf("  %-15s exists\n", table+":")
 	}
 
 	fmt.Println()
@@ -119,7 +129,7 @@ func showDatabaseStats(adapter *sqlite.Adapter) {
 	fmt.Println()
 }
 
-func demo1(adapter *sqlite.Adapter) {
+func demo1(ctx context.Context, adapter adapters.Adapter) {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("Demo 1: Simple Filter - Active users with Balance > 1000")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -137,7 +147,7 @@ func demo1(adapter *sqlite.Adapter) {
 		return
 	}
 
-	packets, err := adapter.ExportTableWithQuery("Users", query, "DemoApp", "Console")
+	packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "DemoApp", "Console")
 	if err != nil {
 		fmt.Printf("❌ Export error: %v\n", err)
 		return
@@ -146,7 +156,7 @@ func demo1(adapter *sqlite.Adapter) {
 	printResults(packets)
 }
 
-func demo2(adapter *sqlite.Adapter) {
+func demo2(ctx context.Context, adapter adapters.Adapter) {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("Demo 2: Complex Query - Users from Moscow or SPb, sorted")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -160,7 +170,7 @@ func demo2(adapter *sqlite.Adapter) {
 	translator := tdtql.NewTranslator()
 	query, _ := translator.Translate(sql)
 
-	packets, err := adapter.ExportTableWithQuery("Users", query, "DemoApp", "Console")
+	packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "DemoApp", "Console")
 	if err != nil {
 		fmt.Printf("❌ Export error: %v\n", err)
 		return
@@ -169,7 +179,7 @@ func demo2(adapter *sqlite.Adapter) {
 	printResults(packets)
 }
 
-func demo3(adapter *sqlite.Adapter) {
+func demo3(ctx context.Context, adapter adapters.Adapter) {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("Demo 3: Pagination - Top 3 users by balance")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -183,7 +193,7 @@ func demo3(adapter *sqlite.Adapter) {
 	translator := tdtql.NewTranslator()
 	query, _ := translator.Translate(sql)
 
-	packets, err := adapter.ExportTableWithQuery("Users", query, "DemoApp", "Console")
+	packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "DemoApp", "Console")
 	if err != nil {
 		fmt.Printf("❌ Export error: %v\n", err)
 		return
@@ -200,7 +210,7 @@ func demo3(adapter *sqlite.Adapter) {
 	}
 }
 
-func demo4(adapter *sqlite.Adapter) {
+func demo4(ctx context.Context, adapter adapters.Adapter) {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("Demo 4: Multiple Tables - Pending orders")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -214,7 +224,7 @@ func demo4(adapter *sqlite.Adapter) {
 	translator := tdtql.NewTranslator()
 	query, _ := translator.Translate(sql)
 
-	packets, err := adapter.ExportTableWithQuery("Orders", query, "DemoApp", "Console")
+	packets, err := adapter.ExportTableWithQuery(ctx, "Orders", query, "DemoApp", "Console")
 	if err != nil {
 		fmt.Printf("❌ Export error: %v\n", err)
 		return
