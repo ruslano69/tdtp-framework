@@ -3,6 +3,8 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+
+	_ "modernc.org/sqlite"
 )
 
 // Adapter представляет адаптер для работы с SQLite
@@ -13,7 +15,7 @@ type Adapter struct {
 
 // NewAdapter создает новый адаптер для SQLite
 func NewAdapter(filePath string) (*Adapter, error) {
-	db, err := sql.Open("sqlite3", filePath)
+	db, err := sql.Open("sqlite", filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

@@ -41,6 +41,11 @@ func (a *Adapter) GetTableSchema(tableName string) (packet.Schema, error) {
 			return packet.Schema{}, fmt.Errorf("failed to build field: %w", err)
 		}
 		
+		// Для TEXT полей без явной длины устанавливаем разумное значение по умолчанию
+		if field.Type == "TEXT" && field.Length == 0 {
+			field.Length = 1000 // Разумное значение по умолчанию
+		}
+		
 		fields = append(fields, field)
 	}
 	

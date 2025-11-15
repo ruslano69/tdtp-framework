@@ -45,13 +45,14 @@ type Schema struct {
 
 // Field описывает одно поле таблицы
 type Field struct {
-	Name      string `xml:"name,attr"`
-	Type      string `xml:"type,attr"`
-	Length    int    `xml:"length,attr,omitempty"`
-	Precision int    `xml:"precision,attr,omitempty"`
-	Scale     int    `xml:"scale,attr,omitempty"`
-	Timezone  string `xml:"timezone,attr,omitempty"`
-	Key       bool   `xml:"key,attr,omitempty"`
+    Name      string `xml:"name,attr"`
+    Type      string `xml:"type,attr"`
+    Length    int    `xml:"length,attr,omitempty"`
+    Precision int    `xml:"precision,attr,omitempty"`
+    Scale     int    `xml:"scale,attr,omitempty"`
+    Key       bool   `xml:"key,attr,omitempty"`
+    Timezone  string `xml:"timezone,attr,omitempty"`
+    Subtype   string `xml:"subtype,attr,omitempty"`  // ← Добавьте эту строку
 }
 
 // Data содержит табличные данные
