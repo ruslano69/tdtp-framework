@@ -119,12 +119,21 @@ func main() {
 
 	fmt.Printf("   ✅ Export completed in %v\n\n", exportDuration)
 
-	// 5. Анализируем пакеты
+	// 5. Анализируем пакеты и сохраняем в XML
 	fmt.Printf("📊 Pagination Results:\n")
 	fmt.Printf("   Total packets: %d\n\n", len(packets))
 
+	// Создаем директорию для XML файлов
+	outputDir := "pagination_output"
+	os.RemoveAll(outputDir) // Очищаем старые файлы
+	err = os.MkdirAll(outputDir, 0755)
+	if err != nil {
+		panic(err)
+	}
+
 	totalRows := 0
 	totalSize := 0
+	xmlFiles := []string{}
 
 	for i, pkt := range packets {
 		// Сериализуем пакет в XML для подсчета размера
@@ -138,11 +147,21 @@ func main() {
 		rowCount := len(pkt.Data.Rows)
 		totalRows += rowCount
 
+		// Сохраняем XML файл
+		xmlFilename := fmt.Sprintf("%s/%s_part_%02d_of_%02d.xml", outputDir, tableName, i+1, len(packets))
+		xmlContent := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + string(xmlData))
+		err = os.WriteFile(xmlFilename, xmlContent, 0644)
+		if err != nil {
+			panic(err)
+		}
+		xmlFiles = append(xmlFiles, xmlFilename)
+
 		fmt.Printf("   Packet #%d:\n", i+1)
 		fmt.Printf("     - Rows: %d\n", rowCount)
 		fmt.Printf("     - Size: %.2f KB (%.2f MB)\n", float64(packetSize)/1024, float64(packetSize)/1024/1024)
 		fmt.Printf("     - Part number: %d\n", pkt.Header.PartNumber)
 		fmt.Printf("     - Total parts: %d\n", pkt.Header.TotalParts)
+		fmt.Printf("     - XML file: %s\n", xmlFilename)
 
 		if len(pkt.Data.Rows) > 0 {
 			// Показываем первую строку как пример
@@ -207,11 +226,19 @@ func main() {
 	}
 
 	fmt.Println("\n✅ Pagination demo completed!")
+	fmt.Printf("\n📁 XML Files saved to: %s/\n", outputDir)
+	fmt.Printf("   Total files: %d\n", len(xmlFiles))
+	for i, file := range xmlFiles {
+		stat, _ := os.Stat(file)
+		fmt.Printf("   [%02d] %s (%.2f KB)\n", i+1, file, float64(stat.Size())/1024)
+	}
+
 	fmt.Println("\n💡 Tips:")
-	fmt.Println("   - Default max packet size: 2 MB")
+	fmt.Println("   - MSMQ limit: 4 MB Binary → ~1.9 MB XML (with headers overhead)")
 	fmt.Println("   - Packets are split automatically based on content size")
 	fmt.Println("   - Each packet preserves schema and metadata")
 	fmt.Println("   - Multi-packet transfers can be imported atomically")
+	fmt.Printf("   - You can inspect XML files in: %s/\n", outputDir)
 }
 
 // createDemoDatabase создает демо базу с 10,000 записей
