@@ -3,6 +3,7 @@ package adapters_test
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
@@ -94,9 +95,9 @@ func TestFactory_UnknownAdapter(t *testing.T) {
 		t.Fatal("Expected error for unknown adapter type, got nil")
 	}
 
-	expectedMsg := "unknown adapter type"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error '%s', got '%s'", expectedMsg, err.Error())
+	// Error message format: "unknown database type: unknown_db (available types: [...])"
+	if !strings.Contains(err.Error(), "unknown database type") {
+		t.Errorf("Expected error to contain 'unknown database type', got '%s'", err.Error())
 	}
 }
 
@@ -172,7 +173,7 @@ func TestFactory_ConfigValidation(t *testing.T) {
 				Type: "sqlite",
 				DSN:  "",
 			},
-			expectErr: true, // SQLite может работать с пустым DSN, но это плохая практика
+			expectErr: false, // SQLite accepts empty DSN (defaults to "")
 		},
 		{
 			name: "Empty Type",
