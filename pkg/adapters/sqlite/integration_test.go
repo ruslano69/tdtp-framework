@@ -1,10 +1,12 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
 
+	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -17,6 +19,8 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 		t.Skip("SQLite driver not available, install: go get modernc.org/sqlite")
 	}
 
+	ctx := context.Background()
+
 	// Создаем временную БД
 	dbFile := "testdata/test_query.db"
 	defer os.Remove(dbFile)
@@ -26,16 +30,16 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create adapter: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	// Создаем тестовую таблицу
-	err = createTestTable(adapter)
+	err = createTestTable(ctx, adapter)
 	if err != nil {
 		t.Fatalf("Failed to create test table: %v", err)
 	}
 
 	// Вставляем тестовые данные
-	err = insertTestData(adapter)
+	err = insertTestData(ctx, adapter)
 	if err != nil {
 		t.Fatalf("Failed to insert test data: %v", err)
 	}
@@ -50,7 +54,7 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 		}
 
 		// Export с фильтрацией
-		packets, err := adapter.ExportTableWithQuery("Users", query, "TestApp", "TestReceiver")
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "TestApp", "TestReceiver")
 		if err != nil {
 			t.Fatalf("ExportTableWithQuery failed: %v", err)
 		}
@@ -94,7 +98,7 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 			t.Fatalf("Failed to translate SQL: %v", err)
 		}
 
-		packets, err := adapter.ExportTableWithQuery("Users", query, "App", "Receiver")
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "App", "Receiver")
 		if err != nil {
 			t.Fatalf("ExportTableWithQuery failed: %v", err)
 		}
@@ -128,7 +132,7 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 			t.Fatalf("Failed to translate SQL: %v", err)
 		}
 
-		packets, err := adapter.ExportTableWithQuery("Users", query, "App", "Receiver")
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "App", "Receiver")
 		if err != nil {
 			t.Fatalf("ExportTableWithQuery failed: %v", err)
 		}
@@ -159,7 +163,7 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 			t.Fatalf("Failed to translate SQL: %v", err)
 		}
 
-		packets, err := adapter.ExportTableWithQuery("Users", query, "App", "Receiver")
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "App", "Receiver")
 		if err != nil {
 			t.Fatalf("ExportTableWithQuery failed: %v", err)
 		}
@@ -174,7 +178,7 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 		// Проверяем MoreAvailable
 		if pkt.QueryContext.ExecutionResults.MoreDataAvailable {
 			// Total 3 записи, offset=1, limit=2 → остается 0
-			// Значит MoreAvailable должно быть false
+			// Значит MoreDataAvailable должно быть false
 			t.Error("MoreDataAvailable should be false")
 		}
 	})
@@ -186,6 +190,8 @@ func TestIntegration_FullCycle(t *testing.T) {
 		t.Skip("SQLite driver not available")
 	}
 
+	ctx := context.Background()
+
 	// Создаем source БД
 	sourceFile := "testdata/source.db"
 	defer os.Remove(sourceFile)
@@ -194,17 +200,17 @@ func TestIntegration_FullCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create source adapter: %v", err)
 	}
-	defer source.Close()
+	defer source.Close(ctx)
 
 	// Наполняем данными
-	createTestTable(source)
-	insertTestData(source)
+	createTestTable(ctx, source)
+	insertTestData(ctx, source)
 
 	// Export с фильтрацией
 	translator := tdtql.NewTranslator()
 	query, _ := translator.Translate("SELECT * FROM Users WHERE Balance > 1000")
 
-	packets, err := source.ExportTableWithQuery("Users", query, "Source", "Target")
+	packets, err := source.ExportTableWithQuery(ctx, "Users", query, "Source", "Target")
 	if err != nil {
 		t.Fatalf("Export failed: %v", err)
 	}
@@ -217,16 +223,16 @@ func TestIntegration_FullCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create target adapter: %v", err)
 	}
-	defer target.Close()
+	defer target.Close(ctx)
 
 	// Import в target
-	err = target.ImportPackets(packets, StrategyReplace)
+	err = target.ImportPackets(ctx, packets, adapters.StrategyReplace)
 	if err != nil {
 		t.Fatalf("Import failed: %v", err)
 	}
 
 	// Проверяем что данные импортировались
-	count, err := target.GetRowCount("Users")
+	count, err := target.GetRowCount(ctx, "Users")
 	if err != nil {
 		t.Fatalf("Failed to count rows: %v", err)
 	}
@@ -252,7 +258,7 @@ func isSQLiteDriverAvailable() bool {
 	return err == nil
 }
 
-func createTestTable(adapter *Adapter) error {
+func createTestTable(ctx context.Context, adapter *Adapter) error {
 	builder := schema.NewBuilder()
 	schemaObj := builder.
 		AddInteger("ID", true).
@@ -261,10 +267,10 @@ func createTestTable(adapter *Adapter) error {
 		AddBoolean("IsActive").
 		Build()
 
-	return adapter.CreateTable("Users", schemaObj)
+	return adapter.CreateTable(ctx, "Users", schemaObj)
 }
 
-func insertTestData(adapter *Adapter) error {
+func insertTestData(ctx context.Context, adapter *Adapter) error {
 	// Создаем пакет с тестовыми данными
 	builder := schema.NewBuilder()
 	schemaObj := builder.
@@ -284,5 +290,5 @@ func insertTestData(adapter *Adapter) error {
 		},
 	}
 
-	return adapter.ImportPacket(pkt, StrategyReplace)
+	return adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
 }

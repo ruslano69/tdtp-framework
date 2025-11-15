@@ -1,8 +1,10 @@
 package postgres
 
 import (
+	"context"
 	"testing"
 
+	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -12,13 +14,15 @@ const testConnString = "postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432
 
 // TestIntegration_BasicConnection проверяет базовое подключение
 func TestIntegration_BasicConnection(t *testing.T) {
+	ctx := context.Background()
+
 	adapter, err := NewAdapter(testConnString)
 	if err != nil {
 		t.Skipf("PostgreSQL not available: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
-	version, err := adapter.GetDatabaseVersion()
+	version, err := adapter.GetDatabaseVersion(ctx)
 	if err != nil {
 		t.Fatalf("Failed to get version: %v", err)
 	}
@@ -32,16 +36,18 @@ func TestIntegration_BasicConnection(t *testing.T) {
 
 // TestIntegration_ExportImport проверяет полный цикл Export → Import
 func TestIntegration_ExportImport(t *testing.T) {
+	ctx := context.Background()
+
 	adapter, err := NewAdapter(testConnString)
 	if err != nil {
 		t.Skipf("PostgreSQL not available: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	tableName := "test_export_import"
 
 	// Cleanup
-	defer adapter.Exec("DROP TABLE IF EXISTS " + tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем тестовую таблицу
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -53,7 +59,7 @@ func TestIntegration_ExportImport(t *testing.T) {
 		is_active BOOLEAN
 	)`
 
-	err = adapter.Exec(createSQL)
+	err = adapter.Exec(ctx, createSQL)
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
@@ -64,14 +70,14 @@ func TestIntegration_ExportImport(t *testing.T) {
 		('Jane Smith', 'jane@example.com', 25, 2000.00, true),
 		('Bob Johnson', 'bob@example.com', 35, 500.00, false)`
 
-	err = adapter.Exec(insertSQL)
+	err = adapter.Exec(ctx, insertSQL)
 	if err != nil {
 		t.Fatalf("Failed to insert data: %v", err)
 	}
 
 	// Export
 	t.Log("Exporting table...")
-	packets, err := adapter.ExportTable(tableName)
+	packets, err := adapter.ExportTable(ctx, tableName)
 	if err != nil {
 		t.Fatalf("Export failed: %v", err)
 	}
@@ -99,17 +105,17 @@ func TestIntegration_ExportImport(t *testing.T) {
 	}
 
 	// Удаляем таблицу
-	adapter.Exec("DROP TABLE " + tableName)
+	adapter.Exec(ctx, "DROP TABLE "+tableName)
 
 	// Import обратно
 	t.Log("Importing table...")
-	err = adapter.ImportPacket(packets[0], StrategyReplace)
+	err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 	if err != nil {
 		t.Fatalf("Import failed: %v", err)
 	}
 
 	// Проверяем что данные импортированы
-	rows, err := adapter.Query("SELECT COUNT(*) FROM " + tableName)
+	rows, err := adapter.Query(ctx, "SELECT COUNT(*) FROM "+tableName)
 	if err != nil {
 		t.Fatalf("Failed to count rows: %v", err)
 	}
@@ -129,16 +135,18 @@ func TestIntegration_ExportImport(t *testing.T) {
 
 // TestIntegration_SpecialTypes проверяет работу со специальными типами PostgreSQL
 func TestIntegration_SpecialTypes(t *testing.T) {
+	ctx := context.Background()
+
 	adapter, err := NewAdapter(testConnString)
 	if err != nil {
 		t.Skipf("PostgreSQL not available: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	tableName := "test_special_types"
 
 	// Cleanup
-	defer adapter.Exec("DROP TABLE IF EXISTS " + tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем таблицу со специальными типами
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -149,7 +157,7 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 		ip_address INET
 	)`
 
-	err = adapter.Exec(createSQL)
+	err = adapter.Exec(ctx, createSQL)
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
@@ -158,13 +166,13 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 	insertSQL := `INSERT INTO ` + tableName + ` (user_id, metadata, config, ip_address) VALUES
 		('550e8400-e29b-41d4-a716-446655440000', '{"role":"admin"}', '{"level":5}', '192.168.1.1')`
 
-	err = adapter.Exec(insertSQL)
+	err = adapter.Exec(ctx, insertSQL)
 	if err != nil {
 		t.Fatalf("Failed to insert data: %v", err)
 	}
 
 	// Export
-	packets, err := adapter.ExportTable(tableName)
+	packets, err := adapter.ExportTable(ctx, tableName)
 	if err != nil {
 		t.Fatalf("Export failed: %v", err)
 	}
@@ -211,15 +219,15 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 	t.Log("✓ Special types mapped correctly")
 
 	// Удаляем и импортируем обратно
-	adapter.Exec("DROP TABLE " + tableName)
+	adapter.Exec(ctx, "DROP TABLE "+tableName)
 
-	err = adapter.ImportPacket(pkt, StrategyReplace)
+	err = adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
 	if err != nil {
 		t.Fatalf("Import failed: %v", err)
 	}
 
 	// Проверяем что типы восстановились
-	schema, err := adapter.GetTableSchema(tableName)
+	schema, err := adapter.GetTableSchema(ctx, tableName)
 	if err != nil {
 		t.Fatalf("Failed to get schema: %v", err)
 	}
@@ -256,16 +264,18 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 
 // TestIntegration_ExportWithQuery проверяет экспорт с фильтрацией
 func TestIntegration_ExportWithQuery(t *testing.T) {
+	ctx := context.Background()
+
 	adapter, err := NewAdapter(testConnString)
 	if err != nil {
 		t.Skipf("PostgreSQL not available: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	tableName := "test_export_query"
 
 	// Cleanup
-	defer adapter.Exec("DROP TABLE IF EXISTS " + tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем таблицу
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -275,7 +285,7 @@ func TestIntegration_ExportWithQuery(t *testing.T) {
 		is_active BOOLEAN
 	)`
 
-	adapter.Exec(createSQL)
+	adapter.Exec(ctx, createSQL)
 
 	// Вставляем тестовые данные
 	insertSQL := `INSERT INTO ` + tableName + ` (name, age, is_active) VALUES
@@ -283,7 +293,7 @@ func TestIntegration_ExportWithQuery(t *testing.T) {
 		('Active User 2', 30, true),
 		('Inactive User', 35, false)`
 
-	adapter.Exec(insertSQL)
+	adapter.Exec(ctx, insertSQL)
 
 	// Создаем TDTQL запрос
 	translator := tdtql.NewTranslator()
@@ -293,7 +303,7 @@ func TestIntegration_ExportWithQuery(t *testing.T) {
 	}
 
 	// Export с фильтрацией
-	packets, err := adapter.ExportTableWithQuery(tableName, query, "TestApp", "TestServer")
+	packets, err := adapter.ExportTableWithQuery(ctx, tableName, query, "TestApp", "TestServer")
 	if err != nil {
 		t.Fatalf("ExportWithQuery failed: %v", err)
 	}
@@ -323,16 +333,18 @@ func TestIntegration_ExportWithQuery(t *testing.T) {
 
 // TestIntegration_ImportStrategies проверяет разные стратегии импорта
 func TestIntegration_ImportStrategies(t *testing.T) {
+	ctx := context.Background()
+
 	adapter, err := NewAdapter(testConnString)
 	if err != nil {
 		t.Skipf("PostgreSQL not available: %v", err)
 	}
-	defer adapter.Close()
+	defer adapter.Close(ctx)
 
 	tableName := "test_import_strategies"
 
 	// Cleanup
-	defer adapter.Exec("DROP TABLE IF EXISTS " + tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем схему TDTP
 	builder := schema.NewBuilder()
@@ -354,7 +366,7 @@ func TestIntegration_ImportStrategies(t *testing.T) {
 
 	// Test StrategyReplace
 	t.Run("StrategyReplace", func(t *testing.T) {
-		err := adapter.ImportPacket(pkt1, StrategyReplace)
+		err := adapter.ImportPacket(ctx, pkt1, adapters.StrategyReplace)
 		if err != nil {
 			t.Fatalf("Import failed: %v", err)
 		}
@@ -369,13 +381,13 @@ func TestIntegration_ImportStrategies(t *testing.T) {
 			},
 		}
 
-		err = adapter.ImportPacket(pkt2, StrategyReplace)
+		err = adapter.ImportPacket(ctx, pkt2, adapters.StrategyReplace)
 		if err != nil {
 			t.Fatalf("Import failed: %v", err)
 		}
 
 		// Проверяем результат
-		rows, _ := adapter.Query("SELECT COUNT(*) FROM " + tableName)
+		rows, _ := adapter.Query(ctx, "SELECT COUNT(*) FROM "+tableName)
 		defer rows.Close()
 
 		var count int
@@ -387,7 +399,7 @@ func TestIntegration_ImportStrategies(t *testing.T) {
 		}
 
 		// Проверяем что первая запись обновилась
-		rows2, _ := adapter.Query("SELECT value FROM " + tableName + " WHERE id = 1")
+		rows2, _ := adapter.Query(ctx, "SELECT value FROM "+tableName+" WHERE id = 1")
 		defer rows2.Close()
 
 		var value int
