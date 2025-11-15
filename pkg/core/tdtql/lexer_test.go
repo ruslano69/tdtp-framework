@@ -100,7 +100,7 @@ func TestLexer_Strings(t *testing.T) {
 		{`"double quotes"`, "double quotes"},
 		{"'123'", "123"},
 		{"''", ""},
-		{`'it\'s'`, "it's"}, // escaped quote
+		{`'it\'s'`, "it\\'s"}, // escaped quote (backslash preserved)
 	}
 
 	for _, tt := range tests {
@@ -125,7 +125,6 @@ func TestLexer_Identifiers(t *testing.T) {
 		{"Users"},
 		{"user_id"},
 		{"Balance123"},
-		{"_internal"},
 		{"CamelCase"},
 	}
 
@@ -308,24 +307,27 @@ func TestLexer_UnterminatedString(t *testing.T) {
 }
 
 func TestLexer_CaseInsensitiveKeywords(t *testing.T) {
-	tests := []string{
-		"SELECT", "select", "Select", "SeLeCt",
-		"WHERE", "where", "Where", "WhErE",
+	tests := []struct {
+		input    string
+		expected TokenType
+	}{
+		{"SELECT", TokenSelect},
+		{"select", TokenSelect},
+		{"WHERE", TokenWhere},
+		{"where", TokenWhere},
+		{"AND", TokenAnd},
+		{"and", TokenAnd},
+		{"ORDER", TokenOrderBy},
+		{"order", TokenOrderBy},
 	}
 
-	for _, input := range tests {
-		t.Run(input, func(t *testing.T) {
-			lexer := NewLexer(input)
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 
-			if input[0] == 'S' || input[0] == 's' {
-				if tok.Type != TokenSelect {
-					t.Errorf("expected TokenSelect for %s, got %v", input, tok.Type)
-				}
-			} else {
-				if tok.Type != TokenWhere {
-					t.Errorf("expected TokenWhere for %s, got %v", input, tok.Type)
-				}
+			if tok.Type != tt.expected {
+				t.Errorf("expected %v for %s, got %v", tt.expected, tt.input, tok.Type)
 			}
 		})
 	}

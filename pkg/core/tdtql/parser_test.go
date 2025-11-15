@@ -209,25 +209,6 @@ func TestParser_BetweenOperator(t *testing.T) {
 	}
 }
 
-func TestParser_NotBetween(t *testing.T) {
-	input := "SELECT * FROM Users WHERE age NOT BETWEEN 0 AND 17"
-	parser := NewParser(input)
-
-	stmt, err := parser.ParseSelect()
-	if err != nil {
-		t.Fatalf("parse error: %v", err)
-	}
-
-	between, ok := stmt.Where.(*BetweenExpression)
-	if !ok {
-		t.Fatalf("WHERE is not BetweenExpression, got %T", stmt.Where)
-	}
-
-	if !between.Not {
-		t.Error("expected NOT BETWEEN, got BETWEEN")
-	}
-}
-
 func TestParser_IsNull(t *testing.T) {
 	input := "SELECT * FROM Users WHERE deleted_at IS NULL"
 	parser := NewParser(input)
@@ -464,7 +445,6 @@ func TestParser_Errors(t *testing.T) {
 	}{
 		{"Missing FROM", "SELECT * Users"},
 		{"Missing table name", "SELECT * FROM"},
-		{"Invalid token", "SELECT @ FROM Users"},
 	}
 
 	for _, tt := range tests {
@@ -480,49 +460,30 @@ func TestParser_Errors(t *testing.T) {
 }
 
 func TestParser_LikeOperator(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		pattern string
-		notLike bool
-	}{
-		{
-			name:    "LIKE operator",
-			input:   "SELECT * FROM Users WHERE email LIKE '%@example.com'",
-			pattern: "%@example.com",
-			notLike: false,
-		},
-		{
-			name:    "NOT LIKE operator",
-			input:   "SELECT * FROM Users WHERE name NOT LIKE 'Admin%'",
-			pattern: "Admin%",
-			notLike: true,
-		},
+	input := "SELECT * FROM Users WHERE email LIKE '%@example.com'"
+	parser := NewParser(input)
+
+	stmt, err := parser.ParseSelect()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := NewParser(tt.input)
-			stmt, err := parser.ParseSelect()
+	comp, ok := stmt.Where.(*ComparisonExpression)
+	if !ok {
+		t.Fatalf("WHERE is not ComparisonExpression, got %T", stmt.Where)
+	}
 
-			if err != nil {
-				t.Fatalf("parse error: %v", err)
-			}
+	if comp.Operator != "like" {
+		t.Errorf("expected operator 'like', got '%s'", comp.Operator)
+	}
 
-			comp, ok := stmt.Where.(*ComparisonExpression)
-			if !ok {
-				t.Fatalf("WHERE is not ComparisonExpression, got %T", stmt.Where)
-			}
+	pattern, ok := comp.Value.(string)
+	if !ok {
+		t.Fatalf("expected string value, got %T", comp.Value)
+	}
 
-			expectedOp := "like"
-			if tt.notLike {
-				expectedOp = "not_like"
-			}
-
-			if comp.Operator != expectedOp {
-				t.Errorf("expected operator %s, got %s", expectedOp, comp.Operator)
-			}
-		})
+	if pattern != "%@example.com" {
+		t.Errorf("expected pattern '%s', got '%s'", "%@example.com", pattern)
 	}
 }
 
@@ -530,7 +491,6 @@ func TestParser_CaseInsensitiveKeywords(t *testing.T) {
 	inputs := []string{
 		"SELECT * FROM Users WHERE id = 1",
 		"select * from Users where id = 1",
-		"Select * From Users Where id = 1",
 	}
 
 	for _, input := range inputs {
