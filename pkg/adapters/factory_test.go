@@ -209,25 +209,25 @@ func TestFactory_MultipleAdapters(t *testing.T) {
 	ctx := context.Background()
 
 	// Создаем 3 разных SQLite адаптера
-	adapters := make([]adapters.Adapter, 3)
+	adapterList := make([]Adapter, 3)
 
 	for i := 0; i < 3; i++ {
-		cfg := adapters.Config{
+		cfg := Config{
 			Type: "sqlite",
 			DSN:  ":memory:",
 		}
 
-		adapter, err := adapters.New(ctx, cfg)
+		adapter, err := New(ctx, cfg)
 		if err != nil {
 			t.Fatalf("Failed to create adapter %d: %v", i, err)
 		}
 		defer adapter.Close(ctx)
 
-		adapters[i] = adapter
+		adapterList[i] = adapter
 	}
 
 	// Проверяем что все адаптеры работают независимо
-	for i, adapter := range adapters {
+	for i, adapter := range adapterList {
 		err := adapter.Ping(ctx)
 		if err != nil {
 			t.Errorf("Adapter %d ping failed: %v", i, err)

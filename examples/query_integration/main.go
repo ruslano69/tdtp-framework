@@ -333,13 +333,13 @@ func runQuery(ctx context.Context, adapter adapters.Adapter, sql string) {
 	}
 
 	pkt := packets[0]
-	ctx := pkt.QueryContext
+	qctx := pkt.QueryContext
 
 	fmt.Printf("📊 Results:\n")
-	fmt.Printf("   Total in table:   %d\n", ctx.ExecutionResults.TotalRecordsInTable)
-	fmt.Printf("   After filters:    %d\n", ctx.ExecutionResults.RecordsAfterFilters)
-	fmt.Printf("   Returned:         %d\n", ctx.ExecutionResults.RecordsReturned)
-	fmt.Printf("   More available:   %v\n", ctx.ExecutionResults.MoreDataAvailable)
+	fmt.Printf("   Total in table:   %d\n", qctx.ExecutionResults.TotalRecordsInTable)
+	fmt.Printf("   After filters:    %d\n", qctx.ExecutionResults.RecordsAfterFilters)
+	fmt.Printf("   Returned:         %d\n", qctx.ExecutionResults.RecordsReturned)
+	fmt.Printf("   More available:   %v\n", qctx.ExecutionResults.MoreDataAvailable)
 
 	fmt.Println("   Data:")
 	for i, row := range pkt.Data.Rows {
