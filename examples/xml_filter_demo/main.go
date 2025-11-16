@@ -17,7 +17,8 @@ import (
 func main() {
 	ctx := context.Background()
 
-	fmt.Println("=== TDTP XML Filter Demo ===\n")
+	fmt.Println("=== TDTP XML Filter Demo ===")
+	fmt.Println()
 
 	// 1. Создаем БД и данные
 	dbPath := "demo_filter.db"
@@ -125,7 +126,8 @@ func main() {
 		preview = preview[:1000] + "\n... (truncated)"
 	}
 	fmt.Println(preview)
-	fmt.Println("---\n")
+	fmt.Println("---")
+	fmt.Println()
 
 	// 8. Читаем XML обратно
 	fmt.Println("📖 Reading XML back...")

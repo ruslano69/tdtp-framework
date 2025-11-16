@@ -1,244 +1,259 @@
-# tdtpcli - TDTP Universal Database CLI
+# TDTP CLI Utility
 
-Universal command-line interface for working with databases via TDTP adapters.
+Command-line tool for working with TDTP (Table Data Transfer Protocol) and databases.
 
 ## Features
 
-- ✅ **Universal**: Works with SQLite and PostgreSQL
-- ✅ **Simple**: Easy-to-use command-line interface
-- ✅ **Portable**: Single binary, no dependencies
-- ✅ **JSON Export**: Export tables to JSON format
-- ✅ **Cross-platform**: Works on Linux, macOS, Windows
+- ✅ **Configuration File** - Uses `config.yaml` for database connection
+- ✅ **Multiple Databases** - PostgreSQL, SQLite (MS SQL, MySQL, Miranda SQL - in development)
+- ✅ **Safe Import** - Uses temporary tables before replacing production data
+- ✅ **TDTP Format** - Native TDTP.XML export/import
+- ✅ **Database-Specific Templates** - Separate config templates for each DB type
 
 ## Installation
 
 ```bash
-cd cmd/tdtpcli
-go build -o tdtpcli
+go build -o tdtpcli ./cmd/tdtpcli
 ```
 
-Or install globally:
+## First Time Setup
 
+### For PostgreSQL:
 ```bash
-go install github.com/queuebridge/tdtp/cmd/tdtpcli@latest
+./tdtpcli --create-config-pg
+# Edit default_config.yaml
+mv default_config.yaml config.yaml
+```
+
+### For SQLite:
+```bash
+./tdtpcli --create-config-sl
+# Edit default_config.yaml
+mv default_config.yaml config.yaml
+```
+
+## Configuration Templates
+
+| Flag | Database | Status |
+|------|----------|--------|
+| `--create-config-pg` | PostgreSQL | ✅ Supported |
+| `--create-config-sl` | SQLite | ✅ Supported |
+| `--create-config-ms` | MS SQL Server | 🚧 Under development |
+| `--create-config-my` | MySQL | 🚧 Under development |
+| `--create-config-mi` | Miranda SQL | 🚧 Under development |
+
+## Configuration Examples
+
+### PostgreSQL (config.yaml)
+```yaml
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  user: tdtp_user
+  password: secure_password
+  dbname: tdtp_test
+  schema: public
+  sslmode: disable
+```
+
+### SQLite (config.yaml)
+```yaml
+database:
+  type: sqlite
+  path: ./database.db
 ```
 
 ## Usage
 
 ### List Tables
-
-**SQLite:**
 ```bash
-tdtpcli -type sqlite -dsn database.db -list
-```
-
-**PostgreSQL:**
-```bash
-tdtpcli -type postgres -dsn "postgresql://user:pass@localhost:5432/mydb" -list
+./tdtpcli --list
 ```
 
 ### Export Table
-
-**Export to JSON:**
 ```bash
-tdtpcli -type sqlite -dsn database.db -export Users > users.json
+# To stdout
+./tdtpcli --export Users
+
+# To file (auto-adds .tdtp.xml extension)
+./tdtpcli --export Users --output users
+# Creates: users.tdtp.xml
+
+# Explicit extension
+./tdtpcli --export Orders --output orders.tdtp.xml
 ```
 
-**PostgreSQL:**
+### Import Data
 ```bash
-tdtpcli -type postgres -dsn "postgresql://user:pass@localhost/mydb" -export orders > orders.json
+./tdtpcli --import users.tdtp.xml
 ```
+
+**ВАЖНО**: При импорте используются временные таблицы:
+1. Данные загружаются в `table_name_tmp_YYYYMMDD_HHMMSS`
+2. После проверки временная таблица заменяет продакшен
+3. Старая версия удаляется
+4. При ошибке - автоматический откат
 
 ## Command Reference
 
-### Flags
+| Command | Description |
+|---------|-------------|
+| `--list` | List all tables |
+| `--export <table>` | Export table to TDTP format |
+| `--import <file>` | Import TDTP file |
+| `--create-config-XX` | Create config template for database type |
+| `--version` | Show version |
+| `--help` | Show help |
 
-| Flag | Description | Default | Required |
-|------|-------------|---------|----------|
-| `-type` | Database type (`sqlite` or `postgres`) | `sqlite` | No |
-| `-dsn` | Data Source Name (connection string) | - | Yes |
-| `-schema` | Schema name (PostgreSQL only) | `public` | No |
-| `-list` | List all tables | - | No |
-| `-export` | Export table to JSON | - | No |
-| `-version` | Show version | - | No |
-| `-help` | Show help | - | No |
+## Flags
 
-### Connection Strings
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--config <path>` | Config file path | `config.yaml` |
+| `--output <file>` | Output file | `stdout` |
 
-**SQLite:**
-- File: `database.db`
-- Memory: `:memory:`
-- Absolute path: `/path/to/database.db`
+## File Format
 
-**PostgreSQL:**
-- URI: `postgresql://user:password@host:port/database`
-- DSN: `host=localhost port=5432 user=user password=pass dbname=mydb`
+**TDTP uses `.tdtp.xml` extension:**
+- ✅ `users.tdtp.xml` - Correct
+- ❌ `users.xml` - Wrong (generic XML)
+- ❌ `users.json` - Wrong (not TDTP format)
+
+The CLI automatically adds `.tdtp.xml` if not specified:
+```bash
+./tdtpcli --export Users --output users
+# Creates: users.tdtp.xml
+```
 
 ## Examples
 
-### SQLite
-
 ```bash
+# PostgreSQL setup
+./tdtpcli --create-config-pg
+nano default_config.yaml  # Edit settings
+mv default_config.yaml config.yaml
+
+# SQLite setup
+./tdtpcli --create-config-sl
+nano default_config.yaml  # Edit path
+mv default_config.yaml config.yaml
+
 # List tables
-tdtpcli -type sqlite -dsn myapp.db -list
+./tdtpcli --list
 
-# Export table
-tdtpcli -type sqlite -dsn myapp.db -export users
+# Export
+./tdtpcli --export Users --output users.tdtp.xml
 
-# In-memory database
-tdtpcli -type sqlite -dsn :memory: -list
+# Import
+./tdtpcli --import users.tdtp.xml
+
+# Custom config location
+./tdtpcli --config /path/to/config.yaml --list
 ```
 
-### PostgreSQL
+## Safety Features
 
-```bash
-# List tables
-tdtpcli -type postgres \
-  -dsn "postgresql://tdtp_user:password@localhost:5432/tdtp_test" \
-  -list
+### Temporary Tables
+All imports use temporary tables for safety:
 
-# Export table from specific schema
-tdtpcli -type postgres \
-  -dsn "postgresql://user:pass@localhost/mydb" \
-  -schema public \
-  -export orders
-
-# Using DSN format
-tdtpcli -type postgres \
-  -dsn "host=localhost port=5432 user=admin password=secret dbname=production" \
-  -list
+```
+1. Create: Users_tmp_20251116_143000
+2. Load data into temporary table
+3. Validate data integrity
+4. Atomic replace:
+   Users → Users_old
+   Users_tmp_20251116_143000 → Users
+5. Cleanup: DROP Users_old
 ```
 
-### JSON Output
-
-Export produces JSON with schema and data:
-
-```json
-{
-  "table": "users",
-  "type": "reference",
-  "schema": {
-    "columns": [
-      {"name": "id", "type": "INTEGER", "primary_key": true},
-      {"name": "name", "type": "TEXT", "size": 100},
-      {"name": "email", "type": "TEXT", "size": 255}
-    ]
-  },
-  "rows": [
-    {"value": "1|John Doe|john@example.com"},
-    {"value": "2|Jane Smith|jane@example.com"}
-  ]
-}
-```
-
-## Integration
-
-### Pipeline with jq
-
-```bash
-# Extract specific fields
-tdtpcli -type sqlite -dsn data.db -export users | jq '.rows[].value'
-
-# Count rows
-tdtpcli -type sqlite -dsn data.db -export users | jq '.rows | length'
-
-# Filter data
-tdtpcli -type sqlite -dsn data.db -export users | \
-  jq '.rows[] | select(.value | contains("John"))'
-```
-
-### Backup Script
-
-```bash
-#!/bin/bash
-# backup-tables.sh
-
-DB_TYPE="postgres"
-DSN="postgresql://user:pass@localhost/mydb"
-OUTPUT_DIR="./backups"
-
-# Get all tables
-TABLES=$(tdtpcli -type $DB_TYPE -dsn "$DSN" -list | grep "•" | awk '{print $2}')
-
-# Export each table
-for table in $TABLES; do
-  echo "Exporting $table..."
-  tdtpcli -type $DB_TYPE -dsn "$DSN" -export "$table" > "$OUTPUT_DIR/${table}.json"
-done
-```
-
-## Building
-
-### Standard Build
-
-```bash
-go build -o tdtpcli
-```
-
-### Optimized Build
-
-```bash
-go build -ldflags="-s -w" -o tdtpcli
-```
-
-### Cross-Compilation
-
-```bash
-# Linux
-GOOS=linux GOARCH=amd64 go build -o tdtpcli-linux
-
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o tdtpcli-macos
-
-# Windows
-GOOS=windows GOARCH=amd64 go build -o tdtpcli.exe
-```
+**Benefits:**
+- ✅ No data loss if import fails
+- ✅ Atomic replacement (no partial updates)
+- ✅ Automatic rollback on error
+- ✅ Production table always consistent
 
 ## Troubleshooting
 
-### Connection Errors
-
-**SQLite "unable to open database file":**
+### Adapter Not Supported
 ```bash
-# Check file exists
-ls -la database.db
-
-# Check permissions
-chmod 644 database.db
+⚠️  WARNING: mssql adapter is under development
+💡 Currently supported: PostgreSQL, SQLite
 ```
+**Solution**: Use PostgreSQL or SQLite, or wait for adapter release
 
-**PostgreSQL "connection refused":**
+### Connection Failed
 ```bash
-# Test connection
-psql -h localhost -U user -d mydb
+❌ Failed to connect: connection refused
+```
+**Solution**: 
+- For PostgreSQL: Check host, port, user, password in config.yaml
+- For SQLite: Check path to database file
 
-# Check if PostgreSQL is running
-systemctl status postgresql
+### Table Not Found
+```bash
+❌ Table 'Users' does not exist
+```
+**Solution**: Run `--list` to see available tables
+
+### Config Not Found
+```bash
+❌ config.yaml not found
+```
+**Solution**: Run `--create-config-XX` and rename default_config.yaml
+
+## Supported Databases
+
+| Database | Type | Status | Config Flag |
+|----------|------|--------|-------------|
+| PostgreSQL | postgres | ✅ Full support | `--create-config-pg` |
+| SQLite | sqlite | ✅ Full support | `--create-config-sl` |
+| MS SQL Server | mssql | 🚧 In development | `--create-config-ms` |
+| MySQL | mysql | 🚧 In development | `--create-config-my` |
+| Miranda SQL | miranda | 🚧 In development | `--create-config-mi` |
+
+## Building
+
+```bash
+# Linux
+GOOS=linux GOARCH=amd64 go build -o tdtpcli ./cmd/tdtpcli
+
+# Windows
+GOOS=windows GOARCH=amd64 go build -o tdtpcli.exe ./cmd/tdtpcli
+
+# macOS
+GOOS=darwin GOARCH=amd64 go build -o tdtpcli ./cmd/tdtpcli
 ```
 
-### Driver Not Found
+## TDTP Format
 
-Make sure drivers are imported in `main.go`:
+**TDTP (Table Data Transfer Protocol)** is a specialized XML format for database synchronization:
 
-```go
-import (
-    _ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
-    _ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
-)
+- Self-documenting (schema included in message)
+- Stateless (each response contains full context)
+- Broker-oriented (designed for message queues)
+- Paginated (automatic splitting for large tables)
+
+### Example TDTP file:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>Users</TableName>
+    <MessageID>REF-2025-abc123</MessageID>
+  </Header>
+  <Schema>
+    <Field name="id" type="INTEGER" key="true"/>
+    <Field name="name" type="TEXT" length="100"/>
+  </Schema>
+  <Data>
+    <R>1|Alice</R>
+    <R>2|Bob</R>
+  </Data>
+</DataPacket>
 ```
-
-## Version
-
-Current version: **v1.0.0**
-
-Built with TDTP Universal Adapter Architecture v1.0
 
 ## License
 
-Same as TDTP framework
-
-## See Also
-
-- [TDTP Framework](../../README.md)
-- [Adapter Interface](../../docs/ADAPTER_INTERFACE.md)
-- [Benchmarks](../../docs/BENCHMARKS.md)
+Part of TDTP Framework

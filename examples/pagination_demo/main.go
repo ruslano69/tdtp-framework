@@ -17,7 +17,8 @@ import (
 func main() {
 	ctx := context.Background()
 
-	fmt.Println("=== TDTP Pagination Demo (2MB packets) ===\n")
+	fmt.Println("=== TDTP Pagination Demo (2MB packets) ===")
+	fmt.Println()
 
 	// 1. Подключаемся к существующей БД с 100,000 записей
 	var dbPath string

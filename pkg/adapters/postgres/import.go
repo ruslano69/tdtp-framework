@@ -4,22 +4,125 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 )
 
-// ImportPacket импортирует один TDTP пакет в PostgreSQL
+// ImportPacket импортирует один TDTP пакет в PostgreSQL через временную таблицу
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-	// Создаем таблицу если не существует
-	err := a.createTableFromSchema(ctx, pkt.Header.TableName, pkt.Schema)
+	tableName := pkt.Header.TableName
+	
+	// Генерируем имя временной таблицы
+	tempTableName := generateTempTableName(tableName)
+	
+	fmt.Printf("📋 Import to temporary table: %s\n", tempTableName)
+	
+	// 1. Создаем временную таблицу
+	err := a.createTableFromSchema(ctx, tempTableName, pkt.Schema)
 	if err != nil {
-		return fmt.Errorf("failed to create table: %w", err)
+		return fmt.Errorf("failed to create temporary table: %w", err)
+	}
+	
+	// 2. Импортируем данные во временную таблицу
+	tempPacket := *pkt
+	tempPacket.Header.TableName = tempTableName
+	
+	switch strategy {
+	case adapters.StrategyCopy:
+		err = a.importWithCopy(ctx, &tempPacket)
+	case adapters.StrategyReplace, adapters.StrategyIgnore, adapters.StrategyFail:
+		err = a.importWithInsert(ctx, &tempPacket, strategy)
+	default:
+		err = fmt.Errorf("unknown import strategy: %s", strategy)
+	}
+	
+	if err != nil {
+		// Откатываем - удаляем временную таблицу
+		a.dropTable(ctx, tempTableName)
+		return fmt.Errorf("failed to import to temporary table: %w", err)
+	}
+	
+	fmt.Printf("✅ Data loaded to temporary table\n")
+	fmt.Printf("🔄 Replacing production table: %s\n", tableName)
+	
+	// 3. Заменяем продакшен таблицу временной (атомарная операция)
+	err = a.replaceTables(ctx, tableName, tempTableName)
+	if err != nil {
+		// Откатываем - удаляем временную таблицу
+		a.dropTable(ctx, tempTableName)
+		return fmt.Errorf("failed to replace tables: %w", err)
+	}
+	
+	fmt.Printf("✅ Production table replaced successfully\n")
+	
+	return nil
+}
+
+// ImportPackets импортирует множество пакетов атомарно через временную таблицу
+// Реализует интерфейс adapters.Adapter
+func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
+	if len(packets) == 0 {
+		return nil
 	}
 
-	// Импортируем данные в зависимости от стратегии
+	tableName := packets[0].Header.TableName
+	tempTableName := generateTempTableName(tableName)
+	
+	fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
+
+	// Начинаем транзакцию
+	tx, err := a.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Создаем временную таблицу (используем схему из первого пакета)
+	err = a.createTableFromSchema(ctx, tempTableName, packets[0].Schema)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary table: %w", err)
+	}
+
+	// 2. Импортируем каждый пакет во временную таблицу
+	for i, pkt := range packets {
+		fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
+		
+		tempPacket := *pkt
+		tempPacket.Header.TableName = tempTableName
+		
+		err := a.importPacketData(ctx, &tempPacket, strategy)
+		if err != nil {
+			a.dropTable(ctx, tempTableName)
+			return fmt.Errorf("failed to import packet %d: %w", i+1, err)
+		}
+	}
+
+	fmt.Printf("✅ All packets loaded to temporary table\n")
+	fmt.Printf("🔄 Replacing production table: %s\n", tableName)
+
+	// 3. Заменяем продакшен таблицу временной
+	err = a.replaceTables(ctx, tableName, tempTableName)
+	if err != nil {
+		a.dropTable(ctx, tempTableName)
+		return fmt.Errorf("failed to replace tables: %w", err)
+	}
+
+	// Коммитим транзакцию
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	fmt.Printf("✅ Production table replaced successfully\n")
+
+	return nil
+}
+
+// importPacketData импортирует данные одного пакета (вспомогательная функция)
+func (a *Adapter) importPacketData(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	switch strategy {
 	case adapters.StrategyCopy:
 		return a.importWithCopy(ctx, pkt)
@@ -30,34 +133,72 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 	}
 }
 
-// ImportPackets импортирует множество пакетов атомарно
-// Реализует интерфейс adapters.Adapter
-func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
-	if len(packets) == 0 {
-		return nil
+// generateTempTableName генерирует имя временной таблицы
+func generateTempTableName(baseName string) string {
+	timestamp := time.Now().Format("20060102_150405")
+	return fmt.Sprintf("%s_tmp_%s", baseName, timestamp)
+}
+
+// replaceTables заменяет продакшен таблицу временной (атомарная операция)
+func (a *Adapter) replaceTables(ctx context.Context, targetTable, tempTable string) error {
+	quotedTarget := QuoteIdentifier(targetTable)
+	quotedTemp := QuoteIdentifier(tempTable)
+	quotedOld := QuoteIdentifier(targetTable + "_old")
+	
+	if a.schema != "public" {
+		quotedTarget = QuoteIdentifier(a.schema) + "." + quotedTarget
+		quotedTemp = QuoteIdentifier(a.schema) + "." + quotedTemp
+		quotedOld = QuoteIdentifier(a.schema) + "." + quotedOld
 	}
 
-	// Начинаем транзакцию
-	tx, err := a.BeginTx(ctx)
+	// Проверяем существует ли целевая таблица
+	exists, err := a.TableExists(ctx, targetTable)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return err
 	}
-	defer tx.Rollback(ctx)
 
-	// Импортируем каждый пакет
-	for _, pkt := range packets {
-		err := a.ImportPacket(ctx, pkt, strategy)
-		if err != nil {
-			return fmt.Errorf("failed to import packet: %w", err)
+	if exists {
+		// Если таблица существует - делаем атомарную замену
+		// 1. Переименовываем старую таблицу в _old
+		sql := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedTarget, quotedOld)
+		if err := a.Exec(ctx, sql); err != nil {
+			return fmt.Errorf("failed to rename old table: %w", err)
+		}
+
+		// 2. Переименовываем временную таблицу в продакшен
+		sql = fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedTemp, quotedTarget)
+		if err := a.Exec(ctx, sql); err != nil {
+			// Откатываем - возвращаем старое имя
+			rollbackSQL := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedTarget)
+			a.Exec(ctx, rollbackSQL)
+			return fmt.Errorf("failed to rename temp table: %w", err)
+		}
+
+		// 3. Удаляем старую таблицу
+		if err := a.dropTable(ctx, targetTable+"_old"); err != nil {
+			// Не критично, можно оставить для ручной очистки
+			fmt.Printf("⚠️  Warning: failed to drop old table %s_old: %v\n", targetTable, err)
+		}
+	} else {
+		// Если таблицы нет - просто переименовываем временную
+		sql := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedTemp, quotedTarget)
+		if err := a.Exec(ctx, sql); err != nil {
+			return fmt.Errorf("failed to rename temp table: %w", err)
 		}
 	}
 
-	// Коммитим транзакцию
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	return nil
+}
+
+// dropTable удаляет таблицу
+func (a *Adapter) dropTable(ctx context.Context, tableName string) error {
+	quotedTable := QuoteIdentifier(tableName)
+	if a.schema != "public" {
+		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
 	}
 
-	return nil
+	sql := fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", quotedTable)
+	return a.Exec(ctx, sql)
 }
 
 // createTableFromSchema создает таблицу на основе TDTP схемы

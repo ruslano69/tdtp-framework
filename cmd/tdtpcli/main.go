@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
@@ -17,15 +17,20 @@ import (
 const version = "1.0.0"
 
 func main() {
-	// Флаги для подключения
-	dbType := flag.String("type", "sqlite", "Database type (sqlite or postgres)")
-	dsn := flag.String("dsn", "", "Data Source Name (connection string)")
-	schema := flag.String("schema", "public", "Schema name (for PostgreSQL)")
-
 	// Команды
 	listTables := flag.Bool("list", false, "List all tables")
-	exportTable := flag.String("export", "", "Export table to TDTP XML/JSON")
-	format := flag.String("format", "xml", "Output format: xml or json")
+	exportTable := flag.String("export", "", "Export table to TDTP format (required)")
+	importFile := flag.String("import", "", "Import TDTP file (table name from file)")
+	output := flag.String("output", "", "Output file (default: stdout)")
+	configPath := flag.String("config", "", "Path to config file (default: config.yaml in exe dir)")
+	
+	// Флаги создания конфига для разных БД
+	createConfigPG := flag.Bool("create-config-pg", false, "Create PostgreSQL config template")
+	createConfigSL := flag.Bool("create-config-sl", false, "Create SQLite config template")
+	createConfigMS := flag.Bool("create-config-ms", false, "Create MS SQL config template")
+	createConfigMY := flag.Bool("create-config-my", false, "Create MySQL config template")
+	createConfigMI := flag.Bool("create-config-mi", false, "Create Miranda SQL config template")
+	
 	showVersion := flag.Bool("version", false, "Show version")
 	showHelp := flag.Bool("help", false, "Show help")
 
@@ -36,40 +41,151 @@ func main() {
 		return
 	}
 
-	if *showHelp || *dsn == "" {
+	if *showHelp {
 		printHelp()
 		return
 	}
 
-	// Создаём адаптер
-	ctx := context.Background()
-	cfg := adapters.Config{
-		Type:   *dbType,
-		DSN:    *dsn,
-		Schema: *schema,
+	// Создание шаблона конфига для выбранной БД
+	if *createConfigPG {
+		handleCreateConfig("postgres")
+		return
+	}
+	if *createConfigSL {
+		handleCreateConfig("sqlite")
+		return
+	}
+	if *createConfigMS {
+		handleCreateConfig("mssql")
+		return
+	}
+	if *createConfigMY {
+		handleCreateConfig("mysql")
+		return
+	}
+	if *createConfigMI {
+		handleCreateConfig("miranda")
+		return
 	}
 
-	adapter, err := adapters.New(ctx, cfg)
+	// Загрузка конфигурации
+	cfgPath := *configPath
+	if cfgPath == "" {
+		var err error
+		cfgPath, err = EnsureConfigExists()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ %v\n\n", err)
+			fmt.Println("💡 Create a config template:")
+			fmt.Println("   --create-config-pg  (PostgreSQL)")
+			fmt.Println("   --create-config-sl  (SQLite)")
+			fmt.Println("   --create-config-ms  (MS SQL - under development)")
+			fmt.Println("   --create-config-my  (MySQL - under development)")
+			fmt.Println("   --create-config-mi  (Miranda SQL - under development)")
+			os.Exit(1)
+		}
+	}
+
+	config, err := LoadConfig(cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Failed to connect: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ Failed to load config: %v\n", err)
+		fmt.Printf("📝 Config file: %s\n\n", cfgPath)
+		os.Exit(1)
+	}
+
+	fmt.Printf("📁 Using config: %s\n", cfgPath)
+	fmt.Printf("🔌 Connecting to %s...\n", config.Database.Type)
+
+	// Проверка поддержки адаптера
+	if !isAdapterSupported(config.Database.Type) {
+		fmt.Fprintf(os.Stderr, "\n⚠️  WARNING: %s adapter is under development\n", config.Database.Type)
+		fmt.Fprintf(os.Stderr, "💡 Currently supported: PostgreSQL, SQLite\n\n")
+		os.Exit(1)
+	}
+
+	// Создаём адаптер
+	ctx := context.Background()
+	adapterCfg := adapters.Config{
+		Type:   config.Database.Type,
+		DSN:    config.Database.ToDSN(),
+		Schema: config.Database.Schema,
+	}
+
+	adapter, err := adapters.New(ctx, adapterCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\n❌ Failed to connect: %v\n\n", err)
+		fmt.Println("💡 Please check your config.yaml settings:")
+		fmt.Printf("   - Type: %s\n", config.Database.Type)
+		if config.Database.Type == "sqlite" {
+			fmt.Printf("   - Path: %s\n", config.Database.Path)
+		} else {
+			fmt.Printf("   - Host: %s\n", config.Database.Host)
+			fmt.Printf("   - Port: %d\n", config.Database.Port)
+			fmt.Printf("   - User: %s\n", config.Database.User)
+			fmt.Printf("   - Database: %s\n", config.Database.DBName)
+		}
 		os.Exit(1)
 	}
 	defer adapter.Close(ctx)
 
 	// Проверяем подключение
 	if err := adapter.Ping(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Connection failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\n❌ Connection test failed: %v\n", err)
 		os.Exit(1)
 	}
+
+	dbVersion, _ := adapter.GetDatabaseVersion(ctx)
+	fmt.Printf("✅ Connected to %s (%s)\n\n", config.Database.Type, dbVersion)
 
 	// Выполняем команду
 	if *listTables {
 		handleListTables(ctx, adapter)
 	} else if *exportTable != "" {
-		handleExportTable(ctx, adapter, *exportTable, *format)
+		handleExportTable(ctx, adapter, *exportTable, *output)
+	} else if *importFile != "" {
+		handleImportFile(ctx, adapter, *importFile)
 	} else {
 		printHelp()
 	}
+}
+
+func isAdapterSupported(dbType string) bool {
+	supported := []string{"postgres", "sqlite"}
+	for _, t := range supported {
+		if t == dbType {
+			return true
+		}
+	}
+	return false
+}
+
+func handleCreateConfig(dbType string) {
+	path := GetDefaultConfigPath()
+	
+	if err := CreateConfigTemplate(path, dbType); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to create config: %v\n", err)
+		os.Exit(1)
+	}
+	
+	dbNames := map[string]string{
+		"postgres": "PostgreSQL",
+		"sqlite":   "SQLite",
+		"mssql":    "MS SQL Server",
+		"mysql":    "MySQL",
+		"miranda":  "Miranda SQL",
+	}
+	
+	fmt.Printf("✅ Created %s configuration template: %s\n\n", dbNames[dbType], path)
+	
+	if dbType != "postgres" && dbType != "sqlite" {
+		fmt.Printf("⚠️  WARNING: %s adapter is under development\n", dbNames[dbType])
+		fmt.Printf("💡 Currently supported: PostgreSQL, SQLite\n\n")
+	}
+	
+	fmt.Println("📝 Next steps:")
+	fmt.Println("   1. Edit the file with your database settings")
+	fmt.Println("   2. Rename it to 'config.yaml'")
+	fmt.Println("   3. Run tdtpcli commands")
+	fmt.Println()
 }
 
 func handleListTables(ctx context.Context, adapter adapters.Adapter) {
@@ -79,17 +195,17 @@ func handleListTables(ctx context.Context, adapter adapters.Adapter) {
 		os.Exit(1)
 	}
 
-	version, _ := adapter.GetDatabaseVersion(ctx)
 	dbType := adapter.GetDatabaseType()
+	dbVersion, _ := adapter.GetDatabaseVersion(ctx)
 
-	fmt.Printf("📊 Database: %s (%s)\n", dbType, version)
+	fmt.Printf("📊 Database: %s (%s)\n", dbType, dbVersion)
 	fmt.Printf("📋 Tables (%d):\n", len(tables))
 	for _, table := range tables {
 		fmt.Printf("  • %s\n", table)
 	}
 }
 
-func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName string, format string) {
+func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName string, outputFile string) {
 	// Проверяем существование таблицы
 	exists, err := adapter.TableExists(ctx, tableName)
 	if err != nil {
@@ -100,6 +216,8 @@ func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName 
 		fmt.Fprintf(os.Stderr, "❌ Table '%s' does not exist\n", tableName)
 		os.Exit(1)
 	}
+
+	fmt.Printf("📤 Exporting table: %s\n", tableName)
 
 	// Экспортируем таблицу
 	packets, err := adapter.ExportTable(ctx, tableName)
@@ -118,114 +236,165 @@ func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName 
 		totalRows += len(pkt.Data.Rows)
 	}
 
-	// Выбираем формат вывода
-	switch format {
-	case "xml":
-		exportAsXML(packets)
-		fmt.Fprintf(os.Stderr, "\n✅ Exported %d rows from '%s' in TDTP XML format\n", totalRows, tableName)
-	case "json":
-		exportAsJSON(packets)
-		fmt.Fprintf(os.Stderr, "\n✅ Exported %d rows from '%s' in JSON format\n", totalRows, tableName)
-	default:
-		fmt.Fprintf(os.Stderr, "❌ Unknown format '%s'. Use 'xml' or 'json'\n", format)
-		os.Exit(1)
+	// Определяем имя файла вывода
+	var writer *os.File
+	var filename string
+	
+	if outputFile != "" {
+		// Если расширение не указано или не .tdtp.xml, добавляем .tdtp.xml
+		if !strings.HasSuffix(outputFile, ".tdtp.xml") {
+			// Убираем .xml если есть
+			outputFile = strings.TrimSuffix(outputFile, ".xml")
+			outputFile = outputFile + ".tdtp.xml"
+		}
+		filename = outputFile
+		
+		f, err := os.Create(filename)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to create output file: %v\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		writer = f
+	} else {
+		writer = os.Stdout
+		filename = "stdout"
+	}
+
+	// Экспорт в TDTP формат
+	exportAsTDTP(packets, writer)
+	
+	if outputFile != "" {
+		fmt.Printf("✅ Exported %d rows to %s (TDTP format)\n", totalRows, filename)
+	} else {
+		fmt.Fprintf(os.Stderr, "\n✅ Exported %d rows in TDTP format\n", totalRows)
 	}
 }
 
-func exportAsXML(packets []*packet.DataPacket) {
-	// Выводим TDTP XML пакеты
+func handleImportFile(ctx context.Context, adapter adapters.Adapter, filename string) {
+	fmt.Printf("📥 Importing from: %s\n", filename)
+
+	// Читаем файл
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to read file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Парсим TDTP пакет
+	parser := packet.NewParser()
+	pkt, err := parser.ParseBytes(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to parse TDTP packet: %v\n", err)
+		os.Exit(1)
+	}
+
+	tableName := pkt.Header.TableName
+	fmt.Printf("📋 Target table: %s\n", tableName)
+	fmt.Printf("📊 Records in packet: %d\n", len(pkt.Data.Rows))
+
+	// Импортируем с использованием временной таблицы
+	if err := adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Import failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Imported %d rows into '%s'\n", len(pkt.Data.Rows), tableName)
+}
+
+func exportAsTDTP(packets []*packet.DataPacket, writer *os.File) {
 	for i, pkt := range packets {
 		xmlData, err := xml.MarshalIndent(pkt, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ XML encoding failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "❌ TDTP encoding failed: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Добавляем XML declaration
-		fmt.Println("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
-		fmt.Println(string(xmlData))
+		fmt.Fprintln(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+		fmt.Fprintln(writer, string(xmlData))
 
-		// Разделитель между пакетами
 		if i < len(packets)-1 {
-			fmt.Println()
-			fmt.Println("<!-- Next packet -->")
-			fmt.Println()
+			fmt.Fprintln(writer)
+			fmt.Fprintln(writer, "<!-- Next packet -->")
+			fmt.Fprintln(writer)
 		}
-	}
-}
-
-func exportAsJSON(packets []*packet.DataPacket) {
-	// Конвертируем в JSON (для совместимости)
-	for _, pkt := range packets {
-		data := map[string]interface{}{
-			"protocol": pkt.Protocol,
-			"version":  pkt.Version,
-			"header":   pkt.Header,
-			"schema":   pkt.Schema,
-			"data":     pkt.Data,
-		}
-
-		jsonData, err := json.MarshalIndent(data, "", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ JSON encoding failed: %v\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Println(string(jsonData))
 	}
 }
 
 func printHelp() {
 	fmt.Println("tdtpcli - TDTP Universal Database CLI v" + version)
 	fmt.Println()
+	fmt.Println("Configuration:")
+	fmt.Println("  Uses config.yaml from executable directory")
+	fmt.Println("  Create config template with database-specific flags")
+	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  tdtpcli -type <db-type> -dsn <connection-string> [command]")
-	fmt.Println()
-	fmt.Println("Database Types:")
-	fmt.Println("  sqlite     SQLite database")
-	fmt.Println("  postgres   PostgreSQL database")
-	fmt.Println()
-	fmt.Println("Connection Examples:")
-	fmt.Println("  SQLite:")
-	fmt.Println("    tdtpcli -type sqlite -dsn database.db -list")
-	fmt.Println("    tdtpcli -type sqlite -dsn :memory: -list")
-	fmt.Println()
-	fmt.Println("  PostgreSQL:")
-	fmt.Println("    tdtpcli -type postgres -dsn \"postgresql://user:pass@localhost:5432/dbname\" -list")
-	fmt.Println("    tdtpcli -type postgres -dsn \"host=localhost port=5432 user=user password=pass dbname=dbname\" -schema public -list")
+	fmt.Println("  tdtpcli [flags] [command]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  -list              List all tables in database")
-	fmt.Println("  -export <table>    Export table to TDTP XML or JSON format")
-	fmt.Println("  -version           Show version information")
-	fmt.Println("  -help              Show this help message")
+	fmt.Println("  --list                    List all tables in database")
+	fmt.Println("  --export <table>          Export table to TDTP format")
+	fmt.Println("  --import <file>           Import TDTP file")
+	fmt.Println("  --version                 Show version")
+	fmt.Println("  --help                    Show this help")
+	fmt.Println()
+	fmt.Println("Create Config Templates:")
+	fmt.Println("  --create-config-pg        PostgreSQL config template")
+	fmt.Println("  --create-config-sl        SQLite config template")
+	fmt.Println("  --create-config-ms        MS SQL config template (⚠️  under development)")
+	fmt.Println("  --create-config-my        MySQL config template (⚠️  under development)")
+	fmt.Println("  --create-config-mi        Miranda SQL config template (⚠️  under development)")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -type      Database type (default: sqlite)")
-	fmt.Println("  -dsn       Data Source Name / connection string (required)")
-	fmt.Println("  -schema    Schema name for PostgreSQL (default: public)")
-	fmt.Println("  -format    Output format: xml (default) or json")
+	fmt.Println("  --config <path>           Path to config file (default: config.yaml)")
+	fmt.Println("  --output <file>           Output file (default: stdout)")
 	fmt.Println()
 	fmt.Println("Examples:")
-	fmt.Println("  # List tables in SQLite database")
-	fmt.Println("  tdtpcli -type sqlite -dsn database.db -list")
 	fmt.Println()
-	fmt.Println("  # Export SQLite table to TDTP XML (default)")
-	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users")
-	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users -format xml")
+	fmt.Println("  # First time setup - PostgreSQL")
+	fmt.Println("  tdtpcli --create-config-pg")
+	fmt.Println("  # Edit default_config.yaml, then rename to config.yaml")
 	fmt.Println()
-	fmt.Println("  # Export SQLite table to JSON (compatibility)")
-	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users -format json")
+	fmt.Println("  # First time setup - SQLite")
+	fmt.Println("  tdtpcli --create-config-sl")
 	fmt.Println()
-	fmt.Println("  # List PostgreSQL tables")
-	fmt.Println("  tdtpcli -type postgres -dsn \"postgresql://user:pass@localhost/mydb\" -list")
+	fmt.Println("  # List tables")
+	fmt.Println("  tdtpcli --list")
 	fmt.Println()
-	fmt.Println("  # Export PostgreSQL table to TDTP XML")
-	fmt.Println("  tdtpcli -type postgres -dsn \"postgresql://user:pass@localhost/mydb\" -export orders")
+	fmt.Println("  # Export to stdout")
+	fmt.Println("  tdtpcli --export Users")
 	fmt.Println()
-	fmt.Println("  # Redirect to file")
-	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users > users.xml")
-	fmt.Println("  tdtpcli -type sqlite -dsn database.db -export Users -format json > users.json")
+	fmt.Println("  # Export to file (auto-adds .tdtp.xml extension)")
+	fmt.Println("  tdtpcli --export Users --output users")
+	fmt.Println("  # Creates: users.tdtp.xml")
 	fmt.Println()
-	fmt.Println("For more information, visit: https://github.com/queuebridge/tdtp")
+	fmt.Println("  # Export with explicit extension")
+	fmt.Println("  tdtpcli --export Orders --output orders.tdtp.xml")
+	fmt.Println()
+	fmt.Println("  # Import from file")
+	fmt.Println("  tdtpcli --import users.tdtp.xml")
+	fmt.Println()
+	fmt.Println("Supported Databases:")
+	fmt.Println("  ✅ PostgreSQL (postgres)")
+	fmt.Println("  ✅ SQLite (sqlite)")
+	fmt.Println("  🚧 MS SQL Server (mssql) - under development")
+	fmt.Println("  🚧 MySQL (mysql) - under development")
+	fmt.Println("  🚧 Miranda SQL (miranda) - under development")
+	fmt.Println()
+	fmt.Println("Config file example - PostgreSQL (config.yaml):")
+	fmt.Println("  database:")
+	fmt.Println("    type: postgres")
+	fmt.Println("    host: localhost")
+	fmt.Println("    port: 5432")
+	fmt.Println("    user: tdtp_user")
+	fmt.Println("    password: your_password")
+	fmt.Println("    dbname: tdtp_test")
+	fmt.Println("    schema: public")
+	fmt.Println("    sslmode: disable")
+	fmt.Println()
+	fmt.Println("Config file example - SQLite (config.yaml):")
+	fmt.Println("  database:")
+	fmt.Println("    type: sqlite")
+	fmt.Println("    path: ./database.db")
+	fmt.Println()
 }
