@@ -36,7 +36,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 		}
 
 		// Проверяем существование таблицы
-		tableName := pkt.Schema.Table
+		tableName := pkt.Header.TableName
 		exists, err := a.TableExists(ctx, tableName)
 		if err != nil {
 			return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
@@ -44,7 +44,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 		// Создаем таблицу если нужно
 		if !exists {
-			if err := a.createTableInTx(ctx, tx, pkt.Schema); err != nil {
+			if err := a.createTableInTx(ctx, tx, tableName, pkt.Schema); err != nil {
 				return fmt.Errorf("failed to create table %s: %w", tableName, err)
 			}
 		}
@@ -66,8 +66,8 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 // ========== Table Creation ==========
 
 // createTableInTx создает таблицу в рамках транзакции
-func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, schema packet.Schema) error {
-	sqlCreate := a.buildCreateTableSQL(schema)
+func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, tableName string, schema packet.Schema) error {
+	sqlCreate := a.buildCreateTableSQL(tableName, schema)
 
 	_, err := tx.ExecContext(ctx, sqlCreate)
 	if err != nil {
@@ -78,9 +78,9 @@ func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, schema packet
 }
 
 // buildCreateTableSQL строит CREATE TABLE запрос
-func (a *Adapter) buildCreateTableSQL(schema packet.Schema) string {
-	schemaName, tableName := a.parseTableName(schema.Table)
-	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
+func (a *Adapter) buildCreateTableSQL(tableName string, schema packet.Schema) string {
+	schemaName, table := a.parseTableName(tableName)
+	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
 	var columns []string
 	var pkColumns []string
@@ -101,7 +101,7 @@ func (a *Adapter) buildCreateTableSQL(schema packet.Schema) string {
 	// Primary key constraint
 	if len(pkColumns) > 0 {
 		pkConstraint := fmt.Sprintf("CONSTRAINT [PK_%s] PRIMARY KEY (%s)",
-			tableName,
+			table,
 			strings.Join(pkColumns, ", "))
 		columns = append(columns, pkConstraint)
 	}
@@ -120,7 +120,7 @@ func (a *Adapter) importPacketDataInTx(
 	pkt *packet.DataPacket,
 	strategy adapters.ImportStrategy,
 ) error {
-	if len(pkt.Data) == 0 {
+	if len(pkt.Data.Rows) == 0 {
 		return nil // Пустой пакет - не ошибка
 	}
 
@@ -162,15 +162,16 @@ func (a *Adapter) importWithMerge(ctx context.Context, tx *sql.Tx, pkt *packet.D
 		return a.importWithInsert(ctx, tx, pkt)
 	}
 
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	// Строим MERGE запрос
 	mergeSQL := a.buildMergeSQL(fullTableName, pkt.Schema, pkFields)
 
 	// Выполняем MERGE для каждой строки
-	for _, row := range pkt.Data {
-		args := a.rowToArgs(row, pkt.Schema)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, mergeSQL, args...)
 		if err != nil {
 			return fmt.Errorf("failed to execute MERGE: %w", err)
@@ -195,10 +196,9 @@ func (a *Adapter) buildMergeSQL(tableName string, schema packet.Schema, pkFields
 		insertValues  []string
 	)
 
-	paramIndex := 1
 	for _, field := range schema.Fields {
 		colName := fmt.Sprintf("[%s]", field.Name)
-		paramName := fmt.Sprintf("@p%d", paramIndex)
+		paramName := "?"
 
 		sourceColumns = append(sourceColumns, fmt.Sprintf("%s AS %s", paramName, colName))
 		insertColumns = append(insertColumns, colName)
@@ -218,8 +218,6 @@ func (a *Adapter) buildMergeSQL(tableName string, schema packet.Schema, pkFields
 		if !isPK {
 			updateSets = append(updateSets, fmt.Sprintf("target.%s = source.%s", colName, colName))
 		}
-
-		paramIndex++
 	}
 
 	merge := fmt.Sprintf(`
@@ -249,7 +247,7 @@ WHEN NOT MATCHED THEN
 // SQL Server не имеет прямого аналога INSERT OR IGNORE,
 // используем TRY-CATCH или проверку существования
 func (a *Adapter) importWithIgnore(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	// Находим PK колонки
@@ -268,15 +266,16 @@ func (a *Adapter) importWithIgnore(ctx context.Context, tx *sql.Tx, pkt *packet.
 	}
 
 	// Проверяем существование и вставляем только новые записи
-	for _, row := range pkt.Data {
-		exists, err := a.rowExists(ctx, tx, fullTableName, pkFields, pkIndices, row)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		exists, err := a.rowExists(ctx, tx, fullTableName, pkFields, pkIndices, rowValues)
 		if err != nil {
 			return fmt.Errorf("failed to check row existence: %w", err)
 		}
 
 		if !exists {
 			insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
-			args := a.rowToArgs(row, pkt.Schema)
+			args := a.rowToArgs(rowValues, pkt.Schema)
 			_, err := tx.ExecContext(ctx, insertSQL, args...)
 			if err != nil {
 				return fmt.Errorf("failed to insert row: %w", err)
@@ -301,7 +300,7 @@ func (a *Adapter) rowExists(
 
 	for i, field := range pkFields {
 		idx := pkIndices[i]
-		conditions = append(conditions, fmt.Sprintf("[%s] = @p%d", field.Name, i+1))
+		conditions = append(conditions, fmt.Sprintf("[%s] = ?", field.Name))
 		args = append(args, a.stringToValue(row[idx], field))
 	}
 
@@ -320,13 +319,14 @@ func (a *Adapter) rowExists(
 
 // importWithInsertIgnoreErrors вставляет с игнорированием ошибок дубликатов
 func (a *Adapter) importWithInsertIgnoreErrors(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
 
-	for _, row := range pkt.Data {
-		args := a.rowToArgs(row, pkt.Schema)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		// Игнорируем ошибки дубликатов (primary key violation)
 		if err != nil && !isPrimaryKeyViolation(err) {
@@ -353,13 +353,14 @@ func isPrimaryKeyViolation(err error) bool {
 
 // importWithInsert использует обычный INSERT (ошибка при дубликатах)
 func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
 
-	for _, row := range pkt.Data {
-		args := a.rowToArgs(row, pkt.Schema)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		if err != nil {
 			return fmt.Errorf("failed to insert row: %w", err)
@@ -374,9 +375,9 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 	var columns []string
 	var placeholders []string
 
-	for i, field := range schema.Fields {
+	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("[%s]", field.Name))
-		placeholders = append(placeholders, fmt.Sprintf("@p%d", i+1))
+		placeholders = append(placeholders, "?")
 	}
 
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
@@ -386,6 +387,19 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 }
 
 // ========== Data Conversion ==========
+
+// parseRow разбивает строку row.Value на отдельные значения
+func (a *Adapter) parseRow(rowValue string, schema packet.Schema) []string {
+	// Значения разделены табуляциями
+	values := strings.Split(rowValue, "\t")
+
+	// Дополняем пустыми значениями если не хватает
+	for len(values) < len(schema.Fields) {
+		values = append(values, "")
+	}
+
+	return values
+}
 
 // rowToArgs конвертирует строку TDTP пакета в массив аргументов для SQL
 func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []interface{} {
@@ -416,26 +430,4 @@ func (a *Adapter) stringToValue(str string, field packet.Field) interface{} {
 	}
 }
 
-// ========== Transaction Support ==========
-
-// Transaction wrapper for implementing adapters.Tx interface
-type transaction struct {
-	tx *sql.Tx
-}
-
-func (t *transaction) Commit(ctx context.Context) error {
-	return t.tx.Commit()
-}
-
-func (t *transaction) Rollback(ctx context.Context) error {
-	return t.tx.Rollback()
-}
-
-// BeginTx начинает транзакцию
-func (a *Adapter) BeginTx(ctx context.Context) (adapters.Tx, error) {
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	return &transaction{tx: tx}, nil
-}
+// Transaction methods (BeginTx, transaction struct) are implemented in adapter.go

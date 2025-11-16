@@ -19,7 +19,7 @@ services:
       - mssql_dev_data:/var/opt/mssql
       - ./scripts/mssql/init-dev.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DevPassword123! -Q "SELECT 1"
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P DevPassword123! -C -Q "SELECT 1"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,7 +40,7 @@ services:
       - mssql_prod_data:/var/opt/mssql
       - ./scripts/mssql/init-prod.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P ProdPassword123! -Q "SELECT 1"
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P ProdPassword123! -C -Q "SELECT 1"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,7 +59,7 @@ services:
     volumes:
       - mssql_2022_data:/var/opt/mssql
     healthcheck:
-      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P SQL2022Pass123! -Q "SELECT 1"
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P SQL2022Pass123! -C -Q "SELECT 1"
       interval: 10s
       timeout: 5s
       retries: 5

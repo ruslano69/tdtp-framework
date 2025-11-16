@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
 )
 
 // ========== Schema Operations ==========
@@ -43,7 +42,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		) pk ON c.TABLE_SCHEMA = pk.TABLE_SCHEMA
 			AND c.TABLE_NAME = pk.TABLE_NAME
 			AND c.COLUMN_NAME = pk.COLUMN_NAME
-		WHERE c.TABLE_SCHEMA = @p1 AND c.TABLE_NAME = @p2
+		WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
 		ORDER BY c.ORDINAL_POSITION
 	`
 
@@ -112,60 +111,11 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	}
 
 	return packet.Schema{
-		Table:  tableName,
 		Fields: fields,
 	}, nil
 }
 
-// GetTableNames возвращает список всех таблиц в БД
-func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
-	query := `
-		SELECT TABLE_SCHEMA + '.' + TABLE_NAME
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_TYPE = 'BASE TABLE'
-		ORDER BY TABLE_SCHEMA, TABLE_NAME
-	`
-
-	rows, err := a.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query table names: %w", err)
-	}
-	defer rows.Close()
-
-	var tables []string
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			return nil, fmt.Errorf("failed to scan table name: %w", err)
-		}
-		tables = append(tables, tableName)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
-	}
-
-	return tables, nil
-}
-
-// TableExists проверяет существование таблицы
-func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, error) {
-	schemaName, tableName := a.parseTableName(tableName)
-
-	query := `
-		SELECT COUNT(*)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = @p1 AND TABLE_NAME = @p2 AND TABLE_TYPE = 'BASE TABLE'
-	`
-
-	var count int
-	err := a.db.QueryRowContext(ctx, query, schemaName, tableName).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("failed to check table existence: %w", err)
-	}
-
-	return count > 0, nil
-}
+// GetTableNames and TableExists are implemented in adapter.go
 
 // ========== Export Operations ==========
 
@@ -202,7 +152,7 @@ func (a *Adapter) ExportTableWithQuery(
 	defer rows.Close()
 
 	// 4. Читаем данные и создаем пакеты
-	packets, err := a.rowsToPackets(rows, tableSchema, sender, recipient)
+	packets, err := a.rowsToPackets(rows, tableSchema, tableName, sender, recipient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert rows to packets: %w", err)
 	}
@@ -249,21 +199,16 @@ func (a *Adapter) buildSelectQuery(
 	sqlQuery := fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), fullTableName)
 
 	var args []interface{}
-	paramIndex := 1
 
-	// WHERE clause из TDTQL
-	if query != nil && query.Where != "" {
-		whereClause, whereArgs, err := a.convertTDTQLToSQL(query.Where, &paramIndex)
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to convert TDTQL WHERE: %w", err)
-		}
-		sqlQuery += " WHERE " + whereClause
-		args = append(args, whereArgs...)
-	}
+	// WHERE clause из TDTQL (упрощенная реализация)
+	// TODO: Полная поддержка query.Filters
+	// if query != nil && query.Filters != nil {
+	//     ... конвертация Filters в WHERE
+	// }
 
 	// ORDER BY (обязательно для OFFSET/FETCH в SQL Server 2012+)
-	if query != nil && query.OrderBy != "" {
-		sqlQuery += " ORDER BY " + a.sanitizeOrderBy(query.OrderBy)
+	if query != nil && query.OrderBy != nil {
+		sqlQuery += " ORDER BY " + a.buildOrderByClause(query.OrderBy)
 	} else {
 		// Default: order by first column (required for OFFSET/FETCH)
 		if len(tableSchema.Fields) > 0 {
@@ -287,26 +232,35 @@ func (a *Adapter) buildSelectQuery(
 	return sqlQuery, args, nil
 }
 
-// convertTDTQLToSQL конвертирует TDTQL WHERE условие в SQL
-// Базовая реализация для простых фильтров
-func (a *Adapter) convertTDTQLToSQL(tdtql string, paramIndex *int) (string, []interface{}, error) {
-	// TODO: Полноценный парсер TDTQL
-	// Сейчас простая реализация для базовых случаев
+// buildOrderByClause строит ORDER BY из packet.OrderBy
+func (a *Adapter) buildOrderByClause(orderBy *packet.OrderBy) string {
+	if orderBy == nil {
+		return ""
+	}
 
-	// Для начала возвращаем как есть, но с параметризацией позже
-	// В будущем нужно будет парсить TDTQL AST
-	return tdtql, nil, nil
-}
+	// Multiple fields
+	if len(orderBy.Fields) > 0 {
+		var clauses []string
+		for _, field := range orderBy.Fields {
+			direction := "ASC"
+			if strings.ToUpper(field.Direction) == "DESC" {
+				direction = "DESC"
+			}
+			clauses = append(clauses, fmt.Sprintf("[%s] %s", field.Name, direction))
+		}
+		return strings.Join(clauses, ", ")
+	}
 
-// sanitizeOrderBy проверяет и очищает ORDER BY выражение
-func (a *Adapter) sanitizeOrderBy(orderBy string) string {
-	// Базовая проверка на SQL injection
-	// В продакшене нужна более строгая валидация
-	orderBy = strings.TrimSpace(orderBy)
+	// Single field
+	if orderBy.Field != "" {
+		direction := "ASC"
+		if strings.ToUpper(orderBy.Direction) == "DESC" {
+			direction = "DESC"
+		}
+		return fmt.Sprintf("[%s] %s", orderBy.Field, direction)
+	}
 
-	// Разрешаем только идентификаторы, запятые, ASC/DESC
-	// TODO: Более строгая валидация
-	return orderBy
+	return ""
 }
 
 // rowsToPackets конвертирует sql.Rows в TDTP пакеты
@@ -314,14 +268,14 @@ func (a *Adapter) sanitizeOrderBy(orderBy string) string {
 func (a *Adapter) rowsToPackets(
 	rows *sql.Rows,
 	tableSchema packet.Schema,
-	sender, recipient string,
+	tableName, sender, recipient string,
 ) ([]*packet.DataPacket, error) {
 	const maxPacketSize = 3800000 // ~3.8MB (из git log)
 	const estimatedRowSize = 1000 // Примерный размер строки
 	const maxRowsPerPacket = maxPacketSize / estimatedRowSize
 
 	var packets []*packet.DataPacket
-	var currentRows [][]string
+	var currentRows []packet.Row
 	currentSize := 0
 	packetNumber := 1
 
@@ -338,19 +292,21 @@ func (a *Adapter) rowsToPackets(
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		// Конвертируем значения в строки
-		row := make([]string, columnCount)
+		// Конвертируем значения в строки и объединяем табуляцией
+		var rowValues []string
 		rowSize := 0
-		for i, val := range values {
+		for _, val := range values {
 			strVal := a.valueToString(val)
-			row[i] = strVal
+			rowValues = append(rowValues, strVal)
 			rowSize += len(strVal)
 		}
+
+		row := packet.Row{Value: strings.Join(rowValues, "\t")}
 
 		// Проверяем, нужно ли создать новый пакет
 		if len(currentRows) >= maxRowsPerPacket || (currentSize+rowSize) >= maxPacketSize {
 			if len(currentRows) > 0 {
-				pkt := a.createPacket(tableSchema, currentRows, packetNumber, sender, recipient)
+				pkt := a.createPacket(tableSchema, tableName, currentRows, packetNumber, sender, recipient)
 				packets = append(packets, pkt)
 				packetNumber++
 				currentRows = nil
@@ -368,13 +324,13 @@ func (a *Adapter) rowsToPackets(
 
 	// Последний пакет
 	if len(currentRows) > 0 {
-		pkt := a.createPacket(tableSchema, currentRows, packetNumber, sender, recipient)
+		pkt := a.createPacket(tableSchema, tableName, currentRows, packetNumber, sender, recipient)
 		packets = append(packets, pkt)
 	}
 
 	// Если нет данных, создаем пустой пакет со схемой
 	if len(packets) == 0 {
-		pkt := a.createPacket(tableSchema, nil, 1, sender, recipient)
+		pkt := a.createPacket(tableSchema, tableName, nil, 1, sender, recipient)
 		packets = append(packets, pkt)
 	}
 
@@ -406,33 +362,36 @@ func (a *Adapter) valueToString(value interface{}) string {
 // createPacket создает TDTP пакет из схемы и данных
 func (a *Adapter) createPacket(
 	tableSchema packet.Schema,
-	rows [][]string,
+	tableName string,
+	rows []packet.Row,
 	packetNumber int,
 	sender, recipient string,
 ) *packet.DataPacket {
 	pkt := &packet.DataPacket{
+		Protocol: "TDTP",
+		Version:  "1.0",
 		Header: packet.Header{
-			Version:   packet.ProtocolVersion,
-			Type:      string(schema.TypeData),
-			Timestamp: time.Now().Format(time.RFC3339),
-			Sender:    sender,
-			Recipient: recipient,
+			Type:          packet.TypeResponse,
+			TableName:     tableName,
+			MessageID:     generateMessageID(),
+			PartNumber:    packetNumber,
+			RecordsInPart: len(rows),
+			Timestamp:     time.Now().UTC(),
+			Sender:        sender,
+			Recipient:     recipient,
 		},
 		Schema: tableSchema,
-		Data:   rows,
-	}
-
-	// Добавляем metadata
-	pkt.Header.Metadata = map[string]string{
-		"database_type":   a.GetDatabaseType(),
-		"packet_number":   fmt.Sprintf("%d", packetNumber),
-		"rows_count":      fmt.Sprintf("%d", len(rows)),
-		"table":           tableSchema.Table,
-		"compat_level":    fmt.Sprintf("%d", a.effectiveCompat),
-		"server_version":  fmt.Sprintf("%d", a.serverVersion),
+		Data: packet.Data{
+			Rows: rows,
+		},
 	}
 
 	return pkt
+}
+
+// generateMessageID генерирует уникальный ID сообщения
+func generateMessageID() string {
+	return fmt.Sprintf("mssql-%d", time.Now().UnixNano())
 }
 
 // ========== Query Statistics ==========
@@ -448,8 +407,8 @@ func (a *Adapter) GetTableRowCount(ctx context.Context, tableName string) (int64
 		FROM sys.tables t
 		INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 		INNER JOIN sys.partitions p ON t.object_id = p.object_id
-		WHERE s.name = @p1
-			AND t.name = @p2
+		WHERE s.name = ?
+			AND t.name = ?
 			AND p.index_id IN (0, 1)  -- Heap or Clustered index
 	`
 
@@ -478,7 +437,7 @@ func (a *Adapter) GetTableSize(ctx context.Context, tableName string) (int64, er
 		INNER JOIN sys.indexes i ON t.object_id = i.object_id
 		INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
 		INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
-		WHERE s.name = @p1 AND t.name = @p2
+		WHERE s.name = ? AND t.name = ?
 	`
 
 	var size sql.NullInt64
