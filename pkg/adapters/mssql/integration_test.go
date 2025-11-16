@@ -15,13 +15,13 @@ var (
 	// Dev environment (SQL Server 2019)
 	testConnStringDev = getEnvOrDefault(
 		"MSSQL_TEST_DSN_DEV",
-		"server=localhost,1433;user id=sa;password=SQL2022Pass123!;database=TestDB;encrypt=disable",
+		"server=localhost,1433;user id=sa;password=DevPassword123!;database=TestDB;encrypt=disable",
 	)
 
 	// Production simulation (SQL Server 2012 compatibility mode)
 	testConnStringProdSim = getEnvOrDefault(
 		"MSSQL_TEST_DSN_PROD",
-		"server=localhost,1434;user id=sa;password=SQL2022Pass123!;database=ProdSimDB;encrypt=disable",
+		"server=localhost,1434;user id=sa;password=ProdPassword123!;database=ProdSimDB;encrypt=disable",
 	)
 )
 
