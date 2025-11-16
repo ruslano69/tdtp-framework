@@ -15,7 +15,7 @@ var (
 	// Dev environment (SQL Server 2019)
 	testConnStringDev = getEnvOrDefault(
 		"MSSQL_TEST_DSN_DEV",
-		"server=localhost,1433;user id=sa;password=DevPassword123!;database=TestDB;encrypt=disable",
+		"server=localhost,1433;user id=sa;password=DevPassword123!;database=DevDB;encrypt=disable",
 	)
 
 	// Production simulation (SQL Server 2012 compatibility mode)
