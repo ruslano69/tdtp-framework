@@ -547,13 +547,15 @@ func handleImportBroker(ctx context.Context, adapter adapters.Adapter, config *C
 		var strategy adapters.ImportStrategy
 		if packetType == "reference" {
 			strategy = adapters.StrategyReplace // Полная синхронизация (через временную таблицу)
-			fmt.Printf("   Strategy: REPLACE (full sync via temp table)\n")
+			fmt.Printf("   Type: REFERENCE - full sync via temp table\n")
 		} else if packetType == "response" {
-			strategy = adapters.StrategyMerge // Инкрементальное обновление (UPSERT)
-			fmt.Printf("   Strategy: MERGE (incremental update)\n")
+			// TODO: Для response пакетов должен быть UPSERT в существующую таблицу
+			// Сейчас используется StrategyReplace (временная таблица) - работает, но не оптимально
+			strategy = adapters.StrategyReplace
+			fmt.Printf("   Type: RESPONSE - incremental update (currently via temp table)\n")
 		} else {
 			strategy = adapters.StrategyReplace // По умолчанию
-			fmt.Printf("   Strategy: REPLACE (default)\n")
+			fmt.Printf("   Type: UNKNOWN - using REPLACE strategy\n")
 		}
 
 		// Импортируем пакет
