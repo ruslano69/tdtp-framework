@@ -165,6 +165,23 @@ func (a *Adapter) importWithMerge(ctx context.Context, tx *sql.Tx, pkt *packet.D
 	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
+	// Проверяем есть ли IDENTITY колонки (обычно INT PRIMARY KEY)
+	// Для IDENTITY колонок нужен SET IDENTITY_INSERT ON
+	hasIdentity := a.tableHasIdentityColumn(ctx, pkt.Header.TableName)
+
+	// Включаем IDENTITY_INSERT если есть IDENTITY колонка
+	if hasIdentity {
+		identitySQL := fmt.Sprintf("SET IDENTITY_INSERT %s ON", fullTableName)
+		if _, err := tx.ExecContext(ctx, identitySQL); err != nil {
+			return fmt.Errorf("failed to enable IDENTITY_INSERT: %w", err)
+		}
+		// Отложенное выключение IDENTITY_INSERT
+		defer func() {
+			identityOffSQL := fmt.Sprintf("SET IDENTITY_INSERT %s OFF", fullTableName)
+			tx.ExecContext(ctx, identityOffSQL)
+		}()
+	}
+
 	// Строим MERGE запрос
 	mergeSQL := a.buildMergeSQL(fullTableName, pkt.Schema, pkFields)
 
@@ -356,6 +373,21 @@ func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.
 	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
+	// Проверяем есть ли IDENTITY колонки
+	hasIdentity := a.tableHasIdentityColumn(ctx, pkt.Header.TableName)
+
+	// Включаем IDENTITY_INSERT если есть IDENTITY колонка
+	if hasIdentity {
+		identitySQL := fmt.Sprintf("SET IDENTITY_INSERT %s ON", fullTableName)
+		if _, err := tx.ExecContext(ctx, identitySQL); err != nil {
+			return fmt.Errorf("failed to enable IDENTITY_INSERT: %w", err)
+		}
+		defer func() {
+			identityOffSQL := fmt.Sprintf("SET IDENTITY_INSERT %s OFF", fullTableName)
+			tx.ExecContext(ctx, identityOffSQL)
+		}()
+	}
+
 	insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
 
 	for _, row := range pkt.Data.Rows {
@@ -390,8 +422,9 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 
 // parseRow разбивает строку row.Value на отдельные значения
 func (a *Adapter) parseRow(rowValue string, schema packet.Schema) []string {
-	// Значения разделены табуляциями
-	values := strings.Split(rowValue, "\t")
+	// Значения разделены PIPE символом | согласно спецификации TDTP v1.0
+	// Экранированные pipe (&#124;) не обрабатываются здесь (обрабатывает parser)
+	values := strings.Split(rowValue, "|")
 
 	// Дополняем пустыми значениями если не хватает
 	for len(values) < len(schema.Fields) {
@@ -428,6 +461,33 @@ func (a *Adapter) stringToValue(str string, field packet.Field) interface{} {
 	default:
 		return str
 	}
+}
+
+// ========== IDENTITY Column Detection ==========
+
+// tableHasIdentityColumn проверяет есть ли в таблице IDENTITY колонка
+// Для таких колонок требуется SET IDENTITY_INSERT ON перед явной вставкой значений
+func (a *Adapter) tableHasIdentityColumn(ctx context.Context, tableName string) bool {
+	schemaName, table := a.parseTableName(tableName)
+
+	query := `
+		SELECT COUNT(*)
+		FROM sys.columns c
+		INNER JOIN sys.tables t ON c.object_id = t.object_id
+		INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+		WHERE s.name = @p1
+		  AND t.name = @p2
+		  AND c.is_identity = 1
+	`
+
+	var count int
+	err := a.db.QueryRowContext(ctx, query, schemaName, table).Scan(&count)
+	if err != nil {
+		// Если ошибка - предполагаем что IDENTITY есть (безопаснее)
+		return true
+	}
+
+	return count > 0
 }
 
 // Transaction methods (BeginTx, transaction struct) are implemented in adapter.go
