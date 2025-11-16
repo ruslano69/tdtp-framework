@@ -25,7 +25,13 @@ func main() {
 	importFile := flag.String("import", "", "Import TDTP file (table name from file)")
 	output := flag.String("output", "", "Output file (default: stdout)")
 	configPath := flag.String("config", "", "Path to config file (default: config.yaml in exe dir)")
-	
+
+	// TDTQL фильтры
+	where := flag.String("where", "", "TDTQL WHERE clause (e.g., \"ID > 2\")")
+	orderBy := flag.String("order-by", "", "ORDER BY clause (e.g., \"ID DESC\")")
+	limit := flag.Int("limit", 0, "LIMIT rows")
+	offset := flag.Int("offset", 0, "OFFSET rows")
+
 	// Флаги создания конфига для разных БД
 	createConfigPG := flag.Bool("create-config-pg", false, "Create PostgreSQL config template")
 	createConfigSL := flag.Bool("create-config-sl", false, "Create SQLite config template")
@@ -142,7 +148,7 @@ func main() {
 	if *listTables {
 		handleListTables(ctx, adapter)
 	} else if *exportTable != "" {
-		handleExportTable(ctx, adapter, *exportTable, *output)
+		handleExportTable(ctx, adapter, *exportTable, *output, *where, *orderBy, *limit, *offset)
 	} else if *importFile != "" {
 		handleImportFile(ctx, adapter, *importFile)
 	} else {
@@ -215,7 +221,7 @@ func handleListTables(ctx context.Context, adapter adapters.Adapter) {
 	}
 }
 
-func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName string, outputFile string) {
+func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName string, outputFile string, where string, orderBy string, limit int, offset int) {
 	// Проверяем существование таблицы
 	exists, err := adapter.TableExists(ctx, tableName)
 	if err != nil {
@@ -227,10 +233,22 @@ func handleExportTable(ctx context.Context, adapter adapters.Adapter, tableName 
 		os.Exit(1)
 	}
 
-	fmt.Printf("📤 Exporting table: %s\n", tableName)
+	// Создаём TDTQL query если есть фильтры
+	var query *packet.Query
+	if where != "" || orderBy != "" || limit > 0 || offset > 0 {
+		query = buildTDTQLQuery(where, orderBy, limit, offset)
+		fmt.Printf("📤 Exporting table: %s (with filters)\n", tableName)
+	} else {
+		fmt.Printf("📤 Exporting table: %s\n", tableName)
+	}
 
 	// Экспортируем таблицу
-	packets, err := adapter.ExportTable(ctx, tableName)
+	var packets []*packet.DataPacket
+	if query != nil {
+		packets, err = adapter.ExportTableWithQuery(ctx, tableName, query, "", "")
+	} else {
+		packets, err = adapter.ExportTable(ctx, tableName)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Export failed: %v\n", err)
 		os.Exit(1)
@@ -407,4 +425,122 @@ func printHelp() {
 	fmt.Println("    type: sqlite")
 	fmt.Println("    path: ./database.db")
 	fmt.Println()
+}
+
+// buildTDTQLQuery создаёт packet.Query из параметров CLI
+func buildTDTQLQuery(where string, orderBy string, limit int, offset int) *packet.Query {
+	query := packet.NewQuery()
+
+	// WHERE clause - упрощённый парсинг для базовых операторов
+	if where != "" {
+		query.Filters = parseSimpleWhere(where)
+	}
+
+	// ORDER BY
+	if orderBy != "" {
+		// Парсим строку вида "ID DESC" или "Name ASC, ID DESC"
+		query.OrderBy = &packet.OrderBy{}
+		parts := strings.Split(orderBy, ",")
+
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			tokens := strings.Fields(part)
+
+			if len(tokens) >= 1 {
+				fieldName := tokens[0]
+				direction := "ASC"
+				if len(tokens) >= 2 {
+					direction = strings.ToUpper(tokens[1])
+				}
+
+				if query.OrderBy.Field == "" {
+					// Первое поле - одиночная сортировка
+					query.OrderBy.Field = fieldName
+					query.OrderBy.Direction = direction
+				} else {
+					// Дополнительные поля - множественная сортировка
+					if query.OrderBy.Fields == nil {
+						// Переносим первое поле в массив
+						query.OrderBy.Fields = []packet.OrderField{
+							{Name: query.OrderBy.Field, Direction: query.OrderBy.Direction},
+						}
+						query.OrderBy.Field = ""
+						query.OrderBy.Direction = ""
+					}
+					query.OrderBy.Fields = append(query.OrderBy.Fields, packet.OrderField{
+						Name:      fieldName,
+						Direction: direction,
+					})
+				}
+			}
+		}
+	}
+
+	// LIMIT и OFFSET
+	if limit > 0 {
+		query.Limit = limit
+	}
+	if offset > 0 {
+		query.Offset = offset
+	}
+
+	return query
+}
+
+// parseSimpleWhere парсит упрощённый WHERE для одного условия
+// Примеры: "ID > 2", "Name = 'John'", "Balance >= 1000"
+func parseSimpleWhere(where string) *packet.Filters {
+	// Упрощённый парсер для базовых операторов
+	operators := []string{">=", "<=", "!=", "<>", "=", ">", "<"}
+
+	var field, operator, value string
+	for _, op := range operators {
+		if idx := strings.Index(where, op); idx > 0 {
+			field = strings.TrimSpace(where[:idx])
+			operator = op
+			value = strings.TrimSpace(where[idx+len(op):])
+			break
+		}
+	}
+
+	if field == "" || operator == "" {
+		// Не удалось распарсить, возвращаем nil
+		return nil
+	}
+
+	// Удаляем кавычки из значения
+	value = strings.Trim(value, "'\"")
+
+	// Конвертируем SQL оператор в TDTQL
+	tdtqlOp := ""
+	switch operator {
+	case "=":
+		tdtqlOp = "eq"
+	case "!=", "<>":
+		tdtqlOp = "ne"
+	case ">":
+		tdtqlOp = "gt"
+	case ">=":
+		tdtqlOp = "gte"
+	case "<":
+		tdtqlOp = "lt"
+	case "<=":
+		tdtqlOp = "lte"
+	}
+
+	if tdtqlOp == "" {
+		return nil
+	}
+
+	return &packet.Filters{
+		And: &packet.LogicalGroup{
+			Filters: []packet.Filter{
+				{
+					Field:    field,
+					Operator: tdtqlOp,
+					Value:    value,
+				},
+			},
+		},
+	}
 }
