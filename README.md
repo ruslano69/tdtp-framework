@@ -10,76 +10,140 @@
 - **Безопасность** - TLS, аутентификация, audit trail
 - **Удобство** - простое API, понятная структура
 
-## 📦 Что реализовано (v0.5)
+## 📦 Что реализовано (v1.2)
 
-### ✅ Core: Packet Module
-- XML парсер с валидацией
-- Генератор для всех типов сообщений
-- Автоматическое разбиение на части
+### ✅ Core Modules
+
+**Packet Module:**
+- XML парсер с валидацией TDTP v1.0
+- Генератор для всех типов сообщений (Reference, Delta, Response, Request)
+- Автоматическое разбиение на части (пагинация до 3.8MB)
 - QueryContext для stateless паттерна
+- Поддержка subtypes (UUID, JSONB, TIMESTAMPTZ)
 
-### ✅ Core: Schema Module
+**Schema Module:**
 - Валидация всех типов данных TDTP
-- Конвертер строковых значений
+- Универсальный Converter для всех адаптеров
 - Проверка соответствия данных схеме
-- Builder для создания схем
+- Builder API для создания схем
 
-### ✅ Core: TDTQL Translator
-- SQL парсер (WHERE, ORDER BY, LIMIT, OFFSET)
-- Поддержка всех операторов
-- Логические операторы с приоритетами
-- Генерация древовидных фильтров
-
-### ✅ Core: TDTQL Executor
-- Фильтрация данных по TDTQL запросам
-- Все операторы (=, !=, <, >, IN, BETWEEN, LIKE, IS NULL)
+**TDTQL Module:**
+- Translator: SQL → TDTQL (WHERE, ORDER BY, LIMIT, OFFSET)
+- Executor: in-memory фильтрация данных
+- SQL Generator: TDTQL → SQL оптимизация
+- Все операторы (=, !=, <, >, >=, <=, IN, BETWEEN, LIKE, IS NULL)
 - Логические группы (AND/OR) с вложенностью
 - Сортировка (одиночная и множественная)
-- Пагинация (LIMIT/OFFSET)
-- Статистика выполнения
-- QueryContext для Response
+- Пагинация с QueryContext статистикой
 
-### ✅ Adapters: Universal Adapter Interface (v1.0)
-- **Двухуровневая архитектура** (Level 1: Interface, Level 2: Implementations)
-- **Фабрика адаптеров** с автоматической регистрацией
-- **Унифицированный API** для всех БД
-- **Context-aware** операции (context.Context)
-- **Стратегии импорта**: REPLACE, IGNORE, FAIL, COPY
+### ✅ Database Adapters
 
-### ✅ Adapters: SQLite Adapter
-- Подключение к SQLite БД
-- Export: БД → TDTP пакеты
-- Import: TDTP пакеты → БД
-- Автоматический маппинг типов
+**Universal Interface:**
+- Двухуровневая архитектура (Interface + Implementations)
+- Фабрика адаптеров с автоматической регистрацией
+- Context-aware операции (context.Context)
+- Стратегии импорта: REPLACE, IGNORE, FAIL, COPY
+- ExportTable / ExportTableWithQuery
+- ImportPacket с transaction support
+
+**SQLite Adapter:**
+- Подключение через modernc.org/sqlite
+- Export/Import с автоматическим маппингом типов
+- TDTQL → SQL оптимизация на уровне БД
 - Автоматическое создание таблиц
-- Транзакции для множественных операций
+- Benchmark тесты (10K+ rows/sec)
 
-### ✅ Adapters: PostgreSQL Adapter
+**PostgreSQL Adapter:**
 - Подключение через pgx/v5 connection pool
-- Export с поддержкой schemas
-- Import с COPY (высокая производительность)
-- Специальные типы: UUID, JSONB, JSON, INET, ARRAY
+- Export с поддержкой schemas (public/custom)
+- Import с COPY для bulk operations
+- Специальные типы: UUID, JSONB, JSON, INET, ARRAY, NUMERIC
 - ON CONFLICT для стратегий импорта
+- TDTQL → SQL оптимизация с безопасной заменой schema
+
+**MS SQL Server Adapter:**
+- Подключение через github.com/microsoft/go-mssqldb
+- Export с параметризованными запросами
+- IDENTITY_INSERT для импорта ключевых полей
+- Поддержка NVARCHAR, UNIQUEIDENTIFIER, DATETIME2
+- Совместимость с MS SQL 2012+
+
+### ✅ Message Brokers
+
+**RabbitMQ:**
+- Publish/Consume TDTP пакетов
+- Manual ACK для надежной доставки
+- Queue parameters (durable, auto_delete, exclusive)
+- Tested with PostgreSQL adapter
+
+**MSMQ (Windows):**
+- Windows Message Queue integration
+- Transactional queues support
+- Tested with MS SQL adapter
+
+### ✅ CLI Utility (tdtpcli)
+
+**Commands:**
+- `--list` - список таблиц
+- `--export <table>` - экспорт в файл/stdout
+- `--import <file>` - импорт из файла
+- `--export-broker <table>` - экспорт в message queue
+- `--import-broker` - импорт из message queue
+
+**TDTQL Filters:**
+- `--where "field > value"` - условия фильтрации
+- `--order-by "field DESC"` - сортировка
+- `--limit N` - лимит записей
+- `--offset N` - пропуск записей
+
+**Configuration:**
+- YAML конфигурационные файлы
+- `--create-config-sqlite/pg/mssql` - генерация конфигов
+- Поддержка всех адаптеров и брокеров
 
 ## 🏗️ Архитектура
 
 ```
 tdtp-framework/
-├─ pkg/core/packet/      ✅ Парсинг/генерация пакетов
-├─ pkg/core/schema/      ✅ Валидация типов и схем  
-├─ pkg/core/tdtql/       ✅ Translator + Executor
-├─ pkg/core/validator/   ⏳ Расширенная валидация
-├─ pkg/core/security/    ⏳ TLS, auth, audit
-├─ pkg/adapters/sqlite/  ✅ SQLite adapter (NEW!)
-├─ pkg/adapters/postgres ⏳ PostgreSQL adapter
-├─ pkg/adapters/mssql    ⏳ MS SQL Server adapter
-├─ pkg/brokers/          ⏳ Интеграция с брокерами
-├─ cmd/tdtpcli/          ⏳ CLI утилита
-├─ examples/basic/       ✅ Packet примеры
-├─ examples/schema/      ✅ Schema примеры
-├─ examples/tdtql/       ✅ Translator примеры
-├─ examples/executor/    ✅ Executor примеры
-└─ examples/sqlite/      ✅ SQLite adapter примеры (NEW!)
+├─ pkg/core/
+│  ├─ packet/            ✅ Парсинг/генерация TDTP пакетов
+│  ├─ schema/            ✅ Валидация типов, Converter, Builder
+│  └─ tdtql/             ✅ Translator, Executor, SQL Generator
+│
+├─ pkg/adapters/
+│  ├─ adapter.go         ✅ Универсальный интерфейс
+│  ├─ factory.go         ✅ Фабрика адаптеров
+│  ├─ sqlite/            ✅ SQLite adapter (modernc.org/sqlite)
+│  ├─ postgres/          ✅ PostgreSQL adapter (pgx/v5)
+│  └─ mssql/             ✅ MS SQL Server adapter (go-mssqldb)
+│
+├─ pkg/brokers/
+│  ├─ broker.go          ✅ Интерфейс брокеров
+│  ├─ rabbitmq.go        ✅ RabbitMQ интеграция
+│  └─ msmq.go            ✅ MSMQ интеграция (Windows)
+│
+├─ cmd/tdtpcli/          ✅ CLI утилита
+│  ├─ main.go            ✅ Команды export/import/list
+│  └─ config.go          ✅ YAML конфигурация
+│
+├─ docs/                 ✅ Документация
+│  ├─ SPECIFICATION.md   ✅ Спецификация TDTP v1.0
+│  ├─ PACKET_MODULE.md   ✅ Документация Packet
+│  ├─ SCHEMA_MODULE.md   ✅ Документация Schema
+│  ├─ TDTQL_TRANSLATOR.md✅ Документация TDTQL
+│  ├─ SQLITE_ADAPTER.md  ✅ Документация SQLite
+│  └─ ...                ✅ Прочие документы
+│
+├─ examples/
+│  ├─ basic/             ✅ Packet примеры
+│  ├─ schema/            ✅ Schema примеры
+│  ├─ tdtql/             ✅ TDTQL примеры
+│  └─ sqlite/            ✅ SQLite adapter примеры
+│
+└─ scripts/              ✅ Вспомогательные скрипты
+   ├─ create_sqlite_test_db.py
+   ├─ create_postgres_test_db.py
+   └─ README.md          ✅ Руководство по скриптам
 ```
 
 ## 🚀 Быстрый старт
@@ -192,80 +256,54 @@ go test -v ./pkg/core/packet/
 
 ## 📋 Roadmap
 
-### ~~v0.1~~ ✅ Завершено
-- [x] Packet module
-
-### ~~v0.2~~ ✅ Завершено  
-- [x] Schema module
-- [x] Builder, Converter, Validator
-
-### ~~v0.3~~ ✅ Завершено
-- [x] TDTQL Translator (SQL → TDTQL)
-- [x] Lexer, Parser, AST, Generator
-- [x] Поддержка всех операторов
-
-### ~~v0.4~~ ✅ Завершено
-- [x] TDTQL Executor
-- [x] Фильтрация in-memory данных
-- [x] Сортировка и пагинация
-- [x] QueryContext для Response
-
-### ~~v0.5~~ ✅ Завершено
-- [x] SQLite Adapter
-- [x] Маппинг типов SQLite ↔ TDTP
-- [x] Export: БД → TDTP
-- [x] Import: TDTP → БД
-- [x] Автоматическое создание таблиц
-
-### ~~v0.6~~ ✅ Завершено
-- [x] Integration тесты для SQLite
-- [x] ExportTableWithQuery через TDTQL
-- [x] In-memory фильтрация
-
-### ~~v0.7~~ ✅ Завершено
-- [x] TDTQL → SQL трансляция для оптимизации
-- [x] SQL-level фильтрация (WHERE/ORDER BY/LIMIT)
-
-### ~~v0.8~~ ✅ Завершено
-- [x] SQLite benchmark тесты
-- [x] Поддержка subtypes
-
-### ~~v0.9~~ ✅ Завершено
-- [x] PostgreSQL adapter
-- [x] UUID, JSONB, JSON, INET типы
-- [x] COPY для bulk import
-
 ### ~~v1.0~~ ✅ Завершено
-- [x] **Двухуровневая архитектура адаптеров**
-- [x] **Фабрика адаптеров с регистрацией**
-- [x] **Context-aware API**
-- [x] **Унифицированные стратегии импорта**
-- [x] **Обновленные интеграционные тесты**
-- [x] **Примеры использования фабрики**
+**Core Modules:**
+- [x] Packet module (XML парсинг/генерация, пагинация)
+- [x] Schema module (валидация типов, конвертер, builder)
+- [x] TDTQL Translator (SQL → TDTQL, все операторы)
+- [x] TDTQL Executor (in-memory фильтрация, сортировка, пагинация)
+- [x] TDTQL SQL Generator (TDTQL → SQL оптимизация)
 
-### ~~v1.1~~ ✅ Завершено (NEW!)
-- [x] **CLI утилита (tdtpcli)**
-- [x] **YAML конфигурационные файлы**
-- [x] **Export/Import команды для PostgreSQL и SQLite**
-- [x] **Увеличен max packet size до 3.8MB**
-- [x] **Демонстрация пагинации**
+**Adapters:**
+- [x] Двухуровневая архитектура адаптеров
+- [x] Фабрика адаптеров с регистрацией
+- [x] Context-aware API
+- [x] Унифицированные стратегии импорта
+- [x] SQLite adapter (полная поддержка, benchmarks)
+- [x] PostgreSQL adapter (pgx/v5, UUID, JSONB, COPY)
+- [x] MS SQL Server adapter (sqlserver driver, IDENTITY_INSERT)
 
-### v1.2 (следующее)
-- [ ] CLI расширения (convert, stats, diff, merge)
-- [ ] Query optimization (автовыбор стратегии)
-- [ ] Incremental sync (delta exports)
+### ~~v1.2~~ ✅ Завершено
+**CLI & Message Brokers:**
+- [x] CLI утилита (tdtpcli)
+- [x] YAML конфигурационные файлы
+- [x] Export/Import команды для всех адаптеров
+- [x] TDTQL фильтры в CLI (--where, --order-by, --limit, --offset)
+- [x] RabbitMQ broker integration
+- [x] MSMQ broker integration (Windows)
+- [x] Export/Import to message brokers
+- [x] Manual ACK для надежной доставки
+- [x] Увеличен max packet size до 3.8MB
+
+### v1.3 (текущее)
+- [ ] Документация пользователя (USER_GUIDE.md)
+- [ ] Описание модулей (MODULES.md)
+- [ ] Актуализация SPECIFICATION.md
+- [ ] PostgreSQL adapter documentation
+- [ ] MS SQL adapter documentation
 
 ### v1.5 (планируется)
-- [ ] MS SQL Server adapter
+- [ ] CLI расширения (convert, stats, diff, merge)
 - [ ] Schema migration (ALTER TABLE)
-- [ ] Incremental sync
+- [ ] Incremental sync (delta exports)
+- [ ] Query optimization (автовыбор стратегии)
 
 ### v2.0 (планируется)
-- [ ] RabbitMQ broker integration
 - [ ] Kafka broker integration
 - [ ] Python bindings
 - [ ] Docker образ
-- [ ] Production документация
+- [ ] Production deployment guide
+- [ ] Monitoring & metrics
 
 ## 🤝 Вклад в проект
 
@@ -285,5 +323,5 @@ MIT
 
 ---
 
-**Статус:** v1.1 - CLI Utility Complete!
+**Статус:** v1.2 - Message Brokers Integration Complete!
 **Последнее обновление:** 16.11.2025
