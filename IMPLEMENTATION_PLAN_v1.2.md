@@ -2,6 +2,13 @@
 **Дата:** 16.11.2025
 **Цель:** MS SQL Server Adapter + MSMQ/RabbitMQ Integration
 
+## ⚠️ Важные требования
+
+**Обратная совместимость:** MS SQL Server 2012 и выше
+- Минимальная версия: SQL Server 2012 (11.x)
+- Поддержка версий: 2012, 2014, 2016, 2017, 2019, 2022
+- **См. детали:** [docs/MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md)
+
 ## 🎯 Use Case
 
 **Задача:** Экспорт данных из MS SQL Server в облачную СЭД через очереди сообщений
@@ -24,27 +31,36 @@ MS SQL Server (on-premise)
 #### Задачи:
 
 1. **Настройка драйвера MS SQL**
-   - Драйвер: `github.com/microsoft/go-mssqldb` или `github.com/denisenkom/go-mssqldb`
-   - Connection string поддержка
+   - Драйвер: `github.com/denisenkom/go-mssqldb` (стабильный, зрелый)
+   - Connection string поддержка (SQL Auth + Windows Auth)
    - Connection pool настройка
-   - Windows Authentication support (опционально)
+   - **SQL Server 2012+ compatibility mode**
+   - Определение версии сервера для feature detection
 
-2. **Маппинг типов MS SQL ↔ TDTP**
+2. **Маппинг типов MS SQL ↔ TDTP (SQL Server 2012+ compatible)**
    ```go
    MS SQL Type           TDTP Type        Особенности
    ─────────────────────────────────────────────────────
    INT, BIGINT          INTEGER
    DECIMAL, NUMERIC     DECIMAL          precision, scale
-   VARCHAR, NVARCHAR    TEXT             length, Unicode
+   VARCHAR, NVARCHAR    TEXT             length, Unicode (используем NVARCHAR)
    CHAR, NCHAR          TEXT             fixed length
    BIT                  BOOLEAN
-   DATE                 DATE
-   DATETIME, DATETIME2  TIMESTAMP
+   DATE                 DATE             (SQL Server 2008+)
+   DATETIME, DATETIME2  TIMESTAMP        DATETIME2 preferred (точность 100ns)
    UNIQUEIDENTIFIER     TEXT(36)         UUID as string
    VARBINARY, IMAGE     BLOB             Binary data
    XML                  TEXT             XML as string
    MONEY                DECIMAL(19,4)    Fixed precision
+   TEXT, NTEXT          TEXT             (deprecated, но работает)
+
+   ❌ JSON               -                SQL Server 2016+ only (не поддерживается в 2012)
    ```
+
+   **Важно:**
+   - Используем NVARCHAR вместо VARCHAR для Unicode
+   - DATETIME2 вместо DATETIME (лучшая точность)
+   - JSON не поддерживается в SQL Server 2012 - хранится как NVARCHAR(MAX)
 
 3. **Adapter Implementation**
    ```
@@ -57,12 +73,20 @@ MS SQL Server (on-premise)
    └── doc.go
    ```
 
-4. **Специфичные возможности MS SQL**
+4. **Специфичные возможности MS SQL (SQL Server 2012+ compatible)**
    - Schema support (dbo, custom schemas)
    - Catalog/Database support
-   - Bulk INSERT для производительности
-   - MERGE для UPSERT (стратегия REPLACE)
+   - **Bulk INSERT / Table-Valued Parameters** для производительности
+   - **MERGE statement** для UPSERT (SQL Server 2008+) ✅
+   - **OFFSET/FETCH** для пагинации (SQL Server 2012+) ✅
    - Transaction isolation levels
+   - **Feature detection** - определение версии сервера для условного использования функций
+
+   **Ограничения SQL Server 2012:**
+   - ❌ JSON функции (появились в 2016)
+   - ❌ STRING_SPLIT (появилась в 2016)
+   - ❌ STRING_AGG (появилась в 2017)
+   - ✅ MERGE, OFFSET/FETCH, IIF, TRY_CONVERT работают
 
 5. **Export функциональность**
    ```go
@@ -648,6 +672,29 @@ go test ./pkg/brokers/rabbitmq/...
 
 ---
 
+## 📚 Важная документация
+
+**Обязательно к прочтению перед реализацией:**
+1. **[MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md)** - Требования совместимости с SQL Server 2012+
+   - Поддерживаемые типы данных
+   - Ограничения SQL Server 2012
+   - Рекомендации по type mapping
+   - Feature detection strategy
+   - Workarounds для устаревших функций
+
+**Ключевые моменты:**
+- ✅ OFFSET/FETCH работает в SQL Server 2012+
+- ✅ MERGE работает для UPSERT
+- ❌ JSON функции НЕ работают (SQL Server 2016+)
+- ❌ STRING_SPLIT НЕ работает (SQL Server 2016+)
+- Используем NVARCHAR для Unicode
+- Используем DATETIME2 для лучшей точности
+- Feature detection для условного использования функций
+
+---
+
 **Готов начать реализацию?** 🚀
 
 Предлагаю начать с MS SQL Server Adapter, так как это foundation для всей вашей интеграции.
+
+**Первый шаг:** Изучить [MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md) для понимания всех ограничений и рекомендаций.
