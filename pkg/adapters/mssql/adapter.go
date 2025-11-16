@@ -10,7 +10,6 @@ import (
 	_ "github.com/denisenkom/go-mssqldb" // MS SQL Server driver
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
 )
 
 // Adapter implements the adapters.Adapter interface for Microsoft SQL Server.

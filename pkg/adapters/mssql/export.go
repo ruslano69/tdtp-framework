@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
 )
 
 // ========== Schema Operations ==========

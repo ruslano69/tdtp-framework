@@ -36,7 +36,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 		}
 
 		// Проверяем существование таблицы
-		tableName := pkt.Schema.Table
+		tableName := pkt.Header.TableName
 		exists, err := a.TableExists(ctx, tableName)
 		if err != nil {
 			return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
@@ -44,7 +44,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 		// Создаем таблицу если нужно
 		if !exists {
-			if err := a.createTableInTx(ctx, tx, pkt.Schema); err != nil {
+			if err := a.createTableInTx(ctx, tx, tableName, pkt.Schema); err != nil {
 				return fmt.Errorf("failed to create table %s: %w", tableName, err)
 			}
 		}
@@ -66,8 +66,8 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 // ========== Table Creation ==========
 
 // createTableInTx создает таблицу в рамках транзакции
-func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, schema packet.Schema) error {
-	sqlCreate := a.buildCreateTableSQL(schema)
+func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, tableName string, schema packet.Schema) error {
+	sqlCreate := a.buildCreateTableSQL(tableName, schema)
 
 	_, err := tx.ExecContext(ctx, sqlCreate)
 	if err != nil {
@@ -78,9 +78,9 @@ func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, schema packet
 }
 
 // buildCreateTableSQL строит CREATE TABLE запрос
-func (a *Adapter) buildCreateTableSQL(schema packet.Schema) string {
-	schemaName, tableName := a.parseTableName(schema.Table)
-	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
+func (a *Adapter) buildCreateTableSQL(tableName string, schema packet.Schema) string {
+	schemaName, table := a.parseTableName(tableName)
+	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
 	var columns []string
 	var pkColumns []string
@@ -101,7 +101,7 @@ func (a *Adapter) buildCreateTableSQL(schema packet.Schema) string {
 	// Primary key constraint
 	if len(pkColumns) > 0 {
 		pkConstraint := fmt.Sprintf("CONSTRAINT [PK_%s] PRIMARY KEY (%s)",
-			tableName,
+			table,
 			strings.Join(pkColumns, ", "))
 		columns = append(columns, pkConstraint)
 	}

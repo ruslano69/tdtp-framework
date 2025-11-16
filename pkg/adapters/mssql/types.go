@@ -121,7 +121,7 @@ func MSSQLToTDTP(sqlType string, nullable bool) (packet.Field, error) {
 		field.Type = string(schema.TypeDate)
 
 	case "TIME":
-		field.Type = string(schema.TypeTime)
+		field.Type = string(schema.TypeText)
 		field.Subtype = "time"
 
 	case "DATETIME2":
@@ -231,6 +231,8 @@ func TDTPToMSSQL(field packet.Field) string {
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:
 		// Check for special text types
 		switch subtype {
+		case "time":
+			return "TIME"
 		case "uniqueidentifier":
 			return "UNIQUEIDENTIFIER"
 		case "xml":
@@ -272,9 +274,6 @@ func TDTPToMSSQL(field packet.Field) string {
 
 	case schema.TypeDate:
 		return "DATE"
-
-	case schema.TypeTime:
-		return "TIME"
 
 	case schema.TypeDatetime, schema.TypeTimestamp:
 		// Prefer DATETIME2 for new tables (SQL Server 2008+)
