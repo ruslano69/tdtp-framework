@@ -13,6 +13,7 @@ import (
 	_ "github.com/queuebridge/tdtp/pkg/adapters/mssql"
 	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
 	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
+	"github.com/queuebridge/tdtp/pkg/brokers"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 )
 
@@ -23,6 +24,8 @@ func main() {
 	listTables := flag.Bool("list", false, "List all tables")
 	exportTable := flag.String("export", "", "Export table to TDTP format (required)")
 	importFile := flag.String("import", "", "Import TDTP file (table name from file)")
+	exportBroker := flag.String("export-broker", "", "Export table to message broker queue")
+	importBroker := flag.Bool("import-broker", false, "Import from message broker queue")
 	output := flag.String("output", "", "Output file (default: stdout)")
 	configPath := flag.String("config", "", "Path to config file (default: config.yaml in exe dir)")
 
@@ -151,6 +154,10 @@ func main() {
 		handleExportTable(ctx, adapter, *exportTable, *output, *where, *orderBy, *limit, *offset)
 	} else if *importFile != "" {
 		handleImportFile(ctx, adapter, *importFile)
+	} else if *exportBroker != "" {
+		handleExportBroker(ctx, adapter, config, *exportBroker, *where, *orderBy, *limit, *offset)
+	} else if *importBroker {
+		handleImportBroker(ctx, adapter, config)
 	} else {
 		printHelp()
 	}
@@ -349,6 +356,205 @@ func exportAsTDTP(packets []*packet.DataPacket, writer *os.File) {
 	}
 }
 
+func handleExportBroker(ctx context.Context, adapter adapters.Adapter, config *Config, tableName string, where string, orderBy string, limit int, offset int) {
+	// Проверяем конфигурацию брокера
+	if config.Broker.Type == "" {
+		fmt.Fprintf(os.Stderr, "❌ Broker configuration is missing in config file\n")
+		fmt.Println("💡 Add broker section to config.yaml:")
+		fmt.Println("   broker:")
+		fmt.Println("     type: rabbitmq")
+		fmt.Println("     host: localhost")
+		fmt.Println("     port: 5672")
+		fmt.Println("     user: guest")
+		fmt.Println("     password: guest")
+		fmt.Println("     queue: tdtp_export")
+		fmt.Println("     durable: true")
+		fmt.Println("     auto_delete: false")
+		fmt.Println("     exclusive: false")
+		os.Exit(1)
+	}
+
+	// Проверяем существование таблицы
+	exists, err := adapter.TableExists(ctx, tableName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error checking table: %v\n", err)
+		os.Exit(1)
+	}
+	if !exists {
+		fmt.Fprintf(os.Stderr, "❌ Table '%s' does not exist\n", tableName)
+		os.Exit(1)
+	}
+
+	// Создаём TDTQL query если есть фильтры
+	var query *packet.Query
+	if where != "" || orderBy != "" || limit > 0 || offset > 0 {
+		query = buildTDTQLQuery(where, orderBy, limit, offset)
+		fmt.Printf("📤 Exporting table: %s (with filters) to %s queue\n", tableName, config.Broker.Type)
+	} else {
+		fmt.Printf("📤 Exporting table: %s to %s queue\n", tableName, config.Broker.Type)
+	}
+
+	// Экспортируем таблицу
+	var packets []*packet.DataPacket
+	if query != nil {
+		packets, err = adapter.ExportTableWithQuery(ctx, tableName, query, "", "")
+	} else {
+		packets, err = adapter.ExportTable(ctx, tableName)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Export failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(packets) == 0 {
+		fmt.Println("⚠️  No data found")
+		return
+	}
+
+	totalRows := 0
+	for _, pkt := range packets {
+		totalRows += len(pkt.Data.Rows)
+	}
+
+	// Создаём брокер
+	brokerCfg := brokers.Config{
+		Type:       config.Broker.Type,
+		Host:       config.Broker.Host,
+		Port:       config.Broker.Port,
+		User:       config.Broker.User,
+		Password:   config.Broker.Password,
+		Queue:      config.Broker.Queue,
+		VHost:      config.Broker.VHost,
+		Durable:    config.Broker.Durable,
+		AutoDelete: config.Broker.AutoDelete,
+		Exclusive:  config.Broker.Exclusive,
+		QueuePath:  config.Broker.QueuePath,
+	}
+
+	broker, err := brokers.New(brokerCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to create broker: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("🔌 Connecting to %s at %s:%d...\n", config.Broker.Type, config.Broker.Host, config.Broker.Port)
+	if err := broker.Connect(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to connect to broker: %v\n", err)
+		os.Exit(1)
+	}
+	defer broker.Close()
+
+	fmt.Printf("✅ Connected to %s (queue: %s)\n", config.Broker.Type, config.Broker.Queue)
+
+	// Отправляем каждый пакет в очередь
+	for i, pkt := range packets {
+		xmlData, err := xml.MarshalIndent(pkt, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ XML encoding failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Добавляем XML declaration
+		message := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+		message = append(message, xmlData...)
+
+		if err := broker.Send(ctx, message); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to send packet %d/%d: %v\n", i+1, len(packets), err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("📨 Sent packet %d/%d (%d rows)\n", i+1, len(packets), len(pkt.Data.Rows))
+	}
+
+	fmt.Printf("✅ Successfully exported %d rows in %d packet(s) to queue '%s'\n", totalRows, len(packets), config.Broker.Queue)
+}
+
+func handleImportBroker(ctx context.Context, adapter adapters.Adapter, config *Config) {
+	// Проверяем конфигурацию брокера
+	if config.Broker.Type == "" {
+		fmt.Fprintf(os.Stderr, "❌ Broker configuration is missing in config file\n")
+		fmt.Println("💡 Add broker section to config.yaml")
+		os.Exit(1)
+	}
+
+	// Создаём брокер
+	brokerCfg := brokers.Config{
+		Type:       config.Broker.Type,
+		Host:       config.Broker.Host,
+		Port:       config.Broker.Port,
+		User:       config.Broker.User,
+		Password:   config.Broker.Password,
+		Queue:      config.Broker.Queue,
+		VHost:      config.Broker.VHost,
+		Durable:    config.Broker.Durable,
+		AutoDelete: config.Broker.AutoDelete,
+		Exclusive:  config.Broker.Exclusive,
+		QueuePath:  config.Broker.QueuePath,
+	}
+
+	broker, err := brokers.New(brokerCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to create broker: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("🔌 Connecting to %s at %s:%d...\n", config.Broker.Type, config.Broker.Host, config.Broker.Port)
+	if err := broker.Connect(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to connect to broker: %v\n", err)
+		os.Exit(1)
+	}
+	defer broker.Close()
+
+	fmt.Printf("✅ Connected to %s (queue: %s)\n", config.Broker.Type, config.Broker.Queue)
+	fmt.Printf("📥 Waiting for messages from queue '%s'...\n", config.Broker.Queue)
+	fmt.Println("💡 Press Ctrl+C to stop")
+
+	// Получаем сообщения из очереди
+	packetCount := 0
+	totalRows := 0
+
+	for {
+		// Получаем сообщение (блокирующий вызов)
+		message, err := broker.Receive(ctx)
+		if err != nil {
+			if err == context.Canceled {
+				break
+			}
+			fmt.Fprintf(os.Stderr, "\n❌ Failed to receive message: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Парсим TDTP пакет
+		parser := packet.NewParser()
+		pkt, err := parser.ParseBytes(message)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Failed to parse TDTP packet: %v (skipping)\n", err)
+			continue
+		}
+
+		tableName := pkt.Header.TableName
+		rowCount := len(pkt.Data.Rows)
+
+		fmt.Printf("\n📦 Received packet for table '%s' (%d rows)\n", tableName, rowCount)
+
+		// Импортируем пакет
+		if err := adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Import failed: %v (skipping)\n", err)
+			continue
+		}
+
+		packetCount++
+		totalRows += rowCount
+		fmt.Printf("✅ Imported %d rows into table '%s' (total: %d packets, %d rows)\n", rowCount, tableName, packetCount, totalRows)
+	}
+
+	if packetCount == 0 {
+		fmt.Println("\n⚠️  No messages received")
+	} else {
+		fmt.Printf("\n✅ Import complete: %d packets, %d total rows\n", packetCount, totalRows)
+	}
+}
+
 func printHelp() {
 	fmt.Println("tdtpcli - TDTP Universal Database CLI v" + version)
 	fmt.Println()
@@ -363,6 +569,8 @@ func printHelp() {
 	fmt.Println("  --list                    List all tables in database")
 	fmt.Println("  --export <table>          Export table to TDTP format")
 	fmt.Println("  --import <file>           Import TDTP file")
+	fmt.Println("  --export-broker <table>   Export table to message broker queue")
+	fmt.Println("  --import-broker           Import from message broker queue")
 	fmt.Println("  --version                 Show version")
 	fmt.Println("  --help                    Show this help")
 	fmt.Println()
@@ -376,6 +584,10 @@ func printHelp() {
 	fmt.Println("Flags:")
 	fmt.Println("  --config <path>           Path to config file (default: config.yaml)")
 	fmt.Println("  --output <file>           Output file (default: stdout)")
+	fmt.Println("  --where <clause>          TDTQL WHERE clause (e.g., \"ID > 2\")")
+	fmt.Println("  --order-by <clause>       ORDER BY clause (e.g., \"ID DESC\")")
+	fmt.Println("  --limit <N>               Limit number of rows")
+	fmt.Println("  --offset <N>              Offset rows")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println()
@@ -396,8 +608,18 @@ func printHelp() {
 	fmt.Println("  tdtpcli --export Users --output users")
 	fmt.Println("  # Creates: users.tdtp.xml")
 	fmt.Println()
-	fmt.Println("  # Export with explicit extension")
-	fmt.Println("  tdtpcli --export Orders --output orders.tdtp.xml")
+	fmt.Println("  # Export with filters")
+	fmt.Println("  tdtpcli --export Users --where \"Balance >= 1000\" --limit 10")
+	fmt.Println()
+	fmt.Println("  # Export to message broker (RabbitMQ)")
+	fmt.Println("  tdtpcli --export-broker Users")
+	fmt.Println()
+	fmt.Println("  # Export to broker with filters")
+	fmt.Println("  tdtpcli --export-broker Users --where \"ID > 100\" --limit 50")
+	fmt.Println()
+	fmt.Println("  # Import from message broker")
+	fmt.Println("  tdtpcli --import-broker")
+	fmt.Println("  # (Press Ctrl+C to stop)")
 	fmt.Println()
 	fmt.Println("  # Import from file")
 	fmt.Println("  tdtpcli --import users.tdtp.xml")

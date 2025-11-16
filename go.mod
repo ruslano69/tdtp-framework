@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/jackc/pgx/v5 v5.7.6
+	github.com/rabbitmq/amqp091-go v1.10.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.0
 )
