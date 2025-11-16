@@ -1,0 +1,37 @@
+# TDTP PostgreSQL Configuration
+# This config connects to PostgreSQL database for TDTP operations
+
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  user: tdtp_test
+  password: tdtp_test_password
+  database: tdtp_test_db
+  schema: public  # Default PostgreSQL schema
+
+  # Connection options (optional)
+  # sslmode: disable  # Options: disable, require, verify-ca, verify-full
+  # connect_timeout: 10
+  # application_name: tdtp-cli
+
+# Message Broker Configuration (optional - for --export-broker / --import-broker)
+broker:
+  type: rabbitmq
+  host: localhost
+  port: 5672
+  user: tdtp_test
+  password: tdtp_test_password
+  queue: tdtp_postgres_queue
+  vhost: /  # Default RabbitMQ vhost
+
+  # Queue parameters (IMPORTANT: must match existing queue!)
+  durable: true      # Queue survives RabbitMQ restart
+  auto_delete: false # Queue persists when no consumers
+  exclusive: false   # Queue can be accessed by multiple connections
+
+# Tables to export (optional - used with batch export)
+# tables:
+#   - users
+#   - orders
+#   - products
