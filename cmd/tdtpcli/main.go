@@ -514,11 +514,15 @@ func handleImportBroker(ctx context.Context, adapter adapters.Adapter, config *C
 	totalRows := 0
 
 	for {
-		// Получаем сообщение (блокирующий вызов)
+		// Получаем сообщение (НЕ удаляется из очереди автоматически!)
 		message, err := broker.Receive(ctx)
 		if err != nil {
 			if err == context.Canceled {
 				break
+			}
+			// Если нет сообщений - просто ждем еще
+			if strings.Contains(err.Error(), "no messages available") {
+				continue
 			}
 			fmt.Fprintf(os.Stderr, "\n❌ Failed to receive message: %v\n", err)
 			os.Exit(1)
@@ -529,18 +533,46 @@ func handleImportBroker(ctx context.Context, adapter adapters.Adapter, config *C
 		pkt, err := parser.ParseBytes(message)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "⚠️  Failed to parse TDTP packet: %v (skipping)\n", err)
+			// ВАЖНО: Не подтверждаем сообщение при ошибке парсинга - оно останется в очереди
 			continue
 		}
 
 		tableName := pkt.Header.TableName
 		rowCount := len(pkt.Data.Rows)
+		packetType := pkt.Header.Type
 
-		fmt.Printf("\n📦 Received packet for table '%s' (%d rows)\n", tableName, rowCount)
+		fmt.Printf("\n📦 Received %s packet for table '%s' (%d rows)\n", packetType, tableName, rowCount)
+
+		// Выбираем стратегию импорта по типу пакета
+		var strategy adapters.ImportStrategy
+		if packetType == "reference" {
+			strategy = adapters.StrategyReplace // Полная синхронизация (через временную таблицу)
+			fmt.Printf("   Strategy: REPLACE (full sync via temp table)\n")
+		} else if packetType == "response" {
+			strategy = adapters.StrategyMerge // Инкрементальное обновление (UPSERT)
+			fmt.Printf("   Strategy: MERGE (incremental update)\n")
+		} else {
+			strategy = adapters.StrategyReplace // По умолчанию
+			fmt.Printf("   Strategy: REPLACE (default)\n")
+		}
 
 		// Импортируем пакет
-		if err := adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace); err != nil {
-			fmt.Fprintf(os.Stderr, "⚠️  Import failed: %v (skipping)\n", err)
+		if err := adapter.ImportPacket(ctx, pkt, strategy); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Import failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "⚠️  Message will remain in queue for retry\n")
+			// НЕ подтверждаем сообщение - оно останется в очереди для повторной попытки
 			continue
+		}
+
+		// Импорт успешен - подтверждаем и удаляем сообщение из очереди
+		// Только для RabbitMQ (у MSMQ может не быть этого метода)
+		if rbMQ, ok := broker.(*brokers.RabbitMQ); ok {
+			if err := rbMQ.AckLast(); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Failed to acknowledge message: %v\n", err)
+				// Продолжаем работу, сообщение будет redelivered позже
+			} else {
+				fmt.Printf("   ✓ Message acknowledged and removed from queue\n")
+			}
 		}
 
 		packetCount++
