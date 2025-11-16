@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
@@ -160,13 +161,20 @@ func isAdapterSupported(dbType string) bool {
 }
 
 func handleCreateConfig(dbType string) {
-	path := GetDefaultConfigPath()
-	
+	// Создаём файл с именем типа БД: config.mssql.yaml, config.postgres.yaml и т.д.
+	exePath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Failed to get executable path: %v\n", err)
+		os.Exit(1)
+	}
+	exeDir := filepath.Dir(exePath)
+	path := filepath.Join(exeDir, fmt.Sprintf("config.%s.yaml", dbType))
+
 	if err := CreateConfigTemplate(path, dbType); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Failed to create config: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	dbNames := map[string]string{
 		"postgres": "PostgreSQL",
 		"sqlite":   "SQLite",
@@ -174,18 +182,19 @@ func handleCreateConfig(dbType string) {
 		"mysql":    "MySQL",
 		"miranda":  "Miranda SQL",
 	}
-	
+
 	fmt.Printf("✅ Created %s configuration template: %s\n\n", dbNames[dbType], path)
 
 	if dbType != "postgres" && dbType != "sqlite" && dbType != "mssql" {
 		fmt.Printf("⚠️  WARNING: %s adapter is under development\n", dbNames[dbType])
 		fmt.Printf("💡 Currently supported: PostgreSQL, SQLite, MS SQL Server\n\n")
 	}
-	
+
 	fmt.Println("📝 Next steps:")
 	fmt.Println("   1. Edit the file with your database settings")
-	fmt.Println("   2. Rename it to 'config.yaml'")
-	fmt.Println("   3. Run tdtpcli commands")
+	fmt.Printf("   2. Use it: tdtpcli -config %s -export TableName\n", filepath.Base(path))
+	fmt.Println()
+	fmt.Println("💡 Or rename to 'config.yaml' to use as default")
 	fmt.Println()
 }
 
