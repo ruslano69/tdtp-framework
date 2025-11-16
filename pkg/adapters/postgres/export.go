@@ -150,7 +150,6 @@ func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.
 
 	// Собираем данные
 	var dataRows [][]string
-	fieldDescriptions := rows.FieldDescriptions()
 
 	for rows.Next() {
 		values, err := rows.Values()
@@ -251,7 +250,6 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 	defer rows.Close()
 
 	var dataRows [][]string
-	fieldDescriptions := rows.FieldDescriptions()
 
 	for rows.Next() {
 		values, err := rows.Values()
@@ -365,7 +363,7 @@ func (a *Adapter) convertValueToTDTP(field packet.Field, value string) string {
 		Scale:     field.Scale,
 		Timezone:  field.Timezone,
 		Key:       field.Key,
-		Subtype:   field.Subtype,
+		Nullable:  !field.NotNull,
 	}
 
 	// Парсим значение
