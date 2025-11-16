@@ -363,7 +363,7 @@ func (a *Adapter) convertValueToTDTP(field packet.Field, value string) string {
 		Scale:     field.Scale,
 		Timezone:  field.Timezone,
 		Key:       field.Key,
-		Nullable:  !field.NotNull,
+		Nullable:  true, // packet.Field не содержит информацию о nullable
 	}
 
 	// Парсим значение
