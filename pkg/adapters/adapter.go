@@ -34,6 +34,21 @@ type Config struct {
 
 	// SSL - настройки SSL/TLS
 	SSL SSLConfig
+
+	// CompatibilityMode - режим совместимости для MS SQL Server
+	// Значения: "2012", "2016", "2019", "auto" (по умолчанию)
+	// Используется только для MS SQL Server adapter
+	CompatibilityMode string
+
+	// StrictCompatibility - строгий режим совместимости
+	// Если true, ошибка при попытке использовать недоступные функции
+	// Если false, предупреждение и fallback на альтернативные методы
+	StrictCompatibility bool
+
+	// WarnOnIncompatible - предупреждать о несовместимых функциях
+	// Показывает предупреждения когда используются функции недоступные
+	// в текущем compatibility mode
+	WarnOnIncompatible bool
 }
 
 // SSLConfig - настройки SSL/TLS подключения
