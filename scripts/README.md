@@ -184,5 +184,148 @@ python3 scripts/create_test_db.py
 
 ---
 
+## create_postgres_test_db.py
+
+Python скрипт для создания тестовой PostgreSQL базы данных с PostgreSQL-специфичными типами данных.
+
+### Зачем?
+
+- **PostgreSQL-специфичные типы** - UUID, JSONB, ARRAY, SERIAL, INET
+- **Реалистичные данные** - 100 пользователей, 50 продуктов, 200 заказов
+- **Message Broker тесты** - готовые данные для RabbitMQ интеграции
+- **Для integration тестов** - тестирование PostgreSQL адаптера
+
+### Требования
+
+```bash
+pip install psycopg2-binary
+```
+
+### Использование
+
+```bash
+# 1. Запустите PostgreSQL контейнер
+cd tests/integration
+docker-compose up -d postgres
+
+# 2. Создайте тестовые данные
+python3 scripts/create_postgres_test_db.py
+```
+
+### Что создается?
+
+**Таблица users (100 записей):**
+- UUID primary key
+- JSONB metadata (preferences, login info)
+- NUMERIC balance with precision
+- TIMESTAMP WITH TIME ZONE
+
+**Таблица products (50 записей):**
+- BIGSERIAL primary key
+- JSONB dimensions
+- TEXT[] categories (массив)
+- REAL weight
+
+**Таблица orders (200 записей):**
+- SERIAL primary key
+- UUID foreign key → users
+- TEXT[] tags (массив)
+- JSONB items (структурированные данные)
+
+**Таблица activity_logs (~600 записей):**
+- BIGSERIAL primary key
+- INET ip_address
+- JSONB details
+
+### Тестирование с TDTP CLI
+
+```bash
+# 1. Создайте конфиг
+tdtpcli --create-config-pg
+
+# 2. Список таблиц
+tdtpcli -config config.postgres.yaml --list
+
+# 3. Экспорт в файл
+tdtpcli -config config.postgres.yaml --export users --output users.tdtp.xml
+
+# 4. Экспорт в RabbitMQ
+tdtpcli -config config.postgres.yaml --export-broker users
+
+# 5. Импорт из RabbitMQ
+tdtpcli -config config.postgres.yaml --import-broker
+
+# 6. Фильтрация с TDTQL
+tdtpcli -config config.postgres.yaml --export users \
+  --where "balance >= 5000" \
+  --order-by "balance DESC" \
+  --limit 10
+```
+
+### Примеры PostgreSQL-специфичных возможностей
+
+**UUID операции:**
+```sql
+SELECT id, username FROM users WHERE id = 'e5f1c2a3-...'::uuid;
+```
+
+**JSONB запросы:**
+```sql
+SELECT username, metadata->>'preferences' FROM users
+WHERE metadata @> '{"preferences": {"theme": "dark"}}';
+```
+
+**ARRAY операции:**
+```sql
+SELECT order_number FROM orders WHERE 'urgent' = ANY(tags);
+```
+
+**NUMERIC с precision:**
+```sql
+SELECT username, balance FROM users WHERE balance > 5000.00;
+```
+
+### Пример вывода
+
+```
+===========================================================
+🐘 PostgreSQL Test Database Creator for TDTP Framework
+===========================================================
+
+🔌 Connecting to PostgreSQL...
+✅ Connected successfully
+   Host: localhost
+   Port: 5432
+   Database: tdtp_test_db
+   User: tdtp_test
+
+📋 Creating table: users...
+📋 Creating table: orders...
+📋 Creating table: products...
+📋 Creating table: activity_logs...
+✅ Tables created successfully
+
+📊 Generating test data...
+   Users: 100
+   Products: 50
+   Orders: 200
+
+👥 Inserting users...
+📦 Inserting products...
+🛒 Inserting orders...
+📝 Inserting activity logs...
+✅ Test data inserted successfully
+
+📊 Database Statistics:
+============================================================
+  users                | Rows:    100 | Size: 128 kB
+  products             | Rows:     50 | Size: 80 kB
+  orders               | Rows:    200 | Size: 144 kB
+  activity_logs        | Rows:    600 | Size: 256 kB
+============================================================
+```
+
+---
+
 *Версия: 1.0*
 *Совместимость: TDTP v0.6+*

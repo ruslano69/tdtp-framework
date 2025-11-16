@@ -21,9 +21,9 @@ import uuid
 DB_CONFIG = {
     'host': 'localhost',
     'port': 5432,
-    'user': 'tdtp_user',
-    'password': 'tdtp_dev_pass_2025',
-    'database': 'tdtp_test'
+    'user': 'tdtp_test',
+    'password': 'tdtp_test_password',
+    'database': 'tdtp_test_db'
 }
 
 def create_connection():
@@ -333,9 +333,9 @@ database:
   type: postgres
   host: localhost
   port: 5432
-  user: tdtp_user
-  password: tdtp_dev_pass_2025
-  dbname: tdtp_test
+  user: tdtp_test
+  password: tdtp_test_password
+  database: tdtp_test_db
   schema: public
   sslmode: disable
         """)
