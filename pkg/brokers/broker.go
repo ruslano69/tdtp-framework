@@ -39,6 +39,11 @@ type Config struct {
 	Queue    string // Имя очереди
 	VHost    string // Virtual host (для RabbitMQ, по умолчанию "/")
 
+	// RabbitMQ параметры очереди (ВАЖНО: должны совпадать с существующей очередью!)
+	Durable    bool // Очередь переживает перезапуск RabbitMQ
+	AutoDelete bool // Очередь удаляется когда нет consumer'ов
+	Exclusive  bool // Очередь доступна только одному соединению
+
 	// MSMQ специфичные параметры (Windows only)
 	QueuePath string // Путь к очереди MSMQ (например: ".\\private$\\tdtp_export")
 }

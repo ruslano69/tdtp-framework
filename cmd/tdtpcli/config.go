@@ -43,6 +43,12 @@ type BrokerConfig struct {
 	Queue    string `yaml:"queue"`              // Имя очереди
 	VHost    string `yaml:"vhost,omitempty"`    // Virtual host (для RabbitMQ, по умолчанию "/")
 
+	// RabbitMQ специфичные параметры очереди
+	// ВАЖНО: Параметры должны совпадать с существующей очередью!
+	Durable    bool `yaml:"durable"`     // Очередь переживает перезапуск RabbitMQ (по умолчанию true)
+	AutoDelete bool `yaml:"auto_delete"` // Очередь удаляется когда нет consumer'ов (по умолчанию false)
+	Exclusive  bool `yaml:"exclusive"`   // Очередь доступна только одному соединению (по умолчанию false)
+
 	// MSMQ специфичные параметры (Windows only)
 	QueuePath string `yaml:"queue_path,omitempty"` // Путь к очереди MSMQ (например: ".\\private$\\tdtp_export")
 }
@@ -213,6 +219,11 @@ broker:
   password: guest
   queue: tdtp_export
   vhost: /
+
+  # Параметры очереди RabbitMQ (ВАЖНО: должны совпадать с существующей очередью!)
+  durable: true      # Очередь переживает перезапуск RabbitMQ
+  auto_delete: false # Очередь НЕ удаляется когда нет consumer'ов
+  exclusive: false   # Очередь доступна нескольким соединениям
 
   # Или MSMQ (только Windows, для локальной интеграции)
   # type: msmq

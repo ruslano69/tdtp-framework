@@ -61,13 +61,14 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 	}
 
 	// Объявляем очередь (создается если не существует, идемпотентная операция)
+	// ВАЖНО: Параметры должны совпадать с существующей очередью!
 	r.queue, err = r.channel.QueueDeclare(
-		r.config.Queue, // name
-		true,           // durable - очередь сохраняется при перезапуске RabbitMQ
-		false,          // auto-delete
-		false,          // exclusive
-		false,          // no-wait
-		nil,            // arguments
+		r.config.Queue,      // name
+		r.config.Durable,    // durable - очередь сохраняется при перезапуске RabbitMQ
+		r.config.AutoDelete, // auto-delete
+		r.config.Exclusive,  // exclusive
+		false,               // no-wait
+		nil,                 // arguments
 	)
 	if err != nil {
 		r.channel.Close()
