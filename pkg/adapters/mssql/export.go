@@ -9,6 +9,7 @@ import (
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
+	"github.com/queuebridge/tdtp/pkg/core/tdtql"
 )
 
 // ========== Schema Operations ==========
@@ -230,83 +231,84 @@ func (a *Adapter) parseTableName(fullName string) (schema, table string) {
 	return "dbo", fullName
 }
 
-// buildSelectQuery строит SQL запрос для экспорта
-// Использует OFFSET/FETCH для пагинации (SQL Server 2012+)
+// buildSelectQuery строит SQL запрос для экспорта используя tdtql.SQLGenerator
+// Адаптирует стандартный SQL под SQL Server синтаксис (OFFSET/FETCH вместо LIMIT)
 func (a *Adapter) buildSelectQuery(
 	tableName string,
 	tableSchema packet.Schema,
 	query *packet.Query,
 ) (string, []interface{}, error) {
+	// Используем генератор SQL из ядра (не дублируем код!)
+	sqlGenerator := tdtql.NewSQLGenerator()
+
+	// Генерируем стандартный SQL (с LIMIT/OFFSET)
+	standardSQL, err := sqlGenerator.GenerateSQL(tableName, query)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to generate SQL: %w", err)
+	}
+
+	// Адаптируем под SQL Server синтаксис
+	sqlServerSQL := a.adaptToSQLServerSyntax(standardSQL, tableName, tableSchema, query)
+
+	return sqlServerSQL, nil, nil
+}
+
+// adaptToSQLServerSyntax адаптирует стандартный SQL под SQL Server
+// Основные изменения:
+// 1. LIMIT N → FETCH NEXT N ROWS ONLY
+// 2. OFFSET N → OFFSET N ROWS
+// 3. Добавляет ORDER BY если нужен для OFFSET/FETCH
+func (a *Adapter) adaptToSQLServerSyntax(
+	standardSQL string,
+	tableName string,
+	tableSchema packet.Schema,
+	query *packet.Query,
+) string {
 	schemaName, table := a.parseTableName(tableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
-	// Список колонок
-	var columns []string
+	// Заменяем имя таблицы на квалифицированное с квадратными скобками
+	sql := strings.Replace(standardSQL, tableName, fullTableName, 1)
+
+	// Квалифицируем имена полей квадратными скобками
 	for _, field := range tableSchema.Fields {
-		columns = append(columns, fmt.Sprintf("[%s]", field.Name))
+		// Заменяем field на [field] в WHERE и ORDER BY
+		sql = strings.ReplaceAll(sql, " "+field.Name+" ", " ["+field.Name+"] ")
+		sql = strings.ReplaceAll(sql, "("+field.Name+")", "(["+field.Name+"])")
+		sql = strings.ReplaceAll(sql, ","+field.Name+" ", ",["+field.Name+"] ")
 	}
 
-	sqlQuery := fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), fullTableName)
+	// Заменяем LIMIT/OFFSET на SQL Server синтаксис
+	if query != nil && (query.Limit > 0 || query.Offset > 0) {
+		// Убираем LIMIT N и OFFSET N из стандартного SQL
+		limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
+		offsetPattern := fmt.Sprintf(" OFFSET %d", query.Offset)
+		sql = strings.Replace(sql, limitPattern, "", 1)
+		sql = strings.Replace(sql, offsetPattern, "", 1)
 
-	var args []interface{}
-	paramIndex := 1
-
-	// WHERE clause из TDTQL
-	if query != nil && query.Where != "" {
-		whereClause, whereArgs, err := a.convertTDTQLToSQL(query.Where, &paramIndex)
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to convert TDTQL WHERE: %w", err)
+		// SQL Server требует ORDER BY для OFFSET/FETCH
+		// Проверяем есть ли ORDER BY в запросе
+		hasOrderBy := strings.Contains(sql, "ORDER BY")
+		if !hasOrderBy && len(tableSchema.Fields) > 0 {
+			// Добавляем ORDER BY по первому полю (обязательно для OFFSET/FETCH)
+			sql += fmt.Sprintf(" ORDER BY [%s]", tableSchema.Fields[0].Name)
 		}
-		sqlQuery += " WHERE " + whereClause
-		args = append(args, whereArgs...)
-	}
 
-	// ORDER BY (обязательно для OFFSET/FETCH в SQL Server 2012+)
-	if query != nil && query.OrderBy != "" {
-		sqlQuery += " ORDER BY " + a.sanitizeOrderBy(query.OrderBy)
-	} else {
-		// Default: order by first column (required for OFFSET/FETCH)
-		if len(tableSchema.Fields) > 0 {
-			sqlQuery += fmt.Sprintf(" ORDER BY [%s]", tableSchema.Fields[0].Name)
-		}
-	}
-
-	// LIMIT/OFFSET → OFFSET/FETCH (SQL Server 2012+)
-	if query != nil {
+		// Добавляем OFFSET ... ROWS
 		if query.Offset > 0 {
-			sqlQuery += fmt.Sprintf(" OFFSET %d ROWS", query.Offset)
+			sql += fmt.Sprintf(" OFFSET %d ROWS", query.Offset)
 		} else {
-			sqlQuery += " OFFSET 0 ROWS"
+			// OFFSET 0 ROWS обязателен если есть FETCH
+			sql += " OFFSET 0 ROWS"
 		}
 
+		// Добавляем FETCH NEXT ... ROWS ONLY
 		if query.Limit > 0 {
-			sqlQuery += fmt.Sprintf(" FETCH NEXT %d ROWS ONLY", query.Limit)
+			sql += fmt.Sprintf(" FETCH NEXT %d ROWS ONLY", query.Limit)
 		}
 	}
 
-	return sqlQuery, args, nil
-}
-
-// convertTDTQLToSQL конвертирует TDTQL WHERE условие в SQL
-// Базовая реализация для простых фильтров
-func (a *Adapter) convertTDTQLToSQL(tdtql string, paramIndex *int) (string, []interface{}, error) {
-	// TODO: Полноценный парсер TDTQL
-	// Сейчас простая реализация для базовых случаев
-
-	// Для начала возвращаем как есть, но с параметризацией позже
-	// В будущем нужно будет парсить TDTQL AST
-	return tdtql, nil, nil
-}
-
-// sanitizeOrderBy проверяет и очищает ORDER BY выражение
-func (a *Adapter) sanitizeOrderBy(orderBy string) string {
-	// Базовая проверка на SQL injection
-	// В продакшене нужна более строгая валидация
-	orderBy = strings.TrimSpace(orderBy)
-
-	// Разрешаем только идентификаторы, запятые, ASC/DESC
-	// TODO: Более строгая валидация
-	return orderBy
+	return sql
 }
 
 // rowsToPackets конвертирует sql.Rows в TDTP пакеты
