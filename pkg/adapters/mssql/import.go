@@ -475,8 +475,8 @@ func (a *Adapter) tableHasIdentityColumn(ctx context.Context, tableName string) 
 		FROM sys.columns c
 		INNER JOIN sys.tables t ON c.object_id = t.object_id
 		INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-		WHERE s.name = @p1
-		  AND t.name = @p2
+		WHERE s.name = ?
+		  AND t.name = ?
 		  AND c.is_identity = 1
 	`
 
