@@ -410,27 +410,32 @@ func (a *Adapter) createPacket(
 	packetNumber int,
 	sender, recipient string,
 ) *packet.DataPacket {
-	pkt := &packet.DataPacket{
-		Header: packet.Header{
-			Version:   packet.ProtocolVersion,
-			Type:      string(schema.TypeData),
-			Timestamp: time.Now().Format(time.RFC3339),
-			Sender:    sender,
-			Recipient: recipient,
-		},
-		Schema: tableSchema,
-		Data:   rows,
+	// Используем packet generator для правильного форматирования данных
+	generator := packet.NewGenerator()
+
+	// Создаем reference пакет (используем GenerateReference для правильного формата)
+	packets, err := generator.GenerateReference(tableSchema.Table, tableSchema, rows)
+	if err != nil || len(packets) == 0 {
+		// Fallback: создаем пустой пакет
+		return &packet.DataPacket{
+			Protocol: "TDTP",
+			Version:  "1.0",
+			Header: packet.Header{
+				Type:      packet.TypeReference,
+				TableName: tableSchema.Table,
+				Timestamp: time.Now().UTC(),
+				Sender:    sender,
+				Recipient: recipient,
+			},
+			Schema: tableSchema,
+			Data:   packet.Data{Rows: []packet.Row{}},
+		}
 	}
 
-	// Добавляем metadata
-	pkt.Header.Metadata = map[string]string{
-		"database_type":   a.GetDatabaseType(),
-		"packet_number":   fmt.Sprintf("%d", packetNumber),
-		"rows_count":      fmt.Sprintf("%d", len(rows)),
-		"table":           tableSchema.Table,
-		"compat_level":    fmt.Sprintf("%d", a.effectiveCompat),
-		"server_version":  fmt.Sprintf("%d", a.serverVersion),
-	}
+	// Берем первый пакет и обновляем metadata
+	pkt := packets[0]
+	pkt.Header.Sender = sender
+	pkt.Header.Recipient = recipient
 
 	return pkt
 }
