@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -341,8 +342,29 @@ func (a *Adapter) pgValueToRawString(val interface{}) string {
 	case time.Time:
 		// Timestamp в ISO формате
 		return v.Format("2006-01-02 15:04:05")
+	case pgtype.Numeric:
+		// PostgreSQL NUMERIC/DECIMAL - конвертируем через Float64
+		if !v.Valid {
+			return ""
+		}
+		if v.NaN {
+			return "NaN"
+		}
+		if v.InfinityModifier != 0 {
+			if v.InfinityModifier > 0 {
+				return "Infinity"
+			}
+			return "-Infinity"
+		}
+		// Конвертируем в float64 для получения числового значения
+		f64, err := v.Float64Value()
+		if err == nil && f64.Valid {
+			return fmt.Sprintf("%v", f64.Float64)
+		}
+		// Fallback - используем строковое представление Int и Exp
+		return v.Int.String()
 	default:
-		// Попытка конвертировать в строку через Stringer interface (для pgx numeric types)
+		// Попытка конвертировать в строку через Stringer interface
 		if s, ok := val.(fmt.Stringer); ok {
 			return s.String()
 		}
