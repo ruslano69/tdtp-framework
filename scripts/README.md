@@ -255,12 +255,73 @@ tdtpcli -config config.postgres.yaml --export-broker users
 # 5. Импорт из RabbitMQ
 tdtpcli -config config.postgres.yaml --import-broker
 
-# 6. Фильтрация с TDTQL
+# 6. Фильтрация с TDTQL (SQL-level optimization)
 tdtpcli -config config.postgres.yaml --export users \
   --where "balance >= 5000" \
   --order-by "balance DESC" \
   --limit 10
+
+# 7. Фильтрация в RabbitMQ export
+tdtpcli -config config.postgres.yaml --export-broker users \
+  --where "is_active = 1" \
+  --limit 50
 ```
+
+### TDTQL Фильтры (с оптимизацией SQL)
+
+PostgreSQL адаптер автоматически транслирует TDTQL фильтры в SQL для максимальной производительности:
+
+**Простые условия:**
+```bash
+# Числовые сравнения
+tdtpcli -config config.postgres.yaml --export users --where "age > 25"
+tdtpcli -config config.postgres.yaml --export users --where "balance >= 1000.00"
+
+# Текстовые совпадения
+tdtpcli -config config.postgres.yaml --export users --where "username = 'admin'"
+
+# Boolean поля
+tdtpcli -config config.postgres.yaml --export users --where "is_active = 1"
+```
+
+**Сортировка:**
+```bash
+# Одно поле
+tdtpcli -config config.postgres.yaml --export users --order-by "created_at DESC"
+
+# Множественная сортировка
+tdtpcli -config config.postgres.yaml --export users --order-by "balance DESC, age ASC"
+```
+
+**Пагинация:**
+```bash
+# Первые 100 записей
+tdtpcli -config config.postgres.yaml --export users --limit 100
+
+# Пропустить 100, взять следующие 50
+tdtpcli -config config.postgres.yaml --export users --limit 50 --offset 100
+```
+
+**Комбинированные запросы:**
+```bash
+# Активные пользователи с балансом > 5000, сортировка по балансу, топ 20
+tdtpcli -config config.postgres.yaml --export users \
+  --where "balance > 5000" \
+  --order-by "balance DESC" \
+  --limit 20
+
+# Экспорт в RabbitMQ с фильтрацией
+tdtpcli -config config.postgres.yaml --export-broker orders \
+  --where "total_amount >= 1000" \
+  --order-by "order_date DESC" \
+  --limit 100
+```
+
+**Как это работает:**
+1. TDTQL фильтры транслируются в SQL: `WHERE balance > 5000 ORDER BY balance DESC LIMIT 20`
+2. Фильтрация происходит на уровне PostgreSQL (быстро!)
+3. Поддержка schemas: автоматически добавляется `schema.table_name`
+4. Если трансляция невозможна - fallback на in-memory фильтрацию
 
 ### Примеры PostgreSQL-специфичных возможностей
 

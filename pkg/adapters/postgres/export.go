@@ -200,9 +200,10 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 		if err == nil {
 			// Добавляем schema если не public
 			if a.schema != "public" {
-				// Заменяем table_name на schema.table_name
+				// Заменяем table_name на schema.table_name в FROM clause
 				quotedTable := QuoteIdentifier(a.schema) + "." + QuoteIdentifier(tableName)
-				sql = strings.Replace(sql, tableName, quotedTable, 1)
+				// Безопасная замена: только в "FROM tableName " (не в именах колонок)
+				sql = strings.Replace(sql, " FROM "+tableName+" ", " FROM "+quotedTable+" ", 1)
 			}
 
 			// Выполняем SQL запрос напрямую
