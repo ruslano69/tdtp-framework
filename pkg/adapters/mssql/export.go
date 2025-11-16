@@ -44,7 +44,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		) pk ON c.TABLE_SCHEMA = pk.TABLE_SCHEMA
 			AND c.TABLE_NAME = pk.TABLE_NAME
 			AND c.COLUMN_NAME = pk.COLUMN_NAME
-		WHERE c.TABLE_SCHEMA = @p1 AND c.TABLE_NAME = @p2
+		WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
 		ORDER BY c.ORDINAL_POSITION
 	`
 
@@ -113,60 +113,11 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	}
 
 	return packet.Schema{
-		Table:  tableName,
 		Fields: fields,
 	}, nil
 }
 
-// GetTableNames возвращает список всех таблиц в БД
-func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
-	query := `
-		SELECT TABLE_SCHEMA + '.' + TABLE_NAME
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_TYPE = 'BASE TABLE'
-		ORDER BY TABLE_SCHEMA, TABLE_NAME
-	`
-
-	rows, err := a.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query table names: %w", err)
-	}
-	defer rows.Close()
-
-	var tables []string
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			return nil, fmt.Errorf("failed to scan table name: %w", err)
-		}
-		tables = append(tables, tableName)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
-	}
-
-	return tables, nil
-}
-
-// TableExists проверяет существование таблицы
-func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, error) {
-	schemaName, tableName := a.parseTableName(tableName)
-
-	query := `
-		SELECT COUNT(*)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = @p1 AND TABLE_NAME = @p2 AND TABLE_TYPE = 'BASE TABLE'
-	`
-
-	var count int
-	err := a.db.QueryRowContext(ctx, query, schemaName, tableName).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("failed to check table existence: %w", err)
-	}
-
-	return count > 0, nil
-}
+// GetTableNames and TableExists are implemented in adapter.go
 
 // ========== Export Operations ==========
 
@@ -466,6 +417,11 @@ func (a *Adapter) createQueryContextForSQL(ctx context.Context, query *packet.Qu
 	}
 }
 
+// generateMessageID генерирует уникальный ID сообщения
+func generateMessageID() string {
+	return fmt.Sprintf("mssql-%d", time.Now().UnixNano())
+}
+
 // ========== Query Statistics ==========
 
 // GetTableRowCount возвращает количество строк в таблице (примерное)
@@ -479,8 +435,8 @@ func (a *Adapter) GetTableRowCount(ctx context.Context, tableName string) (int64
 		FROM sys.tables t
 		INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 		INNER JOIN sys.partitions p ON t.object_id = p.object_id
-		WHERE s.name = @p1
-			AND t.name = @p2
+		WHERE s.name = ?
+			AND t.name = ?
 			AND p.index_id IN (0, 1)  -- Heap or Clustered index
 	`
 
@@ -509,7 +465,7 @@ func (a *Adapter) GetTableSize(ctx context.Context, tableName string) (int64, er
 		INNER JOIN sys.indexes i ON t.object_id = i.object_id
 		INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
 		INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
-		WHERE s.name = @p1 AND t.name = @p2
+		WHERE s.name = ? AND t.name = ?
 	`
 
 	var size sql.NullInt64

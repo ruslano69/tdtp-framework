@@ -3,10 +3,10 @@ package mssql
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
 )
 
 // Тестовые строки подключения
@@ -15,13 +15,13 @@ var (
 	// Dev environment (SQL Server 2019)
 	testConnStringDev = getEnvOrDefault(
 		"MSSQL_TEST_DSN_DEV",
-		"server=localhost,1433;user id=sa;password=YourStrong!Passw0rd;database=TestDB;encrypt=disable",
+		"server=localhost,1433;user id=sa;password=DevPassword123!;database=DevDB;encrypt=disable",
 	)
 
 	// Production simulation (SQL Server 2012 compatibility mode)
 	testConnStringProdSim = getEnvOrDefault(
 		"MSSQL_TEST_DSN_PROD",
-		"server=localhost,1434;user id=sa;password=YourStrong!Passw0rd;database=ProdSimDB;encrypt=disable",
+		"server=localhost,1434;user id=sa;password=ProdPassword123!;database=ProdSimDB;encrypt=disable",
 	)
 )
 
@@ -140,7 +140,7 @@ func TestIntegration_ExportImport(t *testing.T) {
 	// Проверяем данные
 	totalRows := 0
 	for _, p := range packets {
-		totalRows += len(p.Data)
+		totalRows += len(p.Data.Rows)
 	}
 
 	if totalRows != 3 {
@@ -205,9 +205,14 @@ func TestIntegration_MergeUpsert(t *testing.T) {
 	}
 
 	// Модифицируем данные в пакете (обновляем balance для id=1)
-	for i, row := range packets[0].Data {
-		if row[0] == "1" { // id = 1
-			packets[0].Data[i][4] = "9999.99" // balance = 9999.99
+	for i, row := range packets[0].Data.Rows {
+		// Разбираем значения (разделены табуляциями)
+		values := strings.Split(row.Value, "\t")
+		if len(values) > 0 && values[0] == "1" { // id = 1
+			if len(values) > 4 {
+				values[4] = "9999.99" // balance = 9999.99
+				packets[0].Data.Rows[i].Value = strings.Join(values, "\t")
+			}
 		}
 	}
 
@@ -335,10 +340,7 @@ func TestIntegration_GetTableSchema(t *testing.T) {
 		t.Fatalf("GetTableSchema failed: %v", err)
 	}
 
-	if schema.Table != tableName {
-		t.Errorf("Expected table name %s, got %s", tableName, schema.Table)
-	}
-
+	// Schema теперь содержит только Fields, tableName хранится в Header.TableName
 	if len(schema.Fields) != 6 {
 		t.Errorf("Expected 6 fields, got %d", len(schema.Fields))
 	}
@@ -564,7 +566,7 @@ func getBalance(t *testing.T, ctx context.Context, adapter adapters.Adapter, tab
 	}
 
 	var balance string
-	query := "SELECT CAST(balance AS VARCHAR) FROM " + tableName + " WHERE id = @p1"
+	query := "SELECT CAST(balance AS VARCHAR) FROM " + tableName + " WHERE id = ?"
 	err := mssqlAdapter.db.QueryRowContext(ctx, query, id).Scan(&balance)
 	if err != nil {
 		t.Fatalf("Failed to get balance: %v", err)
