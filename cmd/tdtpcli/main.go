@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/mssql"
 	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
 	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
@@ -78,7 +79,7 @@ func main() {
 			fmt.Println("💡 Create a config template:")
 			fmt.Println("   --create-config-pg  (PostgreSQL)")
 			fmt.Println("   --create-config-sl  (SQLite)")
-			fmt.Println("   --create-config-ms  (MS SQL - under development)")
+			fmt.Println("   --create-config-ms  (MS SQL)")
 			fmt.Println("   --create-config-my  (MySQL - under development)")
 			fmt.Println("   --create-config-mi  (Miranda SQL - under development)")
 			os.Exit(1)
@@ -98,7 +99,7 @@ func main() {
 	// Проверка поддержки адаптера
 	if !isAdapterSupported(config.Database.Type) {
 		fmt.Fprintf(os.Stderr, "\n⚠️  WARNING: %s adapter is under development\n", config.Database.Type)
-		fmt.Fprintf(os.Stderr, "💡 Currently supported: PostgreSQL, SQLite\n\n")
+		fmt.Fprintf(os.Stderr, "💡 Currently supported: PostgreSQL, SQLite, MS SQL Server\n\n")
 		os.Exit(1)
 	}
 
@@ -149,7 +150,7 @@ func main() {
 }
 
 func isAdapterSupported(dbType string) bool {
-	supported := []string{"postgres", "sqlite"}
+	supported := []string{"postgres", "sqlite", "mssql"}
 	for _, t := range supported {
 		if t == dbType {
 			return true
@@ -175,10 +176,10 @@ func handleCreateConfig(dbType string) {
 	}
 	
 	fmt.Printf("✅ Created %s configuration template: %s\n\n", dbNames[dbType], path)
-	
-	if dbType != "postgres" && dbType != "sqlite" {
+
+	if dbType != "postgres" && dbType != "sqlite" && dbType != "mssql" {
 		fmt.Printf("⚠️  WARNING: %s adapter is under development\n", dbNames[dbType])
-		fmt.Printf("💡 Currently supported: PostgreSQL, SQLite\n\n")
+		fmt.Printf("💡 Currently supported: PostgreSQL, SQLite, MS SQL Server\n\n")
 	}
 	
 	fmt.Println("📝 Next steps:")
@@ -341,7 +342,7 @@ func printHelp() {
 	fmt.Println("Create Config Templates:")
 	fmt.Println("  --create-config-pg        PostgreSQL config template")
 	fmt.Println("  --create-config-sl        SQLite config template")
-	fmt.Println("  --create-config-ms        MS SQL config template (⚠️  under development)")
+	fmt.Println("  --create-config-ms        MS SQL config template")
 	fmt.Println("  --create-config-my        MySQL config template (⚠️  under development)")
 	fmt.Println("  --create-config-mi        Miranda SQL config template (⚠️  under development)")
 	fmt.Println()
@@ -377,7 +378,7 @@ func printHelp() {
 	fmt.Println("Supported Databases:")
 	fmt.Println("  ✅ PostgreSQL (postgres)")
 	fmt.Println("  ✅ SQLite (sqlite)")
-	fmt.Println("  🚧 MS SQL Server (mssql) - under development")
+	fmt.Println("  ✅ MS SQL Server (mssql)")
 	fmt.Println("  🚧 MySQL (mysql) - under development")
 	fmt.Println("  🚧 Miranda SQL (miranda) - under development")
 	fmt.Println()
