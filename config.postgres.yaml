@@ -5,9 +5,9 @@ database:
   type: postgres
   host: localhost
   port: 5432
-  user: tdtp_test
-  password: tdtp_test_password
-  database: tdtp_test_db
+  user: tdtp_user
+  password: tdtp_dev_pass_2025
+  database: tdtp_test
   schema: public  # Default PostgreSQL schema
 
   # Connection options (optional)
@@ -20,8 +20,8 @@ broker:
   type: rabbitmq
   host: localhost
   port: 5672
-  user: tdtp_test
-  password: tdtp_test_password
+  user: tdtp
+  password: tdtp_dev_2025
   queue: tdtp_postgres_queue
   vhost: /  # Default RabbitMQ vhost
 
