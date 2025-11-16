@@ -2,12 +2,32 @@
 **Дата:** 16.11.2025
 **Цель:** MS SQL Server Adapter + MSMQ/RabbitMQ Integration
 
-## ⚠️ Важные требования
+## ⚠️ КРИТИЧЕСКИ ВАЖНО!
 
-**Обратная совместимость:** MS SQL Server 2012 и выше
-- Минимальная версия: SQL Server 2012 (11.x)
-- Поддержка версий: 2012, 2014, 2016, 2017, 2019, 2022
-- **См. детали:** [docs/MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md)
+### Окружения разработки vs Production
+
+**Development (локально):**
+- Docker контейнер: SQL Server 2019/2022
+- Все современные функции доступны
+
+**Production:**
+- SQL Server 2012
+- Ограниченный набор функций
+
+**ПРОБЛЕМА:** Код, работающий в Docker, может НЕ работать в production!
+
+**РЕШЕНИЕ:**
+1. **Обязательно** читать: [docs/MSSQL_DEV_VS_PROD.md](docs/MSSQL_DEV_VS_PROD.md)
+2. Использовать `docker-compose.mssql.yml` для тестирования на SQL Server 2012 compatibility mode
+3. **ВСЕГДА** тестировать на `mssql-prod-sim` контейнере перед коммитом
+
+### Обратная совместимость: MS SQL Server 2012+
+
+- **Минимальная версия:** SQL Server 2012 (11.x)
+- **Поддержка:** 2012, 2014, 2016, 2017, 2019, 2022
+- **Документация:**
+  - [docs/MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md) - Типы данных и функции
+  - [docs/MSSQL_DEV_VS_PROD.md](docs/MSSQL_DEV_VS_PROD.md) - **ОБЯЗАТЕЛЬНО К ПРОЧТЕНИЮ!**
 
 ## 🎯 Use Case
 
@@ -674,8 +694,17 @@ go test ./pkg/brokers/rabbitmq/...
 
 ## 📚 Важная документация
 
-**Обязательно к прочтению перед реализацией:**
-1. **[MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md)** - Требования совместимости с SQL Server 2012+
+**КРИТИЧНО - Обязательно к прочтению перед началом разработки:**
+
+### 1. **[MSSQL_DEV_VS_PROD.md](docs/MSSQL_DEV_VS_PROD.md)** ⚠️ САМОЕ ВАЖНОЕ!
+   - **Проблема:** Docker (SQL Server 2019+) vs Production (SQL Server 2012)
+   - **Решение:** Compatibility mode testing
+   - **Forbidden functions list** (JSON, STRING_SPLIT, STRING_AGG)
+   - **Allowed functions list** (OFFSET/FETCH, MERGE, IIF)
+   - **Docker Compose** для тестирования на SQL Server 2012 mode
+   - **Pre-commit workflow** для проверки совместимости
+
+### 2. **[MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md)**
    - Поддерживаемые типы данных
    - Ограничения SQL Server 2012
    - Рекомендации по type mapping
@@ -687,9 +716,48 @@ go test ./pkg/brokers/rabbitmq/...
 - ✅ MERGE работает для UPSERT
 - ❌ JSON функции НЕ работают (SQL Server 2016+)
 - ❌ STRING_SPLIT НЕ работает (SQL Server 2016+)
+- ❌ STRING_AGG НЕ работает (SQL Server 2017+)
 - Используем NVARCHAR для Unicode
 - Используем DATETIME2 для лучшей точности
-- Feature detection для условного использования функций
+- **Feature detection** для условного использования функций
+- **ВСЕГДА тестировать на prod simulation** перед коммитом
+
+---
+
+## 🚀 Быстрый старт для разработки
+
+### Первые шаги ПЕРЕД написанием кода:
+
+1. **Прочитать документацию (30 минут):**
+   - ⚠️ [docs/MSSQL_DEV_VS_PROD.md](docs/MSSQL_DEV_VS_PROD.md) - КРИТИЧНО!
+   - [docs/MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md)
+
+2. **Настроить окружение:**
+   ```bash
+   # Запустить prod simulation контейнер
+   docker-compose -f docker-compose.mssql.yml up -d mssql-prod-sim
+
+   # Проверить что контейнер работает
+   docker-compose -f docker-compose.mssql.yml ps
+
+   # Подключиться и проверить compatibility level
+   docker exec -it tdtp-mssql-prod-sim /opt/mssql-tools/bin/sqlcmd \
+       -S localhost -U sa -P 'ProdPassword123!' \
+       -Q "SELECT name, compatibility_level FROM sys.databases WHERE name='ProdSimDB'"
+
+   # Должен вернуть: ProdSimDB | 110 (SQL Server 2012)
+   ```
+
+3. **Создать базовую структуру:**
+   ```bash
+   mkdir -p pkg/adapters/mssql
+   cd pkg/adapters/mssql
+   ```
+
+4. **Начать с feature detection:**
+   - Создать `adapter.go` с определением версии сервера
+   - Создать `types.go` с маппингом типов SQL Server 2012+
+   - Добавить тесты на compatibility level 110
 
 ---
 
@@ -697,4 +765,4 @@ go test ./pkg/brokers/rabbitmq/...
 
 Предлагаю начать с MS SQL Server Adapter, так как это foundation для всей вашей интеграции.
 
-**Первый шаг:** Изучить [MSSQL_2012_COMPATIBILITY.md](docs/MSSQL_2012_COMPATIBILITY.md) для понимания всех ограничений и рекомендаций.
+**КРИТИЧНО:** Всегда тестировать на `mssql-prod-sim` (SQL Server 2012 compatibility) перед коммитом!
