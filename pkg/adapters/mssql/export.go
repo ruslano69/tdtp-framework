@@ -42,7 +42,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		) pk ON c.TABLE_SCHEMA = pk.TABLE_SCHEMA
 			AND c.TABLE_NAME = pk.TABLE_NAME
 			AND c.COLUMN_NAME = pk.COLUMN_NAME
-		WHERE c.TABLE_SCHEMA = @p1 AND c.TABLE_NAME = @p2
+		WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
 		ORDER BY c.ORDINAL_POSITION
 	`
 
@@ -407,8 +407,8 @@ func (a *Adapter) GetTableRowCount(ctx context.Context, tableName string) (int64
 		FROM sys.tables t
 		INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 		INNER JOIN sys.partitions p ON t.object_id = p.object_id
-		WHERE s.name = @p1
-			AND t.name = @p2
+		WHERE s.name = ?
+			AND t.name = ?
 			AND p.index_id IN (0, 1)  -- Heap or Clustered index
 	`
 
@@ -437,7 +437,7 @@ func (a *Adapter) GetTableSize(ctx context.Context, tableName string) (int64, er
 		INNER JOIN sys.indexes i ON t.object_id = i.object_id
 		INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
 		INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
-		WHERE s.name = @p1 AND t.name = @p2
+		WHERE s.name = ? AND t.name = ?
 	`
 
 	var size sql.NullInt64

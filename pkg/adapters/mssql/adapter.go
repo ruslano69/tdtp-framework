@@ -272,7 +272,7 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	query := `
 		SELECT TABLE_NAME
 		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = @p1
+		WHERE TABLE_SCHEMA = ?
 		  AND TABLE_TYPE = 'BASE TABLE'
 		ORDER BY TABLE_NAME
 	`
@@ -309,8 +309,8 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 	query := `
 		SELECT COUNT(*)
 		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = @p1
-		  AND TABLE_NAME = @p2
+		WHERE TABLE_SCHEMA = ?
+		  AND TABLE_NAME = ?
 		  AND TABLE_TYPE = 'BASE TABLE'
 	`
 

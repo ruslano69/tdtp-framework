@@ -566,7 +566,7 @@ func getBalance(t *testing.T, ctx context.Context, adapter adapters.Adapter, tab
 	}
 
 	var balance string
-	query := "SELECT CAST(balance AS VARCHAR) FROM " + tableName + " WHERE id = @p1"
+	query := "SELECT CAST(balance AS VARCHAR) FROM " + tableName + " WHERE id = ?"
 	err := mssqlAdapter.db.QueryRowContext(ctx, query, id).Scan(&balance)
 	if err != nil {
 		t.Fatalf("Failed to get balance: %v", err)
