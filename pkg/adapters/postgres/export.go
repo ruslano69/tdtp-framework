@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
 )
 
@@ -157,10 +158,12 @@ func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		// Конвертируем значения в строки
+		// Конвертируем значения в строки TDTP формата
 		rowData := make([]string, len(values))
 		for i, val := range values {
-			rowData[i] = a.valueToString(val, fieldDescriptions[i].Name)
+			// Сначала в сырую строку, потом через schema.Converter для правильного форматирования
+			rawValue := a.pgValueToRawString(val)
+			rowData[i] = a.convertValueToTDTP(pkgSchema.Fields[i], rawValue)
 		}
 
 		dataRows = append(dataRows, rowData)
@@ -258,7 +261,9 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 
 		rowData := make([]string, len(values))
 		for i, val := range values {
-			rowData[i] = a.valueToString(val, fieldDescriptions[i].Name)
+			// Сначала в сырую строку, потом через schema.Converter для правильного форматирования
+			rawValue := a.pgValueToRawString(val)
+			rowData[i] = a.convertValueToTDTP(schema.Fields[i], rawValue)
 		}
 
 		dataRows = append(dataRows, rowData)
@@ -292,8 +297,8 @@ func (a *Adapter) createQueryContextForSQL(ctx context.Context, query *packet.Qu
 	}
 }
 
-// valueToString конвертирует значение PostgreSQL в строку для TDTP
-func (a *Adapter) valueToString(val interface{}, fieldName string) string {
+// pgValueToRawString конвертирует pgx значение в сырую строку для последующей обработки
+func (a *Adapter) pgValueToRawString(val interface{}) string {
 	if val == nil {
 		return ""
 	}
@@ -327,22 +332,19 @@ func (a *Adapter) valueToString(val interface{}, fieldName string) string {
 		return fmt.Sprintf("%d", v)
 	case uint, uint8, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v)
-	case float32:
-		return fmt.Sprintf("%.2f", v)
-	case float64:
-		return fmt.Sprintf("%.2f", v)
+	case float32, float64:
+		// Для float используем %v чтобы сохранить точность
+		return fmt.Sprintf("%v", v)
 	case bool:
 		if v {
 			return "1"
 		}
 		return "0"
+	case time.Time:
+		// Timestamp в ISO формате
+		return v.Format("2006-01-02 15:04:05")
 	default:
-		// Попытка обработать как time.Time (для TIMESTAMP)
-		if t, ok := val.(time.Time); ok {
-			return t.Format("2006-01-02 15:04:05")
-		}
-
-		// Попытка конвертировать в строку через Stringer interface
+		// Попытка конвертировать в строку через Stringer interface (для pgx numeric types)
 		if s, ok := val.(fmt.Stringer); ok {
 			return s.String()
 		}
@@ -350,6 +352,34 @@ func (a *Adapter) valueToString(val interface{}, fieldName string) string {
 		// Последняя попытка - используем строковое представление
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// convertValueToTDTP конвертирует значение из БД в TDTP формат используя schema.Converter
+func (a *Adapter) convertValueToTDTP(field packet.Field, value string) string {
+	// Создаем FieldDef для использования converter
+	fieldDef := schema.FieldDef{
+		Name:      field.Name,
+		Type:      schema.DataType(field.Type),
+		Length:    field.Length,
+		Precision: field.Precision,
+		Scale:     field.Scale,
+		Timezone:  field.Timezone,
+		Key:       field.Key,
+		Subtype:   field.Subtype,
+	}
+
+	// Парсим значение
+	converter := schema.NewConverter()
+	typedValue, err := converter.ParseValue(value, fieldDef)
+	if err != nil {
+		// Если ошибка парсинга, возвращаем как есть
+		return value
+	}
+
+	// Форматируем обратно в строку TDTP
+	formatted := converter.FormatValue(typedValue)
+
+	return formatted
 }
 
 // parseRow парсит строку данных разделенную |
