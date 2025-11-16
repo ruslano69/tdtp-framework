@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -326,15 +327,27 @@ func (a *Adapter) valueToString(val interface{}, fieldName string) string {
 		return fmt.Sprintf("%d", v)
 	case uint, uint8, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
+	case float32:
+		return fmt.Sprintf("%.2f", v)
+	case float64:
+		return fmt.Sprintf("%.2f", v)
 	case bool:
 		if v {
 			return "1"
 		}
 		return "0"
 	default:
-		// Для сложных типов используем строковое представление
+		// Попытка обработать как time.Time (для TIMESTAMP)
+		if t, ok := val.(time.Time); ok {
+			return t.Format("2006-01-02 15:04:05")
+		}
+
+		// Попытка конвертировать в строку через Stringer interface
+		if s, ok := val.(fmt.Stringer); ok {
+			return s.String()
+		}
+
+		// Последняя попытка - используем строковое представление
 		return fmt.Sprintf("%v", v)
 	}
 }
