@@ -120,7 +120,7 @@ func (a *Adapter) importPacketDataInTx(
 	pkt *packet.DataPacket,
 	strategy adapters.ImportStrategy,
 ) error {
-	if len(pkt.Data) == 0 {
+	if len(pkt.Data.Rows) == 0 {
 		return nil // Пустой пакет - не ошибка
 	}
 
@@ -162,15 +162,16 @@ func (a *Adapter) importWithMerge(ctx context.Context, tx *sql.Tx, pkt *packet.D
 		return a.importWithInsert(ctx, tx, pkt)
 	}
 
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	// Строим MERGE запрос
 	mergeSQL := a.buildMergeSQL(fullTableName, pkt.Schema, pkFields)
 
 	// Выполняем MERGE для каждой строки
-	for _, row := range pkt.Data {
-		args := a.rowToArgs(row, pkt.Schema)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, mergeSQL, args...)
 		if err != nil {
 			return fmt.Errorf("failed to execute MERGE: %w", err)
@@ -249,7 +250,7 @@ WHEN NOT MATCHED THEN
 // SQL Server не имеет прямого аналога INSERT OR IGNORE,
 // используем TRY-CATCH или проверку существования
 func (a *Adapter) importWithIgnore(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	// Находим PK колонки
@@ -268,15 +269,16 @@ func (a *Adapter) importWithIgnore(ctx context.Context, tx *sql.Tx, pkt *packet.
 	}
 
 	// Проверяем существование и вставляем только новые записи
-	for _, row := range pkt.Data {
-		exists, err := a.rowExists(ctx, tx, fullTableName, pkFields, pkIndices, row)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		exists, err := a.rowExists(ctx, tx, fullTableName, pkFields, pkIndices, rowValues)
 		if err != nil {
 			return fmt.Errorf("failed to check row existence: %w", err)
 		}
 
 		if !exists {
 			insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
-			args := a.rowToArgs(row, pkt.Schema)
+			args := a.rowToArgs(rowValues, pkt.Schema)
 			_, err := tx.ExecContext(ctx, insertSQL, args...)
 			if err != nil {
 				return fmt.Errorf("failed to insert row: %w", err)
@@ -320,13 +322,14 @@ func (a *Adapter) rowExists(
 
 // importWithInsertIgnoreErrors вставляет с игнорированием ошибок дубликатов
 func (a *Adapter) importWithInsertIgnoreErrors(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
 
-	for _, row := range pkt.Data {
-		args := a.rowToArgs(row, pkt.Schema)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		// Игнорируем ошибки дубликатов (primary key violation)
 		if err != nil && !isPrimaryKeyViolation(err) {
@@ -353,13 +356,14 @@ func isPrimaryKeyViolation(err error) bool {
 
 // importWithInsert использует обычный INSERT (ошибка при дубликатах)
 func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	schemaName, tableName := a.parseTableName(pkt.Schema.Table)
+	schemaName, tableName := a.parseTableName(pkt.Header.TableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, tableName)
 
 	insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
 
-	for _, row := range pkt.Data {
-		args := a.rowToArgs(row, pkt.Schema)
+	for _, row := range pkt.Data.Rows {
+		rowValues := a.parseRow(row.Value, pkt.Schema)
+		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		if err != nil {
 			return fmt.Errorf("failed to insert row: %w", err)
@@ -386,6 +390,19 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 }
 
 // ========== Data Conversion ==========
+
+// parseRow разбивает строку row.Value на отдельные значения
+func (a *Adapter) parseRow(rowValue string, schema packet.Schema) []string {
+	// Значения разделены табуляциями
+	values := strings.Split(rowValue, "\t")
+
+	// Дополняем пустыми значениями если не хватает
+	for len(values) < len(schema.Fields) {
+		values = append(values, "")
+	}
+
+	return values
+}
 
 // rowToArgs конвертирует строку TDTP пакета в массив аргументов для SQL
 func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []interface{} {
