@@ -335,7 +335,7 @@ database:
   port: 5432
   user: tdtp_user
   password: tdtp_dev_pass_2025
-  database: tdtp_test
+  dbname: tdtp_test
   schema: public
   sslmode: disable
         """)
