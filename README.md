@@ -235,7 +235,7 @@ go test -v ./pkg/core/packet/
 - [x] UUID, JSONB, JSON, INET типы
 - [x] COPY для bulk import
 
-### ~~v1.0~~ ✅ Завершено (NEW!)
+### ~~v1.0~~ ✅ Завершено
 - [x] **Двухуровневая архитектура адаптеров**
 - [x] **Фабрика адаптеров с регистрацией**
 - [x] **Context-aware API**
@@ -243,10 +243,17 @@ go test -v ./pkg/core/packet/
 - [x] **Обновленные интеграционные тесты**
 - [x] **Примеры использования фабрики**
 
-### v1.1 (следующее)
-- [ ] Оптимизация производительности
-- [ ] Расширенная документация
-- [ ] CLI утилита (tdtpcli)
+### ~~v1.1~~ ✅ Завершено (NEW!)
+- [x] **CLI утилита (tdtpcli)**
+- [x] **YAML конфигурационные файлы**
+- [x] **Export/Import команды для PostgreSQL и SQLite**
+- [x] **Увеличен max packet size до 3.8MB**
+- [x] **Демонстрация пагинации**
+
+### v1.2 (следующее)
+- [ ] CLI расширения (convert, stats, diff, merge)
+- [ ] Query optimization (автовыбор стратегии)
+- [ ] Incremental sync (delta exports)
 
 ### v1.5 (планируется)
 - [ ] MS SQL Server adapter
@@ -278,5 +285,5 @@ MIT
 
 ---
 
-**Статус:** v1.0 - Universal Adapter Architecture Complete!
-**Последнее обновление:** 15.11.2025
+**Статус:** v1.1 - CLI Utility Complete!
+**Последнее обновление:** 16.11.2025
