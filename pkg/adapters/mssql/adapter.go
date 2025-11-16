@@ -327,7 +327,7 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 // Transaction support
 
 // BeginTx starts a new transaction.
-func (a *Adapter) BeginTx(ctx context.Context) (adapters.Transaction, error) {
+func (a *Adapter) BeginTx(ctx context.Context) (adapters.Tx, error) {
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -349,34 +349,4 @@ func (t *transaction) Rollback(ctx context.Context) error {
 	return t.tx.Rollback()
 }
 
-// Placeholder implementations (will be implemented in export.go and import.go)
-
-// ExportTable exports a table to TDTP packets.
-func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
-	return nil, fmt.Errorf("not implemented yet")
-}
-
-// ExportTableWithQuery exports a table with TDTQL query filtering.
-func (a *Adapter) ExportTableWithQuery(
-	ctx context.Context,
-	tableName string,
-	query *packet.Query,
-	sender, recipient string,
-) ([]*packet.DataPacket, error) {
-	return nil, fmt.Errorf("not implemented yet")
-}
-
-// GetTableSchema returns the TDTP schema for a table.
-func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error) {
-	return packet.Schema{}, fmt.Errorf("not implemented yet")
-}
-
-// ImportPacket imports a TDTP packet into the database.
-func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-	return fmt.Errorf("not implemented yet")
-}
-
-// ImportPackets imports multiple TDTP packets in a single transaction.
-func (a *Adapter) ImportPackets(ctx context.Context, pkts []*packet.DataPacket, strategy adapters.ImportStrategy) error {
-	return fmt.Errorf("not implemented yet")
-}
+// Export, Import, and Schema methods are implemented in export.go and import.go

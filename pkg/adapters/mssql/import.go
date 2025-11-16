@@ -416,26 +416,4 @@ func (a *Adapter) stringToValue(str string, field packet.Field) interface{} {
 	}
 }
 
-// ========== Transaction Support ==========
-
-// Transaction wrapper for implementing adapters.Tx interface
-type transaction struct {
-	tx *sql.Tx
-}
-
-func (t *transaction) Commit(ctx context.Context) error {
-	return t.tx.Commit()
-}
-
-func (t *transaction) Rollback(ctx context.Context) error {
-	return t.tx.Rollback()
-}
-
-// BeginTx начинает транзакцию
-func (a *Adapter) BeginTx(ctx context.Context) (adapters.Tx, error) {
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	return &transaction{tx: tx}, nil
-}
+// Transaction methods (BeginTx, transaction struct) are implemented in adapter.go
