@@ -177,38 +177,83 @@ func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.
 }
 
 // ExportTableWithQuery экспортирует таблицу с фильтрацией через TDTQL
+// Реализует интерфейс adapters.Adapter
 func (a *Adapter) ExportTableWithQuery(
 	ctx context.Context,
 	tableName string,
 	query *packet.Query,
 	sender, recipient string,
 ) ([]*packet.DataPacket, error) {
-	// 1. Получаем схему таблицы
-	tableSchema, err := a.GetTableSchema(ctx, tableName)
+	// Получаем схему
+	pkgSchema, err := a.GetTableSchema(ctx, tableName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get table schema: %w", err)
+		return nil, err
 	}
 
-	// 2. Строим SQL запрос
-	sqlQuery, args, err := a.buildSelectQuery(tableName, tableSchema, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build select query: %w", err)
+	// Если query == nil, это полный экспорт (reference)
+	if query == nil {
+		rows, err := a.readAllRows(ctx, tableName, pkgSchema)
+		if err != nil {
+			return nil, err
+		}
+
+		// Генерируем reference пакеты
+		generator := packet.NewGenerator()
+		return generator.GenerateReference(tableName, pkgSchema, rows)
 	}
 
-	// 3. Выполняем запрос
-	rows, err := a.db.QueryContext(ctx, sqlQuery, args...)
+	// Пробуем транслировать TDTQL → SQL для оптимизации
+	sqlGenerator := tdtql.NewSQLGenerator()
+	if sqlGenerator.CanTranslateToSQL(query) {
+		// Оптимизированный путь: фильтрация на уровне SQL
+		sqlQuery, _, err := a.buildSelectQuery(tableName, pkgSchema, query)
+		if err == nil {
+			// Выполняем SQL запрос напрямую
+			rows, err := a.readRowsWithSQL(ctx, sqlQuery, pkgSchema)
+			if err == nil {
+				// Генерируем Response пакеты
+				// QueryContext создаем вручную так как данные уже отфильтрованы
+				queryContext := a.createQueryContextForSQL(ctx, query, rows, tableName)
+
+				generator := packet.NewGenerator()
+				return generator.GenerateResponse(
+					tableName,
+					"",
+					pkgSchema,
+					rows,
+					queryContext,
+					sender,
+					recipient,
+				)
+			}
+			// Если SQL запрос не удался, fallback на in-memory
+		}
+	}
+
+	// Fallback: in-memory фильтрация
+	rows, err := a.readAllRows(ctx, tableName, pkgSchema)
+	if err != nil {
+		return nil, err
+	}
+
+	// Применяем TDTQL фильтрацию в памяти
+	executor := tdtql.NewExecutor()
+	result, err := executor.Execute(query, rows, pkgSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer rows.Close()
 
-	// 4. Читаем данные и создаем пакеты
-	packets, err := a.rowsToPackets(rows, tableSchema, sender, recipient)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert rows to packets: %w", err)
-	}
-
-	return packets, nil
+	// Генерируем Response пакеты с QueryContext
+	generator := packet.NewGenerator()
+	return generator.GenerateResponse(
+		tableName,
+		"",
+		pkgSchema,
+		result.FilteredRows,
+		result.QueryContext,
+		sender,
+		recipient,
+	)
 }
 
 // ========== Internal Helpers ==========
@@ -311,24 +356,45 @@ func (a *Adapter) adaptToSQLServerSyntax(
 	return sql
 }
 
-// rowsToPackets конвертирует sql.Rows в TDTP пакеты
-// Автоматически разбивает на пакеты по max size (~3.8MB)
-func (a *Adapter) rowsToPackets(
-	rows *sql.Rows,
-	tableSchema packet.Schema,
-	sender, recipient string,
-) ([]*packet.DataPacket, error) {
-	const maxPacketSize = 3800000 // ~3.8MB (из git log)
-	const estimatedRowSize = 1000 // Примерный размер строки
-	const maxRowsPerPacket = maxPacketSize / estimatedRowSize
+// readAllRows читает все строки из таблицы
+func (a *Adapter) readAllRows(ctx context.Context, tableName string, pkgSchema packet.Schema) ([][]string, error) {
+	schemaName, table := a.parseTableName(tableName)
+	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
-	var packets []*packet.DataPacket
-	var currentRows [][]string
-	currentSize := 0
-	packetNumber := 1
+	// Формируем список полей для SELECT
+	var columns []string
+	for _, field := range pkgSchema.Fields {
+		columns = append(columns, fmt.Sprintf("[%s]", field.Name))
+	}
 
-	// Подготовка для чтения значений
-	columnCount := len(tableSchema.Fields)
+	query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), fullTableName)
+
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query table: %w", err)
+	}
+	defer rows.Close()
+
+	return a.scanRows(rows, pkgSchema)
+}
+
+// readRowsWithSQL выполняет SQL запрос и возвращает строки
+func (a *Adapter) readRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchema packet.Schema) ([][]string, error) {
+	rows, err := a.db.QueryContext(ctx, sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute SQL: %w", err)
+	}
+	defer rows.Close()
+
+	return a.scanRows(rows, pkgSchema)
+}
+
+// scanRows сканирует sql.Rows в [][]string
+func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string, error) {
+	var result [][]string
+
+	// Подготавливаем scanner для всех колонок
+	columnCount := len(pkgSchema.Fields)
 	values := make([]interface{}, columnCount)
 	valuePtrs := make([]interface{}, columnCount)
 	for i := range values {
@@ -340,47 +406,16 @@ func (a *Adapter) rowsToPackets(
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		// Конвертируем значения в строки
+		// Конвертируем в строки согласно TDTP формату
 		row := make([]string, columnCount)
-		rowSize := 0
 		for i, val := range values {
-			strVal := a.valueToString(val)
-			row[i] = strVal
-			rowSize += len(strVal)
+			row[i] = a.valueToString(val)
 		}
 
-		// Проверяем, нужно ли создать новый пакет
-		if len(currentRows) >= maxRowsPerPacket || (currentSize+rowSize) >= maxPacketSize {
-			if len(currentRows) > 0 {
-				pkt := a.createPacket(tableSchema, currentRows, packetNumber, sender, recipient)
-				packets = append(packets, pkt)
-				packetNumber++
-				currentRows = nil
-				currentSize = 0
-			}
-		}
-
-		currentRows = append(currentRows, row)
-		currentSize += rowSize
+		result = append(result, row)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
-	}
-
-	// Последний пакет
-	if len(currentRows) > 0 {
-		pkt := a.createPacket(tableSchema, currentRows, packetNumber, sender, recipient)
-		packets = append(packets, pkt)
-	}
-
-	// Если нет данных, создаем пустой пакет со схемой
-	if len(packets) == 0 {
-		pkt := a.createPacket(tableSchema, nil, 1, sender, recipient)
-		packets = append(packets, pkt)
-	}
-
-	return packets, nil
+	return result, rows.Err()
 }
 
 // valueToString конвертирует значение БД в строку для TDTP
@@ -405,41 +440,30 @@ func (a *Adapter) valueToString(value interface{}) string {
 	}
 }
 
-// createPacket создает TDTP пакет из схемы и данных
-func (a *Adapter) createPacket(
-	tableSchema packet.Schema,
-	rows [][]string,
-	packetNumber int,
-	sender, recipient string,
-) *packet.DataPacket {
-	// Используем packet generator для правильного форматирования данных
-	generator := packet.NewGenerator()
+// createQueryContextForSQL создает QueryContext для SQL-фильтрованных данных
+func (a *Adapter) createQueryContextForSQL(ctx context.Context, query *packet.Query, rows [][]string, tableName string) *packet.QueryContext {
+	// Получаем общее количество записей в таблице
+	totalRecords, _ := a.GetTableRowCount(ctx, tableName)
 
-	// Создаем reference пакет (используем GenerateReference для правильного формата)
-	packets, err := generator.GenerateReference(tableSchema.Table, tableSchema, rows)
-	if err != nil || len(packets) == 0 {
-		// Fallback: создаем пустой пакет
-		return &packet.DataPacket{
-			Protocol: "TDTP",
-			Version:  "1.0",
-			Header: packet.Header{
-				Type:      packet.TypeReference,
-				TableName: tableSchema.Table,
-				Timestamp: time.Now().UTC(),
-				Sender:    sender,
-				Recipient: recipient,
-			},
-			Schema: tableSchema,
-			Data:   packet.Data{Rows: []packet.Row{}},
+	moreDataAvailable := false
+	nextOffset := 0
+	if query != nil && query.Limit > 0 {
+		if len(rows) == query.Limit {
+			moreDataAvailable = true
+			nextOffset = query.Offset + query.Limit
 		}
 	}
 
-	// Берем первый пакет и обновляем metadata
-	pkt := packets[0]
-	pkt.Header.Sender = sender
-	pkt.Header.Recipient = recipient
-
-	return pkt
+	return &packet.QueryContext{
+		OriginalQuery: *query,
+		ExecutionResults: packet.ExecutionResults{
+			TotalRecordsInTable: int(totalRecords),
+			RecordsAfterFilters: len(rows),
+			RecordsReturned:     len(rows),
+			MoreDataAvailable:   moreDataAvailable,
+			NextOffset:          nextOffset,
+		},
+	}
 }
 
 // ========== Query Statistics ==========
