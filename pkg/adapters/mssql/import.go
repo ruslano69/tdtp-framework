@@ -196,10 +196,9 @@ func (a *Adapter) buildMergeSQL(tableName string, schema packet.Schema, pkFields
 		insertValues  []string
 	)
 
-	paramIndex := 1
 	for _, field := range schema.Fields {
 		colName := fmt.Sprintf("[%s]", field.Name)
-		paramName := fmt.Sprintf("@p%d", paramIndex)
+		paramName := "?"
 
 		sourceColumns = append(sourceColumns, fmt.Sprintf("%s AS %s", paramName, colName))
 		insertColumns = append(insertColumns, colName)
@@ -219,8 +218,6 @@ func (a *Adapter) buildMergeSQL(tableName string, schema packet.Schema, pkFields
 		if !isPK {
 			updateSets = append(updateSets, fmt.Sprintf("target.%s = source.%s", colName, colName))
 		}
-
-		paramIndex++
 	}
 
 	merge := fmt.Sprintf(`
@@ -303,7 +300,7 @@ func (a *Adapter) rowExists(
 
 	for i, field := range pkFields {
 		idx := pkIndices[i]
-		conditions = append(conditions, fmt.Sprintf("[%s] = @p%d", field.Name, i+1))
+		conditions = append(conditions, fmt.Sprintf("[%s] = ?", field.Name))
 		args = append(args, a.stringToValue(row[idx], field))
 	}
 
@@ -378,9 +375,9 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 	var columns []string
 	var placeholders []string
 
-	for i, field := range schema.Fields {
+	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("[%s]", field.Name))
-		placeholders = append(placeholders, fmt.Sprintf("@p%d", i+1))
+		placeholders = append(placeholders, "?")
 	}
 
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
