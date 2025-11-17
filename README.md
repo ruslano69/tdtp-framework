@@ -325,11 +325,25 @@ go run main.go
 
 ## 📚 Документация
 
+### Руководства
+
+- **[Installation Guide](INSTALLATION_GUIDE.md)** ⭐ **НАЧНИТЕ ЗДЕСЬ** - установка, настройка, quick start
+- **[User Guide](docs/USER_GUIDE.md)** - полное руководство по CLI утилите
+- **[Documentation Index](docs/README.md)** - полный каталог документации
+
+### Технические спецификации
+
+- [TDTP Specification](docs/SPECIFICATION.md) - спецификация протокола TDTP v1.0
 - [Packet Module](docs/PACKET_MODULE.md) - парсинг и генерация пакетов
 - [Schema Module](docs/SCHEMA_MODULE.md) - валидация типов и схем
-- [TDTQL Translator](docs/TDTQL_TRANSLATOR.md) - трансляция SQL → TDTQL
-- [SQLite Adapter](docs/SQLITE_ADAPTER.md) - интеграция с SQLite **(NEW!)**
-- [Техническое задание](docs/SPECIFICATION.md) - полная спецификация TDTP/TDTQL
+- [TDTQL Translator](docs/TDTQL_TRANSLATOR.md) - язык запросов
+- [SQLite Adapter](docs/SQLITE_ADAPTER.md) - интеграция с SQLite
+
+### Package READMEs
+
+- [Circuit Breaker](pkg/resilience/README.md) - защита от каскадных сбоев
+- [Audit Logger](pkg/audit/README.md) - compliance и security
+- [XLSX Converter](pkg/xlsx/README.md) 🍒 - Database ↔ Excel
 
 ## 🧪 Тестирование
 
