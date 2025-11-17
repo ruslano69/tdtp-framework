@@ -120,21 +120,36 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 }
 
 // GetRowValues разбивает строку данных на значения полей
+// Обрабатывает экранирование: \| → | и \\ → \
 func (p *Parser) GetRowValues(row Row) []string {
-	// Простой split по |
-	// TODO: обработка экранированных разделителей &#124;
 	values := []string{}
 	current := ""
-	
+	escaped := false
+
 	for _, char := range row.Value {
-		if char == '|' {
+		if escaped {
+			// Предыдущий символ был backslash
+			current += string(char)
+			escaped = false
+		} else if char == '\\' {
+			// Начало escape-последовательности
+			escaped = true
+		} else if char == '|' {
+			// Неэкранированный разделитель
 			values = append(values, current)
 			current = ""
 		} else {
 			current += string(char)
 		}
 	}
+
+	// Если последний символ был backslash (не экранирующий ничего), добавляем его
+	if escaped {
+		current += "\\"
+	}
+
+	// Добавляем последнее значение
 	values = append(values, current)
-	
+
 	return values
 }
