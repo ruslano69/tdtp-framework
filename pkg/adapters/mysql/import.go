@@ -168,7 +168,7 @@ func (a *Adapter) importWithReplace(ctx context.Context, tx *sql.Tx, pkt *packet
 
 	// Выполняем для каждой строки
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		if err != nil {
@@ -213,7 +213,7 @@ func (a *Adapter) importWithReplaceInto(ctx context.Context, tx *sql.Tx, pkt *pa
 	replaceSQL := a.buildReplaceSQL(tableName, pkt.Schema)
 
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, replaceSQL, args...)
 		if err != nil {
@@ -248,7 +248,7 @@ func (a *Adapter) importWithIgnore(ctx context.Context, tx *sql.Tx, pkt *packet.
 	insertSQL := a.buildInsertIgnoreSQL(tableName, pkt.Schema)
 
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		if err != nil {
@@ -283,7 +283,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.
 	insertSQL := a.buildInsertSQL(tableName, pkt.Schema)
 
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		if err != nil {
@@ -350,9 +350,11 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 }
 
 // parseRow разбивает строку row.Value на отдельные значения
-func (a *Adapter) parseRow(rowValue string, schema packet.Schema) []string {
-	// Значения разделены PIPE символом | согласно спецификации TDTP v1.0
-	values := strings.Split(rowValue, "|")
+func (a *Adapter) parseRow(row packet.Row, schema packet.Schema) []string {
+	// Используем Parser.GetRowValues() для правильной обработки экранирования
+	// Backslash escaping: \| → | и \\ → \
+	parser := packet.NewParser()
+	values := parser.GetRowValues(row)
 
 	// Дополняем пустыми значениями если не хватает
 	for len(values) < len(schema.Fields) {

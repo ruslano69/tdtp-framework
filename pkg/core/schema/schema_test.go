@@ -138,10 +138,10 @@ func TestConverterText(t *testing.T) {
 		t.Errorf("Expected 'Test', got %v", tv.StringValue)
 	}
 
-	// With escaped separator
-	tv, err = converter.ParseValue("Test&#124;Value", field)
+	// With pipe character (Parser.GetRowValues already unescaped \| → |)
+	tv, err = converter.ParseValue("Test|Value", field)
 	if err != nil {
-		t.Fatalf("Failed to parse escaped text: %v", err)
+		t.Fatalf("Failed to parse text with pipe: %v", err)
 	}
 	if tv.StringValue == nil || *tv.StringValue != "Test|Value" {
 		t.Errorf("Expected 'Test|Value', got %v", tv.StringValue)
@@ -264,15 +264,15 @@ func TestFormatValue(t *testing.T) {
 		t.Errorf("Expected '1', got '%s'", result)
 	}
 
-	// Text with separator
+	// Text with pipe (Generator.escapeValue will handle \| escaping later)
 	strVal := "Test|Value"
 	tv = &TypedValue{
 		Type:        TypeText,
 		StringValue: &strVal,
 	}
 	result = converter.FormatValue(tv)
-	if result != "Test&#124;Value" {
-		t.Errorf("Expected 'Test&#124;Value', got '%s'", result)
+	if result != "Test|Value" {
+		t.Errorf("Expected 'Test|Value', got '%s'", result)
 	}
 
 	// NULL

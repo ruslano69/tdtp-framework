@@ -189,7 +189,7 @@ func (a *Adapter) importWithMerge(ctx context.Context, tx *sql.Tx, pkt *packet.D
 
 	// Выполняем MERGE для каждой строки
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, mergeSQL, args...)
 		if err != nil {
@@ -286,7 +286,7 @@ func (a *Adapter) importWithIgnore(ctx context.Context, tx *sql.Tx, pkt *packet.
 
 	// Проверяем существование и вставляем только новые записи
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		exists, err := a.rowExists(ctx, tx, fullTableName, pkFields, pkIndices, rowValues)
 		if err != nil {
 			return fmt.Errorf("failed to check row existence: %w", err)
@@ -344,7 +344,7 @@ func (a *Adapter) importWithInsertIgnoreErrors(ctx context.Context, tx *sql.Tx, 
 	insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
 
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		// Игнорируем ошибки дубликатов (primary key violation)
@@ -403,7 +403,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.
 	insertSQL := a.buildInsertSQL(fullTableName, pkt.Schema)
 
 	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row.Value, pkt.Schema)
+		rowValues := a.parseRow(row, pkt.Schema)
 		args := a.rowToArgs(rowValues, pkt.Schema)
 		_, err := tx.ExecContext(ctx, insertSQL, args...)
 		if err != nil {
@@ -447,10 +447,11 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 }
 
 // parseRow разбивает строку row.Value на отдельные значения
-func (a *Adapter) parseRow(rowValue string, schema packet.Schema) []string {
-	// Значения разделены PIPE символом | согласно спецификации TDTP v1.0
-	// Экранированные pipe (&#124;) не обрабатываются здесь (обрабатывает parser)
-	values := strings.Split(rowValue, "|")
+func (a *Adapter) parseRow(row packet.Row, schema packet.Schema) []string {
+	// Используем Parser.GetRowValues() для правильной обработки экранирования
+	// Backslash escaping: \| → | и \\ → \
+	parser := packet.NewParser()
+	values := parser.GetRowValues(row)
 
 	// Дополняем пустыми значениями если не хватает
 	for len(values) < len(schema.Fields) {

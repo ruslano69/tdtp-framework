@@ -222,20 +222,30 @@ func (g *Generator) rowsToData(rows [][]string) Data {
 	data := Data{
 		Rows: make([]Row, len(rows)),
 	}
-	
+
 	for i, row := range rows {
-		// Экранируем разделитель | в данных
+		// Экранируем разделитель | и backslash в данных
 		escapedValues := make([]string, len(row))
 		for j, value := range row {
-			escapedValues[j] = strings.ReplaceAll(value, "|", "&#124;")
+			escapedValues[j] = escapeValue(value)
 		}
-		
+
 		data.Rows[i] = Row{
 			Value: strings.Join(escapedValues, "|"),
 		}
 	}
-	
+
 	return data
+}
+
+// escapeValue экранирует специальные символы в значении
+// Backslash (\) экранируется как \\
+// Pipe (|) экранируется как \|
+func escapeValue(value string) string {
+	// Сначала экранируем backslash, потом pipe (важен порядок!)
+	escaped := strings.ReplaceAll(value, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "|", "\\|")
+	return escaped
 }
 
 // generateMessageID генерирует уникальный MessageID

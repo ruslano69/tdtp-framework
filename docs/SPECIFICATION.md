@@ -176,12 +176,33 @@ DataPacket
 - **Разделитель:** Pipe `|` (ASCII 124)
 - **Пустое значение:** Пустая строка между разделителями: `field1||field3`
 - **NULL:** Отсутствие значения = NULL
-- **Escape:** Специальные символы экранируются XML entities:
+- **Escape разделителя:** Backslash escaping для pipe внутри значений:
+  - `|` → `\|` (pipe внутри значения)
+  - `\` → `\\` (backslash внутри значения)
+- **XML entities:** XML специальные символы экранируются автоматически:
   - `<` → `&lt;`
   - `>` → `&gt;`
   - `&` → `&amp;`
   - `"` → `&quot;`
   - `'` → `&apos;`
+
+**Примеры экранирования:**
+```xml
+<!-- Простое значение -->
+<R>value1|value2|value3</R>
+
+<!-- Pipe внутри первого значения -->
+<R>path\|to\|file|value2|value3</R>
+<!-- Декодируется как: ["path|to|file", "value2", "value3"] -->
+
+<!-- Backslash внутри значения -->
+<R>C:\\Windows\\System32|value2</R>
+<!-- Декодируется как: ["C:\Windows\System32", "value2"] -->
+
+<!-- Комбинация pipe и backslash -->
+<R>C:\\path\|to\|file|value2</R>
+<!-- Декодируется как: ["C:\path|to|file", "value2"] -->
+```
 
 ### Query (TDTQL)
 

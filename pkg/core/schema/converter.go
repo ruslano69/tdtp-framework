@@ -143,8 +143,9 @@ func (c *Converter) parseDecimal(tv *TypedValue, field FieldDef) (*TypedValue, e
 
 // parseText парсит TEXT/VARCHAR/STRING
 func (c *Converter) parseText(tv *TypedValue, field FieldDef) (*TypedValue, error) {
-	// Декодируем экранированный разделитель
-	val := strings.ReplaceAll(tv.RawValue, "&#124;", "|")
+	// Экранирование разделителя уже обработано Parser.GetRowValues()
+	// который декодирует \| → | и \\ → \
+	val := tv.RawValue
 
 	// Проверка длины
 	if field.Length > 0 && len(val) > field.Length {
@@ -256,8 +257,9 @@ func (c *Converter) FormatValue(tv *TypedValue) string {
 		}
 	case TypeText:
 		if tv.StringValue != nil {
-			// Экранируем разделитель
-			return strings.ReplaceAll(*tv.StringValue, "|", "&#124;")
+			// Экранирование разделителя выполняется Generator.escapeValue()
+			// Здесь возвращаем значение как есть
+			return *tv.StringValue
 		}
 	case TypeBoolean:
 		if tv.BoolValue != nil {
