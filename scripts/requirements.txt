@@ -1,0 +1,2 @@
+# Python dependencies for TDTP Framework scripts
+PyYAML>=6.0.1
