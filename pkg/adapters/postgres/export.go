@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -433,4 +435,126 @@ func parseRow(rowValue string) []string {
 
 	values = append(values, current)
 	return values
+}
+
+// ExportTableIncremental экспортирует только измененные записи с момента последней синхронизации
+// Реализует интерфейс adapters.Adapter
+func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, incrementalConfig adapters.IncrementalConfig) ([]*packet.DataPacket, string, error) {
+	// Валидация конфигурации
+	if err := incrementalConfig.Validate(); err != nil {
+		return nil, "", fmt.Errorf("invalid incremental config: %w", err)
+	}
+
+	// Получаем схему
+	pkgSchema, err := a.GetTableSchema(ctx, tableName)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Проверяем что tracking field существует в схеме
+	trackingFieldExists := false
+	var trackingFieldIndex int
+	for i, field := range pkgSchema.Fields {
+		if field.Name == incrementalConfig.TrackingField {
+			trackingFieldExists = true
+			trackingFieldIndex = i
+			break
+		}
+	}
+
+	if !trackingFieldExists {
+		return nil, "", fmt.Errorf("tracking field '%s' not found in table schema", incrementalConfig.TrackingField)
+	}
+
+	// Формируем SQL запрос с WHERE условием для инкрементальной выгрузки
+	quotedTable := QuoteIdentifier(tableName)
+	if a.schema != "public" {
+		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
+	}
+
+	quotedTrackingField := QuoteIdentifier(incrementalConfig.TrackingField)
+
+	var query string
+	if incrementalConfig.InitialValue != "" {
+		// Есть checkpoint - загружаем только новые записи
+		query = fmt.Sprintf(
+			"SELECT * FROM %s WHERE %s > $1 ORDER BY %s %s",
+			quotedTable,
+			quotedTrackingField,
+			quotedTrackingField,
+			incrementalConfig.OrderBy,
+		)
+
+		// Добавляем LIMIT если указан BatchSize
+		if incrementalConfig.BatchSize > 0 {
+			query += fmt.Sprintf(" LIMIT %d", incrementalConfig.BatchSize)
+		}
+	} else {
+		// Первая синхронизация - загружаем все записи (или с InitialValue)
+		query = fmt.Sprintf(
+			"SELECT * FROM %s ORDER BY %s %s",
+			quotedTable,
+			quotedTrackingField,
+			incrementalConfig.OrderBy,
+		)
+
+		if incrementalConfig.BatchSize > 0 {
+			query += fmt.Sprintf(" LIMIT %d", incrementalConfig.BatchSize)
+		}
+	}
+
+	// Выполняем запрос
+	var rows pgx.Rows
+	if incrementalConfig.InitialValue != "" {
+		rows, err = a.pool.Query(ctx, query, incrementalConfig.InitialValue)
+	} else {
+		rows, err = a.pool.Query(ctx, query)
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read incremental data: %w", err)
+	}
+	defer rows.Close()
+
+	// Собираем данные
+	var dataRows [][]string
+	var lastTrackingValue string
+
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Конвертируем значения в строки TDTP формата
+		rowData := make([]string, len(values))
+		for i, val := range values {
+			rawValue := a.pgValueToRawString(val)
+			rowData[i] = a.convertValueToTDTP(pkgSchema.Fields[i], rawValue)
+
+			// Сохраняем последнее значение tracking поля
+			if i == trackingFieldIndex {
+				lastTrackingValue = rowData[i]
+			}
+		}
+
+		dataRows = append(dataRows, rowData)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("error reading rows: %w", err)
+	}
+
+	// Если нет данных, возвращаем пустой результат
+	if len(dataRows) == 0 {
+		return []*packet.DataPacket{}, incrementalConfig.InitialValue, nil
+	}
+
+	// Генерируем пакеты
+	generator := packet.NewGenerator()
+	packets, err := generator.GenerateReference(tableName, pkgSchema, dataRows)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate packets: %w", err)
+	}
+
+	return packets, lastTrackingValue, nil
 }

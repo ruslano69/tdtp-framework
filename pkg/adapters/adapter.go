@@ -5,7 +5,11 @@ import (
 	"time"
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/sync"
 )
+
+// Type aliases для удобства
+type IncrementalConfig = sync.IncrementalConfig
 
 // Config - универсальная конфигурация подключения к БД
 type Config struct {
@@ -96,6 +100,15 @@ type Adapter interface {
 		query *packet.Query,
 		sender, recipient string,
 	) ([]*packet.DataPacket, error)
+
+	// ExportTableIncremental экспортирует только измененные записи с момента последней синхронизации
+	// Использует IncrementalConfig для отслеживания изменений
+	// Возвращает пакеты и последнее значение tracking поля для следующей синхронизации
+	ExportTableIncremental(
+		ctx context.Context,
+		tableName string,
+		incrementalConfig IncrementalConfig,
+	) ([]*packet.DataPacket, string, error)
 
 	// ========== Import ==========
 

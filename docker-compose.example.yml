@@ -1,0 +1,84 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tdtp-postgres
+    environment:
+      POSTGRES_USER: tdtp
+      POSTGRES_PASSWORD: tdtp_password
+      POSTGRES_DB: tdtp_db
+    ports:
+    - 5432:5432
+    volumes:
+    - postgres-data:/var/lib/postgresql/data
+    networks:
+    - tdtp-network
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U tdtp
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  mysql:
+    image: mysql:8.0
+    container_name: tdtp-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: tdtp_db
+      MYSQL_USER: tdtp
+      MYSQL_PASSWORD: tdtp_password
+    ports:
+    - 3306:3306
+    volumes:
+    - mysql-data:/var/lib/mysql
+    networks:
+    - tdtp-network
+    healthcheck:
+      test:
+      - CMD
+      - mysqladmin
+      - ping
+      - -h
+      - localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: tdtp-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: tdtp
+      RABBITMQ_DEFAULT_PASS: tdtp_password
+    ports:
+    - 5672:5672
+    - 15672:15672
+    volumes:
+    - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+    - tdtp-network
+    healthcheck:
+      test:
+      - CMD
+      - rabbitmq-diagnostics
+      - -q
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  adminer:
+    image: adminer:latest
+    container_name: tdtp-adminer
+    ports:
+    - 8080:8080
+    networks:
+    - tdtp-network
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+networks:
+  tdtp-network:
+    driver: bridge
+volumes:
+  postgres-data:
+  mysql-data:
+  rabbitmq-data:

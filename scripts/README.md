@@ -388,5 +388,173 @@ SELECT username, balance FROM users WHERE balance > 5000.00;
 
 ---
 
+## docker-compose-generator.py
+
+Генератор docker-compose.yml файлов для быстрого развертывания тестового окружения с базами данных и брокерами сообщений.
+
+### Зачем?
+
+- **Быстрое развертывание** - одна команда для создания окружения
+- **Гибкая конфигурация** - выбирайте только нужные компоненты
+- **Интерактивный режим** - удобный CLI с подсказками
+- **Healthcheck для всех сервисов** - автоматическая проверка готовности
+- **Production-ready** - правильные настройки для разработки и тестирования
+
+### Требования
+
+```bash
+pip install -r scripts/requirements.txt
+# или
+pip install PyYAML>=6.0.1
+```
+
+### Использование
+
+#### Интерактивный режим (рекомендуется)
+
+```bash
+python3 scripts/docker-compose-generator.py
+```
+
+Вы увидите интерактивное меню для выбора компонентов.
+
+#### Режим с аргументами
+
+```bash
+# Базовая конфигурация
+python3 scripts/docker-compose-generator.py --postgres --rabbitmq
+
+# Все компоненты
+python3 scripts/docker-compose-generator.py --all
+
+# Пользовательское имя файла
+python3 scripts/docker-compose-generator.py --postgres --mysql -o my-compose.yml
+
+# Помощь
+python3 scripts/docker-compose-generator.py --help
+```
+
+### Доступные компоненты
+
+**Базы данных:**
+- `--postgres` - PostgreSQL 16 (порт 5432)
+- `--mysql` - MySQL 8.0 (порт 3306)
+- `--mssql` - Microsoft SQL Server 2022 (порт 1433)
+
+**Брокеры сообщений:**
+- `--rabbitmq` - RabbitMQ 3.12 + Management UI (порты 5672, 15672)
+- `--kafka` - Apache Kafka 7.5 + Zookeeper (порт 9092)
+
+**UI инструменты:**
+- `--pgadmin` - pgAdmin 4 для PostgreSQL (порт 5050)
+- `--adminer` - Adminer для всех БД (порт 8080)
+- `--kafka-ui` - Kafka UI (порт 8081)
+
+### Примеры
+
+**1. Разработка с PostgreSQL + RabbitMQ:**
+```bash
+python3 scripts/docker-compose-generator.py --postgres --rabbitmq --adminer
+docker-compose up -d
+```
+
+**2. Тестирование миграции между БД:**
+```bash
+python3 scripts/docker-compose-generator.py --postgres --mysql --mssql
+docker-compose up -d
+```
+
+**3. Kafka окружение:**
+```bash
+python3 scripts/docker-compose-generator.py --postgres --kafka --kafka-ui
+docker-compose up -d
+```
+
+### Доступ к сервисам
+
+После запуска `docker-compose up -d`:
+
+**PostgreSQL:**
+```
+Host: localhost:5432
+User: tdtp
+Password: tdtp_password
+Database: tdtp_db
+```
+
+**MySQL:**
+```
+Host: localhost:3306
+User: tdtp
+Password: tdtp_password
+Database: tdtp_db
+```
+
+**RabbitMQ:**
+```
+AMQP: localhost:5672
+Management UI: http://localhost:15672
+User: tdtp / tdtp_password
+```
+
+**Adminer:** http://localhost:8080
+
+**Kafka:** localhost:9092
+
+### Пример подключения из Go
+
+```go
+import "github.com/queuebridge/tdtp/pkg/adapters/postgres"
+
+config := postgres.Config{
+    Host:     "localhost",
+    Port:     5432,
+    User:     "tdtp",
+    Password: "tdtp_password",
+    Database: "tdtp_db",
+    SSLMode:  "disable",
+}
+
+adapter, err := postgres.NewAdapter(config)
+```
+
+### CI/CD интеграция
+
+```yaml
+# .github/workflows/test.yml
+- name: Setup test environment
+  run: |
+    python3 scripts/docker-compose-generator.py --postgres --rabbitmq
+    docker-compose up -d
+    timeout 60 bash -c 'until docker-compose ps | grep healthy; do sleep 2; done'
+
+- name: Run tests
+  run: go test ./...
+
+- name: Cleanup
+  run: docker-compose down -v
+```
+
+### Управление окружением
+
+```bash
+# Запустить все сервисы
+docker-compose up -d
+
+# Проверить статус
+docker-compose ps
+
+# Посмотреть логи
+docker-compose logs -f postgres
+
+# Остановить
+docker-compose down
+
+# Удалить все данные
+docker-compose down -v
+```
+
+---
+
 *Версия: 1.0*
 *Совместимость: TDTP v0.6+*
