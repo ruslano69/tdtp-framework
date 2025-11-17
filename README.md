@@ -133,6 +133,16 @@
 - FieldNormalizer: Email, phone, date normalization
 - Processor chain for complex transformations
 
+**XLSX Converter (pkg/xlsx):** 🍒 **NEW!**
+- TDTP → XLSX export (Database → Excel for business analysis)
+- XLSX → TDTP import (Excel → Database bulk loading)
+- Type preservation (INTEGER, REAL, BOOLEAN, DATE, DATETIME, etc.)
+- Formatted headers with field types and primary keys
+- Auto-formatting (numbers, dates, booleans)
+- Business-friendly interface (no SQL knowledge required)
+- Round-trip data integrity
+- **Instant business value** - work with data in familiar Excel interface
+
 ### ✅ CLI Utility (tdtpcli)
 
 **Commands:**
@@ -190,6 +200,7 @@ tdtp-framework/
 │  ├─ 01-basic-export/   ✅ PostgreSQL → JSON export
 │  ├─ 02-rabbitmq-mssql/ ✅ MSSQL → RabbitMQ integration (Circuit Breaker + Audit)
 │  ├─ 03-incremental-sync/✅ PostgreSQL → MySQL incremental sync
+│  ├─ 04-tdtp-xlsx/      ✅ Database ↔ Excel converter 🍒 (instant business value!)
 │  ├─ 04-audit-masking/  ✅ Compliance: Audit logging + PII masking
 │  ├─ 05-circuit-breaker/✅ API resilience patterns
 │  └─ 06-etl-pipeline/   ✅ Complete ETL pipeline
@@ -207,6 +218,11 @@ tdtp-framework/
 **Начните с готовых production-ready примеров:**
 
 ```bash
+# Database ↔ Excel converter (instant business value!) 🍒
+cd examples/04-tdtp-xlsx
+go run main.go
+# Генерирует: ./output/orders.xlsx - готов для работы в Excel!
+
 # RabbitMQ + MSSQL integration (Circuit Breaker, Audit, Retry)
 cd examples/02-rabbitmq-mssql
 go run main.go

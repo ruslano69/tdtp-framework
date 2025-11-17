@@ -114,6 +114,50 @@ go run main.go
 
 ---
 
+### [04. TDTP ↔ XLSX Converter](./04-tdtp-xlsx/) 🍒
+**Сложность**: ⭐ Начинающий
+**Время**: 5 минут
+
+**Мгновенный профит для бизнеса** - конвертация между базой данных и Excel.
+
+**Что демонстрирует**:
+- ✅ TDTP → XLSX export (Database → Excel для анализа)
+- ✅ XLSX → TDTP import (Excel → Database загрузка)
+- ✅ Type preservation (INTEGER, REAL, BOOLEAN, DATE, etc.)
+- ✅ Formatted headers (field types + primary keys)
+- ✅ Auto-formatting (numbers, dates, booleans)
+- ✅ Round-trip data integrity
+
+**Когда использовать**:
+- Business users работают с данными в Excel
+- Экспорт отчетов из БД для анализа
+- Импорт данных из Excel без SQL знаний
+- Master data management в Excel
+- Data validation и corrections
+- **Любой сценарий где нужен Excel** 📊
+
+**Бизнес-ценность**:
+- Не нужно знать SQL - работайте в Excel
+- Мгновенный экспорт для анализа
+- Bulk loading через Excel
+- Знакомый интерфейс для всех
+- Zero training required
+
+```bash
+cd 04-tdtp-xlsx
+go run main.go
+# Generates: ./output/orders.xlsx (ready for Excel!)
+```
+
+**Пример Excel файла:**
+```
+order_id (INTEGER) * | customer (TEXT) | product (TEXT) | quantity (INTEGER) | ...
+1001                 | ACME Corp       | Laptop         | 5                  | ...
+1002                 | Tech Solutions  | Monitor        | 10                 | ...
+```
+
+---
+
 ### [04. Audit + Data Masking](./04-audit-masking/)
 **Сложность**: ⭐⭐ Средний
 **Время**: 10 минут
@@ -201,6 +245,7 @@ go run main.go
 | 01-basic-export | ⭐ | Adapter | ❌ | Learning, Simple migration |
 | 02-rabbitmq-mssql | ⭐⭐⭐ | Adapter, Broker, Circuit Breaker, Retry, Audit, Processors | ✅ | Message queue integration |
 | 03-incremental-sync | ⭐⭐ | Adapter, IncrementalSync, StateManager | ✅ | Database replication |
+| 04-tdtp-xlsx 🍒 | ⭐ | XLSX Converter | ✅ | Business reports, Excel integration |
 | 04-audit-masking | ⭐⭐ | Audit, Processors | ✅ | Compliance, Data privacy |
 | 05-circuit-breaker | ⭐⭐ | Circuit Breaker | ✅ | API resilience |
 | 06-etl-pipeline | ⭐⭐⭐⭐ | All components | ✅ | Enterprise ETL |
@@ -239,6 +284,7 @@ go run main.go
 - **Изучить фреймворк** → [01-basic-export](./01-basic-export/)
 - **Интеграция с RabbitMQ/MSSQL** → [02-rabbitmq-mssql](./02-rabbitmq-mssql/) 🔥
 - **Синхронизировать большие таблицы** → [03-incremental-sync](./03-incremental-sync/)
+- **Работать с данными в Excel** → [04-tdtp-xlsx](./04-tdtp-xlsx/) 🍒
 - **GDPR compliance** → [04-audit-masking](./04-audit-masking/)
 - **Защитить API от сбоев** → [05-circuit-breaker](./05-circuit-breaker/)
 - **Полноценный ETL** → [06-etl-pipeline](./06-etl-pipeline/)
