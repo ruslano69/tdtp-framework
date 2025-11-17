@@ -5,10 +5,189 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/queuebridge/tdtp/cmd/tdtpcli/commands"
 	"github.com/queuebridge/tdtp/pkg/adapters"
+	"github.com/queuebridge/tdtp/pkg/audit"
+	"github.com/queuebridge/tdtp/pkg/core/packet"
 )
+
+// routeCommand routes the command to the appropriate handler with production features
+func routeCommand(
+	ctx context.Context,
+	flags *Flags,
+	config *Config,
+	adapterConfig adapters.Config,
+	query *packet.Query,
+	prodFeatures *ProductionFeatures,
+) error {
+	startTime := time.Now()
+	var err error
+	var operation audit.Operation
+	var metadata map[string]string
+
+	// Database commands
+	if *flags.List {
+		operation = audit.OpQuery
+		metadata = map[string]string{"command": "list"}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "list-tables", func() error {
+			return commands.ListTables(ctx, adapterConfig)
+		})
+
+	} else if *flags.Export != "" {
+		operation = audit.OpExport
+		metadata = map[string]string{
+			"command": "export",
+			"table":   *flags.Export,
+			"output":  determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
+			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
+				TableName:  *flags.Export,
+				OutputFile: determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
+				Query:      query,
+			})
+		})
+
+	} else if *flags.Import != "" {
+		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
+		if stratErr != nil {
+			return stratErr
+		}
+
+		operation = audit.OpImport
+		metadata = map[string]string{
+			"command":  "import",
+			"file":     *flags.Import,
+			"strategy": *flags.Strategy,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
+			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
+				FilePath: *flags.Import,
+				Strategy: strategy,
+			})
+		})
+
+	// XLSX commands
+	} else if *flags.ToXLSX != "" {
+		operation = audit.OpTransform
+		metadata = map[string]string{
+			"command": "to-xlsx",
+			"input":   *flags.ToXLSX,
+			"output":  determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-xlsx", func() error {
+			return commands.ConvertTDTPToXLSX(commands.XLSXOptions{
+				InputFile:  *flags.ToXLSX,
+				OutputFile: determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
+				SheetName:  *flags.Sheet,
+			})
+		})
+
+	} else if *flags.FromXLSX != "" {
+		operation = audit.OpTransform
+		metadata = map[string]string{
+			"command": "from-xlsx",
+			"input":   *flags.FromXLSX,
+			"output":  determineOutputFile(*flags.Output, *flags.FromXLSX, "tdtp.xml"),
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "xlsx-to-tdtp", func() error {
+			return commands.ConvertXLSXToTDTP(commands.XLSXOptions{
+				InputFile:  *flags.FromXLSX,
+				OutputFile: determineOutputFile(*flags.Output, *flags.FromXLSX, "tdtp.xml"),
+				SheetName:  *flags.Sheet,
+			})
+		})
+
+	} else if *flags.ExportXLSX != "" {
+		operation = audit.OpExport
+		metadata = map[string]string{
+			"command": "export-xlsx",
+			"table":   *flags.ExportXLSX,
+			"output":  determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "export-table-to-xlsx", func() error {
+			return commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
+				TableName:  *flags.ExportXLSX,
+				OutputFile: determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
+				SheetName:  *flags.Sheet,
+				Query:      query,
+			})
+		})
+
+	} else if *flags.ImportXLSX != "" {
+		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
+		if stratErr != nil {
+			return stratErr
+		}
+
+		operation = audit.OpImport
+		metadata = map[string]string{
+			"command":  "import-xlsx",
+			"file":     *flags.ImportXLSX,
+			"strategy": *flags.Strategy,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "import-xlsx-to-table", func() error {
+			return commands.ImportXLSXToTable(ctx, adapterConfig, commands.XLSXOptions{
+				InputFile: *flags.ImportXLSX,
+				SheetName: *flags.Sheet,
+				Strategy:  strategy,
+			})
+		})
+
+	// Broker commands
+	} else if *flags.ExportBroker != "" {
+		brokerCfg := buildBrokerConfig(config)
+
+		operation = audit.OpExport
+		metadata = map[string]string{
+			"command": "export-broker",
+			"table":   *flags.ExportBroker,
+			"broker":  brokerCfg.Type,
+			"queue":   brokerCfg.Queue,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
+			return commands.ExportToBroker(ctx, adapterConfig, brokerCfg, *flags.ExportBroker, query)
+		})
+
+	} else if *flags.ImportBroker {
+		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
+		if stratErr != nil {
+			return stratErr
+		}
+
+		brokerCfg := buildBrokerConfig(config)
+
+		operation = audit.OpImport
+		metadata = map[string]string{
+			"command":  "import-broker",
+			"broker":   brokerCfg.Type,
+			"queue":    brokerCfg.Queue,
+			"strategy": *flags.Strategy,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
+			return commands.ImportFromBroker(ctx, adapterConfig, brokerCfg, strategy)
+		})
+	}
+
+	// Log operation result with metadata
+	if metadata != nil {
+		metadata["duration_ms"] = fmt.Sprintf("%d", time.Since(startTime).Milliseconds())
+		prodFeatures.LogWithMetadata(ctx, operation, err == nil, err, metadata)
+	}
+
+	return err
+}
 
 func main() {
 	ctx := context.Background()
@@ -52,6 +231,13 @@ func main() {
 		fatal("Failed to load config: %v", err)
 	}
 
+	// Initialize production features (Circuit Breaker, Audit, Retry)
+	prodFeatures, err := InitProductionFeatures(config)
+	if err != nil {
+		fatal("Failed to initialize production features: %v", err)
+	}
+	defer prodFeatures.Close()
+
 	// Build adapter config
 	adapterConfig := adapters.Config{
 		Type: config.Database.Type,
@@ -64,75 +250,8 @@ func main() {
 		fatal("Failed to build query: %v", err)
 	}
 
-	// Route commands
-	var cmdErr error
-
-	// Database commands
-	if *flags.List {
-		cmdErr = commands.ListTables(ctx, adapterConfig)
-	} else if *flags.Export != "" {
-		cmdErr = commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
-			TableName:  *flags.Export,
-			OutputFile: determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
-			Query:      query,
-		})
-	} else if *flags.Import != "" {
-		strategy, err := commands.ParseImportStrategy(*flags.Strategy)
-		if err != nil {
-			fatal("Invalid strategy: %v", err)
-		}
-		cmdErr = commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
-			FilePath: *flags.Import,
-			Strategy: strategy,
-		})
-	}
-
-	// XLSX commands
-	if *flags.ToXLSX != "" {
-		cmdErr = commands.ConvertTDTPToXLSX(commands.XLSXOptions{
-			InputFile:  *flags.ToXLSX,
-			OutputFile: determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
-			SheetName:  *flags.Sheet,
-		})
-	} else if *flags.FromXLSX != "" {
-		cmdErr = commands.ConvertXLSXToTDTP(commands.XLSXOptions{
-			InputFile:  *flags.FromXLSX,
-			OutputFile: determineOutputFile(*flags.Output, *flags.FromXLSX, "tdtp.xml"),
-			SheetName:  *flags.Sheet,
-		})
-	} else if *flags.ExportXLSX != "" {
-		cmdErr = commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
-			TableName:  *flags.ExportXLSX,
-			OutputFile: determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
-			SheetName:  *flags.Sheet,
-			Query:      query,
-		})
-	} else if *flags.ImportXLSX != "" {
-		strategy, err := commands.ParseImportStrategy(*flags.Strategy)
-		if err != nil {
-			fatal("Invalid strategy: %v", err)
-		}
-		cmdErr = commands.ImportXLSXToTable(ctx, adapterConfig, commands.XLSXOptions{
-			InputFile: *flags.ImportXLSX,
-			SheetName: *flags.Sheet,
-			Strategy:  strategy,
-		})
-	}
-
-	// Broker commands
-	if *flags.ExportBroker != "" {
-		brokerCfg := buildBrokerConfig(config)
-		cmdErr = commands.ExportToBroker(ctx, adapterConfig, brokerCfg, *flags.ExportBroker, query)
-	} else if *flags.ImportBroker {
-		strategy, err := commands.ParseImportStrategy(*flags.Strategy)
-		if err != nil {
-			fatal("Invalid strategy: %v", err)
-		}
-		brokerCfg := buildBrokerConfig(config)
-		cmdErr = commands.ImportFromBroker(ctx, adapterConfig, brokerCfg, strategy)
-	}
-
-	// Note: Incremental sync will be implemented in Phase 6
+	// Route commands with production features
+	cmdErr := routeCommand(ctx, flags, config, adapterConfig, query, prodFeatures)
 
 	// Handle errors
 	if cmdErr != nil {
