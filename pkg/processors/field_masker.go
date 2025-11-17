@@ -15,7 +15,7 @@ type MaskPattern string
 const (
 	// MaskPartial маскирует среднюю часть (email: j***@example.com)
 	MaskPartial MaskPattern = "partial"
-	// MaskMiddle маскирует середину (phone: +7(999)XXX-XX-67)
+	// MaskMiddle маскирует середину (phone: +1 (555) XXX-X567)
 	MaskMiddle MaskPattern = "middle"
 	// MaskStars заменяет все на звездочки (**** *****)
 	MaskStars MaskPattern = "stars"
@@ -134,7 +134,7 @@ func (m *FieldMasker) maskPartial(value string) string {
 
 // maskMiddle маскирует среднюю часть, оставляя начало и конец
 // Примеры:
-//   - Phone: +7(999)123-45-67 → +7(999)XXX-XX-67
+//   - Phone: +1 (555) 123-4567 → +1 (555) XXX-X567
 //   - Card: 1234 5678 9012 3456 → 1234 XXXX XXXX 3456
 func (m *FieldMasker) maskMiddle(value string) string {
 	// Убираем все не-цифры для определения длины

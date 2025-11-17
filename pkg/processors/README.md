@@ -40,7 +40,7 @@
 
 **Типы маскирования:**
 - `partial` - маскирует середину (email: j***@example.com)
-- `middle` - маскирует среднюю часть (phone: +7(999)XXX-XX-67)
+- `middle` - маскирует среднюю часть (phone: +1 (555) XXX-X567)
 - `stars` - заменяет всё на звездочки (**** *****)
 - `first2_last2` - показывает только первые 2 и последние 2 символа
 
@@ -52,7 +52,7 @@ processors:
       params:
         fields:
           email: partial           # john@example.com → j***@example.com
-          phone: middle            # +7(999)123-45-67 → +7(999)XXX-XX-67
+          phone: middle            # +1 (555) 123-4567 → +1 (555) XXX-X567
           passport: first2_last2   # 1234 567890 → 12** ****90
           password: stars          # MyPass123 → *********
 ```
@@ -67,7 +67,7 @@ processors:
 Приводит данные к единому формату.
 
 **Правила нормализации:**
-- `phone` - приводит к формату 79991234567
+- `phone` - приводит к международному формату (только цифры)
 - `email` - нижний регистр, без пробелов
 - `whitespace` - убирает лишние пробелы
 - `uppercase` - верхний регистр
@@ -81,7 +81,7 @@ processors:
     - type: field_normalizer
       params:
         fields:
-          phone: phone             # +7 (999) 123-45-67 → 79991234567
+          phone: phone             # +1 (555) 123-4567 → 15551234567
           email: email             # John@EXAMPLE.com → john@example.com
           name: whitespace         # "John   Doe" → "John Doe"
           country_code: uppercase  # "ru" → "RU"
@@ -161,8 +161,8 @@ func main() {
 
     // Применение процессора
     data := [][]string{
-        {"john.doe@example.com", "+7(999)123-45-67"},
-        {"jane.smith@test.com", "+7(999)987-65-43"},
+        {"john.doe@example.com", "+1 (555) 123-4567"},
+        {"jane.smith@test.com", "+1 (555) 987-6543"},
     }
 
     schema := packet.Schema{
@@ -179,8 +179,8 @@ func main() {
 
     // processed:
     // [
-    //   ["j***@example.com", "+7(999)XXX-XX-67"],
-    //   ["j***@test.com", "+7(999)XXX-XX-43"]
+    //   ["j***@example.com", "+1 (555) XXX-X567"],
+    //   ["j***@test.com", "+1 (555) XXX-X543"]
     // ]
 }
 ```
@@ -308,7 +308,7 @@ processors:
     - type: field_normalizer
       params:
         fields:
-          phone: phone              # Формат 79991234567
+          phone: phone              # Международный формат (только цифры)
           email: email              # Lowercase
           country_code: uppercase   # ISO 3166-1 alpha-2
           created_at: date          # YYYY-MM-DD

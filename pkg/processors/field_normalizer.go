@@ -117,29 +117,21 @@ func (n *FieldNormalizer) normalizeValue(value string, rule NormalizeRule) (stri
 	}
 }
 
-// normalizePhone приводит телефон к формату 79991234567
+// normalizePhone приводит телефон к международному формату (только цифры)
 // Примеры:
-//   - "+7 (999) 123-45-67" → "79991234567"
-//   - "8(999)123-45-67" → "79991234567"
-//   - "+7-999-123-45-67" → "79991234567"
+//   - "+1 (555) 123-4567" → "15551234567"
+//   - "+44 20 1234 5678" → "442012345678"
+//   - "+1-555-123-4567" → "15551234567"
 func (n *FieldNormalizer) normalizePhone(value string) (string, error) {
 	// Убираем все символы кроме цифр и +
 	cleaned := n.phoneRegex.ReplaceAllString(value, "")
 
-	// Если начинается с +7, убираем +
-	if strings.HasPrefix(cleaned, "+7") {
-		cleaned = "7" + cleaned[2:]
-	}
+	// Если начинается с +, убираем его
+	cleaned = strings.TrimPrefix(cleaned, "+")
 
-	// Если начинается с 8, заменяем на 7
-	if strings.HasPrefix(cleaned, "8") && len(cleaned) == 11 {
-		cleaned = "7" + cleaned[1:]
-	}
-
-	// Проверяем длину
-	if len(cleaned) != 11 || !strings.HasPrefix(cleaned, "7") {
-		// Если это не российский номер, возвращаем как есть
-		return value, nil
+	// Проверяем, что осталось хотя бы 7 цифр (минимальная длина телефона)
+	if len(cleaned) < 7 {
+		return value, fmt.Errorf("phone number too short")
 	}
 
 	return cleaned, nil
