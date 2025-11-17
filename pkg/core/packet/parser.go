@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // Parser отвечает за парсинг TDTP пакетов
@@ -122,34 +123,37 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 // GetRowValues разбивает строку данных на значения полей
 // Обрабатывает экранирование: \| → | и \\ → \
 func (p *Parser) GetRowValues(row Row) []string {
-	values := []string{}
-	current := ""
+	s := row.Value
+	n := len(s)
+
+	// Preallocate: estimate ~10 fields avg
+	values := make([]string, 0, 10)
+	var buf strings.Builder
+	buf.Grow(n / 10) // estimate avg field length
+
 	escaped := false
 
-	for _, char := range row.Value {
+	for i := 0; i < n; i++ {
+		char := s[i]
+
 		if escaped {
-			// Предыдущий символ был backslash
-			current += string(char)
+			buf.WriteByte(char)
 			escaped = false
 		} else if char == '\\' {
-			// Начало escape-последовательности
 			escaped = true
 		} else if char == '|' {
-			// Неэкранированный разделитель
-			values = append(values, current)
-			current = ""
+			values = append(values, buf.String())
+			buf.Reset()
 		} else {
-			current += string(char)
+			buf.WriteByte(char)
 		}
 	}
 
-	// Если последний символ был backslash (не экранирующий ничего), добавляем его
+	// Trailing backslash
 	if escaped {
-		current += "\\"
+		buf.WriteByte('\\')
 	}
 
-	// Добавляем последнее значение
-	values = append(values, current)
-
+	values = append(values, buf.String())
 	return values
 }
