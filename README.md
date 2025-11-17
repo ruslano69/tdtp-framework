@@ -81,6 +81,58 @@
 - Transactional queues support
 - Tested with MS SQL adapter
 
+**Kafka:** 🆕 v1.1
+- High-throughput message streaming
+- Producer/Consumer with batching
+- Configurable partitioning
+- Tested with PostgreSQL adapter
+
+### ✅ Resilience & Production Features 🆕 v1.2
+
+**CircuitBreaker (pkg/resilience):**
+- Three states: Closed, Half-Open, Open
+- Automatic recovery with configurable timeout
+- Concurrent call limiting
+- Success threshold for recovery
+- State change callbacks
+- Custom trip logic
+- Circuit Breaker groups
+- 13 comprehensive tests
+
+**AuditLogger (pkg/audit):**
+- Multiple appenders: File, Database, Console
+- Three logging levels: Minimal, Standard, Full (GDPR compliance)
+- Async/Sync modes with configurable buffering
+- File rotation with size limits and backups
+- Database storage with SQL support (batch inserts)
+- Query, filter, and cleanup operations
+- Builder pattern for fluent entry creation
+- Thread-safe concurrent operations
+- GDPR/HIPAA/SOX compliance features
+- 17 comprehensive tests
+
+**Retry Mechanism (pkg/retry):**
+- Three backoff strategies: Constant, Linear, Exponential
+- Jitter support to prevent thundering herd
+- Configurable retryable errors
+- Context-aware cancellation
+- OnRetry callbacks for monitoring
+- Dead Letter Queue (DLQ) support
+- 20 comprehensive tests
+
+**IncrementalSync (pkg/sync):**
+- StateManager with checkpoint tracking
+- Three tracking strategies: Timestamp, Sequence, Version
+- Batch processing with configurable sizes
+- Resume from last checkpoint
+- 200x faster for large tables
+
+**Data Processors (pkg/processor):**
+- FieldMasker: Email, phone, card masking (GDPR/PII)
+- FieldValidator: Regex, range, format validation
+- FieldNormalizer: Email, phone, date normalization
+- Processor chain for complex transformations
+
 ### ✅ CLI Utility (tdtpcli)
 
 **Commands:**
@@ -134,11 +186,13 @@ tdtp-framework/
 │  ├─ SQLITE_ADAPTER.md  ✅ Документация SQLite
 │  └─ ...                ✅ Прочие документы
 │
-├─ examples/
-│  ├─ basic/             ✅ Packet примеры
-│  ├─ schema/            ✅ Schema примеры
-│  ├─ tdtql/             ✅ TDTQL примеры
-│  └─ sqlite/            ✅ SQLite adapter примеры
+├─ examples/             🆕 Production-ready examples
+│  ├─ 01-basic-export/   ✅ PostgreSQL → JSON export
+│  ├─ 02-rabbitmq-mssql/ ✅ MSSQL → RabbitMQ integration (Circuit Breaker + Audit)
+│  ├─ 03-incremental-sync/✅ PostgreSQL → MySQL incremental sync
+│  ├─ 04-audit-masking/  ✅ Compliance: Audit logging + PII masking
+│  ├─ 05-circuit-breaker/✅ API resilience patterns
+│  └─ 06-etl-pipeline/   ✅ Complete ETL pipeline
 │
 └─ scripts/              ✅ Вспомогательные скрипты
    ├─ create_sqlite_test_db.py
@@ -147,6 +201,26 @@ tdtp-framework/
 ```
 
 ## 🚀 Быстрый старт
+
+### Примеры
+
+**Начните с готовых production-ready примеров:**
+
+```bash
+# RabbitMQ + MSSQL integration (Circuit Breaker, Audit, Retry)
+cd examples/02-rabbitmq-mssql
+go run main.go
+
+# Incremental Sync (200x faster for large tables)
+cd examples/03-incremental-sync
+go run main.go
+
+# См. все примеры с описанием
+cd examples
+cat README.md
+```
+
+**Полная документация примеров**: [examples/README.md](./examples/README.md)
 
 ### Установка
 
