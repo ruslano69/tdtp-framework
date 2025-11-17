@@ -42,11 +42,18 @@
   - [x] Stars masking (passwords)
   - [x] First2Last2 masking (passports, cards)
 - [x] **FieldNormalizer** - нормализация данных
-  - [x] Phone normalization (79991234567)
+  - [x] Phone normalization (international format)
   - [x] Email normalization (lowercase)
   - [x] Whitespace cleanup
   - [x] Date normalization (YYYY-MM-DD)
   - [x] Case conversion (upper/lower)
+- [x] **FieldValidator** - валидация данных
+  - [x] Regex validation
+  - [x] Range validation (numbers)
+  - [x] Enum validation (allowed values)
+  - [x] Required field validation
+  - [x] Length validation (strings)
+  - [x] Format validation (email, phone, url, date)
 - [ ] Integration with adapters (ExportTableWithProcessors/ImportPacketWithProcessors)
 - [ ] Configuration support in config.yaml
 - [ ] Unit tests for all processors
@@ -62,22 +69,6 @@
 ## 📋 Planned Features
 
 ### v1.2 - Advanced Processors
-
-#### Validation Processor
-```yaml
-- type: field_validator
-  params:
-    rules:
-      email: "^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
-      age: "range:0-150"
-      status: "enum:active,inactive,pending"
-      phone: "phone_format"
-```
-
-**Use cases:**
-- Pre-export data quality checks
-- Post-import data validation
-- Preventing invalid data propagation
 
 #### Enricher Processor
 ```yaml

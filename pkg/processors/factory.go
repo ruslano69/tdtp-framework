@@ -27,6 +27,10 @@ func NewFactory() *Factory {
 		return NewFieldNormalizerFromConfig(params)
 	})
 
+	f.Register("field_validator", func(params map[string]interface{}) (Processor, error) {
+		return NewFieldValidatorFromConfig(params)
+	})
+
 	return f
 }
 
