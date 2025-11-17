@@ -1,0 +1,39 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+/bin/
+/cmd/tdtpcli/tdtpcli
+/cmd/tdtpcli/tdtpcli.exe
+tdtpcli
+
+# Test databases
+*.db
+*.db-journal
+test_*.sqlite
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (keeping in repo but can exclude if needed)
+# /docs/
+# *.md
+# !README.md
+
+# Go
+vendor/
+# go.sum should be committed for reproducible builds
+
+# Build artifacts
+dist/
+*.tar.gz
+*.zip

@@ -1,0 +1,99 @@
+# Docker Compose для MS SQL Server testing
+# Версия: 1.0
+# Дата: 16.11.2025
+
+version: '3.8'
+
+services:
+  # Development контейнер - SQL Server 2019 с современными функциями
+  mssql-dev:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: tdtp-mssql-dev
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: DevPassword123!
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_dev_data:/var/opt/mssql
+      - ./scripts/mssql/init-dev.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P DevPassword123! -C -Q "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Production Simulation - SQL Server 2019 в SQL Server 2012 compatibility mode
+  # КРИТИЧНО для тестирования перед деплоем в production
+  mssql-prod-sim:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: tdtp-mssql-prod-sim
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: ProdPassword123!
+      MSSQL_PID: Developer
+    ports:
+      - "1434:1433"
+    volumes:
+      - mssql_prod_data:/var/opt/mssql
+      - ./scripts/mssql/init-prod.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P ProdPassword123! -C -Q "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # SQL Server 2022 - для тестирования на самой новой версии
+  mssql-2022:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: tdtp-mssql-2022
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: SQL2022Pass123!
+      MSSQL_PID: Developer
+    ports:
+      - "1435:1433"
+    volumes:
+      - mssql_2022_data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P SQL2022Pass123! -C -Q "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  mssql_dev_data:
+    driver: local
+  mssql_prod_data:
+    driver: local
+  mssql_2022_data:
+    driver: local
+
+# Usage:
+#
+# Start all containers:
+#   docker-compose -f docker-compose.mssql.yml up -d
+#
+# Start only prod simulation (для pre-commit тестов):
+#   docker-compose -f docker-compose.mssql.yml up -d mssql-prod-sim
+#
+# Stop all:
+#   docker-compose -f docker-compose.mssql.yml down
+#
+# Remove volumes (clean restart):
+#   docker-compose -f docker-compose.mssql.yml down -v
+#
+# Connection strings:
+#
+# Development:
+#   server=localhost,1433;user id=sa;password=DevPassword123!;database=DevDB
+#
+# Production Simulation (SQL Server 2012 compatibility):
+#   server=localhost,1434;user id=sa;password=ProdPassword123!;database=ProdSimDB
+#
+# SQL Server 2022:
+#   server=localhost,1435;user id=sa;password=SQL2022Pass123!;database=master

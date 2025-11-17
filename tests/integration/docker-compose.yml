@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # RabbitMQ для message broker тестов
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: tdtp-rabbitmq-test
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: tdtp_test
+      RABBITMQ_DEFAULT_PASS: tdtp_test_password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tdtp-test-network
+
+  # MS SQL Server 2019 для тестов
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: tdtp-mssql-test
+    ports:
+      - "1433:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_PID: "Developer"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tdtp-test-network
+
+  # PostgreSQL для тестов (опционально)
+  postgres:
+    image: postgres:16
+    container_name: tdtp-postgres-test
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tdtp_test
+      POSTGRES_PASSWORD: tdtp_test_password
+      POSTGRES_DB: tdtp_test_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tdtp_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tdtp-test-network
+
+networks:
+  tdtp-test-network:
+    driver: bridge
