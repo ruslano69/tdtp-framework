@@ -72,6 +72,18 @@ See "Completed (v1.0)" section above
   - [x] Автоматическая генерация volumes и networks
   - [x] Документация и примеры
 
+#### Resilience & Production Readiness 🆕
+- [x] **CircuitBreaker** - защита от каскадных сбоев
+  - [x] 3 состояния (Closed, Half-Open, Open)
+  - [x] Automatic recovery с timeout
+  - [x] Concurrent call limiting
+  - [x] Success threshold для восстановления
+  - [x] State change callbacks
+  - [x] Custom trip logic
+  - [x] Circuit Breaker groups
+  - [x] Comprehensive tests (13 tests passing)
+  - [x] Complete documentation
+
 ## 🚧 In Progress (v1.2)
 
 ### Data Processors

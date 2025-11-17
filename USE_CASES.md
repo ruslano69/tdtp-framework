@@ -1,11 +1,11 @@
 # TDTP Framework - Use Cases & Integration Strategies
 
-## 📊 Текущий статус покрытия (v1.1)
+## 📊 Текущий статус покрытия (v1.2)
 
-| Use Case | Покрытие v1.0 | Покрытие v1.1 | Прогресс |
+| Use Case | Покрытие v1.0 | Покрытие v1.2 | Прогресс |
 |----------|---------------|---------------|----------|
 | Database Migration | 60% | **85%** ✅ | +25% |
-| Real-time Integration | 50% | **70%** ✅ | +20% |
+| Real-time Integration | 50% | **85%** ✅ | +35% |
 | ETL/ELT Pipelines | 40% | **70%** ✅ | +30% |
 | Data Replication | 30% | **55%** ✅ | +25% |
 | Compliance & Privacy | 40% | 40% | - |
@@ -17,7 +17,10 @@
 - ✅ Kafka Adapter (pkg/brokers/kafka.go) - High-throughput messaging
 - ✅ Docker Compose Generator - One-command environment setup
 
-**Общее покрытие:** 45% → **62%** (+17%)
+**Ключевые достижения v1.2:**
+- ✅ CircuitBreaker (pkg/resilience) - Protection against cascading failures
+
+**Общее покрытие:** 45% → **65%** (+20%)
 
 ---
 
@@ -56,10 +59,10 @@
 - ✅ Data masking для безопасности (FieldMasker)
 - ✅ **Retry mechanism** с exponential backoff - pkg/retry (3 стратегии)
 - ✅ **Dead Letter Queue** (DLQ) для проблемных сообщений - pkg/retry/dlq.go
+- ✅ **Circuit Breaker** при недоступности - pkg/resilience (Closed/Half-Open/Open)
 - ⚠️ **Idempotency** (дедупликация) - НЕТ
-- ⚠️ **Circuit Breaker** при недоступности - НЕТ
 
-**Текущее покрытие:** 70%
+**Текущее покрытие:** 85%
 
 ---
 
