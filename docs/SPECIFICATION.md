@@ -659,15 +659,15 @@ LIMIT 50 OFFSET 0
 
 MIT License
 
-Copyright (c) 2025 QueueBridge
+Copyright (c) 2025 TDTP Framework
 
 ---
 
 ## Контакты
 
-- **GitHub:** https://github.com/queuebridge/tdtp
-- **Email:** support@queuebridge.io
-- **Документация:** https://github.com/queuebridge/tdtp/tree/main/docs
+- **GitHub:** https://github.com/ruslano69/tdtp-framework
+- **Email:** ruslano69@gmail.com
+- **Документация:** https://github.com/ruslano69/tdtp-framework/tree/main/docs
 
 ---
 

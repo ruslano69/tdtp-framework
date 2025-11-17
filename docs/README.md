@@ -4,20 +4,18 @@
 
 ---
 
-## 📚 Руководства
+## 📚 Основные руководства
 
 ### Для новых пользователей
 
-1. **[INSTALLATION_GUIDE.md](../INSTALLATION_GUIDE.md)** ⭐ **НАЧНИТЕ ЗДЕСЬ**
-   - Системные требования
-   - Установка фреймворка
+1. **[../README.md](../README.md)** ⭐ **НАЧНИТЕ ЗДЕСЬ**
+   - Обзор фреймворка
    - Быстрый старт
-   - Настройка БД и брокеров
-   - Production deployment
-   - Troubleshooting
+   - Установка
+   - Основные концепции
 
-2. **[USER_GUIDE.md](./USER_GUIDE.md)** - CLI утилита
-   - Команды tdtpcli
+2. **[USER_GUIDE.md](./USER_GUIDE.md)** - CLI утилита tdtpcli
+   - Команды и параметры
    - Конфигурация YAML
    - Работа с TDTQL фильтрами
    - Message Brokers интеграция
@@ -25,50 +23,23 @@
 
 ### Для разработчиков
 
-3. **[SPECIFICATION.md](./SPECIFICATION.md)** - Спецификация TDTP v1.0
+3. **[DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)** - Руководство разработчика
+   - Архитектура фреймворка
+   - Настройка тестовой среды
+   - Core Modules (Packet, Schema, TDTQL)
+   - Database Adapters (SQLite, PostgreSQL, MSSQL, MySQL)
+   - Message Brokers (RabbitMQ, MSMQ, Kafka)
+   - Production Features (Circuit Breaker, Retry, Audit, Processors)
+   - Разработка нового адаптера
+   - Best Practices
+   - Testing
+
+4. **[SPECIFICATION.md](./SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
    - XML формат сообщений
    - Типы данных
    - TDTQL язык запросов
    - Протокол обмена
-
----
-
-## 🔧 Модули фреймворка
-
-### Core модули
-
-- **[PACKET_MODULE.md](./PACKET_MODULE.md)** - Работа с TDTP пакетами
-  - Парсинг XML
-  - Генерация Reference/Delta/Request/Response
-  - Пагинация (chunks до 3.8MB)
-  - QueryContext для stateless паттерна
-
-- **[SCHEMA_MODULE.md](./SCHEMA_MODULE.md)** - Типы данных и валидация
-  - DataType поддержка (INTEGER, TEXT, DECIMAL, DATE, etc.)
-  - Schema Builder
-  - Converter для адаптеров
-  - Валидация данных
-
-- **[TDTQL_TRANSLATOR.md](./TDTQL_TRANSLATOR.md)** - Язык запросов
-  - SQL → TDTQL трансляция
-  - TDTQL Executor (in-memory фильтрация)
-  - SQL Generator (TDTQL → SQL оптимизация)
-  - Операторы (=, !=, <, >, IN, LIKE, BETWEEN, IS NULL)
-
-### Адаптеры БД
-
-- **[SQLITE_ADAPTER.md](./SQLITE_ADAPTER.md)** - SQLite интеграция
-  - Export/Import таблиц
-  - Стратегии импорта (REPLACE, IGNORE, COPY, FAIL)
-  - TDTQL → SQL оптимизация
-  - Benchmarks
-
-### Архитектура
-
-- **[MODULES.md](./MODULES.md)** - Обзор всех модулей
-  - Структура проекта
-  - Зависимости между модулями
-  - Паттерны проектирования
+   - Примеры пакетов
 
 ---
 
@@ -76,13 +47,20 @@
 
 Каждый production-ready пакет имеет свой README:
 
-### Resilience & Production
+### Resilience & Production Features
 
 - **[pkg/resilience/README.md](../pkg/resilience/README.md)** - Circuit Breaker
   - Три состояния (Closed, Half-Open, Open)
   - Automatic recovery
   - Concurrent call limiting
   - State change callbacks
+  - Custom trip logic
+
+- **[pkg/retry/README.md](../pkg/retry/README.md)** - Retry Mechanism
+  - Exponential backoff
+  - Jitter strategies
+  - Context-aware retry
+  - Dead Letter Queue (DLQ) support
 
 - **[pkg/audit/README.md](../pkg/audit/README.md)** - Audit Logger
   - File, Database, Console appenders
@@ -91,6 +69,18 @@
   - Async/Sync modes
   - Query и filter операции
 
+- **[pkg/processors/README.md](../pkg/processors/README.md)** - Data Processors
+  - FieldMasker (PII protection)
+  - FieldValidator (data validation)
+  - FieldNormalizer (data normalization)
+  - Processor chains
+
+- **[pkg/sync/README.md](../pkg/sync/README.md)** - Incremental Sync
+  - StateManager with checkpoint tracking
+  - Timestamp/sequence-based sync
+  - Batch processing
+  - Recovery mechanisms
+
 ### Data Conversion
 
 - **[pkg/xlsx/README.md](../pkg/xlsx/README.md)** - XLSX Converter 🍒
@@ -98,6 +88,13 @@
   - Excel → TDTP import
   - Type preservation
   - Business value для non-technical users
+
+### Database Adapters
+
+- **[pkg/adapters/sqlite/README.md](../pkg/adapters/sqlite/README.md)** - SQLite
+- **[pkg/adapters/postgres/README.md](../pkg/adapters/postgres/README.md)** - PostgreSQL
+- **[pkg/adapters/mysql/README.md](../pkg/adapters/mysql/README.md)** - MySQL
+- **[pkg/adapters/mssql/README.md](../pkg/adapters/mssql/README.md)** - MS SQL Server
 
 ---
 
@@ -131,15 +128,21 @@
 
 | Задача | Документ |
 |--------|----------|
-| **Установить фреймворк** | [INSTALLATION_GUIDE.md](../INSTALLATION_GUIDE.md) |
+| **Установить фреймворк** | [README.md](../README.md) |
 | **Использовать CLI** | [USER_GUIDE.md](./USER_GUIDE.md) |
 | **Понять TDTP формат** | [SPECIFICATION.md](./SPECIFICATION.md) |
-| **Работать с пакетами** | [PACKET_MODULE.md](./PACKET_MODULE.md) |
-| **Работать с типами данных** | [SCHEMA_MODULE.md](./SCHEMA_MODULE.md) |
-| **Использовать TDTQL** | [TDTQL_TRANSLATOR.md](./TDTQL_TRANSLATOR.md) |
-| **Интеграция с SQLite** | [SQLITE_ADAPTER.md](./SQLITE_ADAPTER.md) |
+| **Разрабатывать с фреймворком** | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) |
+| **Настроить тестовую среду** | [DEVELOPER_GUIDE.md § Настройка тестовой среды](./DEVELOPER_GUIDE.md#настройка-тестовой-среды) |
+| **Работать с пакетами** | [DEVELOPER_GUIDE.md § Packet Module](./DEVELOPER_GUIDE.md#packet-module) |
+| **Работать с типами данных** | [DEVELOPER_GUIDE.md § Schema Module](./DEVELOPER_GUIDE.md#schema-module) |
+| **Использовать TDTQL** | [DEVELOPER_GUIDE.md § TDTQL Module](./DEVELOPER_GUIDE.md#tdtql-module) |
+| **Интеграция с БД** | [DEVELOPER_GUIDE.md § Database Adapters](./DEVELOPER_GUIDE.md#database-adapters) |
+| **Разработать свой адаптер** | [DEVELOPER_GUIDE.md § Разработка нового адаптера](./DEVELOPER_GUIDE.md#разработка-нового-адаптера) |
 | **Circuit Breaker** | [pkg/resilience/README.md](../pkg/resilience/README.md) |
+| **Retry mechanism** | [pkg/retry/README.md](../pkg/retry/README.md) |
 | **Audit Logging** | [pkg/audit/README.md](../pkg/audit/README.md) |
+| **Data Processors** | [pkg/processors/README.md](../pkg/processors/README.md) |
+| **Incremental Sync** | [pkg/sync/README.md](../pkg/sync/README.md) |
 | **Excel конвертер** | [pkg/xlsx/README.md](../pkg/xlsx/README.md) 🍒 |
 | **Примеры кода** | [examples/README.md](../examples/README.md) |
 
@@ -153,12 +156,13 @@
 - XLSX Converter (Database ↔ Excel) 🍒
 - Circuit Breaker для resilience
 - Audit Logger для compliance
-- Production-ready примеры
+- Production-ready CLI с всеми v1.2 фичами
 
 ✅ **Документация:**
-- Обновлен INSTALLATION_GUIDE.md
-- Удалена устаревшая документация
-- Добавлены package-specific READMEs
+- ✨ Новый DEVELOPER_GUIDE.md (комплексное руководство разработчика)
+- Обновлены USER_GUIDE.md и SPECIFICATION.md
+- Удалена устаревшая и временная документация
+- Исправлены все ссылки на репозиторий
 
 ### v1.1 (16.11.2025)
 
@@ -177,11 +181,26 @@
 
 ---
 
+## 📋 Структура документации
+
+```
+docs/
+├── README.md              # Этот файл - навигация по документации
+├── DEVELOPER_GUIDE.md     # Руководство разработчика (архитектура, модули, адаптеры)
+├── USER_GUIDE.md          # Руководство пользователя CLI
+└── SPECIFICATION.md       # Спецификация TDTP v1.0 & TDTQL
+
+Root:
+├── README.md              # Главная страница проекта
+└── ROADMAP.md             # Дорожная карта развития
+```
+
+---
+
 ## 📞 Поддержка
 
-**GitHub Issues:** https://github.com/queuebridge/tdtp/issues
-**Discussions:** https://github.com/queuebridge/tdtp/discussions
-**Email:** support@queuebridge.io
+**GitHub Issues:** https://github.com/ruslano69/tdtp-framework/issues
+**Email:** ruslano69@gmail.com
 
 ---
 
