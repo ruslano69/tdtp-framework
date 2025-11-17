@@ -47,7 +47,9 @@ func TestIntegration_ExportImport(t *testing.T) {
 	tableName := "test_export_import"
 
 	// Cleanup
-	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	t.Cleanup(func() {
+		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	})
 
 	// Создаем тестовую таблицу
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -146,7 +148,9 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 	tableName := "test_special_types"
 
 	// Cleanup
-	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	t.Cleanup(func() {
+		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	})
 
 	// Создаем таблицу со специальными типами
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -275,7 +279,9 @@ func TestIntegration_ExportWithQuery(t *testing.T) {
 	tableName := "test_export_query"
 
 	// Cleanup
-	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	t.Cleanup(func() {
+		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	})
 
 	// Создаем таблицу
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -344,7 +350,9 @@ func TestIntegration_ImportStrategies(t *testing.T) {
 	tableName := "test_import_strategies"
 
 	// Cleanup
-	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	t.Cleanup(func() {
+		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	})
 
 	// Создаем схему TDTP
 	builder := schema.NewBuilder()

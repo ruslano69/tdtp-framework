@@ -110,7 +110,9 @@ func TestIntegration_ExportImport(t *testing.T) {
 	tableName := "test_export_import"
 
 	// Cleanup
-	defer dropTableIfExists(t, ctx, adapter, tableName)
+	t.Cleanup(func() {
+		dropTableIfExists(t, ctx, adapter, tableName)
+	})
 
 	// Создаем тестовую таблицу
 	createTable(t, ctx, adapter, tableName)
@@ -186,7 +188,9 @@ func TestIntegration_MergeUpsert(t *testing.T) {
 	tableName := "test_merge_upsert"
 
 	// Cleanup
-	defer dropTableIfExists(t, ctx, adapter, tableName)
+	t.Cleanup(func() {
+		dropTableIfExists(t, ctx, adapter, tableName)
+	})
 
 	// Создаем таблицу
 	createTable(t, ctx, adapter, tableName)
@@ -329,7 +333,9 @@ func TestIntegration_GetTableSchema(t *testing.T) {
 	tableName := "test_get_schema"
 
 	// Cleanup
-	defer dropTableIfExists(t, ctx, adapter, tableName)
+	t.Cleanup(func() {
+		dropTableIfExists(t, ctx, adapter, tableName)
+	})
 
 	// Создаем таблицу
 	createTable(t, ctx, adapter, tableName)
@@ -402,7 +408,9 @@ func TestIntegration_TableExists(t *testing.T) {
 
 	// Создаем таблицу
 	createTable(t, ctx, adapter, tableName)
-	defer dropTableIfExists(t, ctx, adapter, tableName)
+	t.Cleanup(func() {
+		dropTableIfExists(t, ctx, adapter, tableName)
+	})
 
 	// Проверяем что таблица есть
 	exists, err = adapter.TableExists(ctx, tableName)
@@ -433,7 +441,9 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 	defer adapter.Close(ctx)
 
 	tableName := "test_special_types"
-	defer dropTableIfExists(t, ctx, adapter, tableName)
+	t.Cleanup(func() {
+		dropTableIfExists(t, ctx, adapter, tableName)
+	})
 
 	// Создаем таблицу со специальными типами
 	createTableSpecialTypes(t, ctx, adapter, tableName)
