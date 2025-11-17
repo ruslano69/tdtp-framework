@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/core/schema"
 )
 
 // ========== Import Operations ==========
@@ -359,11 +361,21 @@ func isPrimaryKeyViolation(err error) bool {
 	if err == nil {
 		return false
 	}
-	// SQL Server error code 2627 = PRIMARY KEY violation
-	// TODO: Более надежная проверка через mssql driver error
-	return strings.Contains(err.Error(), "2627") ||
-		strings.Contains(err.Error(), "PRIMARY KEY") ||
-		strings.Contains(err.Error(), "UNIQUE KEY")
+
+	// Проверяем через правильный тип ошибки mssql driver
+	if sqlErr, ok := err.(mssql.Error); ok {
+		// SQL Server error codes:
+		// 2627 = PRIMARY KEY constraint violation
+		// 2601 = UNIQUE KEY constraint violation
+		return sqlErr.Number == 2627 || sqlErr.Number == 2601
+	}
+
+	// Fallback на проверку по строке (для совместимости с другими драйверами)
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "2627") ||
+		strings.Contains(errMsg, "2601") ||
+		strings.Contains(errMsg, "PRIMARY KEY") ||
+		strings.Contains(errMsg, "UNIQUE KEY")
 }
 
 // ========== INSERT Strategy ==========
@@ -420,6 +432,20 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 
 // ========== Data Conversion ==========
 
+// fieldToFieldDef converts packet.Field to schema.FieldDef for type conversion
+func fieldToFieldDef(field packet.Field) schema.FieldDef {
+	return schema.FieldDef{
+		Name:      field.Name,
+		Type:      schema.DataType(field.Type),
+		Length:    field.Length,
+		Precision: field.Precision,
+		Scale:     field.Scale,
+		Timezone:  field.Timezone,
+		Key:       field.Key,
+		Nullable:  true, // TDTP allows NULL by default for import
+	}
+}
+
 // parseRow разбивает строку row.Value на отдельные значения
 func (a *Adapter) parseRow(rowValue string, schema packet.Schema) []string {
 	// Значения разделены PIPE символом | согласно спецификации TDTP v1.0
@@ -448,19 +474,58 @@ func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []interface{} {
 }
 
 // stringToValue конвертирует строку из TDTP в значение для БД
+// Использует schema.Converter для строгой типизации и валидации
 func (a *Adapter) stringToValue(str string, field packet.Field) interface{} {
-	if str == "" {
+	// Конвертируем packet.Field в schema.FieldDef
+	fieldDef := fieldToFieldDef(field)
+
+	// Используем schema.Converter для парсинга значения
+	converter := schema.NewConverter()
+	typedValue, err := converter.ParseValue(str, fieldDef)
+	if err != nil {
+		// Если парсинг не удался, возвращаем строку как fallback
+		// (ошибка валидации будет обработана на уровне БД)
+		if str == "" {
+			return nil
+		}
+		return str
+	}
+
+	// Извлекаем значение в формате, подходящем для database/sql
+	if typedValue.IsNull {
 		return nil
 	}
 
-	// TODO: Более детальная конвертация типов
-	// Сейчас базовая реализация
-	switch field.Type {
-	case "BOOLEAN":
-		return str == "1" || str == "true" || str == "TRUE"
-	default:
-		return str
+	normalized := schema.NormalizeType(typedValue.Type)
+	switch normalized {
+	case schema.TypeInteger:
+		if typedValue.IntValue != nil {
+			return *typedValue.IntValue
+		}
+	case schema.TypeReal, schema.TypeDecimal:
+		if typedValue.FloatValue != nil {
+			return *typedValue.FloatValue
+		}
+	case schema.TypeText:
+		if typedValue.StringValue != nil {
+			return *typedValue.StringValue
+		}
+	case schema.TypeBoolean:
+		if typedValue.BoolValue != nil {
+			return *typedValue.BoolValue
+		}
+	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
+		if typedValue.TimeValue != nil {
+			return *typedValue.TimeValue
+		}
+	case schema.TypeBlob:
+		if typedValue.BlobValue != nil {
+			return typedValue.BlobValue
+		}
 	}
+
+	// Fallback на сырое значение
+	return typedValue.RawValue
 }
 
 // ========== IDENTITY Column Detection ==========
