@@ -11,8 +11,9 @@ import (
 
 // ImportOptions holds options for import operations
 type ImportOptions struct {
-	FilePath string
-	Strategy adapters.ImportStrategy
+	FilePath     string
+	Strategy     adapters.ImportStrategy
+	ProcessorMgr ProcessorManager
 }
 
 // ImportFile imports a TDTP XML file to database
@@ -35,6 +36,15 @@ func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions)
 	fmt.Printf("✓ Parsed packet for table '%s'\n", pkt.Header.TableName)
 	fmt.Printf("✓ Schema: %d field(s)\n", len(pkt.Schema.Fields))
 	fmt.Printf("✓ Data: %d row(s)\n", len(pkt.Data.Rows))
+
+	// Apply data processors if configured
+	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
+		fmt.Printf("Applying data processors...\n")
+		if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
+			return fmt.Errorf("processor failed: %w", err)
+		}
+		fmt.Printf("✓ Data processors applied\n")
+	}
 
 	// Create adapter
 	adapter, err := adapters.New(ctx, config)

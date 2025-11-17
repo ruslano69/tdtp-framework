@@ -13,12 +13,13 @@ import (
 
 // XLSXOptions holds options for XLSX operations
 type XLSXOptions struct {
-	InputFile  string
-	OutputFile string
-	SheetName  string
-	TableName  string
-	Strategy   adapters.ImportStrategy
-	Query      *packet.Query
+	InputFile    string
+	OutputFile   string
+	SheetName    string
+	TableName    string
+	Strategy     adapters.ImportStrategy
+	Query        *packet.Query
+	ProcessorMgr ProcessorManager
 }
 
 // ConvertTDTPToXLSX converts a TDTP XML file to XLSX
@@ -141,6 +142,15 @@ func ExportTableToXLSX(ctx context.Context, config adapters.Config, opts XLSXOpt
 		fmt.Printf("⚠ Multiple packets detected, using first packet only\n")
 	}
 
+	// Apply data processors if configured
+	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
+		fmt.Printf("Applying data processors...\n")
+		if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
+			return fmt.Errorf("processor failed: %w", err)
+		}
+		fmt.Printf("✓ Data processors applied\n")
+	}
+
 	// Determine output file
 	outputFile := opts.OutputFile
 	if outputFile == "" {
@@ -182,6 +192,15 @@ func ImportXLSXToTable(ctx context.Context, config adapters.Config, opts XLSXOpt
 	fmt.Printf("✓ Table: %s\n", pkt.Header.TableName)
 	fmt.Printf("✓ Schema: %d field(s)\n", len(pkt.Schema.Fields))
 	fmt.Printf("✓ Data: %d row(s)\n", len(pkt.Data.Rows))
+
+	// Apply data processors if configured
+	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
+		fmt.Printf("Applying data processors...\n")
+		if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
+			return fmt.Errorf("processor failed: %w", err)
+		}
+		fmt.Printf("✓ Data processors applied\n")
+	}
 
 	// Create adapter
 	adapter, err := adapters.New(ctx, config)

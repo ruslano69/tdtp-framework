@@ -12,9 +12,16 @@ import (
 
 // ExportOptions holds options for export operations
 type ExportOptions struct {
-	TableName  string
-	OutputFile string
-	Query      *packet.Query
+	TableName    string
+	OutputFile   string
+	Query        *packet.Query
+	ProcessorMgr ProcessorManager
+}
+
+// ProcessorManager interface for applying data processors
+type ProcessorManager interface {
+	ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error
+	HasProcessors() bool
 }
 
 // ExportTable exports a table to TDTP XML file
@@ -47,6 +54,17 @@ func ExportTable(ctx context.Context, config adapters.Config, opts ExportOptions
 	}
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
+
+	// Apply data processors if configured
+	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
+		fmt.Printf("Applying data processors...\n")
+		for _, pkt := range packets {
+			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
+				return fmt.Errorf("processor failed: %w", err)
+			}
+		}
+		fmt.Printf("✓ Data processors applied\n")
+	}
 
 	// Count total rows
 	totalRows := 0

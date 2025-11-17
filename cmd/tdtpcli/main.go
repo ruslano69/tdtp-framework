@@ -21,6 +21,7 @@ func routeCommand(
 	adapterConfig adapters.Config,
 	query *packet.Query,
 	prodFeatures *ProductionFeatures,
+	procMgr *ProcessorManager,
 ) error {
 	startTime := time.Now()
 	var err error
@@ -46,9 +47,10 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
 			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
-				TableName:  *flags.Export,
-				OutputFile: determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
-				Query:      query,
+				TableName:       *flags.Export,
+				OutputFile:      determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
+				Query:           query,
+				ProcessorMgr:    procMgr,
 			})
 		})
 
@@ -67,8 +69,9 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
-				FilePath: *flags.Import,
-				Strategy: strategy,
+				FilePath:     *flags.Import,
+				Strategy:     strategy,
+				ProcessorMgr: procMgr,
 			})
 		})
 
@@ -115,10 +118,11 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table-to-xlsx", func() error {
 			return commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
-				TableName:  *flags.ExportXLSX,
-				OutputFile: determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
-				SheetName:  *flags.Sheet,
-				Query:      query,
+				TableName:    *flags.ExportXLSX,
+				OutputFile:   determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
+				SheetName:    *flags.Sheet,
+				Query:        query,
+				ProcessorMgr: procMgr,
 			})
 		})
 
@@ -137,9 +141,10 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-xlsx-to-table", func() error {
 			return commands.ImportXLSXToTable(ctx, adapterConfig, commands.XLSXOptions{
-				InputFile: *flags.ImportXLSX,
-				SheetName: *flags.Sheet,
-				Strategy:  strategy,
+				InputFile:    *flags.ImportXLSX,
+				SheetName:    *flags.Sheet,
+				Strategy:     strategy,
+				ProcessorMgr: procMgr,
 			})
 		})
 
@@ -238,6 +243,26 @@ func main() {
 	}
 	defer prodFeatures.Close()
 
+	// Initialize processor manager
+	procMgr := NewProcessorManager()
+
+	// Configure processors from flags
+	if *flags.Mask != "" {
+		if err := procMgr.AddMaskProcessor(*flags.Mask); err != nil {
+			fatal("Failed to configure mask processor: %v", err)
+		}
+	}
+	if *flags.Validate != "" {
+		if err := procMgr.AddValidateProcessor(*flags.Validate); err != nil {
+			fatal("Failed to configure validate processor: %v", err)
+		}
+	}
+	if *flags.Normalize != "" {
+		if err := procMgr.AddNormalizeProcessor(*flags.Normalize); err != nil {
+			fatal("Failed to configure normalize processor: %v", err)
+		}
+	}
+
 	// Build adapter config
 	adapterConfig := adapters.Config{
 		Type: config.Database.Type,
@@ -250,8 +275,8 @@ func main() {
 		fatal("Failed to build query: %v", err)
 	}
 
-	// Route commands with production features
-	cmdErr := routeCommand(ctx, flags, config, adapterConfig, query, prodFeatures)
+	// Route commands with production features and processors
+	cmdErr := routeCommand(ctx, flags, config, adapterConfig, query, prodFeatures, procMgr)
 
 	// Handle errors
 	if cmdErr != nil {
