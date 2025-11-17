@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
 )
 
@@ -359,7 +360,11 @@ func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string,
 		// Конвертируем в строки согласно TDTP формату
 		row := make([]string, columnCount)
 		for i, val := range values {
-			row[i] = a.valueToString(val)
+			if i < len(pkgSchema.Fields) {
+				row[i] = a.valueToString(val, pkgSchema.Fields[i])
+			} else {
+				row[i] = a.valueToString(val, packet.Field{Type: "TEXT"})
+			}
 		}
 
 		result = append(result, row)
@@ -369,25 +374,70 @@ func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string,
 }
 
 // valueToString конвертирует значение БД в строку для TDTP
-func (a *Adapter) valueToString(value interface{}) string {
+// Использует schema.Converter для правильного форматирования всех типов
+func (a *Adapter) valueToString(value interface{}, field packet.Field) string {
 	if value == nil {
 		return ""
 	}
 
-	switch v := value.(type) {
-	case []byte:
-		return string(v)
-	case time.Time:
-		// RFC3339 format для timestamp
-		return v.Format(time.RFC3339)
-	case bool:
-		if v {
-			return "1"
-		}
-		return "0"
-	default:
-		return fmt.Sprintf("%v", v)
+	// Создаем TypedValue из значения БД
+	typedValue := &schema.TypedValue{
+		Type:     schema.DataType(field.Type),
+		IsNull:   false,
+		RawValue: fmt.Sprintf("%v", value),
 	}
+
+	// Заполняем типизированные поля на основе типа из БД
+	switch v := value.(type) {
+	case int, int8, int16, int32, int64:
+		val := int64(0)
+		switch vt := v.(type) {
+		case int:
+			val = int64(vt)
+		case int8:
+			val = int64(vt)
+		case int16:
+			val = int64(vt)
+		case int32:
+			val = int64(vt)
+		case int64:
+			val = vt
+		}
+		typedValue.IntValue = &val
+
+	case float32, float64:
+		val := float64(0)
+		switch vt := v.(type) {
+		case float32:
+			val = float64(vt)
+		case float64:
+			val = vt
+		}
+		typedValue.FloatValue = &val
+
+	case string:
+		typedValue.StringValue = &v
+
+	case []byte:
+		// Для BLOB используем BlobValue, для TEXT - StringValue
+		normalized := schema.NormalizeType(schema.DataType(field.Type))
+		if normalized == schema.TypeBlob {
+			typedValue.BlobValue = v
+		} else {
+			str := string(v)
+			typedValue.StringValue = &str
+		}
+
+	case bool:
+		typedValue.BoolValue = &v
+
+	case time.Time:
+		typedValue.TimeValue = &v
+	}
+
+	// Используем форматтер из schema для консистентности
+	converter := schema.NewConverter()
+	return converter.FormatValue(typedValue)
 }
 
 // createQueryContextForSQL создает QueryContext для SQL-фильтрованных данных

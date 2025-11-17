@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/core/schema"
 )
 
 // ImportPacket импортирует один TDTP пакет в PostgreSQL через временную таблицу
@@ -426,30 +427,79 @@ func (a *Adapter) importWithCopy(ctx context.Context, pkt *packet.DataPacket) er
 	return nil
 }
 
+// fieldToFieldDef converts packet.Field to schema.FieldDef for type conversion
+func fieldToFieldDef(field packet.Field) schema.FieldDef {
+	return schema.FieldDef{
+		Name:      field.Name,
+		Type:      schema.DataType(field.Type),
+		Length:    field.Length,
+		Precision: field.Precision,
+		Scale:     field.Scale,
+		Timezone:  field.Timezone,
+		Key:       field.Key,
+		Nullable:  true, // TDTP allows NULL by default for import
+	}
+}
+
 // convertValue конвертирует строковое значение в правильный тип для PostgreSQL
+// Использует schema.Converter для строгой типизации и валидации
 func (a *Adapter) convertValue(value string, field packet.Field) interface{} {
-	if value == "" {
+	// Для типов с subtype используем строку без дополнительной конвертации
+	if field.Subtype != "" {
+		if value == "" {
+			return nil
+		}
+		return value
+	}
+
+	// Конвертируем packet.Field в schema.FieldDef
+	fieldDef := fieldToFieldDef(field)
+
+	// Используем schema.Converter для парсинга значения
+	converter := schema.NewConverter()
+	typedValue, err := converter.ParseValue(value, fieldDef)
+	if err != nil {
+		// Если парсинг не удался, возвращаем строку как fallback
+		// (ошибка валидации будет обработана на уровне БД)
+		if value == "" {
+			return nil
+		}
+		return value
+	}
+
+	// Извлекаем значение в формате, подходящем для database/sql и pgx
+	if typedValue.IsNull {
 		return nil
 	}
 
-	// Для типов с subtype используем строку
-	if field.Subtype != "" {
-		return value
+	normalized := schema.NormalizeType(typedValue.Type)
+	switch normalized {
+	case schema.TypeInteger:
+		if typedValue.IntValue != nil {
+			return *typedValue.IntValue
+		}
+	case schema.TypeReal, schema.TypeDecimal:
+		if typedValue.FloatValue != nil {
+			return *typedValue.FloatValue
+		}
+	case schema.TypeText:
+		if typedValue.StringValue != nil {
+			return *typedValue.StringValue
+		}
+	case schema.TypeBoolean:
+		if typedValue.BoolValue != nil {
+			return *typedValue.BoolValue
+		}
+	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
+		if typedValue.TimeValue != nil {
+			return *typedValue.TimeValue
+		}
+	case schema.TypeBlob:
+		if typedValue.BlobValue != nil {
+			return typedValue.BlobValue
+		}
 	}
 
-	// Для остальных типов конвертируем
-	switch field.Type {
-	case "INTEGER":
-		var i int64
-		fmt.Sscanf(value, "%d", &i)
-		return i
-	case "REAL", "DECIMAL":
-		var f float64
-		fmt.Sscanf(value, "%f", &f)
-		return f
-	case "BOOLEAN":
-		return value == "1" || strings.ToLower(value) == "true"
-	default:
-		return value
-	}
+	// Fallback на сырое значение
+	return typedValue.RawValue
 }
