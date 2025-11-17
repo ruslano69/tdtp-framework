@@ -23,7 +23,9 @@ func TestIntegration_ExportTableWithQuery(t *testing.T) {
 
 	// Создаем временную БД
 	dbFile := "testdata/test_query.db"
-	defer os.Remove(dbFile)
+	t.Cleanup(func() {
+		os.Remove(dbFile)
+	})
 
 	// Подключаемся
 	adapter, err := NewAdapter(dbFile)
@@ -194,7 +196,9 @@ func TestIntegration_FullCycle(t *testing.T) {
 
 	// Создаем source БД
 	sourceFile := "testdata/source.db"
-	defer os.Remove(sourceFile)
+	t.Cleanup(func() {
+		os.Remove(sourceFile)
+	})
 
 	source, err := NewAdapter(sourceFile)
 	if err != nil {
@@ -217,7 +221,9 @@ func TestIntegration_FullCycle(t *testing.T) {
 
 	// Создаем target БД
 	targetFile := "testdata/target.db"
-	defer os.Remove(targetFile)
+	t.Cleanup(func() {
+		os.Remove(targetFile)
+	})
 
 	target, err := NewAdapter(targetFile)
 	if err != nil {

@@ -17,7 +17,9 @@ func TestXMLFilterIntegration(t *testing.T) {
 
 	// 1. Создаем тестовую БД с данными
 	dbPath := "testdata/xml_filter_test.db"
-	defer os.Remove(dbPath)
+	t.Cleanup(func() {
+		os.Remove(dbPath)
+	})
 
 	cfg := adapters.Config{
 		Type: "sqlite",
@@ -102,7 +104,9 @@ func TestXMLFilterIntegration(t *testing.T) {
 
 	// 7. Записываем XML в файл
 	xmlFile := "testdata/filtered_export.xml"
-	defer os.Remove(xmlFile)
+	t.Cleanup(func() {
+		os.Remove(xmlFile)
+	})
 
 	err = os.WriteFile(xmlFile, []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"+string(xmlData)), 0644)
 	if err != nil {
@@ -209,7 +213,9 @@ func TestXMLComplexFilter(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := "testdata/xml_complex_filter_test.db"
-	defer os.Remove(dbPath)
+	t.Cleanup(func() {
+		os.Remove(dbPath)
+	})
 
 	cfg := adapters.Config{
 		Type: "sqlite",
