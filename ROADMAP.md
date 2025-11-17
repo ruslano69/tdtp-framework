@@ -239,7 +239,7 @@
 
 ### v1.6 - Message Brokers
 - [x] RabbitMQ integration
-- [ ] Apache Kafka integration
+- [x] Apache Kafka integration
 - [ ] AWS SQS/SNS integration
 - [ ] Azure Service Bus integration
 - [ ] Google Cloud Pub/Sub integration

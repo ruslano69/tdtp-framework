@@ -6,7 +6,7 @@ import (
 )
 
 // MessageBroker представляет универсальный интерфейс для работы с очередями сообщений
-// Поддерживает RabbitMQ и MSMQ
+// Поддерживает RabbitMQ, MSMQ и Apache Kafka
 type MessageBroker interface {
 	// Connect устанавливает соединение с брокером
 	Connect(ctx context.Context) error
@@ -25,18 +25,18 @@ type MessageBroker interface {
 	// Ping проверяет доступность брокера
 	Ping(ctx context.Context) error
 
-	// GetBrokerType возвращает тип брокера (rabbitmq, msmq)
+	// GetBrokerType возвращает тип брокера (rabbitmq, msmq, kafka)
 	GetBrokerType() string
 }
 
 // Config содержит параметры подключения к message broker
 type Config struct {
-	Type     string // rabbitmq, msmq
+	Type     string // rabbitmq, msmq, kafka
 	Host     string // Хост (для RabbitMQ)
 	Port     int    // Порт (для RabbitMQ)
 	User     string // Пользователь (для RabbitMQ)
 	Password string // Пароль (для RabbitMQ)
-	Queue    string // Имя очереди
+	Queue    string // Имя очереди (для RabbitMQ, MSMQ)
 	VHost    string // Virtual host (для RabbitMQ, по умолчанию "/")
 
 	// RabbitMQ параметры очереди (ВАЖНО: должны совпадать с существующей очередью!)
@@ -46,6 +46,11 @@ type Config struct {
 
 	// MSMQ специфичные параметры (Windows only)
 	QueuePath string // Путь к очереди MSMQ (например: ".\\private$\\tdtp_export")
+
+	// Kafka специфичные параметры
+	Brokers       []string // Список Kafka brokers (например: ["localhost:9092", "localhost:9093"])
+	Topic         string   // Имя Kafka topic
+	ConsumerGroup string   // Consumer group ID (по умолчанию "tdtp-consumer-group")
 }
 
 // New создает новый MessageBroker на основе конфигурации
@@ -55,7 +60,9 @@ func New(cfg Config) (MessageBroker, error) {
 		return NewRabbitMQ(cfg)
 	case "msmq":
 		return NewMSMQ(cfg)
+	case "kafka":
+		return NewKafka(cfg)
 	default:
-		return nil, fmt.Errorf("unsupported broker type: %s (supported: rabbitmq, msmq)", cfg.Type)
+		return nil, fmt.Errorf("unsupported broker type: %s (supported: rabbitmq, msmq, kafka)", cfg.Type)
 	}
 }
