@@ -11,14 +11,14 @@ import (
 
 // Basic Export Example
 //
-// Simplest example of exporting data from PostgreSQL to JSON file
+// Simplest example of exporting data from PostgreSQL to TDTP XML file
 // using TDTP Framework.
 
 func main() {
 	ctx := context.Background()
 
 	log.Println("=== Basic Export Example ===")
-	log.Println("Scenario: PostgreSQL → JSON file")
+	log.Println("Scenario: PostgreSQL → TDTP XML file")
 	log.Println()
 
 	// 1. Setup PostgreSQL adapter (source)
