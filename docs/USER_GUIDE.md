@@ -31,7 +31,7 @@
 ### Сборка из исходников
 
 ```bash
-git clone https://github.com/queuebridge/tdtp
+git clone https://github.com/ruslano69/tdtp-framework
 cd tdtp-framework
 go mod tidy
 go build -o tdtpcli ./cmd/tdtpcli
@@ -751,8 +751,8 @@ tdtpcli.exe -config config.mssql.yaml --export-broker users
 
 Нашли баг или хотите предложить улучшение?
 
-- **GitHub Issues:** https://github.com/queuebridge/tdtp/issues
-- **Email:** support@queuebridge.io
+- **GitHub Issues:** https://github.com/ruslano69/tdtp-framework/issues
+- **Email:** ruslano69@gmail.com
 
 ---
 
