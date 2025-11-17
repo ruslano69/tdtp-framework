@@ -206,12 +206,12 @@ func TestIntegration_MergeUpsert(t *testing.T) {
 
 	// Модифицируем данные в пакете (обновляем balance для id=1)
 	for i, row := range packets[0].Data.Rows {
-		// Разбираем значения (разделены табуляциями)
-		values := strings.Split(row.Value, "\t")
+		// Разбираем значения 
+		values := strings.Split(row.Value, "|")
 		if len(values) > 0 && values[0] == "1" { // id = 1
 			if len(values) > 4 {
 				values[4] = "9999.99" // balance = 9999.99
-				packets[0].Data.Rows[i].Value = strings.Join(values, "\t")
+				packets[0].Data.Rows[i].Value = strings.Join(values, "|")
 			}
 		}
 	}
