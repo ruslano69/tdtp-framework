@@ -197,7 +197,7 @@ tdtp-framework/
 │  └─ ...                ✅ Прочие документы
 │
 ├─ examples/             🆕 Production-ready examples
-│  ├─ 01-basic-export/   ✅ PostgreSQL → JSON export
+│  ├─ 01-basic-export/   ✅ PostgreSQL → TDTP XML export
 │  ├─ 02-rabbitmq-mssql/ ✅ MSSQL → RabbitMQ integration (Circuit Breaker + Audit)
 │  ├─ 03-incremental-sync/✅ PostgreSQL → MySQL incremental sync
 │  ├─ 04-tdtp-xlsx/      ✅ Database ↔ Excel converter 🍒 (instant business value!)
