@@ -32,9 +32,23 @@
 
 ---
 
-## 🚧 In Progress (v1.1)
+## ✅ Completed Features
 
-### Data Processors 🆕
+### v1.0 - Foundation
+See "Completed (v1.0)" section above
+
+### v1.1 - Data Processing & Incremental Sync
+
+#### Incremental Sync 🆕
+- [x] **StateManager** - checkpoint tracking and persistence
+- [x] **IncrementalConfig** - flexible configuration (timestamp, sequence, version)
+- [x] **ExportTableIncremental** - PostgreSQL and MySQL adapters
+- [x] **Batch processing** - configurable batch sizes
+- [x] **Comprehensive tests** - full test coverage
+
+## 🚧 In Progress (v1.2)
+
+### Data Processors
 - [x] **Core infrastructure** - processor interfaces, chain, factory
 - [x] **FieldMasker** - маскирование чувствительных данных
   - [x] Email masking (partial)
