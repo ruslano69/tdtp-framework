@@ -249,9 +249,10 @@ func (a *Adapter) importRows(ctx context.Context, tableName string, pkgSchema pa
 	// Вставляем каждую строку
 	converter := schema.NewConverter()
 
+	parser := packet.NewParser()
 	for rowIdx, row := range rows {
-		// Парсим строку (разделитель |)
-		values := strings.Split(row.Value, "|")
+		// Парсим строку с правильной обработкой экранирования (\| и \\)
+		values := parser.GetRowValues(row)
 		if len(values) != len(pkgSchema.Fields) {
 			return fmt.Errorf("row %d: expected %d values, got %d",
 				rowIdx, len(pkgSchema.Fields), len(values))
