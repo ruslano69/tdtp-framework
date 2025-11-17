@@ -8,7 +8,7 @@ const version = "1.2.0"
 func PrintVersion() {
 	fmt.Printf("tdtpcli version %s\n", version)
 	fmt.Println("TDTP Framework - Table Data Transfer Protocol")
-	fmt.Println("https://github.com/queuebridge/tdtp")
+	fmt.Println("https://github.com/ruslano69/tdtp-framework")
 }
 
 // PrintHelp prints comprehensive help information
@@ -164,10 +164,10 @@ func PrintHelp() {
 	fmt.Println()
 
 	fmt.Println("DOCUMENTATION:")
-	fmt.Println("  https://github.com/queuebridge/tdtp")
+	fmt.Println("  https://github.com/ruslano69/tdtp-framework")
 	fmt.Println()
 
 	fmt.Println("SUPPORT:")
-	fmt.Println("  Issues: https://github.com/queuebridge/tdtp/issues")
-	fmt.Println("  Email: support@queuebridge.io")
+	fmt.Println("  Issues: https://github.com/ruslano69/tdtp-framework/issues")
+	fmt.Println("  Email: ruslano69@gmail.com")
 }
