@@ -183,6 +183,28 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
 			return commands.ImportFromBroker(ctx, adapterConfig, brokerCfg, strategy)
 		})
+
+	// Incremental Sync command
+	} else if *flags.SyncIncr != "" {
+		operation = audit.OpExport
+		metadata = map[string]string{
+			"command":         "sync-incremental",
+			"table":           *flags.SyncIncr,
+			"tracking_field":  *flags.TrackingField,
+			"checkpoint_file": *flags.CheckpointFile,
+			"output":          determineOutputFile(*flags.Output, *flags.SyncIncr, "xml"),
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "incremental-sync", func() error {
+			return commands.IncrementalSync(ctx, adapterConfig, commands.SyncOptions{
+				TableName:      *flags.SyncIncr,
+				OutputFile:     determineOutputFile(*flags.Output, *flags.SyncIncr, "xml"),
+				TrackingField:  *flags.TrackingField,
+				CheckpointFile: *flags.CheckpointFile,
+				BatchSize:      *flags.BatchSize,
+				ProcessorMgr:   procMgr,
+			})
+		})
 	}
 
 	// Log operation result with metadata
@@ -339,8 +361,8 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ExportXLSX != "" ||
 		*flags.ImportXLSX != "" ||
 		*flags.ExportBroker != "" ||
-		*flags.ImportBroker
-		// Note: SyncIncr will be added in Phase 6
+		*flags.ImportBroker ||
+		*flags.SyncIncr != ""
 }
 
 // fatal prints error and exits
