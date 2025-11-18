@@ -37,3 +37,11 @@ vendor/
 dist/
 *.tar.gz
 *.zip
+# Test data files
+*.tdtp.xml
+*.xlsx
+benchmark_*.db
+audit.log
+config.yaml
+test.go
+tests.txt
