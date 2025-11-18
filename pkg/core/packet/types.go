@@ -57,7 +57,8 @@ type Field struct {
 
 // Data содержит табличные данные
 type Data struct {
-	Rows []Row `xml:"R"`
+	Compression string `xml:"compression,attr,omitempty"` // Алгоритм сжатия: "zstd" или пусто
+	Rows        []Row  `xml:"R"`
 }
 
 // Row представляет одну строку данных

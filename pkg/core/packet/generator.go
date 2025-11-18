@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -9,21 +10,67 @@ import (
 	"time"
 )
 
+// CompressionOptions содержит настройки сжатия данных
+type CompressionOptions struct {
+	Enabled      bool // Включить сжатие
+	Level        int  // Уровень сжатия: 1 (fastest) - 19 (best), по умолчанию 3
+	MinSize      int  // Минимальный размер данных для сжатия (bytes), по умолчанию 1024
+	Algorithm    string // Алгоритм сжатия: "zstd" (пока только он поддерживается)
+}
+
+// DefaultCompressionOptions возвращает настройки сжатия по умолчанию
+func DefaultCompressionOptions() CompressionOptions {
+	return CompressionOptions{
+		Enabled:   false,
+		Level:     3,
+		MinSize:   1024,
+		Algorithm: "zstd",
+	}
+}
+
 // Generator отвечает за генерацию TDTP пакетов
 type Generator struct {
-	maxMessageSize int // в байтах
+	maxMessageSize int                // в байтах
+	compression    CompressionOptions // настройки сжатия
 }
 
 // NewGenerator создает новый генератор
 func NewGenerator() *Generator {
 	return &Generator{
 		maxMessageSize: 3800000, // ~3.8MB для получения ~1.9MB XML (с учетом UTF-16 оценки)
+		compression:    DefaultCompressionOptions(),
 	}
 }
 
 // SetMaxMessageSize устанавливает максимальный размер сообщения
 func (g *Generator) SetMaxMessageSize(size int) {
 	g.maxMessageSize = size
+}
+
+// SetCompression устанавливает настройки сжатия
+func (g *Generator) SetCompression(opts CompressionOptions) {
+	g.compression = opts
+}
+
+// EnableCompression включает сжатие с уровнем по умолчанию
+func (g *Generator) EnableCompression() {
+	g.compression.Enabled = true
+}
+
+// DisableCompression выключает сжатие
+func (g *Generator) DisableCompression() {
+	g.compression.Enabled = false
+}
+
+// SetCompressionLevel устанавливает уровень сжатия (1-19)
+func (g *Generator) SetCompressionLevel(level int) {
+	if level < 1 {
+		level = 1
+	}
+	if level > 19 {
+		level = 19
+	}
+	g.compression.Level = level
 }
 
 // GenerateReference создает reference пакет (полный справочник)
@@ -236,6 +283,62 @@ func (g *Generator) rowsToData(rows [][]string) Data {
 	}
 
 	return data
+}
+
+// rowsToDataWithCompression преобразует срез строк в Data с опциональным сжатием
+// compressor - функция сжатия, если nil - сжатие не применяется
+func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]string, compressor func(ctx context.Context, rows []string, level int) (string, error)) (Data, error) {
+	// Сначала создаем обычные строки
+	rowStrings := make([]string, len(rows))
+	for i, row := range rows {
+		escapedValues := make([]string, len(row))
+		for j, value := range row {
+			escapedValues[j] = escapeValue(value)
+		}
+		rowStrings[i] = strings.Join(escapedValues, "|")
+	}
+
+	// Если сжатие не включено или компрессор не задан
+	if !g.compression.Enabled || compressor == nil {
+		data := Data{
+			Rows: make([]Row, len(rowStrings)),
+		}
+		for i, rowStr := range rowStrings {
+			data.Rows[i] = Row{Value: rowStr}
+		}
+		return data, nil
+	}
+
+	// Проверяем минимальный размер для сжатия
+	totalSize := 0
+	for _, rowStr := range rowStrings {
+		totalSize += len(rowStr)
+	}
+
+	if totalSize < g.compression.MinSize {
+		// Данные слишком маленькие, сжатие не выгодно
+		data := Data{
+			Rows: make([]Row, len(rowStrings)),
+		}
+		for i, rowStr := range rowStrings {
+			data.Rows[i] = Row{Value: rowStr}
+		}
+		return data, nil
+	}
+
+	// Сжимаем данные
+	compressed, err := compressor(ctx, rowStrings, g.compression.Level)
+	if err != nil {
+		return Data{}, fmt.Errorf("compression failed: %w", err)
+	}
+
+	// Возвращаем Data с одной сжатой строкой
+	return Data{
+		Compression: g.compression.Algorithm,
+		Rows: []Row{
+			{Value: compressed},
+		},
+	}, nil
 }
 
 // escapeValue экранирует специальные символы в значении

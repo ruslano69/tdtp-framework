@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -118,6 +119,86 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 	}
 
 	return nil
+}
+
+// IsCompressed проверяет, сжаты ли данные в пакете
+func (p *Parser) IsCompressed(packet *DataPacket) bool {
+	return packet.Data.Compression != ""
+}
+
+// GetCompressionAlgorithm возвращает алгоритм сжатия данных
+func (p *Parser) GetCompressionAlgorithm(packet *DataPacket) string {
+	return packet.Data.Compression
+}
+
+// DecompressData распаковывает сжатые данные в пакете
+// decompressor - функция распаковки, должна принимать сжатую строку и возвращать массив строк
+// Если данные не сжаты, возвращает их как есть
+func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompressor func(ctx context.Context, compressed string) ([]string, error)) error {
+	// Если данные не сжаты, ничего не делаем
+	if packet.Data.Compression == "" {
+		return nil
+	}
+
+	// Проверяем что есть данные для распаковки
+	if len(packet.Data.Rows) == 0 {
+		return nil
+	}
+
+	// При сжатии все данные упакованы в одну строку
+	if len(packet.Data.Rows) != 1 {
+		return fmt.Errorf("compressed data should have exactly 1 row, got %d", len(packet.Data.Rows))
+	}
+
+	// Распаковываем
+	compressedData := packet.Data.Rows[0].Value
+	decompressedRows, err := decompressor(ctx, compressedData)
+	if err != nil {
+		return fmt.Errorf("decompression failed: %w", err)
+	}
+
+	// Восстанавливаем структуру Data
+	packet.Data.Compression = "" // Очищаем флаг сжатия
+	packet.Data.Rows = make([]Row, len(decompressedRows))
+	for i, rowStr := range decompressedRows {
+		packet.Data.Rows[i] = Row{Value: rowStr}
+	}
+
+	return nil
+}
+
+// ParseWithDecompression парсит пакет и автоматически распаковывает сжатые данные
+func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx context.Context, compressed string) ([]string, error)) (*DataPacket, error) {
+	packet, err := p.Parse(r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Распаковываем если нужно
+	if p.IsCompressed(packet) && decompressor != nil {
+		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
+			return nil, err
+		}
+	}
+
+	return packet, nil
+}
+
+// ParseBytesWithDecompression парсит пакет из байтов и автоматически распаковывает
+func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx context.Context, compressed string) ([]string, error)) (*DataPacket, error) {
+	packet, err := p.ParseBytes(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Распаковываем если нужно
+	if p.IsCompressed(packet) && decompressor != nil {
+		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
+			return nil, err
+		}
+	}
+
+	return packet, nil
 }
 
 // GetRowValues разбивает строку данных на значения полей
