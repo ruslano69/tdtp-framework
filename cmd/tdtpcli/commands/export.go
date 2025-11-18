@@ -5,17 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/processors"
 )
 
 // ExportOptions holds options for export operations
 type ExportOptions struct {
-	TableName    string
-	OutputFile   string
-	Query        *packet.Query
-	ProcessorMgr ProcessorManager
+	TableName     string
+	OutputFile    string
+	Query         *packet.Query
+	ProcessorMgr  ProcessorManager
+	Compress      bool
+	CompressLevel int
 }
 
 // ProcessorManager interface for applying data processors
@@ -66,12 +70,23 @@ func ExportTable(ctx context.Context, config adapters.Config, opts ExportOptions
 		fmt.Printf("✓ Data processors applied\n")
 	}
 
-	// Count total rows
+	// Count total rows before compression
 	totalRows := 0
 	for _, pkt := range packets {
 		totalRows += len(pkt.Data.Rows)
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
+
+	// Apply compression if enabled
+	if opts.Compress {
+		fmt.Printf("Compressing data (level %d)...\n", opts.CompressLevel)
+		for _, pkt := range packets {
+			if err := compressPacketData(ctx, pkt, opts.CompressLevel); err != nil {
+				return fmt.Errorf("compression failed: %w", err)
+			}
+		}
+		fmt.Printf("✓ Data compressed with zstd\n")
+	}
 
 	// Write to file or stdout
 	if opts.OutputFile == "" || opts.OutputFile == "-" {
@@ -137,4 +152,65 @@ func generatePacketFilename(baseFile string, n, total int) string {
 	ext := filepath.Ext(baseFile)
 	base := baseFile[:len(baseFile)-len(ext)]
 	return fmt.Sprintf("%s_part_%d_of_%d%s", base, n, total, ext)
+}
+
+// compressPacketData compresses the Data section of a packet using zstd
+func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int) error {
+	if len(pkt.Data.Rows) == 0 {
+		return nil
+	}
+
+	// Extract row values
+	rows := make([]string, len(pkt.Data.Rows))
+	for i, row := range pkt.Data.Rows {
+		rows[i] = row.Value
+	}
+
+	// Compress
+	compressed, stats, err := processors.CompressDataForTdtp(rows, level)
+	if err != nil {
+		return err
+	}
+
+	// Update packet with compressed data
+	pkt.Data.Compression = "zstd"
+	pkt.Data.Rows = []packet.Row{{Value: compressed}}
+
+	// Log compression stats
+	fmt.Printf("  → Compressed: %d → %d bytes (ratio: %.2fx)\n",
+		stats.OriginalSize, stats.CompressedSize, stats.Ratio)
+
+	return nil
+}
+
+// decompressPacketData decompresses the Data section of a packet
+func decompressPacketData(ctx context.Context, pkt *packet.DataPacket) error {
+	if pkt.Data.Compression == "" {
+		return nil // Not compressed
+	}
+
+	if len(pkt.Data.Rows) != 1 {
+		return fmt.Errorf("compressed packet should have exactly 1 row, got %d", len(pkt.Data.Rows))
+	}
+
+	// Decompress
+	rows, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
+	if err != nil {
+		return err
+	}
+
+	// Update packet with decompressed data
+	pkt.Data.Compression = ""
+	pkt.Data.Rows = make([]packet.Row, len(rows))
+	for i, row := range rows {
+		pkt.Data.Rows[i] = packet.Row{Value: row}
+	}
+
+	return nil
+}
+
+// IsCompressedFile checks if filename suggests compressed content
+func IsCompressedFile(filename string) bool {
+	return strings.HasSuffix(strings.ToLower(filename), ".zst") ||
+		strings.HasSuffix(strings.ToLower(filename), ".zstd")
 }

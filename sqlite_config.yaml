@@ -1,0 +1,8 @@
+# SQLite Configuration for TDTP CLI
+database:
+  type: sqlite
+  database: test_data.db
+
+export:
+  compress: true
+  compress_level: 3

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -297,4 +298,10 @@ func (a *Adapter) createQueryContextForSQL(ctx context.Context, query *packet.Qu
 			NextOffset:          query.Offset + len(rows),
 		},
 	}
+}
+
+// ExportTableIncremental экспортирует только измененные записи с момента последней синхронизации
+// Реализует интерфейс adapters.Adapter
+func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, incrementalConfig adapters.IncrementalConfig) ([]*packet.DataPacket, string, error) {
+	return nil, "", fmt.Errorf("incremental export not yet implemented for SQLite adapter")
 }

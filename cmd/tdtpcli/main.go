@@ -11,6 +11,12 @@ import (
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/audit"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+
+	// Database adapters - blank imports for init() registration
+	_ "github.com/queuebridge/tdtp/pkg/adapters/mssql"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/mysql"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 )
 
 // routeCommand routes the command to the appropriate handler with production features
@@ -38,6 +44,13 @@ func routeCommand(
 		})
 
 	} else if *flags.Export != "" {
+		// Merge compression settings: flag takes precedence, then config
+		compress := *flags.Compress || config.Export.Compress
+		compressLevel := *flags.CompressLevel
+		if compressLevel == 3 && config.Export.CompressLevel > 0 {
+			compressLevel = config.Export.CompressLevel
+		}
+
 		operation = audit.OpExport
 		metadata = map[string]string{
 			"command": "export",
@@ -47,10 +60,12 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
 			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
-				TableName:       *flags.Export,
-				OutputFile:      determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
-				Query:           query,
-				ProcessorMgr:    procMgr,
+				TableName:     *flags.Export,
+				OutputFile:    determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
+				Query:         query,
+				ProcessorMgr:  procMgr,
+				Compress:      compress,
+				CompressLevel: compressLevel,
 			})
 		})
 

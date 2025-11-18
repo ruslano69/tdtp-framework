@@ -10,11 +10,18 @@ import (
 // Config represents the main configuration structure
 type Config struct {
 	Database   DatabaseConfig   `yaml:"database"`
+	Export     ExportConfig     `yaml:"export,omitempty"`
 	Tables     []string         `yaml:"tables,omitempty"`
 	Broker     BrokerConfig     `yaml:"broker,omitempty"`
 	Resilience ResilienceConfig `yaml:"resilience,omitempty"`
 	Audit      AuditConfig      `yaml:"audit,omitempty"`
 	Processors ProcessorsConfig `yaml:"processors,omitempty"`
+}
+
+// ExportConfig contains export settings
+type ExportConfig struct {
+	Compress      bool `yaml:"compress"`       // Enable zstd compression by default
+	CompressLevel int  `yaml:"compress_level"` // Compression level: 1-19 (default: 3)
 }
 
 // DatabaseConfig contains database connection settings
@@ -137,6 +144,10 @@ func CreateSampleConfig(dbType string) *Config {
 	config := &Config{
 		Database: DatabaseConfig{
 			Type: dbType,
+		},
+		Export: ExportConfig{
+			Compress:      true, // Enable compression by default
+			CompressLevel: 3,    // Balanced speed/ratio
 		},
 		Resilience: ResilienceConfig{
 			CircuitBreaker: CircuitBreakerConfig{

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
 	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/core/tdtql"
@@ -528,4 +529,10 @@ func (a *Adapter) GetTableSize(ctx context.Context, tableName string) (int64, er
 	}
 
 	return size.Int64, nil
+}
+
+// ExportTableIncremental экспортирует только измененные записи с момента последней синхронизации
+// Реализует интерфейс adapters.Adapter
+func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, incrementalConfig adapters.IncrementalConfig) ([]*packet.DataPacket, string, error) {
+	return nil, "", fmt.Errorf("incremental export not yet implemented for MS SQL adapter")
 }
