@@ -44,6 +44,13 @@ func routeCommand(
 		})
 
 	} else if *flags.Export != "" {
+		// Merge compression settings: flag takes precedence, then config
+		compress := *flags.Compress || config.Export.Compress
+		compressLevel := *flags.CompressLevel
+		if compressLevel == 3 && config.Export.CompressLevel > 0 {
+			compressLevel = config.Export.CompressLevel
+		}
+
 		operation = audit.OpExport
 		metadata = map[string]string{
 			"command": "export",
@@ -57,8 +64,8 @@ func routeCommand(
 				OutputFile:    determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
 				Query:         query,
 				ProcessorMgr:  procMgr,
-				Compress:      *flags.Compress,
-				CompressLevel: *flags.CompressLevel,
+				Compress:      compress,
+				CompressLevel: compressLevel,
 			})
 		})
 
