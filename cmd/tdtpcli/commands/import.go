@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // ImportOptions holds options for import operations

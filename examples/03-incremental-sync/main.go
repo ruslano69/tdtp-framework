@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/adapter"
-	"github.com/queuebridge/tdtp/pkg/audit"
-	"github.com/queuebridge/tdtp/pkg/sync"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/audit"
+	"github.com/ruslano69/tdtp-framework-main/pkg/sync"
 )
 
 // Incremental Sync Example

@@ -6,12 +6,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/adapter"
-	"github.com/queuebridge/tdtp/pkg/audit"
-	"github.com/queuebridge/tdtp/pkg/brokers"
-	"github.com/queuebridge/tdtp/pkg/processor"
-	"github.com/queuebridge/tdtp/pkg/resilience"
-	"github.com/queuebridge/tdtp/pkg/retry"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/audit"
+	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
+	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
+	"github.com/ruslano69/tdtp-framework-main/pkg/resilience"
+	"github.com/ruslano69/tdtp-framework-main/pkg/retry"
 )
 
 // RabbitMQ + MSSQL Integration Example

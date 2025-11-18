@@ -3,7 +3,7 @@ package processors
 import (
 	"context"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // Processor определяет интерфейс для обработки данных

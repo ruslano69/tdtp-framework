@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
-	"github.com/queuebridge/tdtp/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
 )
 
 // GetTableSchema читает схему таблицы из SQLite

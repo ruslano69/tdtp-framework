@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/queuebridge/tdtp/pkg/adapter"
-	"github.com/queuebridge/tdtp/pkg/tdtp"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // Basic Export Example

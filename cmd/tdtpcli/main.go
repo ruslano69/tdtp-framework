@@ -7,16 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/queuebridge/tdtp/cmd/tdtpcli/commands"
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	"github.com/queuebridge/tdtp/pkg/audit"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/audit"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 
 	// Database adapters - blank imports for init() registration
-	_ "github.com/queuebridge/tdtp/pkg/adapters/mssql"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/mysql"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mssql"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
 )
 
 // routeCommand routes the command to the appropriate handler with production features

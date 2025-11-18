@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/sync"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/sync"
 )
 
 // Type aliases для удобства

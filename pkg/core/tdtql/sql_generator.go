@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // SQLGenerator конвертирует TDTQL запросы в SQL

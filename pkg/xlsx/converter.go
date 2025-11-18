@@ -1,13 +1,15 @@
 package xlsx
 
 import (
+	//context"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -24,6 +26,26 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 	// Create new Excel file
 	f := excelize.NewFile()
 	defer f.Close()
+
+	// Check if data is compressed and decompress if needed
+	if pkt.Data.Compression != "" {
+		if len(pkt.Data.Rows) != 1 {
+			return fmt.Errorf("compressed data should have exactly 1 row, got %d", len(pkt.Data.Rows))
+		}
+
+		// Decompress data
+		decompressedRows, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
+		if err != nil {
+			return fmt.Errorf("failed to decompress data: %w", err)
+		}
+
+		// Replace compressed row with decompressed rows
+		pkt.Data.Rows = make([]packet.Row, len(decompressedRows))
+		for i, row := range decompressedRows {
+			pkt.Data.Rows[i] = packet.Row{Value: row}
+		}
+		pkt.Data.Compression = "" // Mark as decompressed
+	}
 
 	// Set default sheet name
 	if sheetName == "" {

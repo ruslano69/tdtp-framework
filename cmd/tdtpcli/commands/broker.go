@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	"github.com/queuebridge/tdtp/pkg/brokers"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // BrokerConfig holds broker configuration

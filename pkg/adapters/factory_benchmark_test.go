@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
 )
 
 // BenchmarkFactory_CreateAdapter измеряет производительность создания адаптера через фабрику

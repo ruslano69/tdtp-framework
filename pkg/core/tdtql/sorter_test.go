@@ -3,8 +3,8 @@ package tdtql
 import (
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
 )
 
 func TestSorter_SingleFieldAsc(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/audit"
-	"github.com/queuebridge/tdtp/pkg/resilience"
-	"github.com/queuebridge/tdtp/pkg/retry"
+	"github.com/ruslano69/tdtp-framework-main/pkg/audit"
+	"github.com/ruslano69/tdtp-framework-main/pkg/resilience"
+	"github.com/ruslano69/tdtp-framework-main/pkg/retry"
 )
 
 // ProductionFeatures holds all production-ready components

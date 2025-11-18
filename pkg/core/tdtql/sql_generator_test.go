@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 func TestSQLGenerator_SimpleFilter(t *testing.T) {

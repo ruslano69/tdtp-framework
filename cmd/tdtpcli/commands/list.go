@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 )
 
 // ListTables lists all tables in the database

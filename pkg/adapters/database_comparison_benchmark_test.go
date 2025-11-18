@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
 )
 
 // BenchmarkDatabase_Connection сравнивает скорость подключения

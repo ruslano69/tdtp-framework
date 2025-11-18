@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/processors"
+	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
 )
 
 func TestDetectMaskPattern(t *testing.T) {

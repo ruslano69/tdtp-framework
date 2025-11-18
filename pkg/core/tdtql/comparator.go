@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/queuebridge/tdtp/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
 )
 
 // Comparator выполняет операции сравнения

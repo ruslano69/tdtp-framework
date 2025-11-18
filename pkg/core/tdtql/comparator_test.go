@@ -3,7 +3,7 @@ package tdtql
 import (
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
 )
 
 func TestComparator_Equals(t *testing.T) {

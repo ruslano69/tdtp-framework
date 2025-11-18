@@ -7,7 +7,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 )
 
 // AdapterType идентификатор MySQL адаптера

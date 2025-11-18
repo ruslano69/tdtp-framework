@@ -1,6 +1,6 @@
 package adapters
 
-import "github.com/queuebridge/tdtp/pkg/core/packet"
+import "github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 
 // TypeMapper - интерфейс для маппинга типов данных
 // Каждый адаптер должен реализовать свой TypeMapper для конвертации типов

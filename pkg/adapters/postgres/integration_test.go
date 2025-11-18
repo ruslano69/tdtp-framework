@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
-	"github.com/queuebridge/tdtp/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
 )
 
 const testConnString = "postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test"

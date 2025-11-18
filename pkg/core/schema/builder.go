@@ -1,6 +1,6 @@
 package schema
 
-import "github.com/queuebridge/tdtp/pkg/core/packet"
+import "github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 
 // Builder помогает строить схемы
 type Builder struct {

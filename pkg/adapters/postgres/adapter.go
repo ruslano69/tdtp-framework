@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/queuebridge/tdtp/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 )
 
 // Compile-time check: Adapter должен реализовывать интерфейс adapters.Adapter

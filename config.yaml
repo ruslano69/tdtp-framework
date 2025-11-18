@@ -1,0 +1,25 @@
+database:
+  type: sqlite
+  database: benchmark_100k.db
+export:
+  compress: false
+  compress_level: 3
+resilience:
+  circuit_breaker:
+    enabled: true
+    threshold: 5
+    timeout: 60
+    max_concurrent: 100
+    success_threshold: 2
+  retry:
+    enabled: true
+    max_attempts: 3
+    strategy: exponential
+    initial_wait_ms: 1000
+    max_wait_ms: 30000
+    jitter: true
+audit:
+  enabled: true
+  level: standard
+  file: audit.log
+  max_size_mb: 100

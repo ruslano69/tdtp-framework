@@ -3,7 +3,7 @@ package commands
 import (
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 )
 
 func TestParseImportStrategy(t *testing.T) {

@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/mssql"
-	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
-	"github.com/queuebridge/tdtp/pkg/brokers"
-	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mssql"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
+	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // TestRabbitMQBasicConnection проверяет базовое подключение к RabbitMQ

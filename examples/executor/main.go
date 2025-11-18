@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/core/schema"
-	"github.com/queuebridge/tdtp/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
 )
 
 func main() {

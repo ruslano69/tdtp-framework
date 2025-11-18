@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/queuebridge/tdtp/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 )
 
 // Тестовые строки подключения

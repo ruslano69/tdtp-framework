@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/queuebridge/tdtp/pkg/core/packet"
-	"github.com/queuebridge/tdtp/pkg/processors"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
 )
 
 // ProcessorManager manages data processors for CLI
