@@ -11,6 +11,12 @@ import (
 	"github.com/queuebridge/tdtp/pkg/adapters"
 	"github.com/queuebridge/tdtp/pkg/audit"
 	"github.com/queuebridge/tdtp/pkg/core/packet"
+
+	// Database adapters - blank imports for init() registration
+	_ "github.com/queuebridge/tdtp/pkg/adapters/mssql"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/mysql"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 )
 
 // routeCommand routes the command to the appropriate handler with production features

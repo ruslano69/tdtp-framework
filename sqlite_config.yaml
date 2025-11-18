@@ -1,0 +1,4 @@
+# SQLite Configuration for TDTP CLI
+database:
+  type: sqlite
+  database: test_data.db

@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/queuebridge/tdtp/pkg/adapters"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Compile-time check: Adapter должен реализовывать интерфейс adapters.Adapter
@@ -28,7 +28,7 @@ type Adapter struct {
 // Connect устанавливает подключение к SQLite
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
-	db, err := sql.Open("sqlite", cfg.DSN)
+	db, err := sql.Open("sqlite3", cfg.DSN)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
