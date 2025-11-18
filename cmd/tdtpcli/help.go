@@ -55,6 +55,11 @@ func PrintHelp() {
 	fmt.Println("    --batch <size>             Batch size for bulk operations (default: 1000)")
 	fmt.Println()
 
+	fmt.Println("  Compression:")
+	fmt.Println("    --compress                 Enable zstd compression for exported data")
+	fmt.Println("    --compress-level <n>       Compression level: 1 (fastest) - 19 (best), default: 3")
+	fmt.Println()
+
 	fmt.Println("  TDTQL Filters:")
 	fmt.Println("    --where <condition>        WHERE clause (e.g., 'age > 18 AND status = active')")
 	fmt.Println("    --order-by <fields>        ORDER BY clause (e.g., 'name ASC, age DESC')")
@@ -103,6 +108,14 @@ func PrintHelp() {
 
 	fmt.Println("  # Export with filters")
 	fmt.Println("  tdtpcli --export orders --where 'status = active' --limit 100")
+	fmt.Println()
+
+	fmt.Println("  # Export with compression")
+	fmt.Println("  tdtpcli --export users --compress --output users.tdtp.xml")
+	fmt.Println()
+
+	fmt.Println("  # Export with high compression")
+	fmt.Println("  tdtpcli --export logs --compress --compress-level 19 --output logs.tdtp.xml")
 	fmt.Println()
 
 	fmt.Println("  # Export directly to Excel 🍒")

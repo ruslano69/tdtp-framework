@@ -29,6 +29,10 @@ type Flags struct {
 	Strategy *string
 	Batch    *int
 
+	// Compression
+	Compress      *bool
+	CompressLevel *int
+
 	// Incremental Sync
 	TrackingField  *string
 	CheckpointFile *string
@@ -78,6 +82,10 @@ func ParseFlags() *Flags {
 	f.Sheet = flag.String("sheet", "Sheet1", "Excel sheet name for XLSX operations")
 	f.Strategy = flag.String("strategy", "replace", "Import strategy: replace, ignore, fail, copy")
 	f.Batch = flag.Int("batch", 1000, "Batch size for bulk operations")
+
+	// Compression
+	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")
+	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1 (fastest) - 19 (best)")
 
 	// Incremental Sync Options
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")

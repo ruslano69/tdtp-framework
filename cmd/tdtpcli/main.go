@@ -47,10 +47,12 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
 			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
-				TableName:       *flags.Export,
-				OutputFile:      determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
-				Query:           query,
-				ProcessorMgr:    procMgr,
+				TableName:     *flags.Export,
+				OutputFile:    determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
+				Query:         query,
+				ProcessorMgr:  procMgr,
+				Compress:      *flags.Compress,
+				CompressLevel: *flags.CompressLevel,
 			})
 		})
 

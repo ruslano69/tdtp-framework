@@ -35,6 +35,16 @@ func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions)
 
 	fmt.Printf("✓ Parsed packet for table '%s'\n", pkt.Header.TableName)
 	fmt.Printf("✓ Schema: %d field(s)\n", len(pkt.Schema.Fields))
+
+	// Decompress if data is compressed
+	if pkt.Data.Compression != "" {
+		fmt.Printf("Decompressing data (%s)...\n", pkt.Data.Compression)
+		if err := decompressPacketData(ctx, pkt); err != nil {
+			return fmt.Errorf("decompression failed: %w", err)
+		}
+		fmt.Printf("✓ Data decompressed\n")
+	}
+
 	fmt.Printf("✓ Data: %d row(s)\n", len(pkt.Data.Rows))
 
 	// Apply data processors if configured
