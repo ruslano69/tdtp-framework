@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>orders</TableName>
+    <MessageID>REF-2025-09e51bac-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>8</RecordsInPart>
+    <Timestamp>2025-11-18T21:04:27.9398777Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="order_id" type="INTEGER" key="true" subtype="int"></Field>
+    <Field name="quantity" type="INTEGER" subtype="bigint"></Field>
+    <Field name="price" type="DECIMAL" precision="18" scale="2"></Field>
+    <Field name="discount_rate" type="REAL" subtype="float"></Field>
+    <Field name="tax_rate" type="REAL" subtype="real"></Field>
+    <Field name="order_number" type="TEXT" length="50" subtype="varchar"></Field>
+    <Field name="customer_name" type="TEXT" length="100" subtype="nvarchar"></Field>
+    <Field name="customer_email" type="TEXT" length="255" subtype="varchar"></Field>
+    <Field name="customer_phone" type="TEXT" length="20" subtype="varchar"></Field>
+    <Field name="billing_address" type="TEXT" subtype="nvarchar"></Field>
+    <Field name="notes" type="TEXT" subtype="text"></Field>
+    <Field name="credit_card" type="TEXT" length="19" subtype="char"></Field>
+    <Field name="ssn" type="TEXT" length="11" subtype="varchar"></Field>
+    <Field name="order_date" type="DATE"></Field>
+    <Field name="order_datetime" type="TIMESTAMP" subtype="datetime"></Field>
+    <Field name="created_at" type="TIMESTAMP" subtype="datetime2"></Field>
+    <Field name="updated_at" type="TIMESTAMP" subtype="datetimeoffset"></Field>
+    <Field name="is_paid" type="BOOLEAN"></Field>
+    <Field name="is_shipped" type="BOOLEAN"></Field>
+    <Field name="is_cancelled" type="BOOLEAN"></Field>
+    <Field name="signature" type="BLOB" subtype="varbinary"></Field>
+    <Field name="order_status" type="INTEGER" subtype="tinyint"></Field>
+    <Field name="priority" type="INTEGER" subtype="smallint"></Field>
+  </Schema>
+  <Data>
+    <R>1|5|[49 53 48 46 53 48]|0.1|0.20000000298023224|ORD-2024-001|Иван Иванов|i***@example.com|+7-495-XXX-4567|Москва, ул. Ленина, д. 10, кв. 5|????????? ????? ?????????|45***************10|***-**-****|2024-01-15|2024-01-15T10:30:00Z|2025-11-18T20:58:56Z|2024-01-15T10:30:00+03:00|1|1|0||2|5</R>
+    <R>2|10|[50 57 57 46 57 57]|0.15|0.20000000298023224|ORD-2024-002|Jane Smith|j***@example.com|+1-555-XXX-6543|123 Main St, New York, NY 10001, USA||54***************98|***-**-****|2024-01-16|2024-01-16T14:20:00Z|2025-11-18T20:58:56Z|2024-01-16T14:25:00-05:00|1|0|0||1|3</R>
+    <R>3|1|[52 57 46 57 57]|||ORD-2024-003|Петр Петров|p***@example.com||||||2024-01-17|2024-01-17T09:15:00Z|2025-11-18T20:58:56Z||0|0|0||0|5</R>
+    <R>4|9999999999|[57 57 57 57 57 57 57 57 57 46 57 57]|0.999|0.9990000128746033|ORD-2024-004|Bob Wilson|b***@test.org|+44-20-XXXX-5678|Very long address that might cause issues with different encodings and special chars: ??????, ????? ??????? ??? ???????????|Very long notes with special characters: &lt;&gt;&amp;&#34;&#39; ?? ???|37**************05 |***-**-****|2024-01-18|2024-01-18T23:59:59Z|2025-11-18T20:58:56Z|2024-01-18T23:59:59Z|1|1|0||2|1</R>
+    <R>5|3|[55 53 46 48 48]|0.05|0.20000000298023224|ORD-2024-005|Анна Сидорова|a***@mail.ru|+7-812-XXX-9999|Санкт-Петербург, Невский пр., 100|??????? ???????????|60***************11|***-**-****|2024-01-19|2024-01-19T12:00:00Z|2025-11-18T20:58:56Z|2024-01-19T13:00:00+03:00|0|0|1||0|5</R>
+    <R>6|2|[49 57 57 46 57 57]|0.2|0.20000000298023224|ORD-2024-006|Charlie Brown|c***@peanuts.com|+1-555-XXX-0000|1 Peanuts Way, Anytown, USA|Handle with care|41***************11|***-**-****|2024-01-20|2024-01-20T08:00:00Z|2025-11-18T20:58:56Z|2024-01-20T08:05:00-08:00|1|0|0||1|2</R>
+    <R>7|50|[49 50 53 48 46 48 48]|0.25|0.18000000715255737|ORD-2024-007|李明|l***@example.cn|+86-10-XXXX-5678|北京市朝阳区建国路100号|?????|55***************04|***-**-****|2024-01-21|2024-01-21T16:30:00Z|2025-11-18T20:58:56Z|2024-01-21T16:35:00+08:00|0|0|0||0|1</R>
+    <R>8|1|[48 46 48 49]|0|0|ORD-2024-008|Test User|t***@test.test|+1-000-XXX-0000|Test Address|Test Order|00***************01|***-**-****|2024-01-22|2024-01-22T00:00:00Z|2025-11-18T20:58:56Z|2024-01-22T00:00:00Z|0|0|0||0|5</R>
+  </Data>
+</DataPacket>

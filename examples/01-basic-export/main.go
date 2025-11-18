@@ -4,111 +4,183 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+
+	// Импортируем адаптеры для регистрации в фабрике
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
 )
 
-// Basic Export Example
+// Example 01: Basic Export from PostgreSQL to TDTP XML
 //
-// Simplest example of exporting data from PostgreSQL to TDTP XML file
-// using TDTP Framework.
+// Этот пример демонстрирует:
+// - Подключение к PostgreSQL через Docker
+// - Экспорт таблицы в TDTP пакеты
+// - Сохранение пакетов в XML файл
+//
+// Запуск:
+// 1. docker-compose up -d
+// 2. Подождите 10 секунд (инициализация БД)
+// 3. go run main.go
+
+const (
+	// Конфигурация PostgreSQL (соответствует docker-compose.yml)
+	postgresHost     = "localhost"
+	postgresPort     = "5432"
+	postgresUser     = "tdtp_user"
+	postgresPassword = "tdtp_pass_123"
+	postgresDatabase = "example01_db"
+)
 
 func main() {
 	ctx := context.Background()
 
-	log.Println("=== Basic Export Example ===")
-	log.Println("Scenario: PostgreSQL → TDTP XML file")
+	log.Println("=== Example 01: Basic Export ===")
+	log.Println("Export PostgreSQL table → TDTP XML file")
 	log.Println()
 
-	// 1. Setup PostgreSQL adapter (source)
-	sourceAdapter := setupPostgreSQL()
-	defer sourceAdapter.Close()
-
-	// 2. Setup file adapter (target)
-	targetAdapter := setupFile()
-	defer targetAdapter.Close()
-
-	// 3. Export data
-	log.Println("Exporting data from PostgreSQL...")
-	packets, err := sourceAdapter.ExportTable(ctx, "users")
+	// 1. Подключаемся к PostgreSQL
+	log.Println("Step 1: Connecting to PostgreSQL...")
+	adapter, err := connectPostgreSQL(ctx)
 	if err != nil {
-		log.Fatalf("Export failed: %v", err)
+		log.Fatalf("❌ Failed to connect: %v", err)
+	}
+	defer adapter.Close(ctx)
+	log.Println("✓ Connected to PostgreSQL")
+
+	// 2. Проверяем что таблица существует
+	log.Println("\nStep 2: Checking table exists...")
+	exists, err := adapter.TableExists(ctx, "users")
+	if err != nil {
+		log.Fatalf("❌ Failed to check table: %v", err)
+	}
+	if !exists {
+		log.Fatal("❌ Table 'users' does not exist. Run docker-compose up first!")
+	}
+	log.Println("✓ Table 'users' exists")
+
+	// 3. Получаем схему таблицы
+	log.Println("\nStep 3: Getting table schema...")
+	schema, err := adapter.GetTableSchema(ctx, "users")
+	if err != nil {
+		log.Fatalf("❌ Failed to get schema: %v", err)
+	}
+	log.Printf("✓ Schema loaded: %d fields\n", len(schema.Fields))
+	for _, field := range schema.Fields {
+		log.Printf("  - %s (%s)", field.Name, field.Type)
 	}
 
-	log.Printf("✓ Exported %d packets\n", len(packets))
+	// 4. Экспортируем данные
+	log.Println("\nStep 4: Exporting data...")
+	startTime := time.Now()
+	packets, err := adapter.ExportTable(ctx, "users")
+	if err != nil {
+		log.Fatalf("❌ Export failed: %v", err)
+	}
+	duration := time.Since(startTime)
+	log.Printf("✓ Exported %d packet(s) in %v\n", len(packets), duration)
 
-	// 4. Write to file
-	log.Println("Writing to file...")
-	for i, packet := range packets {
-		err = targetAdapter.Write(ctx, packet)
+	// Показываем статистику
+	if len(packets) > 0 {
+		log.Printf("  First packet: %d records\n", packets[0].Header.RecordsInPart)
+		log.Printf("  Total parts: %d\n", packets[0].Header.TotalParts)
+	}
+
+	// 5. Записываем в файл
+	log.Println("\nStep 5: Writing to XML file...")
+	outputFile := "./output/users.tdtp.xml"
+	err = writePacketsToFile(packets, outputFile)
+	if err != nil {
+		log.Fatalf("❌ Write failed: %v", err)
+	}
+	log.Printf("✓ Written to: %s\n", outputFile)
+
+	// 6. Показываем размер файла
+	fileInfo, err := os.Stat(outputFile)
+	if err == nil {
+		log.Printf("  File size: %d bytes\n", fileInfo.Size())
+	}
+
+	log.Println("\n✓ Export completed successfully!")
+	log.Println("\nNext steps:")
+	log.Println("  - Check ./output/users.tdtp.xml")
+	log.Println("  - Import this file using example 02")
+	log.Println("  - Stop containers: docker-compose down")
+}
+
+// connectPostgreSQL создает подключение к PostgreSQL
+func connectPostgreSQL(ctx context.Context) (adapters.Adapter, error) {
+	// Формируем DSN (Data Source Name)
+	dsn := fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		postgresUser,
+		postgresPassword,
+		postgresHost,
+		postgresPort,
+		postgresDatabase,
+	)
+
+	// Создаем адаптер через фабрику
+	adapter, err := adapters.New(ctx, adapters.Config{
+		Type:     "postgres",
+		DSN:      dsn,
+		Schema:   "public",
+		MaxConns: 5,
+		MinConns: 1,
+		Timeout:  10 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create adapter: %w", err)
+	}
+
+	// Проверяем подключение
+	err = adapter.Ping(ctx)
+	if err != nil {
+		adapter.Close(ctx)
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return adapter, nil
+}
+
+// writePacketsToFile записывает пакеты в XML файл
+func writePacketsToFile(packets []*packet.DataPacket, filename string) error {
+	// Создаем директорию если не существует
+	dir := "./output"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Открываем файл для записи
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	// Создаем генератор для сериализации
+	gen := packet.NewGenerator()
+
+	// Записываем каждый пакет
+	for i, pkt := range packets {
+		xmlData, err := gen.ToXML(pkt, true) // true = with indent
 		if err != nil {
-			log.Fatalf("Write failed: %v", err)
+			return fmt.Errorf("failed to marshal packet %d: %w", i+1, err)
 		}
-		log.Printf("  Packet %d/%d written\n", i+1, len(packets))
+
+		_, err = file.Write(xmlData)
+		if err != nil {
+			return fmt.Errorf("failed to write packet %d: %w", i+1, err)
+		}
+
+		// Добавляем разделитель между пакетами
+		if i < len(packets)-1 {
+			file.WriteString("\n\n")
+		}
 	}
 
-	log.Println("\n✓ Export complete!")
-	log.Println("Output: ./output/users.tdtp.xml")
-}
-
-// setupPostgreSQL - setup PostgreSQL adapter
-func setupPostgreSQL() *adapter.PostgreSQLAdapter {
-	// Real usage:
-	// dsn := "postgres://user:password@localhost:5432/mydb?sslmode=disable"
-	// adapter, err := adapter.NewPostgreSQLAdapter(dsn)
-	// if err != nil {
-	//     log.Fatalf("Failed to connect to PostgreSQL: %v", err)
-	// }
-
-	log.Println("📊 Connecting to PostgreSQL")
-	log.Println("   (using mock for example)")
-	return &adapter.PostgreSQLAdapter{}
-}
-
-// setupFile - setup file adapter
-func setupFile() *adapter.FileAdapter {
-	// adapter, err := adapter.NewFileAdapter("./output/users.tdtp.xml")
-	// if err != nil {
-	//     log.Fatalf("Failed to create file adapter: %v", err)
-	// }
-
-	log.Println("📁 Creating file adapter: ./output/users.tdtp.xml")
-	return &adapter.FileAdapter{}
-}
-
-// Example with TDTP packet parsing
-func exampleWithPacketProcessing() {
-	// Create TDTP packet
-	packet := tdtp.NewPacket("users")
-
-	// Add schema
-	packet.AddField("id", tdtp.TypeInteger, true)
-	packet.AddField("name", tdtp.TypeText, false)
-	packet.AddField("email", tdtp.TypeText, false)
-	packet.AddField("created_at", tdtp.TypeTimestamp, false)
-
-	// Add data
-	packet.AddRow(map[string]interface{}{
-		"id":         1,
-		"name":       "John Doe",
-		"email":      "john@example.com",
-		"created_at": "2024-01-15T10:30:00Z",
-	})
-
-	packet.AddRow(map[string]interface{}{
-		"id":         2,
-		"name":       "Jane Smith",
-		"email":      "jane@example.com",
-		"created_at": "2024-01-15T11:00:00Z",
-	})
-
-	// Marshal to XML
-	xml, err := packet.ToXML()
-	if err != nil {
-		log.Fatalf("Failed to marshal packet: %v", err)
-	}
-
-	fmt.Println("\nTDTP Packet (XML):")
-	fmt.Println(string(xml))
+	return nil
 }

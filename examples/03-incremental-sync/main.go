@@ -9,6 +9,11 @@ import (
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/audit"
 	"github.com/ruslano69/tdtp-framework-main/pkg/sync"
+
+	// Импортируем адаптеры для регистрации
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
 )
 
 // Incremental Sync Example
@@ -34,12 +39,18 @@ func main() {
 	defer auditLogger.Close()
 
 	// 2. Setup source (PostgreSQL)
-	sourceAdapter := setupPostgreSQLAdapter()
-	defer sourceAdapter.Close()
+	sourceAdapter, err := setupPostgreSQLAdapter(ctx)
+	if err != nil {
+		log.Fatalf("Failed to setup PostgreSQL: %v", err)
+	}
+	defer sourceAdapter.Close(ctx)
 
 	// 3. Setup target (MySQL)
-	targetAdapter := setupMySQLAdapter()
-	defer targetAdapter.Close()
+	targetAdapter, err := setupMySQLAdapter(ctx)
+	if err != nil {
+		log.Fatalf("Failed to setup MySQL: %v", err)
+	}
+	defer targetAdapter.Close(ctx)
 
 	// 4. Configure incremental sync
 	syncConfig := sync.IncrementalConfig{
@@ -52,26 +63,27 @@ func main() {
 	}
 
 	// 5. Load previous state (if exists)
-	stateManager := sync.NewStateManager(syncConfig.StateFile)
-	lastSyncState, err := stateManager.Load(ctx)
-
+	stateManager, err := sync.NewStateManager(syncConfig.StateFile, true)
 	if err != nil {
+		log.Fatalf("Failed to create state manager: %v", err)
+	}
+
+	tableName := "users"
+	lastSyncState := stateManager.GetState(tableName)
+
+	if lastSyncState.LastSyncValue == "" {
 		log.Printf("No previous sync state found, starting from beginning\n")
-		lastSyncState = &sync.State{
-			LastValue: nil,
-			Timestamp: time.Now(),
-		}
 	} else {
 		log.Printf("✓ Loaded checkpoint: last_value=%v, timestamp=%s\n",
-			lastSyncState.LastValue,
-			lastSyncState.Timestamp.Format(time.RFC3339),
+			lastSyncState.LastSyncValue,
+			lastSyncState.LastSyncTime.Format(time.RFC3339),
 		)
 	}
 
 	// 6. Run incremental sync
 	log.Println("\n--- Starting Incremental Sync ---")
 
-	totalRecords := 0
+	totalRecords := int64(0)
 	batchCount := 0
 
 	for {
@@ -83,7 +95,7 @@ func main() {
 			ctx,
 			sourceAdapter,
 			syncConfig,
-			lastSyncState.LastValue,
+			lastSyncState.LastSyncValue,
 		)
 
 		if err != nil {
@@ -113,19 +125,8 @@ func main() {
 
 		log.Printf("  Imported %d records\n", len(data))
 
-		// Save checkpoint
-		newState := &sync.State{
-			LastValue:      newLastValue,
-			Timestamp:      time.Now(),
-			RecordsTotal:   lastSyncState.RecordsTotal + int64(len(data)),
-			RecordsFailed:  0,
-			LastError:      "",
-			RetryCount:     0,
-			NextRetryAt:    time.Time{},
-			AdditionalData: map[string]interface{}{},
-		}
-
-		err = stateManager.Save(ctx, newState)
+		// Update state through StateManager
+		err = stateManager.UpdateState(tableName, newLastValue, int64(len(data)))
 		if err != nil {
 			log.Printf("⚠️  Failed to save checkpoint: %v\n", err)
 		} else {
@@ -142,9 +143,11 @@ func main() {
 			WithMetadata("batch", batchCount+1).
 			WithMetadata("last_value", newLastValue)
 
-		totalRecords += len(data)
+		totalRecords += int64(len(data))
 		batchCount++
-		lastSyncState = newState
+
+		// Reload state for next iteration
+		lastSyncState = stateManager.GetState(tableName)
 
 		// Exit if less than batch size (no more data)
 		if len(data) < syncConfig.BatchSize {
@@ -183,30 +186,50 @@ func setupAuditLogger() *audit.AuditLogger {
 }
 
 // setupPostgreSQLAdapter - setup PostgreSQL adapter
-func setupPostgreSQLAdapter() *adapter.PostgreSQLAdapter {
+func setupPostgreSQLAdapter(ctx context.Context) (adapters.Adapter, error) {
 	// dsn := "postgres://user:password@localhost:5432/sourcedb?sslmode=disable"
-	// adapter, err := adapter.NewPostgreSQLAdapter(dsn)
+	// adapter, err := adapters.New(ctx, adapters.Config{
+	//     Type: "postgres",
+	//     DSN:  dsn,
+	// })
 
 	log.Println("📊 Connecting to PostgreSQL (source)")
-	return &adapter.PostgreSQLAdapter{}
+	log.Println("   (using SQLite mock for example)")
+
+	// Для примера используем SQLite
+	adapter, err := adapters.New(ctx, adapters.Config{
+		Type: "sqlite",
+		DSN:  ":memory:",
+	})
+	return adapter, err
 }
 
 // setupMySQLAdapter - setup MySQL adapter
-func setupMySQLAdapter() *adapter.MySQLAdapter {
+func setupMySQLAdapter(ctx context.Context) (adapters.Adapter, error) {
 	// dsn := "user:password@tcp(localhost:3306)/targetdb"
-	// adapter, err := adapter.NewMySQLAdapter(dsn)
+	// adapter, err := adapters.New(ctx, adapters.Config{
+	//     Type: "mysql",
+	//     DSN:  dsn,
+	// })
 
 	log.Println("📊 Connecting to MySQL (target)")
-	return &adapter.MySQLAdapter{}
+	log.Println("   (using SQLite mock for example)")
+
+	// Для примера используем SQLite
+	adapter, err := adapters.New(ctx, adapters.Config{
+		Type: "sqlite",
+		DSN:  ":memory:",
+	})
+	return adapter, err
 }
 
 // exportIncremental - export incremental data from PostgreSQL
 func exportIncremental(
 	ctx context.Context,
-	adapter *adapter.PostgreSQLAdapter,
+	adapter adapters.Adapter,
 	config sync.IncrementalConfig,
-	lastValue interface{},
-) ([]map[string]interface{}, interface{}, error) {
+	lastValue string,
+) ([]map[string]interface{}, string, error) {
 	// В реальном сценарии:
 	// query := fmt.Sprintf(
 	//     "SELECT * FROM users WHERE %s > $1 ORDER BY %s LIMIT %d",
@@ -218,10 +241,14 @@ func exportIncremental(
 
 	// Mock data для примера
 	var startTime time.Time
-	if lastValue == nil {
+	if lastValue == "" {
 		startTime = time.Now().Add(-24 * time.Hour) // Start from 24h ago
 	} else {
-		startTime = lastValue.(time.Time)
+		parsedTime, err := time.Parse(time.RFC3339, lastValue)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to parse lastValue: %w", err)
+		}
+		startTime = parsedTime
 	}
 
 	// Generate mock records
@@ -248,24 +275,26 @@ func exportIncremental(
 
 	// Filter by lastValue
 	var filtered []map[string]interface{}
-	var newLastValue interface{} = startTime
+	newLastTime := startTime
 
 	for _, record := range mockData {
 		recordTime := record["updated_at"].(time.Time)
-		if lastValue == nil || recordTime.After(lastValue.(time.Time)) {
+		if lastValue == "" || recordTime.After(startTime) {
 			filtered = append(filtered, record)
-			if recordTime.After(newLastValue.(time.Time)) {
-				newLastValue = recordTime
+			if recordTime.After(newLastTime) {
+				newLastTime = recordTime
 			}
 		}
 	}
 
+	newLastValue := newLastTime.Format(time.RFC3339)
+
 	// Log query
-	if lastValue == nil {
+	if lastValue == "" {
 		log.Printf("  Query: SELECT * FROM users ORDER BY updated_at LIMIT %d\n", config.BatchSize)
 	} else {
 		log.Printf("  Query: SELECT * FROM users WHERE updated_at > '%s' ORDER BY updated_at LIMIT %d\n",
-			lastValue.(time.Time).Format(time.RFC3339),
+			lastValue,
 			config.BatchSize,
 		)
 	}
@@ -284,7 +313,7 @@ func exportIncremental(
 // importToMySQL - import data to MySQL
 func importToMySQL(
 	ctx context.Context,
-	adapter *adapter.MySQLAdapter,
+	adapter adapters.Adapter,
 	data []map[string]interface{},
 ) error {
 	// В реальном сценарии:

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>response</Type>
+    <TableName>orders</TableName>
+    <MessageID>RESP-2025-00cd4604-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>4</RecordsInPart>
+    <Timestamp>2025-11-18T21:04:27.8929867Z</Timestamp>
+    <Sender>example02</Sender>
+    <Recipient>receiver</Recipient>
+  </Header>
+  <QueryContext>
+    <OriginalQuery language="TDTQL" version="1.0">
+      <Filters>
+        <And>
+          <Filter field="is_paid" operator="eq" value="1"></Filter>
+        </And>
+      </Filters>
+    </OriginalQuery>
+    <ExecutionResults>
+      <TotalRecordsInTable>8</TotalRecordsInTable>
+      <RecordsAfterFilters>4</RecordsAfterFilters>
+      <RecordsReturned>4</RecordsReturned>
+      <MoreDataAvailable>false</MoreDataAvailable>
+    </ExecutionResults>
+  </QueryContext>
+  <Schema>
+    <Field name="order_id" type="INTEGER" key="true" subtype="int"></Field>
+    <Field name="quantity" type="INTEGER" subtype="bigint"></Field>
+    <Field name="price" type="DECIMAL" precision="18" scale="2"></Field>
+    <Field name="discount_rate" type="REAL" subtype="float"></Field>
+    <Field name="tax_rate" type="REAL" subtype="real"></Field>
+    <Field name="order_number" type="TEXT" length="50" subtype="varchar"></Field>
+    <Field name="customer_name" type="TEXT" length="100" subtype="nvarchar"></Field>
+    <Field name="customer_email" type="TEXT" length="255" subtype="varchar"></Field>
+    <Field name="customer_phone" type="TEXT" length="20" subtype="varchar"></Field>
+    <Field name="billing_address" type="TEXT" subtype="nvarchar"></Field>
+    <Field name="notes" type="TEXT" subtype="text"></Field>
+    <Field name="credit_card" type="TEXT" length="19" subtype="char"></Field>
+    <Field name="ssn" type="TEXT" length="11" subtype="varchar"></Field>
+    <Field name="order_date" type="DATE"></Field>
+    <Field name="order_datetime" type="TIMESTAMP" subtype="datetime"></Field>
+    <Field name="created_at" type="TIMESTAMP" subtype="datetime2"></Field>
+    <Field name="updated_at" type="TIMESTAMP" subtype="datetimeoffset"></Field>
+    <Field name="is_paid" type="BOOLEAN"></Field>
+    <Field name="is_shipped" type="BOOLEAN"></Field>
+    <Field name="is_cancelled" type="BOOLEAN"></Field>
+    <Field name="signature" type="BLOB" subtype="varbinary"></Field>
+    <Field name="order_status" type="INTEGER" subtype="tinyint"></Field>
+    <Field name="priority" type="INTEGER" subtype="smallint"></Field>
+  </Schema>
+  <Data>
+    <R>1|5|[49 53 48 46 53 48]|0.1|0.20000000298023224|ORD-2024-001|Иван Иванов|ivan.ivanov@example.com|+7-495-123-4567|Москва, ул. Ленина, д. 10, кв. 5|????????? ????? ?????????|4532-1234-5678-9010|123-45-6789|2024-01-15|2024-01-15T10:30:00Z|2025-11-18T20:58:56Z|2024-01-15T10:30:00+03:00|1|1|0||2|5</R>
+    <R>2|10|[50 57 57 46 57 57]|0.15|0.20000000298023224|ORD-2024-002|Jane Smith|jane.smith@example.com|+1-555-987-6543|123 Main St, New York, NY 10001, USA||5412-9876-5432-1098|987-65-4321|2024-01-16|2024-01-16T14:20:00Z|2025-11-18T20:58:56Z|2024-01-16T14:25:00-05:00|1|0|0||1|3</R>
+    <R>4|9999999999|[57 57 57 57 57 57 57 57 57 46 57 57]|0.999|0.9990000128746033|ORD-2024-004|Bob Wilson|bob.wilson@test.org|+44-20-1234-5678|Very long address that might cause issues with different encodings and special chars: ??????, ????? ??????? ??? ???????????|Very long notes with special characters: &lt;&gt;&amp;&#34;&#39; ?? ???|3782-8224-6310-005 |555-55-5555|2024-01-18|2024-01-18T23:59:59Z|2025-11-18T20:58:56Z|2024-01-18T23:59:59Z|1|1|0||2|1</R>
+    <R>6|2|[49 57 57 46 57 57]|0.2|0.20000000298023224|ORD-2024-006|Charlie Brown|charlie@peanuts.com|+1-555-123-0000|1 Peanuts Way, Anytown, USA|Handle with care|4111-1111-1111-1111|111-11-1111|2024-01-20|2024-01-20T08:00:00Z|2025-11-18T20:58:56Z|2024-01-20T08:05:00-08:00|1|0|0||1|2</R>
+  </Data>
+</DataPacket>

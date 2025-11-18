@@ -1,0 +1,6 @@
+{"id":"audit-1763499867494779900-867","timestamp":"2025-11-18T23:04:27.4947799+02:00","operation":"authenticate","status":"success","user":"system","metadata":{"example":"02-rabbitmq-mssql"}}
+{"id":"audit-1763499867821035900-867","timestamp":"2025-11-18T23:04:27.8210359+02:00","operation":"export","status":"success","user":"system","resource":"orders","records_affected":8,"duration":2514600}
+{"id":"audit-1763499867894429000-867","timestamp":"2025-11-18T23:04:27.894429+02:00","operation":"query","status":"success","user":"system","resource":"orders","records_affected":4,"duration":69799400,"metadata":{"filter":"is_paid=1"}}
+{"id":"audit-1763499867933936800-867","timestamp":"2025-11-18T23:04:27.9339368+02:00","operation":"query","status":"success","user":"system","resource":"orders","records_affected":1,"duration":36857400,"metadata":{"filter":"complex"}}
+{"id":"audit-1763499867939877700-867","timestamp":"2025-11-18T23:04:27.9398777+02:00","operation":"mask","status":"success","user":"system","resource":"orders","records_affected":8,"duration":3266300}
+{"id":"audit-1763499867994901000-867","timestamp":"2025-11-18T23:04:27.994901+02:00","operation":"sync","status":"success","user":"system","target":"rabbitmq://localhost:5672/tdtp-orders","records_affected":1,"duration":51285400}

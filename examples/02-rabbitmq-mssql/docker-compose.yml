@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: example02-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "Tdtp_Pass_123!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./init.sql:/init.sql
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Tdtp_Pass_123!' -Q 'SELECT 1' -C"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: example02-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: tdtp
+      RABBITMQ_DEFAULT_PASS: tdtp_pass_123
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI (http://localhost:15672)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  mssql_data:
+  rabbitmq_data:
+
+networks:
+  default:
+    name: example02-network
