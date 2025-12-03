@@ -298,3 +298,156 @@ func (a *Adapter) createQueryContextForSQL(ctx context.Context, query *packet.Qu
 		},
 	}
 }
+
+// ExportTableIncremental экспортирует только измененные записи с момента последней синхронизации
+// Использует IncrementalConfig для отслеживания изменений
+// Возвращает пакеты и последнее значение tracking поля для следующей синхронизации
+func (a *Adapter) ExportTableIncremental(
+	ctx context.Context,
+	tableName string,
+	incrementalConfig adapters.IncrementalConfig,
+) ([]*packet.DataPacket, string, error) {
+	// Валидация конфигурации
+	if err := incrementalConfig.Validate(); err != nil {
+		return nil, "", fmt.Errorf("invalid incremental config: %w", err)
+	}
+
+	// Получаем схему
+	pkgSchema, err := a.GetTableSchema(ctx, tableName)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Проверяем что tracking field существует в схеме
+	trackingFieldExists := false
+	var trackingFieldIndex int
+	for i, field := range pkgSchema.Fields {
+		if field.Name == incrementalConfig.TrackingField {
+			trackingFieldExists = true
+			trackingFieldIndex = i
+			break
+		}
+	}
+
+	if !trackingFieldExists {
+		return nil, "", fmt.Errorf("tracking field '%s' not found in table schema", incrementalConfig.TrackingField)
+	}
+
+	// Формируем SQL запрос с WHERE условием для инкрементальной выгрузки
+	quotedTable := quoteIdentifier(tableName)
+	quotedTrackingField := quoteIdentifier(incrementalConfig.TrackingField)
+
+	var query string
+	var args []interface{}
+
+	if incrementalConfig.InitialValue != "" {
+		// Есть checkpoint - загружаем только новые записи
+		query = fmt.Sprintf(
+			"SELECT * FROM %s WHERE %s > ? ORDER BY %s %s",
+			quotedTable,
+			quotedTrackingField,
+			quotedTrackingField,
+			incrementalConfig.OrderBy,
+		)
+		args = append(args, incrementalConfig.InitialValue)
+
+		// Добавляем LIMIT если указан BatchSize
+		if incrementalConfig.BatchSize > 0 {
+			query += fmt.Sprintf(" LIMIT %d", incrementalConfig.BatchSize)
+		}
+	} else {
+		// Первая синхронизация - загружаем все записи
+		query = fmt.Sprintf(
+			"SELECT * FROM %s ORDER BY %s %s",
+			quotedTable,
+			quotedTrackingField,
+			incrementalConfig.OrderBy,
+		)
+
+		if incrementalConfig.BatchSize > 0 {
+			query += fmt.Sprintf(" LIMIT %d", incrementalConfig.BatchSize)
+		}
+	}
+
+	// Выполняем запрос
+	rows, err := a.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read incremental data: %w", err)
+	}
+	defer rows.Close()
+
+	// Собираем данные
+	var dataRows [][]string
+	var lastTrackingValue string
+
+	// Получаем названия колонок
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// Читаем строки
+	for rows.Next() {
+		// Создаем slice для сканирования
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, "", fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Конвертируем в string slice
+		row := make([]string, len(columns))
+		for i, val := range values {
+			if val == nil {
+				row[i] = ""
+			} else {
+				switch v := val.(type) {
+				case []byte:
+					row[i] = string(v)
+				default:
+					row[i] = fmt.Sprint(v)
+				}
+			}
+
+			// Сохраняем последнее значение tracking field
+			if i == trackingFieldIndex {
+				lastTrackingValue = row[i]
+			}
+		}
+
+		dataRows = append(dataRows, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	// Если нет данных, возвращаем пустой результат
+	if len(dataRows) == 0 {
+		return []*packet.DataPacket{}, incrementalConfig.InitialValue, nil
+	}
+
+	// Создаем TDTP пакет
+	pkt := packet.NewDataPacket(packet.TypeReference, tableName)
+	pkt.Schema = pkgSchema
+
+	// Конвертируем строки в TDTP format (pipe-delimited)
+	packetRows := make([]packet.Row, 0, len(dataRows))
+	for _, row := range dataRows {
+		rowStr := strings.Join(row, "|")
+		packetRows = append(packetRows, packet.Row{Value: rowStr})
+	}
+
+	pkt.Data = packet.Data{Rows: packetRows}
+
+	return []*packet.DataPacket{pkt}, lastTrackingValue, nil
+}
+
+// quoteIdentifier quotes an identifier (table or column name) for SQLite
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
