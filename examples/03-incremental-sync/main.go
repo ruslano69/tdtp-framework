@@ -2,51 +2,68 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/adapter"
+	"github.com/queuebridge/tdtp/pkg/adapters"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/postgres" // PostgreSQL driver
+	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"   // SQLite driver
 	"github.com/queuebridge/tdtp/pkg/audit"
+	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/sync"
 )
 
 // Incremental Sync Example
 //
-// Demonstrates how to synchronize only changed data using IncrementalSync
-// with StateManager for checkpoint tracking.
+// Demonstrates how to synchronize only changed data using the TDTP Framework's
+// incremental sync capabilities with StateManager for checkpoint tracking.
 //
-// Use case: PostgreSQL → MySQL incremental replication
-// - Track last synchronized timestamp
-// - Process only new/updated records
+// Use case: PostgreSQL → SQLite incremental replication
+// - Track last synchronized timestamp using StateManager
+// - Process only new/updated records using ExportTableIncremental()
+// - Import via TDTP protocol using ImportPacket()
 // - Save checkpoint after each successful batch
 // - Resume from last checkpoint on restart
+//
+// This example shows the REAL power of TDTP Framework:
+// 1. Automatic schema detection
+// 2. Cross-database sync (PostgreSQL → SQLite)
+// 3. Incremental tracking with timestamps
+// 4. Checkpoint management
+// 5. Full audit trail
 
 func main() {
 	ctx := context.Background()
 
-	log.Println("=== Incremental Sync Example ===")
-	log.Println("Scenario: PostgreSQL → MySQL (only changed data)")
+	log.Println("=== TDTP Framework: Incremental Sync Example ===")
+	log.Println("Scenario: PostgreSQL → SQLite (only changed data)")
 	log.Println()
 
 	// 1. Setup audit logger
 	auditLogger := setupAuditLogger()
 	defer auditLogger.Close()
 
-	// 2. Setup source (PostgreSQL)
-	sourceAdapter := setupPostgreSQLAdapter()
-	defer sourceAdapter.Close()
+	// 2. Setup source database (PostgreSQL)
+	sourceAdapter, err := setupSourceDatabase(ctx)
+	if err != nil {
+		log.Fatalf("Failed to setup source: %v", err)
+	}
+	defer sourceAdapter.Close(ctx)
 
-	// 3. Setup target (MySQL)
-	targetAdapter := setupMySQLAdapter()
-	defer targetAdapter.Close()
+	// 3. Setup target database (SQLite)
+	targetAdapter, err := setupTargetDatabase(ctx)
+	if err != nil {
+		log.Fatalf("Failed to setup target: %v", err)
+	}
+	defer targetAdapter.Close(ctx)
 
 	// 4. Configure incremental sync
 	syncConfig := sync.IncrementalConfig{
 		Enabled:       true,
 		Mode:          sync.SyncModeIncremental,
 		Strategy:      sync.TrackingTimestamp, // Track by timestamp
-		TrackingField: "updated_at",            // Field to track
+		TrackingField: "updated_at",            // Field to track changes
 		StateFile:     "./sync_state.json",     // Checkpoint file
 		BatchSize:     1000,                    // Records per batch
 	}
@@ -58,7 +75,7 @@ func main() {
 	if err != nil {
 		log.Printf("No previous sync state found, starting from beginning\n")
 		lastSyncState = &sync.State{
-			LastValue: nil,
+			LastValue: "",
 			Timestamp: time.Now(),
 		}
 	} else {
@@ -68,56 +85,78 @@ func main() {
 		)
 	}
 
-	// 6. Run incremental sync
-	log.Println("\n--- Starting Incremental Sync ---")
+	// Update config with last value from state
+	syncConfig.LastValue = lastSyncState.LastValue
 
+	// 6. Run incremental sync
+	log.Println("\n--- Starting Incremental Sync via TDTP Protocol ---")
+
+	tableName := "users"
 	totalRecords := 0
 	batchCount := 0
 
 	for {
 		startTime := time.Now()
 
-		// Export incremental data from PostgreSQL
+		// ========== TDTP FRAMEWORK EXPORT ==========
+		// This is where the framework magic happens:
+		// - Automatically builds SQL query with WHERE clause
+		// - Converts result set to TDTP packets
+		// - Handles schema mapping
 		log.Printf("\nBatch #%d:\n", batchCount+1)
-		data, newLastValue, err := exportIncremental(
+		log.Printf("  Calling: sourceAdapter.ExportTableIncremental('%s', config)\n", tableName)
+
+		packets, newLastValue, err := sourceAdapter.ExportTableIncremental(
 			ctx,
-			sourceAdapter,
+			tableName,
 			syncConfig,
-			lastSyncState.LastValue,
 		)
 
 		if err != nil {
 			log.Printf("❌ Export failed: %v\n", err)
 			auditLogger.LogFailure(ctx, audit.OpSync, err).
 				WithSource("postgresql://source-db").
-				WithTarget("mysql://target-db")
+				WithTarget("sqlite://target.db")
 			break
 		}
 
-		if len(data) == 0 {
+		if len(packets) == 0 {
 			log.Println("✓ No new records to sync")
 			break
 		}
 
-		log.Printf("  Exported %d records\n", len(data))
+		// Count total rows in all packets
+		totalRowsInBatch := 0
+		for _, pkt := range packets {
+			totalRowsInBatch += len(pkt.Data.Rows)
+		}
 
-		// Import to MySQL
-		err = importToMySQL(ctx, targetAdapter, data)
+		log.Printf("  ✓ Exported %d TDTP packet(s) with %d rows total\n", len(packets), totalRowsInBatch)
+		log.Printf("  New last_value: %s\n", newLastValue)
+
+		// ========== TDTP FRAMEWORK IMPORT ==========
+		// Framework handles:
+		// - CREATE TABLE if not exists (schema from TDTP packet)
+		// - Data type mapping (PostgreSQL → SQLite)
+		// - Bulk insert with UPSERT strategy
+		log.Printf("  Calling: targetAdapter.ImportPackets(packets, StrategyReplace)\n")
+
+		err = targetAdapter.ImportPackets(ctx, packets, adapters.StrategyReplace)
 		if err != nil {
 			log.Printf("❌ Import failed: %v\n", err)
 			auditLogger.LogFailure(ctx, audit.OpImport, err).
-				WithTarget("mysql://target-db").
-				WithRecordsAffected(int64(len(data)))
+				WithTarget("sqlite://target.db").
+				WithRecordsAffected(int64(totalRowsInBatch))
 			break
 		}
 
-		log.Printf("  Imported %d records\n", len(data))
+		log.Printf("  ✓ Imported %d rows to SQLite\n", totalRowsInBatch)
 
 		// Save checkpoint
 		newState := &sync.State{
 			LastValue:      newLastValue,
 			Timestamp:      time.Now(),
-			RecordsTotal:   lastSyncState.RecordsTotal + int64(len(data)),
+			RecordsTotal:   lastSyncState.RecordsTotal + int64(totalRowsInBatch),
 			RecordsFailed:  0,
 			LastError:      "",
 			RetryCount:     0,
@@ -129,25 +168,28 @@ func main() {
 		if err != nil {
 			log.Printf("⚠️  Failed to save checkpoint: %v\n", err)
 		} else {
-			log.Printf("  ✓ Checkpoint saved: last_value=%v\n", newLastValue)
+			log.Printf("  ✓ Checkpoint saved: %s\n", syncConfig.StateFile)
 		}
 
 		// Audit log
 		auditLogger.LogSuccess(ctx, audit.OpSync).
 			WithUser("system").
 			WithSource("postgresql://source-db").
-			WithTarget("mysql://target-db").
-			WithRecordsAffected(int64(len(data))).
+			WithTarget("sqlite://target.db").
+			WithRecordsAffected(int64(totalRowsInBatch)).
 			WithDuration(time.Since(startTime)).
 			WithMetadata("batch", batchCount+1).
 			WithMetadata("last_value", newLastValue)
 
-		totalRecords += len(data)
+		totalRecords += totalRowsInBatch
 		batchCount++
 		lastSyncState = newState
 
+		// Update config for next iteration
+		syncConfig.LastValue = newLastValue
+
 		// Exit if less than batch size (no more data)
-		if len(data) < syncConfig.BatchSize {
+		if totalRowsInBatch < syncConfig.BatchSize {
 			log.Println("\n✓ All records synchronized")
 			break
 		}
@@ -157,6 +199,12 @@ func main() {
 	log.Printf("Total records synced: %d\n", totalRecords)
 	log.Printf("Total batches: %d\n", batchCount)
 	log.Printf("Checkpoint file: %s\n", syncConfig.StateFile)
+	log.Printf("\n💡 This example demonstrates:\n")
+	log.Printf("   • Cross-database sync via TDTP protocol\n")
+	log.Printf("   • Automatic schema detection and mapping\n")
+	log.Printf("   • Incremental sync with timestamp tracking\n")
+	log.Printf("   • Checkpoint management for resumability\n")
+	log.Printf("   • Full audit trail of operations\n")
 }
 
 // setupAuditLogger - setup audit logger
@@ -182,121 +230,109 @@ func setupAuditLogger() *audit.AuditLogger {
 	return audit.NewLogger(config, multiAppender)
 }
 
-// setupPostgreSQLAdapter - setup PostgreSQL adapter
-func setupPostgreSQLAdapter() *adapter.PostgreSQLAdapter {
+// setupSourceDatabase - setup PostgreSQL source database
+func setupSourceDatabase(ctx context.Context) (adapters.Adapter, error) {
+	// In production, use real DSN:
 	// dsn := "postgres://user:password@localhost:5432/sourcedb?sslmode=disable"
-	// adapter, err := adapter.NewPostgreSQLAdapter(dsn)
+	//
+	// For this example, we use SQLite to make it runnable without PostgreSQL:
+	dsn := "source.db"
 
-	log.Println("📊 Connecting to PostgreSQL (source)")
-	return &adapter.PostgreSQLAdapter{}
+	log.Println("📊 Connecting to source database")
+	log.Printf("   DSN: %s\n", dsn)
+
+	cfg := adapters.Config{
+		Type:     "sqlite", // Change to "postgres" in production
+		DSN:      dsn,
+		MaxConns: 10,
+		MinConns: 2,
+	}
+
+	adapter, err := adapters.New(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify connection
+	if err := adapter.Ping(ctx); err != nil {
+		adapter.Close(ctx)
+		return nil, err
+	}
+
+	// Check if table exists
+	exists, _ := adapter.TableExists(ctx, "users")
+	if !exists {
+		log.Printf("   ⚠️  Table 'users' does not exist. Creating sample data...\n")
+		createSampleData(ctx, adapter)
+	}
+
+	log.Println("   ✓ Connected")
+	return adapter, nil
 }
 
-// setupMySQLAdapter - setup MySQL adapter
-func setupMySQLAdapter() *adapter.MySQLAdapter {
-	// dsn := "user:password@tcp(localhost:3306)/targetdb"
-	// adapter, err := adapter.NewMySQLAdapter(dsn)
+// setupTargetDatabase - setup SQLite target database
+func setupTargetDatabase(ctx context.Context) (adapters.Adapter, error) {
+	dsn := "target.db"
 
-	log.Println("📊 Connecting to MySQL (target)")
-	return &adapter.MySQLAdapter{}
+	log.Println("📁 Connecting to target database")
+	log.Printf("   DSN: %s\n", dsn)
+
+	cfg := adapters.Config{
+		Type: "sqlite",
+		DSN:  dsn,
+	}
+
+	adapter, err := adapters.New(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := adapter.Ping(ctx); err != nil {
+		adapter.Close(ctx)
+		return nil, err
+	}
+
+	log.Println("   ✓ Connected")
+	return adapter, nil
 }
 
-// exportIncremental - export incremental data from PostgreSQL
-func exportIncremental(
-	ctx context.Context,
-	adapter *adapter.PostgreSQLAdapter,
-	config sync.IncrementalConfig,
-	lastValue interface{},
-) ([]map[string]interface{}, interface{}, error) {
-	// В реальном сценарии:
-	// query := fmt.Sprintf(
-	//     "SELECT * FROM users WHERE %s > $1 ORDER BY %s LIMIT %d",
-	//     config.TrackingField,
-	//     config.TrackingField,
-	//     config.BatchSize,
-	// )
-	// rows, err := adapter.QueryContext(ctx, query, lastValue)
+// createSampleData - create sample data in source database for demo
+func createSampleData(ctx context.Context, adapter adapters.Adapter) {
+	// Note: This is just for demo purposes
+	// In production, your source database would already have data
+	log.Println("   Creating sample 'users' table with test data...")
 
-	// Mock data для примера
-	var startTime time.Time
-	if lastValue == nil {
-		startTime = time.Now().Add(-24 * time.Hour) // Start from 24h ago
-	} else {
-		startTime = lastValue.(time.Time)
-	}
+	// We'll use ImportPacket to create the table with sample data
+	// This demonstrates that TDTP can work both ways!
 
-	// Generate mock records
-	mockData := []map[string]interface{}{
-		{
-			"id":         101,
-			"name":       "John Doe",
-			"email":      "john@example.com",
-			"updated_at": startTime.Add(1 * time.Hour),
-		},
-		{
-			"id":         102,
-			"name":       "Jane Smith",
-			"email":      "jane@example.com",
-			"updated_at": startTime.Add(2 * time.Hour),
-		},
-		{
-			"id":         103,
-			"name":       "Bob Wilson",
-			"email":      "bob@example.com",
-			"updated_at": startTime.Add(3 * time.Hour),
+	builder := schema.NewBuilder()
+	schemaObj := builder.
+		AddInteger("id", true).
+		AddText("name", 100).
+		AddText("email", 100).
+		AddTimestamp("updated_at", false).
+		Build()
+
+	pkt := packet.NewDataPacket(packet.TypeReference, "users")
+	pkt.Schema = schemaObj
+
+	// Add sample rows with different timestamps
+	now := time.Now()
+	pkt.Data = packet.Data{
+		Rows: []packet.Row{
+			{Value: "1|John Doe|john@example.com|" + now.Add(-24*time.Hour).Format(time.RFC3339)},
+			{Value: "2|Jane Smith|jane@example.com|" + now.Add(-23*time.Hour).Format(time.RFC3339)},
+			{Value: "3|Bob Wilson|bob@example.com|" + now.Add(-22*time.Hour).Format(time.RFC3339)},
+			{Value: "4|Alice Brown|alice@example.com|" + now.Add(-21*time.Hour).Format(time.RFC3339)},
+			{Value: "5|Charlie Davis|charlie@example.com|" + now.Add(-20*time.Hour).Format(time.RFC3339)},
 		},
 	}
 
-	// Filter by lastValue
-	var filtered []map[string]interface{}
-	var newLastValue interface{} = startTime
-
-	for _, record := range mockData {
-		recordTime := record["updated_at"].(time.Time)
-		if lastValue == nil || recordTime.After(lastValue.(time.Time)) {
-			filtered = append(filtered, record)
-			if recordTime.After(newLastValue.(time.Time)) {
-				newLastValue = recordTime
-			}
-		}
+	err := adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
+	if err != nil {
+		log.Printf("   ⚠️  Failed to create sample data: %v\n", err)
+		return
 	}
 
-	// Log query
-	if lastValue == nil {
-		log.Printf("  Query: SELECT * FROM users ORDER BY updated_at LIMIT %d\n", config.BatchSize)
-	} else {
-		log.Printf("  Query: SELECT * FROM users WHERE updated_at > '%s' ORDER BY updated_at LIMIT %d\n",
-			lastValue.(time.Time).Format(time.RFC3339),
-			config.BatchSize,
-		)
-	}
-
-	for _, record := range filtered {
-		log.Printf("    • ID: %v, Name: %s, Updated: %s\n",
-			record["id"],
-			record["name"],
-			record["updated_at"].(time.Time).Format(time.RFC3339),
-		)
-	}
-
-	return filtered, newLastValue, nil
-}
-
-// importToMySQL - import data to MySQL
-func importToMySQL(
-	ctx context.Context,
-	adapter *adapter.MySQLAdapter,
-	data []map[string]interface{},
-) error {
-	// В реальном сценарии:
-	// for _, record := range data {
-	//     query := "INSERT INTO users (id, name, email, updated_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), updated_at=VALUES(updated_at)"
-	//     _, err := adapter.ExecContext(ctx, query, record["id"], record["name"], record["email"], record["updated_at"])
-	//     if err != nil {
-	//         return err
-	//     }
-	// }
-
-	// Mock для примера
-	time.Sleep(100 * time.Millisecond)
-	return nil
+	log.Println("   ✓ Sample data created")
 }
