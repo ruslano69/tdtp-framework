@@ -86,7 +86,7 @@ func main() {
 	}
 
 	// Update config with last value from state
-	syncConfig.LastValue = lastSyncState.LastValue
+	syncConfig.InitialValue = lastSyncState.LastValue
 
 	// 6. Run incremental sync
 	log.Println("\n--- Starting Incremental Sync via TDTP Protocol ---")
@@ -186,7 +186,7 @@ func main() {
 		lastSyncState = newState
 
 		// Update config for next iteration
-		syncConfig.LastValue = newLastValue
+		syncConfig.InitialValue = newLastValue
 
 		// Exit if less than batch size (no more data)
 		if totalRowsInBatch < syncConfig.BatchSize {
