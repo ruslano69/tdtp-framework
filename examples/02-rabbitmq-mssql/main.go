@@ -4,210 +4,158 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
-	"github.com/queuebridge/tdtp/pkg/adapter"
+	"github.com/queuebridge/tdtp/pkg/adapters"
+	_ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 	"github.com/queuebridge/tdtp/pkg/audit"
-	"github.com/queuebridge/tdtp/pkg/brokers"
+	"github.com/queuebridge/tdtp/pkg/core/packet"
+	"github.com/queuebridge/tdtp/pkg/core/schema"
 	"github.com/queuebridge/tdtp/pkg/processor"
 	"github.com/queuebridge/tdtp/pkg/resilience"
-	"github.com/queuebridge/tdtp/pkg/retry"
 )
 
-// RabbitMQ + MSSQL Integration Example
+// Advanced Data Pipeline Example
 //
-// Сценарий: Экспорт данных из MSSQL в RabbitMQ с аудитом, маскированием
-// и защитой от сбоев (circuit breaker + retry)
+// Demonstrates production-ready data pipeline using TDTP Framework components:
+// - Database export/import via TDTP protocol
+// - Data processing (masking, validation, normalization)
+// - Circuit breaker for resilience
+// - Full audit trail
 //
-// Реальный use case:
-// - MSSQL база данных с заказами
-// - RabbitMQ для отправки в другие системы
-// - Маскирование PII данных (email, phone)
-// - Аудит всех операций (GDPR compliance)
-// - Circuit breaker для защиты от перегрузки RabbitMQ
-// - Retry с exponential backoff при сбоях
+// Use case: E-commerce orders processing with PII protection
 
 func main() {
 	ctx := context.Background()
 
-	// 1. Настройка Audit Logger
+	// 1. Setup audit logger
 	auditLogger := setupAuditLogger()
 	defer auditLogger.Close()
 
-	log.Println("=== RabbitMQ + MSSQL Integration Example ===")
-	auditLogger.LogSuccess(ctx, audit.OpAuthenticate).
-		WithUser("system").
-		WithMetadata("example", "rabbitmq-mssql")
+	log.Println("=== Advanced Data Pipeline Example ===")
+	log.Println("Scenario: Orders Export → PII Masking → Analytics Import")
+	log.Println()
 
-	// 2. Подключение к MSSQL
-	mssqlAdapter, err := setupMSSQLAdapter(auditLogger)
+	// 2. Setup source database
+	sourceDB, err := setupSourceDatabase(ctx)
 	if err != nil {
-		log.Fatalf("Failed to setup MSSQL adapter: %v", err)
+		log.Fatalf("Failed to setup source: %v", err)
 	}
-	defer mssqlAdapter.Close()
+	defer sourceDB.Close(ctx)
 
-	// 3. Подключение к RabbitMQ с Circuit Breaker
-	rabbitMQAdapter, circuitBreaker := setupRabbitMQWithCircuitBreaker(auditLogger)
-	defer rabbitMQAdapter.Close()
+	// 3. Setup target database
+	targetDB, err := setupTargetDatabase(ctx)
+	if err != nil {
+		log.Fatalf("Failed to setup target: %v", err)
+	}
+	defer targetDB.Close(ctx)
 
-	// 4. Настройка процессоров (маскирование данных)
+	// 4. Setup processors
 	processors := setupProcessors()
 
-	// 5. Экспорт данных из MSSQL
-	log.Println("\n--- Step 1: Export from MSSQL ---")
-	startTime := time.Now()
+	// 5. Setup circuit breaker
+	circuitBreaker := setupCircuitBreaker()
 
-	data, err := exportFromMSSQL(ctx, mssqlAdapter, auditLogger)
+	// 6. Export from source
+	log.Println("--- Step 1: Export ---")
+	packets, err := sourceDB.ExportTable(ctx, "orders")
 	if err != nil {
 		log.Fatalf("Export failed: %v", err)
 	}
+	log.Printf("✓ Exported %d packet(s)\n", len(packets))
 
-	auditLogger.LogSuccess(ctx, audit.OpExport).
-		WithUser("system").
-		WithSource("mssql://orders-db").
-		WithResource("orders").
-		WithRecordsAffected(int64(len(data))).
-		WithDuration(time.Since(startTime))
+	// 7. Apply processors
+	log.Println("\n--- Step 2: Data Processing ---")
+	processedPackets := applyProcessors(ctx, packets, processors, auditLogger)
+	log.Printf("✓ Processed data (masked PII)\n")
 
-	log.Printf("Exported %d records from MSSQL\n", len(data))
-
-	// 6. Применение процессоров (маскирование)
-	log.Println("\n--- Step 2: Apply Data Masking ---")
-	maskedData := applyProcessors(ctx, data, processors, auditLogger)
-	log.Printf("Masked %d records\n", len(maskedData))
-
-	// 7. Отправка в RabbitMQ с Circuit Breaker и Retry
-	log.Println("\n--- Step 3: Send to RabbitMQ with Protection ---")
-	err = sendToRabbitMQWithProtection(
-		ctx,
-		rabbitMQAdapter,
-		circuitBreaker,
-		maskedData,
-		auditLogger,
-	)
+	// 8. Import to target with resilience
+	log.Println("\n--- Step 3: Import ---")
+	err = circuitBreaker.Execute(ctx, func(ctx context.Context) error {
+		return targetDB.ImportPackets(ctx, processedPackets, adapters.StrategyReplace)
+	})
 
 	if err != nil {
-		log.Printf("Send failed: %v\n", err)
-		auditLogger.LogFailure(ctx, audit.OpSync, err).
-			WithTarget("rabbitmq://orders-queue")
-	} else {
-		log.Println("✓ Successfully sent to RabbitMQ")
-		auditLogger.LogSuccess(ctx, audit.OpSync).
-			WithUser("system").
-			WithTarget("rabbitmq://orders-queue").
-			WithRecordsAffected(int64(len(maskedData))).
-			WithDuration(time.Since(startTime))
+		log.Fatalf("Import failed: %v", err)
 	}
 
-	// 8. Статистика Circuit Breaker
-	printCircuitBreakerStats(circuitBreaker)
+	log.Println("✓ Imported to analytics database")
 
-	log.Println("\n=== Integration Complete ===")
+	log.Println("\n=== Pipeline Complete ===")
+	printStats(circuitBreaker)
 }
 
-// setupAuditLogger - настройка audit logger с file + console
 func setupAuditLogger() *audit.AuditLogger {
-	// File appender для постоянного хранения
-	fileAppender, err := audit.NewFileAppender(audit.FileAppenderConfig{
-		FilePath:   "./logs/rabbitmq-mssql.log",
-		MaxSize:    50, // 50 MB
+	fileAppender, _ := audit.NewFileAppender(audit.FileAppenderConfig{
+		FilePath:   "./logs/pipeline.log",
+		MaxSize:    50,
 		MaxBackups: 10,
-		Level:      audit.LevelStandard, // Без sensitive data
+		Level:      audit.LevelStandard,
 		FormatJSON: true,
 	})
-	if err != nil {
-		log.Fatalf("Failed to create file appender: %v", err)
-	}
 
-	// Console appender для отладки
 	consoleAppender := audit.NewConsoleAppender(audit.LevelMinimal, false)
-
-	// Multi appender
 	multiAppender := audit.NewMultiAppender(fileAppender, consoleAppender)
 
-	// Logger с async режимом
 	config := audit.DefaultConfig()
 	config.AsyncMode = true
-	config.BufferSize = 1000
-	config.DefaultUser = "system"
-	config.DefaultSource = "rabbitmq-mssql-integration"
 
 	return audit.NewLogger(config, multiAppender)
 }
 
-// setupMSSQLAdapter - настройка MSSQL адаптера
-func setupMSSQLAdapter(auditLogger *audit.AuditLogger) (*adapter.MSSQLAdapter, error) {
-	// В реальном сценарии используйте переменные окружения
-	dsn := "sqlserver://sa:YourPassword@localhost:1433?database=OrdersDB"
+func setupSourceDatabase(ctx context.Context) (adapters.Adapter, error) {
+	log.Println("📊 Connecting to source database")
 
-	// Для примера создадим mock adapter
-	// В production используйте реальный DSN
-	log.Println("📊 Connecting to MSSQL: OrdersDB")
-	log.Println("   (using mock data for example)")
-
-	// mssqlAdapter, err := adapter.NewMSSQLAdapter(dsn)
-	// return mssqlAdapter, err
-
-	// Mock для примера
-	return &adapter.MSSQLAdapter{}, nil
-}
-
-// setupRabbitMQWithCircuitBreaker - RabbitMQ с circuit breaker
-func setupRabbitMQWithCircuitBreaker(auditLogger *audit.AuditLogger) (*brokers.RabbitMQBroker, *resilience.CircuitBreaker) {
-	// RabbitMQ connection
-	rabbitURL := "amqp://guest:guest@localhost:5672/"
-
-	log.Println("🐰 Connecting to RabbitMQ")
-	log.Println("   (using mock for example)")
-
-	// broker, err := brokers.NewRabbitMQBroker(rabbitURL, "orders-queue")
-	// if err != nil {
-	// 	log.Fatalf("Failed to connect to RabbitMQ: %v", err)
-	// }
-
-	// Circuit Breaker для защиты RabbitMQ
-	cbConfig := resilience.DefaultConfig("rabbitmq")
-	cbConfig.MaxFailures = 5
-	cbConfig.Timeout = 30 * time.Second
-	cbConfig.SuccessThreshold = 2
-	cbConfig.OnStateChange = func(name string, from, to resilience.State) {
-		log.Printf("⚡ Circuit Breaker [%s]: %s → %s\n", name, from, to)
-
-		// Логируем в audit
-		auditLogger.LogOperation(context.Background(), audit.OpUpdate, audit.StatusSuccess).
-			WithMetadata("circuit_breaker", name).
-			WithMetadata("state_from", from.String()).
-			WithMetadata("state_to", to.String())
-	}
-
-	circuitBreaker, err := resilience.New(cbConfig)
+	adapter, err := adapters.New(ctx, adapters.Config{
+		Type: "sqlite",
+		DSN:  "orders.db",
+	})
 	if err != nil {
-		log.Fatalf("Failed to create circuit breaker: %v", err)
+		return nil, err
 	}
 
-	// Mock для примера
-	return &brokers.RabbitMQBroker{}, circuitBreaker
+	exists, _ := adapter.TableExists(ctx, "orders")
+	if !exists {
+		log.Println("   Creating sample data...")
+		createSampleOrders(ctx, adapter)
+	}
+
+	log.Println("   ✓ Connected")
+	return adapter, nil
 }
 
-// setupProcessors - настройка data processors
+func setupTargetDatabase(ctx context.Context) (adapters.Adapter, error) {
+	log.Println("📈 Connecting to target database")
+
+	adapter, err := adapters.New(ctx, adapters.Config{
+		Type: "sqlite",
+		DSN:  "analytics.db",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("   ✓ Connected")
+	return adapter, nil
+}
+
 func setupProcessors() *processor.Chain {
 	chain := processor.NewChain()
 
-	// FieldMasker для PII данных
+	// Normalizer
+	normalizer := processor.NewFieldNormalizer()
+	normalizer.AddNormalization("customer_email", processor.NormalizeEmail)
+
+	// Validator
+	validator := processor.NewFieldValidator()
+	validator.AddValidation("customer_email", processor.ValidateEmail)
+
+	// Masker (PII protection)
 	masker := processor.NewFieldMasker()
 	masker.AddMaskRule("customer_email", processor.MaskEmail)
 	masker.AddMaskRule("customer_phone", processor.MaskPhone)
 	masker.AddMaskRule("billing_card", processor.MaskFirst2Last2)
-
-	// FieldNormalizer
-	normalizer := processor.NewFieldNormalizer()
-	normalizer.AddNormalization("customer_email", processor.NormalizeEmail)
-	normalizer.AddNormalization("customer_phone", processor.NormalizePhone)
-
-	// FieldValidator
-	validator := processor.NewFieldValidator()
-	validator.AddValidation("customer_email", processor.ValidateEmail)
-	validator.AddValidation("order_total", processor.ValidatePositiveNumber)
 
 	chain.Add(normalizer)
 	chain.Add(validator)
@@ -216,161 +164,110 @@ func setupProcessors() *processor.Chain {
 	return chain
 }
 
-// exportFromMSSQL - экспорт данных из MSSQL
-func exportFromMSSQL(
-	ctx context.Context,
-	mssqlAdapter *adapter.MSSQLAdapter,
-	auditLogger *audit.AuditLogger,
-) ([]map[string]interface{}, error) {
-	// В реальном сценарии:
-	// query := "SELECT order_id, customer_email, customer_phone, billing_card, order_total FROM orders WHERE created_at > @last_sync"
-	// return mssqlAdapter.QueryContext(ctx, query)
+func setupCircuitBreaker() *resilience.CircuitBreaker {
+	config := resilience.DefaultConfig("import")
+	config.MaxFailures = 5
+	config.Timeout = 30 * time.Second
 
-	// Mock данные для примера
-	mockData := []map[string]interface{}{
-		{
-			"order_id":       "ORD-001",
-			"customer_email": "john.doe@company.com",
-			"customer_phone": "+1-555-123-4567",
-			"billing_card":   "4532-1234-5678-9010",
-			"order_total":    "150.00",
-			"created_at":     time.Now().Add(-1 * time.Hour),
-		},
-		{
-			"order_id":       "ORD-002",
-			"customer_email": "jane.smith@example.com",
-			"customer_phone": "+1-555-987-6543",
-			"billing_card":   "5412-9876-5432-1098",
-			"order_total":    "75.50",
-			"created_at":     time.Now().Add(-30 * time.Minute),
-		},
-		{
-			"order_id":       "ORD-003",
-			"customer_email": "bob.wilson@test.org",
-			"customer_phone": "+1-555-456-7890",
-			"billing_card":   "3782-8224-6310-005",
-			"order_total":    "225.75",
-			"created_at":     time.Now().Add(-15 * time.Minute),
-		},
-	}
-
-	log.Printf("Query: SELECT * FROM orders (last 3 records)\n")
-	for _, record := range mockData {
-		log.Printf("  • Order: %s, Email: %s, Total: %s\n",
-			record["order_id"],
-			record["customer_email"],
-			record["order_total"],
-		)
-	}
-
-	return mockData, nil
+	cb, _ := resilience.New(config)
+	return cb
 }
 
-// applyProcessors - применение процессоров к данным
+func createSampleOrders(ctx context.Context, adapter adapters.Adapter) error {
+	builder := schema.NewBuilder()
+	schemaObj := builder.
+		AddInteger("order_id", true).
+		AddText("customer_email", 100).
+		AddText("customer_phone", 20).
+		AddText("billing_card", 19).
+		AddDecimal("order_total", 10, 2).
+		Build()
+
+	pkt := packet.NewDataPacket(packet.TypeReference, "orders")
+	pkt.Schema = schemaObj
+	pkt.Data = packet.Data{
+		Rows: []packet.Row{
+			{Value: "1|john.doe@company.com|+1-555-123-4567|4532-1234-5678-9010|150.00"},
+			{Value: "2|jane.smith@example.com|+1-555-987-6543|5412-9876-5432-1098|75.50"},
+			{Value: "3|bob.wilson@test.org|+1-555-456-7890|3782-8224-6310-005|225.75"},
+		},
+	}
+
+	return adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
+}
+
 func applyProcessors(
 	ctx context.Context,
-	data []map[string]interface{},
+	packets []*packet.DataPacket,
 	processors *processor.Chain,
 	auditLogger *audit.AuditLogger,
-) []map[string]interface{} {
-	maskedData := make([]map[string]interface{}, 0, len(data))
+) []*packet.DataPacket {
+	result := make([]*packet.DataPacket, 0, len(packets))
 
-	for _, record := range data {
-		// Применяем цепочку процессоров
-		processedRecord, err := processors.Process(ctx, record)
-		if err != nil {
-			log.Printf("⚠️  Processing error for order %s: %v\n", record["order_id"], err)
-			auditLogger.LogFailure(ctx, audit.OpTransform, err).
-				WithMetadata("order_id", record["order_id"])
-			continue
+	for _, pkt := range packets {
+		processedRows := make([]packet.Row, 0, len(pkt.Data.Rows))
+
+		for i, row := range pkt.Data.Rows {
+			rowMap := rowToMap(pkt.Schema, row.Value)
+
+			processedRow, err := processors.Process(ctx, rowMap)
+			if err != nil {
+				log.Printf("⚠️  Row %d processing error: %v\n", i, err)
+				continue
+			}
+
+			processedRowStr := mapToRow(pkt.Schema, processedRow)
+			processedRows = append(processedRows, packet.Row{Value: processedRowStr})
+
+			// Show masking example
+			if i < 2 {
+				log.Printf("  • Masked: email=%s, card=%s\n",
+					processedRow["customer_email"],
+					processedRow["billing_card"],
+				)
+			}
 		}
 
-		maskedData = append(maskedData, processedRecord)
-
-		// Показываем результат маскирования
-		log.Printf("  • Order: %s, Masked Email: %s, Masked Card: %s\n",
-			processedRecord["order_id"],
-			processedRecord["customer_email"],
-			processedRecord["billing_card"],
-		)
+		processedPkt := packet.NewDataPacket(pkt.Type, pkt.TableName)
+		processedPkt.Schema = pkt.Schema
+		processedPkt.Data = packet.Data{Rows: processedRows}
+		result = append(result, processedPkt)
 	}
 
-	return maskedData
+	return result
 }
 
-// sendToRabbitMQWithProtection - отправка в RabbitMQ с защитой
-func sendToRabbitMQWithProtection(
-	ctx context.Context,
-	rabbitMQ *brokers.RabbitMQBroker,
-	circuitBreaker *resilience.CircuitBreaker,
-	data []map[string]interface{},
-	auditLogger *audit.AuditLogger,
-) error {
-	// Retry configuration
-	retryConfig := retry.Config{
-		MaxAttempts: 3,
-		Delay:       1 * time.Second,
-		MaxDelay:    10 * time.Second,
-		Multiplier:  2.0,
-		Jitter:      true,
-		OnRetry: func(attempt int, err error) {
-			log.Printf("🔄 Retry attempt %d: %v\n", attempt, err)
-		},
-	}
-
-	retryer := retry.NewRetryer(retryConfig)
-
-	// Отправка каждой записи
-	for i, record := range data {
-		orderID := record["order_id"]
-		log.Printf("Sending order %s (%d/%d)...\n", orderID, i+1, len(data))
-
-		// Используем Circuit Breaker + Retry
-		err := circuitBreaker.Execute(ctx, func(ctx context.Context) error {
-			return retryer.Do(ctx, func() error {
-				// В реальном сценарии:
-				// return rabbitMQ.Publish(ctx, record)
-
-				// Mock для примера
-				// Имитируем случайные сбои
-				if i == 1 {
-					return fmt.Errorf("temporary network error")
-				}
-
-				time.Sleep(100 * time.Millisecond) // Имитация отправки
-				return nil
-			})
-		})
-
-		if err != nil {
-			log.Printf("❌ Failed to send order %s: %v\n", orderID, err)
-			auditLogger.LogFailure(ctx, audit.OpExport, err).
-				WithTarget("rabbitmq://orders-queue").
-				WithMetadata("order_id", orderID)
-
-			return fmt.Errorf("failed to send order %s: %w", orderID, err)
-		}
-
-		log.Printf("✓ Order %s sent successfully\n", orderID)
-	}
-
-	return nil
-}
-
-// printCircuitBreakerStats - вывод статистики circuit breaker
-func printCircuitBreakerStats(cb *resilience.CircuitBreaker) {
+func printStats(cb *resilience.CircuitBreaker) {
 	stats := cb.Stats()
+	log.Printf("\nCircuit Breaker Stats:\n")
+	log.Printf("  State: %s\n", stats.State)
+	log.Printf("  Requests: %d\n", stats.Counts.Requests)
+	log.Printf("  Successes: %d\n", stats.Counts.TotalSuccesses)
+}
 
-	log.Println("\n--- Circuit Breaker Statistics ---")
-	log.Printf("State: %s\n", stats.State)
-	log.Printf("Total Requests: %d\n", stats.Counts.Requests)
-	log.Printf("Total Successes: %d\n", stats.Counts.TotalSuccesses)
-	log.Printf("Total Failures: %d\n", stats.Counts.TotalFailures)
-	log.Printf("Consecutive Successes: %d\n", stats.Counts.ConsecutiveSuccesses)
-	log.Printf("Consecutive Failures: %d\n", stats.Counts.ConsecutiveFailures)
-	log.Printf("Max Running Calls: %d\n", stats.MaxRunningCalls)
+// Helper functions
 
-	if stats.State == resilience.StateOpen {
-		log.Printf("Time Until Half-Open: %s\n", stats.TimeUntilHalfOpen)
+func rowToMap(schema packet.Schema, rowValue string) map[string]interface{} {
+	values := strings.Split(rowValue, "|")
+	result := make(map[string]interface{})
+
+	for i, field := range schema.Fields {
+		if i < len(values) {
+			result[field.Name] = values[i]
+		}
 	}
+
+	return result
+}
+
+func mapToRow(schema packet.Schema, rowMap map[string]interface{}) string {
+	values := make([]string, len(schema.Fields))
+
+	for i, field := range schema.Fields {
+		if val, ok := rowMap[field.Name]; ok {
+			values[i] = fmt.Sprint(val)
+		}
+	}
+
+	return strings.Join(values, "|")
 }
