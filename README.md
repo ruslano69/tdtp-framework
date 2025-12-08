@@ -18,6 +18,11 @@
 - XML парсер с валидацией TDTP v1.0
 - Генератор для всех типов сообщений (Reference, Delta, Response, Request)
 - Автоматическое разбиение на части (пагинация до 3.8MB)
+- **Поддержка сжатия данных zstd**: 🆕
+  - CompressionOptions для настройки (enabled, level, minSize, algorithm)
+  - Автоматическое сжатие при генерации пакетов (порог 1KB)
+  - Автоматическая распаковка при парсинге
+  - XML-атрибут `compression="zstd"` для идентификации сжатых данных
 - QueryContext для stateless паттерна
 - Поддержка subtypes (UUID, JSONB, TIMESTAMPTZ)
 
@@ -127,11 +132,17 @@
 - Resume from last checkpoint
 - 200x faster for large tables
 
-**Data Processors (pkg/processor):**
-- FieldMasker: Email, phone, card masking (GDPR/PII)
-- FieldValidator: Regex, range, format validation
-- FieldNormalizer: Email, phone, date normalization
-- Processor chain for complex transformations
+**Data Processors (pkg/processors):**
+- **CompressionProcessor**: Сжатие/распаковка zstd (уровни 1-22, по умолчанию 3)
+  - Автоматическое base64-кодирование для безопасной передачи
+  - Многопоточная обработка (до 4 ядер)
+  - Порог сжатия (по умолчанию 1KB)
+  - Статистика сжатия (коэффициент, время)
+  - Интеграция с packet generator/parser
+- **FieldMasker**: Email, phone, card masking (GDPR/PII)
+- **FieldValidator**: Regex, range, format validation
+- **FieldNormalizer**: Email, phone, date normalization
+- **Processor chain**: Цепочки процессоров для сложных трансформаций
 
 **XLSX Converter (pkg/xlsx):** 🍒 **NEW!**
 - TDTP → XLSX export (Database → Excel for business analysis)
@@ -168,7 +179,7 @@
 ```
 tdtp-framework/
 ├─ pkg/core/
-│  ├─ packet/            ✅ Парсинг/генерация TDTP пакетов
+│  ├─ packet/            ✅ Парсинг/генерация TDTP пакетов + компрессия
 │  ├─ schema/            ✅ Валидация типов, Converter, Builder
 │  └─ tdtql/             ✅ Translator, Executor, SQL Generator
 │
@@ -177,16 +188,44 @@ tdtp-framework/
 │  ├─ factory.go         ✅ Фабрика адаптеров
 │  ├─ sqlite/            ✅ SQLite adapter (modernc.org/sqlite)
 │  ├─ postgres/          ✅ PostgreSQL adapter (pgx/v5)
-│  └─ mssql/             ✅ MS SQL Server adapter (go-mssqldb)
+│  ├─ mssql/             ✅ MS SQL Server adapter (go-mssqldb)
+│  └─ mysql/             ✅ MySQL adapter (go-sql-driver/mysql)
+│
+├─ pkg/processors/       ✅ Обработка и трансформация данных
+│  ├─ compression.go     ✅ Сжатие/распаковка zstd (klauspost/compress)
+│  ├─ field_masker.go    ✅ Маскирование PII (email, phone, card)
+│  ├─ field_validator.go ✅ Валидация полей (regex, range, format)
+│  ├─ field_normalizer.go✅ Нормализация данных
+│  ├─ chain.go           ✅ Цепочки процессоров
+│  └─ factory.go         ✅ Фабрика процессоров
+│
+├─ pkg/resilience/       ✅ Circuit Breaker паттерн
+│  └─ circuit_breaker.go ✅ Защита от каскадных сбоев
+│
+├─ pkg/audit/            ✅ Audit Logger
+│  ├─ logger.go          ✅ Система аудита (File, DB, Console)
+│  └─ appenders.go       ✅ Appenders для логов
+│
+├─ pkg/retry/            ✅ Retry механизм
+│  └─ retry.go           ✅ Стратегии повтора с backoff
+│
+├─ pkg/sync/             ✅ Incremental Sync
+│  └─ state_manager.go   ✅ Инкрементальная синхронизация
+│
+├─ pkg/xlsx/             ✅ Excel интеграция
+│  └─ converter.go       ✅ TDTP ↔ XLSX конвертер
 │
 ├─ pkg/brokers/
 │  ├─ broker.go          ✅ Интерфейс брокеров
 │  ├─ rabbitmq.go        ✅ RabbitMQ интеграция
+│  ├─ kafka.go           ✅ Kafka интеграция
 │  └─ msmq.go            ✅ MSMQ интеграция (Windows)
 │
 ├─ cmd/tdtpcli/          ✅ CLI утилита
 │  ├─ main.go            ✅ Команды export/import/list
-│  └─ config.go          ✅ YAML конфигурация
+│  ├─ config.go          ✅ YAML конфигурация
+│  ├─ processors.go      ✅ Интеграция процессоров
+│  └─ commands/          ✅ Команды CLI
 │
 ├─ docs/                 ✅ Документация
 │  ├─ SPECIFICATION.md   ✅ Спецификация TDTP v1.0
@@ -276,6 +315,48 @@ generator.WriteToFile(packets[0], "reference.xml")
 // Парсинг
 parser := packet.NewParser()
 pkt, err := parser.ParseFile("reference.xml")
+```
+
+### Использование сжатия данных 🆕
+
+```go
+import (
+    "github.com/queuebridge/tdtp/pkg/core/packet"
+    "github.com/queuebridge/tdtp/pkg/processors"
+)
+
+// Генерация с автоматическим сжатием
+generator := packet.NewGenerator()
+
+// Включение сжатия с настройками
+generator.SetCompression(packet.CompressionOptions{
+    Enabled:   true,
+    Level:     3,      // 1 (быстро) - 19 (лучшее сжатие)
+    MinSize:   1024,   // Минимальный размер для сжатия (байты)
+    Algorithm: "zstd",
+})
+
+// Или просто включить с настройками по умолчанию
+generator.EnableCompression()
+
+// Генерация пакета (автоматически сжимается если данных > 1KB)
+packets, err := generator.GenerateReference("LargeTable", schema, rows)
+
+// Парсинг со сжатием
+parser := packet.NewParser()
+decompressor := func(data []byte) ([]byte, error) {
+    return processors.Decompress(data)
+}
+
+pkt, err := parser.ParseFileWithDecompression("compressed.xml", decompressor)
+// Данные автоматически распакованы и готовы к использованию
+
+// Прямое использование процессора сжатия
+compressed, stats, err := processors.Compress([]byte("large data"), 3)
+fmt.Printf("Сжатие: %d -> %d байт (%.2f%%)\n",
+    stats.OriginalSize, stats.CompressedSize, stats.Ratio*100)
+
+decompressed, err := processors.Decompress(compressed)
 ```
 
 ### Использование адаптеров (v1.0)
