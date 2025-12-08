@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build binaries
+        run: |
+          # Build for multiple platforms
+          mkdir -p dist
+
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -o dist/tdtpcli-linux-amd64 ./cmd/tdtpcli
+
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -o dist/tdtpcli-linux-arm64 ./cmd/tdtpcli
+
+          # Windows amd64
+          GOOS=windows GOARCH=amd64 go build -o dist/tdtpcli-windows-amd64.exe ./cmd/tdtpcli
+
+          # macOS amd64
+          GOOS=darwin GOARCH=amd64 go build -o dist/tdtpcli-darwin-amd64 ./cmd/tdtpcli
+
+          # macOS arm64
+          GOOS=darwin GOARCH=arm64 go build -o dist/tdtpcli-darwin-arm64 ./cmd/tdtpcli
+
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
