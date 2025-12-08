@@ -470,12 +470,13 @@ go test -v ./pkg/core/packet/
 - [x] Manual ACK для надежной доставки
 - [x] Увеличен max packet size до 3.8MB
 
-### v1.3 (текущее)
-- [ ] Документация пользователя (USER_GUIDE.md)
-- [ ] Описание модулей (MODULES.md)
-- [ ] Актуализация SPECIFICATION.md
-- [ ] PostgreSQL adapter documentation
-- [ ] MS SQL adapter documentation
+### ~~v1.3~~ ✅ Завершено (08.12.2025)
+- [x] Документация пользователя (USER_GUIDE.md) - существовала
+- [x] Описание модулей (MODULES.md) - создан полный обзор всех модулей
+- [x] Актуализация SPECIFICATION.md - добавлена поддержка сжатия zstd
+- [x] PostgreSQL adapter documentation - существовала
+- [x] MS SQL adapter documentation - создана полная документация
+- [x] SQLite adapter documentation - создана полная документация
 
 ### v1.5 (планируется)
 - [ ] CLI расширения (convert, stats, diff, merge)
