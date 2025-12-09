@@ -10,6 +10,7 @@ import (
 	_ "github.com/denisenkom/go-mssqldb" // MS SQL Server driver
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // Adapter implements the adapters.Adapter interface for Microsoft SQL Server.
@@ -349,3 +350,113 @@ func (t *transaction) Rollback(ctx context.Context) error {
 }
 
 // Export, Import, and Schema methods are implemented in export.go and import.go
+
+// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket
+// Используется для ETL pipeline для загрузки данных из источников
+func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.DataPacket, error) {
+	if a.db == nil {
+		return nil, fmt.Errorf("adapter not connected")
+	}
+
+	// Выполняем SELECT запрос
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Получаем информацию о колонках
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column types: %w", err)
+	}
+
+	// Создаем схему на основе колонок результата
+	schema := packet.Schema{
+		Fields: make([]packet.Field, len(columns)),
+	}
+
+	for i, col := range columns {
+		// Получаем тип MS SQL Server
+		sqlType := columnTypes[i].DatabaseTypeName()
+
+		// Конвертируем в TDTP тип
+		tdtpType, length := convertMSSQLTypeToTDTP(sqlType)
+
+		schema.Fields[i] = packet.Field{
+			Name:   col,
+			Type:   tdtpType,
+			Length: length,
+		}
+	}
+
+	// Читаем данные
+	var rowsData []packet.Row
+	scanArgs := make([]interface{}, len(columns))
+	for i := range scanArgs {
+		var v sql.NullString
+		scanArgs[i] = &v
+	}
+
+	for rows.Next() {
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Конвертируем значения в строку с разделителем |
+		rowValues := make([]string, len(columns))
+		for i, arg := range scanArgs {
+			v := arg.(*sql.NullString)
+			if v.Valid {
+				rowValues[i] = v.String
+			} else {
+				rowValues[i] = "" // NULL представляется пустой строкой
+			}
+		}
+
+		rowsData = append(rowsData, packet.Row{
+			Value: strings.Join(rowValues, "|"),
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading rows: %w", err)
+	}
+
+	// Создаем DataPacket
+	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
+	dataPacket.Schema = schema
+	dataPacket.Data.Rows = rowsData
+
+	return dataPacket, nil
+}
+
+// convertMSSQLTypeToTDTP конвертирует MS SQL Server тип в TDTP тип
+func convertMSSQLTypeToTDTP(sqlType string) (string, int) {
+	sqlType = strings.ToUpper(sqlType)
+
+	switch {
+	case strings.Contains(sqlType, "INT"), strings.Contains(sqlType, "BIGINT"), strings.Contains(sqlType, "SMALLINT"), strings.Contains(sqlType, "TINYINT"):
+		return "INTEGER", 0
+	case strings.Contains(sqlType, "FLOAT"), strings.Contains(sqlType, "REAL"), strings.Contains(sqlType, "DECIMAL"), strings.Contains(sqlType, "NUMERIC"), strings.Contains(sqlType, "MONEY"):
+		return "REAL", 0
+	case strings.Contains(sqlType, "BIT"):
+		return "BOOLEAN", 0
+	case strings.Contains(sqlType, "DATE"):
+		return "DATE", 0
+	case strings.Contains(sqlType, "DATETIME"), strings.Contains(sqlType, "TIMESTAMP"):
+		return "DATETIME", 0
+	case strings.Contains(sqlType, "BINARY"), strings.Contains(sqlType, "IMAGE"):
+		return "BLOB", 0
+	case strings.Contains(sqlType, "VARCHAR"), strings.Contains(sqlType, "CHAR"), strings.Contains(sqlType, "TEXT"), strings.Contains(sqlType, "NVARCHAR"), strings.Contains(sqlType, "NCHAR"):
+		// Для TEXT полей устанавливаем разумное значение по умолчанию
+		return "TEXT", 1000
+	default:
+		return "TEXT", 1000
+	}
+}
