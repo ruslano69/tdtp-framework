@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 	_ "modernc.org/sqlite"
 )
 const driverSqlite = "sqlite"
@@ -165,4 +167,108 @@ func (t *sqliteTx) Commit(ctx context.Context) error {
 
 func (t *sqliteTx) Rollback(ctx context.Context) error {
 	return t.tx.Rollback()
+}
+
+// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket
+// Используется для ETL pipeline для загрузки данных из источников
+func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.DataPacket, error) {
+	if a.db == nil {
+		return nil, fmt.Errorf("adapter not connected")
+	}
+
+	// Выполняем SELECT запрос
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Получаем информацию о колонках
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column types: %w", err)
+	}
+
+	// Создаем схему на основе колонок результата
+	schema := packet.Schema{
+		Fields: make([]packet.Field, len(columns)),
+	}
+
+	for i, col := range columns {
+		// Получаем тип SQLite
+		sqliteType := columnTypes[i].DatabaseTypeName()
+
+		// Конвертируем в TDTP тип
+		tdtpType, length := convertSQLiteTypeToTDTP(sqliteType)
+
+		schema.Fields[i] = packet.Field{
+			Name:   col,
+			Type:   tdtpType,
+			Length: length,
+		}
+	}
+
+	// Читаем данные
+	var rowsData []packet.Row
+	scanArgs := make([]interface{}, len(columns))
+	for i := range scanArgs {
+		var v sql.NullString
+		scanArgs[i] = &v
+	}
+
+	for rows.Next() {
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Конвертируем значения в строку с разделителем |
+		rowValues := make([]string, len(columns))
+		for i, arg := range scanArgs {
+			v := arg.(*sql.NullString)
+			if v.Valid {
+				rowValues[i] = v.String
+			} else {
+				rowValues[i] = "" // NULL представляется пустой строкой
+			}
+		}
+
+		rowsData = append(rowsData, packet.Row{
+			Value: strings.Join(rowValues, "|"),
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading rows: %w", err)
+	}
+
+	// Создаем DataPacket
+	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
+	dataPacket.Schema = schema
+	dataPacket.Data.Rows = rowsData
+
+	return dataPacket, nil
+}
+
+// convertSQLiteTypeToTDTP конвертирует SQLite тип в TDTP тип
+func convertSQLiteTypeToTDTP(sqliteType string) (string, int) {
+	sqliteType = strings.ToUpper(sqliteType)
+
+	switch {
+	case strings.Contains(sqliteType, "INT"):
+		return "INTEGER", 0
+	case strings.Contains(sqliteType, "REAL"), strings.Contains(sqliteType, "FLOAT"), strings.Contains(sqliteType, "DOUBLE"):
+		return "REAL", 0
+	case strings.Contains(sqliteType, "BLOB"):
+		return "BLOB", 0
+	case strings.Contains(sqliteType, "CHAR"), strings.Contains(sqliteType, "TEXT"):
+		// Для TEXT полей устанавливаем разумное значение по умолчанию
+		return "TEXT", 1000
+	default:
+		return "TEXT", 1000
+	}
 }
