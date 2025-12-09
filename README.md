@@ -154,6 +154,86 @@
 - Round-trip data integrity
 - **Instant business value** - work with data in familiar Excel interface
 
+### ✅ ETL Pipeline Processor (pkg/etl) 🚀 **NEW!** v1.3
+
+**Multi-Database ETL с 4-уровневой безопасностью:**
+
+**Ключевые возможности:**
+- 🔄 **Множественные источники**: PostgreSQL, MS SQL Server, MySQL, SQLite
+- ⚡ **Параллельная загрузка**: все источники загружаются одновременно
+- 💾 **SQLite :memory: workspace**: быстрые JOIN операции без дисковых операций
+- 🔍 **SQL трансформации**: полная мощь SQL для обработки данных
+- 📤 **Множественные выходы**: TDTP XML, RabbitMQ, Kafka
+- 🛡️ **4-уровневая безопасность**: READ-ONLY по умолчанию, защита от случайного повреждения
+- 📊 **Детальная статистика**: время выполнения, количество строк, ошибки
+
+**Компоненты ETL:**
+- **Loader** (pkg/etl/loader.go): параллельная загрузка из источников
+- **Workspace** (pkg/etl/workspace.go): SQLite :memory: управление для JOIN
+- **Executor** (pkg/etl/executor.go): выполнение SQL трансформаций
+- **Exporter** (pkg/etl/exporter.go): экспорт в TDTP/RabbitMQ/Kafka
+- **Processor** (pkg/etl/processor.go): главный оркестратор ETL
+
+**Безопасность (4 уровня):**
+1. **Code level**: SQLValidator блокирует запрещенные операции (INSERT, UPDATE, DELETE, DROP)
+2. **OS level**: IsAdmin() проверяет права администратора для unsafe режима
+3. **CLI level**: READ-ONLY по умолчанию, --unsafe требует явного указания
+4. **SQL level**: только SELECT/WITH в safe mode, все операции в unsafe
+
+**Режимы работы:**
+- 🔒 **Safe mode** (по умолчанию): только SELECT/WITH, без admin прав
+- 🔓 **Unsafe mode** (--unsafe): все SQL операции, требует права администратора
+
+**Использование:**
+```bash
+# Safe mode (READ-ONLY)
+tdtpcli --pipeline pipeline.yaml
+
+# Unsafe mode (требует admin)
+sudo tdtpcli --pipeline pipeline.yaml --unsafe
+```
+
+**Пример конфигурации:**
+```yaml
+name: "Multi-DB Report"
+sources:
+  - name: pg_users
+    type: postgres
+    dsn: "postgres://localhost/db1"
+    table_alias: users
+    query: "SELECT * FROM users WHERE active = true"
+
+  - name: mssql_orders
+    type: mssql
+    dsn: "server=localhost;database=orders;user id=sa"
+    table_alias: orders
+    query: "SELECT * FROM orders WHERE year = 2024"
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: "report"
+  sql: |
+    SELECT
+      u.username,
+      COUNT(o.order_id) as total_orders,
+      SUM(o.amount) as total_spent
+    FROM users u
+    LEFT JOIN orders o ON u.user_id = o.user_id
+    GROUP BY u.username
+    ORDER BY total_spent DESC
+
+output:
+  type: TDTP
+  tdtp:
+    destination: "report.xml"
+    compress: true
+```
+
+**Документация**: См. [docs/ETL_PIPELINE_GUIDE.md](docs/ETL_PIPELINE_GUIDE.md)
+
 ### ✅ CLI Utility (tdtpcli)
 
 **Commands:**
@@ -162,6 +242,8 @@
 - `--import <file>` - импорт из файла
 - `--export-broker <table>` - экспорт в message queue
 - `--import-broker` - импорт из message queue
+- `--pipeline <config.yaml>` 🆕 - ETL pipeline из множественных источников
+- `--unsafe` 🆕 - небезопасный режим ETL (требует admin)
 
 **TDTQL Filters:**
 - `--where "field > value"` - условия фильтрации
@@ -198,6 +280,18 @@ tdtp-framework/
 │  ├─ field_normalizer.go✅ Нормализация данных
 │  ├─ chain.go           ✅ Цепочки процессоров
 │  └─ factory.go         ✅ Фабрика процессоров
+│
+├─ pkg/security/         🆕 Система безопасности (v1.3)
+│  ├─ privileges.go      ✅ IsAdmin() для Unix/Windows
+│  └─ validator.go       ✅ SQL валидатор (safe/unsafe режимы)
+│
+├─ pkg/etl/              🆕 ETL Pipeline процессор (v1.3)
+│  ├─ config.go          ✅ YAML конфигурация с валидацией
+│  ├─ workspace.go       ✅ SQLite :memory: workspace management
+│  ├─ loader.go          ✅ Параллельная загрузка из источников
+│  ├─ executor.go        ✅ Выполнение SQL трансформаций
+│  ├─ exporter.go        ✅ Экспорт в TDTP/RabbitMQ/Kafka
+│  └─ processor.go       ✅ Главный оркестратор ETL
 │
 ├─ pkg/resilience/       ✅ Circuit Breaker паттерн
 │  └─ circuit_breaker.go ✅ Защита от каскадных сбоев
@@ -470,13 +564,30 @@ go test -v ./pkg/core/packet/
 - [x] Manual ACK для надежной доставки
 - [x] Увеличен max packet size до 3.8MB
 
-### ~~v1.3~~ ✅ Завершено (08.12.2025)
+### ~~v1.3~~ ✅ Завершено (09.12.2025)
+
+**Документация:**
 - [x] Документация пользователя (USER_GUIDE.md) - существовала
 - [x] Описание модулей (MODULES.md) - создан полный обзор всех модулей
 - [x] Актуализация SPECIFICATION.md - добавлена поддержка сжатия zstd
 - [x] PostgreSQL adapter documentation - существовала
 - [x] MS SQL adapter documentation - создана полная документация
 - [x] SQLite adapter documentation - создана полная документация
+- [x] ETL Pipeline Guide (ETL_PIPELINE_GUIDE.md) - полное руководство пользователя
+
+**ETL Pipeline Processor (pkg/etl):**
+- [x] Система безопасности (pkg/security) - 4-уровневая защита
+  - [x] IsAdmin() для Unix/Windows
+  - [x] SQLValidator (safe/unsafe режимы)
+- [x] YAML конфигурация (config.go) с валидацией
+- [x] SQLite :memory: workspace (workspace.go)
+- [x] Параллельная загрузка из источников (loader.go)
+- [x] SQL трансформации (executor.go)
+- [x] Экспорт результатов (exporter.go)
+- [x] Главный оркестратор (processor.go)
+- [x] ExecuteRawQuery для всех адаптеров (SQLite, PostgreSQL, MSSQL, MySQL)
+- [x] CLI интеграция (--pipeline, --unsafe флаги)
+- [x] Статистика выполнения и обработка ошибок
 
 ### v1.5 (планируется)
 - [ ] CLI расширения (convert, stats, diff, merge)
@@ -509,5 +620,5 @@ MIT
 
 ---
 
-**Статус:** v1.2 - Message Brokers Integration Complete!
-**Последнее обновление:** 16.11.2025
+**Статус:** v1.3 - ETL Pipeline Processor Complete! 🚀
+**Последнее обновление:** 09.12.2025
