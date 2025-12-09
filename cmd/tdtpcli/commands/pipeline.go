@@ -56,14 +56,29 @@ func ExecutePipeline(ctx context.Context, configPath string, unsafe bool) error 
 	fmt.Printf("   Sources: %d\n", len(config.Sources))
 	fmt.Printf("   Workspace: %s (%s)\n", config.Workspace.Type, config.Workspace.Mode)
 	fmt.Printf("   Output: %s\n", config.Output.Type)
+	fmt.Println()
 
-	// TODO: Phase 2 - Implement full ETL pipeline execution
-	// - Create SQLite :memory: workspace
-	// - Load data from all sources in parallel
-	// - Execute transformation SQL
-	// - Export results to configured output
-	fmt.Println("\n⚠️  ETL Pipeline execution not yet implemented (Phase 2)")
-	fmt.Println("✓ Configuration validated successfully")
+	// 6. Create and execute ETL processor
+	processor := etl.NewProcessor(config)
+
+	// Validate processor configuration
+	if err := processor.Validate(); err != nil {
+		return fmt.Errorf("processor validation failed: %w", err)
+	}
+
+	// Execute ETL pipeline
+	fmt.Println("🚀 Starting ETL pipeline execution...")
+	if err := processor.Execute(ctx); err != nil {
+		return fmt.Errorf("pipeline execution failed: %w", err)
+	}
+
+	// 7. Display execution statistics
+	stats := processor.GetStats()
+	fmt.Println("\n✅ ETL Pipeline completed successfully!")
+	fmt.Printf("   Duration: %s\n", stats.Duration)
+	fmt.Printf("   Sources loaded: %d\n", stats.SourcesLoaded)
+	fmt.Printf("   Rows loaded: %d\n", stats.TotalRowsLoaded)
+	fmt.Printf("   Rows exported: %d\n", stats.TotalRowsExported)
 
 	return nil
 }
