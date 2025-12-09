@@ -15,6 +15,7 @@ type Flags struct {
 	ExportXLSX   *string
 	ImportXLSX   *string
 	SyncIncr     *string
+	Pipeline     *string
 
 	// TDTQL Filters
 	Where   *string
@@ -49,6 +50,9 @@ type Flags struct {
 	CreateConfigSQLite *bool
 	CreateConfigMySQL  *bool
 
+	// ETL Pipeline
+	Unsafe *bool
+
 	// Misc
 	Version *bool
 	Help    *bool
@@ -69,6 +73,7 @@ func ParseFlags() *Flags {
 	f.ExportXLSX = flag.String("export-xlsx", "", "Export table directly to XLSX (table name)")
 	f.ImportXLSX = flag.String("import-xlsx", "", "Import XLSX file directly to database (file path)")
 	f.SyncIncr = flag.String("sync-incremental", "", "Incremental sync from table (table name)")
+	f.Pipeline = flag.String("pipeline", "", "Execute ETL pipeline from YAML config (file path)")
 
 	// TDTQL Filters
 	f.Where = flag.String("where", "", "TDTQL WHERE clause (e.g., 'age > 18 AND status = active')")
@@ -102,6 +107,9 @@ func ParseFlags() *Flags {
 	f.CreateConfigMSSQL = flag.Bool("create-config-mssql", false, "Create sample MS SQL config file")
 	f.CreateConfigSQLite = flag.Bool("create-config-sqlite", false, "Create sample SQLite config file")
 	f.CreateConfigMySQL = flag.Bool("create-config-mysql", false, "Create sample MySQL config file")
+
+	// ETL Pipeline
+	f.Unsafe = flag.Bool("unsafe", false, "Enable unsafe mode for pipeline (allows all SQL, requires admin)")
 
 	// Misc
 	f.Version = flag.Bool("version", false, "Show version information")

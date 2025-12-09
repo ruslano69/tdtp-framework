@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // Compile-time check: Adapter должен реализовывать интерфейс adapters.Adapter
@@ -265,4 +267,123 @@ func (a *Adapter) GetSchemas(ctx context.Context) ([]string, error) {
 	}
 
 	return schemas, rows.Err()
+}
+
+// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket
+// Используется для ETL pipeline для загрузки данных из источников
+func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.DataPacket, error) {
+	if a.pool == nil {
+		return nil, fmt.Errorf("adapter not connected")
+	}
+
+	// Выполняем SELECT запрос
+	rows, err := a.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Получаем информацию о колонках
+	fieldDescriptions := rows.FieldDescriptions()
+	if len(fieldDescriptions) == 0 {
+		return nil, fmt.Errorf("query returned no columns")
+	}
+
+	// Создаем схему на основе колонок результата
+	schema := packet.Schema{
+		Fields: make([]packet.Field, len(fieldDescriptions)),
+	}
+
+	for i, fd := range fieldDescriptions {
+		// Конвертируем PostgreSQL тип в TDTP тип
+		tdtpType, length := convertPostgresTypeToTDTP(fd.DataTypeOID)
+
+		schema.Fields[i] = packet.Field{
+			Name:   string(fd.Name),
+			Type:   tdtpType,
+			Length: length,
+		}
+	}
+
+	// Читаем данные
+	var rowsData []packet.Row
+
+	for rows.Next() {
+		// Получаем значения строки
+		values, err := rows.Values()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Конвертируем значения в строку с разделителем |
+		rowValues := make([]string, len(values))
+		for i, val := range values {
+			rowValues[i] = formatPostgresValue(val)
+		}
+
+		rowsData = append(rowsData, packet.Row{
+			Value: strings.Join(rowValues, "|"),
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading rows: %w", err)
+	}
+
+	// Создаем DataPacket
+	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
+	dataPacket.Schema = schema
+	dataPacket.Data.Rows = rowsData
+
+	return dataPacket, nil
+}
+
+// convertPostgresTypeToTDTP конвертирует PostgreSQL OID тип в TDTP тип
+func convertPostgresTypeToTDTP(oid uint32) (string, int) {
+	// PostgreSQL OID константы из pgtype
+	// https://github.com/jackc/pgx/blob/master/pgtype/pgtype.go
+	switch oid {
+	case 20, 21, 23: // INT8, INT2, INT4
+		return "INTEGER", 0
+	case 700, 701, 1700: // FLOAT4, FLOAT8, NUMERIC
+		return "REAL", 0
+	case 16: // BOOL
+		return "BOOLEAN", 0
+	case 1082: // DATE
+		return "DATE", 0
+	case 1114, 1184: // TIMESTAMP, TIMESTAMPTZ
+		return "DATETIME", 0
+	case 17: // BYTEA
+		return "BLOB", 0
+	case 25, 1043: // TEXT, VARCHAR
+		return "TEXT", 1000
+	default:
+		// Для неизвестных типов возвращаем TEXT
+		return "TEXT", 1000
+	}
+}
+
+// formatPostgresValue форматирует значение PostgreSQL в строку для TDTP
+func formatPostgresValue(val interface{}) string {
+	if val == nil {
+		return "" // NULL представляется пустой строкой
+	}
+
+	switch v := val.(type) {
+	case []byte:
+		return string(v)
+	case string:
+		return v
+	case int16, int32, int64, int:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%g", v)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }

@@ -90,7 +90,7 @@ func routeCommand(
 			})
 		})
 
-	// XLSX commands
+		// XLSX commands
 	} else if *flags.ToXLSX != "" {
 		operation = audit.OpTransform
 		metadata = map[string]string{
@@ -163,7 +163,7 @@ func routeCommand(
 			})
 		})
 
-	// Broker commands
+		// Broker commands
 	} else if *flags.ExportBroker != "" {
 		brokerCfg := buildBrokerConfig(config)
 
@@ -199,7 +199,7 @@ func routeCommand(
 			return commands.ImportFromBroker(ctx, adapterConfig, brokerCfg, strategy)
 		})
 
-	// Incremental Sync command
+		// Incremental Sync command
 	} else if *flags.SyncIncr != "" {
 		operation = audit.OpExport
 		metadata = map[string]string{
@@ -219,6 +219,23 @@ func routeCommand(
 				BatchSize:      *flags.BatchSize,
 				ProcessorMgr:   procMgr,
 			})
+		})
+
+		// ETL Pipeline command
+	} else if *flags.Pipeline != "" {
+		operation = audit.OpTransform
+		modeLabel := "safe"
+		if *flags.Unsafe {
+			modeLabel = "unsafe"
+		}
+		metadata = map[string]string{
+			"command": "pipeline",
+			"config":  *flags.Pipeline,
+			"mode":    modeLabel,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "etl-pipeline", func() error {
+			return commands.ExecutePipeline(ctx, *flags.Pipeline, *flags.Unsafe)
 		})
 	}
 
@@ -377,7 +394,8 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ImportXLSX != "" ||
 		*flags.ExportBroker != "" ||
 		*flags.ImportBroker ||
-		*flags.SyncIncr != ""
+		*flags.SyncIncr != "" ||
+		*flags.Pipeline != ""
 }
 
 // fatal prints error and exits

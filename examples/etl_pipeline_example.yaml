@@ -1,0 +1,210 @@
+# ETL Pipeline Example Configuration
+# Пример конфигурации для объединения данных из разных источников
+
+name: "Multi-Database Report"
+version: "1.0"
+description: "Объединение пользователей, заказов и продуктов из PostgreSQL, MS SQL Server и MySQL"
+
+# ============================================================================
+# ИСТОЧНИКИ ДАННЫХ (Sources)
+# ============================================================================
+
+sources:
+  # PostgreSQL - Пользователи
+  - name: users_source
+    type: postgres
+    dsn: "postgres://user:password@localhost:5432/users_db?sslmode=disable"
+    table_alias: users
+    query: |
+      SELECT
+        user_id,
+        username,
+        email,
+        registration_date,
+        country
+      FROM users
+      WHERE active = true
+        AND registration_date >= '2024-01-01'
+      ORDER BY user_id
+
+  # MS SQL Server - Заказы
+  - name: orders_source
+    type: mssql
+    dsn: "server=localhost;user id=sa;password=YourPassword123;database=OrdersDB;encrypt=disable"
+    table_alias: orders
+    query: |
+      SELECT
+        order_id,
+        user_id,
+        order_date,
+        total_amount,
+        status
+      FROM Orders
+      WHERE status IN ('completed', 'shipped')
+        AND order_date >= '2024-01-01'
+
+  # MySQL - Продукты
+  - name: products_source
+    type: mysql
+    dsn: "root:password@tcp(localhost:3306)/products_db?parseTime=true"
+    table_alias: products
+    query: |
+      SELECT
+        product_id,
+        product_name,
+        category,
+        price
+      FROM products
+      WHERE in_stock = 1
+        AND price > 0
+
+# ============================================================================
+# WORKSPACE (Рабочая среда для JOIN)
+# ============================================================================
+
+workspace:
+  type: sqlite
+  mode: ":memory:"  # Использовать оперативную память (быстро)
+  # mode: "workspace.db"  # Или сохранить на диск для отладки
+
+# ============================================================================
+# ТРАНСФОРМАЦИЯ (SQL для объединения данных)
+# ============================================================================
+
+transform:
+  result_table: "user_order_summary"
+  sql: |
+    -- Объединяем данные из всех источников
+    SELECT
+      u.user_id,
+      u.username,
+      u.email,
+      u.country,
+      u.registration_date,
+
+      -- Статистика заказов
+      COUNT(DISTINCT o.order_id) as total_orders,
+      COALESCE(SUM(o.total_amount), 0) as total_spent,
+      MIN(o.order_date) as first_order_date,
+      MAX(o.order_date) as last_order_date,
+
+      -- Топ категория продуктов
+      (
+        SELECT p.category
+        FROM orders o2
+        JOIN products p ON o2.order_id = p.product_id
+        WHERE o2.user_id = u.user_id
+        GROUP BY p.category
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+      ) as favorite_category
+
+    FROM users u
+    LEFT JOIN orders o ON u.user_id = o.user_id
+    GROUP BY
+      u.user_id,
+      u.username,
+      u.email,
+      u.country,
+      u.registration_date
+    HAVING total_orders > 0
+    ORDER BY total_spent DESC
+    LIMIT 1000
+
+# ============================================================================
+# ВЫВОД (Куда экспортировать результаты)
+# ============================================================================
+
+output:
+  type: TDTP
+  tdtp:
+    destination: "reports/user_order_summary.xml"
+    format: "xml"
+    compress: true
+    compress_level: 3
+
+# Альтернативные варианты вывода:
+
+# RabbitMQ
+#output:
+#  type: RabbitMQ
+#  rabbitmq:
+#    host: localhost
+#    port: 5672
+#    user: guest
+#    password: guest
+#    queue: etl_results
+#    vhost: "/"
+#    exchange: ""
+#    routing_key: etl_results
+
+# Kafka
+#output:
+#  type: Kafka
+#  kafka:
+#    brokers: "localhost:9092"
+#    topic: etl_results
+#    partition: 0
+#    compression: gzip
+
+# ============================================================================
+# ПРОИЗВОДИТЕЛЬНОСТЬ
+# ============================================================================
+
+performance:
+  timeout: 300              # Максимальное время выполнения (секунды)
+  batch_size: 10000         # Размер батча для загрузки
+  parallel_sources: true    # Загружать источники параллельно
+  max_memory_mb: 2048       # Лимит памяти (MB)
+
+# ============================================================================
+# АУДИТ И ЛОГИРОВАНИЕ
+# ============================================================================
+
+audit:
+  enabled: true
+  log_file: "logs/etl_pipeline.log"
+  log_queries: true         # Логировать SQL запросы
+  log_errors: true          # Логировать ошибки
+
+# ============================================================================
+# ОБРАБОТКА ОШИБОК
+# ============================================================================
+
+error_handling:
+  on_source_error: "continue"    # continue | fail
+  on_transform_error: "fail"     # continue | fail
+  on_export_error: "fail"        # continue | fail
+  retry_count: 3
+  retry_delay_sec: 5
+
+# ============================================================================
+# ИСПОЛЬЗОВАНИЕ
+# ============================================================================
+
+# Safe mode (READ-ONLY, по умолчанию):
+#   tdtpcli --pipeline etl_pipeline_example.yaml
+#
+# Unsafe mode (все SQL операции, требует admin):
+#   sudo tdtpcli --pipeline etl_pipeline_example.yaml --unsafe
+#
+# Режимы безопасности:
+#   🔒 SAFE   - Только SELECT/WITH, без прав admin
+#   🔓 UNSAFE - Все SQL операции, требует права admin
+#
+# Пример вывода:
+#   📋 Pipeline: Multi-Database Report
+#      Объединение пользователей, заказов и продуктов...
+#      Version: 1.0
+#      Mode: 🔒 SAFE (READ-ONLY: SELECT/WITH only)
+#      Sources: 3
+#      Workspace: sqlite (:memory:)
+#      Output: TDTP
+#
+#   🚀 Starting ETL pipeline execution...
+#
+#   ✅ ETL Pipeline completed successfully!
+#      Duration: 2.45s
+#      Sources loaded: 3
+#      Rows loaded: 15,234
+#      Rows exported: 987
