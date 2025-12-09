@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
 // AdapterType идентификатор MySQL адаптера
@@ -139,4 +141,114 @@ func (t *transaction) Commit(ctx context.Context) error {
 
 func (t *transaction) Rollback(ctx context.Context) error {
 	return t.tx.Rollback()
+}
+
+// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket
+// Используется для ETL pipeline для загрузки данных из источников
+func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.DataPacket, error) {
+	if a.db == nil {
+		return nil, fmt.Errorf("adapter not connected")
+	}
+
+	// Выполняем SELECT запрос
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Получаем информацию о колонках
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column types: %w", err)
+	}
+
+	// Создаем схему на основе колонок результата
+	schema := packet.Schema{
+		Fields: make([]packet.Field, len(columns)),
+	}
+
+	for i, col := range columns {
+		// Получаем тип MySQL
+		mysqlType := columnTypes[i].DatabaseTypeName()
+
+		// Конвертируем в TDTP тип
+		tdtpType, length := convertMySQLTypeToTDTP(mysqlType)
+
+		schema.Fields[i] = packet.Field{
+			Name:   col,
+			Type:   tdtpType,
+			Length: length,
+		}
+	}
+
+	// Читаем данные
+	var rowsData []packet.Row
+	scanArgs := make([]interface{}, len(columns))
+	for i := range scanArgs {
+		var v sql.NullString
+		scanArgs[i] = &v
+	}
+
+	for rows.Next() {
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Конвертируем значения в строку с разделителем |
+		rowValues := make([]string, len(columns))
+		for i, arg := range scanArgs {
+			v := arg.(*sql.NullString)
+			if v.Valid {
+				rowValues[i] = v.String
+			} else {
+				rowValues[i] = "" // NULL представляется пустой строкой
+			}
+		}
+
+		rowsData = append(rowsData, packet.Row{
+			Value: strings.Join(rowValues, "|"),
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading rows: %w", err)
+	}
+
+	// Создаем DataPacket
+	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
+	dataPacket.Schema = schema
+	dataPacket.Data.Rows = rowsData
+
+	return dataPacket, nil
+}
+
+// convertMySQLTypeToTDTP конвертирует MySQL тип в TDTP тип
+func convertMySQLTypeToTDTP(mysqlType string) (string, int) {
+	mysqlType = strings.ToUpper(mysqlType)
+
+	switch {
+	case strings.Contains(mysqlType, "INT"), strings.Contains(mysqlType, "BIGINT"), strings.Contains(mysqlType, "SMALLINT"), strings.Contains(mysqlType, "TINYINT"), strings.Contains(mysqlType, "MEDIUMINT"):
+		return "INTEGER", 0
+	case strings.Contains(mysqlType, "FLOAT"), strings.Contains(mysqlType, "DOUBLE"), strings.Contains(mysqlType, "DECIMAL"), strings.Contains(mysqlType, "NUMERIC"):
+		return "REAL", 0
+	case strings.Contains(mysqlType, "BIT"), strings.Contains(mysqlType, "BOOL"):
+		return "BOOLEAN", 0
+	case strings.Contains(mysqlType, "DATE"):
+		return "DATE", 0
+	case strings.Contains(mysqlType, "DATETIME"), strings.Contains(mysqlType, "TIMESTAMP"):
+		return "DATETIME", 0
+	case strings.Contains(mysqlType, "BLOB"), strings.Contains(mysqlType, "BINARY"):
+		return "BLOB", 0
+	case strings.Contains(mysqlType, "VARCHAR"), strings.Contains(mysqlType, "CHAR"), strings.Contains(mysqlType, "TEXT"):
+		// Для TEXT полей устанавливаем разумное значение по умолчанию
+		return "TEXT", 1000
+	default:
+		return "TEXT", 1000
+	}
 }
