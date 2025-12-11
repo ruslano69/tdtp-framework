@@ -12,7 +12,7 @@ require (
 	github.com/segmentio/kafka-go v0.4.49
 	github.com/xuri/excelize/v2 v2.10.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.40.1
+	modernc.org/sqlite v1.33.1
 )
 
 require (
