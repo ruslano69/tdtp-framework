@@ -86,3 +86,21 @@ func NewDataPacket(msgType MessageType, tableName string) *DataPacket {
 		},
 	}
 }
+
+// GetRows извлекает все данные из пакета в виде [][]string
+// Правильно обрабатывает экранирование специальных символов
+func (p *DataPacket) GetRows() [][]string {
+	parser := NewParser()
+	rows := make([][]string, len(p.Data.Rows))
+	for i, row := range p.Data.Rows {
+		rows[i] = parser.GetRowValues(row)
+	}
+	return rows
+}
+
+// SetRows устанавливает данные в пакет из [][]string
+// Правильно экранирует специальные символы
+func (p *DataPacket) SetRows(rows [][]string) {
+	p.Data = RowsToData(rows)
+	p.Header.RecordsInPart = len(rows)
+}

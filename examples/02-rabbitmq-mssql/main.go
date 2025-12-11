@@ -312,9 +312,9 @@ func testDataMasking(ctx context.Context, adapter adapters.Adapter, schema packe
 	chain := processors.NewChain()
 	chain.Add(masker)
 
-	// Преобразуем Data в [][]string для процессора
-	originalData := dataToRows(packets[0].Data)
-	
+	// Используем API фреймворка для извлечения данных
+	originalData := packets[0].GetRows()
+
 	// Применяем маскирование
 	maskedData, err := chain.Process(ctx, originalData, schema)
 	if err != nil {
@@ -322,8 +322,8 @@ func testDataMasking(ctx context.Context, adapter adapters.Adapter, schema packe
 		return
 	}
 
-	// Преобразуем обратно в Data
-	packets[0].Data = rowsToData(maskedData)
+	// Используем API фреймворка для установки данных
+	packets[0].SetRows(maskedData)
 
 	duration := time.Since(startTime)
 	log.Printf("✓ Masked %d records in %v\n", len(maskedData), duration)
@@ -458,59 +458,4 @@ func findFieldIndex(schema packet.Schema, fieldName string) int {
 		}
 	}
 	return -1
-}
-
-// dataToRows конвертирует packet.Data в [][]string
-func dataToRows(data packet.Data) [][]string {
-	rows := make([][]string, len(data.Rows))
-	for i, row := range data.Rows {
-		// Разбиваем строку по разделителю |
-		fields := splitRow(row.Value)
-		rows[i] = fields
-	}
-	return rows
-}
-
-// rowsToData конвертирует [][]string в packet.Data
-func rowsToData(rows [][]string) packet.Data {
-	data := packet.Data{
-		Rows: make([]packet.Row, len(rows)),
-	}
-	for i, row := range rows {
-		// Объединяем поля через разделитель |
-		data.Rows[i] = packet.Row{
-			Value: joinRow(row),
-		}
-	}
-	return data
-}
-
-// splitRow разбивает строку на поля
-func splitRow(row string) []string {
-	// Простое разбиение по |
-	// TODO: учитывать экранирование
-	fields := []string{}
-	start := 0
-	for i := 0; i < len(row); i++ {
-		if row[i] == '|' {
-			fields = append(fields, row[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(row) {
-		fields = append(fields, row[start:])
-	}
-	return fields
-}
-
-// joinRow объединяет поля в строку
-func joinRow(fields []string) string {
-	result := ""
-	for i, field := range fields {
-		if i > 0 {
-			result += "|"
-		}
-		result += field
-	}
-	return result
 }

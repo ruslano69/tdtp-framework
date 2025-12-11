@@ -163,10 +163,11 @@ func main() {
 	}
 
 	rowCount := 0
+	parser := packet.NewParser()
 	for _, pkt := range exported {
 		rowCount += len(pkt.Data.Rows)
 		for _, row := range pkt.Data.Rows {
-			fields := strings.Split(row.Value, "|")
+			fields := parser.GetRowValues(row)
 			if len(fields) >= 6 {
 				fmt.Printf("   - ID: %s, Name: %s, Email: %s, Age: %s, City: %s, Active: %s\n",
 					fields[0], fields[1], fields[2], fields[3], fields[4], fields[5])

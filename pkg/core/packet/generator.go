@@ -351,6 +351,28 @@ func escapeValue(value string) string {
 	return escaped
 }
 
+// RowsToData преобразует [][]string в Data (публичная функция)
+// Правильно экранирует специальные символы (|, \)
+func RowsToData(rows [][]string) Data {
+	data := Data{
+		Rows: make([]Row, len(rows)),
+	}
+
+	for i, row := range rows {
+		// Экранируем разделитель | и backslash в данных
+		escapedValues := make([]string, len(row))
+		for j, value := range row {
+			escapedValues[j] = escapeValue(value)
+		}
+
+		data.Rows[i] = Row{
+			Value: strings.Join(escapedValues, "|"),
+		}
+	}
+
+	return data
+}
+
 // generateMessageID генерирует уникальный MessageID
 func (g *Generator) generateMessageID(msgType MessageType) string {
 	prefix := ""
