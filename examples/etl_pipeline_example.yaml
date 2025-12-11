@@ -11,10 +11,9 @@ description: "Объединение пользователей, заказов 
 
 sources:
   # PostgreSQL - Пользователи
-  - name: users_source
+  - name: users  # Используется как имя таблицы в workspace
     type: postgres
     dsn: "postgres://user:password@localhost:5432/users_db?sslmode=disable"
-    table_alias: users
     query: |
       SELECT
         user_id,
@@ -28,10 +27,9 @@ sources:
       ORDER BY user_id
 
   # MS SQL Server - Заказы
-  - name: orders_source
+  - name: orders  # Используется как имя таблицы в workspace
     type: mssql
     dsn: "server=localhost;user id=sa;password=YourPassword123;database=OrdersDB;encrypt=disable"
-    table_alias: orders
     query: |
       SELECT
         order_id,
@@ -44,10 +42,9 @@ sources:
         AND order_date >= '2024-01-01'
 
   # MySQL - Продукты
-  - name: products_source
+  - name: products  # Используется как имя таблицы в workspace
     type: mysql
     dsn: "root:password@tcp(localhost:3306)/products_db?parseTime=true"
-    table_alias: products
     query: |
       SELECT
         product_id,
@@ -120,8 +117,7 @@ output:
   tdtp:
     destination: "reports/user_order_summary.xml"
     format: "xml"
-    compress: true
-    compress_level: 3
+    compression: true  # Использовать zstd сжатие (уровень 3 - сбалансированный)
 
 # Альтернативные варианты вывода:
 

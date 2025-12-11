@@ -15,10 +15,9 @@ description: "Export paid orders from MSSQL to RabbitMQ with PII masking"
 
 # 1. ИСТОЧНИК: MSSQL с фильтрацией и маскированием
 sources:
-  - name: mssql_orders
+  - name: orders  # Имя источника (используется как имя таблицы в workspace)
     type: mssql
     dsn: "sqlserver://sa:Tdtp_Pass_123!@localhost:1433?database=example02_db&encrypt=disable"
-    table_alias: orders
 
     # SQL запрос объединяет:
     # - Фильтрацию (WHERE is_paid = 1)

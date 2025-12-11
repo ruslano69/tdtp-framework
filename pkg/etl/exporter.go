@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
 )
 
 // ExportResult представляет результат экспорта
@@ -75,14 +76,15 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		return fmt.Errorf("TDTP destination is not set")
 	}
 
-	// Создаем генератор пакетов
-	generator := packet.NewGenerator()
-
 	// Применяем сжатие если настроено
 	if e.config.TDTP.Compression {
-		// TODO: Реализовать сжатие через CompressionProcessor
-		// Пока оставляем без сжатия
+		if err := e.compressDataPacket(dataPacket); err != nil {
+			return fmt.Errorf("failed to compress data: %w", err)
+		}
 	}
+
+	// Создаем генератор пакетов
+	generator := packet.NewGenerator()
 
 	// Генерируем XML
 	xmlData, err := generator.ToXML(dataPacket, true) // pretty = true
@@ -243,6 +245,48 @@ func (e *Exporter) ValidateConfig() error {
 
 	default:
 		return fmt.Errorf("unsupported output type: %s", e.config.Type)
+	}
+
+	return nil
+}
+
+// compressDataPacket сжимает данные в DataPacket используя zstd
+func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket) error {
+	if len(dataPacket.Data.Rows) == 0 {
+		return nil // Нечего сжимать
+	}
+
+	// Проверяем минимальный размер для сжатия (1KB)
+	totalSize := 0
+	rowStrings := make([]string, len(dataPacket.Data.Rows))
+	for i, row := range dataPacket.Data.Rows {
+		rowStrings[i] = row.Value
+		totalSize += len(row.Value)
+	}
+
+	// Если данные слишком маленькие, сжатие не выгодно
+	if totalSize < 1024 {
+		return nil
+	}
+
+	// Сжимаем данные используя CompressDataForTdtp
+	compressedData, stats, err := processors.CompressDataForTdtp(rowStrings, 3) // Level 3 - balanced
+	if err != nil {
+		return fmt.Errorf("compression failed: %w", err)
+	}
+
+	// Проверяем выгоду от сжатия (должно уменьшиться хотя бы на 10%)
+	if stats.CompressedSize >= int(float64(stats.OriginalSize)*0.9) {
+		// Сжатие не дало значительной выгоды, оставляем без сжатия
+		return nil
+	}
+
+	// Обновляем DataPacket сжатыми данными
+	dataPacket.Data = packet.Data{
+		Compression: "zstd",
+		Rows: []packet.Row{
+			{Value: compressedData},
+		},
 	}
 
 	return nil

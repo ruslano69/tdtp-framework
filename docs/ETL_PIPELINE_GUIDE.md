@@ -152,10 +152,9 @@ description: "Объединение пользователей и заказо�
 # Источники данных
 sources:
   # PostgreSQL источник
-  - name: users_pg
+  - name: users  # Имя источника = имя таблицы в workspace
     type: postgres
     dsn: "postgres://user:password@localhost:5432/production?sslmode=disable"
-    table_alias: users
     query: |
       SELECT
         id,
@@ -166,10 +165,9 @@ sources:
       WHERE active = true
 
   # MS SQL Server источник
-  - name: orders_mssql
+  - name: orders
     type: mssql
     dsn: "server=localhost;user id=sa;password=Password123;database=OrdersDB"
-    table_alias: orders
     query: |
       SELECT
         order_id,
@@ -180,10 +178,9 @@ sources:
       WHERE order_date >= '2024-01-01'
 
   # MySQL источник
-  - name: products_mysql
+  - name: products
     type: mysql
     dsn: "user:password@tcp(localhost:3306)/products_db"
-    table_alias: products
     query: |
       SELECT
         product_id,
@@ -222,8 +219,7 @@ output:
   tdtp:
     destination: "reports/user_orders_report.xml"
     format: "xml"
-    compress: true
-    compress_level: 3
+    compression: true  # Использовать zstd сжатие (уровень 3)
 
 # Настройки производительности
 performance:
@@ -258,7 +254,6 @@ sources:
   - name: source1
     type: postgres
     dsn: "postgres://localhost/db1"
-    table_alias: data1
     query: "SELECT * FROM table1"
 
 workspace:
@@ -377,7 +372,6 @@ sources:
   - name: pg_customers
     type: postgres
     dsn: "postgres://user:pass@pg-server:5432/crm"
-    table_alias: pg_customers
     query: |
       SELECT
         customer_id,
@@ -390,7 +384,6 @@ sources:
   - name: mssql_customers
     type: mssql
     dsn: "server=mssql-server;database=Sales;user id=sa;password=Pass"
-    table_alias: mssql_customers
     query: |
       SELECT
         CustomerID as customer_id,
@@ -425,7 +418,7 @@ output:
   tdtp:
     destination: "unified_customers.xml"
     format: "xml"
-    compress: true
+    compression: true
 ```
 
 **Запуск**:
@@ -446,7 +439,6 @@ sources:
   - name: orders
     type: postgres
     dsn: "postgres://localhost/orders_db"
-    table_alias: orders
     query: |
       SELECT
         order_id,
@@ -460,7 +452,6 @@ sources:
   - name: products
     type: mysql
     dsn: "user:pass@tcp(localhost:3306)/products_db"
-    table_alias: products
     query: |
       SELECT
         product_id,
@@ -472,7 +463,6 @@ sources:
   - name: customers
     type: mssql
     dsn: "server=localhost;database=CRM;user id=sa;password=Pass"
-    table_alias: customers
     query: |
       SELECT
         customer_id,
@@ -507,8 +497,7 @@ output:
   tdtp:
     destination: "sales_report_2024.xml"
     format: "xml"
-    compress: true
-    compress_level: 5
+    compression: true
 
 audit:
   enabled: true
@@ -534,7 +523,6 @@ sources:
   - name: legacy_users
     type: mysql
     dsn: "user:pass@tcp(old-server:3306)/legacy_db"
-    table_alias: old_users
     query: |
       SELECT
         user_id,
