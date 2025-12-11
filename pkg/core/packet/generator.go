@@ -12,10 +12,10 @@ import (
 
 // CompressionOptions содержит настройки сжатия данных
 type CompressionOptions struct {
-	Enabled      bool // Включить сжатие
-	Level        int  // Уровень сжатия: 1 (fastest) - 19 (best), по умолчанию 3
-	MinSize      int  // Минимальный размер данных для сжатия (bytes), по умолчанию 1024
-	Algorithm    string // Алгоритм сжатия: "zstd" (пока только он поддерживается)
+	Enabled   bool   // Включить сжатие
+	Level     int    // Уровень сжатия: 1 (fastest) - 19 (best), по умолчанию 3
+	MinSize   int    // Минимальный размер данных для сжатия (bytes), по умолчанию 1024
+	Algorithm string // Алгоритм сжатия: "zstd" (пока только он поддерживается)
 }
 
 // DefaultCompressionOptions возвращает настройки сжатия по умолчанию
@@ -76,30 +76,30 @@ func (g *Generator) SetCompressionLevel(level int) {
 // GenerateReference создает reference пакет (полный справочник)
 func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]string) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
-	
+
 	// Разбиваем на части если нужно
 	partitions := g.partitionRows(rows, schema)
-	
+
 	messageIDBase := g.generateMessageID(TypeReference)
-	
+
 	for i, partition := range partitions {
 		packet := NewDataPacket(TypeReference, tableName)
 		packet.Header.MessageID = fmt.Sprintf("%s-P%d", messageIDBase, i+1)
 		packet.Header.PartNumber = i + 1
 		packet.Header.TotalParts = len(partitions)
 		packet.Header.RecordsInPart = len(partition)
-		
+
 		// Schema только в первой части
 		if i == 0 {
 			packet.Schema = schema
 		}
-		
+
 		// Преобразуем строки в Data
 		packet.Data = g.rowsToData(partition)
-		
+
 		packets = append(packets, packet)
 	}
-	
+
 	return packets, nil
 }
 
@@ -109,11 +109,11 @@ func (g *Generator) GenerateRequest(tableName string, query *Query, sender, reci
 	packet.Header.MessageID = g.generateMessageID(TypeRequest)
 	packet.Header.Sender = sender
 	packet.Header.Recipient = recipient
-	
+
 	if query != nil {
 		packet.Query = query
 	}
-	
+
 	return packet, nil
 }
 
@@ -128,9 +128,9 @@ func (g *Generator) GenerateResponse(
 ) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
 	partitions := g.partitionRows(rows, schema)
-	
+
 	messageIDBase := g.generateMessageID(TypeResponse)
-	
+
 	for i, partition := range partitions {
 		packet := NewDataPacket(TypeResponse, tableName)
 		packet.Header.MessageID = fmt.Sprintf("%s-P%d", messageIDBase, i+1)
@@ -140,7 +140,7 @@ func (g *Generator) GenerateResponse(
 		packet.Header.RecordsInPart = len(partition)
 		packet.Header.Sender = sender
 		packet.Header.Recipient = recipient
-		
+
 		// Schema и QueryContext только в первой части
 		if i == 0 {
 			packet.Schema = schema
@@ -148,11 +148,11 @@ func (g *Generator) GenerateResponse(
 				packet.QueryContext = queryContext
 			}
 		}
-		
+
 		packet.Data = g.rowsToData(partition)
 		packets = append(packets, packet)
 	}
-	
+
 	return packets, nil
 }
 
@@ -166,17 +166,17 @@ func (g *Generator) GenerateAlarm(
 ) (*DataPacket, error) {
 	packet := NewDataPacket(TypeAlarm, tableName)
 	packet.Header.MessageID = g.generateMessageID(TypeAlarm)
-	
+
 	packet.AlarmDetails = &AlarmDetails{
 		Severity:        severity,
 		Code:            code,
 		Message:         message,
 		AffectedRecords: affectedRecords,
 	}
-	
+
 	packet.Schema = schema
 	packet.Data = g.rowsToData(rows)
-	
+
 	return packet, nil
 }
 
@@ -184,17 +184,17 @@ func (g *Generator) GenerateAlarm(
 func (g *Generator) ToXML(packet *DataPacket, indent bool) ([]byte, error) {
 	var data []byte
 	var err error
-	
+
 	if indent {
 		data, err = xml.MarshalIndent(packet, "", "  ")
 	} else {
 		data, err = xml.Marshal(packet)
 	}
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal XML: %w", err)
 	}
-	
+
 	// Добавляем XML declaration
 	xmlDeclaration := []byte(xml.Header)
 	return append(xmlDeclaration, data...), nil
@@ -206,7 +206,7 @@ func (g *Generator) WriteToFile(packet *DataPacket, filename string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	return os.WriteFile(filename, data, 0644)
 }
 
@@ -216,7 +216,7 @@ func (g *Generator) WriteToWriter(packet *DataPacket, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = w.Write(data)
 	return err
 }
@@ -226,31 +226,31 @@ func (g *Generator) partitionRows(rows [][]string, schema Schema) [][][]string {
 	if len(rows) == 0 {
 		return [][][]string{{}}
 	}
-	
+
 	partitions := [][][]string{}
 	currentPartition := [][]string{}
 	currentSize := 0
-	
+
 	// Примерный размер служебной информации
 	overheadSize := 5000
-	
+
 	for _, row := range rows {
 		rowSize := g.estimateRowSize(row)
-		
+
 		if currentSize+rowSize+overheadSize > g.maxMessageSize && len(currentPartition) > 0 {
 			partitions = append(partitions, currentPartition)
 			currentPartition = [][]string{}
 			currentSize = 0
 		}
-		
+
 		currentPartition = append(currentPartition, row)
 		currentSize += rowSize
 	}
-	
+
 	if len(currentPartition) > 0 {
 		partitions = append(partitions, currentPartition)
 	}
-	
+
 	return partitions
 }
 
@@ -260,7 +260,7 @@ func (g *Generator) estimateRowSize(row []string) int {
 	for _, value := range row {
 		size += len(value) + 1 // +1 для разделителя
 	}
-	size += 10 // XML теги <R></R>
+	size += 10      // XML теги <R></R>
 	return size * 2 // UTF-16 для MSMQ
 }
 
@@ -386,9 +386,9 @@ func (g *Generator) generateMessageID(msgType MessageType) string {
 	case TypeAlarm:
 		prefix = "ALARM"
 	}
-	
+
 	year := time.Now().UTC().Year()
 	uid := generateUUID()[:8]
-	
+
 	return fmt.Sprintf("%s-%d-%s", prefix, year, uid)
 }
