@@ -49,7 +49,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 
 			result := SourceData{
 				SourceName: src.Name,
-				TableName:  src.TableAlias,
+				TableName:  src.Name,
 			}
 
 			// Загружаем данные из источника
@@ -109,14 +109,14 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 	if err != nil {
 		return &SourceData{
 			SourceName: source.Name,
-			TableName:  source.TableAlias,
+			TableName:  source.Name,
 			Error:      err,
 		}, err
 	}
 
 	return &SourceData{
 		SourceName: source.Name,
-		TableName:  source.TableAlias,
+		TableName:  source.Name,
 		Packet:     packet,
 	}, nil
 }
@@ -146,7 +146,7 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	}
 
 	// Обновляем имя таблицы в пакете на alias
-	packet.Header.TableName = source.TableAlias
+	packet.Header.TableName = source.Name
 
 	return packet, nil
 }
