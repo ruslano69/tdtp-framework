@@ -1,0 +1,90 @@
+# ETL Pipeline: MSSQL → RabbitMQ с маскированием PII
+#
+# ЧТО ЭТОТ ПРИМЕР ДЕМОНСТРИРУЕТ:
+# - Замена 461 строки Go кода (examples/02-rabbitmq-mssql) на ~80 строк YAML
+# - SQL-based маскирование данных (вместо processors в Go)
+# - Декларативный подход вместо императивного
+#
+# СРАВНЕНИЕ:
+# Старый подход (Go код):       461 строка
+# Новый подход (ETL YAML):      ~80 строк
+# Экономия:                     ~380 строк (82%)
+
+name: "MSSQL to RabbitMQ ETL"
+description: "Export paid orders from MSSQL to RabbitMQ with PII masking"
+
+# 1. ИСТОЧНИК: MSSQL с фильтрацией и маскированием
+sources:
+  - name: mssql_orders
+    type: mssql
+    dsn: "sqlserver://sa:Tdtp_Pass_123!@localhost:1433?database=example02_db&encrypt=disable"
+    table_alias: orders
+
+    # SQL запрос объединяет:
+    # - Фильтрацию (WHERE is_paid = 1)
+    # - Маскирование PII данных
+    query: |
+      SELECT
+        order_id,
+        customer_name,
+
+        -- Маскирование email: j***@example.com
+        CONCAT(
+          LEFT(customer_email, 1),
+          '***@',
+          SUBSTRING(customer_email, CHARINDEX('@', customer_email) + 1, LEN(customer_email))
+        ) AS customer_email,
+
+        -- Маскирование телефона: ***-***-1234
+        CONCAT('***-***-', RIGHT(customer_phone, 4)) AS customer_phone,
+
+        -- Маскирование кредитной карты: ****-****-****-1234
+        CONCAT('****-****-****-', RIGHT(credit_card, 4)) AS credit_card,
+
+        -- Полное маскирование SSN
+        '***-**-****' AS ssn,
+
+        product_name,
+        quantity,
+        price,
+        total,
+        is_paid,
+        is_shipped,
+        order_date,
+        ship_date
+      FROM orders
+      WHERE is_paid = 1  -- Фильтр: только оплаченные заказы
+
+# 2. WORKSPACE: SQLite in-memory
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+# 3. ТРАНСФОРМАЦИЯ: просто выбираем все
+# (вся логика уже в SQL запросе источника)
+transform:
+  result_table: "masked_orders"
+  sql: |
+    SELECT * FROM orders
+    ORDER BY order_date DESC
+
+# 4. ВЫХОД: RabbitMQ
+output:
+  type: RabbitMQ
+  rabbitmq:
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp_pass_123
+    queue: tdtp-orders
+
+# 5. БЕЗОПАСНОСТЬ
+security:
+  mode: safe           # READ-ONLY (по умолчанию)
+  validate_sql: true   # Проверка SQL на опасные операции
+
+# 6. ПРОИЗВОДИТЕЛЬНОСТЬ
+performance:
+  max_memory_mb: 512
+  batch_size: 1000
+  parallel_sources: false  # Один источник, параллелизм не нужен
