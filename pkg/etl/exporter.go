@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
@@ -103,9 +104,41 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 		return fmt.Errorf("RabbitMQ config is not set")
 	}
 
-	// TODO: Реализовать экспорт в RabbitMQ
-	// Используя pkg/brokers/rabbitmq
-	return fmt.Errorf("RabbitMQ export not yet implemented (Phase 3)")
+	cfg := e.config.RabbitMQConfig
+
+	// Создаем broker
+	broker, err := brokers.New(brokers.Config{
+		Type:     "rabbitmq",
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		User:     cfg.User,
+		Password: cfg.Password,
+		Queue:    cfg.Queue,
+		Durable:  true, // Очередь переживает перезапуск
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create RabbitMQ broker: %w", err)
+	}
+
+	// Подключаемся
+	if err := broker.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+	}
+	defer broker.Close()
+
+	// Генерируем XML из пакета
+	generator := packet.NewGenerator()
+	xmlData, err := generator.ToXML(dataPacket, false) // compact XML
+	if err != nil {
+		return fmt.Errorf("failed to generate XML: %w", err)
+	}
+
+	// Отправляем в RabbitMQ
+	if err := broker.Send(ctx, xmlData); err != nil {
+		return fmt.Errorf("failed to send to RabbitMQ: %w", err)
+	}
+
+	return nil
 }
 
 // exportToKafka экспортирует в Kafka
@@ -114,9 +147,37 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 		return fmt.Errorf("Kafka config is not set")
 	}
 
-	// TODO: Реализовать экспорт в Kafka
-	// Используя pkg/brokers/kafka
-	return fmt.Errorf("Kafka export not yet implemented (Phase 3)")
+	cfg := e.config.KafkaConfig
+
+	// Создаем broker
+	broker, err := brokers.New(brokers.Config{
+		Type:    "kafka",
+		Brokers: cfg.Brokers,
+		Topic:   cfg.Topic,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create Kafka broker: %w", err)
+	}
+
+	// Подключаемся
+	if err := broker.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect to Kafka: %w", err)
+	}
+	defer broker.Close()
+
+	// Генерируем XML из пакета
+	generator := packet.NewGenerator()
+	xmlData, err := generator.ToXML(dataPacket, false) // compact XML
+	if err != nil {
+		return fmt.Errorf("failed to generate XML: %w", err)
+	}
+
+	// Отправляем в Kafka
+	if err := broker.Send(ctx, xmlData); err != nil {
+		return fmt.Errorf("failed to send to Kafka: %w", err)
+	}
+
+	return nil
 }
 
 // getDestination возвращает назначение экспорта в виде строки

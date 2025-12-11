@@ -14,13 +14,13 @@ const (
 
 // DataPacket представляет корневой элемент TDTP сообщения
 type DataPacket struct {
-	Protocol string      `xml:"protocol,attr"`
-	Version  string      `xml:"version,attr"`
-	Header   Header      `xml:"Header"`
-	Query    *Query      `xml:"Query,omitempty"`
+	Protocol     string        `xml:"protocol,attr"`
+	Version      string        `xml:"version,attr"`
+	Header       Header        `xml:"Header"`
+	Query        *Query        `xml:"Query,omitempty"`
 	QueryContext *QueryContext `xml:"QueryContext,omitempty"`
-	Schema   Schema      `xml:"Schema"`
-	Data     Data        `xml:"Data"`
+	Schema       Schema        `xml:"Schema"`
+	Data         Data          `xml:"Data"`
 	AlarmDetails *AlarmDetails `xml:"AlarmDetails,omitempty"`
 }
 
@@ -45,14 +45,14 @@ type Schema struct {
 
 // Field описывает одно поле таблицы
 type Field struct {
-    Name      string `xml:"name,attr"`
-    Type      string `xml:"type,attr"`
-    Length    int    `xml:"length,attr,omitempty"`
-    Precision int    `xml:"precision,attr,omitempty"`
-    Scale     int    `xml:"scale,attr,omitempty"`
-    Key       bool   `xml:"key,attr,omitempty"`
-    Timezone  string `xml:"timezone,attr,omitempty"`
-    Subtype   string `xml:"subtype,attr,omitempty"`  // ← Добавьте эту строку
+	Name      string `xml:"name,attr"`
+	Type      string `xml:"type,attr"`
+	Length    int    `xml:"length,attr,omitempty"`
+	Precision int    `xml:"precision,attr,omitempty"`
+	Scale     int    `xml:"scale,attr,omitempty"`
+	Key       bool   `xml:"key,attr,omitempty"`
+	Timezone  string `xml:"timezone,attr,omitempty"`
+	Subtype   string `xml:"subtype,attr,omitempty"` // ← Добавьте эту строку
 }
 
 // Data содержит табличные данные
