@@ -292,7 +292,7 @@ func TestQueueParametersMatching(t *testing.T) {
 
 func createTestTable(ctx context.Context, adapter adapters.Adapter, tableName string) error {
 	// Простая тестовая таблица
-	query := `
+	_ = `
 		IF OBJECT_ID('` + tableName + `', 'U') IS NOT NULL
 			DROP TABLE ` + tableName + `;
 

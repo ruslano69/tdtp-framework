@@ -66,11 +66,11 @@ func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*
 
 // exportToTDTP экспортирует в TDTP XML файл
 func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPacket) error {
-	if e.config.TDTPConfig == nil {
+	if e.config.TDTP == nil {
 		return fmt.Errorf("TDTP config is not set")
 	}
 
-	destination := e.config.TDTPConfig.Destination
+	destination := e.config.TDTP.Destination
 	if destination == "" {
 		return fmt.Errorf("TDTP destination is not set")
 	}
@@ -79,7 +79,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	generator := packet.NewGenerator()
 
 	// Применяем сжатие если настроено
-	if e.config.TDTPConfig.Compress {
+	if e.config.TDTP.Compression {
 		// TODO: Реализовать сжатие через CompressionProcessor
 		// Пока оставляем без сжатия
 	}
@@ -100,11 +100,11 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 
 // exportToRabbitMQ экспортирует в RabbitMQ
 func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.DataPacket) error {
-	if e.config.RabbitMQConfig == nil {
+	if e.config.RabbitMQ == nil {
 		return fmt.Errorf("RabbitMQ config is not set")
 	}
 
-	cfg := e.config.RabbitMQConfig
+	cfg := e.config.RabbitMQ
 
 	// Создаем broker
 	broker, err := brokers.New(brokers.Config{
@@ -143,11 +143,11 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 
 // exportToKafka экспортирует в Kafka
 func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPacket) error {
-	if e.config.KafkaConfig == nil {
+	if e.config.Kafka == nil {
 		return fmt.Errorf("Kafka config is not set")
 	}
 
-	cfg := e.config.KafkaConfig
+	cfg := e.config.Kafka
 
 	// Создаем broker
 	broker, err := brokers.New(brokers.Config{
@@ -184,21 +184,21 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 func (e *Exporter) getDestination() string {
 	switch e.config.Type {
 	case "TDTP":
-		if e.config.TDTPConfig != nil {
-			return e.config.TDTPConfig.Destination
+		if e.config.TDTP != nil {
+			return e.config.TDTP.Destination
 		}
 	case "RabbitMQ":
-		if e.config.RabbitMQConfig != nil {
+		if e.config.RabbitMQ != nil {
 			return fmt.Sprintf("%s:%d/%s",
-				e.config.RabbitMQConfig.Host,
-				e.config.RabbitMQConfig.Port,
-				e.config.RabbitMQConfig.Queue)
+				e.config.RabbitMQ.Host,
+				e.config.RabbitMQ.Port,
+				e.config.RabbitMQ.Queue)
 		}
 	case "Kafka":
-		if e.config.KafkaConfig != nil {
+		if e.config.Kafka != nil {
 			return fmt.Sprintf("%s/%s",
-				e.config.KafkaConfig.Brokers,
-				e.config.KafkaConfig.Topic)
+				e.config.Kafka.Brokers,
+				e.config.Kafka.Topic)
 		}
 	}
 	return "unknown"
@@ -212,32 +212,32 @@ func (e *Exporter) ValidateConfig() error {
 
 	switch e.config.Type {
 	case "TDTP":
-		if e.config.TDTPConfig == nil {
+		if e.config.TDTP == nil {
 			return fmt.Errorf("TDTP config is required for TDTP output")
 		}
-		if e.config.TDTPConfig.Destination == "" {
+		if e.config.TDTP.Destination == "" {
 			return fmt.Errorf("TDTP destination is required")
 		}
 
 	case "RabbitMQ":
-		if e.config.RabbitMQConfig == nil {
+		if e.config.RabbitMQ == nil {
 			return fmt.Errorf("RabbitMQ config is required for RabbitMQ output")
 		}
-		if e.config.RabbitMQConfig.Host == "" {
+		if e.config.RabbitMQ.Host == "" {
 			return fmt.Errorf("RabbitMQ host is required")
 		}
-		if e.config.RabbitMQConfig.Queue == "" {
+		if e.config.RabbitMQ.Queue == "" {
 			return fmt.Errorf("RabbitMQ queue is required")
 		}
 
 	case "Kafka":
-		if e.config.KafkaConfig == nil {
+		if e.config.Kafka == nil {
 			return fmt.Errorf("Kafka config is required for Kafka output")
 		}
-		if e.config.KafkaConfig.Brokers == "" {
+		if len(e.config.Kafka.Brokers) == 0 {
 			return fmt.Errorf("Kafka brokers is required")
 		}
-		if e.config.KafkaConfig.Topic == "" {
+		if e.config.Kafka.Topic == "" {
 			return fmt.Errorf("Kafka topic is required")
 		}
 
