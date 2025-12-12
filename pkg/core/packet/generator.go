@@ -89,10 +89,8 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 		packet.Header.TotalParts = len(partitions)
 		packet.Header.RecordsInPart = len(partition)
 
-		// Schema только в первой части
-		if i == 0 {
-			packet.Schema = schema
-		}
+		// Schema во всех частях (для самодостаточности при файловом экспорте)
+		packet.Schema = schema
 
 		// Преобразуем строки в Data
 		packet.Data = g.rowsToData(partition)
@@ -141,12 +139,11 @@ func (g *Generator) GenerateResponse(
 		packet.Header.Sender = sender
 		packet.Header.Recipient = recipient
 
-		// Schema и QueryContext только в первой части
-		if i == 0 {
-			packet.Schema = schema
-			if queryContext != nil {
-				packet.QueryContext = queryContext
-			}
+		// Schema во всех частях (для самодостаточности при файловом экспорте)
+		packet.Schema = schema
+		// QueryContext только в первой части (вспомогательная информация)
+		if i == 0 && queryContext != nil {
+			packet.QueryContext = queryContext
 		}
 
 		packet.Data = g.rowsToData(partition)
