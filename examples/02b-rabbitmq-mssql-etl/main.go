@@ -63,8 +63,7 @@ func main() {
 	log.Println("Statistics:")
 	log.Printf("  Duration: %s\n", stats.Duration)
 	log.Printf("  Rows loaded: %d\n", stats.TotalRowsLoaded)
-	log.Printf("  Rows transformed: %d\n", stats.TransformedRows)
-	log.Printf("  Rows exported: %d\n", stats.ExportedRows)
+	log.Printf("  Rows exported: %d\n", stats.TotalRowsExported)
 	log.Println()
 
 	// 5. Сравнение с оригинальным примером
@@ -82,8 +81,8 @@ func main() {
 	log.Println()
 
 	// Информация о RabbitMQ
-	if config.Output.Type == "RabbitMQ" && config.Output.RabbitMQConfig != nil {
-		cfg := config.Output.RabbitMQConfig
+	if config.Output.Type == "RabbitMQ" && config.Output.RabbitMQ != nil {
+		cfg := config.Output.RabbitMQ
 		log.Println("📤 Data sent to RabbitMQ:")
 		log.Printf("  Host: %s:%d\n", cfg.Host, cfg.Port)
 		log.Printf("  Queue: %s\n", cfg.Queue)
