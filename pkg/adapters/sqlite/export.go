@@ -44,10 +44,9 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 			return packet.Schema{}, fmt.Errorf("failed to build field: %w", err)
 		}
 
-		// Для TEXT полей без явной длины устанавливаем разумное значение по умолчанию
-		if field.Type == "TEXT" && field.Length == 0 {
-			field.Length = 1000 // Разумное значение по умолчанию
-		}
+		// SQLite не хранит ограничения длины для TEXT полей
+		// Оставляем Length = 0, что означает "неограниченная длина"
+		// В XML это будет omitempty (не выводится, если 0)
 
 		fields = append(fields, field)
 	}
