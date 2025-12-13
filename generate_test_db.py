@@ -2,6 +2,15 @@
 """
 Генератор тестовой SQLite базы данных для тестирования сжатия TDTP.
 Создает таблицу users с 100,000 записей.
+
+ВАЖНО: DDL использует правильные типы данных для переносимости через TDTP:
+- VARCHAR(N) вместо TEXT для полей с известной максимальной длиной
+- CHAR(N) для полей фиксированной длины (пол, ИНН)
+- DATE для дат рождения
+- DATETIME для временных меток
+- DECIMAL(18,2) для денежных сумм (точность!)
+
+Это обеспечивает корректное сохранение схемы в TDTP XML и импорт в другие СУБД.
 """
 
 import sqlite3
@@ -179,24 +188,50 @@ def main():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # Создаем таблицу с новыми полями
+    # Создаем таблицу с ПРАВИЛЬНЫМИ типами данных для переносимости через TDTP
     cursor.execute("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
-            first_name TEXT NOT NULL,
-            last_name TEXT NOT NULL,
-            gender TEXT NOT NULL,
-            birth_date TEXT NOT NULL,
-            email TEXT NOT NULL UNIQUE,
-            phone TEXT,
-            inn TEXT NOT NULL,
-            insurance_policy TEXT NOT NULL,
-            city TEXT,
-            marital_status TEXT,
-            status TEXT DEFAULT 'active',
-            balance REAL DEFAULT 0.0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+
+            -- Имена (VARCHAR с ограничением длины)
+            first_name VARCHAR(100) NOT NULL,
+            last_name VARCHAR(100) NOT NULL,
+
+            -- Пол (CHAR - фиксированная длина 1 символ: М/Ж)
+            gender CHAR(1) NOT NULL,
+
+            -- Дата рождения (DATE - правильный тип даты!)
+            birth_date DATE NOT NULL,
+
+            -- Email (VARCHAR(255) - стандарт RFC 5321)
+            email VARCHAR(255) NOT NULL UNIQUE,
+
+            -- Телефон (VARCHAR(20) - международный формат до 20 символов)
+            phone VARCHAR(20),
+
+            -- ИНН (CHAR(12) - фиксированная длина 12 цифр)
+            inn CHAR(12) NOT NULL,
+
+            -- Полис ОМС (VARCHAR(20) - формат XXXX XXXXXX с пробелом)
+            insurance_policy VARCHAR(20) NOT NULL,
+
+            -- Город (VARCHAR(100) - название города)
+            city VARCHAR(100),
+
+            -- Семейное положение (VARCHAR(20) - холост/женат/...)
+            marital_status VARCHAR(20),
+
+            -- Статус (VARCHAR(20) - active/inactive/...)
+            status VARCHAR(20) DEFAULT 'active',
+
+            -- Баланс (DECIMAL(18,2) - точность для денег!)
+            balance DECIMAL(18, 2) DEFAULT 0.0,
+
+            -- Временные метки (DATETIME - правильный тип!)
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+
+            -- Описание (TEXT - длинный текст без ограничения)
             description TEXT
         )
     """)
