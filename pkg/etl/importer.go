@@ -1,6 +1,7 @@
 package etl
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -82,7 +83,7 @@ func (pi *ParallelImporter) Import(
 	}
 
 	// Создаем broker в зависимости от типа
-	var broker brokers.Broker
+	var broker brokers.MessageBroker
 	var err error
 
 	switch pi.config.Type {
@@ -221,7 +222,7 @@ func (pi *ParallelImporter) worker(
 			startTime := time.Now()
 
 			// Парсим TDTP пакет
-			dataPacket, err := parser.Parse(xmlData)
+			dataPacket, err := parser.Parse(bytes.NewReader(xmlData))
 			if err != nil {
 				resultsChan <- &ImportResult{
 					Error:    fmt.Errorf("worker %d: failed to parse packet: %w", workerID, err),
@@ -244,7 +245,7 @@ func (pi *ParallelImporter) worker(
 }
 
 // createRabbitMQBroker создает RabbitMQ брокер для чтения
-func (pi *ParallelImporter) createRabbitMQBroker() (brokers.Broker, error) {
+func (pi *ParallelImporter) createRabbitMQBroker() (brokers.MessageBroker, error) {
 	if pi.config.RabbitMQ == nil {
 		return nil, fmt.Errorf("RabbitMQ config is not set")
 	}
@@ -263,7 +264,7 @@ func (pi *ParallelImporter) createRabbitMQBroker() (brokers.Broker, error) {
 }
 
 // createKafkaBroker создает Kafka брокер для чтения
-func (pi *ParallelImporter) createKafkaBroker() (brokers.Broker, error) {
+func (pi *ParallelImporter) createKafkaBroker() (brokers.MessageBroker, error) {
 	if pi.config.Kafka == nil {
 		return nil, fmt.Errorf("Kafka config is not set")
 	}
