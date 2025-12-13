@@ -145,19 +145,44 @@ func (p *Processor) executeTransformation(ctx context.Context) (*ExecutionResult
 }
 
 // exportResults экспортирует результаты
+// Автоматически выбирает streaming режим для RabbitMQ/Kafka и batch для TDTP файлов
 func (p *Processor) exportResults(ctx context.Context, result *ExecutionResult) error {
+	// Для RabbitMQ/Kafka используем streaming экспорт (не требует всех данных в памяти)
+	if p.config.Output.Type == "RabbitMQ" || p.config.Output.Type == "Kafka" {
+		return p.exportResultsStreaming(ctx)
+	}
+
+	// Для TDTP файлов используем batch экспорт (нужны все данные для TotalParts)
 	if result.Packet == nil {
 		return fmt.Errorf("no data to export")
 	}
 
-	// Экспортируем результаты
 	exportResult, err := p.exporter.Export(ctx, result.Packet)
 	if err != nil {
 		return err
 	}
 
-	// Обновляем статистику
 	p.stats.TotalRowsExported = exportResult.RowsExported
+
+	return nil
+}
+
+// exportResultsStreaming выполняет потоковый экспорт результатов в RabbitMQ/Kafka
+func (p *Processor) exportResultsStreaming(ctx context.Context) error {
+	// Выполняем SQL с потоковым чтением
+	streamResult, err := p.workspace.ExecuteSQLStream(ctx, p.config.Transform.SQL, p.config.Transform.ResultTable)
+	if err != nil {
+		return fmt.Errorf("failed to execute SQL stream: %w", err)
+	}
+
+	// Экспортируем в потоковом режиме
+	exportResult, err := p.exporter.ExportStream(ctx, streamResult, p.config.Transform.ResultTable)
+	if err != nil {
+		return fmt.Errorf("failed to export stream: %w", err)
+	}
+
+	// Обновляем статистику
+	p.stats.TotalRowsExported = exportResult.TotalRows
 
 	return nil
 }
