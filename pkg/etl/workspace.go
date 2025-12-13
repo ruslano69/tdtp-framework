@@ -202,6 +202,104 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sql string, resultTableName 
 	return result, nil
 }
 
+// StreamingResult содержит схему и канал с данными для потоковой обработки
+type StreamingResult struct {
+	Schema    packet.Schema
+	RowsChan  <-chan []string
+	ErrorChan <-chan error
+}
+
+// ExecuteSQLStream выполняет SQL запрос и возвращает данные через channel (streaming)
+// Используется для экспорта больших объемов данных в RabbitMQ/Kafka без загрузки всего в память
+func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTableName string) (*StreamingResult, error) {
+	// Выполняем SELECT запрос
+	rows, err := w.db.QueryContext(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute SQL: %w", err)
+	}
+
+	// Получаем информацию о колонках
+	columns, err := rows.Columns()
+	if err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("failed to get column types: %w", err)
+	}
+
+	// Создаем схему
+	schema := packet.Schema{
+		Fields: make([]packet.Field, len(columns)),
+	}
+	for i, col := range columns {
+		schema.Fields[i] = packet.Field{
+			Name: col,
+			Type: w.mapSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName()),
+		}
+	}
+
+	// Создаем каналы для передачи данных
+	rowsChan := make(chan []string, 100) // Буферизованный канал для производительности
+	errorChan := make(chan error, 1)
+
+	// Запускаем горутину для чтения данных
+	go func() {
+		defer close(rowsChan)
+		defer close(errorChan)
+		defer rows.Close()
+
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		for rows.Next() {
+			// Проверяем контекст
+			select {
+			case <-ctx.Done():
+				errorChan <- ctx.Err()
+				return
+			default:
+			}
+
+			if err := rows.Scan(valuePtrs...); err != nil {
+				errorChan <- fmt.Errorf("failed to scan row: %w", err)
+				return
+			}
+
+			// Конвертируем значения в строки
+			rowValues := make([]string, len(values))
+			for i, val := range values {
+				rowValues[i] = w.formatValue(val)
+			}
+
+			// Отправляем строку в канал
+			select {
+			case rowsChan <- rowValues:
+			case <-ctx.Done():
+				errorChan <- ctx.Err()
+				return
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			errorChan <- fmt.Errorf("error reading rows: %w", err)
+			return
+		}
+	}()
+
+	return &StreamingResult{
+		Schema:    schema,
+		RowsChan:  rowsChan,
+		ErrorChan: errorChan,
+	}, nil
+}
+
 // Close закрывает workspace
 func (w *Workspace) Close(ctx context.Context) error {
 	if w.adapter != nil {
