@@ -185,9 +185,18 @@ func (sm *stateManager) onSuccess() {
 	case StateHalfOpen:
 		// Проверяем достигли ли порога для закрытия
 		if sm.counts.ConsecutiveSuccesses >= sm.config.SuccessThreshold {
-			sm.mu.Unlock()
-			sm.setState(StateClosed, true)
-			sm.mu.Lock()
+			// Изменяем состояние напрямую, lock уже взят
+			oldState := sm.state
+			sm.state = StateClosed
+			sm.generation++
+			sm.lastStateChange = time.Now()
+			sm.stateChanges[StateClosed]++
+			sm.counts = Counts{}
+
+			// Callback без удержания lock
+			if sm.config.OnStateChange != nil {
+				go sm.config.OnStateChange(sm.config.Name, oldState, StateClosed)
+			}
 		}
 	}
 }
@@ -199,20 +208,40 @@ func (sm *stateManager) onFailure() {
 	sm.counts.ConsecutiveFailures++
 	sm.counts.ConsecutiveSuccesses = 0
 
+	var needStateChange bool
+	var newState State
+
 	switch sm.state {
 	case StateClosed:
 		// Проверяем нужно ли открыть circuit
 		if sm.shouldTrip() {
-			sm.mu.Unlock()
-			sm.setState(StateOpen, true)
-			sm.mu.Lock()
+			needStateChange = true
+			newState = StateOpen
 		}
 
 	case StateHalfOpen:
 		// При любой ошибке в Half-Open возвращаемся в Open
-		sm.mu.Unlock()
-		sm.setState(StateOpen, true)
-		sm.mu.Lock()
+		needStateChange = true
+		newState = StateOpen
+	}
+
+	if needStateChange {
+		// Изменяем состояние напрямую, lock уже взят
+		oldState := sm.state
+		sm.state = newState
+		sm.generation++
+		sm.lastStateChange = time.Now()
+		sm.stateChanges[newState]++
+		sm.counts = Counts{}
+
+		if newState == StateOpen {
+			sm.expiry = time.Now().Add(sm.config.Timeout)
+		}
+
+		// Callback без удержания lock
+		if sm.config.OnStateChange != nil {
+			go sm.config.OnStateChange(sm.config.Name, oldState, newState)
+		}
 	}
 }
 
