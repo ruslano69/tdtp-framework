@@ -3,6 +3,7 @@ package resilience
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -271,6 +272,7 @@ func TestCircuitBreaker_MaxConcurrentCalls(t *testing.T) {
 }
 
 func TestCircuitBreaker_StateChangeCallback(t *testing.T) {
+	var mu sync.Mutex
 	stateChanges := []struct {
 		from State
 		to   State
@@ -280,6 +282,8 @@ func TestCircuitBreaker_StateChangeCallback(t *testing.T) {
 	config.MaxFailures = 2
 	config.Timeout = 50 * time.Millisecond
 	config.OnStateChange = func(name string, from State, to State) {
+		mu.Lock()
+		defer mu.Unlock()
 		stateChanges = append(stateChanges, struct {
 			from State
 			to   State
@@ -303,15 +307,25 @@ func TestCircuitBreaker_StateChangeCallback(t *testing.T) {
 	// Даем время для callback
 	time.Sleep(10 * time.Millisecond)
 
-	// Проверяем что был вызван callback
-	if len(stateChanges) == 0 {
+	// Проверяем что был вызван callback (с синхронизацией)
+	mu.Lock()
+	changesCount := len(stateChanges)
+	var firstChange struct {
+		from State
+		to   State
+	}
+	if changesCount > 0 {
+		firstChange = stateChanges[0]
+	}
+	mu.Unlock()
+
+	if changesCount == 0 {
 		t.Error("Expected state change callback to be called")
 	}
 
-	if len(stateChanges) > 0 {
-		change := stateChanges[0]
-		if change.from != StateClosed || change.to != StateOpen {
-			t.Errorf("Expected Closed→Open, got %v→%v", change.from, change.to)
+	if changesCount > 0 {
+		if firstChange.from != StateClosed || firstChange.to != StateOpen {
+			t.Errorf("Expected Closed→Open, got %v→%v", firstChange.from, firstChange.to)
 		}
 	}
 }

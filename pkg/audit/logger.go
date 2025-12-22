@@ -27,6 +27,7 @@ type AuditLogger struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.RWMutex
+	closed       bool
 	config       LoggerConfig
 }
 
@@ -96,6 +97,15 @@ func NewLogger(config LoggerConfig, appenders ...Appender) *AuditLogger {
 func (l *AuditLogger) Log(ctx context.Context, entry *Entry) error {
 	if entry == nil {
 		return fmt.Errorf("entry is nil")
+	}
+
+	// Проверяем не закрыт ли logger
+	l.mu.RLock()
+	isClosed := l.closed
+	l.mu.RUnlock()
+
+	if isClosed {
+		return fmt.Errorf("logger is closed")
 	}
 
 	// Устанавливаем timestamp если не установлен
@@ -186,9 +196,15 @@ func (l *AuditLogger) processEntries() {
 
 	for {
 		select {
-		case entry := <-l.entryChannel:
-			if err := l.writeEntry(context.Background(), entry); err != nil {
-				l.handleError(err)
+		case entry, ok := <-l.entryChannel:
+			if !ok {
+				// Канал закрыт, выходим
+				return
+			}
+			if entry != nil {
+				if err := l.writeEntry(context.Background(), entry); err != nil {
+					l.handleError(err)
+				}
 			}
 
 		case <-l.ctx.Done():
@@ -203,8 +219,14 @@ func (l *AuditLogger) processEntries() {
 func (l *AuditLogger) drainChannel() {
 	for {
 		select {
-		case entry := <-l.entryChannel:
-			l.writeEntry(context.Background(), entry)
+		case entry, ok := <-l.entryChannel:
+			if !ok {
+				// Канал закрыт
+				return
+			}
+			if entry != nil {
+				l.writeEntry(context.Background(), entry)
+			}
 		default:
 			return
 		}
@@ -254,8 +276,22 @@ func (l *AuditLogger) Flush() error {
 
 // Close - закрыть logger и все appenders
 func (l *AuditLogger) Close() error {
+	// Устанавливаем флаг закрытия
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		return fmt.Errorf("logger already closed")
+	}
+	l.closed = true
+	l.mu.Unlock()
+
 	// Останавливаем прием новых entries
 	l.cancel()
+
+	// Закрываем канал если используется асинхронный режим
+	if l.asyncMode && l.entryChannel != nil {
+		close(l.entryChannel)
+	}
 
 	// Ждем обработки всех entries
 	l.wg.Wait()
