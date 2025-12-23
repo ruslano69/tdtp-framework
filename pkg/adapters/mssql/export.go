@@ -13,6 +13,28 @@ import (
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
 )
 
+// Context key для передачи флага includeReadOnly через контекст
+type contextKey string
+
+const includeReadOnlyFieldsKey contextKey = "includeReadOnlyFields"
+
+// WithIncludeReadOnlyFields добавляет флаг includeReadOnly в контекст
+// Используется CLI для передачи флага --readonly-fields в адаптер
+func WithIncludeReadOnlyFields(ctx context.Context, include bool) context.Context {
+	return context.WithValue(ctx, includeReadOnlyFieldsKey, include)
+}
+
+// getIncludeReadOnlyFromContext извлекает флаг includeReadOnly из контекста
+// По умолчанию возвращает false (не экспортировать read-only поля)
+func getIncludeReadOnlyFromContext(ctx context.Context) bool {
+	if val := ctx.Value(includeReadOnlyFieldsKey); val != nil {
+		if boolVal, ok := val.(bool); ok {
+			return boolVal
+		}
+	}
+	return false // По умолчанию НЕ экспортируем read-only поля
+}
+
 // ========== Schema Operations ==========
 
 // GetTableSchema возвращает схему таблицы в формате TDTP
@@ -21,6 +43,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	schemaName, tableName := a.parseTableName(tableName)
 
 	// SQL Server 2012+ compatible query
+	// Enhanced to detect read-only fields: timestamp, computed, identity
 	query := `
 		SELECT
 			c.COLUMN_NAME,
@@ -32,7 +55,9 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 			CASE
 				WHEN pk.COLUMN_NAME IS NOT NULL THEN 1
 				ELSE 0
-			END AS IS_PRIMARY_KEY
+			END AS IS_PRIMARY_KEY,
+			COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA + '.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsComputed') AS IS_COMPUTED,
+			COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA + '.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') AS IS_IDENTITY
 		FROM INFORMATION_SCHEMA.COLUMNS c
 		LEFT JOIN (
 			SELECT ku.TABLE_SCHEMA, ku.TABLE_NAME, ku.COLUMN_NAME
@@ -66,6 +91,8 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 			scale        sql.NullInt64
 			isNullable   string
 			isPrimaryKey int
+			isComputed   sql.NullInt64
+			isIdentity   sql.NullInt64
 		)
 
 		err := rows.Scan(
@@ -76,6 +103,8 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 			&scale,
 			&isNullable,
 			&isPrimaryKey,
+			&isComputed,
+			&isIdentity,
 		)
 		if err != nil {
 			return packet.Schema{}, fmt.Errorf("failed to scan column info: %w", err)
@@ -102,6 +131,13 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 			isPrimaryKey == 1,
 		)
 
+		// Определяем, является ли поле read-only
+		isTimestamp := strings.ToLower(dataType) == "timestamp"
+		isComputedBool := isComputed.Valid && isComputed.Int64 == 1
+		isIdentityBool := isIdentity.Valid && isIdentity.Int64 == 1
+
+		field.ReadOnly = isReadOnlyField(isTimestamp, isComputedBool, isIdentityBool)
+
 		fields = append(fields, field)
 	}
 
@@ -116,6 +152,77 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	return packet.Schema{
 		Fields: fields,
 	}, nil
+}
+
+// isReadOnlyField определяет, является ли поле read-only (нельзя вставить/обновить)
+// Для MS SQL Server read-only поля:
+// - timestamp/rowversion: автоматически генерируемый бинарный счетчик версий
+// - computed columns: вычисляемые поля (по формуле)
+// - identity columns: auto-increment (опционально, зависит от SET IDENTITY_INSERT)
+func isReadOnlyField(isTimestamp, isComputed, isIdentity bool) bool {
+	// timestamp/rowversion - всегда read-only
+	if isTimestamp {
+		return true
+	}
+
+	// Computed columns - всегда read-only
+	if isComputed {
+		return true
+	}
+
+	// IDENTITY - технически можно вставить с SET IDENTITY_INSERT ON,
+	// но в большинстве случаев это read-only поле
+	// Пользователь может переопределить через --readonly-fields
+	if isIdentity {
+		return true
+	}
+
+	return false
+}
+
+// filterReadOnlyFields фильтрует read-only поля из схемы и данных
+// Возвращает новую схему и отфильтрованные строки без read-only полей
+// Параметр includeReadOnly определяет, оставить (true) или удалить (false) read-only поля
+func filterReadOnlyFields(schema packet.Schema, rows [][]string, includeReadOnly bool) (packet.Schema, [][]string) {
+	// Если нужно включить read-only поля, возвращаем как есть
+	if includeReadOnly {
+		return schema, rows
+	}
+
+	// Находим индексы read-only полей
+	var keepIndices []int
+	var filteredFields []packet.Field
+
+	for i, field := range schema.Fields {
+		if !field.ReadOnly {
+			keepIndices = append(keepIndices, i)
+			filteredFields = append(filteredFields, field)
+		}
+	}
+
+	// Если все поля read-only или нет полей для удаления, возвращаем как есть
+	if len(keepIndices) == len(schema.Fields) {
+		return schema, rows
+	}
+
+	// Создаем новую схему без read-only полей
+	filteredSchema := packet.Schema{
+		Fields: filteredFields,
+	}
+
+	// Фильтруем данные
+	filteredRows := make([][]string, len(rows))
+	for i, row := range rows {
+		filteredRow := make([]string, len(keepIndices))
+		for j, idx := range keepIndices {
+			if idx < len(row) {
+				filteredRow[j] = row[idx]
+			}
+		}
+		filteredRows[i] = filteredRow
+	}
+
+	return filteredSchema, filteredRows
 }
 
 // GetTableNames and TableExists are implemented in adapter.go
@@ -142,6 +249,9 @@ func (a *Adapter) ExportTableWithQuery(
 		return nil, err
 	}
 
+	// Проверяем флаг includeReadOnly из контекста
+	includeReadOnly := getIncludeReadOnlyFromContext(ctx)
+
 	// Если query == nil, это полный экспорт (reference)
 	if query == nil {
 		rows, err := a.readAllRows(ctx, tableName, pkgSchema)
@@ -149,9 +259,12 @@ func (a *Adapter) ExportTableWithQuery(
 			return nil, err
 		}
 
+		// Фильтруем read-only поля если нужно
+		filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, rows, includeReadOnly)
+
 		// Генерируем reference пакеты
 		generator := packet.NewGenerator()
-		return generator.GenerateReference(tableName, pkgSchema, rows)
+		return generator.GenerateReference(tableName, filteredSchema, filteredRows)
 	}
 
 	// Пробуем транслировать TDTQL → SQL для оптимизации
@@ -163,16 +276,19 @@ func (a *Adapter) ExportTableWithQuery(
 			// Выполняем SQL запрос напрямую
 			rows, err := a.readRowsWithSQL(ctx, sqlQuery, pkgSchema)
 			if err == nil {
+				// Фильтруем read-only поля если нужно
+				filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, rows, includeReadOnly)
+
 				// Генерируем Response пакеты
 				// QueryContext создаем вручную так как данные уже отфильтрованы
-				queryContext := a.createQueryContextForSQL(ctx, query, rows, tableName)
+				queryContext := a.createQueryContextForSQL(ctx, query, filteredRows, tableName)
 
 				generator := packet.NewGenerator()
 				return generator.GenerateResponse(
 					tableName,
 					"",
-					pkgSchema,
-					rows,
+					filteredSchema,
+					filteredRows,
 					queryContext,
 					sender,
 					recipient,
@@ -195,13 +311,16 @@ func (a *Adapter) ExportTableWithQuery(
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
+	// Фильтруем read-only поля если нужно
+	filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, result.FilteredRows, includeReadOnly)
+
 	// Генерируем Response пакеты с QueryContext
 	generator := packet.NewGenerator()
 	return generator.GenerateResponse(
 		tableName,
 		"",
-		pkgSchema,
-		result.FilteredRows,
+		filteredSchema,
+		filteredRows,
 		result.QueryContext,
 		sender,
 		recipient,
@@ -212,9 +331,10 @@ func (a *Adapter) ExportTableWithQuery(
 
 // parseTableName разбирает имя таблицы на схему и имя
 // Примеры:
-//   "Users" → ("dbo", "Users")
-//   "dbo.Users" → ("dbo", "Users")
-//   "custom.Users" → ("custom", "Users")
+//
+//	"Users" → ("dbo", "Users")
+//	"dbo.Users" → ("dbo", "Users")
+//	"custom.Users" → ("custom", "Users")
 func (a *Adapter) parseTableName(fullName string) (schema, table string) {
 	parts := strings.Split(fullName, ".")
 	if len(parts) == 2 {
@@ -420,13 +540,20 @@ func (a *Adapter) valueToString(value interface{}, field packet.Field) string {
 		typedValue.StringValue = &v
 
 	case []byte:
-		// Для BLOB используем BlobValue, для TEXT - StringValue
-		normalized := schema.NormalizeType(schema.DataType(field.Type))
-		if normalized == schema.TypeBlob {
-			typedValue.BlobValue = v
+		// Специальная обработка для timestamp/rowversion
+		// Конвертируем в hex без ведущих нулей: 0x00000000187F825E → "187F825E"
+		if field.Subtype == "rowversion" {
+			hexStr := bytesToHexWithoutLeadingZeros(v)
+			typedValue.StringValue = &hexStr
 		} else {
-			str := string(v)
-			typedValue.StringValue = &str
+			// Для обычных BLOB используем BlobValue, для TEXT - StringValue
+			normalized := schema.NormalizeType(schema.DataType(field.Type))
+			if normalized == schema.TypeBlob {
+				typedValue.BlobValue = v
+			} else {
+				str := string(v)
+				typedValue.StringValue = &str
+			}
 		}
 
 	case bool:

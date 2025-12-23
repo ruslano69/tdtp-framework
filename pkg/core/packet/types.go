@@ -52,7 +52,8 @@ type Field struct {
 	Scale     int    `xml:"scale,attr,omitempty"`
 	Key       bool   `xml:"key,attr,omitempty"`
 	Timezone  string `xml:"timezone,attr,omitempty"`
-	Subtype   string `xml:"subtype,attr,omitempty"` // ← Добавьте эту строку
+	Subtype   string `xml:"subtype,attr,omitempty"`
+	ReadOnly  bool   `xml:"readonly,attr,omitempty"` // Read-only поля (timestamp, computed)
 }
 
 // Data содержит табличные данные

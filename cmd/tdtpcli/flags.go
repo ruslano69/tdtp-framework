@@ -26,11 +26,12 @@ type Flags struct {
 	Offset  *int
 
 	// Options
-	Config   *string
-	Output   *string
-	Sheet    *string
-	Strategy *string
-	Batch    *int
+	Config         *string
+	Output         *string
+	Sheet          *string
+	Strategy       *string
+	Batch          *int
+	ReadOnlyFields *bool // Include read-only fields (timestamp, computed, identity) in export
 
 	// Compression
 	Compress      *bool
@@ -98,6 +99,7 @@ func ParseFlags() *Flags {
 	f.Sheet = flag.String("sheet", "Sheet1", "Excel sheet name for XLSX operations")
 	f.Strategy = flag.String("strategy", "replace", "Import strategy: replace, ignore, fail, copy")
 	f.Batch = flag.Int("batch", 1000, "Batch size for bulk operations")
+	f.ReadOnlyFields = flag.Bool("readonly-fields", false, "Include read-only fields (timestamp, computed, identity) in export")
 
 	// Compression
 	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")

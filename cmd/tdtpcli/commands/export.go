@@ -8,18 +8,20 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters/mssql"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
 )
 
 // ExportOptions holds options for export operations
 type ExportOptions struct {
-	TableName     string
-	OutputFile    string
-	Query         *packet.Query
-	ProcessorMgr  ProcessorManager
-	Compress      bool
-	CompressLevel int
+	TableName      string
+	OutputFile     string
+	Query          *packet.Query
+	ProcessorMgr   ProcessorManager
+	Compress       bool
+	CompressLevel  int
+	ReadOnlyFields bool // Include read-only fields (timestamp, computed, identity)
 }
 
 // ProcessorManager interface for applying data processors
@@ -38,6 +40,10 @@ func ExportTable(ctx context.Context, config adapters.Config, opts ExportOptions
 	defer adapter.Close(ctx)
 
 	fmt.Printf("Exporting table '%s'...\n", opts.TableName)
+
+	// Add includeReadOnly flag to context for MS SQL adapter
+	// (other adapters will ignore it)
+	ctx = mssql.WithIncludeReadOnlyFields(ctx, opts.ReadOnlyFields)
 
 	// Export with or without query
 	var packets []*packet.DataPacket
@@ -99,7 +105,7 @@ func ExportTable(ctx context.Context, config adapters.Config, opts ExportOptions
 			}
 			fmt.Println(string(xml))
 		}
-	} else{
+	} else {
 		// Write to file(s)
 		if len(packets) == 1 {
 			// Single file

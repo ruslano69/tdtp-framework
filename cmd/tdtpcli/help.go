@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const version = "1.5.0"
+const version = "1.6.0"
 
 // PrintVersion prints version information
 func PrintVersion() {
@@ -58,6 +58,7 @@ func PrintHelp() {
 	fmt.Println("    --output <file>            Output file path")
 	fmt.Println("    --strategy <name>          Import strategy: replace, ignore, fail, copy")
 	fmt.Println("    --batch <size>             Batch size for bulk operations (default: 1000)")
+	fmt.Println("    --readonly-fields          Include read-only fields (timestamp, computed, identity)")
 	fmt.Println()
 
 	fmt.Println("  Compression:")
@@ -133,6 +134,10 @@ func PrintHelp() {
 
 	fmt.Println("  # Export with high compression")
 	fmt.Println("  tdtpcli --export logs --compress --compress-level 19 --output logs.tdtp.xml")
+	fmt.Println()
+
+	fmt.Println("  # Export with read-only fields (timestamp, computed, identity)")
+	fmt.Println("  tdtpcli --export employees --readonly-fields --output employees.tdtp.xml")
 	fmt.Println()
 
 	fmt.Println("  # Export directly to Excel 🍒")
