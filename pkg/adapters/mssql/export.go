@@ -494,46 +494,6 @@ func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string,
 	return result, rows.Err()
 }
 
-// bytesToHexWithoutLeadingZeros конвертирует []byte в hex строку без ведущих нулей
-// Пример: [0x00, 0x00, 0x00, 0x00, 0x18, 0x7F, 0x82, 0x5E] → "187F825E"
-// Используется для MS SQL timestamp/rowversion полей
-func bytesToHexWithoutLeadingZeros(data []byte) string {
-	if len(data) == 0 {
-		return ""
-	}
-
-	// Находим первый ненулевой байт
-	firstNonZero := 0
-	for i, b := range data {
-		if b != 0 {
-			firstNonZero = i
-			break
-		}
-	}
-
-	// Если все байты нулевые, возвращаем "0"
-	if firstNonZero == 0 && data[0] == 0 {
-		allZero := true
-		for _, b := range data {
-			if b != 0 {
-				allZero = false
-				break
-			}
-		}
-		if allZero {
-			return "0"
-		}
-	}
-
-	// Конвертируем в hex, пропуская ведущие нули
-	result := ""
-	for i := firstNonZero; i < len(data); i++ {
-		result += fmt.Sprintf("%02X", data[i])
-	}
-
-	return result
-}
-
 // valueToString конвертирует значение БД в строку для TDTP
 // Использует schema.Converter для правильного форматирования всех типов
 func (a *Adapter) valueToString(value interface{}, field packet.Field) string {
