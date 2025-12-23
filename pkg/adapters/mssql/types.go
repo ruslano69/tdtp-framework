@@ -170,6 +170,13 @@ func MSSQLToTDTP(sqlType string, nullable bool) (packet.Field, error) {
 		field.Type = string(schema.TypeBlob)
 		field.Subtype = "image" // Legacy
 
+	// timestamp/rowversion - 8-byte auto-generated version counter (NOT a datetime!)
+	// This is a READ-ONLY field that changes on every UPDATE
+	case "TIMESTAMP", "ROWVERSION":
+		field.Type = string(schema.TypeBlob)
+		field.Length = 8 // Always 8 bytes
+		field.Subtype = "rowversion"
+
 	default:
 		// Unknown type - default to TEXT
 		field.Type = string(schema.TypeText)
@@ -398,19 +405,19 @@ func BuildFieldFromColumn(columnName, dataType string, length, precision, scale 
 // Common SQL Server type constants for reference
 const (
 	// Preferred types for new tables (SQL Server 2012+)
-	TypeInteger      = "BIGINT"          // Use BIGINT for safety
-	TypeDecimal      = "DECIMAL(18,2)"   // Default precision
-	TypeText         = "NVARCHAR(MAX)"   // Unicode support
-	TypeBoolean      = "BIT"             // 0/1
-	TypeDate         = "DATE"            // SQL Server 2008+
-	TypeTimestamp    = "DATETIME2"       // High precision
-	TypeUUID         = "UNIQUEIDENTIFIER" // GUID
-	TypeBlob         = "VARBINARY(MAX)"  // Binary data
-	TypeXML          = "XML"             // XML documents
+	TypeInteger   = "BIGINT"           // Use BIGINT for safety
+	TypeDecimal   = "DECIMAL(18,2)"    // Default precision
+	TypeText      = "NVARCHAR(MAX)"    // Unicode support
+	TypeBoolean   = "BIT"              // 0/1
+	TypeDate      = "DATE"             // SQL Server 2008+
+	TypeTimestamp = "DATETIME2"        // High precision
+	TypeUUID      = "UNIQUEIDENTIFIER" // GUID
+	TypeBlob      = "VARBINARY(MAX)"   // Binary data
+	TypeXML       = "XML"              // XML documents
 
 	// Legacy types (avoid for new tables, but support for compatibility)
-	TypeTextLegacy   = "TEXT"     // Use NVARCHAR(MAX) instead
-	TypeNTextLegacy  = "NTEXT"    // Use NVARCHAR(MAX) instead
-	TypeImageLegacy  = "IMAGE"    // Use VARBINARY(MAX) instead
+	TypeTextLegacy     = "TEXT"     // Use NVARCHAR(MAX) instead
+	TypeNTextLegacy    = "NTEXT"    // Use NVARCHAR(MAX) instead
+	TypeImageLegacy    = "IMAGE"    // Use VARBINARY(MAX) instead
 	TypeDateTimeLegacy = "DATETIME" // Use DATETIME2 instead
 )
