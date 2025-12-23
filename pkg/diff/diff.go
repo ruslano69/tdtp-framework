@@ -75,6 +75,11 @@ func (d *Differ) Compare(packetA, packetB *packet.DataPacket) (*DiffResult, erro
 		return nil, fmt.Errorf("packets cannot be nil")
 	}
 
+	// Проверяем что таблицы одинаковые
+	if packetA.Header.TableName != packetB.Header.TableName {
+		return nil, fmt.Errorf("different tables: %s vs %s", packetA.Header.TableName, packetB.Header.TableName)
+	}
+
 	// Проверяем совместимость схем
 	if err := d.validateSchemas(packetA.Schema, packetB.Schema); err != nil {
 		return nil, fmt.Errorf("schema mismatch: %w", err)

@@ -98,9 +98,13 @@ func (m *Merger) Merge(packets ...*packet.DataPacket) (*MergeResult, error) {
 		}, nil
 	}
 
-	// Проверяем совместимость схем
+	// Проверяем совместимость схем и таблиц
 	baseSchema := packets[0].Schema
+	baseTableName := packets[0].Header.TableName
 	for i := 1; i < len(packets); i++ {
+		if packets[i].Header.TableName != baseTableName {
+			return nil, fmt.Errorf("packet %d has different table: %s vs %s", i, packets[i].Header.TableName, baseTableName)
+		}
 		if err := m.validateSchemas(baseSchema, packets[i].Schema); err != nil {
 			return nil, fmt.Errorf("packet %d schema mismatch: %w", i, err)
 		}
@@ -264,17 +268,8 @@ func (m *Merger) mergeWithPriority(packets []*packet.DataPacket, schema packet.S
 		},
 	}
 
-	// Для leftPriority - прямой порядок, для rightPriority - обратный
-	processingOrder := packets
-	if !leftPriority {
-		// Обрабатываем в обратном порядке для right priority
-		processingOrder = make([]*packet.DataPacket, len(packets))
-		for i := 0; i < len(packets); i++ {
-			processingOrder[i] = packets[len(packets)-1-i]
-		}
-	}
-
-	for _, pkt := range processingOrder {
+	// Обрабатываем пакеты в прямом порядке
+	for _, pkt := range packets {
 		rows := m.parseRows(pkt.Data.Rows, parser)
 		result.Stats.TotalRowsIn += len(rows)
 
@@ -350,9 +345,7 @@ func (m *Merger) mergeAppend(packets []*packet.DataPacket, schema packet.Schema)
 func (m *Merger) buildPacket(rows [][]string, schema packet.Schema, tableName string) *packet.DataPacket {
 	pkt := packet.NewDataPacket(packet.TypeReference, tableName)
 	pkt.Schema = schema
-
-	generator := packet.NewGenerator()
-	pkt.Data = generator.RowsToData(rows)
+	pkt.Data = packet.RowsToData(rows)
 
 	return pkt
 }
@@ -440,4 +433,40 @@ func (r *MergeResult) FormatText() string {
 	}
 
 	return sb.String()
+}
+
+// String возвращает строковое представление стратегии
+func (s MergeStrategy) String() string {
+	switch s {
+	case StrategyUnion:
+		return "union"
+	case StrategyIntersection:
+		return "intersection"
+	case StrategyLeftPriority:
+		return "left-priority"
+	case StrategyRightPriority:
+		return "right-priority"
+	case StrategyAppend:
+		return "append"
+	default:
+		return fmt.Sprintf("unknown-%d", s)
+	}
+}
+
+// ParseStrategy парсит строку в стратегию
+func ParseStrategy(s string) (MergeStrategy, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "union":
+		return StrategyUnion, nil
+	case "intersection":
+		return StrategyIntersection, nil
+	case "left", "left-priority":
+		return StrategyLeftPriority, nil
+	case "right", "right-priority":
+		return StrategyRightPriority, nil
+	case "append":
+		return StrategyAppend, nil
+	default:
+		return StrategyUnion, fmt.Errorf("unknown merge strategy: %s", s)
+	}
 }
