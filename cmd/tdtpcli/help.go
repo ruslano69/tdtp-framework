@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const version = "1.2.0"
+const version = "1.5.0"
 
 // PrintVersion prints version information
 func PrintVersion() {
@@ -27,6 +27,11 @@ func PrintHelp() {
 	fmt.Println("    --list                     List all tables in database")
 	fmt.Println("    --export <table>           Export table to TDTP XML file")
 	fmt.Println("    --import <file>            Import TDTP XML file to database")
+	fmt.Println()
+
+	fmt.Println("  File Operations:")
+	fmt.Println("    --diff <file-a> <file-b>   Compare two TDTP files and show differences")
+	fmt.Println("    --merge <files>            Merge multiple TDTP files into one")
 	fmt.Println()
 
 	fmt.Println("  XLSX Operations: 🍒")
@@ -75,6 +80,18 @@ func PrintHelp() {
 	fmt.Println("    --tracking-field <field>   Field to track changes (default: updated_at)")
 	fmt.Println("    --checkpoint-file <file>   Checkpoint file (default: checkpoint.yaml)")
 	fmt.Println("    --batch-size <size>        Batch size for sync (default: 1000)")
+	fmt.Println()
+
+	fmt.Println("  Diff Options:")
+	fmt.Println("    --key-fields <fields>      Key fields for comparison (comma-separated)")
+	fmt.Println("    --ignore-fields <fields>   Fields to ignore in diff (comma-separated)")
+	fmt.Println("    --case-sensitive           Case-sensitive comparison (default: false)")
+	fmt.Println()
+
+	fmt.Println("  Merge Options:")
+	fmt.Println("    --merge-strategy <name>    Merge strategy: union, intersection, left, right, append")
+	fmt.Println("                               (default: union)")
+	fmt.Println("    --show-conflicts           Show detailed conflict information")
 	fmt.Println()
 
 	fmt.Println("  Data Processors:")
@@ -146,6 +163,26 @@ func PrintHelp() {
 	fmt.Println("  tdtpcli --sync-incremental orders --tracking-field updated_at")
 	fmt.Println()
 
+	fmt.Println("  # Compare two TDTP files")
+	fmt.Println("  tdtpcli --diff users-old.xml users-new.xml")
+	fmt.Println()
+
+	fmt.Println("  # Compare with custom key fields")
+	fmt.Println("  tdtpcli --diff old.xml new.xml --key-fields user_id --ignore-fields updated_at")
+	fmt.Println()
+
+	fmt.Println("  # Merge multiple TDTP files (union)")
+	fmt.Println("  tdtpcli --merge file1.xml,file2.xml,file3.xml --output merged.xml")
+	fmt.Println()
+
+	fmt.Println("  # Merge with intersection strategy")
+	fmt.Println("  tdtpcli --merge f1.xml,f2.xml --output common.xml --merge-strategy intersection")
+	fmt.Println()
+
+	fmt.Println("  # Merge with conflict resolution")
+	fmt.Println("  tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy right --show-conflicts")
+	fmt.Println()
+
 	fmt.Println("  # Export with data masking")
 	fmt.Println("  tdtpcli --export customers --mask email,phone")
 	fmt.Println()
@@ -167,6 +204,7 @@ func PrintHelp() {
 	fmt.Println()
 	fmt.Println("  ✅ Database Adapters: PostgreSQL, MS SQL, SQLite, MySQL")
 	fmt.Println("  ✅ Message Brokers: RabbitMQ, MSMQ, Kafka")
+	fmt.Println("  ✅ File Operations: Diff & Merge with conflict resolution")
 	fmt.Println("  ✅ XLSX Converter: Database ↔ Excel bidirectional 🍒")
 	fmt.Println("  ✅ Circuit Breaker: Protection from cascading failures")
 	fmt.Println("  ✅ Audit Logger: GDPR/HIPAA compliance")
