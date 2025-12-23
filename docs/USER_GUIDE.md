@@ -388,6 +388,160 @@ tdtpcli -config <config.yaml> --import-broker
 
 ---
 
+### --diff
+
+Сравнить два TDTP файла и показать различия.
+
+**Синтаксис:**
+```bash
+tdtpcli --diff <file-a> <file-b> [опции]
+```
+
+**Параметры:**
+- `<file-a>` - первый TDTP файл (обязательно)
+- `<file-b>` - второй TDTP файл (обязательно)
+- `--key-fields <поля>` - ключевые поля для сравнения (опционально, через запятую)
+- `--ignore-fields <поля>` - поля для игнорирования (опционально, через запятую)
+- `--case-sensitive` - учитывать регистр при сравнении (по умолчанию - нет)
+
+**Примеры:**
+
+Сравнить два файла:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml
+```
+
+Сравнить с указанием ключевого поля:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml --key-fields user_id
+```
+
+Игнорировать временные поля:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml --ignore-fields created_at,updated_at
+```
+
+Сравнение с учетом регистра:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml --case-sensitive
+```
+
+**Вывод:**
+```
+=== Diff Statistics ===
+Total in A: 100
+Total in B: 105
+Added:      5
+Removed:    2
+Modified:   3
+Unchanged:  95
+
+=== Added (5) ===
++ 101 | John Doe | john@example.com
++ 102 | Jane Smith | jane@example.com
+...
+
+=== Removed (2) ===
+- 50 | Old User | old@example.com
+...
+
+=== Modified (3) ===
+~ Key: 10
+  [2] email: 'old@mail.com' → 'new@mail.com'
+...
+```
+
+**Exit codes:**
+- 0 - Файлы идентичны или сравнение успешно
+- 1 - Произошла ошибка
+
+---
+
+### --merge
+
+Объединить несколько TDTP файлов в один.
+
+**Синтаксис:**
+```bash
+tdtpcli --merge <file1,file2,file3,...> --output <result> [опции]
+```
+
+**Параметры:**
+- `<file1,file2,...>` - список файлов через запятую (минимум 2 файла)
+- `--output <file>` - выходной файл (обязательно)
+- `--merge-strategy <strategy>` - стратегия объединения (опционально, по умолчанию `union`)
+- `--key-fields <поля>` - ключевые поля для дедупликации (опционально, через запятую)
+- `--show-conflicts` - показать детальную информацию о конфликтах
+- `--compress` - сжимать результат с помощью zstd
+- `--compress-level <1-22>` - уровень сжатия (по умолчанию 3)
+
+**Стратегии объединения:**
+
+1. **union** (по умолчанию) - объединение всех уникальных строк с дедупликацией по ключу
+2. **intersection** - только строки, присутствующие во ВСЕХ файлах
+3. **left** / **left-priority** - при конфликте оставлять значение из первого файла
+4. **right** / **right-priority** - при конфликте оставлять значение из последнего файла
+5. **append** - просто объединить все строки без дедупликации
+
+**Примеры:**
+
+Объединить 3 файла (union с дедупликацией):
+```bash
+./tdtpcli --merge users-1.xml,users-2.xml,users-3.xml --output users-merged.xml
+```
+
+Intersection (только общие записи):
+```bash
+./tdtpcli --merge file1.xml,file2.xml --output common.xml --merge-strategy intersection
+```
+
+Left priority (при конфликтах - первый файл):
+```bash
+./tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy left --key-fields user_id
+```
+
+Right priority (при конфликтах - последний файл):
+```bash
+./tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy right --key-fields user_id
+```
+
+Append (без дедупликации):
+```bash
+./tdtpcli --merge part1.xml,part2.xml,part3.xml --output all.xml --merge-strategy append
+```
+
+С сжатием:
+```bash
+./tdtpcli --merge file1.xml,file2.xml --output merged.xml --compress --compress-level 9
+```
+
+Показать конфликты:
+```bash
+./tdtpcli --merge old.xml,new.xml --output result.xml --show-conflicts
+```
+
+**Вывод:**
+```
+=== Merge Statistics ===
+Packets merged: 3
+Total rows in:  300
+Total rows out: 250
+Duplicates:     50
+Conflicts:      10
+
+=== Conflicts ===
+Key 42: used_new
+Key 55: used_new
+...
+```
+
+**Примечания:**
+- Все файлы должны относиться к одной таблице
+- Схема (список полей) должна совпадать
+- Для дедупликации требуются ключевые поля (или primary key в схеме)
+
+---
+
 ## Фильтрация данных (TDTQL)
 
 ### Параметры фильтрации

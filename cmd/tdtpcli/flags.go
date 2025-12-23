@@ -16,6 +16,8 @@ type Flags struct {
 	ImportXLSX   *string
 	SyncIncr     *string
 	Pipeline     *string
+	Diff         *string // First file for diff (second as positional arg)
+	Merge        *string // Comma-separated list of files to merge
 
 	// TDTQL Filters
 	Where   *string
@@ -53,6 +55,13 @@ type Flags struct {
 	// ETL Pipeline
 	Unsafe *bool
 
+	// Diff/Merge Options
+	KeyFields     *string
+	IgnoreFields  *string
+	CaseSensitive *bool
+	MergeStrategy *string
+	ShowConflicts *bool
+
 	// Misc
 	Version *bool
 	Help    *bool
@@ -74,6 +83,8 @@ func ParseFlags() *Flags {
 	f.ImportXLSX = flag.String("import-xlsx", "", "Import XLSX file directly to database (file path)")
 	f.SyncIncr = flag.String("sync-incremental", "", "Incremental sync from table (table name)")
 	f.Pipeline = flag.String("pipeline", "", "Execute ETL pipeline from YAML config (file path)")
+	f.Diff = flag.String("diff", "", "Compare two TDTP files: --diff file1.xml file2.xml")
+	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
 
 	// TDTQL Filters
 	f.Where = flag.String("where", "", "TDTQL WHERE clause (e.g., 'age > 18 AND status = active')")
@@ -110,6 +121,13 @@ func ParseFlags() *Flags {
 
 	// ETL Pipeline
 	f.Unsafe = flag.Bool("unsafe", false, "Enable unsafe mode for pipeline (allows all SQL, requires admin)")
+
+	// Diff/Merge Options
+	f.KeyFields = flag.String("key-fields", "", "Key fields for diff/merge (comma-separated)")
+	f.IgnoreFields = flag.String("ignore-fields", "", "Fields to ignore in diff (comma-separated)")
+	f.CaseSensitive = flag.Bool("case-sensitive", false, "Case-sensitive comparison for diff")
+	f.MergeStrategy = flag.String("merge-strategy", "union", "Merge strategy: union, intersection, left, right, append")
+	f.ShowConflicts = flag.Bool("show-conflicts", false, "Show detailed conflict information for merge")
 
 	// Misc
 	f.Version = flag.Bool("version", false, "Show version information")
