@@ -88,8 +88,9 @@
 
 **Kafka:** 🆕 v1.1
 - High-throughput message streaming
-- Producer/Consumer with batching
-- Configurable partitioning
+- Producer/Consumer with manual commit
+- Configurable partitioning and consumer groups
+- Stats and offset management (replay capability)
 - Tested with PostgreSQL adapter
 
 ### ✅ Resilience & Production Features 🆕 v1.2
@@ -589,18 +590,20 @@ go test -v ./pkg/core/packet/
 - [x] CLI интеграция (--pipeline, --unsafe флаги)
 - [x] Статистика выполнения и обработка ошибок
 
-### v1.5 (планируется)
-- [ ] CLI расширения (convert, stats, diff, merge)
+### v1.5 (в разработке)
+- [x] ~~Incremental sync (delta exports)~~ ✅ Завершено в v1.2 (pkg/sync)
+- [ ] CLI расширения (diff, merge)
 - [ ] Schema migration (ALTER TABLE)
-- [ ] Incremental sync (delta exports)
 - [ ] Query optimization (автовыбор стратегии)
 
 ### v2.0 (планируется)
-- [ ] Kafka broker integration
-- [ ] Python bindings
-- [ ] Docker образ
+- [x] ~~Kafka broker integration~~ ✅ Завершено в v1.1 (pkg/brokers/kafka.go)
+- [ ] Streaming export/import (TotalParts=0, "TCP для таблиц")
+- [ ] Parallel import workers
+- [ ] Python bindings (ctypes wrapper)
+- [ ] Docker образ (multi-stage build)
 - [ ] Production deployment guide
-- [ ] Monitoring & metrics
+- [ ] Monitoring & metrics (Prometheus exporter)
 
 ## 🤝 Вклад в проект
 
