@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -237,6 +238,63 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "etl-pipeline", func() error {
 			return commands.ExecutePipeline(ctx, *flags.Pipeline, *flags.Unsafe)
 		})
+
+		// Diff command
+	} else if *flags.Diff != "" {
+		operation = audit.OpQuery
+		metadata = map[string]string{
+			"command": "diff",
+			"file_a":  *flags.Diff,
+		}
+
+		// Get second file from remaining args
+		args := flag.Args()
+		if len(args) < 1 {
+			return fmt.Errorf("diff requires two files: --diff file1.xml file2.xml")
+		}
+		fileB := args[0]
+
+		metadata["file_b"] = fileB
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "diff-files", func() error {
+			return commands.DiffFiles(ctx, commands.DiffOptions{
+				FileA:         *flags.Diff,
+				FileB:         fileB,
+				KeyFields:     splitCommaSeparated(*flags.KeyFields),
+				IgnoreFields:  splitCommaSeparated(*flags.IgnoreFields),
+				CaseSensitive: *flags.CaseSensitive,
+				OutputFormat:  "text",
+			})
+		})
+
+		// Merge command
+	} else if *flags.Merge != "" {
+		operation = audit.OpTransform
+		metadata = map[string]string{
+			"command": "merge",
+			"files":   *flags.Merge,
+			"output":  *flags.Output,
+		}
+
+		if *flags.Output == "" {
+			return fmt.Errorf("merge requires --output flag")
+		}
+
+		inputFiles := splitCommaSeparated(*flags.Merge)
+		if len(inputFiles) < 2 {
+			return fmt.Errorf("merge requires at least 2 files")
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "merge-files", func() error {
+			return commands.MergeFiles(ctx, commands.MergeOptions{
+				InputFiles:    inputFiles,
+				OutputFile:    *flags.Output,
+				Strategy:      *flags.MergeStrategy,
+				KeyFields:     splitCommaSeparated(*flags.KeyFields),
+				Compress:      *flags.Compress,
+				ShowConflicts: *flags.ShowConflicts,
+			})
+		})
 	}
 
 	// Log operation result with metadata
@@ -381,6 +439,22 @@ func determineOutputFile(output, baseName, ext string) string {
 		return baseName + "." + ext
 	}
 	return baseName
+}
+
+// splitCommaSeparated splits a comma-separated string into a slice
+func splitCommaSeparated(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 // commandWasSpecified checks if any command was specified
