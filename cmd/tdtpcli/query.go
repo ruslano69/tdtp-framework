@@ -144,21 +144,31 @@ func parseSimpleFilter(condition string) (packet.Filter, error) {
 			value = strings.Trim(valuePart, "'\"")
 		}
 
-		// Map SQL operators to TDTP operators
+		// Map SQL operators to TDTP text operators
 		tdtpOp := strings.TrimSpace(op)
 		switch tdtpOp {
-		case "=", "!=", ">", "<", ">=", "<=":
-			// Keep as is
+		case "=":
+			tdtpOp = "eq"
+		case "!=":
+			tdtpOp = "ne"
+		case ">":
+			tdtpOp = "gt"
+		case "<":
+			tdtpOp = "lt"
+		case ">=":
+			tdtpOp = "gte"
+		case "<=":
+			tdtpOp = "lte"
 		case "LIKE":
-			tdtpOp = "LIKE"
+			tdtpOp = "like"
 		case "IN":
-			tdtpOp = "IN"
+			tdtpOp = "in"
 		case "BETWEEN":
-			tdtpOp = "BETWEEN"
+			tdtpOp = "between"
 		case "IS NULL":
-			tdtpOp = "IS NULL"
+			tdtpOp = "is_null"
 		case "IS NOT NULL":
-			tdtpOp = "IS NOT NULL"
+			tdtpOp = "is_not_null"
 		}
 
 		return packet.Filter{
