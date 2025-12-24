@@ -24,13 +24,18 @@ type BrokerConfig struct {
 }
 
 // ExportToBroker exports table data to message broker
-func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg BrokerConfig, tableName string, query *packet.Query) error {
+func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, procMgr ProcessorManager) error {
 	// Create database adapter
 	adapter, err := adapters.New(ctx, dbConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer adapter.Close(ctx)
+
+	// Apply processors from config (if any)
+	if procMgr != nil {
+		adapter = procMgr.ApplyToAdapter(adapter)
+	}
 
 	fmt.Printf("Exporting table '%s' to broker...\n", tableName)
 
@@ -53,6 +58,18 @@ func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg Bro
 	}
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
+
+	// Apply compression if enabled
+	if compress {
+		fmt.Printf("Compressing data (level %d)...\n", compressLevel)
+		for _, pkt := range packets {
+			// Use common compression function from export.go
+			if err := compressPacketData(ctx, pkt, compressLevel); err != nil {
+				return fmt.Errorf("compression failed: %w", err)
+			}
+		}
+		fmt.Printf("✓ Data compressed with zstd\n")
+	}
 
 	// Create broker
 	broker, err := createBroker(brokerCfg)
