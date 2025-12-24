@@ -2,6 +2,7 @@ package brokers
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
@@ -62,7 +63,18 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 	)
 
 	var err error
-	r.conn, err = amqp.Dial(connStr)
+	if r.config.UseTLS {
+		// Для TLS используем DialTLS с правильной конфигурацией
+		tlsConfig := &tls.Config{
+			ServerName: r.config.Host,
+			MinVersion: tls.VersionTLS12,
+		}
+		r.conn, err = amqp.DialTLS(connStr, tlsConfig)
+	} else {
+		// Для обычного подключения используем Dial
+		r.conn, err = amqp.Dial(connStr)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
