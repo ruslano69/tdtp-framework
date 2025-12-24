@@ -7,7 +7,6 @@ import (
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
 )
 
 // BrokerConfig holds broker configuration
@@ -25,13 +24,18 @@ type BrokerConfig struct {
 }
 
 // ExportToBroker exports table data to message broker
-func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int) error {
+func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, procMgr ProcessorManager) error {
 	// Create database adapter
 	adapter, err := adapters.New(ctx, dbConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer adapter.Close(ctx)
+
+	// Apply processors from config (if any)
+	if procMgr != nil {
+		adapter = procMgr.ApplyToAdapter(adapter)
+	}
 
 	fmt.Printf("Exporting table '%s' to broker...\n", tableName)
 
@@ -59,7 +63,8 @@ func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg Bro
 	if compress {
 		fmt.Printf("Compressing data (level %d)...\n", compressLevel)
 		for _, pkt := range packets {
-			if err := compressPacketDataForBroker(ctx, pkt, compressLevel); err != nil {
+			// Use common compression function from export.go
+			if err := compressPacketData(ctx, pkt, compressLevel); err != nil {
 				return fmt.Errorf("compression failed: %w", err)
 			}
 		}
@@ -179,33 +184,4 @@ func createBroker(cfg BrokerConfig) (brokers.MessageBroker, error) {
 	}
 
 	return brokers.New(brokerConfig)
-}
-
-// compressPacketDataForBroker compresses the Data section of a packet using zstd
-func compressPacketDataForBroker(ctx context.Context, pkt *packet.DataPacket, level int) error {
-	if len(pkt.Data.Rows) == 0 {
-		return nil
-	}
-
-	// Extract row values
-	rows := make([][]string, len(pkt.Data.Rows))
-	for i, row := range pkt.Data.Rows {
-		rows[i] = row.Value
-	}
-
-	// Compress
-	compressed, stats, err := processors.CompressDataForTdtp(rows, level)
-	if err != nil {
-		return err
-	}
-
-	// Update packet with compressed data
-	pkt.Data.Compression = "zstd"
-	pkt.Data.Rows = []packet.Row{{Value: compressed}}
-
-	// Log compression stats
-	fmt.Printf("  → Compressed: %d → %d bytes (ratio: %.2fx)\n",
-		stats.OriginalSize, stats.CompressedSize, stats.Ratio)
-
-	return nil
 }

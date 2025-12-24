@@ -185,7 +185,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, brokerCfg, *flags.ExportBroker, query, compress, compressLevel)
+			return commands.ExportToBroker(ctx, adapterConfig, brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
 		})
 
 	} else if *flags.ImportBroker {
