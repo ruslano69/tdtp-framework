@@ -176,6 +176,14 @@ func routeCommand(
 			compressLevel = config.Export.CompressLevel
 		}
 
+		// Debug output
+		if config.Export.Compress {
+			fmt.Printf("Compression enabled from config (level: %d)\n", config.Export.CompressLevel)
+		}
+		if *flags.Compress {
+			fmt.Printf("Compression enabled from --compress flag (level: %d)\n", compressLevel)
+		}
+
 		operation = audit.OpExport
 		metadata = map[string]string{
 			"command": "export-broker",

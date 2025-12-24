@@ -167,7 +167,7 @@ func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int) 
 	}
 
 	// Extract row values
-	rows := make([][]string, len(pkt.Data.Rows))
+	rows := make([]string, len(pkt.Data.Rows))
 	for i, row := range pkt.Data.Rows {
 		rows[i] = row.Value
 	}
