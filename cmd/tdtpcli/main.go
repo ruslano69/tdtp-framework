@@ -419,14 +419,16 @@ func createConfigTemplate(dbType string) {
 // buildBrokerConfig builds broker configuration from config
 func buildBrokerConfig(config *Config) commands.BrokerConfig {
 	return commands.BrokerConfig{
-		Type:     config.Broker.Type,
-		Host:     config.Broker.Host,
-		Port:     config.Broker.Port,
-		User:     config.Broker.User,
-		Password: config.Broker.Password,
-		Queue:    config.Broker.Queue,
-		VHost:    config.Broker.VHost,
-		UseTLS:   config.Broker.UseTLS,
+		Type:       config.Broker.Type,
+		Host:       config.Broker.Host,
+		Port:       config.Broker.Port,
+		User:       config.Broker.User,
+		Password:   config.Broker.Password,
+		Queue:      config.Broker.Queue,
+		VHost:      config.Broker.VHost,
+		UseTLS:     config.Broker.UseTLS,
+		Exchange:   config.Broker.Exchange,
+		RoutingKey: config.Broker.RoutingKey,
 	}
 }
 

@@ -138,12 +138,21 @@ func (r *RabbitMQ) Send(ctx context.Context, message []byte) error {
 		return fmt.Errorf("not connected to RabbitMQ")
 	}
 
+	// Определяем exchange (default = "")
+	exchange := r.config.Exchange
+
+	// Определяем routing key (default = имя очереди)
+	routingKey := r.config.RoutingKey
+	if routingKey == "" {
+		routingKey = r.config.Queue
+	}
+
 	err := r.channel.PublishWithContext(
 		ctx,
-		"",              // exchange (пустая строка = default exchange)
-		r.config.Queue,  // routing key = имя очереди
-		false,           // mandatory
-		false,           // immediate
+		exchange,    // exchange (пустая строка = default exchange)
+		routingKey,  // routing key
+		false,       // mandatory
+		false,       // immediate
 		amqp.Publishing{
 			ContentType:  "application/xml", // TDTP пакеты в XML формате
 			Body:         message,
