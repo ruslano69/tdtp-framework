@@ -169,6 +169,13 @@ func routeCommand(
 	} else if *flags.ExportBroker != "" {
 		brokerCfg := buildBrokerConfig(config)
 
+		// Merge compression settings: flag takes precedence, then config
+		compress := *flags.Compress || config.Export.Compress
+		compressLevel := *flags.CompressLevel
+		if compressLevel == 3 && config.Export.CompressLevel > 0 {
+			compressLevel = config.Export.CompressLevel
+		}
+
 		operation = audit.OpExport
 		metadata = map[string]string{
 			"command": "export-broker",
@@ -178,7 +185,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, brokerCfg, *flags.ExportBroker, query)
+			return commands.ExportToBroker(ctx, adapterConfig, brokerCfg, *flags.ExportBroker, query, compress, compressLevel)
 		})
 
 	} else if *flags.ImportBroker {
