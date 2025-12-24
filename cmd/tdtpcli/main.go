@@ -426,6 +426,7 @@ func buildBrokerConfig(config *Config) commands.BrokerConfig {
 		Password: config.Broker.Password,
 		Queue:    config.Broker.Queue,
 		VHost:    config.Broker.VHost,
+		UseTLS:   config.Broker.UseTLS,
 	}
 }
 

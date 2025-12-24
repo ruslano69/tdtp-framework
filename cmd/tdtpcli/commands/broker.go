@@ -18,6 +18,7 @@ type BrokerConfig struct {
 	Password string
 	Queue    string
 	VHost    string
+	UseTLS   bool
 }
 
 // ExportToBroker exports table data to message broker
@@ -158,6 +159,7 @@ func createBroker(cfg BrokerConfig) (brokers.MessageBroker, error) {
 		Password: cfg.Password,
 		Queue:    cfg.Queue,
 		VHost:    cfg.VHost,
+		UseTLS:   cfg.UseTLS,
 	}
 
 	return brokers.New(brokerConfig)

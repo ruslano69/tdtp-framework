@@ -26,7 +26,12 @@ func NewRabbitMQ(cfg Config) (*RabbitMQ, error) {
 		cfg.Host = "localhost"
 	}
 	if cfg.Port == 0 {
-		cfg.Port = 5672
+		// Default port depends on TLS
+		if cfg.UseTLS {
+			cfg.Port = 5671 // amqps default
+		} else {
+			cfg.Port = 5672 // amqp default
+		}
 	}
 	if cfg.VHost == "" {
 		cfg.VHost = "/"
@@ -40,8 +45,15 @@ func NewRabbitMQ(cfg Config) (*RabbitMQ, error) {
 // Connect устанавливает соединение с RabbitMQ
 func (r *RabbitMQ) Connect(ctx context.Context) error {
 	// Формируем connection string
-	// amqp://user:password@host:port/vhost
-	connStr := fmt.Sprintf("amqp://%s:%s@%s:%d/%s",
+	// amqp://user:password@host:port/vhost  (без TLS)
+	// amqps://user:password@host:port/vhost (с TLS)
+	scheme := "amqp"
+	if r.config.UseTLS {
+		scheme = "amqps"
+	}
+
+	connStr := fmt.Sprintf("%s://%s:%s@%s:%d/%s",
+		scheme,
 		r.config.User,
 		r.config.Password,
 		r.config.Host,
