@@ -31,14 +31,16 @@ type MessageBroker interface {
 
 // Config содержит параметры подключения к message broker
 type Config struct {
-	Type     string // rabbitmq, msmq, kafka
-	Host     string // Хост (для RabbitMQ)
-	Port     int    // Порт (для RabbitMQ)
-	User     string // Пользователь (для RabbitMQ)
-	Password string // Пароль (для RabbitMQ)
-	Queue    string // Имя очереди (для RabbitMQ, MSMQ)
-	VHost    string // Virtual host (для RabbitMQ, по умолчанию "/")
-	UseTLS   bool   // Использовать TLS/SSL (amqps://) для RabbitMQ
+	Type       string // rabbitmq, msmq, kafka
+	Host       string // Хост (для RabbitMQ)
+	Port       int    // Порт (для RabbitMQ)
+	User       string // Пользователь (для RabbitMQ)
+	Password   string // Пароль (для RabbitMQ)
+	Queue      string // Имя очереди (для RabbitMQ, MSMQ)
+	VHost      string // Virtual host (для RabbitMQ, по умолчанию "/")
+	UseTLS     bool   // Использовать TLS/SSL (amqps://) для RabbitMQ
+	Exchange   string // RabbitMQ exchange (пустая строка = default exchange)
+	RoutingKey string // RabbitMQ routing key (если пустой, используется имя очереди)
 
 	// RabbitMQ параметры очереди (ВАЖНО: должны совпадать с существующей очередью!)
 	Durable    bool // Очередь переживает перезапуск RabbitMQ

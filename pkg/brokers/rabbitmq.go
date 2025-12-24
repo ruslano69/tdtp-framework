@@ -87,18 +87,31 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 
 	// Объявляем очередь (создается если не существует, идемпотентная операция)
 	// ВАЖНО: Параметры должны совпадать с существующей очередью!
-	r.queue, err = r.channel.QueueDeclare(
+	// Сначала пробуем пассивно проверить существование очереди
+	r.queue, err = r.channel.QueueDeclarePassive(
 		r.config.Queue,      // name
-		r.config.Durable,    // durable - очередь сохраняется при перезапуске RabbitMQ
+		r.config.Durable,    // durable
 		r.config.AutoDelete, // auto-delete
 		r.config.Exclusive,  // exclusive
 		false,               // no-wait
 		nil,                 // arguments
 	)
+
 	if err != nil {
-		r.channel.Close()
-		r.conn.Close()
-		return fmt.Errorf("failed to declare queue: %w", err)
+		// Если очередь не существует, создаем её
+		r.queue, err = r.channel.QueueDeclare(
+			r.config.Queue,      // name
+			r.config.Durable,    // durable - очередь сохраняется при перезапуске RabbitMQ
+			r.config.AutoDelete, // auto-delete
+			r.config.Exclusive,  // exclusive
+			false,               // no-wait
+			nil,                 // arguments
+		)
+		if err != nil {
+			r.channel.Close()
+			r.conn.Close()
+			return fmt.Errorf("failed to declare queue: %w", err)
+		}
 	}
 
 	return nil
@@ -125,12 +138,21 @@ func (r *RabbitMQ) Send(ctx context.Context, message []byte) error {
 		return fmt.Errorf("not connected to RabbitMQ")
 	}
 
+	// Определяем exchange (default = "")
+	exchange := r.config.Exchange
+
+	// Определяем routing key (default = имя очереди)
+	routingKey := r.config.RoutingKey
+	if routingKey == "" {
+		routingKey = r.config.Queue
+	}
+
 	err := r.channel.PublishWithContext(
 		ctx,
-		"",              // exchange (пустая строка = default exchange)
-		r.config.Queue,  // routing key = имя очереди
-		false,           // mandatory
-		false,           // immediate
+		exchange,    // exchange (пустая строка = default exchange)
+		routingKey,  // routing key
+		false,       // mandatory
+		false,       // immediate
 		amqp.Publishing{
 			ContentType:  "application/xml", // TDTP пакеты в XML формате
 			Body:         message,

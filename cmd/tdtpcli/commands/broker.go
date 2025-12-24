@@ -11,14 +11,16 @@ import (
 
 // BrokerConfig holds broker configuration
 type BrokerConfig struct {
-	Type     string
-	Host     string
-	Port     int
-	User     string
-	Password string
-	Queue    string
-	VHost    string
-	UseTLS   bool
+	Type       string
+	Host       string
+	Port       int
+	User       string
+	Password   string
+	Queue      string
+	VHost      string
+	UseTLS     bool
+	Exchange   string
+	RoutingKey string
 }
 
 // ExportToBroker exports table data to message broker
@@ -152,14 +154,16 @@ func ImportFromBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg B
 // createBroker creates a message broker based on configuration
 func createBroker(cfg BrokerConfig) (brokers.MessageBroker, error) {
 	brokerConfig := brokers.Config{
-		Type:     cfg.Type,
-		Host:     cfg.Host,
-		Port:     cfg.Port,
-		User:     cfg.User,
-		Password: cfg.Password,
-		Queue:    cfg.Queue,
-		VHost:    cfg.VHost,
-		UseTLS:   cfg.UseTLS,
+		Type:       cfg.Type,
+		Host:       cfg.Host,
+		Port:       cfg.Port,
+		User:       cfg.User,
+		Password:   cfg.Password,
+		Queue:      cfg.Queue,
+		VHost:      cfg.VHost,
+		UseTLS:     cfg.UseTLS,
+		Exchange:   cfg.Exchange,
+		RoutingKey: cfg.RoutingKey,
 	}
 
 	return brokers.New(brokerConfig)

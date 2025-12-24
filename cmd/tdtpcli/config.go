@@ -39,14 +39,16 @@ type DatabaseConfig struct {
 
 // BrokerConfig contains message broker settings
 type BrokerConfig struct {
-	Type     string `yaml:"type"`               // rabbitmq, msmq, kafka
-	Host     string `yaml:"host,omitempty"`     // Broker host
-	Port     int    `yaml:"port,omitempty"`     // Broker port
-	User     string `yaml:"user,omitempty"`     // Username
-	Password string `yaml:"password,omitempty"` // Password
-	Queue    string `yaml:"queue,omitempty"`    // Queue/topic name
-	VHost    string `yaml:"vhost,omitempty"`    // RabbitMQ vhost
-	UseTLS   bool   `yaml:"use_tls,omitempty"`  // Use TLS/SSL (amqps) for RabbitMQ
+	Type       string `yaml:"type"`                  // rabbitmq, msmq, kafka
+	Host       string `yaml:"host,omitempty"`        // Broker host
+	Port       int    `yaml:"port,omitempty"`        // Broker port
+	User       string `yaml:"user,omitempty"`        // Username
+	Password   string `yaml:"password,omitempty"`    // Password
+	Queue      string `yaml:"queue,omitempty"`       // Queue/topic name
+	VHost      string `yaml:"vhost,omitempty"`       // RabbitMQ vhost
+	UseTLS     bool   `yaml:"use_tls,omitempty"`     // Use TLS/SSL (amqps) for RabbitMQ
+	Exchange   string `yaml:"exchange,omitempty"`    // RabbitMQ exchange (default = "")
+	RoutingKey string `yaml:"routing_key,omitempty"` // RabbitMQ routing key (default = queue name)
 }
 
 // ResilienceConfig contains circuit breaker and retry settings
