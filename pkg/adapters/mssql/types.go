@@ -178,9 +178,17 @@ func MSSQLToTDTP(sqlType string, nullable bool) (packet.Field, error) {
 		field.Length = 16 // Hex string length (8 bytes = 16 hex chars max)
 		field.Subtype = "rowversion"
 
-	default:
-		// Unknown type - default to TEXT
+	// sql_variant - can store values of various data types
+	// https://learn.microsoft.com/en-us/sql/t-sql/data-types/sql-variant-transact-sql
+	case "SQL_VARIANT":
 		field.Type = string(schema.TypeText)
+		field.Length = 8000 // Maximum size
+		field.Subtype = "sql_variant"
+
+	default:
+		// Unknown type - default to TEXT with reasonable length
+		field.Type = string(schema.TypeText)
+		field.Length = 255 // Default length for unknown types
 		field.Subtype = strings.ToLower(baseType)
 	}
 
@@ -243,6 +251,8 @@ func TDTPToMSSQL(field packet.Field) string {
 			// timestamp/rowversion cannot be created manually - it's auto-generated
 			// Skip this field during table creation (it's read-only)
 			return "ROWVERSION"
+		case "sql_variant":
+			return "SQL_VARIANT"
 		case "time":
 			return "TIME"
 		case "uniqueidentifier":
