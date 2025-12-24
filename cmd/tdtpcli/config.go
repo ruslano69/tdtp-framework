@@ -46,6 +46,7 @@ type BrokerConfig struct {
 	Password string `yaml:"password,omitempty"` // Password
 	Queue    string `yaml:"queue,omitempty"`    // Queue/topic name
 	VHost    string `yaml:"vhost,omitempty"`    // RabbitMQ vhost
+	UseTLS   bool   `yaml:"use_tls,omitempty"`  // Use TLS/SSL (amqps) for RabbitMQ
 }
 
 // ResilienceConfig contains circuit breaker and retry settings

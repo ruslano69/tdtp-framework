@@ -38,6 +38,7 @@ type Config struct {
 	Password string // Пароль (для RabbitMQ)
 	Queue    string // Имя очереди (для RabbitMQ, MSMQ)
 	VHost    string // Virtual host (для RabbitMQ, по умолчанию "/")
+	UseTLS   bool   // Использовать TLS/SSL (amqps://) для RabbitMQ
 
 	// RabbitMQ параметры очереди (ВАЖНО: должны совпадать с существующей очередью!)
 	Durable    bool // Очередь переживает перезапуск RabbitMQ
