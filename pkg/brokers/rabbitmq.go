@@ -41,7 +41,7 @@ func NewRabbitMQ(cfg Config) (*RabbitMQ, error) {
 func (r *RabbitMQ) Connect(ctx context.Context) error {
 	// Формируем connection string
 	// amqp://user:password@host:port/vhost
-	connStr := fmt.Sprintf("amqp://%s:%s@%s:%d%s",
+	connStr := fmt.Sprintf("amqp://%s:%s@%s:%d/%s",
 		r.config.User,
 		r.config.Password,
 		r.config.Host,
