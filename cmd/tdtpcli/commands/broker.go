@@ -32,11 +32,6 @@ func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg Bro
 	}
 	defer adapter.Close(ctx)
 
-	// Apply processors from config (if any)
-	if procMgr != nil {
-		adapter = procMgr.ApplyToAdapter(adapter)
-	}
-
 	fmt.Printf("Exporting table '%s' to broker...\n", tableName)
 
 	// Export data
