@@ -172,9 +172,10 @@ func MSSQLToTDTP(sqlType string, nullable bool) (packet.Field, error) {
 
 	// timestamp/rowversion - 8-byte auto-generated version counter (NOT a datetime!)
 	// This is a READ-ONLY field that changes on every UPDATE
+	// Exported as hex string (not base64), so use TEXT type
 	case "TIMESTAMP", "ROWVERSION":
-		field.Type = string(schema.TypeBlob)
-		field.Length = 8 // Always 8 bytes
+		field.Type = string(schema.TypeText)
+		field.Length = 16 // Hex string length (8 bytes = 16 hex chars max)
 		field.Subtype = "rowversion"
 
 	default:
@@ -238,6 +239,10 @@ func TDTPToMSSQL(field packet.Field) string {
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:
 		// Check for special text types
 		switch subtype {
+		case "rowversion":
+			// timestamp/rowversion cannot be created manually - it's auto-generated
+			// Skip this field during table creation (it's read-only)
+			return "ROWVERSION"
 		case "time":
 			return "TIME"
 		case "uniqueidentifier":
