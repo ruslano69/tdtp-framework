@@ -1,6 +1,7 @@
 package base
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -208,11 +209,11 @@ func (c *UniversalTypeConverter) mssqlValueToString(val interface{}, field packe
 			return bytesToHexWithoutLeadingZeros(v)
 		}
 
-		// Для обычных BLOB используем BlobValue, для TEXT - StringValue
+		// Для обычных BLOB используем Base64 encoding (TDTP стандарт)
 		normalized := schema.NormalizeType(schema.DataType(field.Type))
 		if normalized == schema.TypeBlob {
-			// Возвращаем hex представление
-			return fmt.Sprintf("%X", v)
+			// Возвращаем Base64 представление (не HEX!)
+			return base64.StdEncoding.EncodeToString(v)
 		}
 
 		// Для TEXT полей - конвертируем в строку
