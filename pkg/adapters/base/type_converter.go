@@ -37,6 +37,7 @@ func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value st
 		Scale:     field.Scale,
 		Timezone:  field.Timezone,
 		Key:       field.Key,
+		Nullable:  true, // По умолчанию все поля nullable (кроме primary keys проверяется на уровне БД)
 	}
 
 	// Парсим значение
