@@ -9,7 +9,6 @@ import (
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
 )
 
@@ -280,8 +279,28 @@ func (a *Adapter) ExportTableWithQuery(
 				filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, rows, includeReadOnly)
 
 				// Генерируем Response пакеты
-				// QueryContext создаем вручную так как данные уже отфильтрованы
-				queryContext := a.createQueryContextForSQL(ctx, query, filteredRows, tableName)
+				// QueryContext создаем с исправленной pagination logic
+				totalCount, _ := a.GetRowCount(ctx, tableName)
+				moreDataAvailable := false
+				nextOffset := 0
+				if query != nil && query.Limit > 0 {
+					// Fixed pagination logic: check currentPosition < total
+					currentPosition := query.Offset + len(filteredRows)
+					if currentPosition < int(totalCount) {
+						moreDataAvailable = true
+						nextOffset = query.Offset + len(filteredRows)
+					}
+				}
+				queryContext := &packet.QueryContext{
+					OriginalQuery: *query,
+					ExecutionResults: packet.ExecutionResults{
+						TotalRecordsInTable: int(totalCount),
+						RecordsAfterFilters: len(filteredRows),
+						RecordsReturned:     len(filteredRows),
+						MoreDataAvailable:   moreDataAvailable,
+						NextOffset:          nextOffset,
+					},
+				}
 
 				generator := packet.NewGenerator()
 				return generator.GenerateResponse(
@@ -428,6 +447,12 @@ func (a *Adapter) adaptToSQLServerSyntax(
 	return sql
 }
 
+// ReadAllRows implements base.DataReader interface
+// Reads all rows from a table
+func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, pkgSchema packet.Schema) ([][]string, error) {
+	return a.readAllRows(ctx, tableName, pkgSchema)
+}
+
 // readAllRows читает все строки из таблицы
 func (a *Adapter) readAllRows(ctx context.Context, tableName string, pkgSchema packet.Schema) ([][]string, error) {
 	schemaName, table := a.parseTableName(tableName)
@@ -448,6 +473,12 @@ func (a *Adapter) readAllRows(ctx context.Context, tableName string, pkgSchema p
 	defer rows.Close()
 
 	return a.scanRows(rows, pkgSchema)
+}
+
+// ReadRowsWithSQL implements base.DataReader interface
+// Executes a SQL query and returns rows
+func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchema packet.Schema) ([][]string, error) {
+	return a.readRowsWithSQL(ctx, sqlQuery, pkgSchema)
 }
 
 // readRowsWithSQL выполняет SQL запрос и возвращает строки
@@ -495,104 +526,16 @@ func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string,
 }
 
 // valueToString конвертирует значение БД в строку для TDTP
-// Использует schema.Converter для правильного форматирования всех типов
+// Делегирует в UniversalTypeConverter для устранения дублирования кода
 func (a *Adapter) valueToString(value interface{}, field packet.Field) string {
-	if value == nil {
-		return ""
-	}
-
-	// Создаем TypedValue из значения БД
-	typedValue := &schema.TypedValue{
-		Type:     schema.DataType(field.Type),
-		IsNull:   false,
-		RawValue: fmt.Sprintf("%v", value),
-	}
-
-	// Заполняем типизированные поля на основе типа из БД
-	switch v := value.(type) {
-	case int, int8, int16, int32, int64:
-		val := int64(0)
-		switch vt := v.(type) {
-		case int:
-			val = int64(vt)
-		case int8:
-			val = int64(vt)
-		case int16:
-			val = int64(vt)
-		case int32:
-			val = int64(vt)
-		case int64:
-			val = vt
-		}
-		typedValue.IntValue = &val
-
-	case float32, float64:
-		val := float64(0)
-		switch vt := v.(type) {
-		case float32:
-			val = float64(vt)
-		case float64:
-			val = vt
-		}
-		typedValue.FloatValue = &val
-
-	case string:
-		typedValue.StringValue = &v
-
-	case []byte:
-		// Специальная обработка для timestamp/rowversion
-		// Конвертируем в hex без ведущих нулей: 0x00000000187F825E → "187F825E"
-		if field.Subtype == "rowversion" {
-			hexStr := bytesToHexWithoutLeadingZeros(v)
-			typedValue.StringValue = &hexStr
-		} else {
-			// Для обычных BLOB используем BlobValue, для TEXT - StringValue
-			normalized := schema.NormalizeType(schema.DataType(field.Type))
-			if normalized == schema.TypeBlob {
-				typedValue.BlobValue = v
-			} else {
-				str := string(v)
-				typedValue.StringValue = &str
-			}
-		}
-
-	case bool:
-		typedValue.BoolValue = &v
-
-	case time.Time:
-		typedValue.TimeValue = &v
-	}
-
-	// Используем форматтер из schema для консистентности
-	converter := schema.NewConverter()
-	return converter.FormatValue(typedValue)
+	// Делегируем в UniversalTypeConverter с MSSQL-specific обработкой
+	rawStr := a.converter.DBValueToString(value, field, "mssql")
+	// Конвертируем в TDTP формат
+	return a.converter.ConvertValueToTDTP(field, rawStr)
 }
 
-// createQueryContextForSQL создает QueryContext для SQL-фильтрованных данных
-func (a *Adapter) createQueryContextForSQL(ctx context.Context, query *packet.Query, rows [][]string, tableName string) *packet.QueryContext {
-	// Получаем общее количество записей в таблице
-	totalRecords, _ := a.GetTableRowCount(ctx, tableName)
-
-	moreDataAvailable := false
-	nextOffset := 0
-	if query != nil && query.Limit > 0 {
-		if len(rows) == query.Limit {
-			moreDataAvailable = true
-			nextOffset = query.Offset + query.Limit
-		}
-	}
-
-	return &packet.QueryContext{
-		OriginalQuery: *query,
-		ExecutionResults: packet.ExecutionResults{
-			TotalRecordsInTable: int(totalRecords),
-			RecordsAfterFilters: len(rows),
-			RecordsReturned:     len(rows),
-			MoreDataAvailable:   moreDataAvailable,
-			NextOffset:          nextOffset,
-		},
-	}
-}
+// createQueryContextForSQL удален - делегируется в base.ExportHelper
+// (эта функция была дублированной и содержала pagination bug, который уже исправлен в base)
 
 // generateMessageID генерирует уникальный ID сообщения
 func generateMessageID() string {
@@ -600,6 +543,12 @@ func generateMessageID() string {
 }
 
 // ========== Query Statistics ==========
+
+// GetRowCount implements base.DataReader interface
+// Alias for GetTableRowCount for interface compatibility
+func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
+	return a.GetTableRowCount(ctx, tableName)
+}
 
 // GetTableRowCount возвращает количество строк в таблице (примерное)
 // Использует sys.dm_db_partition_stats для быстрого подсчета
