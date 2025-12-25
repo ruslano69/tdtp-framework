@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Converter отвечает за конвертацию значений
@@ -147,8 +148,8 @@ func (c *Converter) parseText(tv *TypedValue, field FieldDef) (*TypedValue, erro
 	// который декодирует \| → | и \\ → \
 	val := tv.RawValue
 
-	// Проверка длины
-	if field.Length > 0 && len(val) > field.Length {
+	// Проверка длины (считаем Unicode символы, а не байты)
+	if field.Length > 0 && utf8.RuneCountInString(val) > field.Length {
 		return nil, &ValidationError{
 			Field:   field.Name,
 			Message: fmt.Sprintf("text length exceeds %d", field.Length),
