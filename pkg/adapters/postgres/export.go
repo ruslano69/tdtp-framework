@@ -2,16 +2,12 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
 )
 
@@ -211,8 +207,38 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 			// Выполняем SQL запрос напрямую
 			rows, err := a.readRowsWithSQL(ctx, sql, pkgSchema)
 			if err == nil {
-				// Генерируем Response пакеты
-				queryContext := a.createQueryContextForSQL(ctx, query, rows, tableName)
+				// Создаем QueryContext с исправленной pagination logic
+				var totalRecords int
+				quotedTable := QuoteIdentifier(tableName)
+				if a.schema != "public" {
+					quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
+				}
+				countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
+				a.pool.QueryRow(ctx, countSQL).Scan(&totalRecords)
+
+				recordsReturned := len(rows)
+				moreDataAvailable := false
+				nextOffset := 0
+				if query != nil && query.Limit > 0 {
+					// Fixed pagination logic: check currentPosition < total
+					currentPosition := query.Offset + recordsReturned
+					if currentPosition < totalRecords {
+						moreDataAvailable = true
+						nextOffset = query.Offset + recordsReturned
+					}
+				}
+
+				queryContext := &packet.QueryContext{
+					OriginalQuery: *query,
+					ExecutionResults: packet.ExecutionResults{
+						TotalRecordsInTable: totalRecords,
+						RecordsAfterFilters: recordsReturned,
+						RecordsReturned:     recordsReturned,
+						MoreDataAvailable:   moreDataAvailable,
+						NextOffset:          nextOffset,
+					},
+				}
+
 				generator := packet.NewGenerator()
 				return generator.GenerateResponse(tableName, "", pkgSchema, rows, queryContext, sender, recipient)
 			}
@@ -274,135 +300,21 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 	return dataRows, rows.Err()
 }
 
-// createQueryContextForSQL создает QueryContext для SQL-фильтрованных данных
-func (a *Adapter) createQueryContextForSQL(ctx context.Context, query *packet.Query, rows [][]string, tableName string) *packet.QueryContext {
-	// Получаем общее количество записей в таблице
-	var totalRecords int
-	quotedTable := QuoteIdentifier(tableName)
-	if a.schema != "public" {
-		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
-	}
-
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
-	a.pool.QueryRow(ctx, countSQL).Scan(&totalRecords)
-
-	recordsReturned := len(rows)
-
-	return &packet.QueryContext{
-		OriginalQuery: *query,
-		ExecutionResults: packet.ExecutionResults{
-			TotalRecordsInTable: totalRecords,
-			RecordsAfterFilters: recordsReturned,
-			RecordsReturned:     recordsReturned,
-			MoreDataAvailable:   false,
-		},
-	}
-}
+// createQueryContextForSQL удален - делегируется в base.ExportHelper
+// (эта функция была дублированной и содержала pagination bug - MoreDataAvailable всегда false)
 
 // pgValueToRawString конвертирует pgx значение в сырую строку для последующей обработки
+// Делегирует в UniversalTypeConverter для устранения дублирования кода
 func (a *Adapter) pgValueToRawString(val interface{}) string {
-	if val == nil {
-		return ""
-	}
-
-	switch v := val.(type) {
-	case []byte:
-		// Для UUID, BYTEA и других бинарных типов
-		// Проверяем длину - если 16 байт, это может быть UUID
-		if len(v) == 16 {
-			// Форматируем как UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-			return fmt.Sprintf("%x-%x-%x-%x-%x",
-				v[0:4], v[4:6], v[6:8], v[8:10], v[10:16])
-		}
-		// Иначе возвращаем как строку (для TEXT полей или JSON)
-		return string(v)
-	case [16]byte:
-		// UUID как массив байт
-		return fmt.Sprintf("%x-%x-%x-%x-%x",
-			v[0:4], v[4:6], v[6:8], v[8:10], v[10:16])
-	case map[string]interface{}:
-		// JSON/JSONB как map - конвертируем в JSON строку
-		jsonBytes, _ := json.Marshal(v)
-		return string(jsonBytes)
-	case []interface{}:
-		// JSON array
-		jsonBytes, _ := json.Marshal(v)
-		return string(jsonBytes)
-	case string:
-		return v
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%d", v)
-	case uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		// Для float используем %v чтобы сохранить точность
-		return fmt.Sprintf("%v", v)
-	case bool:
-		if v {
-			return "1"
-		}
-		return "0"
-	case time.Time:
-		// Timestamp в ISO формате
-		return v.Format("2006-01-02 15:04:05")
-	case pgtype.Numeric:
-		// PostgreSQL NUMERIC/DECIMAL - конвертируем через Float64
-		if !v.Valid {
-			return ""
-		}
-		if v.NaN {
-			return "NaN"
-		}
-		if v.InfinityModifier != 0 {
-			if v.InfinityModifier > 0 {
-				return "Infinity"
-			}
-			return "-Infinity"
-		}
-		// Конвертируем в float64 для получения числового значения
-		f64, err := v.Float64Value()
-		if err == nil && f64.Valid {
-			return fmt.Sprintf("%v", f64.Float64)
-		}
-		// Fallback - используем строковое представление Int и Exp
-		return v.Int.String()
-	default:
-		// Попытка конвертировать в строку через Stringer interface
-		if s, ok := val.(fmt.Stringer); ok {
-			return s.String()
-		}
-
-		// Последняя попытка - используем строковое представление
-		return fmt.Sprintf("%v", v)
-	}
+	// Используем пустое поле для generic conversion
+	emptyField := packet.Field{}
+	return a.converter.DBValueToString(val, emptyField, "postgres")
 }
 
 // convertValueToTDTP конвертирует значение из БД в TDTP формат используя schema.Converter
+// Делегирует в UniversalTypeConverter для устранения дублирования кода
 func (a *Adapter) convertValueToTDTP(field packet.Field, value string) string {
-	// Создаем FieldDef для использования converter
-	fieldDef := schema.FieldDef{
-		Name:      field.Name,
-		Type:      schema.DataType(field.Type),
-		Length:    field.Length,
-		Precision: field.Precision,
-		Scale:     field.Scale,
-		Timezone:  field.Timezone,
-		Key:       field.Key,
-		Nullable:  true, // packet.Field не содержит информацию о nullable
-	}
-
-	// Парсим значение
-	converter := schema.NewConverter()
-	typedValue, err := converter.ParseValue(value, fieldDef)
-	if err != nil {
-		// Если ошибка парсинга, возвращаем как есть
-		return value
-	}
-
-	// Форматируем обратно в строку TDTP
-	formatted := converter.FormatValue(typedValue)
-
-	return formatted
+	return a.converter.ConvertValueToTDTP(field, value)
 }
 
 // parseRow парсит строку данных разделенную |
@@ -557,4 +469,48 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 	}
 
 	return packets, lastTrackingValue, nil
+}
+
+// ========== base.DataReader interface methods ==========
+
+// ReadAllRows implements base.DataReader interface
+// Reads all rows from a table (wrapper for backward compatibility)
+func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, pkgSchema packet.Schema) ([][]string, error) {
+	// PostgreSQL адаптер не имеет отдельного метода readAllRows как у MSSQL
+	// Используем ExportTable и конвертируем результат
+	packets, err := a.ExportTable(ctx, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	var rows [][]string
+	for _, pkt := range packets {
+		for _, row := range pkt.Data.Rows {
+			rows = append(rows, parseRow(row.Value))
+		}
+	}
+	return rows, nil
+}
+
+// ReadRowsWithSQL implements base.DataReader interface
+// Executes a SQL query and returns rows
+func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchema packet.Schema) ([][]string, error) {
+	return a.readRowsWithSQL(ctx, sqlQuery, pkgSchema)
+}
+
+// GetRowCount implements base.DataReader interface
+// Returns the number of rows in a table
+func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
+	quotedTable := QuoteIdentifier(tableName)
+	if a.schema != "public" {
+		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
+	}
+
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
+	var count int64
+	err := a.pool.QueryRow(ctx, countSQL).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get row count: %w", err)
+	}
+	return count, nil
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
@@ -26,6 +27,11 @@ func init() {
 type Adapter struct {
 	pool   *pgxpool.Pool
 	schema string // public, custom, etc.
+
+	// Base helpers (added in refactoring)
+	exportHelper *base.ExportHelper
+	importHelper *base.ImportHelper
+	converter    *base.UniversalTypeConverter
 }
 
 // Connect устанавливает подключение к PostgreSQL
@@ -68,7 +74,34 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 		a.schema = "public" // default schema
 	}
 
+	// Initialize base helpers (added in refactoring)
+	a.initHelpers()
+
 	return nil
+}
+
+// initHelpers initializes base package helpers for common operations
+// Added during refactoring to eliminate code duplication
+func (a *Adapter) initHelpers() {
+	// Initialize type converter
+	a.converter = base.NewUniversalTypeConverter()
+
+	// Initialize export helper with PostgreSQL-specific components
+	// Note: PostgreSQL doesn't use SQLAdapter (uses native pgx types)
+	a.exportHelper = base.NewExportHelper(
+		a,           // SchemaReader
+		a,           // DataReader
+		a.converter, // ValueConverter
+		nil,         // SQLAdapter (not needed for PostgreSQL)
+	)
+
+	// Initialize import helper with temporary tables for atomic replace
+	a.importHelper = base.NewImportHelper(
+		a,    // TableManager
+		a,    // DataInserter
+		a,    // TransactionManager
+		true, // useTemporaryTables (PostgreSQL supports temp tables)
+	)
 }
 
 // NewAdapter создает новый адаптер для PostgreSQL (legacy)
