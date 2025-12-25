@@ -276,6 +276,7 @@ func ConvertRowToSQLValues(
 			Precision: pkgSchema.Fields[i].Precision,
 			Scale:     pkgSchema.Fields[i].Scale,
 			Timezone:  pkgSchema.Fields[i].Timezone,
+			Nullable:  true, // По умолчанию все поля nullable при импорте
 		}
 
 		// Парсим значение
