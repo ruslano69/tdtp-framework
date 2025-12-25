@@ -3,6 +3,8 @@ package base
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,6 +42,8 @@ func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value st
 	// Парсим значение
 	typedValue, err := c.converter.ParseValue(value, fieldDef)
 	if err != nil {
+		// Логируем ошибку парсинга для debugging
+		log.Printf("Failed to parse field %s (type %s): %v", field.Name, field.Type, err)
 		// Если ошибка парсинга, возвращаем как есть
 		return value
 	}
@@ -61,6 +65,8 @@ func (c *UniversalTypeConverter) DBValueToString(value interface{}, field packet
 	case "sqlite", "mysql":
 		return c.genericValueToString(value)
 	default:
+		// Логируем неизвестный dbType для debugging
+		log.Printf("Unknown dbType '%s' for field %s, using generic converter", dbType, field.Name)
 		return c.genericValueToString(value)
 	}
 }
@@ -75,28 +81,58 @@ func (c *UniversalTypeConverter) pgValueToString(val interface{}, field packet.F
 	switch v := val.(type) {
 	case []byte:
 		// Для UUID, BYTEA и других бинарных типов
-		// Проверяем длину - если 16 байт, это может быть UUID
-		if len(v) == 16 {
+		// Проверяем длину - если 16 байт и тип UUID, это может быть UUID
+		if len(v) == 16 && field.Type == "uuid" {
 			// Форматируем как UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-			return fmt.Sprintf("%x-%x-%x-%x-%x",
-				v[0:4], v[4:6], v[6:8], v[8:10], v[10:16])
+			// Используем strings.Builder для оптимизации (меньше аллокаций)
+			var sb strings.Builder
+			sb.Grow(36) // UUID length: 32 hex chars + 4 dashes
+			sb.WriteString(fmt.Sprintf("%x", v[0:4]))
+			sb.WriteByte('-')
+			sb.WriteString(fmt.Sprintf("%x", v[4:6]))
+			sb.WriteByte('-')
+			sb.WriteString(fmt.Sprintf("%x", v[6:8]))
+			sb.WriteByte('-')
+			sb.WriteString(fmt.Sprintf("%x", v[8:10]))
+			sb.WriteByte('-')
+			sb.WriteString(fmt.Sprintf("%x", v[10:16]))
+			return sb.String()
 		}
 		// Иначе возвращаем как строку (для TEXT полей или JSON)
 		return string(v)
 
 	case [16]byte:
 		// UUID как массив байт
-		return fmt.Sprintf("%x-%x-%x-%x-%x",
-			v[0:4], v[4:6], v[6:8], v[8:10], v[10:16])
+		// Используем strings.Builder для оптимизации
+		var sb strings.Builder
+		sb.Grow(36)
+		sb.WriteString(fmt.Sprintf("%x", v[0:4]))
+		sb.WriteByte('-')
+		sb.WriteString(fmt.Sprintf("%x", v[4:6]))
+		sb.WriteByte('-')
+		sb.WriteString(fmt.Sprintf("%x", v[6:8]))
+		sb.WriteByte('-')
+		sb.WriteString(fmt.Sprintf("%x", v[8:10]))
+		sb.WriteByte('-')
+		sb.WriteString(fmt.Sprintf("%x", v[10:16]))
+		return sb.String()
 
 	case map[string]interface{}:
 		// JSON/JSONB как map - конвертируем в JSON строку
-		jsonBytes, _ := json.Marshal(v)
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			log.Printf("Failed to marshal JSON map for field %s: %v", field.Name, err)
+			return "{}" // Возвращаем пустой JSON при ошибке
+		}
 		return string(jsonBytes)
 
 	case []interface{}:
 		// JSON array
-		jsonBytes, _ := json.Marshal(v)
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			log.Printf("Failed to marshal JSON array for field %s: %v", field.Name, err)
+			return "[]" // Возвращаем пустой массив при ошибке
+		}
 		return string(jsonBytes)
 
 	case string:
@@ -120,7 +156,13 @@ func (c *UniversalTypeConverter) pgValueToString(val interface{}, field packet.F
 
 	case time.Time:
 		// Timestamp в ISO формате
-		return v.Format("2006-01-02 15:04:05")
+		// Нормализуем в UTC для consistency
+		normalized := v.In(time.UTC)
+		// Если поле содержит timezone info, используем формат с зоной
+		if field.Timezone != "" {
+			return normalized.Format("2006-01-02 15:04:05 -07:00")
+		}
+		return normalized.Format("2006-01-02 15:04:05")
 
 	case pgtype.Numeric:
 		// PostgreSQL NUMERIC/DECIMAL - конвертируем через Float64
@@ -252,7 +294,7 @@ func bytesToHexWithoutLeadingZeros(b []byte) string {
 	}
 
 	// Находим первый ненулевой байт
-	firstNonZero := 0
+	firstNonZero := len(b) // Инициализируем как len(b) - если не найдем, значит все нули
 	for i, v := range b {
 		if v != 0 {
 			firstNonZero = i
@@ -260,13 +302,16 @@ func bytesToHexWithoutLeadingZeros(b []byte) string {
 		}
 	}
 
-	// Если все нули, возвращаем "0"
-	if firstNonZero == len(b)-1 && b[firstNonZero] == 0 {
+	// Если все нули (не нашли ненулевой байт), возвращаем "0"
+	if firstNonZero == len(b) {
 		return "0"
 	}
 
-	// Конвертируем без ведущих нулей
-	return fmt.Sprintf("%X", b[firstNonZero:])
+	// Конвертируем без ведущих нулей, используем strings.Builder для оптимизации
+	var sb strings.Builder
+	sb.Grow(len(b[firstNonZero:]) * 2) // 2 hex chars per byte
+	sb.WriteString(fmt.Sprintf("%X", b[firstNonZero:]))
+	return sb.String()
 }
 
 // TypedValueToSQL конвертирует TypedValue в значение для SQL
