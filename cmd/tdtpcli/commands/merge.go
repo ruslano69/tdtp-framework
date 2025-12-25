@@ -98,7 +98,7 @@ func MergeFiles(ctx context.Context, options MergeOptions) error {
 
 // PrintMergeHelp выводит справку по команде merge
 func PrintMergeHelp() {
-	fmt.Println(`Usage: tdtpcli --merge <file1> <file2> [file3...] --output <output-file> [options]
+	fmt.Print(`Usage: tdtpcli --merge <file1> <file2> [file3...] --output <output-file> [options]
 
 Merge multiple TDTP XML files into a single file.
 

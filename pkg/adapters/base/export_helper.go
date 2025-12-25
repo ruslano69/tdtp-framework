@@ -228,10 +228,11 @@ func (h *ExportHelper) createQueryContextForSQL(
 	nextOffset := 0
 
 	if query != nil && query.Limit > 0 {
-		// Если вернулось ровно Limit записей, возможно есть еще данные
-		if recordsReturned == query.Limit {
+		// Проверяем есть ли еще данные: offset + returned < total
+		currentPosition := query.Offset + recordsReturned
+		if currentPosition < int(totalCount) {
 			moreDataAvailable = true
-			nextOffset = query.Offset + query.Limit
+			nextOffset = query.Offset + recordsReturned
 		}
 	}
 
