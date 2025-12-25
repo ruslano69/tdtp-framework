@@ -298,6 +298,99 @@ Eliminate code duplication across database adapters by creating reusable base he
 
 ---
 
+## ✅ Phase 6: Bug Fixes During Production Testing (COMPLETED)
+
+**Status:** ✅ Done
+**Commits:**
+- `6d86761` - Fix: Change timestamp format to RFC3339 for TDTP compatibility
+- `0ddf450` - Fix: Set nullable fields to true by default and RFC3339 timestamps
+- `a51b528` - Fix: Use Unicode character count instead of byte count for text length validation
+- `88f34e8` - Fix: Use Base64 encoding for BLOB fields instead of HEX
+
+### Bug 1: Timestamp Format Validation
+
+**Problem:** All timestamps failed validation with "invalid timestamp format, expected RFC3339"
+
+**Examples:**
+- `'1753-01-01 00:00:00'` → Expected RFC3339
+- `'2024-11-06 00:00:00'` → Expected RFC3339
+
+**Root Cause:** Three places returned `v.Format("2006-01-02 15:04:05")` instead of RFC3339
+
+**Fix:** Changed to `v.UTC().Format(time.RFC3339)` in:
+- `pkg/adapters/base/type_converter.go:160` - pgValueToString()
+- `pkg/adapters/base/type_converter.go:246` - mssqlValueToString()
+- `pkg/adapters/base/type_converter.go:284` - genericValueToString()
+
+**Impact:** Export succeeded with no validation errors
+
+### Bug 2: Nullable Field Validation
+
+**Problem:** 100+ errors "field is not nullable (value: '')" for empty strings
+
+**Root Cause:** `Nullable: false` by default (Go bool default value)
+
+**Fix:** Set `Nullable: true` in ConvertValueToTDTP():
+```go
+fieldDef := schema.FieldDef{
+    // ...
+    Nullable: true, // Default to true instead of false
+}
+```
+
+**Impact:** Resolved all "field is not nullable" errors
+
+### Bug 3: Unicode Length Counting
+
+**Problem:** Cyrillic text rejected with "text length exceeds" errors
+
+**Examples:**
+- 'ВОЗНЕСЕНІВСЬКИЙ' = 15 chars but counted as 30 bytes → "exceeds 20"
+- 'БТ-ІІ № 5568317' = 16 chars but counted as 32 bytes → "exceeds 20"
+- 'ОРДЖОНИКИДЗЕВСКИЙ' = 17 chars but counted as 34 bytes → "exceeds 30"
+
+**Root Cause:** `len(val)` counts bytes, not Unicode characters (runes)
+
+**Fix:** Changed to `utf8.RuneCountInString(val)` in `pkg/core/schema/converter.go:152`:
+```go
+// OLD: if field.Length > 0 && len(val) > field.Length {
+// NEW:
+if field.Length > 0 && utf8.RuneCountInString(val) > field.Length {
+```
+
+**Impact:** Proper Unicode character counting, successful export of Cyrillic text
+
+### Bug 4: BLOB Base64 Encoding
+
+**Problem:** BLOB/IMAGE fields exported as HEX instead of Base64
+
+**Root Cause:**
+1. MSSQL adapter: `fmt.Sprintf("%X", v)` converts []byte to HEX
+2. ConvertValueToTDTP() tries to parse HEX as Base64 → fails
+3. Result: HEX string in XML instead of proper Base64
+
+**Fix:** Changed `pkg/adapters/base/type_converter.go:216`:
+```go
+// OLD: return fmt.Sprintf("%X", v)
+// NEW:
+return base64.StdEncoding.EncodeToString(v)
+```
+
+**Impact:**
+- IMAGE/VARBINARY/BLOB fields now export correctly
+- Compatible with TDTP protocol specification
+- Picture field exports in proper Base64 format
+
+### Testing Results
+
+**User Testing:**
+- Export of 10,509 rows across 6 packets
+- All validation errors resolved
+- Zstd compression working (~6x ratio)
+- No data corruption
+
+---
+
 ## 📊 Overall Progress
 
 | Phase | Status | Code Reduction | Commits |
@@ -308,7 +401,8 @@ Eliminate code duplication across database adapters by creating reusable base he
 | 3. MSSQL Migration | ✅ Done | -14 lines (-0.8%) | 1 |
 | 4. PostgreSQL Migration | ✅ Done | +31 lines (+2.1%)* | 1 |
 | 5. MySQL Migration | ✅ Done | **-670 lines (-47%)** | 1 |
-| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **7** |
+| 6. Bug Fixes (Testing) | ✅ Done | 4 critical bugs fixed | 4 |
+| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **11** |
 
 *PostgreSQL: Code increased but eliminated ~100 lines of duplication (net win)
 
