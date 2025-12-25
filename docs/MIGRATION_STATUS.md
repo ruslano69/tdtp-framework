@@ -308,6 +308,7 @@ Eliminate code duplication across database adapters by creating reusable base he
 - `88f34e8` - Fix: Use Base64 encoding for BLOB fields instead of HEX (MSSQL)
 - `557ac12` - Fix: Add BLOB Base64 encoding support for SQLite and MySQL
 - `825b629` - Fix: Allow NULL values in imported data
+- `68b041e` - Fix: Enforce NOT NULL constraint for PRIMARY KEY fields during import
 
 ### Bug 1: Timestamp Format Validation
 
@@ -411,9 +412,54 @@ fieldDef := schema.FieldDef{
 ```
 
 **Impact:**
-- Import works correctly with NULL values in any position
+- Import works correctly with NULL values in non-key fields
 - Consistent with export behavior (Nullable: true default)
-- Fixes primary key fields that can be NULL in source data
+- **Note:** Allowed NULL in PRIMARY KEY fields (fixed in Bug 6)
+
+### Bug 6: PRIMARY KEY NULL Validation
+
+**Problem:** NULL values in PRIMARY KEY fields were accepted during import, causing database errors
+
+**Example:**
+```xml
+<Field name="Timetable No_" type="TEXT" key="true"/>
+<R>|1753-01-01T00:00:00Z|...
+     ↑ NULL in PRIMARY KEY field → should be rejected
+```
+
+**Root Cause (from Bug 5 fix):**
+```go
+// ALL fields were nullable, including keys
+Nullable: true, // Applied to ALL fields
+```
+
+**Fix:** Check `Key` attribute and enforce NOT NULL for PRIMARY KEY fields:
+```go
+// pkg/adapters/base/import_helper.go:274-278
+nullable := true
+if field.Key {
+    nullable = false  // PRIMARY KEY fields must have values
+}
+
+fieldDef := schema.FieldDef{
+    // ...
+    Key:      field.Key,      // Now passed from schema
+    Nullable: nullable,       // false for keys, true for others
+}
+```
+
+**Validation Flow:**
+1. Import: `<R>|val2|val3` → first field empty, but is `key="true"`
+2. ParseValue("", fieldDef) detects: IsNull=true, Nullable=false
+3. **Error:** "field is not nullable (value: '')"
+4. Import stops at TDTP protocol level (before database)
+
+**Impact:**
+- Early validation (fail-fast principle)
+- Clear error messages at TDTP level
+- Prevents invalid data from reaching database
+- NULL allowed in non-key fields ✅
+- NULL rejected in PRIMARY KEY fields ❌
 
 ### Testing Results
 
@@ -435,8 +481,8 @@ fieldDef := schema.FieldDef{
 | 3. MSSQL Migration | ✅ Done | -14 lines (-0.8%) | 1 |
 | 4. PostgreSQL Migration | ✅ Done | +31 lines (+2.1%)* | 1 |
 | 5. MySQL Migration | ✅ Done | **-670 lines (-47%)** | 1 |
-| 6. Bug Fixes (Testing) | ✅ Done | 5 critical bugs fixed | 6 |
-| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **13** |
+| 6. Bug Fixes (Testing) | ✅ Done | 6 critical bugs fixed | 7 |
+| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **14** |
 
 *PostgreSQL: Code increased but eliminated ~100 lines of duplication (net win)
 
