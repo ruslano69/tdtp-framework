@@ -309,6 +309,7 @@ Eliminate code duplication across database adapters by creating reusable base he
 - `557ac12` - Fix: Add BLOB Base64 encoding support for SQLite and MySQL
 - `825b629` - Fix: Allow NULL values in imported data
 - `68b041e` - Fix: Enforce NOT NULL constraint for PRIMARY KEY fields during import
+- `8c609ac` - Fix: Allow empty strings in TEXT/VARCHAR fields with NOT NULL constraint
 
 ### Bug 1: Timestamp Format Validation
 
@@ -460,6 +461,68 @@ fieldDef := schema.FieldDef{
 - Prevents invalid data from reaching database
 - NULL allowed in non-key fields ✅
 - NULL rejected in PRIMARY KEY fields ❌
+- **Note:** Rejected empty strings in VARCHAR NOT NULL (fixed in Bug 7)
+
+### Bug 7: Empty Strings in TEXT/VARCHAR NOT NULL Fields
+
+**CRITICAL:** Bug 6 fix broke import of empty strings in VARCHAR NOT NULL fields!
+
+**Problem:**
+Table schema allows empty strings:
+```sql
+[Timetable No_] [varchar](10) NOT NULL  -- Allows '', does NOT allow NULL
+```
+
+Export data with composite PRIMARY KEY:
+```xml
+<Field name="Timetable No_" type="TEXT" key="true"/>
+<Field name="From Date" type="TIMESTAMP" key="true"/>
+<R>|1753-01-01T00:00:00Z|...
+    ↑ Empty string (valid for varchar NOT NULL)
+```
+
+**Root Cause:**
+```go
+// pkg/core/schema/converter.go:28 (OLD)
+if rawValue == "" {
+    tv.IsNull = true  // ❌ Treats "" as NULL for ALL types!
+    if !field.Nullable {  // ← Key field + Nullable=false
+        return error  // ❌ Rejected valid empty strings!
+    }
+}
+```
+
+**TDTP Protocol Limitation:**
+- NULL from DB → `""` in TDTP
+- Empty string from DB → also `""` in TDTP
+- **NO distinction between NULL and empty string!**
+
+**Fix:** Different semantics for TEXT vs other types:
+```go
+// pkg/core/schema/converter.go:27-49
+normalized := NormalizeType(field.Type)
+
+if rawValue == "" {
+    // For TEXT types: empty string is valid (NOT NULL)
+    if normalized == TypeText || normalized == TypeVarchar ||
+       normalized == TypeChar || normalized == TypeString {
+        return c.parseText(tv, field)  // ✅ Parse as empty string
+    }
+
+    // For other types (INTEGER, TIMESTAMP): empty string = NULL
+    tv.IsNull = true
+    if !field.Nullable {
+        return error
+    }
+    return tv, nil
+}
+```
+
+**Impact:**
+- VARCHAR/TEXT fields: `""` → empty string value (not NULL) ✅
+- INTEGER/TIMESTAMP fields: `""` → NULL with validation ✅
+- Composite PRIMARY KEY with empty TEXT: now works ✅
+- Example: `(Timetable No_='', From Date='2008-05-06')` is valid key
 
 ### Testing Results
 
@@ -481,8 +544,8 @@ fieldDef := schema.FieldDef{
 | 3. MSSQL Migration | ✅ Done | -14 lines (-0.8%) | 1 |
 | 4. PostgreSQL Migration | ✅ Done | +31 lines (+2.1%)* | 1 |
 | 5. MySQL Migration | ✅ Done | **-670 lines (-47%)** | 1 |
-| 6. Bug Fixes (Testing) | ✅ Done | 6 critical bugs fixed | 7 |
-| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **14** |
+| 6. Bug Fixes (Testing) | ✅ Done | 7 critical bugs fixed | 8 |
+| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **15** |
 
 *PostgreSQL: Code increased but eliminated ~100 lines of duplication (net win)
 
