@@ -269,14 +269,23 @@ func ConvertRowToSQLValues(
 	args := make([]interface{}, len(rowValues))
 
 	for i, value := range rowValues {
+		field := pkgSchema.Fields[i]
+
+		// Для ключевых полей (PRIMARY KEY) NULL не допускается
+		nullable := true
+		if field.Key {
+			nullable = false
+		}
+
 		fieldDef := schema.FieldDef{
-			Name:      pkgSchema.Fields[i].Name,
-			Type:      schema.DataType(pkgSchema.Fields[i].Type),
-			Length:    pkgSchema.Fields[i].Length,
-			Precision: pkgSchema.Fields[i].Precision,
-			Scale:     pkgSchema.Fields[i].Scale,
-			Timezone:  pkgSchema.Fields[i].Timezone,
-			Nullable:  true, // По умолчанию все поля nullable при импорте
+			Name:      field.Name,
+			Type:      schema.DataType(field.Type),
+			Length:    field.Length,
+			Precision: field.Precision,
+			Scale:     field.Scale,
+			Timezone:  field.Timezone,
+			Key:       field.Key,
+			Nullable:  nullable, // Ключевые поля: false, остальные: true
 		}
 
 		// Парсим значение
