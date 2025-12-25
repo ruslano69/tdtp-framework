@@ -65,11 +65,11 @@ func (c *UniversalTypeConverter) DBValueToString(value interface{}, field packet
 	case "mssql":
 		return c.mssqlValueToString(value, field)
 	case "sqlite", "mysql":
-		return c.genericValueToString(value)
+		return c.genericValueToString(value, field)
 	default:
 		// Логируем неизвестный dbType для debugging
 		log.Printf("Unknown dbType '%s' for field %s, using generic converter", dbType, field.Name)
-		return c.genericValueToString(value)
+		return c.genericValueToString(value, field)
 	}
 }
 
@@ -249,13 +249,21 @@ func (c *UniversalTypeConverter) mssqlValueToString(val interface{}, field packe
 
 // genericValueToString конвертирует общее значение БД в строку
 // Для SQLite, MySQL и других простых типов
-func (c *UniversalTypeConverter) genericValueToString(val interface{}) string {
+func (c *UniversalTypeConverter) genericValueToString(val interface{}, field packet.Field) string {
 	if val == nil {
 		return ""
 	}
 
 	switch v := val.(type) {
 	case []byte:
+		// Для BLOB используем Base64 encoding (TDTP стандарт)
+		normalized := schema.NormalizeType(schema.DataType(field.Type))
+		if normalized == schema.TypeBlob {
+			// Возвращаем Base64 представление
+			return base64.StdEncoding.EncodeToString(v)
+		}
+
+		// Для TEXT полей - конвертируем в строку
 		return string(v)
 
 	case string:
