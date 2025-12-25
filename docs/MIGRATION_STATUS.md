@@ -305,7 +305,9 @@ Eliminate code duplication across database adapters by creating reusable base he
 - `6d86761` - Fix: Change timestamp format to RFC3339 for TDTP compatibility
 - `0ddf450` - Fix: Set nullable fields to true by default and RFC3339 timestamps
 - `a51b528` - Fix: Use Unicode character count instead of byte count for text length validation
-- `88f34e8` - Fix: Use Base64 encoding for BLOB fields instead of HEX
+- `88f34e8` - Fix: Use Base64 encoding for BLOB fields instead of HEX (MSSQL)
+- `557ac12` - Fix: Add BLOB Base64 encoding support for SQLite and MySQL
+- `825b629` - Fix: Allow NULL values in imported data
 
 ### Bug 1: Timestamp Format Validation
 
@@ -381,6 +383,38 @@ return base64.StdEncoding.EncodeToString(v)
 - Compatible with TDTP protocol specification
 - Picture field exports in proper Base64 format
 
+### Bug 5: NULL Values in Import
+
+**Problem:** Import failed when fields have NULL values (empty strings), especially for first field in row
+
+**Examples:**
+- `<R>|1753-01-01T00:00:00Z|...` → First field (Timetable No_) is NULL
+- Error: "field is not nullable (value: '')"
+
+**Root Cause:** `ConvertRowToSQLValues()` created `FieldDef` with `Nullable = false` by default
+
+**Code Path:**
+```go
+// pkg/adapters/base/import_helper.go:272
+fieldDef := schema.FieldDef{
+    // ...
+    // ❌ Nullable NOT set → defaults to false
+}
+```
+
+**Fix:** Added `Nullable: true` to FieldDef in ConvertRowToSQLValues():
+```go
+fieldDef := schema.FieldDef{
+    // ...
+    Nullable: true, // По умолчанию все поля nullable при импорте
+}
+```
+
+**Impact:**
+- Import works correctly with NULL values in any position
+- Consistent with export behavior (Nullable: true default)
+- Fixes primary key fields that can be NULL in source data
+
 ### Testing Results
 
 **User Testing:**
@@ -401,8 +435,8 @@ return base64.StdEncoding.EncodeToString(v)
 | 3. MSSQL Migration | ✅ Done | -14 lines (-0.8%) | 1 |
 | 4. PostgreSQL Migration | ✅ Done | +31 lines (+2.1%)* | 1 |
 | 5. MySQL Migration | ✅ Done | **-670 lines (-47%)** | 1 |
-| 6. Bug Fixes (Testing) | ✅ Done | 4 critical bugs fixed | 4 |
-| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **11** |
+| 6. Bug Fixes (Testing) | ✅ Done | 5 critical bugs fixed | 6 |
+| **TOTAL** | **✅ COMPLETED** | **-939 lines net** | **13** |
 
 *PostgreSQL: Code increased but eliminated ~100 lines of duplication (net win)
 
