@@ -155,14 +155,9 @@ func (c *UniversalTypeConverter) pgValueToString(val interface{}, field packet.F
 		return "0"
 
 	case time.Time:
-		// Timestamp в ISO формате
+		// Timestamp в RFC3339 формате (TDTP стандарт)
 		// Нормализуем в UTC для consistency
-		normalized := v.In(time.UTC)
-		// Если поле содержит timezone info, используем формат с зоной
-		if field.Timezone != "" {
-			return normalized.Format("2006-01-02 15:04:05 -07:00")
-		}
-		return normalized.Format("2006-01-02 15:04:05")
+		return v.UTC().Format(time.RFC3339)
 
 	case pgtype.Numeric:
 		// PostgreSQL NUMERIC/DECIMAL - конвертируем через Float64
@@ -241,8 +236,9 @@ func (c *UniversalTypeConverter) mssqlValueToString(val interface{}, field packe
 		return "0"
 
 	case time.Time:
-		// DATETIME, DATETIME2, DATETIMEOFFSET
-		return v.Format("2006-01-02 15:04:05")
+		// DATETIME, DATETIME2, DATETIMEOFFSET - конвертируем в RFC3339 для TDTP
+		// ВАЖНО: нормализуем в UTC для консистентности
+		return v.UTC().Format(time.RFC3339)
 
 	default:
 		return fmt.Sprintf("%v", v)
@@ -279,7 +275,8 @@ func (c *UniversalTypeConverter) genericValueToString(val interface{}) string {
 		return "0"
 
 	case time.Time:
-		return v.Format("2006-01-02 15:04:05")
+		// Конвертируем в RFC3339 для TDTP (консистентность с MSSQL и PostgreSQL)
+		return v.UTC().Format(time.RFC3339)
 
 	default:
 		return fmt.Sprintf("%v", v)
