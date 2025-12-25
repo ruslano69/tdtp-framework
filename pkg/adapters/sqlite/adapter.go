@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 	_ "modernc.org/sqlite"
 )
@@ -26,6 +27,11 @@ func init() {
 // Реализует интерфейс adapters.Adapter
 type Adapter struct {
 	db *sql.DB
+
+	// Base helpers (added in refactoring to eliminate code duplication)
+	exportHelper *base.ExportHelper
+	importHelper *base.ImportHelper
+	converter    *base.UniversalTypeConverter
 }
 
 // Connect устанавливает подключение к SQLite
@@ -43,6 +49,10 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	}
 
 	a.db = db
+
+	// Инициализируем base helpers
+	a.initHelpers()
+
 	return nil
 }
 
@@ -98,6 +108,22 @@ func (a *Adapter) GetDatabaseVersion(ctx context.Context) (string, error) {
 // DB возвращает *sql.DB для прямого доступа (helper метод)
 func (a *Adapter) DB() *sql.DB {
 	return a.db
+}
+
+// initHelpers инициализирует базовые хелперы для устранения дублирования кода
+func (a *Adapter) initHelpers() {
+	// Создаем универсальный конвертер типов
+	a.converter = base.NewUniversalTypeConverter()
+
+	// Создаем export helper
+	// self реализует SchemaReader и DataReader интерфейсы
+	// nil = не нужна адаптация SQL для SQLite (стандартный LIMIT/OFFSET)
+	a.exportHelper = base.NewExportHelper(a, a, a.converter, nil)
+
+	// Создаем import helper
+	// self реализует TableManager, DataInserter, TransactionManager интерфейсы
+	// true = использовать временные таблицы для атомарной замены
+	a.importHelper = base.NewImportHelper(a, a, a, true)
 }
 
 // TableExists проверяет существование таблицы
