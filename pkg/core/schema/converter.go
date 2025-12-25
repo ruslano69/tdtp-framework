@@ -24,8 +24,19 @@ func (c *Converter) ParseValue(rawValue string, field FieldDef) (*TypedValue, er
 		RawValue: rawValue,
 	}
 
-	// Проверка на NULL
+	normalized := NormalizeType(field.Type)
+
+	// Проверка на NULL (пустая строка)
+	// ВАЖНО: Для TEXT/VARCHAR пустая строка "" - валидное значение, НЕ NULL!
 	if rawValue == "" {
+		// Для текстовых типов пустая строка разрешена (не является NULL)
+		if normalized == TypeText || normalized == TypeVarchar ||
+		   normalized == TypeChar || normalized == TypeString {
+			// Продолжаем парсинг пустой строки как валидного значения
+			return c.parseText(tv, field)
+		}
+
+		// Для остальных типов (INTEGER, TIMESTAMP, etc.) пустая строка = NULL
 		tv.IsNull = true
 		if !field.Nullable {
 			return nil, &ValidationError{
@@ -36,8 +47,6 @@ func (c *Converter) ParseValue(rawValue string, field FieldDef) (*TypedValue, er
 		}
 		return tv, nil
 	}
-
-	normalized := NormalizeType(field.Type)
 
 	switch normalized {
 	case TypeInteger:
