@@ -14,54 +14,26 @@ import (
 // Экономия: ~40 строк дублированного кода
 
 // WrapDBError оборачивает ошибку БД с контекстом операции
+// Вызывается только когда err != nil (проверка снаружи)
 func WrapDBError(operation string, err error) error {
-	if err == nil {
-		return nil
-	}
 	return fmt.Errorf("%s failed: %w", operation, err)
 }
 
 // WrapTableError оборачивает ошибку с информацией о таблице
+// Вызывается только когда err != nil (проверка снаружи)
 func WrapTableError(operation, tableName string, err error) error {
-	if err == nil {
-		return nil
-	}
 	return fmt.Errorf("%s for table %s failed: %w", operation, tableName, err)
 }
 
 // WrapQueryError оборачивает ошибку с информацией о запросе
+// Вызывается только когда err != nil (проверка снаружи)
 func WrapQueryError(operation, query string, err error) error {
-	if err == nil {
-		return nil
-	}
 	// Обрезаем длинные запросы для читаемости
 	maxLen := 100
 	if len(query) > maxLen {
 		query = query[:maxLen] + "..."
 	}
 	return fmt.Errorf("%s failed (query: %s): %w", operation, query, err)
-}
-
-// ============================================================================
-// Resource Management Helpers
-// ============================================================================
-// Найдено funcstat: Close вызывается 4-6 раз в каждом адаптере
-// Экономия: ~20 строк дублированного кода
-
-// SafeClose безопасно закрывает ресурс, игнорируя nil
-func SafeClose(closer interface{ Close() error }) error {
-	if closer != nil {
-		return closer.Close()
-	}
-	return nil
-}
-
-// SafeCloseRows безопасно закрывает sql.Rows
-func SafeCloseRows(rows *sql.Rows) error {
-	if rows != nil {
-		return rows.Close()
-	}
-	return nil
 }
 
 // ============================================================================
