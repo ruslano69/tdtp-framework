@@ -35,7 +35,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 
 	rows, err := a.pool.Query(ctx, query, a.schema, tableName)
 	if err != nil {
-		return packet.Schema{}, fmt.Errorf("failed to get table schema: %w", err)
+		return packet.Schema{}, adapters.WrapTableError("get table schema", tableName, err)
 	}
 	defer rows.Close()
 
@@ -44,7 +44,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	// Получаем Primary Key колонки
 	pkColumns, err := a.getPrimaryKeyColumns(ctx, tableName)
 	if err != nil {
-		return packet.Schema{}, fmt.Errorf("failed to get primary keys: %w", err)
+		return packet.Schema{}, adapters.WrapTableError("get primary keys", tableName, err)
 	}
 
 	for rows.Next() {
@@ -59,7 +59,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		)
 
 		if err := rows.Scan(&columnName, &dataType, &charMaxLen, &numPrecision, &numScale, &isNullable, &columnDef); err != nil {
-			return packet.Schema{}, fmt.Errorf("failed to scan column info: %w", err)
+			return packet.Schema{}, adapters.WrapDBError("scan column info", err)
 		}
 
 		// Формируем полный тип для парсинга
@@ -82,14 +82,14 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		// Строим Field
 		field, err := BuildFieldFromPGColumn(columnName, fullType, isNullable == "YES", isPK, "")
 		if err != nil {
-			return packet.Schema{}, fmt.Errorf("failed to build field %s: %w", columnName, err)
+			return packet.Schema{}, adapters.WrapTableError("build field", tableName, err)
 		}
 
 		fields = append(fields, field)
 	}
 
 	if err := rows.Err(); err != nil {
-		return packet.Schema{}, fmt.Errorf("error iterating columns: %w", err)
+		return packet.Schema{}, adapters.WrapDBError("iterate columns", err)
 	}
 
 	if len(fields) == 0 {
@@ -147,7 +147,7 @@ func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.
 	query := fmt.Sprintf("SELECT * FROM %s", quotedTable)
 	rows, err := a.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read table data: %w", err)
+		return nil, adapters.WrapTableError("read table data", tableName, err)
 	}
 	defer rows.Close()
 
@@ -157,7 +157,7 @@ func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+			return nil, adapters.WrapDBError("scan row", err)
 		}
 
 		// Конвертируем значения в строки TDTP формата
@@ -172,14 +172,14 @@ func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error reading rows: %w", err)
+		return nil, adapters.WrapDBError("read rows", err)
 	}
 
 	// Генерируем пакеты
 	generator := packet.NewGenerator()
 	packets, err := generator.GenerateReference(tableName, pkgSchema, dataRows)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate packets: %w", err)
+		return nil, adapters.WrapDBError("generate packets", err)
 	}
 
 	return packets, nil
@@ -237,7 +237,7 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 	executor := tdtql.NewExecutor()
 	result, err := executor.Execute(query, allRows, pkgSchema)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
+		return nil, adapters.WrapDBError("execute query", err)
 	}
 
 	// Генерируем Response пакеты
@@ -249,7 +249,7 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet.Schema) ([][]string, error) {
 	rows, err := a.pool.Query(ctx, sql)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute SQL: %w", err)
+		return nil, adapters.WrapQueryError("execute SQL", sql, err)
 	}
 	defer rows.Close()
 
@@ -258,7 +258,7 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+			return nil, adapters.WrapDBError("scan row", err)
 		}
 
 		rowData := make([]string, len(values))
@@ -442,7 +442,7 @@ func parseRow(rowValue string) []string {
 func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, incrementalConfig adapters.IncrementalConfig) ([]*packet.DataPacket, string, error) {
 	// Валидация конфигурации
 	if err := incrementalConfig.Validate(); err != nil {
-		return nil, "", fmt.Errorf("invalid incremental config: %w", err)
+		return nil, "", adapters.WrapDBError("validate incremental config", err)
 	}
 
 	// Получаем схему
@@ -511,7 +511,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 		rows, err = a.pool.Query(ctx, query)
 	}
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to read incremental data: %w", err)
+		return nil, "", adapters.WrapTableError("read incremental data", tableName, err)
 	}
 	defer rows.Close()
 
@@ -553,7 +553,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 	generator := packet.NewGenerator()
 	packets, err := generator.GenerateReference(tableName, pkgSchema, dataRows)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to generate packets: %w", err)
+		return nil, "", adapters.WrapDBError("generate packets", err)
 	}
 
 	return packets, lastTrackingValue, nil
