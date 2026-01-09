@@ -102,31 +102,29 @@ func (m *MSMQ) Close() error {
 	defer m.mu.Unlock()
 
 	// Закрываем очереди
-	if m.sendQueue != nil {
-		closeResult, _ := oleutil.CallMethod(m.sendQueue, "Close")
-		// ✅ CRITICAL: Free Variant from Close
-		if closeResult != nil {
-			closeResult.Clear()
-		}
-		m.sendQueue.Release()
-		m.sendQueue = nil
-	}
-
-	if m.receiveQueue != nil {
-		closeResult, _ := oleutil.CallMethod(m.receiveQueue, "Close")
-		// ✅ CRITICAL: Free Variant from Close
-		if closeResult != nil {
-			closeResult.Clear()
-		}
-		m.receiveQueue.Release()
-		m.receiveQueue = nil
-	}
+	m.closeQueue(&m.sendQueue)
+	m.closeQueue(&m.receiveQueue)
 
 	// Деинициализируем COM
 	ole.CoUninitialize()
 	m.initialized = false
 
 	return nil
+}
+
+// closeQueue безопасно закрывает MSMQ очередь с правильной очисткой памяти
+func (m *MSMQ) closeQueue(queue **ole.IDispatch) {
+	if *queue == nil {
+		return
+	}
+
+	// ✅ CRITICAL: Free Variant from Close
+	if closeResult, _ := oleutil.CallMethod(*queue, "Close"); closeResult != nil {
+		closeResult.Clear()
+	}
+
+	(*queue).Release()
+	*queue = nil
 }
 
 // Send отправляет сообщение в MSMQ очередь
