@@ -14,20 +14,29 @@ import (
 // Экономия: ~40 строк дублированного кода
 
 // WrapDBError оборачивает ошибку БД с контекстом операции
-// Вызывается только когда err != nil (проверка снаружи)
+// Можно вызывать без проверки - если err == nil, вернет nil
 func WrapDBError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
 	return fmt.Errorf("%s failed: %w", operation, err)
 }
 
 // WrapTableError оборачивает ошибку с информацией о таблице
-// Вызывается только когда err != nil (проверка снаружи)
+// Можно вызывать без проверки - если err == nil, вернет nil
 func WrapTableError(operation, tableName string, err error) error {
+	if err == nil {
+		return nil
+	}
 	return fmt.Errorf("%s for table %s failed: %w", operation, tableName, err)
 }
 
 // WrapQueryError оборачивает ошибку с информацией о запросе
-// Вызывается только когда err != nil (проверка снаружи)
+// Можно вызывать без проверки - если err == nil, вернет nil
 func WrapQueryError(operation, query string, err error) error {
+	if err == nil {
+		return nil
+	}
 	// Обрезаем длинные запросы для читаемости
 	maxLen := 100
 	if len(query) > maxLen {
