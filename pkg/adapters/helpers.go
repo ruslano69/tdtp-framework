@@ -154,37 +154,6 @@ func CollectRows(rows *sql.Rows, schema packet.Schema, estimatedRows int) ([][]s
 }
 
 // ============================================================================
-// Transaction Helpers
-// ============================================================================
-
-// RollbackOnError выполняет rollback если err != nil
-// Удобно использовать с defer для автоматической очистки
-func RollbackOnError(tx Tx, err *error) {
-	if *err != nil && tx != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			// Логируем ошибку rollback, но не перезаписываем оригинальную ошибку
-			*err = fmt.Errorf("%w (rollback also failed: %v)", *err, rbErr)
-		}
-	}
-}
-
-// SafeCommit безопасно коммитит транзакцию
-func SafeCommit(tx Tx) error {
-	if tx != nil {
-		return tx.Commit()
-	}
-	return nil
-}
-
-// SafeRollback безопасно откатывает транзакцию
-func SafeRollback(tx Tx) error {
-	if tx != nil {
-		return tx.Rollback()
-	}
-	return nil
-}
-
-// ============================================================================
 // Validation Helpers
 // ============================================================================
 
