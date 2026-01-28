@@ -10,6 +10,7 @@ import (
 	_ "github.com/denisenkom/go-mssqldb" // MS SQL Server driver
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
 
@@ -19,9 +20,9 @@ type Adapter struct {
 	config adapters.Config
 
 	// Version information
-	serverVersion   int    // Major version: 11=2012, 13=2016, 14=2017, 15=2019, 16=2022
+	serverVersion    int    // Major version: 11=2012, 13=2016, 14=2017, 15=2019, 16=2022
 	serverVersionStr string // Full version string
-	compatLevel     int    // Database compatibility level: 110=2012, 130=2016, etc.
+	compatLevel      int    // Database compatibility level: 110=2012, 130=2016, etc.
 
 	// Effective compatibility (min of config, server, and database)
 	effectiveCompat int
@@ -29,6 +30,11 @@ type Adapter struct {
 	// Compatibility mode settings
 	strictMode bool // Error on incompatible functions
 	warnMode   bool // Warn on incompatible functions
+
+	// Base helpers (added in refactoring)
+	exportHelper *base.ExportHelper
+	converter    *base.UniversalTypeConverter
+	sqlAdapter   *base.MSSQLAdapter
 }
 
 // Compatibility levels
@@ -80,7 +86,38 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 		return err
 	}
 
+	// Initialize base helpers (added in refactoring)
+	a.initHelpers()
+
 	return nil
+}
+
+// initHelpers initializes base package helpers for common operations
+// Added during refactoring to eliminate code duplication
+func (a *Adapter) initHelpers() {
+	// Initialize type converter
+	a.converter = base.NewUniversalTypeConverter()
+
+	// Initialize SQL adapter for MSSQL dialect
+	// Default schema is "dbo" for MS SQL Server
+	defaultSchema := "dbo"
+	if a.config.Schema != "" {
+		defaultSchema = a.config.Schema
+	}
+	a.sqlAdapter = base.NewMSSQLAdapter(defaultSchema)
+
+	// Initialize export helper with MSSQL-specific components
+	a.exportHelper = base.NewExportHelper(
+		a,            // SchemaReader
+		a,            // DataReader
+		a.converter,  // ValueConverter
+		a.sqlAdapter, // SQLAdapter for MSSQL syntax
+	)
+
+	// Note: Import helper not used for MSSQL because:
+	// - MSSQL uses MERGE statement (unique feature)
+	// - MSSQL has transaction-based import (not temp tables)
+	// - Keep existing import logic for MSSQL-specific behavior
 }
 
 // detectCompatibility detects SQL Server version and database compatibility level.

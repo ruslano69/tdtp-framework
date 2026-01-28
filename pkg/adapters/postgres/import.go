@@ -503,3 +503,45 @@ func (a *Adapter) convertValue(value string, field packet.Field) interface{} {
 	// Fallback на сырое значение
 	return typedValue.RawValue
 }
+
+// ========== base.TableManager interface methods ==========
+
+// CreateTable implements base.TableManager interface
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
+	return a.createTableFromSchema(ctx, tableName, schema)
+}
+
+// DropTable implements base.TableManager interface
+func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
+	return a.dropTable(ctx, tableName)
+}
+
+// RenameTable implements base.TableManager interface
+func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
+	return a.replaceTables(ctx, oldName, newName)
+}
+
+// ========== base.DataInserter interface methods ==========
+
+// InsertRows implements base.DataInserter interface
+// Uses COPY for bulk insert (PostgreSQL-specific fast path)
+func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
+	// PostgreSQL adapter использует COPY command для bulk insert
+	// Это быстрее чем INSERT statements
+	pkt := &packet.DataPacket{
+		Header: packet.Header{
+			TableName: tableName,
+		},
+		Schema: schema,
+	}
+	pkt.Data.Rows = rows
+
+	// Use COPY for fast bulk insert
+	return a.importWithCopy(ctx, pkt)
+}
+
+// ========== base.TransactionManager interface methods ==========
+
+// BeginTx implements base.TransactionManager interface (уже определен в adapter.go)
+// CommitTx и RollbackTx не нужны так как используется pgx.Tx
+

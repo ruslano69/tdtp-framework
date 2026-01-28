@@ -2,89 +2,35 @@ package mysql
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework-main/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
 )
 
-// ========== Import Operations ==========
+// ========== Публичные методы (делегируют в ImportHelper) ==========
 
-// ImportPacket импортирует один TDTP пакет в MySQL
+// ImportPacket импортирует один пакет - просто делегируем
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-	return a.ImportPackets(ctx, []*packet.DataPacket{pkt}, strategy)
+	return a.importHelper.ImportPacket(ctx, pkt, strategy)
 }
 
-// ImportPackets импортирует множество пакетов атомарно (в одной транзакции)
+// ImportPackets импортирует несколько пакетов - просто делегируем
 func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
-	if len(packets) == 0 {
-		return nil
-	}
-
-	// Начинаем транзакцию
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	for i, pkt := range packets {
-		if pkt == nil {
-			return fmt.Errorf("packet %d is nil", i)
-		}
-
-		// Проверяем существование таблицы
-		tableName := pkt.Header.TableName
-		exists, err := a.TableExists(ctx, tableName)
-		if err != nil {
-			return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
-		}
-
-		// Создаем таблицу если нужно
-		if !exists {
-			if err := a.createTableInTx(ctx, tx, tableName, pkt.Schema); err != nil {
-				return fmt.Errorf("failed to create table %s: %w", tableName, err)
-			}
-		}
-
-		// Импортируем данные
-		if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
-			return fmt.Errorf("failed to import packet %d: %w", i, err)
-		}
-	}
-
-	// Commit транзакции
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
+	return a.importHelper.ImportPackets(ctx, packets, strategy)
 }
 
-// ========== Table Creation ==========
+// ========== base.TableManager interface ==========
 
-// createTableInTx создает таблицу в рамках транзакции
-func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, tableName string, schema packet.Schema) error {
-	sqlCreate := a.buildCreateTableSQL(tableName, schema)
-
-	_, err := tx.ExecContext(ctx, sqlCreate)
-	if err != nil {
-		return fmt.Errorf("failed to execute CREATE TABLE: %w", err)
-	}
-
-	return nil
-}
-
-// buildCreateTableSQL строит CREATE TABLE запрос
-func (a *Adapter) buildCreateTableSQL(tableName string, schema packet.Schema) string {
+// CreateTable создает таблицу из TDTP схемы
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
 	var columns []string
 	var pkColumns []string
 
 	for _, field := range schema.Fields {
+		// Конвертируем TDTP тип в MySQL тип через types.go
 		mysqlType := TDTPToMySQL(field)
 		column := fmt.Sprintf("`%s` %s", field.Name, mysqlType)
 
@@ -99,206 +45,93 @@ func (a *Adapter) buildCreateTableSQL(tableName string, schema packet.Schema) st
 
 	// Primary key constraint
 	if len(pkColumns) > 0 {
-		pkConstraint := fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(pkColumns, ", "))
-		columns = append(columns, pkConstraint)
+		columns = append(columns, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(pkColumns, ", ")))
 	}
 
-	return fmt.Sprintf("CREATE TABLE `%s` (\n    %s\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-		tableName,
-		strings.Join(columns, ",\n    "))
+	createSQL := fmt.Sprintf("CREATE TABLE `%s` (%s)", tableName, strings.Join(columns, ", "))
+
+	_, err := a.db.ExecContext(ctx, createSQL)
+	if err != nil {
+		return fmt.Errorf("failed to create table: %w", err)
+	}
+
+	return nil
 }
 
-// ========== Data Import ==========
+// DropTable удаляет таблицу
+func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
+	_, err := a.db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName))
+	return err
+}
 
-// importPacketDataInTx импортирует данные пакета в рамках транзакции
-func (a *Adapter) importPacketDataInTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	pkt *packet.DataPacket,
-	strategy adapters.ImportStrategy,
-) error {
-	if len(pkt.Data.Rows) == 0 {
-		return nil // Пустой пакет - не ошибка
+// RenameTable переименовывает таблицу
+func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
+	_, err := a.db.ExecContext(ctx, fmt.Sprintf("RENAME TABLE `%s` TO `%s`", oldName, newName))
+	return err
+}
+
+// ========== base.DataInserter interface ==========
+
+// InsertRows вставляет строки с учетом strategy
+// Это ЕДИНСТВЕННОЕ место где MySQL-специфичная логика!
+func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
+	if len(rows) == 0 {
+		return nil
 	}
 
+	// Выбираем SQL в зависимости от strategy
+	var insertSQL string
 	switch strategy {
 	case adapters.StrategyReplace:
-		return a.importWithReplace(ctx, tx, pkt)
+		// MySQL-специфично: INSERT ... ON DUPLICATE KEY UPDATE
+		insertSQL = a.buildInsertOnDuplicateSQL(tableName, schema)
 
 	case adapters.StrategyIgnore:
-		return a.importWithIgnore(ctx, tx, pkt)
+		// MySQL-специфично: INSERT IGNORE
+		insertSQL = a.buildInsertIgnoreSQL(tableName, schema)
 
 	case adapters.StrategyFail:
-		return a.importWithInsert(ctx, tx, pkt)
-
-	case adapters.StrategyCopy:
-		// MySQL не поддерживает COPY как PostgreSQL, используем обычный INSERT
-		return a.importWithInsert(ctx, tx, pkt)
+		// Обычный INSERT (fail on duplicate)
+		insertSQL = a.buildInsertSQL(tableName, schema)
 
 	default:
-		return fmt.Errorf("unsupported import strategy: %s", strategy)
+		return fmt.Errorf("unsupported import strategy: %v", strategy)
 	}
-}
 
-// ========== INSERT ... ON DUPLICATE KEY UPDATE Strategy (UPSERT) ==========
-
-// importWithReplace использует INSERT ... ON DUPLICATE KEY UPDATE для UPSERT операций
-func (a *Adapter) importWithReplace(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	// Находим primary key колонки
-	var pkFields []packet.Field
-	var nonPkFields []packet.Field
-
-	for _, field := range pkt.Schema.Fields {
-		if field.Key {
-			pkFields = append(pkFields, field)
-		} else {
-			nonPkFields = append(nonPkFields, field)
+	// Вставляем батчами по 1000 строк (для производительности)
+	batchSize := 1000
+	for i := 0; i < len(rows); i += batchSize {
+		end := i + batchSize
+		if end > len(rows) {
+			end = len(rows)
 		}
-	}
 
-	if len(pkFields) == 0 {
-		// Нет PK - используем REPLACE INTO
-		return a.importWithReplaceInto(ctx, tx, pkt)
-	}
+		batch := rows[i:end]
 
-	tableName := pkt.Header.TableName
-
-	// Строим INSERT ... ON DUPLICATE KEY UPDATE запрос
-	insertSQL := a.buildInsertOnDuplicateSQL(tableName, pkt.Schema, nonPkFields)
-
-	// Выполняем для каждой строки
-	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row, pkt.Schema)
-		args := a.rowToArgs(rowValues, pkt.Schema)
-		_, err := tx.ExecContext(ctx, insertSQL, args...)
-		if err != nil {
-			return fmt.Errorf("failed to execute INSERT ON DUPLICATE: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// buildInsertOnDuplicateSQL строит INSERT ... ON DUPLICATE KEY UPDATE запрос
-func (a *Adapter) buildInsertOnDuplicateSQL(tableName string, schema packet.Schema, nonPkFields []packet.Field) string {
-	var columns []string
-	var placeholders []string
-	var updates []string
-
-	for _, field := range schema.Fields {
-		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
-		placeholders = append(placeholders, "?")
-	}
-
-	// UPDATE часть для non-PK колонок
-	for _, field := range nonPkFields {
-		updates = append(updates, fmt.Sprintf("`%s` = VALUES(`%s`)", field.Name, field.Name))
-	}
-
-	sql := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "))
-
-	if len(updates) > 0 {
-		sql += " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ", ")
-	}
-
-	return sql
-}
-
-// importWithReplaceInto использует REPLACE INTO (для таблиц без PK)
-func (a *Adapter) importWithReplaceInto(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	tableName := pkt.Header.TableName
-	replaceSQL := a.buildReplaceSQL(tableName, pkt.Schema)
-
-	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row, pkt.Schema)
-		args := a.rowToArgs(rowValues, pkt.Schema)
-		_, err := tx.ExecContext(ctx, replaceSQL, args...)
-		if err != nil {
-			return fmt.Errorf("failed to execute REPLACE: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// buildReplaceSQL строит REPLACE запрос
-func (a *Adapter) buildReplaceSQL(tableName string, schema packet.Schema) string {
-	var columns []string
-	var placeholders []string
-
-	for _, field := range schema.Fields {
-		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
-		placeholders = append(placeholders, "?")
-	}
-
-	return fmt.Sprintf("REPLACE INTO `%s` (%s) VALUES (%s)",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "))
-}
-
-// ========== INSERT IGNORE Strategy ==========
-
-// importWithIgnore использует INSERT IGNORE для пропуска дубликатов
-func (a *Adapter) importWithIgnore(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	tableName := pkt.Header.TableName
-	insertSQL := a.buildInsertIgnoreSQL(tableName, pkt.Schema)
-
-	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row, pkt.Schema)
-		args := a.rowToArgs(rowValues, pkt.Schema)
-		_, err := tx.ExecContext(ctx, insertSQL, args...)
-		if err != nil {
-			return fmt.Errorf("failed to execute INSERT IGNORE: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// buildInsertIgnoreSQL строит INSERT IGNORE запрос
-func (a *Adapter) buildInsertIgnoreSQL(tableName string, schema packet.Schema) string {
-	var columns []string
-	var placeholders []string
-
-	for _, field := range schema.Fields {
-		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
-		placeholders = append(placeholders, "?")
-	}
-
-	return fmt.Sprintf("INSERT IGNORE INTO `%s` (%s) VALUES (%s)",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "))
-}
-
-// ========== INSERT Strategy ==========
-
-// importWithInsert использует обычный INSERT (ошибка при дубликатах)
-func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.DataPacket) error {
-	tableName := pkt.Header.TableName
-	insertSQL := a.buildInsertSQL(tableName, pkt.Schema)
-
-	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row, pkt.Schema)
-		args := a.rowToArgs(rowValues, pkt.Schema)
-		_, err := tx.ExecContext(ctx, insertSQL, args...)
-		if err != nil {
-			// Проверяем, является ли это ошибкой дубликата ключа
-			if isDuplicateKeyError(err) {
-				return fmt.Errorf("duplicate key error: %w", err)
+		// Подготавливаем значения
+		var args []interface{}
+		for _, row := range batch {
+			rowValues := base.ParseRowValues(row)
+			sqlValues, err := base.ConvertRowToSQLValues(rowValues, schema, a.converter, "mysql")
+			if err != nil {
+				return fmt.Errorf("failed to convert row values: %w", err)
 			}
-			return fmt.Errorf("failed to insert row: %w", err)
+			args = append(args, sqlValues...)
+		}
+
+		// Выполняем INSERT
+		_, err := a.db.ExecContext(ctx, insertSQL, args...)
+		if err != nil {
+			return fmt.Errorf("failed to insert batch: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// buildInsertSQL строит INSERT запрос
+// ========== MySQL-специфичные SQL builders ==========
+
+// buildInsertSQL строит обычный INSERT
 func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string {
 	var columns []string
 	var placeholders []string
@@ -308,130 +141,59 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 		placeholders = append(placeholders, "?")
 	}
 
-	return fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)",
+	return fmt.Sprintf(
+		"INSERT INTO `%s` (%s) VALUES (%s)",
 		tableName,
 		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "))
+		strings.Join(placeholders, ", "),
+	)
 }
 
-// isDuplicateKeyError проверяет, является ли ошибка нарушением уникальности
-func isDuplicateKeyError(err error) bool {
-	if err == nil {
-		return false
+// buildInsertIgnoreSQL строит INSERT IGNORE (MySQL-специфично)
+func (a *Adapter) buildInsertIgnoreSQL(tableName string, schema packet.Schema) string {
+	var columns []string
+	var placeholders []string
+
+	for _, field := range schema.Fields {
+		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
+		placeholders = append(placeholders, "?")
 	}
 
-	// Проверяем через правильный тип ошибки MySQL driver
-	if mysqlErr, ok := err.(*mysql.MySQLError); ok {
-		// MySQL error codes:
-		// 1062 = Duplicate entry for key
-		return mysqlErr.Number == 1062
-	}
-
-	// Fallback на проверку по строке (для совместимости)
-	errMsg := err.Error()
-	return strings.Contains(errMsg, "1062") ||
-		strings.Contains(errMsg, "Duplicate entry")
+	return fmt.Sprintf(
+		"INSERT IGNORE INTO `%s` (%s) VALUES (%s)",
+		tableName,
+		strings.Join(columns, ", "),
+		strings.Join(placeholders, ", "),
+	)
 }
 
-// ========== Data Conversion ==========
+// buildInsertOnDuplicateSQL строит INSERT ... ON DUPLICATE KEY UPDATE (MySQL-специфично)
+func (a *Adapter) buildInsertOnDuplicateSQL(tableName string, schema packet.Schema) string {
+	var columns []string
+	var placeholders []string
+	var updates []string
 
-// fieldToFieldDef converts packet.Field to schema.FieldDef for type conversion
-func fieldToFieldDef(field packet.Field) schema.FieldDef {
-	return schema.FieldDef{
-		Name:      field.Name,
-		Type:      schema.DataType(field.Type),
-		Length:    field.Length,
-		Precision: field.Precision,
-		Scale:     field.Scale,
-		Timezone:  field.Timezone,
-		Key:       field.Key,
-		Nullable:  true, // TDTP allows NULL by default for import
-	}
-}
+	for _, field := range schema.Fields {
+		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
+		placeholders = append(placeholders, "?")
 
-// parseRow разбивает строку row.Value на отдельные значения
-func (a *Adapter) parseRow(row packet.Row, schema packet.Schema) []string {
-	// Используем Parser.GetRowValues() для правильной обработки экранирования
-	// Backslash escaping: \| → | и \\ → \
-	parser := packet.NewParser()
-	values := parser.GetRowValues(row)
-
-	// Дополняем пустыми значениями если не хватает
-	for len(values) < len(schema.Fields) {
-		values = append(values, "")
-	}
-
-	return values
-}
-
-// rowToArgs конвертирует строку TDTP пакета в массив аргументов для SQL
-func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []interface{} {
-	args := make([]interface{}, len(row))
-	for i, val := range row {
-		if i < len(schema.Fields) {
-			args[i] = a.stringToValue(val, schema.Fields[i])
-		} else {
-			args[i] = val
-		}
-	}
-	return args
-}
-
-// stringToValue конвертирует строку из TDTP в значение для БД
-// Использует schema.Converter для строгой типизации и валидации
-func (a *Adapter) stringToValue(str string, field packet.Field) interface{} {
-	// Конвертируем packet.Field в schema.FieldDef
-	fieldDef := fieldToFieldDef(field)
-
-	// Используем schema.Converter для парсинга значения
-	converter := schema.NewConverter()
-	typedValue, err := converter.ParseValue(str, fieldDef)
-	if err != nil {
-		// Если парсинг не удался, возвращаем строку как fallback
-		// (ошибка валидации будет обработана на уровне БД)
-		if str == "" {
-			return nil
-		}
-		return str
-	}
-
-	// Извлекаем значение в формате, подходящем для database/sql
-	if typedValue.IsNull {
-		return nil
-	}
-
-	normalized := schema.NormalizeType(typedValue.Type)
-	switch normalized {
-	case schema.TypeInteger:
-		if typedValue.IntValue != nil {
-			return *typedValue.IntValue
-		}
-	case schema.TypeReal, schema.TypeDecimal:
-		if typedValue.FloatValue != nil {
-			return *typedValue.FloatValue
-		}
-	case schema.TypeText:
-		if typedValue.StringValue != nil {
-			return *typedValue.StringValue
-		}
-	case schema.TypeBoolean:
-		if typedValue.BoolValue != nil {
-			// MySQL хранит boolean как TINYINT(1)
-			if *typedValue.BoolValue {
-				return 1
-			}
-			return 0
-		}
-	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
-		if typedValue.TimeValue != nil {
-			return *typedValue.TimeValue
-		}
-	case schema.TypeBlob:
-		if typedValue.BlobValue != nil {
-			return typedValue.BlobValue
+		// UPDATE часть только для non-PK колонок
+		if !field.Key {
+			updates = append(updates, fmt.Sprintf("`%s` = VALUES(`%s`)", field.Name, field.Name))
 		}
 	}
 
-	// Fallback на сырое значение
-	return typedValue.RawValue
+	sql := fmt.Sprintf(
+		"INSERT INTO `%s` (%s) VALUES (%s)",
+		tableName,
+		strings.Join(columns, ", "),
+		strings.Join(placeholders, ", "),
+	)
+
+	// Добавляем ON DUPLICATE KEY UPDATE если есть non-PK поля
+	if len(updates) > 0 {
+		sql += " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ", ")
+	}
+
+	return sql
 }

@@ -70,7 +70,7 @@ func DiffFiles(ctx context.Context, options DiffOptions) error {
 
 // PrintDiffHelp выводит справку по команде diff
 func PrintDiffHelp() {
-	fmt.Println(`Usage: tdtpcli --diff <file-a> <file-b> [options]
+	fmt.Print(`Usage: tdtpcli --diff <file-a> <file-b> [options]
 
 Compare two TDTP XML files and show differences.
 
