@@ -121,12 +121,6 @@ func (m *Merger) Merge(packets ...*packet.DataPacket) (*MergeResult, error) {
 	}
 
 	// Выполняем merge по выбранной стратегии
-	result := &MergeResult{
-		Stats: MergeStats{
-			TotalPackets: len(packets),
-		},
-	}
-
 	switch m.options.Strategy {
 	case StrategyUnion:
 		return m.mergeUnion(packets, baseSchema, keyFields)
