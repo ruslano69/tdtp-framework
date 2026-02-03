@@ -395,7 +395,7 @@ func (e *Exporter) exportStreamToKafka(ctx context.Context, streamResult *Stream
 }
 
 // exportStreamToBroker выполняет общую логику потокового экспорта в любой broker (RabbitMQ/Kafka)
-func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Broker, streamResult *StreamingResult, tableName string, result *StreamingExportResult) (*StreamingExportResult, error) {
+func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.MessageBroker, streamResult *StreamingResult, tableName string, result *StreamingExportResult) (*StreamingExportResult, error) {
 	// Подключаемся к broker
 	if err := broker.Connect(ctx); err != nil {
 		result.Errors = append(result.Errors, err)
