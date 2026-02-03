@@ -141,8 +141,6 @@ func (m *Merger) Merge(packets ...*packet.DataPacket) (*MergeResult, error) {
 	default:
 		return nil, fmt.Errorf("unknown merge strategy: %d", m.options.Strategy)
 	}
-
-	return result, nil
 }
 
 // mergeUnion объединяет все уникальные строки
