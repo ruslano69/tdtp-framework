@@ -61,15 +61,25 @@ func (p *Processor) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to populate workspace: %w", err)
 	}
 
-	// 4. Выполняем SQL трансформацию
-	result, err := p.executeTransformation(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to execute transformation: %w", err)
-	}
+	// 4. Выполняем трансформацию и экспорт
+	// Стратегия зависит от типа output:
+	// - Streaming (RabbitMQ/Kafka): SQL выполняется потоком через ExecuteSQLStream (не загружает в память)
+	// - Batch (TDTP): SQL выполняется полностью через ExecuteSQL (нужно знать TotalParts для XML)
+	if p.config.Output.Type == "rabbitmq" || p.config.Output.Type == "kafka" {
+		// Streaming: SQL выполняется один раз внутри exportResultsStreaming
+		if err := p.exportResultsStreaming(ctx); err != nil {
+			return fmt.Errorf("failed to export results (streaming): %w", err)
+		}
+	} else {
+		// Batch: выполняем SQL, загружаем все данные в память, экспортируем
+		result, err := p.executeTransformation(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to execute transformation: %w", err)
+		}
 
-	// 5. Экспортируем результаты
-	if err := p.exportResults(ctx, result); err != nil {
-		return fmt.Errorf("failed to export results: %w", err)
+		if err := p.exportResults(ctx, result); err != nil {
+			return fmt.Errorf("failed to export results: %w", err)
+		}
 	}
 
 	return nil
@@ -144,15 +154,9 @@ func (p *Processor) executeTransformation(ctx context.Context) (*ExecutionResult
 	return result, nil
 }
 
-// exportResults экспортирует результаты
-// Автоматически выбирает streaming режим для RabbitMQ/Kafka и batch для TDTP файлов
+// exportResults экспортирует результаты в batch режиме (для TDTP файлов)
+// Этот метод используется только для batch output (TDTP), где нужны все данные в памяти
 func (p *Processor) exportResults(ctx context.Context, result *ExecutionResult) error {
-	// Для RabbitMQ/Kafka используем streaming экспорт (не требует всех данных в памяти)
-	if p.config.Output.Type == "rabbitmq" || p.config.Output.Type == "kafka" {
-		return p.exportResultsStreaming(ctx)
-	}
-
-	// Для TDTP файлов используем batch экспорт (нужны все данные для TotalParts)
 	if result.Packet == nil {
 		return fmt.Errorf("no data to export")
 	}
