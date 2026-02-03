@@ -215,7 +215,7 @@ transform:
 
 # Выходной формат
 output:
-  type: TDTP
+  type: tdtp
   tdtp:
     destination: "reports/user_orders_report.xml"
     format: "xml"
@@ -265,17 +265,19 @@ transform:
   sql: "SELECT * FROM data1"
 
 output:
-  type: TDTP
+  type: tdtp
   tdtp:
     destination: "output.xml"
     format: "xml"
 ```
 
+> **Примечание**: Тип output (`type`) не чувствителен к регистру. Можно использовать `tdtp`, `TDTP` или `Tdtp` - все варианты будут работать одинаково. Рекомендуется использовать lowercase для единообразия.
+
 ### Конфигурация для RabbitMQ
 
 ```yaml
 output:
-  type: RabbitMQ
+  type: rabbitmq  # Также можно: RabbitMQ, RABBITMQ (case-insensitive)
   rabbitmq:
     host: localhost
     port: 5672
@@ -291,7 +293,7 @@ output:
 
 ```yaml
 output:
-  type: Kafka
+  type: kafka  # Также можно: Kafka, KAFKA (case-insensitive)
   kafka:
     brokers: "localhost:9092,localhost:9093"
     topic: etl_results
@@ -414,7 +416,7 @@ transform:
     ORDER BY customer_name
 
 output:
-  type: TDTP
+  type: tdtp
   tdtp:
     destination: "unified_customers.xml"
     format: "xml"
@@ -493,7 +495,7 @@ transform:
     ORDER BY total_revenue DESC
 
 output:
-  type: TDTP
+  type: tdtp
   tdtp:
     destination: "sales_report_2024.xml"
     format: "xml"
@@ -549,7 +551,7 @@ transform:
     WHERE email LIKE '%@%'  -- Только валидные email
 
 output:
-  type: TDTP
+  type: tdtp
   tdtp:
     destination: "migrated_users.xml"
     format: "xml"

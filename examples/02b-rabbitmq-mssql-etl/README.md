@@ -30,7 +30,7 @@ pipeline.yaml:         ~80 строк
 ```yaml
 # Вместо 50+ строк Go кода:
 output:
-  type: RabbitMQ
+  type: rabbitmq
   rabbitmq:
     host: localhost
     port: 5672

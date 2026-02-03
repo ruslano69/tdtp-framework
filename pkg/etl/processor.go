@@ -31,7 +31,7 @@ type Processor struct {
 func NewProcessor(config *PipelineConfig) *Processor {
 	return &Processor{
 		config: config,
-		loader: NewLoader(config.Sources),
+		loader: NewLoader(config.Sources, config.ErrorHandling),
 		stats:  ProcessorStats{},
 	}
 }
@@ -61,15 +61,25 @@ func (p *Processor) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to populate workspace: %w", err)
 	}
 
-	// 4. Выполняем SQL трансформацию
-	result, err := p.executeTransformation(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to execute transformation: %w", err)
-	}
+	// 4. Выполняем трансформацию и экспорт
+	// Стратегия зависит от типа output:
+	// - Streaming (RabbitMQ/Kafka): SQL выполняется потоком через ExecuteSQLStream (не загружает в память)
+	// - Batch (TDTP): SQL выполняется полностью через ExecuteSQL (нужно знать TotalParts для XML)
+	if p.config.Output.Type == "rabbitmq" || p.config.Output.Type == "kafka" {
+		// Streaming: SQL выполняется один раз внутри exportResultsStreaming
+		if err := p.exportResultsStreaming(ctx); err != nil {
+			return fmt.Errorf("failed to export results (streaming): %w", err)
+		}
+	} else {
+		// Batch: выполняем SQL, загружаем все данные в память, экспортируем
+		result, err := p.executeTransformation(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to execute transformation: %w", err)
+		}
 
-	// 5. Экспортируем результаты
-	if err := p.exportResults(ctx, result); err != nil {
-		return fmt.Errorf("failed to export results: %w", err)
+		if err := p.exportResults(ctx, result); err != nil {
+			return fmt.Errorf("failed to export results: %w", err)
+		}
 	}
 
 	return nil
@@ -93,26 +103,47 @@ func (p *Processor) initWorkspace(ctx context.Context) error {
 func (p *Processor) loadSources(ctx context.Context) ([]SourceData, error) {
 	// Загружаем данные параллельно
 	sourcesData, err := p.loader.LoadAll(ctx)
-	if err != nil {
+
+	// Если on_source_error = "continue", ошибки могут быть, но продолжаем
+	// Если on_source_error = "fail", err != nil означает критичную ошибку
+	if err != nil && p.config.ErrorHandling.OnSourceError == "fail" {
 		return nil, err
 	}
 
-	// Подсчитываем статистику
-	p.stats.SourcesLoaded = len(sourcesData)
+	// Подсчитываем статистику только для успешно загруженных источников
+	successCount := 0
 	for _, data := range sourcesData {
-		if data.Packet != nil {
+		if data.Error == nil && data.Packet != nil {
+			successCount++
 			p.stats.TotalRowsLoaded += len(data.Packet.Data.Rows)
 		}
 	}
+	p.stats.SourcesLoaded = successCount
 
-	return sourcesData, nil
+	// Возвращаем все результаты (включая ошибочные, если on_source_error = "continue")
+	return sourcesData, err
 }
 
 // populateWorkspace создает таблицы и загружает данные в workspace
 func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceData) error {
 	for _, source := range sourcesData {
+		// Обработка ошибок источника согласно on_source_error стратегии
 		if source.Error != nil {
-			return fmt.Errorf("source '%s' has error: %w", source.SourceName, source.Error)
+			switch p.config.ErrorHandling.OnSourceError {
+			case "continue":
+				// Continue: пропускаем источник с ошибкой, продолжаем с остальными
+				// Записываем ошибку в статистику для отчета
+				p.stats.Errors = append(p.stats.Errors, fmt.Errorf("source '%s' skipped: %w", source.SourceName, source.Error))
+				continue
+
+			case "fail":
+				// Fail: останавливаемся на первой ошибке источника
+				return fmt.Errorf("source '%s' has error: %w", source.SourceName, source.Error)
+
+			default:
+				// По умолчанию fail
+				return fmt.Errorf("source '%s' has error: %w", source.SourceName, source.Error)
+			}
 		}
 
 		if source.Packet == nil {
@@ -135,8 +166,19 @@ func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceD
 
 // executeTransformation выполняет SQL трансформацию
 func (p *Processor) executeTransformation(ctx context.Context) (*ExecutionResult, error) {
-	// Выполняем SQL из конфигурации
-	result, err := p.executor.Execute(ctx, p.config.Transform.SQL, p.config.Transform.ResultTable)
+	// Применяем timeout из конфигурации трансформации
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+
+	if p.config.Transform.Timeout > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(p.config.Transform.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		timeoutCtx = ctx
+	}
+
+	// Выполняем SQL из конфигурации с учетом timeout
+	result, err := p.executor.Execute(timeoutCtx, p.config.Transform.SQL, p.config.Transform.ResultTable)
 	if err != nil {
 		return nil, err
 	}
@@ -144,15 +186,9 @@ func (p *Processor) executeTransformation(ctx context.Context) (*ExecutionResult
 	return result, nil
 }
 
-// exportResults экспортирует результаты
-// Автоматически выбирает streaming режим для RabbitMQ/Kafka и batch для TDTP файлов
+// exportResults экспортирует результаты в batch режиме (для TDTP файлов)
+// Этот метод используется только для batch output (TDTP), где нужны все данные в памяти
 func (p *Processor) exportResults(ctx context.Context, result *ExecutionResult) error {
-	// Для RabbitMQ/Kafka используем streaming экспорт (не требует всех данных в памяти)
-	if p.config.Output.Type == "RabbitMQ" || p.config.Output.Type == "Kafka" {
-		return p.exportResultsStreaming(ctx)
-	}
-
-	// Для TDTP файлов используем batch экспорт (нужны все данные для TotalParts)
 	if result.Packet == nil {
 		return fmt.Errorf("no data to export")
 	}
@@ -169,14 +205,25 @@ func (p *Processor) exportResults(ctx context.Context, result *ExecutionResult) 
 
 // exportResultsStreaming выполняет потоковый экспорт результатов в RabbitMQ/Kafka
 func (p *Processor) exportResultsStreaming(ctx context.Context) error {
-	// Выполняем SQL с потоковым чтением
-	streamResult, err := p.workspace.ExecuteSQLStream(ctx, p.config.Transform.SQL, p.config.Transform.ResultTable)
+	// Применяем timeout из конфигурации трансформации
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+
+	if p.config.Transform.Timeout > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(p.config.Transform.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		timeoutCtx = ctx
+	}
+
+	// Выполняем SQL с потоковым чтением с учетом timeout
+	streamResult, err := p.workspace.ExecuteSQLStream(timeoutCtx, p.config.Transform.SQL, p.config.Transform.ResultTable)
 	if err != nil {
 		return fmt.Errorf("failed to execute SQL stream: %w", err)
 	}
 
-	// Экспортируем в потоковом режиме
-	exportResult, err := p.exporter.ExportStream(ctx, streamResult, p.config.Transform.ResultTable)
+	// Экспортируем в потоковом режиме с учетом timeout
+	exportResult, err := p.exporter.ExportStream(timeoutCtx, streamResult, p.config.Transform.ResultTable)
 	if err != nil {
 		return fmt.Errorf("failed to export stream: %w", err)
 	}

@@ -69,7 +69,7 @@ transform:
 
 # 4. ВЫХОД: RabbitMQ
 output:
-  type: RabbitMQ
+  type: rabbitmq
   rabbitmq:
     host: localhost
     port: 5672
