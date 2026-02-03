@@ -76,17 +76,18 @@ func main() {
 
 	query := &packet.Query{
 		Filters: &packet.Filters{
-			Condition: "AND",
-			Rules: []packet.FilterRule{
-				{
-					Field:    "City",
-					Operator: "=",
-					Value:    "Moscow",
-				},
-				{
-					Field:    "IsActive",
-					Operator:    "=",
-					Value:    "1",
+			And: &packet.LogicalGroup{
+				Filters: []packet.Filter{
+					{
+						Field:    "City",
+						Operator: "=",
+						Value:    "Moscow",
+					},
+					{
+						Field:    "IsActive",
+						Operator: "=",
+						Value:    "1",
+					},
 				},
 			},
 		},
