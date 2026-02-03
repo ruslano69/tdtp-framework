@@ -38,6 +38,7 @@ type KafkaInputConfig struct {
 // ImportResult представляет результат импорта одной части
 type ImportResult struct {
 	PartNumber int
+	TotalParts int           // Из Header.TotalParts
 	RowsCount  int
 	Error      error
 	Duration   time.Duration
@@ -167,6 +168,11 @@ func (pi *ParallelImporter) Import(
 		stats.PartsImported++
 		stats.TotalRows += result.RowsCount
 
+		// Обновляем TotalParts если есть значение (берем максимальное)
+		if result.TotalParts > stats.TotalParts {
+			stats.TotalParts = result.TotalParts
+		}
+
 		if result.Error != nil {
 			stats.Errors = append(stats.Errors, fmt.Errorf("part %d: %w", result.PartNumber, result.Error))
 		}
@@ -236,6 +242,7 @@ func (pi *ParallelImporter) worker(
 
 			resultsChan <- &ImportResult{
 				PartNumber: dataPacket.Header.PartNumber,
+				TotalParts: dataPacket.Header.TotalParts,
 				RowsCount:  len(dataPacket.Data.Rows),
 				Error:      err,
 				Duration:   time.Since(startTime),
