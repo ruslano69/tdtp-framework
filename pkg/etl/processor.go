@@ -148,7 +148,7 @@ func (p *Processor) executeTransformation(ctx context.Context) (*ExecutionResult
 // Автоматически выбирает streaming режим для RabbitMQ/Kafka и batch для TDTP файлов
 func (p *Processor) exportResults(ctx context.Context, result *ExecutionResult) error {
 	// Для RabbitMQ/Kafka используем streaming экспорт (не требует всех данных в памяти)
-	if p.config.Output.Type == "RabbitMQ" || p.config.Output.Type == "Kafka" {
+	if p.config.Output.Type == "rabbitmq" || p.config.Output.Type == "kafka" {
 		return p.exportResultsStreaming(ctx)
 	}
 

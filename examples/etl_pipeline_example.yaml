@@ -113,7 +113,7 @@ transform:
 # ============================================================================
 
 output:
-  type: TDTP
+  type: tdtp
   tdtp:
     destination: "reports/user_order_summary.xml"
     format: "xml"
@@ -123,7 +123,7 @@ output:
 
 # RabbitMQ
 #output:
-#  type: RabbitMQ
+#  type: rabbitmq
 #  rabbitmq:
 #    host: localhost
 #    port: 5672
@@ -136,7 +136,7 @@ output:
 
 # Kafka
 #output:
-#  type: Kafka
+#  type: kafka
 #  kafka:
 #    brokers: "localhost:9092"
 #    topic: etl_results

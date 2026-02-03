@@ -43,17 +43,17 @@ func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*
 	}
 
 	switch e.config.Type {
-	case "TDTP":
+	case "tdtp":
 		err := e.exportToTDTP(ctx, dataPacket)
 		result.Error = err
 		return result, err
 
-	case "RabbitMQ":
+	case "rabbitmq":
 		err := e.exportToRabbitMQ(ctx, dataPacket)
 		result.Error = err
 		return result, err
 
-	case "Kafka":
+	case "kafka":
 		err := e.exportToKafka(ctx, dataPacket)
 		result.Error = err
 		return result, err
@@ -185,18 +185,18 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 // getDestination возвращает назначение экспорта в виде строки
 func (e *Exporter) getDestination() string {
 	switch e.config.Type {
-	case "TDTP":
+	case "tdtp":
 		if e.config.TDTP != nil {
 			return e.config.TDTP.Destination
 		}
-	case "RabbitMQ":
+	case "rabbitmq":
 		if e.config.RabbitMQ != nil {
 			return fmt.Sprintf("%s:%d/%s",
 				e.config.RabbitMQ.Host,
 				e.config.RabbitMQ.Port,
 				e.config.RabbitMQ.Queue)
 		}
-	case "Kafka":
+	case "kafka":
 		if e.config.Kafka != nil {
 			return fmt.Sprintf("%s/%s",
 				e.config.Kafka.Brokers,
@@ -213,7 +213,7 @@ func (e *Exporter) ValidateConfig() error {
 	}
 
 	switch e.config.Type {
-	case "TDTP":
+	case "tdtp":
 		if e.config.TDTP == nil {
 			return fmt.Errorf("TDTP config is required for TDTP output")
 		}
@@ -221,7 +221,7 @@ func (e *Exporter) ValidateConfig() error {
 			return fmt.Errorf("TDTP destination is required")
 		}
 
-	case "RabbitMQ":
+	case "rabbitmq":
 		if e.config.RabbitMQ == nil {
 			return fmt.Errorf("RabbitMQ config is required for RabbitMQ output")
 		}
@@ -232,7 +232,7 @@ func (e *Exporter) ValidateConfig() error {
 			return fmt.Errorf("RabbitMQ queue is required")
 		}
 
-	case "Kafka":
+	case "kafka":
 		if e.config.Kafka == nil {
 			return fmt.Errorf("Kafka config is required for Kafka output")
 		}
@@ -317,13 +317,13 @@ func (e *Exporter) ExportStream(ctx context.Context, streamResult *StreamingResu
 	}
 
 	switch e.config.Type {
-	case "RabbitMQ":
+	case "rabbitmq":
 		return e.exportStreamToRabbitMQ(ctx, streamResult, tableName)
 
-	case "Kafka":
+	case "kafka":
 		return e.exportStreamToKafka(ctx, streamResult, tableName)
 
-	case "TDTP":
+	case "tdtp":
 		// Для файлового экспорта используем batch режим (нужно знать TotalParts заранее)
 		return nil, fmt.Errorf("streaming export to TDTP files is not supported, use batch Export() instead")
 

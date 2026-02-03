@@ -3,6 +3,7 @@ package etl
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -213,6 +214,9 @@ func (o *OutputConfig) Validate() error {
 	if o.Type == "" {
 		return fmt.Errorf("type is required")
 	}
+
+	// Normalize type to lowercase for case-insensitive comparison
+	o.Type = strings.ToLower(o.Type)
 
 	switch o.Type {
 	case "tdtp":
