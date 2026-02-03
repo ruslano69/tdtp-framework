@@ -166,8 +166,19 @@ func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceD
 
 // executeTransformation выполняет SQL трансформацию
 func (p *Processor) executeTransformation(ctx context.Context) (*ExecutionResult, error) {
-	// Выполняем SQL из конфигурации
-	result, err := p.executor.Execute(ctx, p.config.Transform.SQL, p.config.Transform.ResultTable)
+	// Применяем timeout из конфигурации трансформации
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+
+	if p.config.Transform.Timeout > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(p.config.Transform.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		timeoutCtx = ctx
+	}
+
+	// Выполняем SQL из конфигурации с учетом timeout
+	result, err := p.executor.Execute(timeoutCtx, p.config.Transform.SQL, p.config.Transform.ResultTable)
 	if err != nil {
 		return nil, err
 	}
@@ -194,14 +205,25 @@ func (p *Processor) exportResults(ctx context.Context, result *ExecutionResult) 
 
 // exportResultsStreaming выполняет потоковый экспорт результатов в RabbitMQ/Kafka
 func (p *Processor) exportResultsStreaming(ctx context.Context) error {
-	// Выполняем SQL с потоковым чтением
-	streamResult, err := p.workspace.ExecuteSQLStream(ctx, p.config.Transform.SQL, p.config.Transform.ResultTable)
+	// Применяем timeout из конфигурации трансформации
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+
+	if p.config.Transform.Timeout > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(p.config.Transform.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		timeoutCtx = ctx
+	}
+
+	// Выполняем SQL с потоковым чтением с учетом timeout
+	streamResult, err := p.workspace.ExecuteSQLStream(timeoutCtx, p.config.Transform.SQL, p.config.Transform.ResultTable)
 	if err != nil {
 		return fmt.Errorf("failed to execute SQL stream: %w", err)
 	}
 
-	// Экспортируем в потоковом режиме
-	exportResult, err := p.exporter.ExportStream(ctx, streamResult, p.config.Transform.ResultTable)
+	// Экспортируем в потоковом режиме с учетом timeout
+	exportResult, err := p.exporter.ExportStream(timeoutCtx, streamResult, p.config.Transform.ResultTable)
 	if err != nil {
 		return fmt.Errorf("failed to export stream: %w", err)
 	}

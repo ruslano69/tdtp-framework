@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
@@ -139,24 +140,35 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 
 // loadFromSource загружает данные из конкретного источника
 func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*packet.DataPacket, error) {
+	// Применяем timeout из конфигурации источника
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+
+	if source.Timeout > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(source.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		timeoutCtx = ctx
+	}
+
 	// Создаем адаптер для источника
-	adapter, err := adapters.New(ctx, adapters.Config{
+	adapter, err := adapters.New(timeoutCtx, adapters.Config{
 		Type: source.Type,
 		DSN:  source.DSN,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer adapter.Close(timeoutCtx)
 
 	// Проверяем соединение
-	if err := adapter.Ping(ctx); err != nil {
+	if err := adapter.Ping(timeoutCtx); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Выполняем SQL запрос источника
+	// Выполняем SQL запрос источника с учетом timeout
 	// Используем ExecuteRawSQL для выполнения произвольного SELECT
-	packet, err := l.executeSourceQuery(ctx, adapter, source)
+	packet, err := l.executeSourceQuery(timeoutCtx, adapter, source)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
