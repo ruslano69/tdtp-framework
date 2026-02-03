@@ -97,6 +97,12 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 				partsChan <- &PartResult{
 					Error: ctx.Err(),
 				}
+				// Отправляем summary даже при отмене контекста
+				summaryChan <- &StreamingSummary{
+					MessageIDBase: messageIDBase,
+					TotalParts:    partNum - 1, // Уже созданные части
+					TotalRows:     totalRows,
+				}
 				return
 
 			case row, ok := <-rowsChan:
@@ -155,7 +161,12 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 					}
 
 					if err != nil {
-						// При ошибке продолжаем, но отправляем error в result
+						// При ошибке отправляем summary и завершаем
+						summaryChan <- &StreamingSummary{
+							MessageIDBase: messageIDBase,
+							TotalParts:    partNum, // Части до ошибки
+							TotalRows:     totalRows,
+						}
 						return
 					}
 
@@ -233,6 +244,12 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 				partsChan <- &PartResult{
 					Error: ctx.Err(),
 				}
+				// Отправляем summary даже при отмене контекста
+				summaryChan <- &StreamingSummary{
+					MessageIDBase: messageIDBase,
+					TotalParts:    partNum - 1, // Уже созданные части
+					TotalRows:     totalRows,
+				}
 				return
 
 			case row, ok := <-rowsChan:
@@ -294,6 +311,12 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 					}
 
 					if err != nil {
+						// При ошибке отправляем summary и завершаем
+						summaryChan <- &StreamingSummary{
+							MessageIDBase: messageIDBase,
+							TotalParts:    partNum, // Части до ошибки
+							TotalRows:     totalRows,
+						}
 						return
 					}
 

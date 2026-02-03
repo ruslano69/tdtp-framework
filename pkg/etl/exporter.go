@@ -454,9 +454,17 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Brok
 	}
 
 	// Получаем итоговую информацию
-	summary := <-summaryChan
-	result.TotalParts = summary.TotalParts
-	result.TotalRows = summary.TotalRows
+	// Безопасное чтение: если канал закрыт без записи (ctx.Done или ошибка), ok будет false
+	summary, ok := <-summaryChan
+	if ok {
+		result.TotalParts = summary.TotalParts
+		result.TotalRows = summary.TotalRows
+	} else {
+		// summaryChan закрыт без отправки summary (ошибка или отмена контекста)
+		// TotalParts и TotalRows остаются 0 или частично заполненными
+		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context cancelled or generator error)"))
+		result.ErrorsCount++
+	}
 
 	// Если были ошибки при отправке частей, возвращаем ошибку
 	if result.ErrorsCount > 0 {
