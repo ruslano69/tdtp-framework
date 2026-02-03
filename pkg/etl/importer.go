@@ -130,19 +130,15 @@ func (pi *ParallelImporter) Import(
 				errorsChan <- ctx.Err()
 				return
 			default:
-				// Получаем сообщение из брокера
+				// Получаем сообщение из брокера (блокирующий вызов)
 				msg, err := broker.Receive(ctx)
 				if err != nil {
 					// Если контекст отменен, выходим нормально
 					if ctx.Err() != nil {
 						return
 					}
+					// Другая ошибка (например, соединение разорвано)
 					errorsChan <- fmt.Errorf("failed to receive message: %w", err)
-					return
-				}
-
-				if msg == nil {
-					// Нет больше сообщений
 					return
 				}
 
