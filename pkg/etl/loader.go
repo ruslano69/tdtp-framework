@@ -2,6 +2,7 @@ package etl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -19,13 +20,15 @@ type SourceData struct {
 
 // Loader отвечает за загрузку данных из источников
 type Loader struct {
-	sources []SourceConfig
+	sources       []SourceConfig
+	errorHandling ErrorHandlingConfig
 }
 
 // NewLoader создает новый загрузчик данных
-func NewLoader(sources []SourceConfig) *Loader {
+func NewLoader(sources []SourceConfig, errorHandling ErrorHandlingConfig) *Loader {
 	return &Loader{
-		sources: sources,
+		sources:       sources,
+		errorHandling: errorHandling,
 	}
 }
 
@@ -72,18 +75,31 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 
 	// Собираем результаты
 	var allResults []SourceData
-	var errors []error
+	var sourceErrors []error
 
 	for result := range results {
 		allResults = append(allResults, result)
 		if result.Error != nil {
-			errors = append(errors, fmt.Errorf("source '%s': %w", result.SourceName, result.Error))
+			sourceErrors = append(sourceErrors, fmt.Errorf("source '%s': %w", result.SourceName, result.Error))
 		}
 	}
 
-	// Если были ошибки, возвращаем первую
-	if len(errors) > 0 {
-		return allResults, errors[0]
+	// Обработка ошибок согласно on_source_error стратегии
+	if len(sourceErrors) > 0 {
+		switch l.errorHandling.OnSourceError {
+		case "continue":
+			// Continue: возвращаем все результаты (включая ошибочные) и все ошибки
+			// Processor решит что делать с источниками где Error != nil
+			return allResults, errors.Join(sourceErrors...)
+
+		case "fail":
+			// Fail: останавливаемся на первой ошибке
+			return allResults, sourceErrors[0]
+
+		default:
+			// По умолчанию fail
+			return allResults, sourceErrors[0]
+		}
 	}
 
 	return allResults, nil

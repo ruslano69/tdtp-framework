@@ -31,7 +31,7 @@ type Processor struct {
 func NewProcessor(config *PipelineConfig) *Processor {
 	return &Processor{
 		config: config,
-		loader: NewLoader(config.Sources),
+		loader: NewLoader(config.Sources, config.ErrorHandling),
 		stats:  ProcessorStats{},
 	}
 }
@@ -103,26 +103,47 @@ func (p *Processor) initWorkspace(ctx context.Context) error {
 func (p *Processor) loadSources(ctx context.Context) ([]SourceData, error) {
 	// Загружаем данные параллельно
 	sourcesData, err := p.loader.LoadAll(ctx)
-	if err != nil {
+
+	// Если on_source_error = "continue", ошибки могут быть, но продолжаем
+	// Если on_source_error = "fail", err != nil означает критичную ошибку
+	if err != nil && p.config.ErrorHandling.OnSourceError == "fail" {
 		return nil, err
 	}
 
-	// Подсчитываем статистику
-	p.stats.SourcesLoaded = len(sourcesData)
+	// Подсчитываем статистику только для успешно загруженных источников
+	successCount := 0
 	for _, data := range sourcesData {
-		if data.Packet != nil {
+		if data.Error == nil && data.Packet != nil {
+			successCount++
 			p.stats.TotalRowsLoaded += len(data.Packet.Data.Rows)
 		}
 	}
+	p.stats.SourcesLoaded = successCount
 
-	return sourcesData, nil
+	// Возвращаем все результаты (включая ошибочные, если on_source_error = "continue")
+	return sourcesData, err
 }
 
 // populateWorkspace создает таблицы и загружает данные в workspace
 func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceData) error {
 	for _, source := range sourcesData {
+		// Обработка ошибок источника согласно on_source_error стратегии
 		if source.Error != nil {
-			return fmt.Errorf("source '%s' has error: %w", source.SourceName, source.Error)
+			switch p.config.ErrorHandling.OnSourceError {
+			case "continue":
+				// Continue: пропускаем источник с ошибкой, продолжаем с остальными
+				// Записываем ошибку в статистику для отчета
+				p.stats.Errors = append(p.stats.Errors, fmt.Errorf("source '%s' skipped: %w", source.SourceName, source.Error))
+				continue
+
+			case "fail":
+				// Fail: останавливаемся на первой ошибке источника
+				return fmt.Errorf("source '%s' has error: %w", source.SourceName, source.Error)
+
+			default:
+				// По умолчанию fail
+				return fmt.Errorf("source '%s' has error: %w", source.SourceName, source.Error)
+			}
 		}
 
 		if source.Packet == nil {
