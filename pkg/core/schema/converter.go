@@ -189,15 +189,21 @@ func (c *Converter) parseBoolean(tv *TypedValue, field FieldDef) (*TypedValue, e
 	return tv, nil
 }
 
-// parseDate парсит DATE (YYYY-MM-DD)
+// parseDate парсит DATE (YYYY-MM-DD или ISO8601 с временной частью)
 func (c *Converter) parseDate(tv *TypedValue, field FieldDef) (*TypedValue, error) {
 	val, err := time.Parse("2006-01-02", tv.RawValue)
 	if err != nil {
-		return nil, &ValidationError{
-			Field:   field.Name,
-			Message: "invalid date format, expected YYYY-MM-DD",
-			Value:   tv.RawValue,
+		// SQLite и другие БД могут вернуть дату в формате RFC3339 (например, "2024-01-15T00:00:00Z")
+		val, err = time.Parse(time.RFC3339, tv.RawValue)
+		if err != nil {
+			return nil, &ValidationError{
+				Field:   field.Name,
+				Message: "invalid date format, expected YYYY-MM-DD",
+				Value:   tv.RawValue,
+			}
 		}
+		// Отбрасываем временную часть — сохраняем только дату
+		val = time.Date(val.Year(), val.Month(), val.Day(), 0, 0, 0, 0, time.UTC)
 	}
 	tv.TimeValue = &val
 	return tv, nil

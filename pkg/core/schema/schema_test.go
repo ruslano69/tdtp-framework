@@ -209,6 +209,26 @@ func TestConverterDate(t *testing.T) {
 		t.Errorf("Expected %v, got %v", expected, tv.TimeValue)
 	}
 
+	// ISO8601 date from SQLite (e.g. "1984-04-13T00:00:00Z") — временная часть отбрасывается
+	tv, err = converter.ParseValue("1984-04-13T00:00:00Z", field)
+	if err != nil {
+		t.Fatalf("Failed to parse ISO8601 date: %v", err)
+	}
+	expectedISO := time.Date(1984, 4, 13, 0, 0, 0, 0, time.UTC)
+	if !tv.TimeValue.Equal(expectedISO) {
+		t.Errorf("Expected %v, got %v", expectedISO, tv.TimeValue)
+	}
+
+	// ISO8601 date с ненулевым временем — время всё равно отбрасывается
+	tv, err = converter.ParseValue("2024-06-15T14:30:00Z", field)
+	if err != nil {
+		t.Fatalf("Failed to parse ISO8601 date with time: %v", err)
+	}
+	expectedDate := time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)
+	if !tv.TimeValue.Equal(expectedDate) {
+		t.Errorf("Expected %v, got %v", expectedDate, tv.TimeValue)
+	}
+
 	// Invalid date
 	_, err = converter.ParseValue("2025-13-01", field)
 	if err == nil {
