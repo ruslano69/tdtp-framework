@@ -295,17 +295,38 @@ func ImportToDatabase(
 ) (*ImportStats, error) {
 	var mu sync.Mutex
 	tableCreated := false
+	var expectedBatchID string    // MessageID base первого пакета
+	var expectedSchema []packet.Field // Schema первого пакета
 
 	// Handler который вставляет данные в workspace
 	handler := func(ctx context.Context, dataPacket *packet.DataPacket) error {
+		// Извлекаем batch ID из MessageID (часть до "-P")
+		batchID := extractBatchID(dataPacket.Header.MessageID)
+
 		// Создаем таблицу при обработке первой части (thread-safe)
 		mu.Lock()
 		if !tableCreated {
+			// Сохраняем batch ID и schema первого пакета
+			expectedBatchID = batchID
+			expectedSchema = dataPacket.Schema.Fields
+
 			if err := workspace.CreateTable(ctx, tableName, dataPacket.Schema.Fields); err != nil {
 				mu.Unlock()
 				return fmt.Errorf("failed to create table: %w", err)
 			}
 			tableCreated = true
+		} else {
+			// Валидация: проверяем что пакет из того же batch
+			if batchID != expectedBatchID {
+				mu.Unlock()
+				return fmt.Errorf("batch mismatch: expected %s, got %s (mixed batches in queue)", expectedBatchID, batchID)
+			}
+
+			// Валидация: проверяем что schema совпадает
+			if !schemaEquals(dataPacket.Schema.Fields, expectedSchema) {
+				mu.Unlock()
+				return fmt.Errorf("schema mismatch: packet from batch %s has different schema", batchID)
+			}
 		}
 		mu.Unlock()
 
@@ -318,4 +339,39 @@ func ImportToDatabase(
 	}
 
 	return importer.Import(ctx, handler)
+}
+
+// extractBatchID извлекает batch ID из MessageID (часть до "-P")
+// Например: "MSG-2024-123-P1" -> "MSG-2024-123"
+func extractBatchID(messageID string) string {
+	// Ищем последний "-P" в строке
+	lastPIndex := -1
+	for i := len(messageID) - 2; i >= 0; i-- {
+		if messageID[i:i+2] == "-P" {
+			lastPIndex = i
+			break
+		}
+	}
+
+	if lastPIndex > 0 {
+		return messageID[:lastPIndex]
+	}
+
+	// Если не нашли "-P", возвращаем весь MessageID
+	return messageID
+}
+
+// schemaEquals проверяет что две schema идентичны
+func schemaEquals(a, b []packet.Field) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i].Name != b[i].Name || a[i].Type != b[i].Type {
+			return false
+		}
+	}
+
+	return true
 }
