@@ -362,74 +362,8 @@ func (e *Exporter) exportStreamToRabbitMQ(ctx context.Context, streamResult *Str
 		return result, fmt.Errorf("failed to create RabbitMQ broker: %w", err)
 	}
 
-	// Подключаемся
-	if err := broker.Connect(ctx); err != nil {
-		result.Errors = append(result.Errors, err)
-		return result, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
-	}
-	defer broker.Close()
-
-	// Создаем streaming generator
-	streamGen := packet.NewStreamingGenerator()
-
-	// Генерируем и отправляем части по мере поступления данных
-	partsChan, summaryChan := streamGen.GeneratePartsStream(
-		ctx,
-		streamResult.RowsChan,
-		streamResult.Schema,
-		tableName,
-		packet.TypeReference,
-	)
-
-	// Создаем генератор для XML
-	xmlGen := packet.NewGenerator()
-
-	// Обрабатываем части
-	for partResult := range partsChan {
-		if partResult.Error != nil {
-			result.Errors = append(result.Errors, partResult.Error)
-			result.ErrorsCount++
-			continue
-		}
-
-		// Генерируем XML
-		xmlData, err := xmlGen.ToXML(partResult.Packet, false) // compact
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("part %d XML generation failed: %w", partResult.PartNum, err))
-			result.ErrorsCount++
-			continue
-		}
-
-		// Отправляем в RabbitMQ
-		if err := broker.Send(ctx, xmlData); err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("part %d send failed: %w", partResult.PartNum, err))
-			result.ErrorsCount++
-			continue
-		}
-
-		result.PartsSent++
-		result.TotalRows += partResult.RowsCount
-	}
-
-	// Проверяем ошибки из канала ошибок
-	select {
-	case err := <-streamResult.ErrorChan:
-		if err != nil {
-			result.Errors = append(result.Errors, err)
-			result.ErrorsCount++
-		}
-	default:
-	}
-
-	// Получаем итоговую информацию
-	summary := <-summaryChan
-	result.TotalParts = summary.TotalParts
-
-	if result.ErrorsCount > 0 {
-		return result, fmt.Errorf("streaming export completed with %d errors", result.ErrorsCount)
-	}
-
-	return result, nil
+	// Используем общий метод для экспорта
+	return e.exportStreamToBroker(ctx, broker, streamResult, tableName, result)
 }
 
 // exportStreamToKafka выполняет потоковый экспорт в Kafka
@@ -456,17 +390,23 @@ func (e *Exporter) exportStreamToKafka(ctx context.Context, streamResult *Stream
 		return result, fmt.Errorf("failed to create Kafka broker: %w", err)
 	}
 
-	// Подключаемся
+	// Используем общий метод для экспорта
+	return e.exportStreamToBroker(ctx, broker, streamResult, tableName, result)
+}
+
+// exportStreamToBroker выполняет общую логику потокового экспорта в любой broker (RabbitMQ/Kafka)
+func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Broker, streamResult *StreamingResult, tableName string, result *StreamingExportResult) (*StreamingExportResult, error) {
+	// Подключаемся к broker
 	if err := broker.Connect(ctx); err != nil {
 		result.Errors = append(result.Errors, err)
-		return result, fmt.Errorf("failed to connect to Kafka: %w", err)
+		return result, fmt.Errorf("failed to connect to broker: %w", err)
 	}
 	defer broker.Close()
 
 	// Создаем streaming generator
 	streamGen := packet.NewStreamingGenerator()
 
-	// Генерируем и отправляем части
+	// Генерируем части в потоковом режиме
 	partsChan, summaryChan := streamGen.GeneratePartsStream(
 		ctx,
 		streamResult.RowsChan,
@@ -475,45 +415,58 @@ func (e *Exporter) exportStreamToKafka(ctx context.Context, streamResult *Stream
 		packet.TypeReference,
 	)
 
-	xmlGen := packet.NewGenerator()
-
-	for partResult := range partsChan {
-		if partResult.Error != nil {
-			result.Errors = append(result.Errors, partResult.Error)
+	// Обрабатываем части по мере их генерации
+	for part := range partsChan {
+		if part.Error != nil {
+			result.Errors = append(result.Errors, part.Error)
 			result.ErrorsCount++
 			continue
 		}
 
-		xmlData, err := xmlGen.ToXML(partResult.Packet, false)
+		// Генерируем XML из пакета
+		generator := packet.NewGenerator()
+		xmlData, err := generator.ToXML(part.Packet, false) // compact XML
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("part %d XML generation failed: %w", partResult.PartNum, err))
+			result.Errors = append(result.Errors, fmt.Errorf("failed to generate XML for part %d: %w", part.PartNum, err))
 			result.ErrorsCount++
 			continue
 		}
 
+		// Отправляем в broker
 		if err := broker.Send(ctx, xmlData); err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("part %d send failed: %w", partResult.PartNum, err))
+			result.Errors = append(result.Errors, fmt.Errorf("failed to send part %d to broker: %w", part.PartNum, err))
 			result.ErrorsCount++
 			continue
 		}
 
 		result.PartsSent++
-		result.TotalRows += partResult.RowsCount
 	}
 
-	// Проверяем ошибки
+	// Проверяем ошибки из канала ErrorChan
 	select {
 	case err := <-streamResult.ErrorChan:
 		if err != nil {
-			result.Errors = append(result.Errors, err)
+			result.Errors = append(result.Errors, fmt.Errorf("streaming error: %w", err))
 			result.ErrorsCount++
 		}
 	default:
+		// Нет ошибок
 	}
 
-	summary := <-summaryChan
-	result.TotalParts = summary.TotalParts
+	// Получаем итоговую информацию
+	// Безопасное чтение: если канал закрыт без записи (ctx.Done или ошибка), ok будет false
+	summary, ok := <-summaryChan
+	if ok {
+		result.TotalParts = summary.TotalParts
+		result.TotalRows = summary.TotalRows
+	} else {
+		// summaryChan закрыт без отправки summary (ошибка или отмена контекста)
+		// TotalParts и TotalRows остаются 0 или частично заполненными
+		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context cancelled or generator error)"))
+		result.ErrorsCount++
+	}
 
+	// Если были ошибки при отправке частей, возвращаем ошибку
 	if result.ErrorsCount > 0 {
 		return result, fmt.Errorf("streaming export completed with %d errors", result.ErrorsCount)
 	}

@@ -38,6 +38,7 @@ type KafkaInputConfig struct {
 // ImportResult представляет результат импорта одной части
 type ImportResult struct {
 	PartNumber int
+	TotalParts int           // Из Header.TotalParts
 	RowsCount  int
 	Error      error
 	Duration   time.Duration
@@ -129,19 +130,15 @@ func (pi *ParallelImporter) Import(
 				errorsChan <- ctx.Err()
 				return
 			default:
-				// Получаем сообщение из брокера
+				// Получаем сообщение из брокера (блокирующий вызов)
 				msg, err := broker.Receive(ctx)
 				if err != nil {
 					// Если контекст отменен, выходим нормально
 					if ctx.Err() != nil {
 						return
 					}
+					// Другая ошибка (например, соединение разорвано)
 					errorsChan <- fmt.Errorf("failed to receive message: %w", err)
-					return
-				}
-
-				if msg == nil {
-					// Нет больше сообщений
 					return
 				}
 
@@ -166,6 +163,11 @@ func (pi *ParallelImporter) Import(
 	for result := range resultsChan {
 		stats.PartsImported++
 		stats.TotalRows += result.RowsCount
+
+		// Обновляем TotalParts если есть значение (берем максимальное)
+		if result.TotalParts > stats.TotalParts {
+			stats.TotalParts = result.TotalParts
+		}
 
 		if result.Error != nil {
 			stats.Errors = append(stats.Errors, fmt.Errorf("part %d: %w", result.PartNumber, result.Error))
@@ -236,6 +238,7 @@ func (pi *ParallelImporter) worker(
 
 			resultsChan <- &ImportResult{
 				PartNumber: dataPacket.Header.PartNumber,
+				TotalParts: dataPacket.Header.TotalParts,
 				RowsCount:  len(dataPacket.Data.Rows),
 				Error:      err,
 				Duration:   time.Since(startTime),
@@ -288,17 +291,38 @@ func ImportToDatabase(
 ) (*ImportStats, error) {
 	var mu sync.Mutex
 	tableCreated := false
+	var expectedBatchID string    // MessageID base первого пакета
+	var expectedSchema []packet.Field // Schema первого пакета
 
 	// Handler который вставляет данные в workspace
 	handler := func(ctx context.Context, dataPacket *packet.DataPacket) error {
+		// Извлекаем batch ID из MessageID (часть до "-P")
+		batchID := extractBatchID(dataPacket.Header.MessageID)
+
 		// Создаем таблицу при обработке первой части (thread-safe)
 		mu.Lock()
 		if !tableCreated {
+			// Сохраняем batch ID и schema первого пакета
+			expectedBatchID = batchID
+			expectedSchema = dataPacket.Schema.Fields
+
 			if err := workspace.CreateTable(ctx, tableName, dataPacket.Schema.Fields); err != nil {
 				mu.Unlock()
 				return fmt.Errorf("failed to create table: %w", err)
 			}
 			tableCreated = true
+		} else {
+			// Валидация: проверяем что пакет из того же batch
+			if batchID != expectedBatchID {
+				mu.Unlock()
+				return fmt.Errorf("batch mismatch: expected %s, got %s (mixed batches in queue)", expectedBatchID, batchID)
+			}
+
+			// Валидация: проверяем что schema совпадает
+			if !schemaEquals(dataPacket.Schema.Fields, expectedSchema) {
+				mu.Unlock()
+				return fmt.Errorf("schema mismatch: packet from batch %s has different schema", batchID)
+			}
 		}
 		mu.Unlock()
 
@@ -311,4 +335,39 @@ func ImportToDatabase(
 	}
 
 	return importer.Import(ctx, handler)
+}
+
+// extractBatchID извлекает batch ID из MessageID (часть до "-P")
+// Например: "MSG-2024-123-P1" -> "MSG-2024-123"
+func extractBatchID(messageID string) string {
+	// Ищем последний "-P" в строке
+	lastPIndex := -1
+	for i := len(messageID) - 2; i >= 0; i-- {
+		if messageID[i:i+2] == "-P" {
+			lastPIndex = i
+			break
+		}
+	}
+
+	if lastPIndex > 0 {
+		return messageID[:lastPIndex]
+	}
+
+	// Если не нашли "-P", возвращаем весь MessageID
+	return messageID
+}
+
+// schemaEquals проверяет что две schema идентичны
+func schemaEquals(a, b []packet.Field) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i].Name != b[i].Name || a[i].Type != b[i].Type {
+			return false
+		}
+	}
+
+	return true
 }

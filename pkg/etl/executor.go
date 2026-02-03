@@ -67,35 +67,6 @@ func (e *Executor) Execute(ctx context.Context, sql string, resultTableName stri
 	}, nil
 }
 
-// ValidateSQL проверяет SQL запрос перед выполнением (базовая проверка)
-func (e *Executor) ValidateSQL(sql string) error {
-	if sql == "" {
-		return fmt.Errorf("SQL query is empty")
-	}
-
-	// Базовая проверка - SQL должен начинаться с SELECT или WITH
-	// Более строгая валидация выполняется в security.SQLValidator
-	trimmed := trimLeadingWhitespace(sql)
-	if len(trimmed) < 6 {
-		return fmt.Errorf("SQL query is too short")
-	}
-
-	return nil
-}
-
-// trimLeadingWhitespace удаляет начальные пробелы и переносы строк
-func trimLeadingWhitespace(s string) string {
-	start := 0
-	for start < len(s) {
-		c := s[start]
-		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
-			break
-		}
-		start++
-	}
-	return s[start:]
-}
-
 // GetWorkspace возвращает workspace (для тестирования)
 func (e *Executor) GetWorkspace() *Workspace {
 	return e.workspace

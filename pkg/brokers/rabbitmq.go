@@ -15,7 +15,8 @@ type RabbitMQ struct {
 	conn          *amqp.Connection
 	channel       *amqp.Channel
 	queue         amqp.Queue
-	lastDelivery  *amqp.Delivery // Последнее полученное сообщение (для manual ack)
+	lastDelivery  *amqp.Delivery     // Последнее полученное сообщение (для manual ack)
+	deliveryChan  <-chan amqp.Delivery // Канал для блокирующего получения сообщений
 }
 
 // NewRabbitMQ создает новый RabbitMQ брокер
@@ -114,6 +115,22 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		}
 	}
 
+	// Начинаем потребление сообщений (блокирующий режим)
+	r.deliveryChan, err = r.channel.Consume(
+		r.config.Queue, // queue
+		"",             // consumer tag (пустая строка = auto-generated)
+		false,          // auto-ack = false - MANUAL ACK!
+		false,          // exclusive
+		false,          // no-local
+		false,          // no-wait
+		nil,            // args
+	)
+	if err != nil {
+		r.channel.Close()
+		r.conn.Close()
+		return fmt.Errorf("failed to start consuming: %w", err)
+	}
+
 	return nil
 }
 
@@ -172,33 +189,27 @@ func (r *RabbitMQ) Send(ctx context.Context, message []byte) error {
 // ВАЖНО: Сообщение НЕ удаляется из очереди автоматически!
 // Нужно вызвать AckLast() после успешной обработки
 func (r *RabbitMQ) Receive(ctx context.Context) ([]byte, error) {
-	if r.channel == nil {
-		return nil, fmt.Errorf("not connected to RabbitMQ")
+	if r.deliveryChan == nil {
+		return nil, fmt.Errorf("not connected to RabbitMQ (deliveryChan is nil)")
 	}
 
-	// Используем Get() вместо Consume() для получения одного сообщения с manual ack
-	// auto-ack = false означает что сообщение останется в очереди пока не подтвердим
-	delivery, ok, err := r.channel.Get(
-		r.config.Queue, // queue
-		false,          // auto-ack = false - MANUAL ACK!
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get message: %w", err)
-	}
-
-	if !ok {
-		// Нет сообщений в очереди - ждем немного и возвращаем ошибку timeout
-		select {
-		case <-time.After(1 * time.Second):
-			return nil, fmt.Errorf("no messages available")
-		case <-ctx.Done():
-			return nil, ctx.Err()
+	// Блокирующее получение сообщения из канала
+	// Ждем пока не придет сообщение или не отменят контекст
+	select {
+	case delivery, ok := <-r.deliveryChan:
+		if !ok {
+			// Канал закрыт (соединение разорвано)
+			return nil, fmt.Errorf("delivery channel closed (connection lost)")
 		}
-	}
 
-	// Сохраняем delivery для последующего подтверждения
-	r.lastDelivery = &delivery
-	return delivery.Body, nil
+		// Сохраняем delivery для последующего подтверждения
+		r.lastDelivery = &delivery
+		return delivery.Body, nil
+
+	case <-ctx.Done():
+		// Контекст отменен
+		return nil, ctx.Err()
+	}
 }
 
 // AckLast подтверждает последнее полученное сообщение (удаляет из очереди)
