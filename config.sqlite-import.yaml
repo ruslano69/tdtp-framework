@@ -1,0 +1,15 @@
+# SQLite Configuration for TDTP CLI
+# Импорт из data.tdtp.xml
+#
+# Использование:
+#   tdtpcli --import data.tdtp.xml --config config.sqlite-import.yaml --strategy copy
+#
+# Стратегия copy: создаёт таблицу заново (temp → atomic rename).
+# Если таблица уже существует — заменяется полностью.
+
+database:
+  type: sqlite
+  database: ZTR_Employee.db
+
+export:
+  compress: false

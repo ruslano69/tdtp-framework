@@ -1,0 +1,38 @@
+# MSSQL Configuration for TDTP CLI
+# Экспорт из ZTR-Live
+#
+# Использование:
+#   tdtpcli --export ZTR$Employee --output data.tdtp.xml --config config.mssql.yaml
+
+database:
+  type: mssql
+  host: sql-srv1
+  port: 1433
+  database: ZTR-Live
+  schema: dbo
+  windows_auth: true    # Windows Authentication (SSPI / trusted_connection)
+  sslmode: disable      # encrypt=disable — локальный SQL Server без TLS
+
+export:
+  compress: false       # без сжатия для тестирования
+
+resilience:
+  circuit_breaker:
+    enabled: true
+    threshold: 5
+    timeout: 30
+    max_concurrent: 100
+    success_threshold: 2
+  retry:
+    enabled: true
+    max_attempts: 3
+    strategy: exponential
+    initial_wait_ms: 1000
+    max_wait_ms: 30000
+    jitter: true
+
+audit:
+  enabled: true
+  level: standard
+  file: ./logs/audit.log
+  max_size_mb: 100

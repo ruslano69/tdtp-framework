@@ -226,12 +226,16 @@ func (c *DatabaseConfig) BuildDSN() string {
 			c.User, c.Password, c.Host, c.Port, c.Database, sslMode, schema)
 
 	case "mssql", "sqlserver":
-		if c.WindowsAuth {
-			return fmt.Sprintf("sqlserver://%s:%d?database=%s&integrated security=SSPI",
-				c.Host, c.Port, c.Database)
+		encrypt := ""
+		if c.SSLMode == "disable" {
+			encrypt = "&encrypt=disable"
 		}
-		return fmt.Sprintf("sqlserver://%s:%s@%s:%d?database=%s",
-			c.User, c.Password, c.Host, c.Port, c.Database)
+		if c.WindowsAuth {
+			return fmt.Sprintf("sqlserver://%s:%d?database=%s%s&trusted_connection=true",
+				c.Host, c.Port, c.Database, encrypt)
+		}
+		return fmt.Sprintf("sqlserver://%s:%s@%s:%d?database=%s%s",
+			c.User, c.Password, c.Host, c.Port, c.Database, encrypt)
 
 	case "sqlite":
 		return c.Database
