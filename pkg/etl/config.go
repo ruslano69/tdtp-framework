@@ -204,7 +204,21 @@ func (w *WorkspaceConfig) Validate() error {
 // Validate проверяет корректность TransformConfig
 func (t *TransformConfig) Validate() error {
 	if t.SQL == "" {
-		return fmt.Errorf("sql is required")
+		return fmt.Errorf("transform SQL is required")
+	}
+	if t.ResultTable == "" {
+		return fmt.Errorf("transform result_table is required")
+	}
+	if t.Timeout < 0 {
+		return fmt.Errorf("timeout must be positive")
+	}
+	return nil
+}
+
+// Validate проверяет корректность ErrorHandlingConfig
+func (e *ErrorHandlingConfig) Validate() error {
+	if e.OnSourceError != "" && e.OnSourceError != "fail" && e.OnSourceError != "continue" {
+		return fmt.Errorf("on_source_error must be 'fail' or 'continue'")
 	}
 	return nil
 }
