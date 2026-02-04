@@ -190,6 +190,13 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 		return nil, err
 	}
 
+	// Валидация и нормализация полей запроса (критично для quoted identifiers)
+	executor := tdtql.NewExecutor()
+	if err := executor.ValidateQuery(query, pkgSchema); err != nil {
+		return nil, err
+	}
+	executor.NormalizeQueryFields(query, pkgSchema)
+
 	// Пробуем транслировать TDTQL → SQL для оптимизации
 	sqlGenerator := tdtql.NewSQLGenerator()
 	if sqlGenerator.CanTranslateToSQL(query) {
@@ -259,8 +266,7 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 		}
 	}
 
-	// Фильтруем in-memory
-	executor := tdtql.NewExecutor()
+	// Фильтруем in-memory (executor уже создан выше)
 	result, err := executor.Execute(query, allRows, pkgSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)

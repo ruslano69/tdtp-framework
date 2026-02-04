@@ -266,6 +266,13 @@ func (a *Adapter) ExportTableWithQuery(
 		return generator.GenerateReference(tableName, filteredSchema, filteredRows)
 	}
 
+	// Валидация и нормализация полей запроса
+	executor := tdtql.NewExecutor()
+	if err := executor.ValidateQuery(query, pkgSchema); err != nil {
+		return nil, err
+	}
+	executor.NormalizeQueryFields(query, pkgSchema)
+
 	// Пробуем транслировать TDTQL → SQL для оптимизации
 	sqlGenerator := tdtql.NewSQLGenerator()
 	if sqlGenerator.CanTranslateToSQL(query) {
@@ -323,8 +330,7 @@ func (a *Adapter) ExportTableWithQuery(
 		return nil, err
 	}
 
-	// Применяем TDTQL фильтрацию в памяти
-	executor := tdtql.NewExecutor()
+	// Применяем TDTQL фильтрацию в памяти (executor уже создан выше)
 	result, err := executor.Execute(query, rows, pkgSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
