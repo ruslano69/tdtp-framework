@@ -352,7 +352,7 @@ func TestValidateSchema(t *testing.T) {
 		t.Error("Expected error for invalid type")
 	}
 
-	// TEXT без length (Length = 0) — валидно, означает неограниченную длину (например, SQLite TEXT)
+	// TEXT без length (Length = 0) — неограниченная длина (SQLite TEXT, PG text, MSSQL VARCHAR(MAX))
 	noLengthSchema := packet.Schema{
 		Fields: []packet.Field{
 			{Name: "Name", Type: "TEXT"},
@@ -363,15 +363,26 @@ func TestValidateSchema(t *testing.T) {
 		t.Errorf("TEXT with Length=0 should be valid (unlimited), got: %v", err)
 	}
 
-	// TEXT с отрицательной длиной — невалидно
-	negLengthSchema := packet.Schema{
+	// TEXT с Length = -1 — неограниченная длина (PostgreSQL uuid/json/jsonb subtype)
+	negOneSchema := packet.Schema{
 		Fields: []packet.Field{
-			{Name: "Name", Type: "TEXT", Length: -1},
+			{Name: "Data", Type: "TEXT", Length: -1},
 		},
 	}
-	err = validator.ValidateSchema(negLengthSchema)
-	if err == nil {
-		t.Error("Expected error for TEXT with negative length")
+	err = validator.ValidateSchema(negOneSchema)
+	if err != nil {
+		t.Errorf("TEXT with Length=-1 should be valid (PG subtype unlimited), got: %v", err)
+	}
+
+	// TEXT с явной длиной — валидно
+	withLengthSchema := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "Name", Type: "TEXT", Length: 100},
+		},
+	}
+	err = validator.ValidateSchema(withLengthSchema)
+	if err != nil {
+		t.Errorf("TEXT with Length=100 should be valid, got: %v", err)
 	}
 }
 
