@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 	"os"
 
@@ -113,13 +112,13 @@ func main() {
 
 	// 4. Сохраняем в файл
 	exportFile := "users_export.tdtp"
-	generator := packet.NewGenerator(packet.GeneratorConfig{})
-	xmlData, err := generator.GenerateXML(pkt)
+	generator := packet.NewGenerator()
+	xmlData, err := generator.ToXML(pkt, true)
 	if err != nil {
 		log.Fatalf("Generate XML failed: %v", err)
 	}
 
-	err = os.WriteFile(exportFile, []byte(xmlData), 0644)
+	err = os.WriteFile(exportFile, xmlData, 0644)
 	if err != nil {
 		log.Fatalf("Write file failed: %v", err)
 	}
