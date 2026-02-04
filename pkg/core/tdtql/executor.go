@@ -44,9 +44,9 @@ func (e *Executor) Execute(query *packet.Query, rows [][]string, schemaObj packe
 		FilterStats: make(map[string]int),
 	}
 
-	// Валидация схемы
-	if err := e.validator.ValidateSchema(schemaObj); err != nil {
-		return nil, fmt.Errorf("schema validation failed: %w", err)
+	// Валидация схемы и полей запроса (фильтры, ORDER BY)
+	if err := e.ValidateQuery(query, schemaObj); err != nil {
+		return nil, err
 	}
 
 	// 1. Фильтрация

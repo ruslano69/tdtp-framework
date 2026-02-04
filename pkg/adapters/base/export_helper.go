@@ -96,7 +96,13 @@ func (h *ExportHelper) ExportTableWithQuery(
 		return nil, err
 	}
 
-	// 2. Пробуем транслировать TDTQL → SQL для оптимизации (pushdown filtering)
+	// 2. Валидация полей запроса (поля фильтров и ORDER BY) до чтения данных
+	executor := tdtql.NewExecutor()
+	if err := executor.ValidateQuery(query, pkgSchema); err != nil {
+		return nil, err
+	}
+
+	// 3. Пробуем транслировать TDTQL → SQL для оптимизации (pushdown filtering)
 	sqlGenerator := tdtql.NewSQLGenerator()
 	if sqlGenerator.CanTranslateToSQL(query) {
 		// Оптимизированный путь: фильтрация на уровне SQL
@@ -136,7 +142,6 @@ func (h *ExportHelper) ExportTableWithQuery(
 	}
 
 	// Применяем TDTQL фильтрацию в памяти
-	executor := tdtql.NewExecutor()
 	result, err := executor.Execute(query, rows, pkgSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
