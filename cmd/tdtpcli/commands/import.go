@@ -4,10 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
+
+// multiPartPattern matches filenames produced by export: {base}_part_{N}_of_{total}{ext}
+var multiPartPattern = regexp.MustCompile(`^(.+)_part_(\d+)_of_(\d+)(\..+)$`)
 
 // ImportOptions holds options for import operations
 type ImportOptions struct {
@@ -16,63 +22,117 @@ type ImportOptions struct {
 	ProcessorMgr ProcessorManager
 }
 
-// ImportFile imports a TDTP XML file to database
+// ImportFile imports a TDTP XML file (or multi-part set) to database.
+// If FilePath is a base name whose _part_ files exist on disk, or is itself
+// a part file, all parts are collected automatically. Multiple packets are
+// passed to adapter.ImportPackets — the framework handles temp table creation,
+// sequential insert of all packets, and atomic swap in one transaction.
 func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions) error {
-	// Read file
-	data, err := os.ReadFile(opts.FilePath)
-	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+	// Detect multi-part set; fall back to single file
+	filePaths := discoverMultiPartFiles(opts.FilePath)
+	if filePaths == nil {
+		filePaths = []string{opts.FilePath}
 	}
 
-	fmt.Printf("Importing file '%s'...\n", opts.FilePath)
-
-	// Parse TDTP packet
-	parser := packet.NewParser()
-	pkt, err := parser.ParseBytes(data)
-	if err != nil {
-		return fmt.Errorf("failed to parse TDTP packet: %w", err)
-	}
-
-	fmt.Printf("✓ Parsed packet for table '%s'\n", pkt.Header.TableName)
-	fmt.Printf("✓ Schema: %d field(s)\n", len(pkt.Schema.Fields))
-
-	// Decompress if data is compressed
-	if pkt.Data.Compression != "" {
-		fmt.Printf("Decompressing data (%s)...\n", pkt.Data.Compression)
-		if err := decompressPacketData(ctx, pkt); err != nil {
-			return fmt.Errorf("decompression failed: %w", err)
+	// Read and parse all packets
+	packets := make([]*packet.DataPacket, 0, len(filePaths))
+	for _, fp := range filePaths {
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
 		}
-		fmt.Printf("✓ Data decompressed\n")
-	}
 
-	fmt.Printf("✓ Data: %d row(s)\n", len(pkt.Data.Rows))
+		fmt.Printf("Reading '%s'...\n", fp)
 
-	// Apply data processors if configured
-	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
-		fmt.Printf("Applying data processors...\n")
-		if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
-			return fmt.Errorf("processor failed: %w", err)
+		parser := packet.NewParser()
+		pkt, err := parser.ParseBytes(data)
+		if err != nil {
+			return fmt.Errorf("failed to parse TDTP packet: %w", err)
 		}
-		fmt.Printf("✓ Data processors applied\n")
+
+		if pkt.Data.Compression != "" {
+			fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
+			if err := decompressPacketData(ctx, pkt); err != nil {
+				return fmt.Errorf("decompression failed: %w", err)
+			}
+		}
+
+		if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
+			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
+				return fmt.Errorf("processor failed: %w", err)
+			}
+		}
+
+		packets = append(packets, pkt)
+		fmt.Printf("  ✓ %d row(s)\n", len(pkt.Data.Rows))
 	}
 
-	// Create adapter
+	// Connect adapter
 	adapter, err := adapters.New(ctx, config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer adapter.Close(ctx)
 
-	// Import packet
-	fmt.Printf("Importing with strategy '%s'...\n", opts.Strategy)
-	if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
+	tableName := packets[0].Header.TableName
+	totalRows := 0
+	for _, pkt := range packets {
+		totalRows += len(pkt.Data.Rows)
+	}
+
+	fmt.Printf("Importing table '%s': %d packet(s), %d row(s), strategy '%s'...\n",
+		tableName, len(packets), totalRows, opts.Strategy)
+
+	// 1 packet → ImportPacket; N packets → ImportPackets (atomic, via framework)
+	if len(packets) == 1 {
+		err = adapter.ImportPacket(ctx, packets[0], opts.Strategy)
+	} else {
+		err = adapter.ImportPackets(ctx, packets, opts.Strategy)
+	}
+	if err != nil {
 		return fmt.Errorf("import failed: %w", err)
 	}
 
-	fmt.Printf("✓ Import complete!\n")
-	fmt.Printf("✓ Table '%s' updated with %d row(s)\n", pkt.Header.TableName, len(pkt.Data.Rows))
-
+	fmt.Printf("✓ Import complete! Table '%s' — %d row(s)\n", tableName, totalRows)
 	return nil
+}
+
+// discoverMultiPartFiles detects a multi-part export set on disk.
+// Handles two cases:
+//   - filePath IS a part file (e.g. "data.tdtp_part_1_of_9.xml")
+//   - filePath is the base name (e.g. "data.tdtp.xml") and _part_ files exist
+//
+// Returns nil if no multi-part set is detected.
+func discoverMultiPartFiles(filePath string) []string {
+	var base, ext string
+	var total int
+
+	if m := multiPartPattern.FindStringSubmatch(filePath); m != nil {
+		// filePath is already a part file
+		base = m[1]
+		ext = m[4]
+		total, _ = strconv.Atoi(m[3])
+	} else {
+		// filePath is the base name — look for _part_1_of_N on disk
+		ext = filepath.Ext(filePath)
+		base = filePath[:len(filePath)-len(ext)]
+		matches, _ := filepath.Glob(fmt.Sprintf("%s_part_1_of_*%s", base, ext))
+		if len(matches) == 1 {
+			if m := multiPartPattern.FindStringSubmatch(matches[0]); m != nil {
+				total, _ = strconv.Atoi(m[3])
+			}
+		}
+	}
+
+	if total < 2 {
+		return nil
+	}
+
+	parts := make([]string, total)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("%s_part_%d_of_%d%s", base, i+1, total, ext)
+	}
+	return parts
 }
 
 // ParseImportStrategy parses import strategy string
