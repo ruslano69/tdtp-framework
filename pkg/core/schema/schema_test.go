@@ -352,15 +352,26 @@ func TestValidateSchema(t *testing.T) {
 		t.Error("Expected error for invalid type")
 	}
 
-	// TEXT without length
+	// TEXT без length (Length = 0) — валидно, означает неограниченную длину (например, SQLite TEXT)
 	noLengthSchema := packet.Schema{
 		Fields: []packet.Field{
 			{Name: "Name", Type: "TEXT"},
 		},
 	}
 	err = validator.ValidateSchema(noLengthSchema)
+	if err != nil {
+		t.Errorf("TEXT with Length=0 should be valid (unlimited), got: %v", err)
+	}
+
+	// TEXT с отрицательной длиной — невалидно
+	negLengthSchema := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "Name", Type: "TEXT", Length: -1},
+		},
+	}
+	err = validator.ValidateSchema(negLengthSchema)
 	if err == nil {
-		t.Error("Expected error for TEXT without length")
+		t.Error("Expected error for TEXT with negative length")
 	}
 }
 

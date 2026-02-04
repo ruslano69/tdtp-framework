@@ -50,8 +50,9 @@ func (v *Validator) ValidateSchema(schema packet.Schema) error {
 
 		switch normalized {
 		case TypeText:
-			if field.Length <= 0 {
-				return fmt.Errorf("field '%s' of type TEXT must have positive length", field.Name)
+			// Length == 0 означает неограниченную длину (например, SQLite TEXT без length)
+			if field.Length < 0 {
+				return fmt.Errorf("field '%s' of type TEXT has invalid length", field.Name)
 			}
 
 		case TypeDecimal:
