@@ -101,6 +101,8 @@ func (h *ExportHelper) ExportTableWithQuery(
 	if err := executor.ValidateQuery(query, pkgSchema); err != nil {
 		return nil, err
 	}
+	// Нормализация имён полей к каноническим из схемы (критично для PostgreSQL quoted identifiers)
+	executor.NormalizeQueryFields(query, pkgSchema)
 
 	// 3. Пробуем транслировать TDTQL → SQL для оптимизации (pushdown filtering)
 	sqlGenerator := tdtql.NewSQLGenerator()

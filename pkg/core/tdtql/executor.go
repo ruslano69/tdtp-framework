@@ -210,3 +210,42 @@ func (e *Executor) validateOrderByFields(orderBy *packet.OrderBy, schemaObj pack
 
 	return nil
 }
+
+// NormalizeQueryFields заменяет имена полей в запросе на канонические из схемы.
+// Должен вызываться после ValidateQuery — гарантирует что все поля существуют.
+// Это важно для PostgreSQL где кавычки в CREATE TABLE сохраняют регистр.
+func (e *Executor) NormalizeQueryFields(query *packet.Query, schemaObj packet.Schema) {
+	if query.Filters != nil {
+		e.normalizeLogicalGroup(query.Filters.And, schemaObj)
+		e.normalizeLogicalGroup(query.Filters.Or, schemaObj)
+	}
+	if query.OrderBy != nil {
+		if query.OrderBy.Field != "" {
+			if field, err := e.validator.GetFieldByName(schemaObj, query.OrderBy.Field); err == nil {
+				query.OrderBy.Field = field.Name
+			}
+		}
+		for i := range query.OrderBy.Fields {
+			if field, err := e.validator.GetFieldByName(schemaObj, query.OrderBy.Fields[i].Name); err == nil {
+				query.OrderBy.Fields[i].Name = field.Name
+			}
+		}
+	}
+}
+
+func (e *Executor) normalizeLogicalGroup(group *packet.LogicalGroup, schemaObj packet.Schema) {
+	if group == nil {
+		return
+	}
+	for i := range group.Filters {
+		if field, err := e.validator.GetFieldByName(schemaObj, group.Filters[i].Field); err == nil {
+			group.Filters[i].Field = field.Name
+		}
+	}
+	for i := range group.And {
+		e.normalizeLogicalGroup(&group.And[i], schemaObj)
+	}
+	for i := range group.Or {
+		e.normalizeLogicalGroup(&group.Or[i], schemaObj)
+	}
+}
