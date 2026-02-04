@@ -50,9 +50,10 @@ func (v *Validator) ValidateSchema(schema packet.Schema) error {
 
 		switch normalized {
 		case TypeText:
-			if field.Length <= 0 {
-				return fmt.Errorf("field '%s' of type TEXT must have positive length", field.Name)
-			}
+			// Length <= 0 означает неограниченную длину:
+			//   0  — SQLite TEXT, PostgreSQL text, MSSQL VARCHAR(MAX)
+			//  -1  — PostgreSQL uuid/json/jsonb/inet и другие subtype
+			// Реальная проверка длины данных выполняется в converter.parseText (только при Length > 0)
 
 		case TypeDecimal:
 			precision := field.Precision
