@@ -2,6 +2,7 @@ package tdtql
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
@@ -177,7 +178,7 @@ func (f *FilterEngine) evaluateFilter(
 	fieldIndex := -1
 	var field packet.Field
 	for i, f := range schemaObj.Fields {
-		if f.Name == filter.Field {
+		if strings.EqualFold(f.Name, filter.Field) {
 			fieldIndex = i
 			field = f
 			break
