@@ -112,7 +112,14 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 		}
 
 		// 2. Импортируем каждый пакет во временную таблицу
+		canonicalSchema := packets[0].Schema
 		for i, pkt := range packets {
+			if !packet.SchemaEquals(canonicalSchema, pkt.Schema) {
+				fmt.Printf("  ⚠️  Skipping packet %d/%d: schema mismatch (expected %d fields, got %d)\n",
+					i+1, len(packets), len(canonicalSchema.Fields), len(pkt.Schema.Fields))
+				continue
+			}
+
 			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
 
 			if err := h.dataInserter.InsertRows(ctx, tempTableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
@@ -132,7 +139,14 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 	} else {
 		// Прямая вставка без временных таблиц
+		canonicalSchema := packets[0].Schema
 		for i, pkt := range packets {
+			if !packet.SchemaEquals(canonicalSchema, pkt.Schema) {
+				fmt.Printf("  ⚠️  Skipping packet %d/%d: schema mismatch (expected %d fields, got %d)\n",
+					i+1, len(packets), len(canonicalSchema.Fields), len(pkt.Schema.Fields))
+				continue
+			}
+
 			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
 
 			if err := h.importDirect(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {

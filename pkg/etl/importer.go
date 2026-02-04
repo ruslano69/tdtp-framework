@@ -292,7 +292,7 @@ func ImportToDatabase(
 	var mu sync.Mutex
 	tableCreated := false
 	var expectedBatchID string    // MessageID base первого пакета
-	var expectedSchema []packet.Field // Schema первого пакета
+	var expectedSchema packet.Schema // Schema первого пакета
 
 	// Handler который вставляет данные в workspace
 	handler := func(ctx context.Context, dataPacket *packet.DataPacket) error {
@@ -304,7 +304,7 @@ func ImportToDatabase(
 		if !tableCreated {
 			// Сохраняем batch ID и schema первого пакета
 			expectedBatchID = batchID
-			expectedSchema = dataPacket.Schema.Fields
+			expectedSchema = dataPacket.Schema
 
 			if err := workspace.CreateTable(ctx, tableName, dataPacket.Schema.Fields); err != nil {
 				mu.Unlock()
@@ -319,7 +319,7 @@ func ImportToDatabase(
 			}
 
 			// Валидация: проверяем что schema совпадает
-			if !schemaEquals(dataPacket.Schema.Fields, expectedSchema) {
+			if !packet.SchemaEquals(dataPacket.Schema, expectedSchema) {
 				mu.Unlock()
 				return fmt.Errorf("schema mismatch: packet from batch %s has different schema", batchID)
 			}
@@ -357,17 +357,3 @@ func extractBatchID(messageID string) string {
 	return messageID
 }
 
-// schemaEquals проверяет что две schema идентичны
-func schemaEquals(a, b []packet.Field) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for i := range a {
-		if a[i].Name != b[i].Name || a[i].Type != b[i].Type {
-			return false
-		}
-	}
-
-	return true
-}

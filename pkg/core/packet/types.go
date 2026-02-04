@@ -105,3 +105,17 @@ func (p *DataPacket) SetRows(rows [][]string) {
 	p.Data = RowsToData(rows)
 	p.Header.RecordsInPart = len(rows)
 }
+
+// SchemaEquals reports whether two schemas are structurally identical:
+// same number of fields, same names and types in the same order.
+func SchemaEquals(a, b Schema) bool {
+	if len(a.Fields) != len(b.Fields) {
+		return false
+	}
+	for i := range a.Fields {
+		if a.Fields[i].Name != b.Fields[i].Name || a.Fields[i].Type != b.Fields[i].Type {
+			return false
+		}
+	}
+	return true
+}

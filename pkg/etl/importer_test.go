@@ -125,9 +125,9 @@ func TestSchemaEquals(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := schemaEquals(tt.a, tt.b)
+			got := packet.SchemaEquals(packet.Schema{Fields: tt.a}, packet.Schema{Fields: tt.b})
 			if got != tt.want {
-				t.Errorf("schemaEquals() = %v, want %v", got, tt.want)
+				t.Errorf("SchemaEquals() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -290,7 +290,7 @@ func TestBatchValidation(t *testing.T) {
 				return
 			}
 
-			if !schemaEquals(tt.secondSchema, expectedSchema) {
+			if !packet.SchemaEquals(packet.Schema{Fields: tt.secondSchema}, packet.Schema{Fields: expectedSchema}) {
 				if !tt.wantError {
 					t.Error("Expected no error for schema mismatch, but should have errored")
 				}
@@ -314,18 +314,17 @@ func TestEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("schemaEquals with nil slices", func(t *testing.T) {
-		var a, b []packet.Field
-		if !schemaEquals(a, b) {
-			t.Error("schemaEquals(nil, nil) should return true")
+	t.Run("SchemaEquals with nil slices", func(t *testing.T) {
+		if !packet.SchemaEquals(packet.Schema{}, packet.Schema{}) {
+			t.Error("SchemaEquals(empty, empty) should return true")
 		}
 	})
 
-	t.Run("schemaEquals one nil one empty", func(t *testing.T) {
-		var a []packet.Field
-		b := []packet.Field{}
-		if !schemaEquals(a, b) {
-			t.Error("schemaEquals(nil, []) should return true")
+	t.Run("SchemaEquals one nil one empty", func(t *testing.T) {
+		a := packet.Schema{}
+		b := packet.Schema{Fields: []packet.Field{}}
+		if !packet.SchemaEquals(a, b) {
+			t.Error("SchemaEquals(nil fields, empty fields) should return true")
 		}
 	})
 }
