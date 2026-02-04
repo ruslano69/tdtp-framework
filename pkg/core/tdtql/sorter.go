@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
@@ -89,7 +90,7 @@ type sortField struct {
 // getFieldInfo находит информацию о поле
 func (s *Sorter) getFieldInfo(fieldName string, schemaObj packet.Schema) (packet.Field, int, error) {
 	for i, field := range schemaObj.Fields {
-		if field.Name == fieldName {
+		if strings.EqualFold(field.Name, fieldName) {
 			return field, i, nil
 		}
 	}

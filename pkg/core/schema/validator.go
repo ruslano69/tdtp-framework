@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 )
@@ -245,7 +246,7 @@ func (v *Validator) GetKeyFields(schema packet.Schema) []packet.Field {
 // GetFieldByName находит поле по имени
 func (v *Validator) GetFieldByName(schema packet.Schema, name string) (*packet.Field, error) {
 	for _, field := range schema.Fields {
-		if field.Name == name {
+		if strings.EqualFold(field.Name, name) {
 			return &field, nil
 		}
 	}
