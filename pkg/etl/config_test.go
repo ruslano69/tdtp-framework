@@ -552,6 +552,28 @@ func TestOutputConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "must be 'xml' or 'json'",
 		},
+		{
+			name: "Mixed case type normalized (RabbitMQ)",
+			output: OutputConfig{
+				Type: "RabbitMQ",
+				RabbitMQ: &RabbitMQOutputConfig{
+					Host:  "localhost",
+					Queue: "test",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Uppercase type normalized (KAFKA)",
+			output: OutputConfig{
+				Type: "KAFKA",
+				Kafka: &KafkaOutputConfig{
+					Brokers: []string{"localhost:9092"},
+					Topic:   "test",
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
