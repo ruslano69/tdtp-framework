@@ -75,9 +75,12 @@ func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions)
 	defer adapter.Close(ctx)
 
 	tableName := packets[0].Header.TableName
+	canonicalSchema := packets[0].Schema
 	totalRows := 0
 	for _, pkt := range packets {
-		totalRows += len(pkt.Data.Rows)
+		if packet.SchemaEquals(canonicalSchema, pkt.Schema) {
+			totalRows += len(pkt.Data.Rows)
+		}
 	}
 
 	fmt.Printf("Importing table '%s': %d packet(s), %d row(s), strategy '%s'...\n",
