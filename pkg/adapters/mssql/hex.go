@@ -1,37 +1,5 @@
 package mssql
 
-// bytesToHexWithoutLeadingZeros converts a slice of bytes to a hex string
-// without leading zeros in the first nibble of the first non-zero byte.
-// For example:
-//   - []byte{0x00, 0x00, 0xAB} → "AB"
-//   - []byte{0x0A, 0xB0} → "AB0"
-//   - []byte{0x00, 0x00, 0x00} → "00"
-//   - []byte{} → ""
-//
-// Optimized for MS SQL Server timestamps (8-byte values):
-//   - Fast path for 8-byte data (common case)
-//   - Skips leading zero bytes efficiently
-//   - Uses lookup table for hex conversion
-func bytesToHexWithoutLeadingZeros(data []byte) string {
-	// Handle empty slice
-	if len(data) == 0 {
-		return ""
-	}
-
-	// Find first non-zero byte
-	start := 0
-	for start < len(data) && data[start] == 0 {
-		start++
-	}
-
-	// All zeros
-	if start == len(data) {
-		return "00"
-	}
-
-	return encodeFromIndex(data, start)
-}
-
 // encodeFromIndex encodes bytes from a given start index without leading zeros.
 func encodeFromIndex(data []byte, start int) string {
 	const hexChars = "0123456789ABCDEF"
