@@ -245,7 +245,7 @@ func TestCheckForbiddenKeywords(t *testing.T) {
 	}{
 		{"No forbidden keywords", "SELECT ID, NAME FROM USERS", false},
 		{"INSERT keyword", "SELECT * FROM USERS WHERE STATUS = 'INSERT'", false}, // 'INSERT' as value
-		{"DELETE in field name", "SELECT DELETED_AT FROM USERS", false},           // 'DELETE' in column name
+		{"DELETE in field name", "SELECT DELETED_AT FROM USERS", false},          // 'DELETE' in column name
 		{"Actual DELETE", "SELECT * FROM USERS DELETE FROM ORDERS", true},
 		{"DROP keyword", "SELECT * FROM USERS DROP TABLE TEMP", true},
 		{"TRUNCATE keyword", "SELECT * TRUNCATE TABLE USERS", true},

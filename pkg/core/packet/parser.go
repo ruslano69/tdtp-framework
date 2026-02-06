@@ -31,7 +31,7 @@ func (p *Parser) ParseFile(filename string) (*DataPacket, error) {
 // Parse парсит TDTP пакет из reader
 func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
 	decoder := xml.NewDecoder(r)
-	
+
 	var packet DataPacket
 	if err := decoder.Decode(&packet); err != nil {
 		return nil, fmt.Errorf("failed to decode XML: %w", err)

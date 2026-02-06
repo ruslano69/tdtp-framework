@@ -173,8 +173,8 @@ func TestXMLFilterIntegration(t *testing.T) {
 				continue
 			}
 
-			name := fields[1]  // name is second column
-			city := fields[4]  // city is fifth column
+			name := fields[1] // name is second column
+			city := fields[4] // city is fifth column
 
 			if name == "Alice" && city == "Moscow" {
 				foundAlice = true

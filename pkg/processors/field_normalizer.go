@@ -30,7 +30,7 @@ const (
 // FieldNormalizer нормализует данные в указанных полях
 // Используется для приведения данных к единому формату перед импортом
 type FieldNormalizer struct {
-	name             string
+	name              string
 	fieldsToNormalize map[string]NormalizeRule // field_name -> normalize_rule
 
 	// Предкомпилированные регулярные выражения
@@ -44,8 +44,8 @@ func NewFieldNormalizer(fieldsToNormalize map[string]NormalizeRule) *FieldNormal
 	return &FieldNormalizer{
 		name:              "field_normalizer",
 		fieldsToNormalize: fieldsToNormalize,
-		phoneRegex:        regexp.MustCompile(`[^\d+]`), // Все кроме цифр и +
-		whitespaceRegex:   regexp.MustCompile(`\s+`),    // Множественные пробелы
+		phoneRegex:        regexp.MustCompile(`[^\d+]`),                                    // Все кроме цифр и +
+		whitespaceRegex:   regexp.MustCompile(`\s+`),                                       // Множественные пробелы
 		dateRegex:         regexp.MustCompile(`^(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})$`), // DD.MM.YYYY или DD/MM/YYYY
 	}
 }

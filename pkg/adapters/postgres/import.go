@@ -16,22 +16,22 @@ import (
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	tableName := pkt.Header.TableName
-	
+
 	// Генерируем имя временной таблицы
 	tempTableName := generateTempTableName(tableName)
-	
+
 	fmt.Printf("📋 Import to temporary table: %s\n", tempTableName)
-	
+
 	// 1. Создаем временную таблицу
 	err := a.createTableFromSchema(ctx, tempTableName, pkt.Schema)
 	if err != nil {
 		return fmt.Errorf("failed to create temporary table: %w", err)
 	}
-	
+
 	// 2. Импортируем данные во временную таблицу
 	tempPacket := *pkt
 	tempPacket.Header.TableName = tempTableName
-	
+
 	switch strategy {
 	case adapters.StrategyCopy:
 		err = a.importWithCopy(ctx, &tempPacket)
@@ -40,16 +40,16 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 	default:
 		err = fmt.Errorf("unknown import strategy: %s", strategy)
 	}
-	
+
 	if err != nil {
 		// Откатываем - удаляем временную таблицу
 		a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to import to temporary table: %w", err)
 	}
-	
+
 	fmt.Printf("✅ Data loaded to temporary table\n")
 	fmt.Printf("🔄 Replacing production table: %s\n", tableName)
-	
+
 	// 3. Заменяем продакшен таблицу временной (атомарная операция)
 	err = a.replaceTables(ctx, tableName, tempTableName)
 	if err != nil {
@@ -57,9 +57,9 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 		a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to replace tables: %w", err)
 	}
-	
+
 	fmt.Printf("✅ Production table replaced successfully\n")
-	
+
 	return nil
 }
 
@@ -72,7 +72,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 	tableName := packets[0].Header.TableName
 	tempTableName := generateTempTableName(tableName)
-	
+
 	fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
 
 	// Начинаем транзакцию
@@ -91,10 +91,10 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	// 2. Импортируем каждый пакет во временную таблицу
 	for i, pkt := range packets {
 		fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
-		
+
 		tempPacket := *pkt
 		tempPacket.Header.TableName = tempTableName
-		
+
 		err := a.importPacketData(ctx, &tempPacket, strategy)
 		if err != nil {
 			a.dropTable(ctx, tempTableName)
@@ -145,7 +145,7 @@ func (a *Adapter) replaceTables(ctx context.Context, targetTable, tempTable stri
 	quotedTarget := QuoteIdentifier(targetTable)
 	quotedTemp := QuoteIdentifier(tempTable)
 	quotedOld := QuoteIdentifier(targetTable + "_old")
-	
+
 	if a.schema != "public" {
 		quotedTarget = QuoteIdentifier(a.schema) + "." + quotedTarget
 		quotedTemp = QuoteIdentifier(a.schema) + "." + quotedTemp
@@ -544,4 +544,3 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 
 // BeginTx implements base.TransactionManager interface (уже определен в adapter.go)
 // CommitTx и RollbackTx не нужны так как используется pgx.Tx
-

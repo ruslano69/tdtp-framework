@@ -101,7 +101,7 @@ type MaskRule struct {
 // ValidateRule for field validation
 type ValidateRule struct {
 	Field   string `yaml:"field"`
-	Type    string `yaml:"type"`  // regex, range, format
+	Type    string `yaml:"type"` // regex, range, format
 	Pattern string `yaml:"pattern,omitempty"`
 	Min     string `yaml:"min,omitempty"`
 	Max     string `yaml:"max,omitempty"`

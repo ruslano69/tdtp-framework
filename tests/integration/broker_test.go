@@ -16,13 +16,13 @@ import (
 // TestRabbitMQBasicConnection проверяет базовое подключение к RabbitMQ
 func TestRabbitMQBasicConnection(t *testing.T) {
 	cfg := brokers.Config{
-		Type:     "rabbitmq",
-		Host:     "localhost",
-		Port:     5672,
-		User:     "tdtp_test",
-		Password: "tdtp_test_password",
-		Queue:    "test_basic_connection",
-		VHost:    "/",
+		Type:       "rabbitmq",
+		Host:       "localhost",
+		Port:       5672,
+		User:       "tdtp_test",
+		Password:   "tdtp_test_password",
+		Queue:      "test_basic_connection",
+		VHost:      "/",
 		Durable:    false,
 		AutoDelete: true,
 		Exclusive:  false,
@@ -242,7 +242,7 @@ func TestQueueParametersMatching(t *testing.T) {
 		Password:   "tdtp_test_password",
 		Queue:      "test_queue_params",
 		VHost:      "/",
-		Durable:    true,  // durable
+		Durable:    true, // durable
 		AutoDelete: false,
 		Exclusive:  false,
 	}

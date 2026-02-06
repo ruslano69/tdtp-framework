@@ -11,6 +11,7 @@ import (
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
 	_ "modernc.org/sqlite"
 )
+
 const driverSqlite = "sqlite"
 
 // Compile-time check: Adapter должен реализовывать интерфейс adapters.Adapter

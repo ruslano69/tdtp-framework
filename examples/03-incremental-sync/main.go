@@ -57,9 +57,9 @@ func main() {
 		Enabled:       true,
 		Mode:          sync.SyncModeIncremental,
 		Strategy:      sync.TrackingTimestamp, // Track by timestamp
-		TrackingField: "updated_at",            // Field to track
-		StateFile:     "./sync_state.json",     // Checkpoint file
-		BatchSize:     1000,                    // Records per batch
+		TrackingField: "updated_at",           // Field to track
+		StateFile:     "./sync_state.json",    // Checkpoint file
+		BatchSize:     1000,                   // Records per batch
 	}
 
 	// 5. Load previous state (if exists)

@@ -54,13 +54,13 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	var fields []packet.Field
 	for rows.Next() {
 		var (
-			columnName  string
-			dataType    string
-			charLength  sql.NullInt64
-			numPrec     sql.NullInt64
-			numScale    sql.NullInt64
-			isNullable  string
-			columnKey   string
+			columnName string
+			dataType   string
+			charLength sql.NullInt64
+			numPrec    sql.NullInt64
+			numScale   sql.NullInt64
+			isNullable string
+			columnKey  string
 		)
 
 		if err := rows.Scan(&columnName, &dataType, &charLength, &numPrec, &numScale, &isNullable, &columnKey); err != nil {

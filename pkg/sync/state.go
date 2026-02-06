@@ -10,19 +10,19 @@ import (
 
 // SyncState представляет состояние синхронизации для конкретной таблицы
 type SyncState struct {
-	TableName      string    `json:"table_name"`
-	LastSyncValue  string    `json:"last_sync_value"`  // Последнее значение tracking поля (timestamp, id, etc.)
-	LastSyncTime   time.Time `json:"last_sync_time"`   // Время последней синхронизации
+	TableName       string    `json:"table_name"`
+	LastSyncValue   string    `json:"last_sync_value"`  // Последнее значение tracking поля (timestamp, id, etc.)
+	LastSyncTime    time.Time `json:"last_sync_time"`   // Время последней синхронизации
 	RecordsExported int64     `json:"records_exported"` // Количество экспортированных записей
-	LastError      string    `json:"last_error,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
 }
 
 // StateManager управляет состоянием синхронизации для нескольких таблиц
 type StateManager struct {
-	mu         sync.RWMutex
-	states     map[string]*SyncState // table_name -> state
-	stateFile  string                // Путь к файлу состояния
-	autoSave   bool                  // Автоматически сохранять при изменениях
+	mu        sync.RWMutex
+	states    map[string]*SyncState // table_name -> state
+	stateFile string                // Путь к файлу состояния
+	autoSave  bool                  // Автоматически сохранять при изменениях
 }
 
 // NewStateManager создает новый менеджер состояния
@@ -52,9 +52,9 @@ func (sm *StateManager) GetState(tableName string) *SyncState {
 	if !exists {
 		// Возвращаем новое состояние если еще не было синхронизации
 		return &SyncState{
-			TableName:      tableName,
-			LastSyncValue:  "",
-			LastSyncTime:   time.Time{},
+			TableName:       tableName,
+			LastSyncValue:   "",
+			LastSyncTime:    time.Time{},
 			RecordsExported: 0,
 		}
 	}
@@ -70,9 +70,9 @@ func (sm *StateManager) UpdateState(tableName string, lastSyncValue string, reco
 	defer sm.mu.Unlock()
 
 	state := &SyncState{
-		TableName:      tableName,
-		LastSyncValue:  lastSyncValue,
-		LastSyncTime:   time.Now(),
+		TableName:       tableName,
+		LastSyncValue:   lastSyncValue,
+		LastSyncTime:    time.Now(),
 		RecordsExported: recordsExported,
 	}
 

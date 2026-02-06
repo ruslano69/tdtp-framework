@@ -10,10 +10,10 @@ import (
 
 // Kafka реализует MessageBroker для Apache Kafka
 type Kafka struct {
-	config       Config
-	writer       *kafka.Writer
-	reader       *kafka.Reader
-	lastMessage  *kafka.Message // Последнее полученное сообщение (для manual commit)
+	config      Config
+	writer      *kafka.Writer
+	reader      *kafka.Reader
+	lastMessage *kafka.Message // Последнее полученное сообщение (для manual commit)
 }
 
 // NewKafka создает новый Kafka брокер
@@ -41,9 +41,9 @@ func (k *Kafka) Connect(ctx context.Context) error {
 		Topic:        k.config.Topic,
 		Balancer:     &kafka.LeastBytes{}, // Балансировка по наименьшей загруженности
 		RequiredAcks: kafka.RequireAll,    // Ждем подтверждения от всех реплик
-		Async:        false,                // Синхронная отправка для надежности
-		Compression:  kafka.Snappy,         // Сжатие данных
-		MaxAttempts:  3,                    // Повторные попытки
+		Async:        false,               // Синхронная отправка для надежности
+		Compression:  kafka.Snappy,        // Сжатие данных
+		MaxAttempts:  3,                   // Повторные попытки
 		WriteTimeout: 10 * time.Second,
 	}
 
@@ -52,11 +52,11 @@ func (k *Kafka) Connect(ctx context.Context) error {
 		Brokers:        k.config.Brokers,
 		GroupID:        k.config.ConsumerGroup,
 		Topic:          k.config.Topic,
-		MinBytes:       1,                   // Минимальный размер batch
-		MaxBytes:       10e6,                // 10MB максимальный размер
-		CommitInterval: 0,                   // Manual commit
-		StartOffset:    kafka.LastOffset,    // Начинаем с последнего offset (новые сообщения)
-		MaxWait:        1 * time.Second,     // Максимальное время ожидания
+		MinBytes:       1,                // Минимальный размер batch
+		MaxBytes:       10e6,             // 10MB максимальный размер
+		CommitInterval: 0,                // Manual commit
+		StartOffset:    kafka.LastOffset, // Начинаем с последнего offset (новые сообщения)
+		MaxWait:        1 * time.Second,  // Максимальное время ожидания
 		ReadBackoffMin: 100 * time.Millisecond,
 		ReadBackoffMax: 1 * time.Second,
 	})

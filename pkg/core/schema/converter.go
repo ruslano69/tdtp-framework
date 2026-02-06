@@ -31,7 +31,7 @@ func (c *Converter) ParseValue(rawValue string, field FieldDef) (*TypedValue, er
 	if rawValue == "" {
 		// Для текстовых типов пустая строка разрешена (не является NULL)
 		if normalized == TypeText || normalized == TypeVarchar ||
-		   normalized == TypeChar || normalized == TypeString {
+			normalized == TypeChar || normalized == TypeString {
 			// Продолжаем парсинг пустой строки как валидного значения
 			return c.parseText(tv, field)
 		}

@@ -50,8 +50,8 @@ const (
 	OpMask         Operation = "mask"
 	OpNormalize    Operation = "normalize"
 	OpTransform    Operation = "transform"
-	OpSync         Operation = "sync"         // Синхронизация данных
-    OpAuthenticate Operation = "authenticate"
+	OpSync         Operation = "sync" // Синхронизация данных
+	OpAuthenticate Operation = "authenticate"
 )
 
 // Status - статус выполнения операции

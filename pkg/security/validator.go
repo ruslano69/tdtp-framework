@@ -97,10 +97,10 @@ func (v *SQLValidator) checkForbiddenKeywords(sql string) error {
 		// Ищем ключевое слово как отдельное слово (с пробелами вокруг)
 		// Это предотвращает ложные срабатывания типа "SELECTED" или "DELETED_AT"
 		patterns := []string{
-			" " + keyword + " ",  // в середине
-			" " + keyword + ";",  // перед точкой с запятой
-			" " + keyword + "(",  // перед скобкой (функция)
-			keyword + " ",        // в начале (уже проверено HasPrefix выше, но на всякий случай)
+			" " + keyword + " ", // в середине
+			" " + keyword + ";", // перед точкой с запятой
+			" " + keyword + "(", // перед скобкой (функция)
+			keyword + " ",       // в начале (уже проверено HasPrefix выше, но на всякий случай)
 		}
 
 		for _, pattern := range patterns {

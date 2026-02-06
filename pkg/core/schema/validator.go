@@ -97,7 +97,7 @@ func (v *Validator) ValidateSchema(schema packet.Schema) error {
 // ValidateRow проверяет соответствие строки данных схеме
 func (v *Validator) ValidateRow(row []string, schema packet.Schema) error {
 	if len(row) != len(schema.Fields) {
-		return fmt.Errorf("row has %d values but schema has %d fields", 
+		return fmt.Errorf("row has %d values but schema has %d fields",
 			len(row), len(schema.Fields))
 	}
 
@@ -140,7 +140,7 @@ func (v *Validator) ValidateDataPacket(pkt *packet.DataPacket) error {
 		for i, row := range pkt.Data.Rows {
 			// Разбиваем строку на значения
 			values := v.splitRowValues(row.Value)
-			
+
 			if err := v.ValidateRow(values, pkt.Schema); err != nil {
 				return fmt.Errorf("row %d validation failed: %w", i+1, err)
 			}
@@ -213,8 +213,8 @@ func (v *Validator) splitRowValues(rowValue string) []string {
 			continue
 		}
 
-		if rowValue[i] == '&' && i+5 < len(rowValue) && 
-		   rowValue[i:i+6] == "&#124;" {
+		if rowValue[i] == '&' && i+5 < len(rowValue) &&
+			rowValue[i:i+6] == "&#124;" {
 			current += "|"
 			i += 5
 			continue

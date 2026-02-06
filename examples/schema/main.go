@@ -168,7 +168,7 @@ func main() {
 	invalidRows := [][]string{
 		{"not_a_number", "Company", "123", "100.00", "1", "2020-01-01", "2020-01-01T00:00:00Z"},
 		{"2", "Company", "123", "100.123", "1", "2020-01-01", "2020-01-01T00:00:00Z"}, // invalid scale
-		{"3", "Company", "123", "100.00", "2", "2020-01-01", "2020-01-01T00:00:00Z"},   // invalid boolean
+		{"3", "Company", "123", "100.00", "2", "2020-01-01", "2020-01-01T00:00:00Z"},  // invalid boolean
 	}
 
 	fmt.Println("Validating invalid rows:")

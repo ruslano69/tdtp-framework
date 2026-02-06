@@ -10,14 +10,14 @@ import (
 
 // FileAppender - запись в файл
 type FileAppender struct {
-	mu           sync.Mutex
-	file         *os.File
-	filePath     string
-	maxSize      int64 // Максимальный размер файла в байтах
-	maxBackups   int   // Количество backup файлов
-	currentSize  int64
-	level        Level
-	formatJSON   bool
+	mu          sync.Mutex
+	file        *os.File
+	filePath    string
+	maxSize     int64 // Максимальный размер файла в байтах
+	maxBackups  int   // Количество backup файлов
+	currentSize int64
+	level       Level
+	formatJSON  bool
 }
 
 // FileAppenderConfig - конфигурация file appender

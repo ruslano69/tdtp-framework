@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package brokers
@@ -23,11 +24,11 @@ type MSMQ struct {
 
 // MSMQ константы доступа
 const (
-	MQ_SEND_ACCESS    = 2 // Для отправки сообщений
-	MQ_RECEIVE_ACCESS = 1 // Для получения сообщений
+	MQ_SEND_ACCESS    = 2  // Для отправки сообщений
+	MQ_RECEIVE_ACCESS = 1  // Для получения сообщений
 	MQ_PEEK_ACCESS    = 32 // Для просмотра без удаления
-	MQ_DENY_NONE      = 0 // Разделяемый доступ
-	MQ_DENY_RECEIVE   = 1 // Эксклюзивное чтение
+	MQ_DENY_NONE      = 0  // Разделяемый доступ
+	MQ_DENY_RECEIVE   = 1  // Эксклюзивное чтение
 )
 
 // NewMSMQ создает новый MSMQ брокер

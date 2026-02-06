@@ -294,13 +294,13 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket) error {
 
 // StreamingExportResult представляет результат потокового экспорта
 type StreamingExportResult struct {
-	OutputType    string
-	Destination   string
-	TotalParts    int
-	TotalRows     int
-	PartsSent     int
-	ErrorsCount   int
-	Errors        []error
+	OutputType  string
+	Destination string
+	TotalParts  int
+	TotalRows   int
+	PartsSent   int
+	ErrorsCount int
+	Errors      []error
 }
 
 // ExportStream выполняет потоковый экспорт данных в RabbitMQ/Kafka

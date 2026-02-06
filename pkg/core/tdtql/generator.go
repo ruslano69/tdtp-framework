@@ -18,7 +18,7 @@ func NewGenerator() *Generator {
 // Generate преобразует SelectStatement в packet.Query
 func (g *Generator) Generate(stmt *SelectStatement) (*packet.Query, error) {
 	query := packet.NewQuery()
-	
+
 	// Генерация фильтров из WHERE
 	if stmt.Where != nil {
 		filters, err := g.generateFilters(stmt.Where)
@@ -27,12 +27,12 @@ func (g *Generator) Generate(stmt *SelectStatement) (*packet.Query, error) {
 		}
 		query.Filters = filters
 	}
-	
+
 	// Генерация ORDER BY
 	if len(stmt.OrderBy) > 0 {
 		query.OrderBy = g.generateOrderBy(stmt.OrderBy)
 	}
-	
+
 	// LIMIT и OFFSET
 	if stmt.Limit != nil {
 		query.Limit = *stmt.Limit
@@ -40,20 +40,20 @@ func (g *Generator) Generate(stmt *SelectStatement) (*packet.Query, error) {
 	if stmt.Offset != nil {
 		query.Offset = *stmt.Offset
 	}
-	
+
 	return query, nil
 }
 
 // generateFilters генерирует Filters из Expression
 func (g *Generator) generateFilters(expr Expression) (*packet.Filters, error) {
 	filters := &packet.Filters{}
-	
+
 	// Определяем корневой логический оператор
 	rootLogicalGroup, err := g.expressionToLogicalGroup(expr)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Определяем, AND или OR на верхнем уровне
 	if g.isAndGroup(expr) {
 		filters.And = rootLogicalGroup
@@ -63,14 +63,14 @@ func (g *Generator) generateFilters(expr Expression) (*packet.Filters, error) {
 		// Одиночное условие оборачиваем в AND
 		filters.And = rootLogicalGroup
 	}
-	
+
 	return filters, nil
 }
 
 // expressionToLogicalGroup преобразует Expression в LogicalGroup
 func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGroup, error) {
 	group := &packet.LogicalGroup{}
-	
+
 	switch e := expr.(type) {
 	case *BinaryExpression:
 		if e.Operator == "AND" {
@@ -83,7 +83,7 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 			if err != nil {
 				return nil, err
 			}
-			
+
 			// Если левая часть - AND, добавляем её содержимое
 			if g.isAndExpression(e.Left) {
 				group.Filters = append(group.Filters, leftGroup.Filters...)
@@ -99,7 +99,7 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 					group.Or = append(group.Or, *leftGroup)
 				}
 			}
-			
+
 			// Аналогично для правой части
 			if g.isAndExpression(e.Right) {
 				group.Filters = append(group.Filters, rightGroup.Filters...)
@@ -113,7 +113,7 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 					group.Or = append(group.Or, *rightGroup)
 				}
 			}
-			
+
 		} else if e.Operator == "OR" {
 			// Собираем все OR условия
 			leftGroup, err := g.expressionToLogicalGroup(e.Left)
@@ -124,7 +124,7 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 			if err != nil {
 				return nil, err
 			}
-			
+
 			// Если левая часть - OR, добавляем её содержимое
 			if g.isOrExpression(e.Left) {
 				group.Filters = append(group.Filters, leftGroup.Filters...)
@@ -138,7 +138,7 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 					group.And = append(group.And, *leftGroup)
 				}
 			}
-			
+
 			if g.isOrExpression(e.Right) {
 				group.Filters = append(group.Filters, rightGroup.Filters...)
 				group.And = append(group.And, rightGroup.And...)
@@ -152,11 +152,11 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 				}
 			}
 		}
-		
+
 	case *ParenExpression:
 		// Скобки создают вложенную группу
 		return g.expressionToLogicalGroup(e.Expression)
-		
+
 	default:
 		// Одиночное условие
 		filter, err := g.expressionToFilter(expr)
@@ -165,7 +165,7 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 		}
 		group.Filters = []packet.Filter{*filter}
 	}
-	
+
 	return group, nil
 }
 
@@ -178,7 +178,7 @@ func (g *Generator) expressionToFilter(expr Expression) (*packet.Filter, error) 
 			Operator: e.Operator,
 			Value:    fmt.Sprintf("%v", e.Value),
 		}, nil
-		
+
 	case *InExpression:
 		operator := "in"
 		if e.Not {
@@ -189,7 +189,7 @@ func (g *Generator) expressionToFilter(expr Expression) (*packet.Filter, error) 
 			Operator: operator,
 			Value:    strings.Join(e.Values, ","),
 		}, nil
-		
+
 	case *BetweenExpression:
 		operator := "between"
 		if e.Not {
@@ -201,7 +201,7 @@ func (g *Generator) expressionToFilter(expr Expression) (*packet.Filter, error) 
 			Value:    e.Low,
 			Value2:   e.High,
 		}, nil
-		
+
 	case *IsNullExpression:
 		operator := "is_null"
 		if e.Not {
@@ -211,7 +211,7 @@ func (g *Generator) expressionToFilter(expr Expression) (*packet.Filter, error) 
 			Field:    e.Field,
 			Operator: operator,
 		}, nil
-		
+
 	default:
 		return nil, fmt.Errorf("cannot convert expression to filter: %T", expr)
 	}
@@ -226,19 +226,19 @@ func (g *Generator) generateOrderBy(clauses []*OrderByClause) *packet.OrderBy {
 			Direction: clauses[0].Direction,
 		}
 	}
-	
+
 	// Множественная сортировка
 	orderBy := &packet.OrderBy{
 		Fields: make([]packet.OrderField, len(clauses)),
 	}
-	
+
 	for i, clause := range clauses {
 		orderBy.Fields[i] = packet.OrderField{
 			Name:      clause.Field,
 			Direction: clause.Direction,
 		}
 	}
-	
+
 	return orderBy
 }
 

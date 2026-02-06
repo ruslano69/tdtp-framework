@@ -8,49 +8,49 @@ import (
 
 func TestBuildIncrementalQuery(t *testing.T) {
 	tests := []struct {
-		name           string
-		trackingField  string
-		lastSyncValue  string
-		batchSize      int
-		expectFilter   bool
-		expectOrderBy  bool
-		expectLimit    bool
+		name          string
+		trackingField string
+		lastSyncValue string
+		batchSize     int
+		expectFilter  bool
+		expectOrderBy bool
+		expectLimit   bool
 	}{
 		{
-			name:           "First sync - no last value",
-			trackingField:  "updated_at",
-			lastSyncValue:  "",
-			batchSize:      0,
-			expectFilter:   false,
-			expectOrderBy:  true,
-			expectLimit:    false,
+			name:          "First sync - no last value",
+			trackingField: "updated_at",
+			lastSyncValue: "",
+			batchSize:     0,
+			expectFilter:  false,
+			expectOrderBy: true,
+			expectLimit:   false,
 		},
 		{
-			name:           "Incremental sync with timestamp",
-			trackingField:  "updated_at",
-			lastSyncValue:  "2024-11-17 10:00:00",
-			batchSize:      0,
-			expectFilter:   true,
-			expectOrderBy:  true,
-			expectLimit:    false,
+			name:          "Incremental sync with timestamp",
+			trackingField: "updated_at",
+			lastSyncValue: "2024-11-17 10:00:00",
+			batchSize:     0,
+			expectFilter:  true,
+			expectOrderBy: true,
+			expectLimit:   false,
 		},
 		{
-			name:           "Incremental sync with ID",
-			trackingField:  "id",
-			lastSyncValue:  "12345",
-			batchSize:      0,
-			expectFilter:   true,
-			expectOrderBy:  true,
-			expectLimit:    false,
+			name:          "Incremental sync with ID",
+			trackingField: "id",
+			lastSyncValue: "12345",
+			batchSize:     0,
+			expectFilter:  true,
+			expectOrderBy: true,
+			expectLimit:   false,
 		},
 		{
-			name:           "With batch size",
-			trackingField:  "updated_at",
-			lastSyncValue:  "2024-11-17 10:00:00",
-			batchSize:      1000,
-			expectFilter:   true,
-			expectOrderBy:  true,
-			expectLimit:    true,
+			name:          "With batch size",
+			trackingField: "updated_at",
+			lastSyncValue: "2024-11-17 10:00:00",
+			batchSize:     1000,
+			expectFilter:  true,
+			expectOrderBy: true,
+			expectLimit:   true,
 		},
 	}
 
