@@ -30,15 +30,15 @@ const (
 
 // TypedValue представляет типизированное значение
 type TypedValue struct {
-	Type      DataType
-	RawValue  string
-	IsNull    bool
-	IntValue  *int64
-	FloatValue *float64
+	Type        DataType
+	RawValue    string
+	IsNull      bool
+	IntValue    *int64
+	FloatValue  *float64
 	StringValue *string
-	BoolValue  *bool
-	TimeValue  *time.Time
-	BlobValue  []byte
+	BoolValue   *bool
+	TimeValue   *time.Time
+	BlobValue   []byte
 }
 
 // FieldDef расширенное определение поля с валидацией
@@ -61,7 +61,7 @@ type ValidationError struct {
 }
 
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("validation error for field '%s': %s (value: '%s')", 
+	return fmt.Sprintf("validation error for field '%s': %s (value: '%s')",
 		e.Field, e.Message, e.Value)
 }
 
@@ -125,8 +125,8 @@ func NormalizeType(t DataType) DataType {
 func IsValidType(t DataType) bool {
 	normalized := NormalizeType(t)
 	switch normalized {
-	case TypeInteger, TypeReal, TypeDecimal, TypeText, 
-		 TypeBoolean, TypeDate, TypeDatetime, TypeTimestamp, TypeBlob:
+	case TypeInteger, TypeReal, TypeDecimal, TypeText,
+		TypeBoolean, TypeDate, TypeDatetime, TypeTimestamp, TypeBlob:
 		return true
 	default:
 		return false

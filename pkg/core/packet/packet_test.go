@@ -31,7 +31,7 @@ func TestParseReference(t *testing.T) {
 
 	parser := NewParser()
 	packet, err := parser.ParseBytes([]byte(xmlData))
-	
+
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestParseReference(t *testing.T) {
 	if packet.Header.Type != TypeReference {
 		t.Errorf("Expected Type=reference, got %s", packet.Header.Type)
 	}
-	
+
 	if packet.Header.TableName != "CustTable" {
 		t.Errorf("Expected TableName=CustTable, got %s", packet.Header.TableName)
 	}
@@ -60,7 +60,7 @@ func TestParseReference(t *testing.T) {
 	if len(values) != 3 {
 		t.Errorf("Expected 3 values, got %d", len(values))
 	}
-	
+
 	if values[0] != "1001" {
 		t.Errorf("Expected first value=1001, got %s", values[0])
 	}
@@ -68,7 +68,7 @@ func TestParseReference(t *testing.T) {
 
 func TestGenerateReference(t *testing.T) {
 	generator := NewGenerator()
-	
+
 	schema := Schema{
 		Fields: []Field{
 			{Name: "ID", Type: "INTEGER", Key: true},
@@ -76,41 +76,41 @@ func TestGenerateReference(t *testing.T) {
 			{Name: "Amount", Type: "DECIMAL"},
 		},
 	}
-	
+
 	rows := [][]string{
 		{"1", "Test 1", "100.50"},
 		{"2", "Test 2", "200.75"},
 	}
-	
+
 	packets, err := generator.GenerateReference("TestTable", schema, rows)
 	if err != nil {
 		t.Fatalf("GenerateReference failed: %v", err)
 	}
-	
+
 	if len(packets) != 1 {
 		t.Errorf("Expected 1 packet, got %d", len(packets))
 	}
-	
+
 	packet := packets[0]
-	
+
 	// Проверка Header
 	if packet.Header.Type != TypeReference {
 		t.Errorf("Expected Type=reference, got %s", packet.Header.Type)
 	}
-	
+
 	if packet.Header.TableName != "TestTable" {
 		t.Errorf("Expected TableName=TestTable, got %s", packet.Header.TableName)
 	}
-	
+
 	if packet.Header.RecordsInPart != 2 {
 		t.Errorf("Expected RecordsInPart=2, got %d", packet.Header.RecordsInPart)
 	}
-	
+
 	// Проверка Schema
 	if len(packet.Schema.Fields) != 3 {
 		t.Errorf("Expected 3 fields, got %d", len(packet.Schema.Fields))
 	}
-	
+
 	// Проверка Data
 	if len(packet.Data.Rows) != 2 {
 		t.Errorf("Expected 2 rows, got %d", len(packet.Data.Rows))
@@ -119,28 +119,28 @@ func TestGenerateReference(t *testing.T) {
 
 func TestGenerateRequest(t *testing.T) {
 	generator := NewGenerator()
-	
+
 	query := NewQuery()
 	query.Limit = 100
 	query.Offset = 0
-	
+
 	packet, err := generator.GenerateRequest("TestTable", query, "SystemA", "SystemB")
 	if err != nil {
 		t.Fatalf("GenerateRequest failed: %v", err)
 	}
-	
+
 	if packet.Header.Type != TypeRequest {
 		t.Errorf("Expected Type=request, got %s", packet.Header.Type)
 	}
-	
+
 	if packet.Header.Sender != "SystemA" {
 		t.Errorf("Expected Sender=SystemA, got %s", packet.Header.Sender)
 	}
-	
+
 	if packet.Query == nil {
 		t.Error("Expected Query to be present")
 	}
-	
+
 	if packet.Query.Limit != 100 {
 		t.Errorf("Expected Limit=100, got %d", packet.Query.Limit)
 	}
@@ -148,18 +148,18 @@ func TestGenerateRequest(t *testing.T) {
 
 func TestGenerateResponse(t *testing.T) {
 	generator := NewGenerator()
-	
+
 	schema := Schema{
 		Fields: []Field{
 			{Name: "ID", Type: "INTEGER"},
 			{Name: "Name", Type: "TEXT"},
 		},
 	}
-	
+
 	rows := [][]string{
 		{"1", "Test"},
 	}
-	
+
 	queryContext := &QueryContext{
 		ExecutionResults: ExecutionResults{
 			TotalRecordsInTable: 100,
@@ -168,7 +168,7 @@ func TestGenerateResponse(t *testing.T) {
 			MoreDataAvailable:   false,
 		},
 	}
-	
+
 	packets, err := generator.GenerateResponse(
 		"TestTable",
 		"REQ-2025-123",
@@ -178,21 +178,21 @@ func TestGenerateResponse(t *testing.T) {
 		"SystemB",
 		"SystemA",
 	)
-	
+
 	if err != nil {
 		t.Fatalf("GenerateResponse failed: %v", err)
 	}
-	
+
 	packet := packets[0]
-	
+
 	if packet.Header.Type != TypeResponse {
 		t.Errorf("Expected Type=response, got %s", packet.Header.Type)
 	}
-	
+
 	if packet.Header.InReplyTo != "REQ-2025-123" {
 		t.Errorf("Expected InReplyTo=REQ-2025-123, got %s", packet.Header.InReplyTo)
 	}
-	
+
 	if packet.QueryContext == nil {
 		t.Error("Expected QueryContext to be present")
 	}
@@ -200,7 +200,7 @@ func TestGenerateResponse(t *testing.T) {
 
 func TestToXML(t *testing.T) {
 	generator := NewGenerator()
-	
+
 	packet := NewDataPacket(TypeReference, "TestTable")
 	packet.Header.MessageID = "TEST-2025-001"
 	packet.Schema = Schema{
@@ -208,22 +208,22 @@ func TestToXML(t *testing.T) {
 			{Name: "ID", Type: "INTEGER"},
 		},
 	}
-	
+
 	xmlData, err := generator.ToXML(packet, true)
 	if err != nil {
 		t.Fatalf("ToXML failed: %v", err)
 	}
-	
+
 	xmlString := string(xmlData)
-	
+
 	if !strings.Contains(xmlString, "<?xml version") {
 		t.Error("Expected XML declaration")
 	}
-	
+
 	if !strings.Contains(xmlString, "protocol=\"TDTP\"") {
 		t.Error("Expected protocol attribute")
 	}
-	
+
 	if !strings.Contains(xmlString, "TestTable") {
 		t.Error("Expected TableName in XML")
 	}
@@ -232,14 +232,14 @@ func TestToXML(t *testing.T) {
 func TestPartitioning(t *testing.T) {
 	generator := NewGenerator()
 	generator.SetMaxMessageSize(1000) // Маленький размер для теста
-	
+
 	schema := Schema{
 		Fields: []Field{
 			{Name: "ID", Type: "INTEGER"},
 			{Name: "Data", Type: "TEXT"},
 		},
 	}
-	
+
 	// Создаем много строк чтобы вызвать разбиение
 	rows := [][]string{}
 	for i := 0; i < 100; i++ {
@@ -248,16 +248,16 @@ func TestPartitioning(t *testing.T) {
 			strings.Repeat("x", 50),
 		})
 	}
-	
+
 	packets, err := generator.GenerateReference("TestTable", schema, rows)
 	if err != nil {
 		t.Fatalf("GenerateReference failed: %v", err)
 	}
-	
+
 	if len(packets) <= 1 {
 		t.Error("Expected multiple packets due to size limit")
 	}
-	
+
 	// Проверка нумерации частей
 	for i, packet := range packets {
 		if packet.Header.PartNumber != i+1 {
@@ -271,7 +271,7 @@ func TestPartitioning(t *testing.T) {
 
 func TestValidation(t *testing.T) {
 	parser := NewParser()
-	
+
 	// Тест на отсутствие обязательных полей
 	invalidXML := `<?xml version="1.0" encoding="utf-8"?>
 <DataPacket protocol="TDTP" version="1.0">
@@ -279,7 +279,7 @@ func TestValidation(t *testing.T) {
     <Type>reference</Type>
   </Header>
 </DataPacket>`
-	
+
 	_, err := parser.ParseBytes([]byte(invalidXML))
 	if err == nil {
 		t.Error("Expected validation error for missing TableName")

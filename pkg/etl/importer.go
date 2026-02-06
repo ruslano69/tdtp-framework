@@ -13,10 +13,10 @@ import (
 
 // ImporterConfig содержит конфигурацию импортера
 type ImporterConfig struct {
-	Type      string              // "RabbitMQ" или "Kafka"
-	RabbitMQ  *RabbitMQInputConfig
-	Kafka     *KafkaInputConfig
-	Workers   int                 // Количество параллельных воркеров для обработки частей
+	Type     string // "RabbitMQ" или "Kafka"
+	RabbitMQ *RabbitMQInputConfig
+	Kafka    *KafkaInputConfig
+	Workers  int // Количество параллельных воркеров для обработки частей
 }
 
 // RabbitMQInputConfig конфигурация для чтения из RabbitMQ
@@ -38,7 +38,7 @@ type KafkaInputConfig struct {
 // ImportResult представляет результат импорта одной части
 type ImportResult struct {
 	PartNumber int
-	TotalParts int           // Из Header.TotalParts
+	TotalParts int // Из Header.TotalParts
 	RowsCount  int
 	Error      error
 	Duration   time.Duration
@@ -291,7 +291,7 @@ func ImportToDatabase(
 ) (*ImportStats, error) {
 	var mu sync.Mutex
 	tableCreated := false
-	var expectedBatchID string    // MessageID base первого пакета
+	var expectedBatchID string       // MessageID base первого пакета
 	var expectedSchema packet.Schema // Schema первого пакета
 
 	// Handler который вставляет данные в workspace
@@ -356,4 +356,3 @@ func extractBatchID(messageID string) string {
 	// Если не нашли "-P", возвращаем весь MessageID
 	return messageID
 }
-

@@ -475,8 +475,8 @@ func TestFieldValidator_FromConfig(t *testing.T) {
 	params := map[string]interface{}{
 		"stop_on_first_error": true,
 		"rules": map[string]interface{}{
-			"email": "email",
-			"age":   "range:18-65",
+			"email":  "email",
+			"age":    "range:18-65",
 			"status": "enum:active,inactive",
 		},
 	}

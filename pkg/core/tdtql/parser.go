@@ -7,7 +7,7 @@ import (
 
 // Parser SQL парсер
 type Parser struct {
-	lexer   *Lexer
+	lexer     *Lexer
 	curToken  Token
 	peekToken Token
 	errors    []string
@@ -19,11 +19,11 @@ func NewParser(input string) *Parser {
 		lexer:  NewLexer(input),
 		errors: []string{},
 	}
-	
+
 	// Читаем два токена для инициализации curToken и peekToken
 	p.nextToken()
 	p.nextToken()
-	
+
 	return p
 }
 
@@ -56,13 +56,13 @@ func (p *Parser) expectToken(t TokenType) bool {
 // ParseSelect парсит SELECT запрос
 func (p *Parser) ParseSelect() (*SelectStatement, error) {
 	stmt := &SelectStatement{}
-	
+
 	// SELECT
 	if p.curToken.Type != TokenSelect {
 		return nil, fmt.Errorf("expected SELECT, got %v", p.curToken.Type)
 	}
 	p.nextToken()
-	
+
 	// * или список полей (пока поддерживаем только *)
 	if p.curToken.Type == TokenStar {
 		p.nextToken()
@@ -72,19 +72,19 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 			p.nextToken()
 		}
 	}
-	
+
 	// FROM
 	if !p.expectToken(TokenFrom) {
 		return nil, fmt.Errorf("expected FROM")
 	}
-	
+
 	// TableName
 	if p.curToken.Type != TokenIdent {
 		return nil, fmt.Errorf("expected table name")
 	}
 	stmt.TableName = p.curToken.Literal
 	p.nextToken()
-	
+
 	// WHERE (опционально)
 	if p.curToken.Type == TokenWhere {
 		p.nextToken()
@@ -94,7 +94,7 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 		}
 		stmt.Where = expr
 	}
-	
+
 	// ORDER BY (опционально)
 	if p.curToken.Type == TokenOrderBy {
 		p.nextToken()
@@ -102,14 +102,14 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 		if p.curToken.Type == TokenOrderBy {
 			p.nextToken()
 		}
-		
+
 		orderBy, err := p.parseOrderBy()
 		if err != nil {
 			return nil, err
 		}
 		stmt.OrderBy = orderBy
 	}
-	
+
 	// LIMIT (опционально)
 	if p.curToken.Type == TokenLimit {
 		p.nextToken()
@@ -120,7 +120,7 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 		stmt.Limit = &limit
 		p.nextToken()
 	}
-	
+
 	// OFFSET (опционально)
 	if p.curToken.Type == TokenOffset {
 		p.nextToken()
@@ -131,11 +131,11 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 		stmt.Offset = &offset
 		p.nextToken()
 	}
-	
+
 	if len(p.errors) > 0 {
 		return nil, fmt.Errorf("parse errors: %v", p.errors)
 	}
-	
+
 	return stmt, nil
 }
 
@@ -144,7 +144,7 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 func (p *Parser) parseExpression(precedence int) (Expression, error) {
 	var left Expression
 	var err error
-	
+
 	// Префиксные операторы
 	if p.curToken.Type == TokenNot {
 		p.nextToken()
@@ -169,12 +169,12 @@ func (p *Parser) parseExpression(precedence int) (Expression, error) {
 			return nil, err
 		}
 	}
-	
+
 	// Инфиксные операторы (AND, OR)
 	for {
 		var opPrecedence int
 		var operator string
-		
+
 		if p.curToken.Type == TokenAnd {
 			opPrecedence = 2
 			operator = "AND"
@@ -184,25 +184,25 @@ func (p *Parser) parseExpression(precedence int) (Expression, error) {
 		} else {
 			break
 		}
-		
+
 		if opPrecedence <= precedence {
 			break
 		}
-		
+
 		p.nextToken()
-		
+
 		right, err := p.parseExpression(opPrecedence)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		left = &BinaryExpression{
 			Left:     left,
 			Operator: operator,
 			Right:    right,
 		}
 	}
-	
+
 	return left, nil
 }
 
@@ -211,10 +211,10 @@ func (p *Parser) parseCondition() (Expression, error) {
 	if p.curToken.Type != TokenIdent {
 		return nil, fmt.Errorf("expected field name, got %v", p.curToken.Type)
 	}
-	
+
 	field := p.curToken.Literal
 	p.nextToken()
-	
+
 	// IS NULL / IS NOT NULL
 	if p.curToken.Type == TokenIs {
 		p.nextToken()
@@ -229,7 +229,7 @@ func (p *Parser) parseCondition() (Expression, error) {
 		p.nextToken()
 		return &IsNullExpression{Field: field, Not: not}, nil
 	}
-	
+
 	// IN / NOT IN
 	if p.curToken.Type == TokenIn {
 		p.nextToken()
@@ -243,13 +243,13 @@ func (p *Parser) parseCondition() (Expression, error) {
 		p.nextToken()
 		return p.parseInExpression(field, true)
 	}
-	
+
 	// BETWEEN / NOT BETWEEN
 	if p.curToken.Type == TokenBetween {
 		p.nextToken()
 		return p.parseBetweenExpression(field, false)
 	}
-	
+
 	// LIKE / NOT LIKE
 	var operator string
 	switch p.curToken.Type {
@@ -277,9 +277,9 @@ func (p *Parser) parseCondition() (Expression, error) {
 	default:
 		return nil, fmt.Errorf("expected operator, got %v", p.curToken.Type)
 	}
-	
+
 	p.nextToken()
-	
+
 	// Value
 	var value interface{}
 	if p.curToken.Type == TokenString {
@@ -292,7 +292,7 @@ func (p *Parser) parseCondition() (Expression, error) {
 		return nil, fmt.Errorf("expected value")
 	}
 	p.nextToken()
-	
+
 	return &ComparisonExpression{
 		Field:    field,
 		Operator: operator,
@@ -306,7 +306,7 @@ func (p *Parser) parseInExpression(field string, not bool) (Expression, error) {
 		return nil, fmt.Errorf("expected ( after IN")
 	}
 	p.nextToken()
-	
+
 	values := []string{}
 	for {
 		if p.curToken.Type == TokenString || p.curToken.Type == TokenNumber || p.curToken.Type == TokenIdent {
@@ -315,18 +315,18 @@ func (p *Parser) parseInExpression(field string, not bool) (Expression, error) {
 		} else {
 			return nil, fmt.Errorf("expected value in IN list, got %v", p.curToken.Type)
 		}
-		
+
 		if p.curToken.Type == TokenRParen {
 			p.nextToken()
 			break
 		}
-		
+
 		if p.curToken.Type != TokenComma {
 			return nil, fmt.Errorf("expected , or ) in IN list, got %v", p.curToken.Type)
 		}
 		p.nextToken() // пропускаем запятую
 	}
-	
+
 	return &InExpression{
 		Field:  field,
 		Values: values,
@@ -342,19 +342,19 @@ func (p *Parser) parseBetweenExpression(field string, not bool) (Expression, err
 	}
 	low := p.curToken.Literal
 	p.nextToken()
-	
+
 	// AND
 	if !p.expectToken(TokenAnd) {
 		return nil, fmt.Errorf("expected AND in BETWEEN")
 	}
-	
+
 	// High value
 	if p.curToken.Type != TokenString && p.curToken.Type != TokenNumber {
 		return nil, fmt.Errorf("expected value after AND in BETWEEN")
 	}
 	high := p.curToken.Literal
 	p.nextToken()
-	
+
 	return &BetweenExpression{
 		Field: field,
 		Low:   low,
@@ -366,18 +366,18 @@ func (p *Parser) parseBetweenExpression(field string, not bool) (Expression, err
 // parseOrderBy парсит ORDER BY
 func (p *Parser) parseOrderBy() ([]*OrderByClause, error) {
 	clauses := []*OrderByClause{}
-	
+
 	for {
 		if p.curToken.Type != TokenIdent {
 			return nil, fmt.Errorf("expected field name in ORDER BY")
 		}
-		
+
 		clause := &OrderByClause{
 			Field:     p.curToken.Literal,
 			Direction: "ASC", // по умолчанию
 		}
 		p.nextToken()
-		
+
 		// ASC/DESC
 		if p.curToken.Type == TokenAsc {
 			clause.Direction = "ASC"
@@ -386,17 +386,17 @@ func (p *Parser) parseOrderBy() ([]*OrderByClause, error) {
 			clause.Direction = "DESC"
 			p.nextToken()
 		}
-		
+
 		clauses = append(clauses, clause)
-		
+
 		// Если есть запятая, продолжаем
 		if p.curToken.Type == TokenComma {
 			p.nextToken()
 			continue
 		}
-		
+
 		break
 	}
-	
+
 	return clauses, nil
 }

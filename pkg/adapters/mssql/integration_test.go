@@ -210,7 +210,7 @@ func TestIntegration_MergeUpsert(t *testing.T) {
 
 	// Модифицируем данные в пакете (обновляем balance для id=1)
 	for i, row := range packets[0].Data.Rows {
-		// Разбираем значения 
+		// Разбираем значения
 		values := strings.Split(row.Value, "|")
 		if len(values) > 0 && values[0] == "1" { // id = 1
 			if len(values) > 4 {
@@ -456,11 +456,11 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 
 	// Проверяем маппинг типов
 	expectedSubtypes := map[string]string{
-		"guid_col":      "uniqueidentifier",
-		"datetime_col":  "datetime2",
-		"money_col":     "money",
-		"xml_col":       "xml",
-		"binary_col":    "varbinary",
+		"guid_col":     "uniqueidentifier",
+		"datetime_col": "datetime2",
+		"money_col":    "money",
+		"xml_col":      "xml",
+		"binary_col":   "varbinary",
 	}
 
 	for _, field := range schema.Fields {

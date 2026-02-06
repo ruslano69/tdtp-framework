@@ -9,22 +9,22 @@ import (
 
 // ExecutionResult результат выполнения запроса
 type ExecutionResult struct {
-	FilteredRows    [][]string               // отфильтрованные и отсортированные строки
-	TotalRows       int                      // всего строк в исходных данных
-	MatchedRows     int                      // строк после фильтрации (до LIMIT)
-	ReturnedRows    int                      // строк возвращено (после LIMIT/OFFSET)
-	MoreAvailable   bool                     // есть ли еще данные
-	NextOffset      int                      // следующий offset для пагинации
-	FilterStats     map[string]int           // статистика по фильтрам
-	QueryContext    *packet.QueryContext     // контекст для Response
+	FilteredRows  [][]string           // отфильтрованные и отсортированные строки
+	TotalRows     int                  // всего строк в исходных данных
+	MatchedRows   int                  // строк после фильтрации (до LIMIT)
+	ReturnedRows  int                  // строк возвращено (после LIMIT/OFFSET)
+	MoreAvailable bool                 // есть ли еще данные
+	NextOffset    int                  // следующий offset для пагинации
+	FilterStats   map[string]int       // статистика по фильтрам
+	QueryContext  *packet.QueryContext // контекст для Response
 }
 
 // Executor выполняет TDTQL запросы на данных
 type Executor struct {
-	filter     *FilterEngine
-	sorter     *Sorter
-	validator  *schema.Validator
-	converter  *schema.Converter
+	filter    *FilterEngine
+	sorter    *Sorter
+	validator *schema.Validator
+	converter *schema.Converter
 }
 
 // NewExecutor создает новый executor

@@ -41,7 +41,7 @@ func main() {
 
 	// 3. Полный цикл: SQL → TDTQL → Execute
 	fmt.Println("=== Example 1: Full SQL → Execute Cycle ===")
-	
+
 	sql := `SELECT * FROM CustTable
 		WHERE IsActive = 1 
 		  AND Balance > 50000
@@ -69,7 +69,7 @@ func main() {
 
 	// 4. Простая фильтрация
 	fmt.Println("\n=== Example 2: Simple Filter (Balance > 100000) ===")
-	
+
 	query2 := packet.NewQuery()
 	query2.Filters = &packet.Filters{
 		And: &packet.LogicalGroup{
@@ -88,7 +88,7 @@ func main() {
 
 	// 5. IN оператор
 	fmt.Println("\n=== Example 3: IN Operator ===")
-	
+
 	query3 := packet.NewQuery()
 	query3.Filters = &packet.Filters{
 		And: &packet.LogicalGroup{
@@ -107,7 +107,7 @@ func main() {
 
 	// 6. Сортировка
 	fmt.Println("\n=== Example 4: Sorting by Balance DESC ===")
-	
+
 	query4 := packet.NewQuery()
 	query4.OrderBy = &packet.OrderBy{
 		Field:     "Balance",
@@ -124,7 +124,7 @@ func main() {
 
 	// 7. Пагинация
 	fmt.Println("\n=== Example 5: Pagination (LIMIT 3 OFFSET 2) ===")
-	
+
 	query5 := packet.NewQuery()
 	query5.Limit = 3
 	query5.Offset = 2
@@ -138,7 +138,7 @@ func main() {
 
 	// 8. Комплексный запрос с QueryContext
 	fmt.Println("\n=== Example 6: Complex Query with QueryContext ===")
-	
+
 	sql6 := `SELECT * FROM CustTable
 		WHERE IsActive = 1
 		  AND (Balance > 100000 OR Balance < 0)
@@ -168,7 +168,7 @@ func main() {
 
 	// 9. Создание Response пакета с результатами
 	fmt.Println("\n=== Example 7: Creating Response Packet ===")
-	
+
 	generator := packet.NewGenerator()
 	responsePackets, err := generator.GenerateResponse(
 		"CustTable",
@@ -196,7 +196,7 @@ func printResult(title string, result *tdtql.ExecutionResult) {
 	fmt.Printf("Total Rows: %d\n", result.TotalRows)
 	fmt.Printf("Matched Rows: %d\n", result.MatchedRows)
 	fmt.Printf("Returned Rows: %d\n", result.ReturnedRows)
-	
+
 	if result.MoreAvailable {
 		fmt.Printf("More Available: YES (next offset: %d)\n", result.NextOffset)
 	} else {

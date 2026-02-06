@@ -30,7 +30,7 @@ func main() {
 
 	// 3. Генерация Reference пакета
 	generator := packet.NewGenerator()
-	
+
 	packets, err := generator.GenerateReference("CustTable", schema, rows)
 	if err != nil {
 		log.Fatalf("Failed to generate reference: %v", err)
@@ -53,7 +53,7 @@ func main() {
 	// 5. Парсинг обратно
 	fmt.Println("=== Parsing back ===")
 	parser := packet.NewParser()
-	
+
 	parsedPacket, err := parser.ParseFile("/tmp/reference_part_1.xml")
 	if err != nil {
 		log.Fatalf("Failed to parse: %v", err)
@@ -78,7 +78,7 @@ func main() {
 	query := packet.NewQuery()
 	query.Limit = 100
 	query.Offset = 0
-	
+
 	// Добавляем фильтр
 	query.Filters = &packet.Filters{
 		And: &packet.LogicalGroup{
@@ -105,8 +105,8 @@ func main() {
 
 	fmt.Printf("Request saved: /tmp/request.xml\n")
 	fmt.Printf("  MessageID: %s\n", requestPacket.Header.MessageID)
-	fmt.Printf("  Sender: %s -> Recipient: %s\n", 
-		requestPacket.Header.Sender, 
+	fmt.Printf("  Sender: %s -> Recipient: %s\n",
+		requestPacket.Header.Sender,
 		requestPacket.Header.Recipient)
 	fmt.Printf("  Query Limit: %d, Offset: %d\n\n",
 		requestPacket.Query.Limit,
@@ -114,7 +114,7 @@ func main() {
 
 	// 8. Создание Response с QueryContext
 	fmt.Println("=== Creating Response ===")
-	
+
 	responseRows := [][]string{
 		{"1001", "ООО Рога и Копыта", "7701234567", "150000.50", "1"},
 	}
@@ -149,7 +149,7 @@ func main() {
 	fmt.Printf("Response saved: /tmp/response.xml\n")
 	fmt.Printf("  MessageID: %s\n", responsePackets[0].Header.MessageID)
 	fmt.Printf("  InReplyTo: %s\n", responsePackets[0].Header.InReplyTo)
-	fmt.Printf("  Records matched: %d\n", 
+	fmt.Printf("  Records matched: %d\n",
 		responsePackets[0].QueryContext.ExecutionResults.RecordsAfterFilters)
 
 	fmt.Println("\n=== Done ===")

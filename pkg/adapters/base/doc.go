@@ -86,5 +86,4 @@
 // - Single Responsibility: каждый хелпер отвечает за свою область (export/import/conversion)
 // - Open/Closed: легко расширяется новыми адаптерами без изменения базового кода
 // - DRY (Don't Repeat Yourself): устранение дублирования кода
-//
 package base

@@ -366,4 +366,3 @@ func UpdatePartTotalParts(packets []*DataPacket, totalParts int) {
 		packet.Header.TotalParts = totalParts
 	}
 }
-

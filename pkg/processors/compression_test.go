@@ -261,11 +261,11 @@ func TestShouldCompress(t *testing.T) {
 		minSize  int
 		expected bool
 	}{
-		{100, 1024, false},  // Меньше минимального
-		{1024, 1024, true},  // Равно минимальному
-		{2000, 1024, true},  // Больше минимального
-		{500, 0, false},     // minSize=0 использует default 1024
-		{2000, 0, true},     // Больше default
+		{100, 1024, false}, // Меньше минимального
+		{1024, 1024, true}, // Равно минимальному
+		{2000, 1024, true}, // Больше минимального
+		{500, 0, false},    // minSize=0 использует default 1024
+		{2000, 0, true},    // Больше default
 	}
 
 	for _, tc := range tests {

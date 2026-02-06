@@ -8,13 +8,13 @@ import (
 
 // ProcessorStats представляет статистику выполнения ETL
 type ProcessorStats struct {
-	StartTime        time.Time
-	EndTime          time.Time
-	Duration         time.Duration
-	SourcesLoaded    int
-	TotalRowsLoaded  int
+	StartTime         time.Time
+	EndTime           time.Time
+	Duration          time.Duration
+	SourcesLoaded     int
+	TotalRowsLoaded   int
 	TotalRowsExported int
-	Errors           []error
+	Errors            []error
 }
 
 // Processor представляет главный ETL процессор

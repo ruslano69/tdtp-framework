@@ -36,16 +36,16 @@ func (s State) String() string {
 
 // stateManager - управление состоянием Circuit Breaker
 type stateManager struct {
-	mu               sync.RWMutex
-	state            State
-	generation       uint64 // Счетчик смены поколений состояний
-	counts           Counts
-	expiry           time.Time // Когда истекает Open состояние
-	config           Config
-	runningCalls     uint32
-	maxRunningCalls  uint32
-	lastStateChange  time.Time
-	stateChanges     map[State]int // Статистика изменений состояний
+	mu              sync.RWMutex
+	state           State
+	generation      uint64 // Счетчик смены поколений состояний
+	counts          Counts
+	expiry          time.Time // Когда истекает Open состояние
+	config          Config
+	runningCalls    uint32
+	maxRunningCalls uint32
+	lastStateChange time.Time
+	stateChanges    map[State]int // Статистика изменений состояний
 }
 
 // newStateManager - создать новый state manager
@@ -269,14 +269,14 @@ func (sm *stateManager) getStats() Stats {
 	defer sm.mu.RUnlock()
 
 	return Stats{
-		State:               sm.state,
-		Generation:          sm.generation,
-		Counts:              sm.counts,
-		RunningCalls:        sm.runningCalls,
-		MaxRunningCalls:     sm.maxRunningCalls,
-		LastStateChange:     sm.lastStateChange,
-		StateChanges:        copyMap(sm.stateChanges),
-		TimeUntilHalfOpen:   sm.timeUntilHalfOpen(),
+		State:             sm.state,
+		Generation:        sm.generation,
+		Counts:            sm.counts,
+		RunningCalls:      sm.runningCalls,
+		MaxRunningCalls:   sm.maxRunningCalls,
+		LastStateChange:   sm.lastStateChange,
+		StateChanges:      copyMap(sm.stateChanges),
+		TimeUntilHalfOpen: sm.timeUntilHalfOpen(),
 	}
 }
 

@@ -217,10 +217,10 @@ func generateTestData(count int) [][]string {
 	rows := make([][]string, count)
 	for i := 0; i < count; i++ {
 		rows[i] = []string{
-			fmt.Sprintf("%d", i+1),                              // id
-			fmt.Sprintf("User %d", i+1),                         // name
-			fmt.Sprintf("user%d@example.com", i+1),              // email
-			fmt.Sprintf("%d", 20+(i%50)),                        // age
+			fmt.Sprintf("%d", i+1),                 // id
+			fmt.Sprintf("User %d", i+1),            // name
+			fmt.Sprintf("user%d@example.com", i+1), // email
+			fmt.Sprintf("%d", 20+(i%50)),           // age
 		}
 	}
 	return rows

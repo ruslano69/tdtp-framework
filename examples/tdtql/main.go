@@ -59,7 +59,7 @@ func main() {
 		ORDER BY Balance DESC
 		LIMIT 100
 		OFFSET 0`
-	
+
 	query5, err := translator.Translate(sql5)
 	if err != nil {
 		log.Fatalf("Error: %v", err)
@@ -86,7 +86,7 @@ func main() {
 
 	// 8. Использование с DataPacket
 	fmt.Println("\n=== Example 8: Integration with DataPacket ===")
-	
+
 	// Транслируем SQL
 	sql8 := "SELECT * FROM TestTable WHERE Status = 'active' ORDER BY CreatedAt DESC LIMIT 50"
 	query8, err := translator.Translate(sql8)
@@ -138,13 +138,13 @@ func main() {
 func printQuery(label, sql string, query *packet.Query) {
 	fmt.Printf("%s: %s\n", label, sql)
 	fmt.Println("\nGenerated TDTQL Query:")
-	
+
 	// Сериализуем Query в XML для наглядности
 	xmlData, err := xml.MarshalIndent(query, "", "  ")
 	if err != nil {
 		log.Printf("Error marshaling: %v", err)
 		return
 	}
-	
+
 	fmt.Println(string(xmlData))
 }

@@ -67,14 +67,14 @@ func (c *Config) Validate() error {
 // DefaultConfig - конфигурация по умолчанию
 func DefaultConfig(name string) Config {
 	return Config{
-		Enabled:              true,
-		Name:                 name,
-		MaxFailures:          5,
-		Timeout:              60 * time.Second,
-		MaxConcurrentCalls:   0, // Без ограничений
-		SuccessThreshold:     2,
-		OnStateChange:        nil,
-		ShouldTrip:           nil, // Используем стандартную логику
+		Enabled:            true,
+		Name:               name,
+		MaxFailures:        5,
+		Timeout:            60 * time.Second,
+		MaxConcurrentCalls: 0, // Без ограничений
+		SuccessThreshold:   2,
+		OnStateChange:      nil,
+		ShouldTrip:         nil, // Используем стандартную логику
 	}
 }
 
@@ -88,27 +88,27 @@ func WithCallbacks(name string, onStateChange func(string, State, State)) Config
 // AggressiveConfig - агрессивная конфигурация (быстрое открытие)
 func AggressiveConfig(name string) Config {
 	return Config{
-		Enabled:              true,
-		Name:                 name,
-		MaxFailures:          3,
-		Timeout:              30 * time.Second,
-		MaxConcurrentCalls:   100,
-		SuccessThreshold:     3,
-		OnStateChange:        nil,
-		ShouldTrip:           nil,
+		Enabled:            true,
+		Name:               name,
+		MaxFailures:        3,
+		Timeout:            30 * time.Second,
+		MaxConcurrentCalls: 100,
+		SuccessThreshold:   3,
+		OnStateChange:      nil,
+		ShouldTrip:         nil,
 	}
 }
 
 // ConservativeConfig - консервативная конфигурация (медленное открытие)
 func ConservativeConfig(name string) Config {
 	return Config{
-		Enabled:              true,
-		Name:                 name,
-		MaxFailures:          10,
-		Timeout:              120 * time.Second,
-		MaxConcurrentCalls:   0,
-		SuccessThreshold:     5,
-		OnStateChange:        nil,
-		ShouldTrip:           nil,
+		Enabled:            true,
+		Name:               name,
+		MaxFailures:        10,
+		Timeout:            120 * time.Second,
+		MaxConcurrentCalls: 0,
+		SuccessThreshold:   5,
+		OnStateChange:      nil,
+		ShouldTrip:         nil,
 	}
 }

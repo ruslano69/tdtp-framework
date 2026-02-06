@@ -14,9 +14,9 @@ const (
 	TokenIllegal
 
 	// Идентификаторы и литералы
-	TokenIdent   // имена полей
-	TokenString  // 'строка'
-	TokenNumber  // 123, 123.45
+	TokenIdent  // имена полей
+	TokenString // 'строка'
+	TokenNumber // 123, 123.45
 
 	// Ключевые слова
 	TokenSelect
@@ -37,16 +37,16 @@ const (
 	TokenOffset
 
 	// Операторы
-	TokenEq       // =
-	TokenNotEq    // != или <>
-	TokenLt       // <
-	TokenLte      // <=
-	TokenGt       // >
-	TokenGte      // >=
-	TokenLParen   // (
-	TokenRParen   // )
-	TokenComma    // ,
-	TokenStar     // *
+	TokenEq     // =
+	TokenNotEq  // != или <>
+	TokenLt     // <
+	TokenLte    // <=
+	TokenGt     // >
+	TokenGte    // >=
+	TokenLParen // (
+	TokenRParen // )
+	TokenComma  // ,
+	TokenStar   // *
 )
 
 // Token представляет токен
@@ -198,7 +198,7 @@ func (l *Lexer) readIdentifier() string {
 func (l *Lexer) readNumber() string {
 	position := l.pos
 	hasDecimal := false
-	
+
 	// Минус только в начале
 	if l.ch == '-' {
 		l.readChar()

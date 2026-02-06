@@ -46,18 +46,18 @@ type OrderField struct {
 
 // QueryContext содержит контекст выполнения запроса (в response)
 type QueryContext struct {
-	OriginalQuery     Query             `xml:"OriginalQuery"`
-	ExecutionResults  ExecutionResults  `xml:"ExecutionResults"`
-	FilterStatistics  *FilterStatistics `xml:"FilterStatistics,omitempty"`
+	OriginalQuery    Query             `xml:"OriginalQuery"`
+	ExecutionResults ExecutionResults  `xml:"ExecutionResults"`
+	FilterStatistics *FilterStatistics `xml:"FilterStatistics,omitempty"`
 }
 
 // ExecutionResults содержит результаты выполнения
 type ExecutionResults struct {
-	TotalRecordsInTable  int  `xml:"TotalRecordsInTable"`
-	RecordsAfterFilters  int  `xml:"RecordsAfterFilters"`
-	RecordsReturned      int  `xml:"RecordsReturned"`
-	MoreDataAvailable    bool `xml:"MoreDataAvailable"`
-	NextOffset           int  `xml:"NextOffset,omitempty"`
+	TotalRecordsInTable int  `xml:"TotalRecordsInTable"`
+	RecordsAfterFilters int  `xml:"RecordsAfterFilters"`
+	RecordsReturned     int  `xml:"RecordsReturned"`
+	MoreDataAvailable   bool `xml:"MoreDataAvailable"`
+	NextOffset          int  `xml:"NextOffset,omitempty"`
 }
 
 // FilterStatistics содержит статистику по фильтрам

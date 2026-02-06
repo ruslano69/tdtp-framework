@@ -10,25 +10,25 @@ import (
 
 // PipelineConfig содержит полную конфигурацию ETL pipeline
 type PipelineConfig struct {
-	Name          string                 `yaml:"name"`
-	Version       string                 `yaml:"version"`
-	Description   string                 `yaml:"description"`
-	Sources       []SourceConfig         `yaml:"sources"`
-	Workspace     WorkspaceConfig        `yaml:"workspace"`
-	Transform     TransformConfig        `yaml:"transform"`
-	Output        OutputConfig           `yaml:"output"`
-	Performance   PerformanceConfig      `yaml:"performance"`
-	Audit         AuditConfig            `yaml:"audit"`
-	ErrorHandling ErrorHandlingConfig    `yaml:"error_handling"`
+	Name          string              `yaml:"name"`
+	Version       string              `yaml:"version"`
+	Description   string              `yaml:"description"`
+	Sources       []SourceConfig      `yaml:"sources"`
+	Workspace     WorkspaceConfig     `yaml:"workspace"`
+	Transform     TransformConfig     `yaml:"transform"`
+	Output        OutputConfig        `yaml:"output"`
+	Performance   PerformanceConfig   `yaml:"performance"`
+	Audit         AuditConfig         `yaml:"audit"`
+	ErrorHandling ErrorHandlingConfig `yaml:"error_handling"`
 }
 
 // SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite)
 type SourceConfig struct {
-	Name    string `yaml:"name"`     // Имя источника (будет использовано как имя таблицы в workspace)
-	Type    string `yaml:"type"`     // Тип: postgres, mssql, mysql, sqlite
-	DSN     string `yaml:"dsn"`      // Data Source Name (строка подключения)
-	Query   string `yaml:"query"`    // SQL запрос для извлечения данных
-	Timeout int    `yaml:"timeout"`  // Таймаут в секундах (0 = без таймаута)
+	Name    string `yaml:"name"`    // Имя источника (будет использовано как имя таблицы в workspace)
+	Type    string `yaml:"type"`    // Тип: postgres, mssql, mysql, sqlite
+	DSN     string `yaml:"dsn"`     // Data Source Name (строка подключения)
+	Query   string `yaml:"query"`   // SQL запрос для извлечения данных
+	Timeout int    `yaml:"timeout"` // Таймаут в секундах (0 = без таймаута)
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -77,9 +77,9 @@ type KafkaOutputConfig struct {
 
 // PerformanceConfig определяет параметры производительности
 type PerformanceConfig struct {
-	MaxMemoryMB     int  `yaml:"max_memory_mb"`     // Максимальная память для workspace (MB)
-	BatchSize       int  `yaml:"batch_size"`        // Размер batch для импорта
-	ParallelSources bool `yaml:"parallel_sources"`  // Загружать источники параллельно
+	MaxMemoryMB     int  `yaml:"max_memory_mb"`    // Максимальная память для workspace (MB)
+	BatchSize       int  `yaml:"batch_size"`       // Размер batch для импорта
+	ParallelSources bool `yaml:"parallel_sources"` // Загружать источники параллельно
 }
 
 // AuditConfig определяет параметры аудита
@@ -92,11 +92,11 @@ type AuditConfig struct {
 
 // ErrorHandlingConfig определяет стратегии обработки ошибок
 type ErrorHandlingConfig struct {
-	OnSourceError     string `yaml:"on_source_error"`      // skip, fail, retry
-	RetryAttempts     int    `yaml:"retry_attempts"`       // Количество повторов
-	RetryDelaySeconds int    `yaml:"retry_delay_seconds"`  // Задержка между повторами
-	OnTransformError  string `yaml:"on_transform_error"`   // skip, fail
-	OnOutputError     string `yaml:"on_output_error"`      // fail, retry
+	OnSourceError     string `yaml:"on_source_error"`     // skip, fail, retry
+	RetryAttempts     int    `yaml:"retry_attempts"`      // Количество повторов
+	RetryDelaySeconds int    `yaml:"retry_delay_seconds"` // Задержка между повторами
+	OnTransformError  string `yaml:"on_transform_error"`  // skip, fail
+	OnOutputError     string `yaml:"on_output_error"`     // fail, retry
 }
 
 // LoadConfig загружает конфигурацию из YAML файла

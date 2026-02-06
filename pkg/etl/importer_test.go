@@ -220,8 +220,8 @@ func TestBatchValidation(t *testing.T) {
 		errorContains string
 	}{
 		{
-			name:         "Same batch ID and schema",
-			firstBatchID: "MSG-2024-001",
+			name:          "Same batch ID and schema",
+			firstBatchID:  "MSG-2024-001",
 			secondBatchID: "MSG-2024-001",
 			firstSchema: []packet.Field{
 				{Name: "id", Type: "int"},
@@ -247,8 +247,8 @@ func TestBatchValidation(t *testing.T) {
 			errorContains: "batch mismatch",
 		},
 		{
-			name:         "Same batch ID but different schema",
-			firstBatchID: "MSG-2024-001",
+			name:          "Same batch ID but different schema",
+			firstBatchID:  "MSG-2024-001",
 			secondBatchID: "MSG-2024-001",
 			firstSchema: []packet.Field{
 				{Name: "id", Type: "int"},
@@ -262,8 +262,8 @@ func TestBatchValidation(t *testing.T) {
 			errorContains: "schema mismatch",
 		},
 		{
-			name:         "Same batch ID but different field types",
-			firstBatchID: "MSG-2024-001",
+			name:          "Same batch ID but different field types",
+			firstBatchID:  "MSG-2024-001",
 			secondBatchID: "MSG-2024-001",
 			firstSchema: []packet.Field{
 				{Name: "id", Type: "int"},

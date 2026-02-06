@@ -11,12 +11,12 @@ import (
 
 // RabbitMQ реализует MessageBroker для RabbitMQ
 type RabbitMQ struct {
-	config        Config
-	conn          *amqp.Connection
-	channel       *amqp.Channel
-	queue         amqp.Queue
-	lastDelivery  *amqp.Delivery     // Последнее полученное сообщение (для manual ack)
-	deliveryChan  <-chan amqp.Delivery // Канал для блокирующего получения сообщений
+	config       Config
+	conn         *amqp.Connection
+	channel      *amqp.Channel
+	queue        amqp.Queue
+	lastDelivery *amqp.Delivery       // Последнее полученное сообщение (для manual ack)
+	deliveryChan <-chan amqp.Delivery // Канал для блокирующего получения сообщений
 }
 
 // NewRabbitMQ создает новый RabbitMQ брокер
@@ -166,10 +166,10 @@ func (r *RabbitMQ) Send(ctx context.Context, message []byte) error {
 
 	err := r.channel.PublishWithContext(
 		ctx,
-		exchange,    // exchange (пустая строка = default exchange)
-		routingKey,  // routing key
-		false,       // mandatory
-		false,       // immediate
+		exchange,   // exchange (пустая строка = default exchange)
+		routingKey, // routing key
+		false,      // mandatory
+		false,      // immediate
 		amqp.Publishing{
 			ContentType:  "application/xml", // TDTP пакеты в XML формате
 			Body:         message,

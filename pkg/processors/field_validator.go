@@ -44,9 +44,9 @@ type FieldValidationRule struct {
 // FieldValidator валидирует данные в указанных полях
 // Может использоваться как PreProcessor (проверка перед экспортом) или PostProcessor (проверка перед импортом)
 type FieldValidator struct {
-	name            string
+	name             string
 	fieldsToValidate map[string][]FieldValidationRule // field_name -> validation rules
-	stopOnFirstError bool                              // Остановиться на первой ошибке или собрать все
+	stopOnFirstError bool                             // Остановиться на первой ошибке или собрать все
 
 	// Предкомпилированные регулярные выражения
 	emailRegex *regexp.Regexp

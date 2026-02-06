@@ -27,7 +27,7 @@ func (f *FilterEngine) ApplyFilters(
 	schemaObj packet.Schema,
 	converter *schema.Converter,
 ) ([][]string, map[string]int, error) {
-	
+
 	stats := make(map[string]int)
 	result := [][]string{}
 
@@ -53,7 +53,7 @@ func (f *FilterEngine) evaluateFilters(
 	converter *schema.Converter,
 	stats map[string]int,
 ) (bool, error) {
-	
+
 	if filters == nil {
 		return true, nil
 	}
@@ -80,21 +80,21 @@ func (f *FilterEngine) evaluateLogicalGroup(
 	converter *schema.Converter,
 	stats map[string]int,
 ) (bool, error) {
-	
+
 	if operator == "AND" {
 		// Для AND все условия должны быть true
-		
+
 		// Проверяем фильтры
 		for _, filter := range group.Filters {
 			match, err := f.evaluateFilter(&filter, row, schemaObj, converter)
 			if err != nil {
 				return false, err
 			}
-			
+
 			if match {
 				stats[filter.Field]++
 			}
-			
+
 			if !match {
 				return false, nil // короткое замыкание для AND
 			}
@@ -126,14 +126,14 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 	} else { // OR
 		// Для OR хотя бы одно условие должно быть true
-		
+
 		// Проверяем фильтры
 		for _, filter := range group.Filters {
 			match, err := f.evaluateFilter(&filter, row, schemaObj, converter)
 			if err != nil {
 				return false, err
 			}
-			
+
 			if match {
 				stats[filter.Field]++
 				return true, nil // короткое замыкание для OR
@@ -173,7 +173,7 @@ func (f *FilterEngine) evaluateFilter(
 	schemaObj packet.Schema,
 	converter *schema.Converter,
 ) (bool, error) {
-	
+
 	// Находим поле в схеме
 	fieldIndex := -1
 	var field packet.Field

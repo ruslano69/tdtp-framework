@@ -20,7 +20,7 @@ func TestEntry_Builder(t *testing.T) {
 		WithTarget("target-file").
 		WithResource("users").
 		WithRecordsAffected(100).
-		WithDuration(500 * time.Millisecond).
+		WithDuration(500*time.Millisecond).
 		WithMetadata("key", "value").
 		WithIPAddress("192.168.1.1").
 		WithSessionID("session-123")

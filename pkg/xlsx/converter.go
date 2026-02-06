@@ -67,8 +67,8 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 
 	// Create header style
 	headerStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Size: 11, Color: "#FFFFFF"},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"#4472C4"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Size: 11, Color: "#FFFFFF"},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"#4472C4"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
 

@@ -25,7 +25,7 @@ func (s *Sorter) Sort(
 	schemaObj packet.Schema,
 	converter *schema.Converter,
 ) ([][]string, error) {
-	
+
 	if orderBy == nil {
 		return rows, nil
 	}
@@ -181,10 +181,10 @@ func (s *Sorter) compareValues(val1, val2 string, field packet.Field, converter 
 
 	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
 		fieldDef := schema.FieldDef{
-			Name:      field.Name,
-			Type:      schema.DataType(field.Type),
-			Timezone:  field.Timezone,
-			Nullable:  true,
+			Name:     field.Name,
+			Type:     schema.DataType(field.Type),
+			Timezone: field.Timezone,
+			Nullable: true,
 		}
 
 		tv1, err1 := converter.ParseValue(val1, fieldDef)
