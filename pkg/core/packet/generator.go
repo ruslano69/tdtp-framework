@@ -93,7 +93,7 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 		packet.Schema = schema
 
 		// Преобразуем строки в Data
-		packet.Data = g.rowsToData(partition)
+		packet.Data = RowsToData(partition)
 
 		packets = append(packets, packet)
 	}
@@ -146,7 +146,7 @@ func (g *Generator) GenerateResponse(
 			packet.QueryContext = queryContext
 		}
 
-		packet.Data = g.rowsToData(partition)
+		packet.Data = RowsToData(partition)
 		packets = append(packets, packet)
 	}
 
@@ -172,7 +172,7 @@ func (g *Generator) GenerateAlarm(
 	}
 
 	packet.Schema = schema
-	packet.Data = g.rowsToData(rows)
+	packet.Data = RowsToData(rows)
 
 	return packet, nil
 }
@@ -232,7 +232,7 @@ func (g *Generator) partitionRows(rows [][]string, schema Schema) [][][]string {
 	overheadSize := 5000
 
 	for _, row := range rows {
-		rowSize := g.estimateRowSize(row)
+		rowSize := estimateRowSize(row)
 
 		if currentSize+rowSize+overheadSize > g.maxMessageSize && len(currentPartition) > 0 {
 			partitions = append(partitions, currentPartition)
@@ -249,37 +249,6 @@ func (g *Generator) partitionRows(rows [][]string, schema Schema) [][][]string {
 	}
 
 	return partitions
-}
-
-// estimateRowSize примерно оценивает размер строки в байтах
-func (g *Generator) estimateRowSize(row []string) int {
-	size := 0
-	for _, value := range row {
-		size += len(value) + 1 // +1 для разделителя
-	}
-	size += 10      // XML теги <R></R>
-	return size * 2 // UTF-16 для MSMQ
-}
-
-// rowsToData преобразует срез строк в Data
-func (g *Generator) rowsToData(rows [][]string) Data {
-	data := Data{
-		Rows: make([]Row, len(rows)),
-	}
-
-	for i, row := range rows {
-		// Экранируем разделитель | и backslash в данных
-		escapedValues := make([]string, len(row))
-		for j, value := range row {
-			escapedValues[j] = escapeValue(value)
-		}
-
-		data.Rows[i] = Row{
-			Value: strings.Join(escapedValues, "|"),
-		}
-	}
-
-	return data
 }
 
 // rowsToDataWithCompression преобразует срез строк в Data с опциональным сжатием
@@ -368,6 +337,17 @@ func RowsToData(rows [][]string) Data {
 	}
 
 	return data
+}
+
+// estimateRowSize примерно оценивает размер строки в байтах
+// Используется для партиционирования по MaxMessageSize
+func estimateRowSize(row []string) int {
+	size := 0
+	for _, value := range row {
+		size += len(value) + 1 // +1 для разделителя
+	}
+	size += 10      // XML теги <R></R>
+	return size * 2 // UTF-16 для MSMQ
 }
 
 // generateMessageID генерирует уникальный MessageID

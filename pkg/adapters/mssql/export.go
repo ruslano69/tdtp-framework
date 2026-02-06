@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
@@ -540,28 +539,10 @@ func (a *Adapter) valueToString(value interface{}, field packet.Field) string {
 	return a.converter.ConvertValueToTDTP(field, rawStr)
 }
 
-// createQueryContextForSQL удален - делегируется в base.ExportHelper
-// (эта функция была дублированной и содержала pagination bug, который уже исправлен в base)
-
-// generateMessageID генерирует уникальный ID сообщения
-func generateMessageID() string {
-	return fmt.Sprintf("mssql-%d", time.Now().UnixNano())
-}
-
-// ========== Query Statistics ==========
-
 // GetRowCount implements base.DataReader interface
-// Alias for GetTableRowCount for interface compatibility
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
-	return a.GetTableRowCount(ctx, tableName)
-}
-
-// GetTableRowCount возвращает количество строк в таблице (примерное)
-// Использует sys.dm_db_partition_stats для быстрого подсчета
-func (a *Adapter) GetTableRowCount(ctx context.Context, tableName string) (int64, error) {
 	schemaName, table := a.parseTableName(tableName)
 
-	// SQL Server 2012+ compatible query
 	query := `
 		SELECT SUM(p.rows)
 		FROM sys.tables t
@@ -569,7 +550,7 @@ func (a *Adapter) GetTableRowCount(ctx context.Context, tableName string) (int64
 		INNER JOIN sys.partitions p ON t.object_id = p.object_id
 		WHERE s.name = ?
 			AND t.name = ?
-			AND p.index_id IN (0, 1)  -- Heap or Clustered index
+			AND p.index_id IN (0, 1)
 	`
 
 	var count sql.NullInt64
@@ -583,34 +564,6 @@ func (a *Adapter) GetTableRowCount(ctx context.Context, tableName string) (int64
 	}
 
 	return count.Int64, nil
-}
-
-// GetTableSize возвращает размер таблицы в байтах
-func (a *Adapter) GetTableSize(ctx context.Context, tableName string) (int64, error) {
-	schemaName, table := a.parseTableName(tableName)
-
-	// SQL Server 2012+ compatible query
-	query := `
-		SELECT SUM(a.total_pages) * 8192
-		FROM sys.tables t
-		INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-		INNER JOIN sys.indexes i ON t.object_id = i.object_id
-		INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
-		INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
-		WHERE s.name = ? AND t.name = ?
-	`
-
-	var size sql.NullInt64
-	err := a.db.QueryRowContext(ctx, query, schemaName, table).Scan(&size)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get table size: %w", err)
-	}
-
-	if !size.Valid {
-		return 0, nil
-	}
-
-	return size.Int64, nil
 }
 
 // ExportTableIncremental экспортирует только измененные записи с момента последней синхронизации
