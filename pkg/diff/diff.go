@@ -89,7 +89,7 @@ func (d *Differ) Compare(packetA, packetB *packet.DataPacket) (*DiffResult, erro
 	keyFields := d.options.KeyFields
 	if len(keyFields) == 0 {
 		// Используем primary key из схемы
-		keyFields = d.extractKeyFields(packetA.Schema)
+		keyFields = packet.ExtractKeyFields(packetA.Schema)
 	}
 
 	if len(keyFields) == 0 {
@@ -97,13 +97,13 @@ func (d *Differ) Compare(packetA, packetB *packet.DataPacket) (*DiffResult, erro
 	}
 
 	// Получаем индексы ключевых и игнорируемых полей
-	keyIndices := d.getFieldIndices(packetA.Schema, keyFields)
-	ignoreIndices := d.getFieldIndices(packetA.Schema, d.options.IgnoreFields)
+	keyIndices := packet.GetFieldIndices(packetA.Schema, keyFields)
+	ignoreIndices := packet.GetFieldIndices(packetA.Schema, d.options.IgnoreFields)
 
 	// Парсим строки
 	parser := packet.NewParser()
-	rowsA := d.parseRows(packetA.Data.Rows, parser)
-	rowsB := d.parseRows(packetB.Data.Rows, parser)
+	rowsA := packet.ParseRows(packetA.Data.Rows, parser)
+	rowsB := packet.ParseRows(packetB.Data.Rows, parser)
 
 	// Создаем map для быстрого поиска
 	mapA := d.buildRowMap(rowsA, keyIndices)
@@ -169,40 +169,6 @@ func (d *Differ) validateSchemas(schemaA, schemaB packet.Schema) error {
 	}
 
 	return nil
-}
-
-// extractKeyFields извлекает ключевые поля из схемы
-func (d *Differ) extractKeyFields(schema packet.Schema) []string {
-	var keys []string
-	for _, field := range schema.Fields {
-		if field.Key {
-			keys = append(keys, field.Name)
-		}
-	}
-	return keys
-}
-
-// getFieldIndices возвращает индексы полей по их именам
-func (d *Differ) getFieldIndices(schema packet.Schema, fieldNames []string) []int {
-	var indices []int
-	for _, name := range fieldNames {
-		for i, field := range schema.Fields {
-			if field.Name == name {
-				indices = append(indices, i)
-				break
-			}
-		}
-	}
-	return indices
-}
-
-// parseRows парсит TDTP строки
-func (d *Differ) parseRows(rows []packet.Row, parser *packet.Parser) [][]string {
-	result := make([][]string, len(rows))
-	for i, row := range rows {
-		result[i] = parser.GetRowValues(row)
-	}
-	return result
 }
 
 // buildRowMap создаёт map для быстрого поиска строк по ключу

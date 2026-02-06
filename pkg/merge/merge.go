@@ -113,7 +113,7 @@ func (m *Merger) Merge(packets ...*packet.DataPacket) (*MergeResult, error) {
 	// Определяем ключевые поля
 	keyFields := m.options.KeyFields
 	if len(keyFields) == 0 {
-		keyFields = m.extractKeyFields(baseSchema)
+		keyFields = packet.ExtractKeyFields(baseSchema)
 	}
 
 	if len(keyFields) == 0 && m.options.Strategy != StrategyAppend {
@@ -140,7 +140,7 @@ func (m *Merger) Merge(packets ...*packet.DataPacket) (*MergeResult, error) {
 // mergeUnion объединяет все уникальные строки
 func (m *Merger) mergeUnion(packets []*packet.DataPacket, schema packet.Schema, keyFields []string) (*MergeResult, error) {
 	parser := packet.NewParser()
-	keyIndices := m.getFieldIndices(schema, keyFields)
+	keyIndices := packet.GetFieldIndices(schema, keyFields)
 
 	rowMap := make(map[string][]string)
 	result := &MergeResult{
@@ -150,7 +150,7 @@ func (m *Merger) mergeUnion(packets []*packet.DataPacket, schema packet.Schema, 
 	}
 
 	for _, pkt := range packets {
-		rows := m.parseRows(pkt.Data.Rows, parser)
+		rows := packet.ParseRows(pkt.Data.Rows, parser)
 		result.Stats.TotalRowsIn += len(rows)
 
 		for _, row := range rows {
@@ -203,10 +203,10 @@ func (m *Merger) mergeUnion(packets []*packet.DataPacket, schema packet.Schema, 
 // mergeIntersection оставляет только строки, присутствующие во всех пакетах
 func (m *Merger) mergeIntersection(packets []*packet.DataPacket, schema packet.Schema, keyFields []string) (*MergeResult, error) {
 	parser := packet.NewParser()
-	keyIndices := m.getFieldIndices(schema, keyFields)
+	keyIndices := packet.GetFieldIndices(schema, keyFields)
 
 	// Создаём map для первого пакета
-	firstRows := m.parseRows(packets[0].Data.Rows, parser)
+	firstRows := packet.ParseRows(packets[0].Data.Rows, parser)
 	keyCounts := make(map[string]int)
 	rowMap := make(map[string][]string)
 
@@ -218,7 +218,7 @@ func (m *Merger) mergeIntersection(packets []*packet.DataPacket, schema packet.S
 
 	// Проверяем наличие в остальных пакетах
 	for i := 1; i < len(packets); i++ {
-		rows := m.parseRows(packets[i].Data.Rows, parser)
+		rows := packet.ParseRows(packets[i].Data.Rows, parser)
 		for _, row := range rows {
 			key := m.buildKey(row, keyIndices)
 			if _, exists := keyCounts[key]; exists {
@@ -251,7 +251,7 @@ func (m *Merger) mergeIntersection(packets []*packet.DataPacket, schema packet.S
 // mergeWithPriority объединяет с приоритетом (левым или правым)
 func (m *Merger) mergeWithPriority(packets []*packet.DataPacket, schema packet.Schema, keyFields []string, leftPriority bool) (*MergeResult, error) {
 	parser := packet.NewParser()
-	keyIndices := m.getFieldIndices(schema, keyFields)
+	keyIndices := packet.GetFieldIndices(schema, keyFields)
 
 	rowMap := make(map[string][]string)
 	result := &MergeResult{
@@ -262,7 +262,7 @@ func (m *Merger) mergeWithPriority(packets []*packet.DataPacket, schema packet.S
 
 	// Обрабатываем пакеты в прямом порядке
 	for _, pkt := range packets {
-		rows := m.parseRows(pkt.Data.Rows, parser)
+		rows := packet.ParseRows(pkt.Data.Rows, parser)
 		result.Stats.TotalRowsIn += len(rows)
 
 		for _, row := range rows {
@@ -316,7 +316,7 @@ func (m *Merger) mergeAppend(packets []*packet.DataPacket, schema packet.Schema)
 	totalRowsIn := 0
 
 	for _, pkt := range packets {
-		rows := m.parseRows(pkt.Data.Rows, parser)
+		rows := packet.ParseRows(pkt.Data.Rows, parser)
 		totalRowsIn += len(rows)
 		allRows = append(allRows, rows...)
 	}
@@ -357,37 +357,6 @@ func (m *Merger) validateSchemas(schemaA, schemaB packet.Schema) error {
 	}
 
 	return nil
-}
-
-func (m *Merger) extractKeyFields(schema packet.Schema) []string {
-	var keys []string
-	for _, field := range schema.Fields {
-		if field.Key {
-			keys = append(keys, field.Name)
-		}
-	}
-	return keys
-}
-
-func (m *Merger) getFieldIndices(schema packet.Schema, fieldNames []string) []int {
-	var indices []int
-	for _, name := range fieldNames {
-		for i, field := range schema.Fields {
-			if field.Name == name {
-				indices = append(indices, i)
-				break
-			}
-		}
-	}
-	return indices
-}
-
-func (m *Merger) parseRows(rows []packet.Row, parser *packet.Parser) [][]string {
-	result := make([][]string, len(rows))
-	for i, row := range rows {
-		result[i] = parser.GetRowValues(row)
-	}
-	return result
 }
 
 func (m *Merger) buildKey(row []string, keyIndices []int) string {

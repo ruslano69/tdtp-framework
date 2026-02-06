@@ -3,7 +3,6 @@ package packet
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 // StreamingGenerator генерирует TDTP пакеты в потоковом режиме
@@ -138,7 +137,7 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 					return
 				}
 
-				rowSize := sg.estimateRowSize(row)
+				rowSize := estimateRowSize(row)
 
 				// Проверяем нужно ли начать новую часть
 				if currentSize+rowSize+overheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
@@ -206,7 +205,7 @@ func (sg *StreamingGenerator) createPart(
 	packet.Schema = schema
 
 	// Преобразуем строки в Data
-	packet.Data = sg.rowsToData(rows)
+	packet.Data = RowsToData(rows)
 
 	return packet, nil
 }
@@ -287,7 +286,7 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 					return
 				}
 
-				rowSize := sg.estimateRowSize(row)
+				rowSize := estimateRowSize(row)
 
 				if currentSize+rowSize+overheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
 					packet, err := sg.createPartWithSender(
@@ -368,31 +367,3 @@ func UpdatePartTotalParts(packets []*DataPacket, totalParts int) {
 	}
 }
 
-// rowsToData преобразует [][]string в Data (дублирует из generator.go для инкапсуляции)
-func (sg *StreamingGenerator) rowsToData(rows [][]string) Data {
-	data := Data{
-		Rows: make([]Row, len(rows)),
-	}
-
-	for i, row := range rows {
-		escapedValues := make([]string, len(row))
-		for j, value := range row {
-			escapedValues[j] = escapeValue(value)
-		}
-		data.Rows[i] = Row{
-			Value: strings.Join(escapedValues, "|"),
-		}
-	}
-
-	return data
-}
-
-// estimateRowSize примерно оценивает размер строки (дублирует из generator.go)
-func (sg *StreamingGenerator) estimateRowSize(row []string) int {
-	size := 0
-	for _, value := range row {
-		size += len(value) + 1
-	}
-	size += 10
-	return size * 2
-}
