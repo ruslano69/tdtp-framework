@@ -88,31 +88,19 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 
 	// Объявляем очередь (создается если не существует, идемпотентная операция)
 	// ВАЖНО: Параметры должны совпадать с существующей очередью!
-	// Сначала пробуем пассивно проверить существование очереди
-	r.queue, err = r.channel.QueueDeclarePassive(
+
+	r.queue, err = r.channel.QueueDeclare(
 		r.config.Queue,      // name
-		r.config.Durable,    // durable
+		r.config.Durable,    // durable - очередь сохраняется при перезапуске RabbitMQ
 		r.config.AutoDelete, // auto-delete
 		r.config.Exclusive,  // exclusive
 		false,               // no-wait
 		nil,                 // arguments
 	)
-
 	if err != nil {
-		// Если очередь не существует, создаем её
-		r.queue, err = r.channel.QueueDeclare(
-			r.config.Queue,      // name
-			r.config.Durable,    // durable - очередь сохраняется при перезапуске RabbitMQ
-			r.config.AutoDelete, // auto-delete
-			r.config.Exclusive,  // exclusive
-			false,               // no-wait
-			nil,                 // arguments
-		)
-		if err != nil {
-			r.channel.Close()
-			r.conn.Close()
-			return fmt.Errorf("failed to declare queue: %w", err)
-		}
+		r.channel.Close()
+		r.conn.Close()
+		return fmt.Errorf("failed to declare queue: %w", err)
 	}
 
 	// Начинаем потребление сообщений (блокирующий режим)

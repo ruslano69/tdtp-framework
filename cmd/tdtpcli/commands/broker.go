@@ -7,6 +7,7 @@ import (
 	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
 )
 
 // BrokerConfig holds broker configuration
@@ -141,8 +142,10 @@ func ImportFromBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg B
 
 		messageCount++
 
-		// Parse packet
-		pkt, err := parser.ParseBytes(xmlData)
+		// Parse packet with automatic decompression if needed
+		pkt, err := parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string) ([]string, error) {
+			return decompressData(compressed)
+		})
 		if err != nil {
 			return fmt.Errorf("failed to parse packet %d: %w", messageCount, err)
 		}
@@ -156,6 +159,13 @@ func ImportFromBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg B
 		}
 
 		fmt.Printf("✓ Imported %d row(s) to table '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+
+		// Acknowledge message after successful import
+		if acker, ok := broker.(interface{ AckLast() error }); ok {
+			if err := acker.AckLast(); err != nil {
+				return fmt.Errorf("failed to acknowledge message: %w", err)
+			}
+		}
 	}
 
 	fmt.Printf("✓ Import from broker complete! (%d message(s) processed)\n", messageCount)
@@ -179,4 +189,9 @@ func createBroker(cfg BrokerConfig) (brokers.MessageBroker, error) {
 	}
 
 	return brokers.New(brokerConfig)
+}
+
+// decompressData decompresses compressed data using processors package
+func decompressData(compressed string) ([]string, error) {
+	return processors.DecompressDataForTdtp(compressed)
 }

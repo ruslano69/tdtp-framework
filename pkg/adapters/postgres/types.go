@@ -154,9 +154,7 @@ func TDTPToPostgreSQL(field packet.Field) string {
 		return fmt.Sprintf("NUMERIC(%d,%d)", precision, scale)
 
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:
-		if field.Length > 0 {
-			return fmt.Sprintf("VARCHAR(%d)", field.Length)
-		}
+		// Force TEXT to avoid truncation issues during import
 		return "TEXT"
 
 	case schema.TypeBoolean, schema.TypeBool:
