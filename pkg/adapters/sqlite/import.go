@@ -80,22 +80,13 @@ func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) erro
 
 // InsertRows вставляет строки данных с использованием стратегии
 // Реализует base.DataInserter интерфейс
+// Оптимизировано: использует батчинг для INSERT (500 строк за раз)
 func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
 	if len(rows) == 0 {
 		return nil
 	}
 
-	// Формируем INSERT запрос
-	fieldNames := make([]string, len(pkgSchema.Fields))
-	for i, field := range pkgSchema.Fields {
-		fieldNames[i] = field.Name
-	}
-
-	placeholders := make([]string, len(pkgSchema.Fields))
-	for i := range placeholders {
-		placeholders[i] = "?"
-	}
-
+	// Формируем INSERT команду
 	var insertCmd string
 	switch strategy {
 	case adapters.StrategyReplace:
@@ -111,33 +102,68 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 		insertCmd = "INSERT OR REPLACE"
 	}
 
-	query := fmt.Sprintf("%s INTO %s (%s) VALUES (%s)",
-		insertCmd,
-		tableName,
-		strings.Join(fieldNames, ", "),
-		strings.Join(placeholders, ", "))
-
-	// Подготавливаем statement
-	stmt, err := a.db.PrepareContext(ctx, query)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
+	// Формируем список колонок
+	fieldNames := make([]string, len(pkgSchema.Fields))
+	for i, field := range pkgSchema.Fields {
+		fieldNames[i] = field.Name
 	}
-	defer stmt.Close()
 
-	// Вставляем каждую строку
-	for rowIdx, row := range rows {
-		// Парсим строку (используем утилиту из base)
-		values := base.ParseRowValues(row)
+	// Батчинг: вставляем по 500 строк за раз
+	// SQLite имеет ограничение на количество параметров (999 по умолчанию)
+	// 500 строк × N колонок должно быть < 999
+	batchSize := 500
+	if len(pkgSchema.Fields) > 10 {
+		// Для таблиц с большим количеством колонок уменьшаем batch
+		batchSize = 999 / len(pkgSchema.Fields)
+		if batchSize < 1 {
+			batchSize = 1
+		}
+	}
 
-		// Конвертируем значения (используем утилиту из base)
-		args, err := base.ConvertRowToSQLValues(values, pkgSchema, a.converter, "sqlite")
-		if err != nil {
-			return fmt.Errorf("row %d: %w", rowIdx, err)
+	// Вставляем батчами
+	for i := 0; i < len(rows); i += batchSize {
+		end := i + batchSize
+		if end > len(rows) {
+			end = len(rows)
 		}
 
-		// Выполняем INSERT
-		if _, err := stmt.ExecContext(ctx, args...); err != nil {
-			return fmt.Errorf("failed to insert row %d: %w", rowIdx, err)
+		batch := rows[i:end]
+
+		// Строим VALUES для батча: VALUES (?,?,...), (?,?,...), ...
+		valuePlaceholders := make([]string, len(batch))
+		for j := range batch {
+			placeholders := make([]string, len(pkgSchema.Fields))
+			for k := range placeholders {
+				placeholders[k] = "?"
+			}
+			valuePlaceholders[j] = fmt.Sprintf("(%s)", strings.Join(placeholders, ", "))
+		}
+
+		// Полный запрос
+		query := fmt.Sprintf("%s INTO %s (%s) VALUES %s",
+			insertCmd,
+			tableName,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "))
+
+		// Собираем все аргументы для батча
+		args := make([]interface{}, 0, len(batch)*len(pkgSchema.Fields))
+		for rowIdx, row := range batch {
+			// Парсим строку
+			values := base.ParseRowValues(row)
+
+			// Конвертируем значения
+			rowArgs, err := base.ConvertRowToSQLValues(values, pkgSchema, a.converter, "sqlite")
+			if err != nil {
+				return fmt.Errorf("row %d: %w", i+rowIdx, err)
+			}
+
+			args = append(args, rowArgs...)
+		}
+
+		// Выполняем батч INSERT
+		if _, err := a.db.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("failed to insert batch at row %d: %w", i, err)
 		}
 	}
 

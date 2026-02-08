@@ -51,6 +51,12 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 
 	a.db = db
 
+	// Применяем PRAGMA оптимизации для быстрого импорта
+	if err := a.applyPragmaOptimizations(ctx); err != nil {
+		db.Close()
+		return fmt.Errorf("failed to apply PRAGMA optimizations: %w", err)
+	}
+
 	// Инициализируем base helpers
 	a.initHelpers()
 
@@ -125,6 +131,42 @@ func (a *Adapter) initHelpers() {
 	// self реализует TableManager, DataInserter, TransactionManager интерфейсы
 	// true = использовать временные таблицы для атомарной замены
 	a.importHelper = base.NewImportHelper(a, a, a, true)
+}
+
+// applyPragmaOptimizations применяет PRAGMA оптимизации для быстрого импорта/экспорта
+// Эти настройки критичны для производительности SQLite при массовых операциях
+func (a *Adapter) applyPragmaOptimizations(ctx context.Context) error {
+	pragmas := []string{
+		// WAL mode: Write-Ahead Logging - до 10x быстрее записи, безопасно
+		"PRAGMA journal_mode = WAL",
+
+		// Synchronous NORMAL: fsync только на критичных моментах (не на каждый INSERT)
+		// Безопасно при WAL mode, дает 5-10x ускорение
+		"PRAGMA synchronous = NORMAL",
+
+		// Cache size: 64 MB кеша (по умолчанию ~2 MB) - важно для больших таблиц
+		"PRAGMA cache_size = -64000",
+
+		// Temp store в памяти: временные таблицы/индексы в RAM, не на диске
+		"PRAGMA temp_store = MEMORY",
+
+		// Отключить auto vacuum во время импорта (можно запустить VACUUM вручную потом)
+		"PRAGMA auto_vacuum = NONE",
+
+		// Увеличить page size до 4KB (по умолчанию 1KB) - лучше для больших записей
+		// ВАЖНО: работает только для новых БД, для существующих игнорируется
+		"PRAGMA page_size = 4096",
+	}
+
+	for _, pragma := range pragmas {
+		if _, err := a.db.ExecContext(ctx, pragma); err != nil {
+			// Некоторые PRAGMA могут не работать (например page_size для существующих БД)
+			// Логируем ошибку но продолжаем
+			fmt.Printf("⚠️  Warning: %s failed: %v\n", pragma, err)
+		}
+	}
+
+	return nil
 }
 
 // TableExists проверяет существование таблицы
