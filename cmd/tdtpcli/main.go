@@ -103,7 +103,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-xlsx", func() error {
-			return commands.ConvertTDTPToXLSX(commands.XLSXOptions{
+			return commands.ConvertTDTPToXLSX(ctx, commands.XLSXOptions{
 				InputFile:  *flags.ToXLSX,
 				OutputFile: determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
 				SheetName:  *flags.Sheet,
