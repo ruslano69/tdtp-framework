@@ -18,6 +18,7 @@ var multiPartPattern = regexp.MustCompile(`^(.+)_part_(\d+)_of_(\d+)(\..+)$`)
 // ImportOptions holds options for import operations
 type ImportOptions struct {
 	FilePath     string
+	TargetTable  string // Переопределяет имя таблицы из XML (опционально)
 	Strategy     adapters.ImportStrategy
 	ProcessorMgr ProcessorManager
 }
@@ -65,6 +66,14 @@ func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions)
 
 		packets = append(packets, pkt)
 		fmt.Printf("  ✓ %d row(s)\n", len(pkt.Data.Rows))
+	}
+
+	// Переопределяем имя таблицы если указан --table
+	if opts.TargetTable != "" {
+		fmt.Printf("Overriding table name: '%s' → '%s'\n", packets[0].Header.TableName, opts.TargetTable)
+		for _, pkt := range packets {
+			pkt.Header.TableName = opts.TargetTable
+		}
 	}
 
 	// Connect adapter
