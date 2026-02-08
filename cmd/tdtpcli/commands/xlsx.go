@@ -23,7 +23,7 @@ type XLSXOptions struct {
 }
 
 // ConvertTDTPToXLSX converts a TDTP XML file to XLSX
-func ConvertTDTPToXLSX(opts XLSXOptions) error {
+func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 	fmt.Printf("Converting TDTP to XLSX...\n")
 	fmt.Printf("Input: %s\n", opts.InputFile)
 	fmt.Printf("Output: %s\n", opts.OutputFile)
@@ -40,6 +40,14 @@ func ConvertTDTPToXLSX(opts XLSXOptions) error {
 	pkt, err := parser.ParseBytes(data)
 	if err != nil {
 		return fmt.Errorf("failed to parse TDTP packet: %w", err)
+	}
+
+	// Decompress if needed
+	if pkt.Data.Compression != "" {
+		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
+		if err := decompressPacketData(ctx, pkt); err != nil {
+			return fmt.Errorf("decompression failed: %w", err)
+		}
 	}
 
 	fmt.Printf("✓ Parsed packet for table '%s'\n", pkt.Header.TableName)
