@@ -1,6 +1,6 @@
 database:
   type: sqlite
-  database: benchmark_100k.db
+  database: test_data.db
 export:
   compress: false
   compress_level: 3
