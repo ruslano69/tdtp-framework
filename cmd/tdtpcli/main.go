@@ -87,6 +87,7 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
 				FilePath:     *flags.Import,
+				TargetTable:  *flags.Table,
 				Strategy:     strategy,
 				ProcessorMgr: procMgr,
 			})
