@@ -184,10 +184,13 @@ def read_tdtp(path: str) -> DataFrame:
     Read TDTP XML file into DataFrame
 
     Automatically handles:
-    - zstd compression + base64 decoding
+    - zstd compression + base64 decoding (requires Go library)
     - Schema parsing
     - Data parsing
     - Pagination (if multiple parts)
+
+    Uses Go shared library for performance and compression support.
+    Falls back to pure Python parser for uncompressed files if Go library not available.
 
     Args:
         path: Path to TDTP XML file
@@ -202,26 +205,46 @@ def read_tdtp(path: str) -> DataFrame:
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
 
-    # Load shared library
-    lib = _load_library()
+    # Try to use Go shared library (fast, supports compression)
+    try:
+        lib = _load_library()
 
-    # Call Go function
-    result_json = lib.ReadTDTP(path.encode('utf-8'))
-    result_str = result_json.decode('utf-8')
+        # Call Go function
+        result_json = lib.ReadTDTP(path.encode('utf-8'))
+        result_str = result_json.decode('utf-8')
 
-    # Parse JSON result
-    result = json.loads(result_str)
+        # Parse JSON result
+        result = json.loads(result_str)
 
-    # Check for errors
-    if 'error' in result and result['error']:
-        raise RuntimeError(f"Failed to read TDTP: {result['error']}")
+        # Check for errors
+        if 'error' in result and result['error']:
+            raise RuntimeError(f"Failed to read TDTP: {result['error']}")
 
-    # Create DataFrame
-    return DataFrame(
-        data=result['data'],
-        schema=result['schema'],
-        header=result.get('header')
-    )
+        # Create DataFrame
+        return DataFrame(
+            data=result['data'],
+            schema=result['schema'],
+            header=result.get('header')
+        )
+
+    except RuntimeError as e:
+        # Go library not available - try pure Python parser (fallback)
+        if "shared library not found" in str(e).lower():
+            from .xml_parser import parse_tdtp_xml
+
+            result = parse_tdtp_xml(path)
+
+            if result.get('error'):
+                raise RuntimeError(result['error'])
+
+            return DataFrame(
+                data=result['data'],
+                schema=result['schema'],
+                header=result.get('header')
+            )
+        else:
+            # Other error - re-raise
+            raise
 
 
 def _load_library():
