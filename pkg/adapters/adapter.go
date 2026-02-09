@@ -126,6 +126,9 @@ type Adapter interface {
 	// GetTableNames возвращает список всех таблиц в БД
 	GetTableNames(ctx context.Context) ([]string, error)
 
+	// GetViewNames возвращает список всех views в БД с информацией об updatable/read-only
+	GetViewNames(ctx context.Context) ([]ViewInfo, error)
+
 	// TableExists проверяет существование таблицы
 	TableExists(ctx context.Context, tableName string) (bool, error)
 
@@ -151,6 +154,17 @@ type Tx interface {
 
 	// Rollback откатывает изменения транзакции
 	Rollback(ctx context.Context) error
+}
+
+// ViewInfo - информация о database view
+type ViewInfo struct {
+	// Name - имя view
+	Name string
+
+	// IsUpdatable - можно ли выполнять INSERT/UPDATE/DELETE на этом view
+	// true  = updatable view (можно импортировать)
+	// false = read-only view (только экспорт)
+	IsUpdatable bool
 }
 
 // ImportStrategy - стратегия импорта данных

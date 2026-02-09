@@ -218,6 +218,41 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	return tables, nil
 }
 
+// GetViewNames возвращает список всех views в текущей схеме с информацией об updatable/read-only
+// Реализует интерфейс adapters.Adapter
+func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error) {
+	query := `
+		SELECT table_name, is_updatable
+		FROM information_schema.views
+		WHERE table_schema = $1
+		ORDER BY table_name
+	`
+
+	rows, err := a.pool.Query(ctx, query, a.schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get view names: %w", err)
+	}
+	defer rows.Close()
+
+	var views []adapters.ViewInfo
+	for rows.Next() {
+		var name, updatable string
+		if err := rows.Scan(&name, &updatable); err != nil {
+			return nil, fmt.Errorf("failed to scan view info: %w", err)
+		}
+		views = append(views, adapters.ViewInfo{
+			Name:        name,
+			IsUpdatable: strings.EqualFold(updatable, "YES"),
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating views: %w", err)
+	}
+
+	return views, nil
+}
+
 // BeginTx начинает транзакцию
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) BeginTx(ctx context.Context) (adapters.Tx, error) {

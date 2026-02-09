@@ -239,12 +239,20 @@ output:
 
 **Commands:**
 - `--list` - список таблиц
-- `--export <table>` - экспорт в файл/stdout
+- `--list-views` 🆕 - список views с указанием updatable/read-only статуса
+- `--export <table>` - экспорт в файл/stdout (✅ работает с views)
 - `--import <file>` - импорт из файла
 - `--export-broker <table>` - экспорт в message queue
 - `--import-broker` - импорт из message queue
 - `--pipeline <config.yaml>` 🆕 - ETL pipeline из множественных источников
 - `--unsafe` 🆕 - небезопасный режим ETL (требует admin)
+
+**Работа с views:**
+- `--list-views` показывает все views с маркерами:
+  - `U*view_name` - updatable view (можно импортировать)
+  - `R*view_name` - read-only view (только экспорт)
+- `--export` поддерживает все database views
+- `--import` работает только с updatable views
 
 **TDTQL Filters:**
 - `--where "field > value"` - условия фильтрации

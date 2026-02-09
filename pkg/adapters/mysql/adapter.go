@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
 
@@ -128,6 +129,30 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 		tables = append(tables, table)
 	}
 	return tables, rows.Err()
+}
+
+// GetViewNames возвращает список всех views с информацией об updatable/read-only
+func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error) {
+	query := "SELECT table_name, is_updatable FROM information_schema.views WHERE table_schema = DATABASE() ORDER BY table_name"
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query views: %w", err)
+	}
+	defer rows.Close()
+
+	var views []adapters.ViewInfo
+	for rows.Next() {
+		var name, updatable string
+		if err := rows.Scan(&name, &updatable); err != nil {
+			return nil, fmt.Errorf("failed to scan view info: %w", err)
+		}
+		views = append(views, adapters.ViewInfo{
+			Name:        name,
+			IsUpdatable: strings.EqualFold(updatable, "YES"),
+		})
+	}
+
+	return views, rows.Err()
 }
 
 // BeginTx начинает транзакцию (для ImportHelper)

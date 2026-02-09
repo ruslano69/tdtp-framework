@@ -44,6 +44,14 @@ func routeCommand(
 			return commands.ListTables(ctx, adapterConfig)
 		})
 
+	} else if *flags.ListViews {
+		operation = audit.OpQuery
+		metadata = map[string]string{"command": "list-views"}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "list-views", func() error {
+			return commands.ListViews(ctx, adapterConfig)
+		})
+
 	} else if *flags.Export != "" {
 		// Merge compression settings: flag takes precedence, then config
 		compress := *flags.Compress || config.Export.Compress
@@ -480,6 +488,7 @@ func splitCommaSeparated(s string) []string {
 // commandWasSpecified checks if any command was specified
 func commandWasSpecified(flags *Flags) bool {
 	return *flags.List ||
+		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
 		*flags.ToXLSX != "" ||
