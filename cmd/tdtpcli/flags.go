@@ -6,6 +6,7 @@ import "flag"
 type Flags struct {
 	// Commands
 	List         *bool
+	ListViews    *bool
 	Export       *string
 	Import       *string
 	ExportBroker *string
@@ -75,6 +76,7 @@ func ParseFlags() *Flags {
 
 	// Commands
 	f.List = flag.Bool("list", false, "List all tables in database")
+	f.ListViews = flag.Bool("list-views", false, "List all database views with updatable status")
 	f.Export = flag.String("export", "", "Export table to TDTP XML file (table name)")
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
 	f.ExportBroker = flag.String("export-broker", "", "Export table to message broker (table name)")

@@ -238,7 +238,8 @@ output:
 ### ✅ CLI Utility (tdtpcli)
 
 **Commands:**
-- `--list` - список таблиц (⚠️ не показывает views)
+- `--list` - список таблиц
+- `--list-views` 🆕 - список views с указанием updatable/read-only статуса
 - `--export <table>` - экспорт в файл/stdout (✅ работает с views)
 - `--import <file>` - импорт из файла
 - `--export-broker <table>` - экспорт в message queue
@@ -247,9 +248,11 @@ output:
 - `--unsafe` 🆕 - небезопасный режим ETL (требует admin)
 
 **Работа с views:**
-- `--export` поддерживает database views (укажите имя явно)
-- `--list` показывает только BASE TABLEs (не views)
-- Для списка views используйте SQL: `SELECT table_name FROM information_schema.views`
+- `--list-views` показывает все views с маркерами:
+  - `U*view_name` - updatable view (можно импортировать)
+  - `R*view_name` - read-only view (только экспорт)
+- `--export` поддерживает все database views
+- `--import` работает только с updatable views
 
 **TDTQL Filters:**
 - `--where "field > value"` - условия фильтрации

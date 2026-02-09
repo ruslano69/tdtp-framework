@@ -337,6 +337,45 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	return tables, nil
 }
 
+// GetViewNames returns all views in the current schema with updatable information.
+func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error) {
+	schema := a.config.Schema
+	if schema == "" {
+		schema = "dbo" // Default schema
+	}
+
+	query := `
+		SELECT TABLE_NAME, IS_UPDATABLE
+		FROM INFORMATION_SCHEMA.VIEWS
+		WHERE TABLE_SCHEMA = ?
+		ORDER BY TABLE_NAME
+	`
+
+	rows, err := a.db.QueryContext(ctx, query, schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query views: %w", err)
+	}
+	defer rows.Close()
+
+	var views []adapters.ViewInfo
+	for rows.Next() {
+		var name, updatable string
+		if err := rows.Scan(&name, &updatable); err != nil {
+			return nil, fmt.Errorf("failed to scan view info: %w", err)
+		}
+		views = append(views, adapters.ViewInfo{
+			Name:        name,
+			IsUpdatable: strings.EqualFold(updatable, "YES"),
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating views: %w", err)
+	}
+
+	return views, nil
+}
+
 // TableExists checks if a table exists in the current schema.
 func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, error) {
 	schema := a.config.Schema

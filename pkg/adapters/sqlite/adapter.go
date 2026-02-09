@@ -215,6 +215,67 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	return tables, rows.Err()
 }
 
+// GetViewNames возвращает список всех views в БД с информацией об updatable/read-only
+// Реализует интерфейс adapters.Adapter
+// Note: SQLite views are read-only by default unless INSTEAD OF triggers are defined
+// For simplicity, we check if INSTEAD OF INSERT trigger exists to determine updatability
+func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error) {
+	// Get all views
+	query := `
+		SELECT name
+		FROM sqlite_master
+		WHERE type='view'
+		ORDER BY name
+	`
+
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get view names: %w", err)
+	}
+	defer rows.Close()
+
+	var views []adapters.ViewInfo
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan view name: %w", err)
+		}
+
+		// Check if view has INSTEAD OF INSERT trigger (makes it updatable)
+		isUpdatable, err := a.hasInsteadOfTrigger(ctx, name)
+		if err != nil {
+			// If we can't determine, assume read-only (safe default)
+			isUpdatable = false
+		}
+
+		views = append(views, adapters.ViewInfo{
+			Name:        name,
+			IsUpdatable: isUpdatable,
+		})
+	}
+
+	return views, rows.Err()
+}
+
+// hasInsteadOfTrigger checks if view has INSTEAD OF INSERT trigger (makes it updatable)
+func (a *Adapter) hasInsteadOfTrigger(ctx context.Context, viewName string) (bool, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type='trigger'
+		  AND tbl_name=?
+		  AND sql LIKE '%INSTEAD OF INSERT%'
+	`
+
+	var count int
+	err := a.db.QueryRowContext(ctx, query, viewName).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
 // BeginTx начинает транзакцию
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) BeginTx(ctx context.Context) (adapters.Tx, error) {
