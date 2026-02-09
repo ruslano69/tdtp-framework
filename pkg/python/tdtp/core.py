@@ -114,6 +114,25 @@ class DataFrame:
         """Return last n rows"""
         return DataFrame(self._data[-n:], self._schema, self._header)
 
+    def to_pandas(self):
+        """
+        Convert to pandas DataFrame
+
+        Returns:
+            pandas.DataFrame
+
+        Raises:
+            ImportError: If pandas is not installed
+
+        Example:
+            >>> import tdtp
+            >>> df_tdtp = tdtp.read_tdtp('file.tdtp.xml')
+            >>> df_pandas = df_tdtp.to_pandas()
+            >>> print(df_pandas.describe())
+        """
+        from .pandas_adapter import to_pandas
+        return to_pandas(self)
+
     def info(self) -> str:
         """Return DataFrame info as string"""
         lines = [

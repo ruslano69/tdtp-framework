@@ -90,6 +90,7 @@ Lightweight data container similar to pandas DataFrame.
 - `__len__()`: Number of rows
 - `__getitem__(key)`: Access by column name or row index
 - `to_dict(orient='records')`: Convert to dict
+- `to_pandas()`: Convert to pandas DataFrame (requires pandas)
 - `head(n=5)`: First n rows
 - `tail(n=5)`: Last n rows
 - `info()`: Display schema and metadata
@@ -133,15 +134,22 @@ print(df.head())  # Show first rows
 
 ```python
 import tdtp
-import pandas as pd
 
-# TDTP → pandas
+# TDTP → pandas (direct conversion)
 df_tdtp = tdtp.read_tdtp('data.tdtp.xml')
-df_pandas = pd.DataFrame(df_tdtp.to_dict('records'))
+df_pandas = df_tdtp.to_pandas()
 
-# Now use pandas functionality
+# Now use full pandas functionality
 print(df_pandas.describe())
+print(df_pandas.groupby('status')['total'].sum())
 df_pandas.to_csv('output.csv')
+df_pandas.to_excel('output.xlsx')
+
+# pandas → TDTP
+import pandas as pd
+df_pandas = pd.read_csv('input.csv')
+df_tdtp = tdtp.from_pandas(df_pandas)
+print(df_tdtp.shape)
 ```
 
 ### 3. Data Processing
