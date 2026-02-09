@@ -50,12 +50,17 @@ func PrintHelp() {
 	fmt.Println("    --sync-incremental <table> Incremental sync from table")
 	fmt.Println()
 
+	fmt.Println("  ETL Pipeline:")
+	fmt.Println("    --pipeline <file>          Execute ETL pipeline from YAML config")
+	fmt.Println()
+
 	fmt.Println("OPTIONS:")
 	fmt.Println()
 
 	fmt.Println("  General:")
 	fmt.Println("    --config <file>            Configuration file (default: config.yaml)")
 	fmt.Println("    --output <file>            Output file path")
+	fmt.Println("    --table <name>             Target table name (overrides name from XML during import)")
 	fmt.Println("    --strategy <name>          Import strategy: replace, ignore, fail, copy")
 	fmt.Println("    --batch <size>             Batch size for bulk operations (default: 1000)")
 	fmt.Println("    --readonly-fields          Include read-only fields (timestamp, computed, identity)")
@@ -81,6 +86,10 @@ func PrintHelp() {
 	fmt.Println("    --tracking-field <field>   Field to track changes (default: updated_at)")
 	fmt.Println("    --checkpoint-file <file>   Checkpoint file (default: checkpoint.yaml)")
 	fmt.Println("    --batch-size <size>        Batch size for sync (default: 1000)")
+	fmt.Println()
+
+	fmt.Println("  ETL Pipeline Options:")
+	fmt.Println("    --unsafe                   Enable unsafe mode (allows all SQL, requires admin)")
 	fmt.Println()
 
 	fmt.Println("  Diff Options:")
@@ -166,6 +175,18 @@ func PrintHelp() {
 
 	fmt.Println("  # Incremental sync")
 	fmt.Println("  tdtpcli --sync-incremental orders --tracking-field updated_at")
+	fmt.Println()
+
+	fmt.Println("  # Execute ETL pipeline")
+	fmt.Println("  tdtpcli --pipeline etl-config.yaml")
+	fmt.Println()
+
+	fmt.Println("  # Execute pipeline in unsafe mode (allows custom SQL)")
+	fmt.Println("  tdtpcli --pipeline etl-config.yaml --unsafe")
+	fmt.Println()
+
+	fmt.Println("  # Import to different table name")
+	fmt.Println("  tdtpcli --import users.xml --table users_backup")
 	fmt.Println()
 
 	fmt.Println("  # Compare two TDTP files")
