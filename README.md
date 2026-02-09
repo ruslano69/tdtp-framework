@@ -238,13 +238,18 @@ output:
 ### ✅ CLI Utility (tdtpcli)
 
 **Commands:**
-- `--list` - список таблиц
-- `--export <table>` - экспорт в файл/stdout
+- `--list` - список таблиц (⚠️ не показывает views)
+- `--export <table>` - экспорт в файл/stdout (✅ работает с views)
 - `--import <file>` - импорт из файла
 - `--export-broker <table>` - экспорт в message queue
 - `--import-broker` - импорт из message queue
 - `--pipeline <config.yaml>` 🆕 - ETL pipeline из множественных источников
 - `--unsafe` 🆕 - небезопасный режим ETL (требует admin)
+
+**Работа с views:**
+- `--export` поддерживает database views (укажите имя явно)
+- `--list` показывает только BASE TABLEs (не views)
+- Для списка views используйте SQL: `SELECT table_name FROM information_schema.views`
 
 **TDTQL Filters:**
 - `--where "field > value"` - условия фильтрации
