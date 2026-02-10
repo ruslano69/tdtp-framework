@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/etl"
+	"github.com/ruslano69/tdtp-framework/pkg/etl"
 )
 
 // Example 02b: MSSQL → RabbitMQ ETL Pipeline

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/sync"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/sync"
 )
 
 // Type aliases для удобства

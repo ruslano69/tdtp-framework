@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 const benchmarkDB = "../../../benchmark_100k.db"

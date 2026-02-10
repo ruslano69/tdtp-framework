@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 	// Импорт драйвера закомментирован - установите один из:
 	// _ "modernc.org/sqlite"
 	// _ "github.com/mattn/go-sqlite3"

@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/etl"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/etl"
 )
 
 // Этот пример демонстрирует:

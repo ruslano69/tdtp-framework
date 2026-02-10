@@ -7,11 +7,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 
 	// Импортируем адаптеры для регистрации в фабрике
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
 )
 
 // Example 01: Basic Export from PostgreSQL to TDTP XML

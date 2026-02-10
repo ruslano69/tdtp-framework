@@ -6,14 +6,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/audit"
-	"github.com/ruslano69/tdtp-framework-main/pkg/sync"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/sync"
 
 	// Импортируем адаптеры для регистрации
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mysql"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 )
 
 // Incremental Sync Example

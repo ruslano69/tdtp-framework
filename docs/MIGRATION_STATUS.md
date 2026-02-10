@@ -622,5 +622,5 @@ All issues are pre-existing and not introduced by the migration.
 ---
 
 **Migration Lead:** Claude (AI Assistant)
-**Repository:** https://github.com/ruslano69/tdtp-framework-main
+**Repository:** https://github.com/ruslano69/tdtp-framework
 **Branch:** `claude/analyze-framework-architecture-Qvm95`

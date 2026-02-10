@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite" // Регистрация
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite" // Регистрация
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
 // Пример полного цикла Export → Import между двумя БД

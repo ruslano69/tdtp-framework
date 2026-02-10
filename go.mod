@@ -1,4 +1,4 @@
-module github.com/ruslano69/tdtp-framework-main
+module github.com/ruslano69/tdtp-framework
 
 go 1.23.0
 

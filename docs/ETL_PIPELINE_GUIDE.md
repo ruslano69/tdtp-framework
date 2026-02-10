@@ -791,4 +791,4 @@ sqlite3 :memory: < transform.sql
 ## Обратная связь
 
 Нашли ошибку или есть предложения? Создайте issue на GitHub:
-https://github.com/ruslano69/tdtp-framework-main/issues
+https://github.com/ruslano69/tdtp-framework/issues

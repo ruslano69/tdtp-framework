@@ -3,8 +3,8 @@ package tdtql
 import (
 	"testing"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
 func TestFilterEngine_SimpleFilter(t *testing.T) {

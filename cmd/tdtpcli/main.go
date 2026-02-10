@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ruslano69/tdtp-framework-main/cmd/tdtpcli/commands"
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/audit"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 
 	// Database adapters - blank imports for init() registration
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mssql"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mysql"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 )
 
 // routeCommand routes the command to the appropriate handler with production features

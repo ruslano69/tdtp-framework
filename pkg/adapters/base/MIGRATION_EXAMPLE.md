@@ -97,7 +97,7 @@ package sqlite
 
 import (
     "database/sql"
-    "github.com/ruslano69/tdtp-framework-main/pkg/adapters/base"
+    "github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 )
 
 type Adapter struct {
@@ -156,7 +156,7 @@ import (
     "database/sql"
     "fmt"
     "strings"
-    "github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+    "github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // ========== Делегирование в ExportHelper ==========
@@ -260,9 +260,9 @@ import (
     "context"
     "fmt"
     "strings"
-    "github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-    "github.com/ruslano69/tdtp-framework-main/pkg/adapters/base"
-    "github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+    "github.com/ruslano69/tdtp-framework/pkg/adapters"
+    "github.com/ruslano69/tdtp-framework/pkg/adapters/base"
+    "github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // ========== Делегирование в ImportHelper ==========
