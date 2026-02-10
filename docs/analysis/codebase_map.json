@@ -6,13 +6,8 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/examples/adapters/basic_usage/main.go",
-      "functions": [{"name": "Example_SQLiteBasic", "line": 14}, {"name": "Example_PostgreSQLBasic", "line": 57}, {"name": "Example_Transactions", "line": 97}, {"name": "Example_SwitchingDatabases", "line": 129}, {"name": "main", "line": 152}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/examples/basic/main.go",
-      "functions": [{"name": "main", "line": 10}],
+      "path": "/home/user/tdtp-framework/examples/tdtql/main.go",
+      "functions": [{"name": "main", "line": 12}, {"name": "printQuery", "line": 138}],
       "classes": []
     },
     {
@@ -21,33 +16,13 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/examples/schema/main.go",
-      "functions": [{"name": "main", "line": 11}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/examples/tdtql/main.go",
-      "functions": [{"name": "main", "line": 12}, {"name": "printQuery", "line": 138}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/generate_test_db.py",
-      "functions": [{"name": "generate_email", "line": 85}, {"name": "transliterate_text", "line": 95}, {"name": "generate_phone", "line": 118}, {"name": "generate_date", "line": 123}, {"name": "generate_birth_date", "line": 131}, {"name": "generate_inn", "line": 143}, {"name": "generate_insurance_policy", "line": 156}, {"name": "generate_description", "line": 162}, {"name": "main", "line": 178}],
-      "classes": []
-    },
-    {
       "path": "/home/user/tdtp-framework/examples/sqlite/main.go",
       "functions": [{"name": "main", "line": 10}, {"name": "demonstrateFullCycle", "line": 61}, {"name": "demonstrateTypesMapping", "line": 107}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/examples/live_demo/main.go",
-      "functions": [{"name": "main", "line": 18}, {"name": "findTestDatabase", "line": 83}, {"name": "showDatabaseStats", "line": 108}, {"name": "demo1", "line": 132}, {"name": "demo2", "line": 159}, {"name": "demo3", "line": 182}, {"name": "demo4", "line": 213}, {"name": "printResults", "line": 236}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/examples/executor/main.go",
-      "functions": [{"name": "main", "line": 12}, {"name": "printResult", "line": 194}],
+      "path": "/home/user/tdtp-framework/examples/adapters/basic_usage/main.go",
+      "functions": [{"name": "Example_SQLiteBasic", "line": 14}, {"name": "Example_PostgreSQLBasic", "line": 57}, {"name": "Example_Transactions", "line": 97}, {"name": "Example_SwitchingDatabases", "line": 129}, {"name": "main", "line": 152}],
       "classes": []
     },
     {
@@ -56,13 +31,8 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/examples/pagination_demo/main.go",
-      "functions": [{"name": "main", "line": 17}, {"name": "createDemoDatabase", "line": 246}, {"name": "truncate", "line": 306}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
-      "functions": [{"name": "main", "line": 24}, {"name": "demonstrateStreamingExport", "line": 45}, {"name": "demonstrateParallelImport", "line": 111}, {"name": "createWorkspaceWithData", "line": 179}, {"name": "generateTestData", "line": 216}],
+      "path": "/home/user/tdtp-framework/generate_test_db.py",
+      "functions": [{"name": "generate_email", "line": 85}, {"name": "transliterate_text", "line": 95}, {"name": "generate_phone", "line": 118}, {"name": "generate_date", "line": 123}, {"name": "generate_birth_date", "line": 131}, {"name": "generate_inn", "line": 143}, {"name": "generate_insurance_policy", "line": 156}, {"name": "generate_description", "line": 162}, {"name": "main", "line": 178}],
       "classes": []
     },
     {
@@ -76,43 +46,33 @@
       "classes": []
     },
     {
+      "path": "/home/user/tdtp-framework/examples/executor/main.go",
+      "functions": [{"name": "main", "line": 12}, {"name": "printResult", "line": 194}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
+      "functions": [{"name": "main", "line": 24}, {"name": "demonstrateStreamingExport", "line": 45}, {"name": "demonstrateParallelImport", "line": 111}, {"name": "createWorkspaceWithData", "line": 179}, {"name": "generateTestData", "line": 216}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/examples/schema/main.go",
+      "functions": [{"name": "main", "line": 11}],
+      "classes": []
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/adapters/adapter.go",
       "functions": [],
       "classes": [{"name": "Config", "line": 15}, {"name": "SSLConfig", "line": 59}, {"name": "Adapter", "line": 79}, {"name": "Tx", "line": 151}, {"name": "ViewInfo", "line": 160}, {"name": "IncrementalConfig", "line": 12}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/factory.go",
-      "functions": [{"name": "NewFactory", "line": 21}, {"name": "Register", "line": 36}, {"name": "Unregister", "line": 43}, {"name": "IsRegistered", "line": 50}, {"name": "GetRegisteredTypes", "line": 58}, {"name": "Create", "line": 78}, {"name": "CreateWithoutConnect", "line": 101}, {"name": "Register", "line": 128}, {"name": "Unregister", "line": 133}, {"name": "IsRegistered", "line": 138}, {"name": "GetRegisteredTypes", "line": 143}, {"name": "New", "line": 160}, {"name": "NewWithoutConnect", "line": 165}, {"name": "MustNew", "line": 173}],
-      "classes": [{"name": "Factory", "line": 15}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/base/sql_adapter.go",
-      "functions": [{"name": "NewStandardSQLAdapter", "line": 20}, {"name": "AdaptSQL", "line": 30}, {"name": "NewMSSQLAdapter", "line": 55}, {"name": "AdaptSQL", "line": 71}, {"name": "QuoteIdentifier", "line": 118}],
-      "classes": [{"name": "StandardSQLAdapter", "line": 12}, {"name": "MSSQLAdapter", "line": 50}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/examples/query_integration/main.go",
-      "functions": [{"name": "main", "line": 16}, {"name": "demonstrateQueryIntegration", "line": 25}, {"name": "demonstrateFullCycle", "line": 92}, {"name": "demonstratePagination", "line": 125}, {"name": "demonstrateComplexFilters", "line": 146}, {"name": "showRealCode", "line": 175}, {"name": "demonstrateWithRealData", "line": 224}, {"name": "runQuery", "line": 316}],
+      "path": "/home/user/tdtp-framework/examples/basic/main.go",
+      "functions": [{"name": "main", "line": 10}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
-      "functions": [{"name": "main", "line": 30}, {"name": "setupAuditLogger", "line": 166}, {"name": "setupPostgreSQLAdapter", "line": 189}, {"name": "setupMySQLAdapter", "line": 208}, {"name": "exportIncremental", "line": 227}, {"name": "importToMySQL", "line": 314}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/hex.go",
-      "functions": [{"name": "encodeFromIndex", "line": 4}, {"name": "bytesToHexWithoutLeadingZerosSQL", "line": 49}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/factory_test.go",
-      "functions": [{"name": "TestFactory_SQLiteRegistration", "line": 15}, {"name": "TestFactory_PostgreSQLRegistration", "line": 49}, {"name": "TestFactory_UnknownAdapter", "line": 85}, {"name": "TestFactory_SQLiteFullWorkflow", "line": 105}, {"name": "TestFactory_ConfigValidation", "line": 154}, {"name": "TestFactory_MultipleAdapters", "line": 209}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/hex_test.go",
-      "functions": [{"name": "TestBytesToHexWithoutLeadingZerosSQL", "line": 7}, {"name": "BenchmarkBytesToHexWithoutLeadingZerosSQL", "line": 51}],
+      "path": "/home/user/tdtp-framework/examples/live_demo/main.go",
+      "functions": [{"name": "main", "line": 18}, {"name": "findTestDatabase", "line": 83}, {"name": "showDatabaseStats", "line": 108}, {"name": "demo1", "line": 132}, {"name": "demo2", "line": 159}, {"name": "demo3", "line": 182}, {"name": "demo4", "line": 213}, {"name": "printResults", "line": 236}],
       "classes": []
     },
     {
@@ -121,8 +81,43 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
-      "functions": [{"name": "BenchmarkDatabase_Connection", "line": 16}, {"name": "BenchmarkDatabase_Import", "line": 62}, {"name": "BenchmarkDatabase_Export", "line": 112}, {"name": "BenchmarkDatabase_Transaction", "line": 167}, {"name": "BenchmarkDatabase_Metadata", "line": 219}, {"name": "BenchmarkDatabase_ImportStrategies", "line": 276}, {"name": "BenchmarkDatabase_BatchImport", "line": 330}, {"name": "createBenchmarkPacket", "line": 377}],
+      "path": "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+      "functions": [{"name": "main", "line": 30}, {"name": "setupAuditLogger", "line": 166}, {"name": "setupPostgreSQLAdapter", "line": 189}, {"name": "setupMySQLAdapter", "line": 208}, {"name": "exportIncremental", "line": 227}, {"name": "importToMySQL", "line": 314}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/factory.go",
+      "functions": [{"name": "NewFactory", "line": 21}, {"name": "Register", "line": 36}, {"name": "Unregister", "line": 43}, {"name": "IsRegistered", "line": 50}, {"name": "GetRegisteredTypes", "line": 58}, {"name": "Create", "line": 78}, {"name": "CreateWithoutConnect", "line": 101}, {"name": "Register", "line": 128}, {"name": "Unregister", "line": 133}, {"name": "IsRegistered", "line": 138}, {"name": "GetRegisteredTypes", "line": 143}, {"name": "New", "line": 160}, {"name": "NewWithoutConnect", "line": 165}, {"name": "MustNew", "line": 173}],
+      "classes": [{"name": "Factory", "line": 15}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/factory_test.go",
+      "functions": [{"name": "TestFactory_SQLiteRegistration", "line": 15}, {"name": "TestFactory_PostgreSQLRegistration", "line": 49}, {"name": "TestFactory_UnknownAdapter", "line": 85}, {"name": "TestFactory_SQLiteFullWorkflow", "line": 105}, {"name": "TestFactory_ConfigValidation", "line": 154}, {"name": "TestFactory_MultipleAdapters", "line": 209}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+      "functions": [{"name": "main", "line": 17}, {"name": "createDemoDatabase", "line": 246}, {"name": "truncate", "line": 306}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/base/sql_adapter.go",
+      "functions": [{"name": "NewStandardSQLAdapter", "line": 20}, {"name": "AdaptSQL", "line": 30}, {"name": "NewMSSQLAdapter", "line": 55}, {"name": "AdaptSQL", "line": 71}, {"name": "QuoteIdentifier", "line": 118}],
+      "classes": [{"name": "StandardSQLAdapter", "line": 12}, {"name": "MSSQLAdapter", "line": 50}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/hex.go",
+      "functions": [{"name": "encodeFromIndex", "line": 4}, {"name": "bytesToHexWithoutLeadingZerosSQL", "line": 49}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/hex_test.go",
+      "functions": [{"name": "TestBytesToHexWithoutLeadingZerosSQL", "line": 7}, {"name": "BenchmarkBytesToHexWithoutLeadingZerosSQL", "line": 51}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/factory_benchmark_test.go",
+      "functions": [{"name": "BenchmarkFactory_CreateAdapter", "line": 12}, {"name": "BenchmarkFactory_CreateAdapter_Parallel", "line": 30}, {"name": "BenchmarkFactory_Overhead", "line": 50}, {"name": "BenchmarkAdapter_Operations", "line": 86}, {"name": "BenchmarkAdapter_Transactions", "line": 136}],
       "classes": []
     },
     {
@@ -131,13 +126,33 @@
       "classes": [{"name": "SchemaReader", "line": 13}, {"name": "DataReader", "line": 18}, {"name": "ValueConverter", "line": 30}, {"name": "SQLAdapter", "line": 36}, {"name": "ExportHelper", "line": 43}]
     },
     {
+      "path": "/home/user/tdtp-framework/examples/query_integration/main.go",
+      "functions": [{"name": "main", "line": 16}, {"name": "demonstrateQueryIntegration", "line": 25}, {"name": "demonstrateFullCycle", "line": 92}, {"name": "demonstratePagination", "line": 125}, {"name": "demonstrateComplexFilters", "line": 146}, {"name": "showRealCode", "line": 175}, {"name": "demonstrateWithRealData", "line": 224}, {"name": "runQuery", "line": 316}],
+      "classes": []
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go",
       "functions": [{"name": "NewUniversalTypeConverter", "line": 23}, {"name": "ConvertValueToTDTP", "line": 31}, {"name": "DBValueToString", "line": 61}, {"name": "pgValueToString", "line": 78}, {"name": "mssqlValueToString", "line": 199}, {"name": "genericValueToString", "line": 252}, {"name": "bytesToHexWithoutLeadingZeros", "line": 298}, {"name": "TypedValueToSQL", "line": 326}],
       "classes": [{"name": "UniversalTypeConverter", "line": 18}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/factory_benchmark_test.go",
-      "functions": [{"name": "BenchmarkFactory_CreateAdapter", "line": 12}, {"name": "BenchmarkFactory_CreateAdapter_Parallel", "line": 30}, {"name": "BenchmarkFactory_Overhead", "line": 50}, {"name": "BenchmarkAdapter_Operations", "line": 86}, {"name": "BenchmarkAdapter_Transactions", "line": 136}],
+      "path": "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
+      "functions": [{"name": "NewImportHelper", "line": 50}, {"name": "ImportPacket", "line": 66}, {"name": "ImportPackets", "line": 85}, {"name": "importWithTemporaryTable", "line": 169}, {"name": "importDirect", "line": 203}, {"name": "replaceTables", "line": 225}, {"name": "ParseRowValues", "line": 265}, {"name": "ConvertRowToSQLValues", "line": 272}, {"name": "GenerateTempTableName", "line": 320}],
+      "classes": [{"name": "TableManager", "line": 14}, {"name": "DataInserter", "line": 29}, {"name": "TransactionManager", "line": 35}, {"name": "ImportHelper", "line": 42}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/mysql/types.go",
+      "functions": [{"name": "TDTPToMySQL", "line": 13}, {"name": "BuildFieldFromColumn", "line": 91}, {"name": "parseDataType", "line": 184}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
+      "functions": [{"name": "BenchmarkDatabase_Connection", "line": 16}, {"name": "BenchmarkDatabase_Import", "line": 62}, {"name": "BenchmarkDatabase_Export", "line": 112}, {"name": "BenchmarkDatabase_Transaction", "line": 167}, {"name": "BenchmarkDatabase_Metadata", "line": 219}, {"name": "BenchmarkDatabase_ImportStrategies", "line": 276}, {"name": "BenchmarkDatabase_BatchImport", "line": 330}, {"name": "createBenchmarkPacket", "line": 377}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
+      "functions": [{"name": "ExportTable", "line": 16}, {"name": "ExportTableWithQuery", "line": 21}, {"name": "ExportTableIncremental", "line": 26}, {"name": "GetTableSchema", "line": 33}, {"name": "ReadAllRows", "line": 90}, {"name": "ReadRowsWithSQL", "line": 102}, {"name": "GetRowCount", "line": 135}],
       "classes": []
     },
     {
@@ -146,43 +161,13 @@
       "classes": [{"name": "Adapter", "line": 21}, {"name": "mysqlTx", "line": 168}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
-      "functions": [{"name": "ExportTable", "line": 16}, {"name": "ExportTableWithQuery", "line": 21}, {"name": "ExportTableIncremental", "line": 26}, {"name": "GetTableSchema", "line": 33}, {"name": "ReadAllRows", "line": 90}, {"name": "ReadRowsWithSQL", "line": 102}, {"name": "GetRowCount", "line": 135}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
-      "functions": [{"name": "ImportPacket", "line": 16}, {"name": "ImportPackets", "line": 21}, {"name": "CreateTable", "line": 28}, {"name": "DropTable", "line": 62}, {"name": "RenameTable", "line": 68}, {"name": "InsertRows", "line": 77}, {"name": "buildInsertSQL", "line": 135}, {"name": "buildInsertIgnoreSQL", "line": 153}, {"name": "buildInsertOnDuplicateSQL", "line": 171}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mysql/types.go",
-      "functions": [{"name": "TDTPToMySQL", "line": 13}, {"name": "BuildFieldFromColumn", "line": 91}, {"name": "parseDataType", "line": 184}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
-      "functions": [{"name": "NewImportHelper", "line": 50}, {"name": "ImportPacket", "line": 66}, {"name": "ImportPackets", "line": 85}, {"name": "importWithTemporaryTable", "line": 169}, {"name": "importDirect", "line": 203}, {"name": "replaceTables", "line": 225}, {"name": "ParseRowValues", "line": 265}, {"name": "ConvertRowToSQLValues", "line": 272}, {"name": "GenerateTempTableName", "line": 320}],
-      "classes": [{"name": "TableManager", "line": 14}, {"name": "DataInserter", "line": 29}, {"name": "TransactionManager", "line": 35}, {"name": "ImportHelper", "line": 42}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/postgres/types.go",
-      "functions": [{"name": "PostgreSQLToTDTP", "line": 12}, {"name": "TDTPToPostgreSQL", "line": 96}, {"name": "extractBaseType", "line": 178}, {"name": "ParsePostgreSQLType", "line": 187}, {"name": "BuildFieldFromPGColumn", "line": 209}, {"name": "IsPostgreSQLReservedWord", "line": 252}, {"name": "QuoteIdentifier", "line": 262}],
-      "classes": []
+      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+      "functions": [{"name": "init", "line": 50}, {"name": "Connect", "line": 59}, {"name": "initHelpers", "line": 97}, {"name": "detectCompatibility", "line": 124}, {"name": "parseServerVersion", "line": 156}, {"name": "applyCompatibilityMode", "line": 171}, {"name": "parseCompatibilityMode", "line": 207}, {"name": "getServerVersionName", "line": 227}, {"name": "SupportsJSON", "line": 249}, {"name": "SupportsStringSplit", "line": 254}, {"name": "SupportsStringAgg", "line": 259}, {"name": "SupportsTrim", "line": 264}, {"name": "SupportsOffsetFetch", "line": 269}, {"name": "SupportsMerge", "line": 274}, {"name": "Close", "line": 281}, {"name": "Ping", "line": 289}, {"name": "GetDatabaseType", "line": 294}, {"name": "GetDatabaseVersion", "line": 299}, {"name": "GetTableNames", "line": 304}, {"name": "GetViewNames", "line": 341}, {"name": "TableExists", "line": 380}, {"name": "BeginTx", "line": 406}, {"name": "Commit", "line": 420}, {"name": "Rollback", "line": 424}, {"name": "ExecuteRawQuery", "line": 432}, {"name": "convertMSSQLTypeToTDTP", "line": 516}],
+      "classes": [{"name": "Adapter", "line": 18}, {"name": "transaction", "line": 416}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/adapters/mssql/types.go",
       "functions": [{"name": "MSSQLToTDTP", "line": 30}, {"name": "TDTPToMSSQL", "line": 200}, {"name": "ParseMSSQLType", "line": 342}, {"name": "extractBaseType", "line": 375}, {"name": "BuildFieldFromColumn", "line": 385}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
-      "functions": [{"name": "ImportPacket", "line": 18}, {"name": "ImportPackets", "line": 24}, {"name": "CreateTable", "line": 32}, {"name": "DropTable", "line": 67}, {"name": "RenameTable", "line": 75}, {"name": "InsertRows", "line": 84}, {"name": "typedValueToSQL", "line": 178}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
-      "functions": [{"name": "WithIncludeReadOnlyFields", "line": 21}, {"name": "getIncludeReadOnlyFromContext", "line": 27}, {"name": "GetTableSchema", "line": 40}, {"name": "isReadOnlyField", "line": 160}, {"name": "filterReadOnlyFields", "line": 184}, {"name": "ExportTable", "line": 232}, {"name": "ExportTableWithQuery", "line": 238}, {"name": "parseTableName", "line": 362}, {"name": "buildSelectQuery", "line": 377}, {"name": "adaptToSQLServerSyntax", "line": 402}, {"name": "ReadAllRows", "line": 457}, {"name": "readAllRows", "line": 462}, {"name": "ReadRowsWithSQL", "line": 485}, {"name": "readRowsWithSQL", "line": 490}, {"name": "scanRows", "line": 501}, {"name": "valueToString", "line": 535}, {"name": "GetRowCount", "line": 543}, {"name": "ExportTableIncremental", "line": 571}],
       "classes": []
     },
     {
@@ -191,8 +176,28 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
-      "functions": [{"name": "TestIntegration_ExportTableWithQuery", "line": 16}, {"name": "TestIntegration_FullCycle", "line": 190}, {"name": "isSQLiteDriverAvailable", "line": 254}, {"name": "createTestTable", "line": 267}, {"name": "insertTestData", "line": 279}],
+      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+      "functions": [{"name": "WithIncludeReadOnlyFields", "line": 21}, {"name": "getIncludeReadOnlyFromContext", "line": 27}, {"name": "GetTableSchema", "line": 40}, {"name": "isReadOnlyField", "line": 160}, {"name": "filterReadOnlyFields", "line": 184}, {"name": "ExportTable", "line": 232}, {"name": "ExportTableWithQuery", "line": 238}, {"name": "parseTableName", "line": 362}, {"name": "buildSelectQuery", "line": 377}, {"name": "adaptToSQLServerSyntax", "line": 402}, {"name": "ReadAllRows", "line": 457}, {"name": "readAllRows", "line": 462}, {"name": "ReadRowsWithSQL", "line": 485}, {"name": "readRowsWithSQL", "line": 490}, {"name": "scanRows", "line": 501}, {"name": "valueToString", "line": 535}, {"name": "GetRowCount", "line": 543}, {"name": "ExportTableIncremental", "line": 571}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
+      "functions": [{"name": "ImportPacket", "line": 16}, {"name": "ImportPackets", "line": 21}, {"name": "CreateTable", "line": 28}, {"name": "DropTable", "line": 62}, {"name": "RenameTable", "line": 68}, {"name": "InsertRows", "line": 77}, {"name": "buildInsertSQL", "line": 135}, {"name": "buildInsertIgnoreSQL", "line": 153}, {"name": "buildInsertOnDuplicateSQL", "line": 171}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+      "functions": [{"name": "ImportPacket", "line": 18}, {"name": "ImportPackets", "line": 24}, {"name": "CreateTable", "line": 32}, {"name": "DropTable", "line": 67}, {"name": "RenameTable", "line": 75}, {"name": "InsertRows", "line": 84}, {"name": "typedValueToSQL", "line": 178}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
+      "functions": [{"name": "TestIntegration_BasicConnection", "line": 16}, {"name": "TestIntegration_ExportImport", "line": 38}, {"name": "TestIntegration_SpecialTypes", "line": 139}, {"name": "TestIntegration_ExportWithQuery", "line": 270}, {"name": "TestIntegration_ImportStrategies", "line": 341}, {"name": "TestIntegration_TypeMapping", "line": 426}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/integration_test.go",
+      "functions": [{"name": "getEnvOrDefault", "line": 28}, {"name": "TestIntegration_BasicConnection", "line": 38}, {"name": "TestIntegration_Ping", "line": 71}, {"name": "TestIntegration_ExportImport", "line": 94}, {"name": "TestIntegration_MergeUpsert", "line": 172}, {"name": "TestIntegration_CompatibilityMode_2012", "line": 248}, {"name": "TestIntegration_GetTableNames", "line": 293}, {"name": "TestIntegration_GetTableSchema", "line": 319}, {"name": "TestIntegration_TableExists", "line": 383}, {"name": "TestIntegration_SpecialTypes", "line": 429}, {"name": "createTable", "line": 480}, {"name": "createTableSpecialTypes", "line": 501}, {"name": "insertTestData", "line": 522}, {"name": "dropTableIfExists", "line": 539}, {"name": "countRows", "line": 557}, {"name": "getBalance", "line": 572}],
       "classes": []
     },
     {
@@ -201,8 +206,8 @@
       "classes": [{"name": "Appender", "line": 8}, {"name": "MultiAppender", "line": 17}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
-      "functions": [{"name": "ImportPacket", "line": 18}, {"name": "ImportPackets", "line": 23}, {"name": "createTableInTx", "line": 71}, {"name": "buildCreateTableSQL", "line": 83}, {"name": "importPacketDataInTx", "line": 119}, {"name": "importWithMerge", "line": 153}, {"name": "buildMergeSQL", "line": 205}, {"name": "importWithIgnore", "line": 268}, {"name": "rowExists", "line": 309}, {"name": "importWithInsertIgnoreErrors", "line": 340}, {"name": "isPrimaryKeyViolation", "line": 360}, {"name": "importWithInsert", "line": 384}, {"name": "buildInsertSQL", "line": 418}, {"name": "fieldToFieldDef", "line": 436}, {"name": "parseRow", "line": 450}, {"name": "rowToArgs", "line": 465}, {"name": "stringToValue", "line": 479}, {"name": "tableHasIdentityColumn", "line": 536}],
+      "path": "/home/user/tdtp-framework/pkg/adapters/sqlite/benchmark_test.go",
+      "functions": [{"name": "BenchmarkSimpleFilter_SQL", "line": 14}, {"name": "BenchmarkSimpleFilter_InMemory", "line": 40}, {"name": "BenchmarkComplexFilter_SQL", "line": 89}, {"name": "BenchmarkComplexFilter_InMemory", "line": 116}, {"name": "BenchmarkWithPagination_SQL", "line": 165}, {"name": "BenchmarkWithPagination_InMemory", "line": 192}, {"name": "BenchmarkFullExport", "line": 241}, {"name": "parseRow", "line": 260}, {"name": "TestBenchmarkSetup", "line": 292}, {"name": "BenchmarkSimpleFilter_SQL_WithStats", "line": 319}],
       "classes": []
     },
     {
@@ -211,19 +216,24 @@
       "classes": []
     },
     {
+      "path": "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+      "functions": [{"name": "TestIntegration_ExportTableWithQuery", "line": 16}, {"name": "TestIntegration_FullCycle", "line": 190}, {"name": "isSQLiteDriverAvailable", "line": 254}, {"name": "createTestTable", "line": 267}, {"name": "insertTestData", "line": 279}],
+      "classes": []
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
       "functions": [{"name": "init", "line": 21}, {"name": "Connect", "line": 40}, {"name": "NewAdapter", "line": 68}, {"name": "Close", "line": 82}, {"name": "Ping", "line": 91}, {"name": "GetDatabaseType", "line": 100}, {"name": "GetDatabaseVersion", "line": 106}, {"name": "DB", "line": 116}, {"name": "initHelpers", "line": 121}, {"name": "applyPragmaOptimizations", "line": 138}, {"name": "TableExists", "line": 174}, {"name": "GetTableNames", "line": 192}, {"name": "GetViewNames", "line": 222}, {"name": "hasInsteadOfTrigger", "line": 261}, {"name": "BeginTx", "line": 281}, {"name": "Commit", "line": 294}, {"name": "Rollback", "line": 298}, {"name": "ExecuteRawQuery", "line": 304}, {"name": "convertSQLiteTypeToTDTP", "line": 388}],
       "classes": [{"name": "Adapter", "line": 29}, {"name": "sqliteTx", "line": 290}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
-      "functions": [{"name": "init", "line": 50}, {"name": "Connect", "line": 59}, {"name": "initHelpers", "line": 97}, {"name": "detectCompatibility", "line": 124}, {"name": "parseServerVersion", "line": 156}, {"name": "applyCompatibilityMode", "line": 171}, {"name": "parseCompatibilityMode", "line": 207}, {"name": "getServerVersionName", "line": 227}, {"name": "SupportsJSON", "line": 249}, {"name": "SupportsStringSplit", "line": 254}, {"name": "SupportsStringAgg", "line": 259}, {"name": "SupportsTrim", "line": 264}, {"name": "SupportsOffsetFetch", "line": 269}, {"name": "SupportsMerge", "line": 274}, {"name": "Close", "line": 281}, {"name": "Ping", "line": 289}, {"name": "GetDatabaseType", "line": 294}, {"name": "GetDatabaseVersion", "line": 299}, {"name": "GetTableNames", "line": 304}, {"name": "GetViewNames", "line": 341}, {"name": "TableExists", "line": 380}, {"name": "BeginTx", "line": 406}, {"name": "Commit", "line": 420}, {"name": "Rollback", "line": 424}, {"name": "ExecuteRawQuery", "line": 432}, {"name": "convertMSSQLTypeToTDTP", "line": 516}],
-      "classes": [{"name": "Adapter", "line": 18}, {"name": "transaction", "line": 416}]
+      "path": "/home/user/tdtp-framework/pkg/adapters/postgres/types.go",
+      "functions": [{"name": "PostgreSQLToTDTP", "line": 12}, {"name": "TDTPToPostgreSQL", "line": 96}, {"name": "extractBaseType", "line": 178}, {"name": "ParsePostgreSQLType", "line": 187}, {"name": "BuildFieldFromPGColumn", "line": 209}, {"name": "IsPostgreSQLReservedWord", "line": 252}, {"name": "QuoteIdentifier", "line": 262}],
+      "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/types.go",
-      "functions": [{"name": "DefaultExportOptions", "line": 144}, {"name": "DefaultImportOptions", "line": 153}],
-      "classes": [{"name": "TypeMapper", "line": 8}, {"name": "QueryBuilder", "line": 32}, {"name": "SchemaInfo", "line": 64}, {"name": "ColumnInfo", "line": 71}, {"name": "TableInfo", "line": 83}, {"name": "DatabaseInfo", "line": 93}, {"name": "ExportOptions", "line": 105}, {"name": "ImportOptions", "line": 123}]
+      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+      "functions": [{"name": "ImportPacket", "line": 18}, {"name": "ImportPackets", "line": 23}, {"name": "createTableInTx", "line": 71}, {"name": "buildCreateTableSQL", "line": 83}, {"name": "importPacketDataInTx", "line": 119}, {"name": "importWithMerge", "line": 153}, {"name": "buildMergeSQL", "line": 205}, {"name": "importWithIgnore", "line": 268}, {"name": "rowExists", "line": 309}, {"name": "importWithInsertIgnoreErrors", "line": 340}, {"name": "isPrimaryKeyViolation", "line": 360}, {"name": "importWithInsert", "line": 384}, {"name": "buildInsertSQL", "line": 418}, {"name": "fieldToFieldDef", "line": 436}, {"name": "parseRow", "line": 450}, {"name": "rowToArgs", "line": 465}, {"name": "stringToValue", "line": 479}, {"name": "tableHasIdentityColumn", "line": 536}],
+      "classes": []
     },
     {
       "path": "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
@@ -231,9 +241,9 @@
       "classes": [{"name": "Adapter", "line": 27}, {"name": "postgresTx", "line": 267}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
-      "functions": [{"name": "TestIntegration_BasicConnection", "line": 16}, {"name": "TestIntegration_ExportImport", "line": 38}, {"name": "TestIntegration_SpecialTypes", "line": 139}, {"name": "TestIntegration_ExportWithQuery", "line": 270}, {"name": "TestIntegration_ImportStrategies", "line": 341}, {"name": "TestIntegration_TypeMapping", "line": 426}],
-      "classes": []
+      "path": "/home/user/tdtp-framework/pkg/adapters/types.go",
+      "functions": [{"name": "DefaultExportOptions", "line": 144}, {"name": "DefaultImportOptions", "line": 153}],
+      "classes": [{"name": "TypeMapper", "line": 8}, {"name": "QueryBuilder", "line": 32}, {"name": "SchemaInfo", "line": 64}, {"name": "ColumnInfo", "line": 71}, {"name": "TableInfo", "line": 83}, {"name": "DatabaseInfo", "line": 93}, {"name": "ExportOptions", "line": 105}, {"name": "ImportOptions", "line": 123}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/brokers/broker.go",
@@ -246,13 +256,8 @@
       "classes": [{"name": "MSMQ", "line": 13}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/audit/entry.go",
-      "functions": [{"name": "String", "line": 24}, {"name": "NewEntry", "line": 115}, {"name": "WithUser", "line": 126}, {"name": "WithSource", "line": 132}, {"name": "WithTarget", "line": 138}, {"name": "WithResource", "line": 144}, {"name": "WithRecordsAffected", "line": 150}, {"name": "WithDuration", "line": 156}, {"name": "WithError", "line": 162}, {"name": "WithMetadata", "line": 171}, {"name": "WithData", "line": 180}, {"name": "WithIPAddress", "line": 186}, {"name": "WithSessionID", "line": 192}, {"name": "ToJSON", "line": 198}, {"name": "ToJSONIndent", "line": 203}, {"name": "String", "line": 208}, {"name": "Clone", "line": 221}, {"name": "FilterByLevel", "line": 236}, {"name": "generateID", "line": 260}],
-      "classes": [{"name": "Entry", "line": 67}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
-      "functions": [{"name": "BenchmarkImportStrategy_REPLACE", "line": 15}, {"name": "BenchmarkImportStrategy_IGNORE", "line": 48}, {"name": "BenchmarkImportStrategy_Comparison", "line": 79}, {"name": "BenchmarkImportStrategy_DataVolume", "line": 113}, {"name": "BenchmarkImportPackets_Batch", "line": 151}, {"name": "BenchmarkImportPackets_SingleVsBatch", "line": 178}, {"name": "BenchmarkExportImport_RoundTrip", "line": 228}, {"name": "createTestPacket", "line": 265}],
+      "path": "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
+      "functions": [{"name": "ImportPacket", "line": 17}, {"name": "ImportPackets", "line": 68}, {"name": "importPacketData", "line": 126}, {"name": "generateTempTableName", "line": 138}, {"name": "replaceTables", "line": 144}, {"name": "dropTable", "line": 195}, {"name": "createTableFromSchema", "line": 206}, {"name": "buildColumnDefinition", "line": 254}, {"name": "importWithInsert", "line": 262}, {"name": "buildOnConflictClause", "line": 327}, {"name": "importWithCopy", "line": 371}, {"name": "fieldToFieldDef", "line": 431}, {"name": "convertValue", "line": 446}, {"name": "CreateTable", "line": 510}, {"name": "DropTable", "line": 515}, {"name": "RenameTable", "line": 520}, {"name": "InsertRows", "line": 528}],
       "classes": []
     },
     {
@@ -261,9 +266,9 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/brokers/kafka_test.go",
-      "functions": [{"name": "TestKafkaIntegration", "line": 11}, {"name": "TestKafkaFactory", "line": 85}, {"name": "TestKafkaValidation", "line": 104}, {"name": "TestKafkaStats", "line": 148}],
-      "classes": []
+      "path": "/home/user/tdtp-framework/pkg/audit/entry.go",
+      "functions": [{"name": "String", "line": 24}, {"name": "NewEntry", "line": 115}, {"name": "WithUser", "line": 126}, {"name": "WithSource", "line": 132}, {"name": "WithTarget", "line": 138}, {"name": "WithResource", "line": 144}, {"name": "WithRecordsAffected", "line": 150}, {"name": "WithDuration", "line": 156}, {"name": "WithError", "line": 162}, {"name": "WithMetadata", "line": 171}, {"name": "WithData", "line": 180}, {"name": "WithIPAddress", "line": 186}, {"name": "WithSessionID", "line": 192}, {"name": "ToJSON", "line": 198}, {"name": "ToJSONIndent", "line": 203}, {"name": "String", "line": 208}, {"name": "Clone", "line": 221}, {"name": "FilterByLevel", "line": 236}, {"name": "generateID", "line": 260}],
+      "classes": [{"name": "Entry", "line": 67}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/audit/file_appender.go",
@@ -271,33 +276,8 @@
       "classes": [{"name": "FileAppender", "line": 12}, {"name": "FileAppenderConfig", "line": 24}, {"name": "ConsoleAppender", "line": 188}, {"name": "NullAppender", "line": 233}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/adapters/mssql/integration_test.go",
-      "functions": [{"name": "getEnvOrDefault", "line": 28}, {"name": "TestIntegration_BasicConnection", "line": 38}, {"name": "TestIntegration_Ping", "line": 71}, {"name": "TestIntegration_ExportImport", "line": 94}, {"name": "TestIntegration_MergeUpsert", "line": 172}, {"name": "TestIntegration_CompatibilityMode_2012", "line": 248}, {"name": "TestIntegration_GetTableNames", "line": 293}, {"name": "TestIntegration_GetTableSchema", "line": 319}, {"name": "TestIntegration_TableExists", "line": 383}, {"name": "TestIntegration_SpecialTypes", "line": 429}, {"name": "createTable", "line": 480}, {"name": "createTableSpecialTypes", "line": 501}, {"name": "insertTestData", "line": 522}, {"name": "dropTableIfExists", "line": 539}, {"name": "countRows", "line": 557}, {"name": "getBalance", "line": 572}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
-      "functions": [{"name": "ImportPacket", "line": 17}, {"name": "ImportPackets", "line": 68}, {"name": "importPacketData", "line": 126}, {"name": "generateTempTableName", "line": 138}, {"name": "replaceTables", "line": 144}, {"name": "dropTable", "line": 195}, {"name": "createTableFromSchema", "line": 206}, {"name": "buildColumnDefinition", "line": 254}, {"name": "importWithInsert", "line": 262}, {"name": "buildOnConflictClause", "line": 327}, {"name": "importWithCopy", "line": 371}, {"name": "fieldToFieldDef", "line": 431}, {"name": "convertValue", "line": 446}, {"name": "CreateTable", "line": 510}, {"name": "DropTable", "line": 515}, {"name": "RenameTable", "line": 520}, {"name": "InsertRows", "line": 528}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/datapacket_test.go",
-      "functions": [{"name": "TestDataPacket_GetRows", "line": 9}, {"name": "TestDataPacket_RoundTrip", "line": 106}, {"name": "TestRowsToData", "line": 139}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/audit/database_appender.go",
-      "functions": [{"name": "NewDatabaseAppender", "line": 40}, {"name": "createTable", "line": 73}, {"name": "prepareInsert", "line": 119}, {"name": "Append", "line": 137}, {"name": "insertEntry", "line": 158}, {"name": "flushBatch", "line": 198}, {"name": "Flush", "line": 256}, {"name": "Close", "line": 264}, {"name": "Query", "line": 279}, {"name": "Count", "line": 393}, {"name": "DeleteOlderThan", "line": 438}],
-      "classes": [{"name": "DatabaseAppender", "line": 12}, {"name": "DatabaseAppenderConfig", "line": 22}, {"name": "QueryFilter", "line": 382}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/brokers/rabbitmq.go",
-      "functions": [{"name": "NewRabbitMQ", "line": 23}, {"name": "Connect", "line": 48}, {"name": "Close", "line": 126}, {"name": "Send", "line": 141}, {"name": "Receive", "line": 179}, {"name": "AckLast", "line": 205}, {"name": "NackLast", "line": 221}, {"name": "Ping", "line": 236}, {"name": "GetBrokerType", "line": 247}],
-      "classes": [{"name": "RabbitMQ", "line": 13}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/escaping_test.go",
-      "functions": [{"name": "TestEscapeValue", "line": 9}, {"name": "TestGetRowValues_Escaping", "line": 57}, {"name": "TestRoundTrip_EscapeUnescape", "line": 113}, {"name": "TestEscaping_EdgeCases", "line": 204}],
+      "path": "/home/user/tdtp-framework/pkg/brokers/kafka_test.go",
+      "functions": [{"name": "TestKafkaIntegration", "line": 11}, {"name": "TestKafkaFactory", "line": 85}, {"name": "TestKafkaValidation", "line": 104}, {"name": "TestKafkaStats", "line": 148}],
       "classes": []
     },
     {
@@ -306,8 +286,8 @@
       "classes": [{"name": "Kafka", "line": 12}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/parser_bench_test.go",
-      "functions": [{"name": "BenchmarkGetRowValues", "line": 9}, {"name": "BenchmarkGetRowValues_Comparison", "line": 45}],
+      "path": "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
+      "functions": [{"name": "BenchmarkImportStrategy_REPLACE", "line": 15}, {"name": "BenchmarkImportStrategy_IGNORE", "line": 48}, {"name": "BenchmarkImportStrategy_Comparison", "line": 79}, {"name": "BenchmarkImportStrategy_DataVolume", "line": 113}, {"name": "BenchmarkImportPackets_Batch", "line": 151}, {"name": "BenchmarkImportPackets_SingleVsBatch", "line": 178}, {"name": "BenchmarkExportImport_RoundTrip", "line": 228}, {"name": "createTestPacket", "line": 265}],
       "classes": []
     },
     {
@@ -316,48 +296,18 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/packet_test.go",
-      "functions": [{"name": "TestParseReference", "line": 9}, {"name": "TestGenerateReference", "line": 69}, {"name": "TestGenerateRequest", "line": 120}, {"name": "TestGenerateResponse", "line": 149}, {"name": "TestToXML", "line": 201}, {"name": "TestPartitioning", "line": 232}, {"name": "TestValidation", "line": 272}],
+      "path": "/home/user/tdtp-framework/pkg/brokers/rabbitmq.go",
+      "functions": [{"name": "NewRabbitMQ", "line": 23}, {"name": "Connect", "line": 48}, {"name": "Close", "line": 126}, {"name": "Send", "line": 141}, {"name": "Receive", "line": 179}, {"name": "AckLast", "line": 205}, {"name": "NackLast", "line": 221}, {"name": "Ping", "line": 236}, {"name": "GetBrokerType", "line": 247}],
+      "classes": [{"name": "RabbitMQ", "line": 13}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/packet/datapacket_test.go",
+      "functions": [{"name": "TestDataPacket_GetRows", "line": 9}, {"name": "TestDataPacket_RoundTrip", "line": 106}, {"name": "TestRowsToData", "line": 139}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/uuid.go",
-      "functions": [{"name": "generateUUID", "line": 10}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/query.go",
-      "functions": [{"name": "NewQuery", "line": 84}],
-      "classes": [{"name": "Query", "line": 4}, {"name": "Filters", "line": 14}, {"name": "LogicalGroup", "line": 20}, {"name": "Filter", "line": 27}, {"name": "OrderBy", "line": 35}, {"name": "OrderField", "line": 42}, {"name": "QueryContext", "line": 48}, {"name": "ExecutionResults", "line": 55}, {"name": "FilterStatistics", "line": 64}, {"name": "FilterStat", "line": 70}, {"name": "OrStat", "line": 78}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/schema/builder.go",
-      "functions": [{"name": "NewBuilder", "line": 11}, {"name": "AddInteger", "line": 18}, {"name": "AddReal", "line": 28}, {"name": "AddDecimal", "line": 37}, {"name": "AddText", "line": 55}, {"name": "AddBoolean", "line": 65}, {"name": "AddDate", "line": 74}, {"name": "AddDatetime", "line": 83}, {"name": "AddTimestamp", "line": 97}, {"name": "AddBlob", "line": 106}, {"name": "AddField", "line": 115}, {"name": "Build", "line": 121}, {"name": "Reset", "line": 128}, {"name": "FieldCount", "line": 134}, {"name": "HasKeyField", "line": 139}],
-      "classes": [{"name": "Builder", "line": 6}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/schema/types.go",
-      "functions": [{"name": "Error", "line": 63}, {"name": "IsNumericType", "line": 69}, {"name": "IsTextType", "line": 79}, {"name": "IsDateTimeType", "line": 89}, {"name": "IsBooleanType", "line": 99}, {"name": "IsBlobType", "line": 104}, {"name": "NormalizeType", "line": 109}, {"name": "IsValidType", "line": 125}, {"name": "GetDefaultPrecision", "line": 137}, {"name": "GetDefaultScale", "line": 142}, {"name": "GetDefaultTimezone", "line": 147}],
-      "classes": [{"name": "TypedValue", "line": 32}, {"name": "FieldDef", "line": 45}, {"name": "ValidationError", "line": 57}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/utils.go",
-      "functions": [{"name": "ExtractKeyFields", "line": 4}, {"name": "GetFieldIndices", "line": 15}, {"name": "ParseRows", "line": 29}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/adapters/sqlite/benchmark_test.go",
-      "functions": [{"name": "BenchmarkSimpleFilter_SQL", "line": 14}, {"name": "BenchmarkSimpleFilter_InMemory", "line": 40}, {"name": "BenchmarkComplexFilter_SQL", "line": 89}, {"name": "BenchmarkComplexFilter_InMemory", "line": 116}, {"name": "BenchmarkWithPagination_SQL", "line": 165}, {"name": "BenchmarkWithPagination_InMemory", "line": 192}, {"name": "BenchmarkFullExport", "line": 241}, {"name": "parseRow", "line": 260}, {"name": "TestBenchmarkSetup", "line": 292}, {"name": "BenchmarkSimpleFilter_SQL_WithStats", "line": 319}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/types.go",
-      "functions": [{"name": "NewDataPacket", "line": 79}, {"name": "GetRows", "line": 93}, {"name": "SetRows", "line": 104}, {"name": "SchemaEquals", "line": 111}],
-      "classes": [{"name": "DataPacket", "line": 16}, {"name": "Header", "line": 28}, {"name": "Schema", "line": 42}, {"name": "Field", "line": 47}, {"name": "Data", "line": 60}, {"name": "Row", "line": 66}, {"name": "AlarmDetails", "line": 71}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/audit/logger_test.go",
-      "functions": [{"name": "TestEntry_Builder", "line": 16}, {"name": "TestEntry_FilterByLevel", "line": 41}, {"name": "TestEntry_JSON", "line": 78}, {"name": "TestFileAppender_Write", "line": 104}, {"name": "TestFileAppender_Rotation", "line": 142}, {"name": "TestConsoleAppender", "line": 195}, {"name": "TestNullAppender", "line": 213}, {"name": "TestMultiAppender", "line": 224}, {"name": "TestAuditLogger_Sync", "line": 268}, {"name": "TestAuditLogger_Async", "line": 301}, {"name": "TestAuditLogger_LogOperation", "line": 342}, {"name": "TestAuditLogger_DefaultValues", "line": 367}, {"name": "TestAuditLogger_Close", "line": 392}, {"name": "TestNullLogger", "line": 426}, {"name": "TestDatabaseAppender_SQLite", "line": 448}, {"name": "TestDatabaseAppender_Batch", "line": 504}, {"name": "TestDatabaseAppender_DeleteOld", "line": 550}],
+      "path": "/home/user/tdtp-framework/pkg/core/packet/parser_bench_test.go",
+      "functions": [{"name": "BenchmarkGetRowValues", "line": 9}, {"name": "BenchmarkGetRowValues_Comparison", "line": 45}],
       "classes": []
     },
     {
@@ -366,14 +316,44 @@
       "classes": [{"name": "MSMQ", "line": 17}]
     },
     {
+      "path": "/home/user/tdtp-framework/pkg/core/packet/uuid.go",
+      "functions": [{"name": "generateUUID", "line": 10}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/packet/types.go",
+      "functions": [{"name": "NewDataPacket", "line": 79}, {"name": "GetRows", "line": 93}, {"name": "SetRows", "line": 104}, {"name": "SchemaEquals", "line": 111}],
+      "classes": [{"name": "DataPacket", "line": 16}, {"name": "Header", "line": 28}, {"name": "Schema", "line": 42}, {"name": "Field", "line": 47}, {"name": "Data", "line": 60}, {"name": "Row", "line": 66}, {"name": "AlarmDetails", "line": 71}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/packet/packet_test.go",
+      "functions": [{"name": "TestParseReference", "line": 9}, {"name": "TestGenerateReference", "line": 69}, {"name": "TestGenerateRequest", "line": 120}, {"name": "TestGenerateResponse", "line": 149}, {"name": "TestToXML", "line": 201}, {"name": "TestPartitioning", "line": 232}, {"name": "TestValidation", "line": 272}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/packet/utils.go",
+      "functions": [{"name": "ExtractKeyFields", "line": 4}, {"name": "GetFieldIndices", "line": 15}, {"name": "ParseRows", "line": 29}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/packet/query.go",
+      "functions": [{"name": "NewQuery", "line": 84}],
+      "classes": [{"name": "Query", "line": 4}, {"name": "Filters", "line": 14}, {"name": "LogicalGroup", "line": 20}, {"name": "Filter", "line": 27}, {"name": "OrderBy", "line": 35}, {"name": "OrderField", "line": 42}, {"name": "QueryContext", "line": 48}, {"name": "ExecutionResults", "line": 55}, {"name": "FilterStatistics", "line": 64}, {"name": "FilterStat", "line": 70}, {"name": "OrStat", "line": 78}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/packet/escaping_test.go",
+      "functions": [{"name": "TestEscapeValue", "line": 9}, {"name": "TestGetRowValues_Escaping", "line": 57}, {"name": "TestRoundTrip_EscapeUnescape", "line": 113}, {"name": "TestEscaping_EdgeCases", "line": 204}],
+      "classes": []
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/core/packet/parser.go",
       "functions": [{"name": "NewParser", "line": 16}, {"name": "ParseFile", "line": 21}, {"name": "Parse", "line": 32}, {"name": "ParseBytes", "line": 49}, {"name": "validatePacket", "line": 63}, {"name": "IsCompressed", "line": 125}, {"name": "GetCompressionAlgorithm", "line": 130}, {"name": "DecompressData", "line": 137}, {"name": "ParseWithDecompression", "line": 171}, {"name": "ParseBytesWithDecompression", "line": 188}, {"name": "GetRowValues", "line": 206}],
       "classes": [{"name": "Parser", "line": 13}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/generator.go",
-      "functions": [{"name": "DefaultCompressionOptions", "line": 22}, {"name": "NewGenerator", "line": 38}, {"name": "SetMaxMessageSize", "line": 46}, {"name": "SetCompression", "line": 51}, {"name": "EnableCompression", "line": 56}, {"name": "DisableCompression", "line": 61}, {"name": "SetCompressionLevel", "line": 66}, {"name": "GenerateReference", "line": 77}, {"name": "GenerateRequest", "line": 105}, {"name": "GenerateResponse", "line": 119}, {"name": "GenerateAlarm", "line": 157}, {"name": "ToXML", "line": 181}, {"name": "WriteToFile", "line": 201}, {"name": "WriteToWriter", "line": 211}, {"name": "partitionRows", "line": 222}, {"name": "rowsToDataWithCompression", "line": 256}, {"name": "escapeValue", "line": 313}, {"name": "RowsToData", "line": 322}, {"name": "estimateRowSize", "line": 344}, {"name": "generateMessageID", "line": 354}],
-      "classes": [{"name": "CompressionOptions", "line": 14}, {"name": "Generator", "line": 32}]
+      "path": "/home/user/tdtp-framework/pkg/audit/database_appender.go",
+      "functions": [{"name": "NewDatabaseAppender", "line": 40}, {"name": "createTable", "line": 73}, {"name": "prepareInsert", "line": 119}, {"name": "Append", "line": 137}, {"name": "insertEntry", "line": 158}, {"name": "flushBatch", "line": 198}, {"name": "Flush", "line": 256}, {"name": "Close", "line": 264}, {"name": "Query", "line": 279}, {"name": "Count", "line": 393}, {"name": "DeleteOlderThan", "line": 438}],
+      "classes": [{"name": "DatabaseAppender", "line": 12}, {"name": "DatabaseAppenderConfig", "line": 22}, {"name": "QueryFilter", "line": 382}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/audit/logger.go",
@@ -381,19 +361,19 @@
       "classes": [{"name": "Logger", "line": 11}, {"name": "AuditLogger", "line": 21}, {"name": "LoggerConfig", "line": 35}, {"name": "NullLogger", "line": 372}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/compression_test.go",
-      "functions": [{"name": "mockCompressor", "line": 11}, {"name": "mockDecompressor", "line": 19}, {"name": "TestGeneratorCompressionOptions", "line": 29}, {"name": "TestGeneratorRowsToDataWithCompression", "line": 68}, {"name": "TestParserIsCompressed", "line": 152}, {"name": "TestParserDecompressData", "line": 181}, {"name": "TestParserGetCompressionAlgorithm", "line": 274}, {"name": "TestDataCompressionAttribute", "line": 289}, {"name": "TestRoundTripWithCompression", "line": 337}, {"name": "BenchmarkRowsToDataWithCompression", "line": 416}],
+      "path": "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+      "functions": [{"name": "DefaultCompressionOptions", "line": 22}, {"name": "NewGenerator", "line": 38}, {"name": "SetMaxMessageSize", "line": 46}, {"name": "SetCompression", "line": 51}, {"name": "EnableCompression", "line": 56}, {"name": "DisableCompression", "line": 61}, {"name": "SetCompressionLevel", "line": 66}, {"name": "GenerateReference", "line": 77}, {"name": "GenerateRequest", "line": 105}, {"name": "GenerateResponse", "line": 119}, {"name": "GenerateAlarm", "line": 157}, {"name": "ToXML", "line": 181}, {"name": "WriteToFile", "line": 201}, {"name": "WriteToWriter", "line": 211}, {"name": "partitionRows", "line": 222}, {"name": "rowsToDataWithCompression", "line": 256}, {"name": "escapeValue", "line": 313}, {"name": "RowsToData", "line": 322}, {"name": "estimateRowSize", "line": 344}, {"name": "generateMessageID", "line": 354}],
+      "classes": [{"name": "CompressionOptions", "line": 14}, {"name": "Generator", "line": 32}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+      "functions": [{"name": "TestEntry_Builder", "line": 16}, {"name": "TestEntry_FilterByLevel", "line": 41}, {"name": "TestEntry_JSON", "line": 78}, {"name": "TestFileAppender_Write", "line": 104}, {"name": "TestFileAppender_Rotation", "line": 142}, {"name": "TestConsoleAppender", "line": 195}, {"name": "TestNullAppender", "line": 213}, {"name": "TestMultiAppender", "line": 224}, {"name": "TestAuditLogger_Sync", "line": 268}, {"name": "TestAuditLogger_Async", "line": 301}, {"name": "TestAuditLogger_LogOperation", "line": 342}, {"name": "TestAuditLogger_DefaultValues", "line": 367}, {"name": "TestAuditLogger_Close", "line": 392}, {"name": "TestNullLogger", "line": 426}, {"name": "TestDatabaseAppender_SQLite", "line": 448}, {"name": "TestDatabaseAppender_Batch", "line": 504}, {"name": "TestDatabaseAppender_DeleteOld", "line": 550}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/schema/converter.go",
-      "functions": [{"name": "NewConverter", "line": 16}, {"name": "ParseValue", "line": 21}, {"name": "parseInteger", "line": 80}, {"name": "parseReal", "line": 94}, {"name": "parseDecimal", "line": 108}, {"name": "parseText", "line": 155}, {"name": "parseBoolean", "line": 174}, {"name": "parseDate", "line": 193}, {"name": "parseDatetime", "line": 213}, {"name": "parseTimestamp", "line": 227}, {"name": "parseBlob", "line": 244}, {"name": "FormatValue", "line": 258}],
-      "classes": [{"name": "Converter", "line": 13}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/packet/streaming.go",
-      "functions": [{"name": "NewStreamingGenerator", "line": 16}, {"name": "SetPartSize", "line": 24}, {"name": "GeneratePartsStream", "line": 71}, {"name": "createPart", "line": 189}, {"name": "GeneratePartsStreamWithSender", "line": 215}, {"name": "createPartWithSender", "line": 338}, {"name": "UpdatePartTotalParts", "line": 364}],
-      "classes": [{"name": "StreamingGenerator", "line": 10}, {"name": "PartResult", "line": 29}, {"name": "StreamingSummary", "line": 37}]
+      "path": "/home/user/tdtp-framework/pkg/core/packet/compression_test.go",
+      "functions": [{"name": "mockCompressor", "line": 11}, {"name": "mockDecompressor", "line": 19}, {"name": "TestGeneratorCompressionOptions", "line": 29}, {"name": "TestGeneratorRowsToDataWithCompression", "line": 68}, {"name": "TestParserIsCompressed", "line": 152}, {"name": "TestParserDecompressData", "line": 181}, {"name": "TestParserGetCompressionAlgorithm", "line": 274}, {"name": "TestDataCompressionAttribute", "line": 289}, {"name": "TestRoundTripWithCompression", "line": 337}, {"name": "BenchmarkRowsToDataWithCompression", "line": 416}],
+      "classes": []
     },
     {
       "path": "/home/user/tdtp-framework/pkg/core/tdtql/ast.go",
@@ -401,14 +381,14 @@
       "classes": [{"name": "Node", "line": 4}, {"name": "Expression", "line": 10}, {"name": "Statement", "line": 16}, {"name": "SelectStatement", "line": 22}, {"name": "OrderByClause", "line": 37}, {"name": "BinaryExpression", "line": 48}, {"name": "ComparisonExpression", "line": 61}, {"name": "InExpression", "line": 74}, {"name": "BetweenExpression", "line": 91}, {"name": "IsNullExpression", "line": 109}, {"name": "NotExpression", "line": 125}, {"name": "ParenExpression", "line": 136}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/ast_test.go",
-      "functions": [{"name": "TestSelectStatement_Implementation", "line": 7}, {"name": "TestOrderByClause_Implementation", "line": 21}, {"name": "TestBinaryExpression_Implementation", "line": 36}, {"name": "TestComparisonExpression_Implementation", "line": 72}, {"name": "TestInExpression_Implementation", "line": 112}, {"name": "TestBetweenExpression_Implementation", "line": 167}, {"name": "TestIsNullExpression_Implementation", "line": 230}, {"name": "TestNotExpression_Implementation", "line": 277}, {"name": "TestParenExpression_Implementation", "line": 301}, {"name": "TestComplexAST", "line": 333}, {"name": "TestSelectStatement_EmptyFields", "line": 400}, {"name": "TestSelectStatement_WithLimitAndOffset", "line": 430}],
-      "classes": []
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/comparator.go",
+      "functions": [{"name": "NewComparator", "line": 15}, {"name": "Equals", "line": 20}, {"name": "GreaterThan", "line": 73}, {"name": "GreaterThanOrEqual", "line": 117}, {"name": "LessThan", "line": 131}, {"name": "LessThanOrEqual", "line": 175}, {"name": "In", "line": 189}, {"name": "Between", "line": 208}, {"name": "Like", "line": 224}],
+      "classes": [{"name": "Comparator", "line": 12}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/generator.go",
-      "functions": [{"name": "NewGenerator", "line": 14}, {"name": "Generate", "line": 19}, {"name": "generateFilters", "line": 48}, {"name": "expressionToLogicalGroup", "line": 71}, {"name": "expressionToFilter", "line": 173}, {"name": "generateOrderBy", "line": 221}, {"name": "isAndGroup", "line": 246}, {"name": "isOrGroup", "line": 254}, {"name": "isAndExpression", "line": 262}, {"name": "isOrExpression", "line": 270}],
-      "classes": [{"name": "Generator", "line": 11}]
+      "path": "/home/user/tdtp-framework/pkg/core/schema/types.go",
+      "functions": [{"name": "Error", "line": 63}, {"name": "IsNumericType", "line": 69}, {"name": "IsTextType", "line": 79}, {"name": "IsDateTimeType", "line": 89}, {"name": "IsBooleanType", "line": 99}, {"name": "IsBlobType", "line": 104}, {"name": "NormalizeType", "line": 109}, {"name": "IsValidType", "line": 125}, {"name": "GetDefaultPrecision", "line": 137}, {"name": "GetDefaultScale", "line": 142}, {"name": "GetDefaultTimezone", "line": 147}],
+      "classes": [{"name": "TypedValue", "line": 32}, {"name": "FieldDef", "line": 45}, {"name": "ValidationError", "line": 57}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/core/schema/validator.go",
@@ -416,13 +396,23 @@
       "classes": [{"name": "Validator", "line": 11}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/comparator.go",
-      "functions": [{"name": "NewComparator", "line": 15}, {"name": "Equals", "line": 20}, {"name": "GreaterThan", "line": 73}, {"name": "GreaterThanOrEqual", "line": 117}, {"name": "LessThan", "line": 131}, {"name": "LessThanOrEqual", "line": 175}, {"name": "In", "line": 189}, {"name": "Between", "line": 208}, {"name": "Like", "line": 224}],
-      "classes": [{"name": "Comparator", "line": 12}]
+      "path": "/home/user/tdtp-framework/pkg/core/schema/builder.go",
+      "functions": [{"name": "NewBuilder", "line": 11}, {"name": "AddInteger", "line": 18}, {"name": "AddReal", "line": 28}, {"name": "AddDecimal", "line": 37}, {"name": "AddText", "line": 55}, {"name": "AddBoolean", "line": 65}, {"name": "AddDate", "line": 74}, {"name": "AddDatetime", "line": 83}, {"name": "AddTimestamp", "line": 97}, {"name": "AddBlob", "line": 106}, {"name": "AddField", "line": 115}, {"name": "Build", "line": 121}, {"name": "Reset", "line": 128}, {"name": "FieldCount", "line": 134}, {"name": "HasKeyField", "line": 139}],
+      "classes": [{"name": "Builder", "line": 6}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/schema/schema_test.go",
-      "functions": [{"name": "TestTypeValidation", "line": 10}, {"name": "TestTypeNormalization", "line": 34}, {"name": "TestConverterInteger", "line": 55}, {"name": "TestConverterDecimal", "line": 91}, {"name": "TestConverterText", "line": 123}, {"name": "TestConverterBoolean", "line": 157}, {"name": "TestConverterDate", "line": 190}, {"name": "TestConverterTimestamp", "line": 239}, {"name": "TestFormatValue", "line": 262}, {"name": "TestValidateSchema", "line": 309}, {"name": "TestValidateRow", "line": 389}, {"name": "TestBuilder", "line": 428}, {"name": "TestValidatePrimaryKey", "line": 463}],
+      "path": "/home/user/tdtp-framework/pkg/core/packet/streaming.go",
+      "functions": [{"name": "NewStreamingGenerator", "line": 16}, {"name": "SetPartSize", "line": 24}, {"name": "GeneratePartsStream", "line": 71}, {"name": "createPart", "line": 189}, {"name": "GeneratePartsStreamWithSender", "line": 215}, {"name": "createPartWithSender", "line": 338}, {"name": "UpdatePartTotalParts", "line": 364}],
+      "classes": [{"name": "StreamingGenerator", "line": 10}, {"name": "PartResult", "line": 29}, {"name": "StreamingSummary", "line": 37}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/schema/converter.go",
+      "functions": [{"name": "NewConverter", "line": 16}, {"name": "ParseValue", "line": 21}, {"name": "parseInteger", "line": 80}, {"name": "parseReal", "line": 94}, {"name": "parseDecimal", "line": 108}, {"name": "parseText", "line": 155}, {"name": "parseBoolean", "line": 174}, {"name": "parseDate", "line": 193}, {"name": "parseDatetime", "line": 213}, {"name": "parseTimestamp", "line": 227}, {"name": "parseBlob", "line": 244}, {"name": "FormatValue", "line": 258}],
+      "classes": [{"name": "Converter", "line": 13}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/ast_test.go",
+      "functions": [{"name": "TestSelectStatement_Implementation", "line": 7}, {"name": "TestOrderByClause_Implementation", "line": 21}, {"name": "TestBinaryExpression_Implementation", "line": 36}, {"name": "TestComparisonExpression_Implementation", "line": 72}, {"name": "TestInExpression_Implementation", "line": 112}, {"name": "TestBetweenExpression_Implementation", "line": 167}, {"name": "TestIsNullExpression_Implementation", "line": 230}, {"name": "TestNotExpression_Implementation", "line": 277}, {"name": "TestParenExpression_Implementation", "line": 301}, {"name": "TestComplexAST", "line": 333}, {"name": "TestSelectStatement_EmptyFields", "line": 400}, {"name": "TestSelectStatement_WithLimitAndOffset", "line": 430}],
       "classes": []
     },
     {
@@ -436,8 +426,13 @@
       "classes": [{"name": "Token", "line": 53}, {"name": "Lexer", "line": 60}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/lexer_test.go",
-      "functions": [{"name": "TestLexer_Keywords", "line": 7}, {"name": "TestLexer_Operators", "line": 34}, {"name": "TestLexer_Numbers", "line": 65}, {"name": "TestLexer_Strings", "line": 93}, {"name": "TestLexer_Identifiers", "line": 121}, {"name": "TestLexer_ComplexQuery", "line": 146}, {"name": "TestLexer_Whitespace", "line": 190}, {"name": "TestLexer_TokenPositions", "line": 214}, {"name": "TestLexer_IllegalCharacters", "line": 235}, {"name": "TestLexer_GetAllTokens", "line": 258}, {"name": "TestLexer_EmptyInput", "line": 276}, {"name": "TestLexer_OnlyWhitespace", "line": 285}, {"name": "TestLexer_UnterminatedString", "line": 294}, {"name": "TestLexer_CaseInsensitiveKeywords", "line": 309}],
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/executor_test.go",
+      "functions": [{"name": "TestExecutorSimpleFilter", "line": 10}, {"name": "TestExecutorAndFilter", "line": 61}, {"name": "TestExecutorOrFilter", "line": 104}, {"name": "TestExecutorInOperator", "line": 140}, {"name": "TestExecutorBetweenOperator", "line": 175}, {"name": "TestExecutorLikeOperator", "line": 210}, {"name": "TestExecutorIsNull", "line": 245}, {"name": "TestExecutorOrderBy", "line": 280}, {"name": "TestExecutorOrderByDesc", "line": 317}, {"name": "TestExecutorLimitOffset", "line": 350}, {"name": "TestExecutorComplexQuery", "line": 394}, {"name": "TestExecutorQueryContext", "line": 456}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/comparator_test.go",
+      "functions": [{"name": "TestComparator_Equals", "line": 9}, {"name": "TestComparator_GreaterThan", "line": 84}, {"name": "TestComparator_LessThan", "line": 145}, {"name": "TestComparator_GreaterThanOrEqual", "line": 192}, {"name": "TestComparator_LessThanOrEqual", "line": 239}, {"name": "TestComparator_In", "line": 286}, {"name": "TestComparator_Between", "line": 347}, {"name": "TestComparator_Like", "line": 422}, {"name": "TestComparator_Errors", "line": 489}],
       "classes": []
     },
     {
@@ -451,48 +446,23 @@
       "classes": [{"name": "Translator", "line": 10}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/executor.go",
-      "functions": [{"name": "NewExecutor", "line": 31}, {"name": "Execute", "line": 41}, {"name": "ExecuteWhere", "line": 110}, {"name": "buildQueryContext", "line": 120}, {"name": "ValidateQuery", "line": 135}, {"name": "validateFiltersFields", "line": 159}, {"name": "validateLogicalGroupFields", "line": 174}, {"name": "validateOrderByFields", "line": 198}, {"name": "NormalizeQueryFields", "line": 217}, {"name": "normalizeLogicalGroup", "line": 236}],
-      "classes": [{"name": "ExecutionResult", "line": 11}, {"name": "Executor", "line": 23}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/comparator_test.go",
-      "functions": [{"name": "TestComparator_Equals", "line": 9}, {"name": "TestComparator_GreaterThan", "line": 84}, {"name": "TestComparator_LessThan", "line": 145}, {"name": "TestComparator_GreaterThanOrEqual", "line": 192}, {"name": "TestComparator_LessThanOrEqual", "line": 239}, {"name": "TestComparator_In", "line": 286}, {"name": "TestComparator_Between", "line": 347}, {"name": "TestComparator_Like", "line": 422}, {"name": "TestComparator_Errors", "line": 489}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/parser.go",
-      "functions": [{"name": "NewParser", "line": 17}, {"name": "nextToken", "line": 31}, {"name": "Errors", "line": 37}, {"name": "addError", "line": 42}, {"name": "expectToken", "line": 47}, {"name": "ParseSelect", "line": 57}, {"name": "parseExpression", "line": 144}, {"name": "parseCondition", "line": 210}, {"name": "parseInExpression", "line": 304}, {"name": "parseBetweenExpression", "line": 338}, {"name": "parseOrderBy", "line": 367}],
-      "classes": [{"name": "Parser", "line": 9}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/executor_test.go",
-      "functions": [{"name": "TestExecutorSimpleFilter", "line": 10}, {"name": "TestExecutorAndFilter", "line": 61}, {"name": "TestExecutorOrFilter", "line": 104}, {"name": "TestExecutorInOperator", "line": 140}, {"name": "TestExecutorBetweenOperator", "line": 175}, {"name": "TestExecutorLikeOperator", "line": 210}, {"name": "TestExecutorIsNull", "line": 245}, {"name": "TestExecutorOrderBy", "line": 280}, {"name": "TestExecutorOrderByDesc", "line": 317}, {"name": "TestExecutorLimitOffset", "line": 350}, {"name": "TestExecutorComplexQuery", "line": 394}, {"name": "TestExecutorQueryContext", "line": 456}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/etl/executor.go",
-      "functions": [{"name": "NewExecutor", "line": 26}, {"name": "Execute", "line": 33}, {"name": "GetWorkspace", "line": 71}],
-      "classes": [{"name": "ExecutionResult", "line": 12}, {"name": "Executor", "line": 21}]
-    },
-    {
       "path": "/home/user/tdtp-framework/pkg/core/tdtql/filter_test.go",
       "functions": [{"name": "TestFilterEngine_SimpleFilter", "line": 10}, {"name": "TestFilterEngine_AndFilter", "line": 50}, {"name": "TestFilterEngine_OrFilter", "line": 94}, {"name": "TestFilterEngine_InOperator", "line": 132}, {"name": "TestFilterEngine_NotInOperator", "line": 172}, {"name": "TestFilterEngine_BetweenOperator", "line": 209}, {"name": "TestFilterEngine_LikeOperator", "line": 246}, {"name": "TestFilterEngine_IsNull", "line": 281}, {"name": "TestFilterEngine_IsNotNull", "line": 316}, {"name": "TestFilterEngine_NestedAndOr", "line": 351}, {"name": "TestFilterEngine_NoFilters", "line": 398}, {"name": "TestFilterEngine_UnknownField", "line": 425}, {"name": "TestFilterEngine_UnknownOperator", "line": 453}, {"name": "TestFilterEngine_EmptyRows", "line": 481}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator.go",
-      "functions": [{"name": "NewSQLGenerator", "line": 14}, {"name": "GenerateSQL", "line": 19}, {"name": "generateWhereClause", "line": 63}, {"name": "generateLogicalGroup", "line": 82}, {"name": "generateFilterCondition", "line": 128}, {"name": "escapeSQLValue", "line": 199}, {"name": "isNumeric", "line": 216}, {"name": "generateOrderByClause", "line": 237}, {"name": "CanTranslateToSQL", "line": 271}],
-      "classes": [{"name": "SQLGenerator", "line": 11}]
+      "path": "/home/user/tdtp-framework/pkg/core/schema/schema_test.go",
+      "functions": [{"name": "TestTypeValidation", "line": 10}, {"name": "TestTypeNormalization", "line": 34}, {"name": "TestConverterInteger", "line": 55}, {"name": "TestConverterDecimal", "line": 91}, {"name": "TestConverterText", "line": 123}, {"name": "TestConverterBoolean", "line": 157}, {"name": "TestConverterDate", "line": 190}, {"name": "TestConverterTimestamp", "line": 239}, {"name": "TestFormatValue", "line": 262}, {"name": "TestValidateSchema", "line": 309}, {"name": "TestValidateRow", "line": 389}, {"name": "TestBuilder", "line": 428}, {"name": "TestValidatePrimaryKey", "line": 463}],
+      "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/diff/diff.go",
-      "functions": [{"name": "NewDiffer", "line": 62}, {"name": "Compare", "line": 73}, {"name": "validateSchemas", "line": 156}, {"name": "buildRowMap", "line": 175}, {"name": "buildKey", "line": 185}, {"name": "compareRows", "line": 200}, {"name": "contains", "line": 232}, {"name": "FormatText", "line": 242}, {"name": "IsEqual", "line": 284}],
-      "classes": [{"name": "DiffResult", "line": 11}, {"name": "ModifiedRow", "line": 20}, {"name": "FieldChange", "line": 28}, {"name": "DiffStats", "line": 35}, {"name": "DiffOptions", "line": 45}, {"name": "Differ", "line": 57}]
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/executor.go",
+      "functions": [{"name": "NewExecutor", "line": 31}, {"name": "Execute", "line": 41}, {"name": "ExecuteWhere", "line": 110}, {"name": "buildQueryContext", "line": 120}, {"name": "ValidateQuery", "line": 135}, {"name": "validateFiltersFields", "line": 159}, {"name": "validateLogicalGroupFields", "line": 174}, {"name": "validateOrderByFields", "line": 198}, {"name": "NormalizeQueryFields", "line": 217}, {"name": "normalizeLogicalGroup", "line": 236}],
+      "classes": [{"name": "ExecutionResult", "line": 11}, {"name": "Executor", "line": 23}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/etl/config_validation_test.go",
-      "functions": [{"name": "TestErrorHandlingConfig_Validate", "line": 11}, {"name": "TestTransformConfig_Validate", "line": 70}],
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/lexer_test.go",
+      "functions": [{"name": "TestLexer_Keywords", "line": 7}, {"name": "TestLexer_Operators", "line": 34}, {"name": "TestLexer_Numbers", "line": 65}, {"name": "TestLexer_Strings", "line": 93}, {"name": "TestLexer_Identifiers", "line": 121}, {"name": "TestLexer_ComplexQuery", "line": 146}, {"name": "TestLexer_Whitespace", "line": 190}, {"name": "TestLexer_TokenPositions", "line": 214}, {"name": "TestLexer_IllegalCharacters", "line": 235}, {"name": "TestLexer_GetAllTokens", "line": 258}, {"name": "TestLexer_EmptyInput", "line": 276}, {"name": "TestLexer_OnlyWhitespace", "line": 285}, {"name": "TestLexer_UnterminatedString", "line": 294}, {"name": "TestLexer_CaseInsensitiveKeywords", "line": 309}],
       "classes": []
     },
     {
@@ -501,18 +471,53 @@
       "classes": []
     },
     {
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator.go",
+      "functions": [{"name": "NewSQLGenerator", "line": 14}, {"name": "GenerateSQL", "line": 19}, {"name": "generateWhereClause", "line": 63}, {"name": "generateLogicalGroup", "line": 82}, {"name": "generateFilterCondition", "line": 128}, {"name": "escapeSQLValue", "line": 199}, {"name": "isNumeric", "line": 216}, {"name": "generateOrderByClause", "line": 237}, {"name": "CanTranslateToSQL", "line": 271}],
+      "classes": [{"name": "SQLGenerator", "line": 11}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/parser.go",
+      "functions": [{"name": "NewParser", "line": 17}, {"name": "nextToken", "line": 31}, {"name": "Errors", "line": 37}, {"name": "addError", "line": 42}, {"name": "expectToken", "line": 47}, {"name": "ParseSelect", "line": 57}, {"name": "parseExpression", "line": 144}, {"name": "parseCondition", "line": 210}, {"name": "parseInExpression", "line": 304}, {"name": "parseBetweenExpression", "line": 338}, {"name": "parseOrderBy", "line": 367}],
+      "classes": [{"name": "Parser", "line": 9}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/generator.go",
+      "functions": [{"name": "NewGenerator", "line": 14}, {"name": "Generate", "line": 19}, {"name": "generateFilters", "line": 48}, {"name": "expressionToLogicalGroup", "line": 71}, {"name": "expressionToFilter", "line": 173}, {"name": "generateOrderBy", "line": 221}, {"name": "isAndGroup", "line": 246}, {"name": "isOrGroup", "line": 254}, {"name": "isAndExpression", "line": 262}, {"name": "isOrExpression", "line": 270}],
+      "classes": [{"name": "Generator", "line": 11}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/sorter_test.go",
+      "functions": [{"name": "TestSorter_SingleFieldAsc", "line": 10}, {"name": "TestSorter_SingleFieldDesc", "line": 45}, {"name": "TestSorter_MultipleFields", "line": 80}, {"name": "TestSorter_TextSort", "line": 130}, {"name": "TestSorter_NullValues", "line": 165}, {"name": "TestSorter_NegativeNumbers", "line": 203}, {"name": "TestSorter_BooleanSort", "line": 239}, {"name": "TestSorter_NoOrderBy", "line": 276}, {"name": "TestSorter_UnknownField", "line": 303}, {"name": "TestSorter_EmptyRows", "line": 328}, {"name": "TestSorter_StableSort", "line": 355}, {"name": "TestSorter_CaseSensitiveText", "line": 395}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/etl/config_validation_test.go",
+      "functions": [{"name": "TestErrorHandlingConfig_Validate", "line": 11}, {"name": "TestTransformConfig_Validate", "line": 70}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/etl/executor.go",
+      "functions": [{"name": "NewExecutor", "line": 26}, {"name": "Execute", "line": 33}, {"name": "GetWorkspace", "line": 71}],
+      "classes": [{"name": "ExecutionResult", "line": 12}, {"name": "Executor", "line": 21}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/etl/exporter_test.go",
+      "functions": [{"name": "TestExporter_getDestination", "line": 7}, {"name": "TestExporter_ValidateConfig", "line": 74}],
+      "classes": []
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/core/tdtql/tdtql_test.go",
       "functions": [{"name": "TestLexer", "line": 7}, {"name": "TestLexerOperators", "line": 45}, {"name": "TestParserSimpleWhere", "line": 61}, {"name": "TestParserAndOr", "line": 92}, {"name": "TestParserIn", "line": 111}, {"name": "TestParserBetween", "line": 134}, {"name": "TestParserIsNull", "line": 157}, {"name": "TestParserOrderBy", "line": 180}, {"name": "TestParserLimitOffset", "line": 202}, {"name": "TestTranslatorSimple", "line": 220}, {"name": "TestTranslatorComplexWhere", "line": 246}, {"name": "TestTranslatorIn", "line": 269}, {"name": "TestTranslatorOrderBy", "line": 292}, {"name": "TestTranslatorLimitOffset", "line": 314}, {"name": "TestTranslatorFullQuery", "line": 332}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator_test.go",
-      "functions": [{"name": "TestSQLGenerator_SimpleFilter", "line": 10}, {"name": "TestSQLGenerator_ComplexFilter", "line": 31}, {"name": "TestSQLGenerator_IN_Operator", "line": 64}, {"name": "TestSQLGenerator_OrderBy", "line": 90}, {"name": "TestSQLGenerator_LimitOffset", "line": 111}, {"name": "TestSQLGenerator_ComplexQuery", "line": 132}, {"name": "TestSQLGenerator_BETWEEN", "line": 180}, {"name": "TestSQLGenerator_LIKE", "line": 209}, {"name": "TestSQLGenerator_IS_NULL", "line": 237}, {"name": "TestSQLGenerator_MultipleOrderBy", "line": 264}, {"name": "TestSQLGenerator_StringEscaping", "line": 287}, {"name": "contains", "line": 316}],
-      "classes": []
+      "path": "/home/user/tdtp-framework/pkg/diff/diff.go",
+      "functions": [{"name": "NewDiffer", "line": 62}, {"name": "Compare", "line": 73}, {"name": "validateSchemas", "line": 156}, {"name": "buildRowMap", "line": 175}, {"name": "buildKey", "line": 185}, {"name": "compareRows", "line": 200}, {"name": "contains", "line": 232}, {"name": "FormatText", "line": 242}, {"name": "IsEqual", "line": 284}],
+      "classes": [{"name": "DiffResult", "line": 11}, {"name": "ModifiedRow", "line": 20}, {"name": "FieldChange", "line": 28}, {"name": "DiffStats", "line": 35}, {"name": "DiffOptions", "line": 45}, {"name": "Differ", "line": 57}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/core/tdtql/sorter_test.go",
-      "functions": [{"name": "TestSorter_SingleFieldAsc", "line": 10}, {"name": "TestSorter_SingleFieldDesc", "line": 45}, {"name": "TestSorter_MultipleFields", "line": 80}, {"name": "TestSorter_TextSort", "line": 130}, {"name": "TestSorter_NullValues", "line": 165}, {"name": "TestSorter_NegativeNumbers", "line": 203}, {"name": "TestSorter_BooleanSort", "line": 239}, {"name": "TestSorter_NoOrderBy", "line": 276}, {"name": "TestSorter_UnknownField", "line": 303}, {"name": "TestSorter_EmptyRows", "line": 328}, {"name": "TestSorter_StableSort", "line": 355}, {"name": "TestSorter_CaseSensitiveText", "line": 395}],
+      "path": "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator_test.go",
+      "functions": [{"name": "TestSQLGenerator_SimpleFilter", "line": 10}, {"name": "TestSQLGenerator_ComplexFilter", "line": 31}, {"name": "TestSQLGenerator_IN_Operator", "line": 64}, {"name": "TestSQLGenerator_OrderBy", "line": 90}, {"name": "TestSQLGenerator_LimitOffset", "line": 111}, {"name": "TestSQLGenerator_ComplexQuery", "line": 132}, {"name": "TestSQLGenerator_BETWEEN", "line": 180}, {"name": "TestSQLGenerator_LIKE", "line": 209}, {"name": "TestSQLGenerator_IS_NULL", "line": 237}, {"name": "TestSQLGenerator_MultipleOrderBy", "line": 264}, {"name": "TestSQLGenerator_StringEscaping", "line": 287}, {"name": "contains", "line": 316}],
       "classes": []
     },
     {
@@ -521,24 +526,19 @@
       "classes": [{"name": "Chain", "line": 11}]
     },
     {
+      "path": "/home/user/tdtp-framework/pkg/processors/factory.go",
+      "functions": [{"name": "NewFactory", "line": 16}, {"name": "Register", "line": 38}, {"name": "Create", "line": 43}, {"name": "CreateChain", "line": 58}, {"name": "CreateProcessor", "line": 76}, {"name": "CreateChainFromConfigs", "line": 81}],
+      "classes": [{"name": "Factory", "line": 8}]
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/diff/diff_test.go",
       "functions": [{"name": "createTestPacket", "line": 10}, {"name": "TestDiffer_IdenticalPackets", "line": 28}, {"name": "TestDiffer_AddedRows", "line": 64}, {"name": "TestDiffer_RemovedRows", "line": 99}, {"name": "TestDiffer_ModifiedRows", "line": 130}, {"name": "TestDiffer_IgnoreFields", "line": 179}, {"name": "TestDiffer_CaseInsensitive", "line": 211}, {"name": "TestDiffer_CaseSensitive", "line": 240}, {"name": "TestDiffer_MultipleKeyFields", "line": 273}, {"name": "TestDiffer_DifferentTables", "line": 307}, {"name": "TestDiffer_FormatText", "line": 326}, {"name": "contains", "line": 365}, {"name": "findSubstring", "line": 369}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/etl/exporter_test.go",
-      "functions": [{"name": "TestExporter_getDestination", "line": 7}, {"name": "TestExporter_ValidateConfig", "line": 74}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/etl/importer_test.go",
-      "functions": [{"name": "TestExtractBatchID", "line": 9}, {"name": "TestSchemaEquals", "line": 52}, {"name": "TestImporterConfig_Validate", "line": 136}, {"name": "TestBatchValidation", "line": 212}, {"name": "TestEdgeCases", "line": 308}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/processors/factory.go",
-      "functions": [{"name": "NewFactory", "line": 16}, {"name": "Register", "line": 38}, {"name": "Create", "line": 43}, {"name": "CreateChain", "line": 58}, {"name": "CreateProcessor", "line": 76}, {"name": "CreateChainFromConfigs", "line": 81}],
-      "classes": [{"name": "Factory", "line": 8}]
+      "path": "/home/user/tdtp-framework/pkg/etl/processor.go",
+      "functions": [{"name": "NewProcessor", "line": 31}, {"name": "Execute", "line": 40}, {"name": "initWorkspace", "line": 89}, {"name": "loadSources", "line": 103}, {"name": "populateWorkspace", "line": 128}, {"name": "executeTransformation", "line": 168}, {"name": "exportResults", "line": 191}, {"name": "exportResultsStreaming", "line": 207}, {"name": "closeWorkspace", "line": 238}, {"name": "GetStats", "line": 247}, {"name": "Validate", "line": 252}, {"name": "GetConfig", "line": 272}],
+      "classes": [{"name": "ProcessorStats", "line": 10}, {"name": "Processor", "line": 21}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/etl/config.go",
@@ -549,6 +549,11 @@
       "path": "/home/user/tdtp-framework/pkg/etl/exporter.go",
       "functions": [{"name": "NewExporter", "line": 27}, {"name": "Export", "line": 34}, {"name": "exportToTDTP", "line": 69}, {"name": "exportToRabbitMQ", "line": 104}, {"name": "exportToKafka", "line": 147}, {"name": "getDestination", "line": 186}, {"name": "ValidateConfig", "line": 210}, {"name": "compressDataPacket", "line": 254}, {"name": "ExportStream", "line": 309}, {"name": "exportStreamToRabbitMQ", "line": 338}, {"name": "exportStreamToKafka", "line": 370}, {"name": "exportStreamToBroker", "line": 398}],
       "classes": [{"name": "ExportResult", "line": 14}, {"name": "Exporter", "line": 22}, {"name": "StreamingExportResult", "line": 296}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/python/example.py",
+      "functions": [{"name": "main", "line": 12}],
+      "classes": []
     },
     {
       "path": "/home/user/tdtp-framework/pkg/processors/compression.go",
@@ -566,29 +571,9 @@
       "classes": [{"name": "SourceData", "line": 15}, {"name": "Loader", "line": 23}, {"name": "RawQueryExecutor", "line": 187}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/etl/processor.go",
-      "functions": [{"name": "NewProcessor", "line": 31}, {"name": "Execute", "line": 40}, {"name": "initWorkspace", "line": 89}, {"name": "loadSources", "line": 103}, {"name": "populateWorkspace", "line": 128}, {"name": "executeTransformation", "line": 168}, {"name": "exportResults", "line": 191}, {"name": "exportResultsStreaming", "line": 207}, {"name": "closeWorkspace", "line": 238}, {"name": "GetStats", "line": 247}, {"name": "Validate", "line": 252}, {"name": "GetConfig", "line": 272}],
-      "classes": [{"name": "ProcessorStats", "line": 10}, {"name": "Processor", "line": 21}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/processors/processor.go",
-      "functions": [],
-      "classes": [{"name": "Processor", "line": 10}, {"name": "PreProcessor", "line": 22}, {"name": "PostProcessor", "line": 28}, {"name": "Config", "line": 33}, {"name": "ProcessorConfig", "line": 39}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/python/example.py",
-      "functions": [{"name": "main", "line": 12}],
+      "path": "/home/user/tdtp-framework/pkg/etl/config_test.go",
+      "functions": [{"name": "TestLoadConfig", "line": 9}, {"name": "TestPipelineConfig_SetDefaults", "line": 280}, {"name": "TestSourceConfig_Validate", "line": 338}, {"name": "TestWorkspaceConfig_Validate", "line": 428}, {"name": "TestOutputConfig_Validate", "line": 480}, {"name": "contains", "line": 600}],
       "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/etl/workspace.go",
-      "functions": [{"name": "NewWorkspace", "line": 23}, {"name": "CreateTable", "line": 49}, {"name": "LoadData", "line": 73}, {"name": "ExecuteSQL", "line": 141}, {"name": "ExecuteSQLStream", "line": 214}, {"name": "Close", "line": 304}, {"name": "generateCreateTableDDL", "line": 312}, {"name": "mapTDTPTypeToSQLite", "line": 325}, {"name": "mapSQLiteTypeToTDTP", "line": 343}, {"name": "convertValue", "line": 358}, {"name": "formatValue", "line": 385}],
-      "classes": [{"name": "Workspace", "line": 16}, {"name": "StreamingResult", "line": 206}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/processors/field_normalizer.go",
-      "functions": [{"name": "NewFieldNormalizer", "line": 43}, {"name": "Name", "line": 54}, {"name": "Process", "line": 59}, {"name": "normalizeValue", "line": 101}, {"name": "normalizePhone", "line": 125}, {"name": "normalizeEmail", "line": 144}, {"name": "normalizeWhitespace", "line": 164}, {"name": "normalizeDate", "line": 179}, {"name": "NewFieldNormalizerFromConfig", "line": 209}],
-      "classes": [{"name": "FieldNormalizer", "line": 32}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/python/libtdtp/main.go",
@@ -596,13 +581,13 @@
       "classes": [{"name": "TDTPResult", "line": 14}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/processors/compression_test.go",
-      "functions": [{"name": "TestCompressionProcessor", "line": 11}, {"name": "TestDecompressionProcessor", "line": 70}, {"name": "TestCompressDataForTdtp", "line": 133}, {"name": "TestCompressDataForTdtpEmpty", "line": 184}, {"name": "TestCompressionLevels", "line": 209}, {"name": "TestCompressionStats", "line": 232}, {"name": "TestShouldCompress", "line": 258}, {"name": "TestCompressDecompressHelpers", "line": 281}, {"name": "BenchmarkCompression", "line": 300}, {"name": "BenchmarkDecompression", "line": 321}, {"name": "BenchmarkCompressDataForTdtp", "line": 352}, {"name": "BenchmarkProcessorReuse", "line": 370}],
-      "classes": []
+      "path": "/home/user/tdtp-framework/pkg/etl/workspace.go",
+      "functions": [{"name": "NewWorkspace", "line": 23}, {"name": "CreateTable", "line": 49}, {"name": "LoadData", "line": 73}, {"name": "ExecuteSQL", "line": 141}, {"name": "ExecuteSQLStream", "line": 214}, {"name": "Close", "line": 304}, {"name": "generateCreateTableDDL", "line": 312}, {"name": "mapTDTPTypeToSQLite", "line": 325}, {"name": "mapSQLiteTypeToTDTP", "line": 343}, {"name": "convertValue", "line": 358}, {"name": "formatValue", "line": 385}],
+      "classes": [{"name": "Workspace", "line": 16}, {"name": "StreamingResult", "line": 206}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/python/tdtp/pandas_adapter.py",
-      "functions": [{"name": "to_pandas", "line": 14}, {"name": "from_pandas", "line": 37}],
+      "path": "/home/user/tdtp-framework/pkg/etl/importer_test.go",
+      "functions": [{"name": "TestExtractBatchID", "line": 9}, {"name": "TestSchemaEquals", "line": 52}, {"name": "TestImporterConfig_Validate", "line": 136}, {"name": "TestBatchValidation", "line": 212}, {"name": "TestEdgeCases", "line": 308}],
       "classes": []
     },
     {
@@ -611,13 +596,8 @@
       "classes": [{"name": "DataFrame", "line": 12}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/etl/config_test.go",
-      "functions": [{"name": "TestLoadConfig", "line": 9}, {"name": "TestPipelineConfig_SetDefaults", "line": 280}, {"name": "TestSourceConfig_Validate", "line": 338}, {"name": "TestWorkspaceConfig_Validate", "line": 428}, {"name": "TestOutputConfig_Validate", "line": 480}, {"name": "contains", "line": 600}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/python/tdtp/xml_parser.py",
-      "functions": [{"name": "parse_tdtp_xml", "line": 10}, {"name": "_parse_row_values", "line": 90}, {"name": "can_use_go_library", "line": 154}],
+      "path": "/home/user/tdtp-framework/pkg/processors/compression_test.go",
+      "functions": [{"name": "TestCompressionProcessor", "line": 11}, {"name": "TestDecompressionProcessor", "line": 70}, {"name": "TestCompressDataForTdtp", "line": 133}, {"name": "TestCompressDataForTdtpEmpty", "line": 184}, {"name": "TestCompressionLevels", "line": 209}, {"name": "TestCompressionStats", "line": 232}, {"name": "TestShouldCompress", "line": 258}, {"name": "TestCompressDecompressHelpers", "line": 281}, {"name": "BenchmarkCompression", "line": 300}, {"name": "BenchmarkDecompression", "line": 321}, {"name": "BenchmarkCompressDataForTdtp", "line": 352}, {"name": "BenchmarkProcessorReuse", "line": 370}],
       "classes": []
     },
     {
@@ -626,14 +606,34 @@
       "classes": []
     },
     {
+      "path": "/home/user/tdtp-framework/pkg/python/tdtp/xml_parser.py",
+      "functions": [{"name": "parse_tdtp_xml", "line": 10}, {"name": "_parse_row_values", "line": 90}, {"name": "can_use_go_library", "line": 154}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/processors/processor.go",
+      "functions": [],
+      "classes": [{"name": "Processor", "line": 10}, {"name": "PreProcessor", "line": 22}, {"name": "PostProcessor", "line": 28}, {"name": "Config", "line": 33}, {"name": "ProcessorConfig", "line": 39}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/python/tdtp/pandas_adapter.py",
+      "functions": [{"name": "to_pandas", "line": 14}, {"name": "from_pandas", "line": 37}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/processors/field_normalizer.go",
+      "functions": [{"name": "NewFieldNormalizer", "line": 43}, {"name": "Name", "line": 54}, {"name": "Process", "line": 59}, {"name": "normalizeValue", "line": 101}, {"name": "normalizePhone", "line": 125}, {"name": "normalizeEmail", "line": 144}, {"name": "normalizeWhitespace", "line": 164}, {"name": "normalizeDate", "line": 179}, {"name": "NewFieldNormalizerFromConfig", "line": 209}],
+      "classes": [{"name": "FieldNormalizer", "line": 32}]
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/processors/field_masker.go",
       "functions": [{"name": "NewFieldMasker", "line": 39}, {"name": "Name", "line": 50}, {"name": "Process", "line": 55}, {"name": "maskValue", "line": 91}, {"name": "maskPartial", "line": 110}, {"name": "maskMiddle", "line": 139}, {"name": "maskStars", "line": 172}, {"name": "maskFirst2Last2", "line": 187}, {"name": "NewFieldMaskerFromConfig", "line": 225}],
       "classes": [{"name": "FieldMasker", "line": 28}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/merge/merge.go",
-      "functions": [{"name": "NewMerger", "line": 73}, {"name": "Merge", "line": 84}, {"name": "mergeUnion", "line": 141}, {"name": "mergeIntersection", "line": 204}, {"name": "mergeWithPriority", "line": 252}, {"name": "mergeAppend", "line": 312}, {"name": "buildPacket", "line": 337}, {"name": "validateSchemas", "line": 347}, {"name": "buildKey", "line": 362}, {"name": "FormatText", "line": 373}, {"name": "String", "line": 400}, {"name": "ParseStrategy", "line": 418}],
-      "classes": [{"name": "MergeOptions", "line": 31}, {"name": "MergeResult", "line": 44}, {"name": "MergeStats", "line": 51}, {"name": "Conflict", "line": 60}, {"name": "Merger", "line": 68}]
+      "path": "/home/user/tdtp-framework/pkg/resilience/config.go",
+      "functions": [{"name": "Validate", "line": 47}, {"name": "DefaultConfig", "line": 68}, {"name": "WithCallbacks", "line": 82}, {"name": "AggressiveConfig", "line": 89}, {"name": "ConservativeConfig", "line": 103}],
+      "classes": [{"name": "Config", "line": 9}, {"name": "Counts", "line": 38}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/retry/config.go",
@@ -641,9 +641,39 @@
       "classes": [{"name": "Config", "line": 21}, {"name": "DLQConfig", "line": 57}]
     },
     {
+      "path": "/home/user/tdtp-framework/pkg/security/validator.go",
+      "functions": [{"name": "NewSQLValidator", "line": 23}, {"name": "Validate", "line": 40}, {"name": "checkForbiddenKeywords", "line": 74}, {"name": "checkMultipleStatements", "line": 122}, {"name": "checkComments", "line": 143}, {"name": "getQueryType", "line": 161}, {"name": "IsSafeMode", "line": 171}, {"name": "SetSafeMode", "line": 176}],
+      "classes": [{"name": "SQLValidator", "line": 14}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/retry/retry.go",
+      "functions": [{"name": "NewRetryer", "line": 22}, {"name": "Do", "line": 43}, {"name": "DoWithData", "line": 48}, {"name": "doInternal", "line": 53}, {"name": "calculateDelay", "line": 118}, {"name": "isRetryableError", "line": 156}, {"name": "GetDLQ", "line": 178}, {"name": "Close", "line": 183}],
+      "classes": [{"name": "Retryer", "line": 16}]
+    },
+    {
       "path": "/home/user/tdtp-framework/pkg/retry/dlq.go",
       "functions": [{"name": "NewDLQ", "line": 30}, {"name": "Add", "line": 48}, {"name": "Get", "line": 68}, {"name": "GetByID", "line": 79}, {"name": "Remove", "line": 94}, {"name": "Clear", "line": 110}, {"name": "CleanupOld", "line": 119}, {"name": "Size", "line": 148}, {"name": "Save", "line": 155}, {"name": "saveUnsafe", "line": 162}, {"name": "Load", "line": 176}, {"name": "GetStats", "line": 195}],
       "classes": [{"name": "DLQEntry", "line": 12}, {"name": "DLQ", "line": 22}, {"name": "DLQStats", "line": 219}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/resilience/circuit_breaker.go",
+      "functions": [{"name": "New", "line": 31}, {"name": "Execute", "line": 45}, {"name": "ExecuteWithFallback", "line": 77}, {"name": "Call", "line": 95}, {"name": "State", "line": 100}, {"name": "Counts", "line": 105}, {"name": "Stats", "line": 110}, {"name": "Reset", "line": 115}, {"name": "IsOpen", "line": 120}, {"name": "IsClosed", "line": 125}, {"name": "IsHalfOpen", "line": 130}, {"name": "Name", "line": 135}, {"name": "WaitUntilReady", "line": 140}, {"name": "String", "line": 160}, {"name": "NewGroup", "line": 176}, {"name": "Add", "line": 183}, {"name": "Get", "line": 188}, {"name": "GetOrCreate", "line": 194}, {"name": "Execute", "line": 210}, {"name": "ResetAll", "line": 220}, {"name": "StatsAll", "line": 227}],
+      "classes": [{"name": "CircuitBreaker", "line": 25}, {"name": "CircuitBreakerGroup", "line": 171}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/security/privileges_test.go",
+      "functions": [{"name": "TestIsAdmin", "line": 9}, {"name": "TestIsAdminUnix", "line": 24}, {"name": "TestIsWindowsAdmin", "line": 39}, {"name": "TestGetCurrentUser", "line": 54}, {"name": "BenchmarkIsAdmin", "line": 70}, {"name": "BenchmarkGetCurrentUser", "line": 76}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/merge/merge.go",
+      "functions": [{"name": "NewMerger", "line": 73}, {"name": "Merge", "line": 84}, {"name": "mergeUnion", "line": 141}, {"name": "mergeIntersection", "line": 204}, {"name": "mergeWithPriority", "line": 252}, {"name": "mergeAppend", "line": 312}, {"name": "buildPacket", "line": 337}, {"name": "validateSchemas", "line": 347}, {"name": "buildKey", "line": 362}, {"name": "FormatText", "line": 373}, {"name": "String", "line": 400}, {"name": "ParseStrategy", "line": 418}],
+      "classes": [{"name": "MergeOptions", "line": 31}, {"name": "MergeResult", "line": 44}, {"name": "MergeStats", "line": 51}, {"name": "Conflict", "line": 60}, {"name": "Merger", "line": 68}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/sync/config.go",
+      "functions": [{"name": "Validate", "line": 59}, {"name": "DefaultIncrementalConfig", "line": 96}, {"name": "EnableIncrementalSync", "line": 110}],
+      "classes": [{"name": "IncrementalConfig", "line": 28}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/security/privileges.go",
@@ -656,59 +686,14 @@
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/resilience/config.go",
-      "functions": [{"name": "Validate", "line": 47}, {"name": "DefaultConfig", "line": 68}, {"name": "WithCallbacks", "line": 82}, {"name": "AggressiveConfig", "line": 89}, {"name": "ConservativeConfig", "line": 103}],
-      "classes": [{"name": "Config", "line": 9}, {"name": "Counts", "line": 38}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/resilience/circuit_breaker.go",
-      "functions": [{"name": "New", "line": 31}, {"name": "Execute", "line": 45}, {"name": "ExecuteWithFallback", "line": 77}, {"name": "Call", "line": 95}, {"name": "State", "line": 100}, {"name": "Counts", "line": 105}, {"name": "Stats", "line": 110}, {"name": "Reset", "line": 115}, {"name": "IsOpen", "line": 120}, {"name": "IsClosed", "line": 125}, {"name": "IsHalfOpen", "line": 130}, {"name": "Name", "line": 135}, {"name": "WaitUntilReady", "line": 140}, {"name": "String", "line": 160}, {"name": "NewGroup", "line": 176}, {"name": "Add", "line": 183}, {"name": "Get", "line": 188}, {"name": "GetOrCreate", "line": 194}, {"name": "Execute", "line": 210}, {"name": "ResetAll", "line": 220}, {"name": "StatsAll", "line": 227}],
-      "classes": [{"name": "CircuitBreaker", "line": 25}, {"name": "CircuitBreakerGroup", "line": 171}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/processors/field_validator.go",
-      "functions": [{"name": "NewFieldValidator", "line": 62}, {"name": "Name", "line": 91}, {"name": "Process", "line": 96}, {"name": "validateValue", "line": 153}, {"name": "validateRegex", "line": 179}, {"name": "validateRange", "line": 194}, {"name": "validateEnum", "line": 224}, {"name": "validateRequired", "line": 236}, {"name": "validateLength", "line": 245}, {"name": "validateEmail", "line": 270}, {"name": "validatePhone", "line": 278}, {"name": "validateURL", "line": 294}, {"name": "validateDate", "line": 302}, {"name": "NewFieldValidatorFromConfig", "line": 329}, {"name": "parseValidationRule", "line": 389}, {"name": "parseValidationRuleFromMap", "line": 422}],
-      "classes": [{"name": "FieldValidationRule", "line": 38}, {"name": "FieldValidator", "line": 46}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/retry/retry.go",
-      "functions": [{"name": "NewRetryer", "line": 22}, {"name": "Do", "line": 43}, {"name": "DoWithData", "line": 48}, {"name": "doInternal", "line": 53}, {"name": "calculateDelay", "line": 118}, {"name": "isRetryableError", "line": 156}, {"name": "GetDLQ", "line": 178}, {"name": "Close", "line": 183}],
-      "classes": [{"name": "Retryer", "line": 16}]
+      "path": "/home/user/tdtp-framework/pkg/retry/retry_test.go",
+      "functions": [{"name": "TestRetryer_Success", "line": 11}, {"name": "TestRetryer_SuccessAfterRetries", "line": 34}, {"name": "TestRetryer_MaxAttemptsExceeded", "line": 68}, {"name": "TestRetryer_ExponentialBackoff", "line": 91}, {"name": "TestRetryer_ConstantBackoff", "line": 130}, {"name": "TestRetryer_ContextCancellation", "line": 163}, {"name": "TestRetryer_OnRetryCallback", "line": 192}, {"name": "TestRetryer_WithDLQ", "line": 220}, {"name": "TestRetryer_RetryableErrors", "line": 258}, {"name": "TestRetryer_Disabled", "line": 292}],
+      "classes": []
     },
     {
       "path": "/home/user/tdtp-framework/scripts/create_benchmark_db.py",
       "functions": [{"name": "generate_name", "line": 38}, {"name": "generate_email", "line": 45}, {"name": "generate_balance", "line": 53}, {"name": "generate_date", "line": 67}, {"name": "create_database", "line": 74}, {"name": "insert_records", "line": 110}, {"name": "print_statistics", "line": 160}, {"name": "main", "line": 202}],
       "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/scripts/create_postgres_test_db.py",
-      "functions": [{"name": "create_connection", "line": 29}, {"name": "create_test_tables", "line": 38}, {"name": "generate_test_data", "line": 112}, {"name": "print_statistics", "line": 242}, {"name": "main", "line": 293}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/security/privileges_test.go",
-      "functions": [{"name": "TestIsAdmin", "line": 9}, {"name": "TestIsAdminUnix", "line": 24}, {"name": "TestIsWindowsAdmin", "line": 39}, {"name": "TestGetCurrentUser", "line": 54}, {"name": "BenchmarkIsAdmin", "line": 70}, {"name": "BenchmarkGetCurrentUser", "line": 76}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/sync/config.go",
-      "functions": [{"name": "Validate", "line": 59}, {"name": "DefaultIncrementalConfig", "line": 96}, {"name": "EnableIncrementalSync", "line": 110}],
-      "classes": [{"name": "IncrementalConfig", "line": 28}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/scripts/test_setup/generate_docker_compose.py",
-      "functions": [{"name": "generate_docker_compose", "line": 10}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/sync/state.go",
-      "functions": [{"name": "NewStateManager", "line": 29}, {"name": "GetState", "line": 47}, {"name": "UpdateState", "line": 68}, {"name": "UpdateStateWithError", "line": 89}, {"name": "Reset", "line": 112}, {"name": "ResetAll", "line": 126}, {"name": "Save", "line": 140}, {"name": "saveUnsafe", "line": 148}, {"name": "Load", "line": 162}, {"name": "GetAllStates", "line": 181}, {"name": "GetStatePath", "line": 196}],
-      "classes": [{"name": "SyncState", "line": 12}, {"name": "StateManager", "line": 21}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/security/validator.go",
-      "functions": [{"name": "NewSQLValidator", "line": 23}, {"name": "Validate", "line": 40}, {"name": "checkForbiddenKeywords", "line": 74}, {"name": "checkMultipleStatements", "line": 122}, {"name": "checkComments", "line": 143}, {"name": "getQueryType", "line": 161}, {"name": "IsSafeMode", "line": 171}, {"name": "SetSafeMode", "line": 176}],
-      "classes": [{"name": "SQLValidator", "line": 14}]
     },
     {
       "path": "/home/user/tdtp-framework/scripts/create_test_db.py",
@@ -721,24 +706,19 @@
       "classes": [{"name": "stateManager", "line": 38}, {"name": "Stats", "line": 320}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/sync/config_test.go",
-      "functions": [{"name": "TestIncrementalConfig_Validate", "line": 7}, {"name": "TestDefaultIncrementalConfig", "line": 98}, {"name": "TestEnableIncrementalSync", "line": 126}, {"name": "TestIncrementalConfig_ValidateWithDefaults", "line": 142}, {"name": "TestSyncMode_Constants", "line": 169}, {"name": "TestTrackingStrategy_Constants", "line": 179}],
+      "path": "/home/user/tdtp-framework/pkg/processors/field_validator.go",
+      "functions": [{"name": "NewFieldValidator", "line": 62}, {"name": "Name", "line": 91}, {"name": "Process", "line": 96}, {"name": "validateValue", "line": 153}, {"name": "validateRegex", "line": 179}, {"name": "validateRange", "line": 194}, {"name": "validateEnum", "line": 224}, {"name": "validateRequired", "line": 236}, {"name": "validateLength", "line": 245}, {"name": "validateEmail", "line": 270}, {"name": "validatePhone", "line": 278}, {"name": "validateURL", "line": 294}, {"name": "validateDate", "line": 302}, {"name": "NewFieldValidatorFromConfig", "line": 329}, {"name": "parseValidationRule", "line": 389}, {"name": "parseValidationRuleFromMap", "line": 422}],
+      "classes": [{"name": "FieldValidationRule", "line": 38}, {"name": "FieldValidator", "line": 46}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/scripts/create_postgres_test_db.py",
+      "functions": [{"name": "create_connection", "line": 29}, {"name": "create_test_tables", "line": 38}, {"name": "generate_test_data", "line": 112}, {"name": "print_statistics", "line": 242}, {"name": "main", "line": 293}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/scripts/test_setup/generate_test_data.py",
-      "functions": [{"name": "__init__", "line": 13}, {"name": "connect", "line": 33}, {"name": "generate_user", "line": 43}, {"name": "generate_batch", "line": 77}, {"name": "show_sample", "line": 122}, {"name": "main", "line": 145}],
-      "classes": [{"name": "TestDataGenerator", "line": 12}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/sync/state_test.go",
-      "functions": [{"name": "TestStateManager_CreateAndLoad", "line": 9}, {"name": "TestStateManager_AutoSave", "line": 48}, {"name": "TestStateManager_GetStateForNonExistentTable", "line": 76}, {"name": "TestStateManager_Reset", "line": 102}, {"name": "TestStateManager_ResetAll", "line": 134}, {"name": "TestStateManager_UpdateStateWithError", "line": 161}, {"name": "Error", "line": 199}],
-      "classes": [{"name": "testError", "line": 195}]
-    },
-    {
-      "path": "/home/user/tdtp-framework/scripts/docker-compose-generator.py",
-      "functions": [{"name": "__init__", "line": 25}, {"name": "add_postgres", "line": 35}, {"name": "add_mysql", "line": 57}, {"name": "add_mssql", "line": 80}, {"name": "add_rabbitmq", "line": 105}, {"name": "add_kafka", "line": 129}, {"name": "add_pgadmin", "line": 163}, {"name": "add_adminer", "line": 182}, {"name": "add_kafka_ui", "line": 194}, {"name": "generate_compose", "line": 213}, {"name": "save_to_file", "line": 226}, {"name": "interactive_mode", "line": 237}, {"name": "print_summary", "line": 303}, {"name": "print_usage_instructions", "line": 325}, {"name": "main", "line": 350}],
-      "classes": [{"name": "DockerComposeGenerator", "line": 22}]
+      "path": "/home/user/tdtp-framework/scripts/test_setup/generate_docker_compose.py",
+      "functions": [{"name": "generate_docker_compose", "line": 10}],
+      "classes": []
     },
     {
       "path": "/home/user/tdtp-framework/scripts/test_setup/generate_configs.py",
@@ -746,24 +726,19 @@
       "classes": [{"name": "ConfigGenerator", "line": 10}]
     },
     {
-      "path": "/home/user/tdtp-framework/scripts/test_setup/init_postgres.py",
-      "functions": [{"name": "__init__", "line": 14}, {"name": "wait_for_postgres", "line": 20}, {"name": "create_databases_and_users", "line": 43}, {"name": "create_tables", "line": 89}, {"name": "show_connection_info", "line": 135}, {"name": "run", "line": 164}],
-      "classes": [{"name": "PostgresInitializer", "line": 13}]
+      "path": "/home/user/tdtp-framework/scripts/test_setup/generate_test_data.py",
+      "functions": [{"name": "__init__", "line": 13}, {"name": "connect", "line": 33}, {"name": "generate_user", "line": 43}, {"name": "generate_batch", "line": 77}, {"name": "show_sample", "line": 122}, {"name": "main", "line": 145}],
+      "classes": [{"name": "TestDataGenerator", "line": 12}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/resilience/circuit_breaker_test.go",
-      "functions": [{"name": "TestCircuitBreaker_Success", "line": 11}, {"name": "TestCircuitBreaker_Failure", "line": 40}, {"name": "TestCircuitBreaker_OpenAfterMaxFailures", "line": 67}, {"name": "TestCircuitBreaker_HalfOpenAfterTimeout", "line": 101}, {"name": "TestCircuitBreaker_ClosedAfterSuccessInHalfOpen", "line": 149}, {"name": "TestCircuitBreaker_OpenAgainAfterFailureInHalfOpen", "line": 188}, {"name": "TestCircuitBreaker_MaxConcurrentCalls", "line": 228}, {"name": "TestCircuitBreaker_StateChangeCallback", "line": 274}, {"name": "TestCircuitBreaker_ExecuteWithFallback", "line": 333}, {"name": "TestCircuitBreaker_Reset", "line": 370}, {"name": "TestCircuitBreaker_Stats", "line": 405}, {"name": "TestCircuitBreaker_Disabled", "line": 434}, {"name": "TestCircuitBreakerGroup", "line": 458}],
+      "path": "/home/user/tdtp-framework/pkg/sync/config_test.go",
+      "functions": [{"name": "TestIncrementalConfig_Validate", "line": 7}, {"name": "TestDefaultIncrementalConfig", "line": 98}, {"name": "TestEnableIncrementalSync", "line": 126}, {"name": "TestIncrementalConfig_ValidateWithDefaults", "line": 142}, {"name": "TestSyncMode_Constants", "line": 169}, {"name": "TestTrackingStrategy_Constants", "line": 179}],
       "classes": []
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/retry/retry_test.go",
-      "functions": [{"name": "TestRetryer_Success", "line": 11}, {"name": "TestRetryer_SuccessAfterRetries", "line": 34}, {"name": "TestRetryer_MaxAttemptsExceeded", "line": 68}, {"name": "TestRetryer_ExponentialBackoff", "line": 91}, {"name": "TestRetryer_ConstantBackoff", "line": 130}, {"name": "TestRetryer_ContextCancellation", "line": 163}, {"name": "TestRetryer_OnRetryCallback", "line": 192}, {"name": "TestRetryer_WithDLQ", "line": 220}, {"name": "TestRetryer_RetryableErrors", "line": 258}, {"name": "TestRetryer_Disabled", "line": 292}],
-      "classes": []
-    },
-    {
-      "path": "/home/user/tdtp-framework/pkg/retry/dlq_test.go",
-      "functions": [{"name": "TestDLQ_AddAndGet", "line": 9}, {"name": "TestDLQ_MaxSize", "line": 50}, {"name": "TestDLQ_SaveAndLoad", "line": 88}, {"name": "TestDLQ_GetByID", "line": 133}, {"name": "TestDLQ_Remove", "line": 179}, {"name": "TestDLQ_Clear", "line": 238}, {"name": "TestDLQ_CleanupOld", "line": 277}, {"name": "TestDLQ_GetStats", "line": 331}, {"name": "TestDLQ_EmptyStats", "line": 400}, {"name": "TestDLQ_Size", "line": 434}],
-      "classes": []
+      "path": "/home/user/tdtp-framework/pkg/sync/state.go",
+      "functions": [{"name": "NewStateManager", "line": 29}, {"name": "GetState", "line": 47}, {"name": "UpdateState", "line": 68}, {"name": "UpdateStateWithError", "line": 89}, {"name": "Reset", "line": 112}, {"name": "ResetAll", "line": 126}, {"name": "Save", "line": 140}, {"name": "saveUnsafe", "line": 148}, {"name": "Load", "line": 162}, {"name": "GetAllStates", "line": 181}, {"name": "GetStatePath", "line": 196}],
+      "classes": [{"name": "SyncState", "line": 12}, {"name": "StateManager", "line": 21}]
     },
     {
       "path": "/home/user/tdtp-framework/scripts/test_setup/setup_all.py",
@@ -771,13 +746,38 @@
       "classes": [{"name": "TestSetup", "line": 13}]
     },
     {
-      "path": "/home/user/tdtp-framework/pkg/security/validator_test.go",
-      "functions": [{"name": "TestNewSQLValidator", "line": 8}, {"name": "TestSQLValidator_ValidateSafeMode", "line": 29}, {"name": "TestSQLValidator_ValidateUnsafeMode", "line": 188}, {"name": "TestSQLValidator_SetSafeMode", "line": 217}, {"name": "TestCheckForbiddenKeywords", "line": 238}, {"name": "TestCheckMultipleStatements", "line": 264}, {"name": "TestCheckComments", "line": 289}, {"name": "TestGetQueryType", "line": 314}, {"name": "BenchmarkValidate_SimpleSelect", "line": 340}, {"name": "BenchmarkValidate_ComplexQuery", "line": 350}, {"name": "BenchmarkValidate_UnsafeMode", "line": 371}],
+      "path": "/home/user/tdtp-framework/scripts/docker-compose-generator.py",
+      "functions": [{"name": "__init__", "line": 25}, {"name": "add_postgres", "line": 35}, {"name": "add_mysql", "line": 57}, {"name": "add_mssql", "line": 80}, {"name": "add_rabbitmq", "line": 105}, {"name": "add_kafka", "line": 129}, {"name": "add_pgadmin", "line": 163}, {"name": "add_adminer", "line": 182}, {"name": "add_kafka_ui", "line": 194}, {"name": "generate_compose", "line": 213}, {"name": "save_to_file", "line": 226}, {"name": "interactive_mode", "line": 237}, {"name": "print_summary", "line": 303}, {"name": "print_usage_instructions", "line": 325}, {"name": "main", "line": 350}],
+      "classes": [{"name": "DockerComposeGenerator", "line": 22}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/retry/dlq_test.go",
+      "functions": [{"name": "TestDLQ_AddAndGet", "line": 9}, {"name": "TestDLQ_MaxSize", "line": 50}, {"name": "TestDLQ_SaveAndLoad", "line": 88}, {"name": "TestDLQ_GetByID", "line": 133}, {"name": "TestDLQ_Remove", "line": 179}, {"name": "TestDLQ_Clear", "line": 238}, {"name": "TestDLQ_CleanupOld", "line": 277}, {"name": "TestDLQ_GetStats", "line": 331}, {"name": "TestDLQ_EmptyStats", "line": 400}, {"name": "TestDLQ_Size", "line": 434}],
       "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/scripts/test_setup/init_postgres.py",
+      "functions": [{"name": "__init__", "line": 14}, {"name": "wait_for_postgres", "line": 20}, {"name": "create_databases_and_users", "line": 43}, {"name": "create_tables", "line": 89}, {"name": "show_connection_info", "line": 135}, {"name": "run", "line": 164}],
+      "classes": [{"name": "PostgresInitializer", "line": 13}]
     },
     {
       "path": "/home/user/tdtp-framework/pkg/xlsx/converter.go",
       "functions": [{"name": "ToXLSX", "line": 25}, {"name": "FromXLSX", "line": 118}, {"name": "parseHeader", "line": 187}, {"name": "parseRow", "line": 211}, {"name": "convertToExcel", "line": 219}, {"name": "convertFromExcel", "line": 244}, {"name": "applyCellFormat", "line": 261}, {"name": "columnName", "line": 277}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/sync/state_test.go",
+      "functions": [{"name": "TestStateManager_CreateAndLoad", "line": 9}, {"name": "TestStateManager_AutoSave", "line": 48}, {"name": "TestStateManager_GetStateForNonExistentTable", "line": 76}, {"name": "TestStateManager_Reset", "line": 102}, {"name": "TestStateManager_ResetAll", "line": 134}, {"name": "TestStateManager_UpdateStateWithError", "line": 161}, {"name": "Error", "line": 199}],
+      "classes": [{"name": "testError", "line": 195}]
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/resilience/circuit_breaker_test.go",
+      "functions": [{"name": "TestCircuitBreaker_Success", "line": 11}, {"name": "TestCircuitBreaker_Failure", "line": 40}, {"name": "TestCircuitBreaker_OpenAfterMaxFailures", "line": 67}, {"name": "TestCircuitBreaker_HalfOpenAfterTimeout", "line": 101}, {"name": "TestCircuitBreaker_ClosedAfterSuccessInHalfOpen", "line": 149}, {"name": "TestCircuitBreaker_OpenAgainAfterFailureInHalfOpen", "line": 188}, {"name": "TestCircuitBreaker_MaxConcurrentCalls", "line": 228}, {"name": "TestCircuitBreaker_StateChangeCallback", "line": 274}, {"name": "TestCircuitBreaker_ExecuteWithFallback", "line": 333}, {"name": "TestCircuitBreaker_Reset", "line": 370}, {"name": "TestCircuitBreaker_Stats", "line": 405}, {"name": "TestCircuitBreaker_Disabled", "line": 434}, {"name": "TestCircuitBreakerGroup", "line": 458}],
+      "classes": []
+    },
+    {
+      "path": "/home/user/tdtp-framework/pkg/security/validator_test.go",
+      "functions": [{"name": "TestNewSQLValidator", "line": 8}, {"name": "TestSQLValidator_ValidateSafeMode", "line": 29}, {"name": "TestSQLValidator_ValidateUnsafeMode", "line": 188}, {"name": "TestSQLValidator_SetSafeMode", "line": 217}, {"name": "TestCheckForbiddenKeywords", "line": 238}, {"name": "TestCheckMultipleStatements", "line": 264}, {"name": "TestCheckComments", "line": 289}, {"name": "TestGetQueryType", "line": 314}, {"name": "BenchmarkValidate_SimpleSelect", "line": 340}, {"name": "BenchmarkValidate_ComplexQuery", "line": 350}, {"name": "BenchmarkValidate_UnsafeMode", "line": 371}],
       "classes": []
     },
     {
