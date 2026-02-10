@@ -12,10 +12,10 @@ import (
 
 // TDTPResult - результат чтения TDTP файла
 type TDTPResult struct {
-	Schema  packet.Schema   `json:"schema"`
-	Data    [][]string      `json:"data"`
-	Header  packet.Header   `json:"header"`
-	Error   string          `json:"error,omitempty"`
+	Schema packet.Schema `json:"schema"`
+	Data   [][]string    `json:"data"`
+	Header packet.Header `json:"header"`
+	Error  string        `json:"error,omitempty"`
 }
 
 //export ReadTDTP
