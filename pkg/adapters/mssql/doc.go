@@ -24,8 +24,8 @@
 //
 //	import (
 //	    "context"
-//	    "github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-//	    _ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/mssql"
+//	    "github.com/ruslano69/tdtp-framework/pkg/adapters"
+//	    _ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 //	)
 //
 //	func main() {

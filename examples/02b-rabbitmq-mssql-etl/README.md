@@ -71,7 +71,7 @@ import (
     "context"
     "log"
 
-    "github.com/ruslano69/tdtp-framework-main/pkg/etl"
+    "github.com/ruslano69/tdtp-framework/pkg/etl"
 )
 
 func main() {

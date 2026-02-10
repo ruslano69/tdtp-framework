@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters/mssql"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
 // ExportOptions holds options for export operations

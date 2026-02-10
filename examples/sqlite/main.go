@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
 func main() {

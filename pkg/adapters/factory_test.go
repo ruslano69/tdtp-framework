@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres" // Register postgres
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"   // Register sqlite
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres" // Register postgres
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"   // Register sqlite
 )
 
 // TestFactory_SQLiteRegistration проверяет регистрацию SQLite адаптера

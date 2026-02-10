@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres" // Import для регистрации
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"   // Import для регистрации
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres" // Import для регистрации
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"   // Import для регистрации
 )
 
 // Пример 1: Подключение к SQLite через фабрику

@@ -3,7 +3,7 @@ package diff
 import (
 	"testing"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // Helper: создать тестовый пакет из [][]string

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
 func TestXMLFilterIntegration(t *testing.T) {

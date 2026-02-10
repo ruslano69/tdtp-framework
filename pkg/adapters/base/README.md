@@ -106,7 +106,7 @@ type DataInserter interface {
 package sqlite
 
 import (
-    "github.com/ruslano69/tdtp-framework-main/pkg/adapters/base"
+    "github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 )
 
 type Adapter struct {

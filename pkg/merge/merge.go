@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // MergeStrategy определяет стратегию объединения

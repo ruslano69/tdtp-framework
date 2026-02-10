@@ -56,7 +56,7 @@ Level 1 определяет единый API для всех операций �
 
 Основной способ создания адаптера - через фабрику:
 
-	import "github.com/ruslano69/tdtp-framework-main/pkg/adapters"
+	import "github.com/ruslano69/tdtp-framework/pkg/adapters"
 
 	// Создание PostgreSQL адаптера
 	adapter, err := adapters.New(ctx, adapters.Config{
@@ -97,8 +97,8 @@ Level 1 определяет единый API для всех операций �
 
 После импорта пакета адаптера он становится доступен через фабрику:
 
-	import _ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/postgres"
-	import _ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
+	import _ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
+	import _ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 
 # Стратегии импорта
 

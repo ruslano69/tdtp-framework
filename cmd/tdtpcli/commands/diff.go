@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/diff"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/diff"
 )
 
 // DiffOptions опции для команды diff

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/etl"
-	"github.com/ruslano69/tdtp-framework-main/pkg/security"
+	"github.com/ruslano69/tdtp-framework/pkg/etl"
+	"github.com/ruslano69/tdtp-framework/pkg/security"
 )
 
 // ExecutePipeline executes an ETL pipeline from YAML configuration file

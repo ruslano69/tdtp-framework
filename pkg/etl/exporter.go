@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/brokers"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/brokers"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
 // ExportResult представляет результат экспорта

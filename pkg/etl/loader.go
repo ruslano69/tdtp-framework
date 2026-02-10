@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // SourceData представляет загруженные данные из одного источника

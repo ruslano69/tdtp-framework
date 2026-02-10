@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // Context key для передачи флага includeReadOnly через контекст

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // Chain представляет цепочку процессоров

@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 func main() {
@@ -177,8 +177,8 @@ func showRealCode() {
 	fmt.Println("   package main")
 	fmt.Println()
 	fmt.Println("   import (")
-	fmt.Println("       \"github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite\"")
-	fmt.Println("       \"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql\"")
+	fmt.Println("       \"github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite\"")
+	fmt.Println("       \"github.com/ruslano69/tdtp-framework/pkg/core/tdtql\"")
 	fmt.Println("       _ \"modernc.org/sqlite\"")
 	fmt.Println("   )")
 	fmt.Println()

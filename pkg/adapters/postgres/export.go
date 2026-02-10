@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // GetTableSchema читает схему таблицы из PostgreSQL через information_schema

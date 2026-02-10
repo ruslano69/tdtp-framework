@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ruslano69/tdtp-framework-main/pkg/adapters"
-	_ "github.com/ruslano69/tdtp-framework-main/pkg/adapters/sqlite"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework-main/pkg/core/schema"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
 // BenchmarkImportStrategy_REPLACE измеряет производительность стратегии REPLACE
