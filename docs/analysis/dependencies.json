@@ -1,0 +1,1046 @@
+{
+  "language": "Go",
+  "total_imports": 57,
+  "unique_modules": 57,
+  "dependencies": [
+    {
+      "module": "fmt",
+      "count": 106,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/config.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/query.go",
+        "/home/user/tdtp-framework/examples/adapters/basic_usage/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/generator.go",
+        "/home/user/tdtp-framework/pkg/etl/importer.go",
+        "/home/user/tdtp-framework/examples/live_demo/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/production.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+        "/home/user/tdtp-framework/pkg/audit/file_appender.go",
+        "/home/user/tdtp-framework/pkg/brokers/kafka.go",
+        "/home/user/tdtp-framework/pkg/core/packet/streaming.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/translator.go",
+        "/home/user/tdtp-framework/pkg/python/libtdtp/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/broker.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
+        "/home/user/tdtp-framework/pkg/diff/diff.go",
+        "/home/user/tdtp-framework/pkg/processors/field_masker.go",
+        "/home/user/tdtp-framework/pkg/retry/retry.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/diff.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory.go",
+        "/home/user/tdtp-framework/pkg/brokers/broker.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/lexer.go",
+        "/home/user/tdtp-framework/pkg/etl/workspace.go",
+        "/home/user/tdtp-framework/pkg/sync/config.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/sql_adapter.go",
+        "/home/user/tdtp-framework/pkg/processors/compression.go",
+        "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/types.go",
+        "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/brokers/msmq.go",
+        "/home/user/tdtp-framework/pkg/retry/config.go",
+        "/home/user/tdtp-framework/examples/02b-rabbitmq-mssql-etl/main.go",
+        "/home/user/tdtp-framework/examples/schema/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go",
+        "/home/user/tdtp-framework/pkg/core/schema/converter.go",
+        "/home/user/tdtp-framework/pkg/sync/state.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/examples/executor/main.go",
+        "/home/user/tdtp-framework/examples/sqlite/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
+        "/home/user/tdtp-framework/pkg/audit/logger.go",
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+        "/home/user/tdtp-framework/pkg/core/schema/validator.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/xlsx.go",
+        "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/export.go",
+        "/home/user/tdtp-framework/pkg/core/schema/types.go",
+        "/home/user/tdtp-framework/pkg/resilience/config.go",
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go",
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/types.go",
+        "/home/user/tdtp-framework/pkg/audit/entry.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/executor.go",
+        "/home/user/tdtp-framework/pkg/etl/config.go",
+        "/home/user/tdtp-framework/pkg/etl/loader.go",
+        "/home/user/tdtp-framework/pkg/processors/chain.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/merge.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/export_helper.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/export.go",
+        "/home/user/tdtp-framework/pkg/brokers/rabbitmq.go",
+        "/home/user/tdtp-framework/pkg/etl/executor.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/pipeline.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/help.go",
+        "/home/user/tdtp-framework/examples/01-basic-export/main.go",
+        "/home/user/tdtp-framework/examples/adapters/export_import/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/types.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/filter.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/processors.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/types.go",
+        "/home/user/tdtp-framework/pkg/brokers/msmq_stub.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/parser.go",
+        "/home/user/tdtp-framework/pkg/merge/merge.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator.go",
+        "/home/user/tdtp-framework/examples/basic/main.go",
+        "/home/user/tdtp-framework/examples/tdtql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
+        "/home/user/tdtp-framework/pkg/audit/database_appender.go",
+        "/home/user/tdtp-framework/pkg/etl/processor.go",
+        "/home/user/tdtp-framework/pkg/processors/field_normalizer.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker.go",
+        "/home/user/tdtp-framework/examples/xml_filter_demo/main.go",
+        "/home/user/tdtp-framework/pkg/core/packet/packet_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/uuid.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator.go",
+        "/home/user/tdtp-framework/pkg/etl/exporter.go",
+        "/home/user/tdtp-framework/pkg/processors/factory.go",
+        "/home/user/tdtp-framework/pkg/resilience/state.go",
+        "/home/user/tdtp-framework/pkg/security/validator.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/list.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/core/packet",
+      "count": 86,
+      "files": [
+        "/home/user/tdtp-framework/pkg/merge/merge.go",
+        "/home/user/tdtp-framework/pkg/processors/chain.go",
+        "/home/user/tdtp-framework/pkg/processors/field_normalizer.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/schema/schema_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync_test.go",
+        "/home/user/tdtp-framework/examples/xml_filter_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/sql_adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/python/libtdtp/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/processors.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/examples/live_demo/main.go",
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/etl/executor.go",
+        "/home/user/tdtp-framework/pkg/etl/importer.go",
+        "/home/user/tdtp-framework/examples/adapters/export_import/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/types.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+        "/home/user/tdtp-framework/pkg/etl/loader.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator.go",
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/examples/schema/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/types.go",
+        "/home/user/tdtp-framework/examples/04-tdtp-xlsx/main.go",
+        "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
+        "/home/user/tdtp-framework/pkg/core/schema/builder.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/executor_test.go",
+        "/home/user/tdtp-framework/test_export_import.go",
+        "/home/user/tdtp-framework/examples/basic/main.go",
+        "/home/user/tdtp-framework/examples/executor/main.go",
+        "/home/user/tdtp-framework/examples/tdtql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator_test.go",
+        "/home/user/tdtp-framework/examples/sqlite/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/broker.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/diff.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
+        "/home/user/tdtp-framework/pkg/etl/exporter.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/xlsx.go",
+        "/home/user/tdtp-framework/pkg/core/schema/validator.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/translator.go",
+        "/home/user/tdtp-framework/tests/integration/broker_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/export_helper.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/etl/importer_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter_test.go",
+        "/home/user/tdtp-framework/pkg/merge/merge_test.go",
+        "/home/user/tdtp-framework/pkg/processors/processor.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/types.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/types.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/filter.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/filter_test.go",
+        "/home/user/tdtp-framework/pkg/diff/diff.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/merge.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/query.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go",
+        "/home/user/tdtp-framework/pkg/adapters/types.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/generator.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator.go",
+        "/home/user/tdtp-framework/pkg/diff/diff_test.go",
+        "/home/user/tdtp-framework/examples/01-basic-export/main.go",
+        "/home/user/tdtp-framework/pkg/etl/workspace.go",
+        "/home/user/tdtp-framework/pkg/processors/field_masker.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/executor.go"
+      ]
+    },
+    {
+      "module": "context",
+      "count": 84,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/diff.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+        "/home/user/tdtp-framework/pkg/brokers/kafka_test.go",
+        "/home/user/tdtp-framework/pkg/processors/processor.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/broker.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/integration_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/export.go",
+        "/home/user/tdtp-framework/pkg/brokers/msmq.go",
+        "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+        "/home/user/tdtp-framework/pkg/etl/exporter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
+        "/home/user/tdtp-framework/pkg/etl/processor.go",
+        "/home/user/tdtp-framework/pkg/processors/chain.go",
+        "/home/user/tdtp-framework/pkg/retry/retry.go",
+        "/home/user/tdtp-framework/tests/integration/broker_test.go",
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/examples/02b-rabbitmq-mssql-etl/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
+        "/home/user/tdtp-framework/pkg/processors/field_normalizer.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/pipeline.go",
+        "/home/user/tdtp-framework/examples/adapters/basic_usage/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/examples/xml_filter_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory.go",
+        "/home/user/tdtp-framework/pkg/audit/database_appender.go",
+        "/home/user/tdtp-framework/pkg/etl/executor.go",
+        "/home/user/tdtp-framework/pkg/etl/loader.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator_test.go",
+        "/home/user/tdtp-framework/test_export_import.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/merge.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/production.go",
+        "/home/user/tdtp-framework/pkg/brokers/rabbitmq.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/xlsx.go",
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/export.go",
+        "/home/user/tdtp-framework/pkg/core/packet/compression_test.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker.go",
+        "/home/user/tdtp-framework/pkg/retry/retry_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/list.go",
+        "/home/user/tdtp-framework/pkg/adapters/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/audit/appender.go",
+        "/home/user/tdtp-framework/pkg/brokers/kafka.go",
+        "/home/user/tdtp-framework/pkg/etl/workspace.go",
+        "/home/user/tdtp-framework/pkg/processors/field_masker.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker_test.go",
+        "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/export_helper.go",
+        "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/audit/logger.go",
+        "/home/user/tdtp-framework/pkg/brokers/broker.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/examples/adapters/export_import/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
+        "/home/user/tdtp-framework/pkg/audit/file_appender.go",
+        "/home/user/tdtp-framework/pkg/processors/compression.go",
+        "/home/user/tdtp-framework/pkg/core/packet/streaming.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync.go",
+        "/home/user/tdtp-framework/examples/04-tdtp-xlsx/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser.go",
+        "/home/user/tdtp-framework/pkg/processors/compression_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/processors.go",
+        "/home/user/tdtp-framework/examples/01-basic-export/main.go",
+        "/home/user/tdtp-framework/examples/live_demo/main.go",
+        "/home/user/tdtp-framework/pkg/brokers/msmq_stub.go",
+        "/home/user/tdtp-framework/pkg/etl/importer.go"
+      ]
+    },
+    {
+      "module": "strings",
+      "count": 55,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/query.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go",
+        "/home/user/tdtp-framework/pkg/core/schema/validator.go",
+        "/home/user/tdtp-framework/pkg/processors/field_masker.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator_test.go",
+        "/home/user/tdtp-framework/pkg/security/validator.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/types.go",
+        "/home/user/tdtp-framework/pkg/core/packet/compression_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/types.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+        "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+        "/home/user/tdtp-framework/pkg/merge/merge.go",
+        "/home/user/tdtp-framework/pkg/processors/compression.go",
+        "/home/user/tdtp-framework/pkg/processors/compression_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/sql_adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/types.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/comparator.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/filter.go",
+        "/home/user/tdtp-framework/pkg/diff/diff.go",
+        "/home/user/tdtp-framework/pkg/processors/field_normalizer.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/merge.go",
+        "/home/user/tdtp-framework/pkg/core/packet/packet_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/generator.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator.go",
+        "/home/user/tdtp-framework/pkg/security/validator_test.go",
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/processors.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/integration_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator.go",
+        "/home/user/tdtp-framework/pkg/etl/workspace.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/types.go",
+        "/home/user/tdtp-framework/pkg/brokers/msmq.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
+        "/home/user/tdtp-framework/pkg/etl/config.go",
+        "/home/user/tdtp-framework/pkg/retry/retry.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/export.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser_bench_test.go",
+        "/home/user/tdtp-framework/pkg/core/schema/converter.go"
+      ]
+    },
+    {
+      "module": "testing",
+      "count": 46,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/hex_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/datapacket_test.go",
+        "/home/user/tdtp-framework/pkg/security/privileges_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser_bench_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/ast_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/filter_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sql_generator_test.go",
+        "/home/user/tdtp-framework/pkg/etl/config_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/compression_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter_test.go",
+        "/home/user/tdtp-framework/pkg/etl/exporter_test.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator_test.go",
+        "/home/user/tdtp-framework/pkg/sync/config_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/processors_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/escaping_test.go",
+        "/home/user/tdtp-framework/pkg/core/schema/schema_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/comparator_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/tdtql_test.go",
+        "/home/user/tdtp-framework/pkg/merge/merge_test.go",
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/lexer_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/parser_test.go",
+        "/home/user/tdtp-framework/pkg/etl/config_validation_test.go",
+        "/home/user/tdtp-framework/pkg/etl/importer_test.go",
+        "/home/user/tdtp-framework/pkg/processors/compression_test.go",
+        "/home/user/tdtp-framework/pkg/brokers/kafka_test.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq_test.go",
+        "/home/user/tdtp-framework/pkg/security/validator_test.go",
+        "/home/user/tdtp-framework/pkg/sync/state_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/packet_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/executor_test.go",
+        "/home/user/tdtp-framework/pkg/diff/diff_test.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker_test.go",
+        "/home/user/tdtp-framework/pkg/retry/retry_test.go",
+        "/home/user/tdtp-framework/tests/integration/broker_test.go"
+      ]
+    },
+    {
+      "module": "time",
+      "count": 45,
+      "files": [
+        "/home/user/tdtp-framework/pkg/audit/logger.go",
+        "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+        "/home/user/tdtp-framework/pkg/core/schema/types.go",
+        "/home/user/tdtp-framework/pkg/retry/config.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq_test.go",
+        "/home/user/tdtp-framework/pkg/sync/state_test.go",
+        "/home/user/tdtp-framework/tests/integration/broker_test.go",
+        "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
+        "/home/user/tdtp-framework/pkg/brokers/rabbitmq.go",
+        "/home/user/tdtp-framework/pkg/core/packet/uuid.go",
+        "/home/user/tdtp-framework/pkg/etl/processor.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker.go",
+        "/home/user/tdtp-framework/pkg/core/schema/schema_test.go",
+        "/home/user/tdtp-framework/pkg/audit/database_appender.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync.go",
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+        "/home/user/tdtp-framework/pkg/core/packet/types.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq.go",
+        "/home/user/tdtp-framework/examples/01-basic-export/main.go",
+        "/home/user/tdtp-framework/pkg/brokers/kafka.go",
+        "/home/user/tdtp-framework/pkg/core/schema/converter.go",
+        "/home/user/tdtp-framework/pkg/etl/executor.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/production.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go",
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/pkg/brokers/kafka_test.go",
+        "/home/user/tdtp-framework/pkg/processors/compression.go",
+        "/home/user/tdtp-framework/pkg/processors/compression_test.go",
+        "/home/user/tdtp-framework/pkg/retry/retry.go",
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go",
+        "/home/user/tdtp-framework/pkg/etl/loader.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker_test.go",
+        "/home/user/tdtp-framework/pkg/resilience/config.go",
+        "/home/user/tdtp-framework/pkg/retry/retry_test.go",
+        "/home/user/tdtp-framework/pkg/sync/state.go",
+        "/home/user/tdtp-framework/pkg/etl/importer.go",
+        "/home/user/tdtp-framework/pkg/audit/entry.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
+        "/home/user/tdtp-framework/pkg/core/packet/compression_test.go",
+        "/home/user/tdtp-framework/pkg/resilience/state.go",
+        "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/adapters",
+      "count": 45,
+      "files": [
+        "/home/user/tdtp-framework/pkg/adapters/mssql/integration_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/list.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+        "/home/user/tdtp-framework/examples/01-basic-export/main.go",
+        "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/xlsx.go",
+        "/home/user/tdtp-framework/examples/xml_filter_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
+        "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
+        "/home/user/tdtp-framework/test_export_import.go",
+        "/home/user/tdtp-framework/examples/adapters/export_import/main.go",
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/doc.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+        "/home/user/tdtp-framework/pkg/etl/loader.go",
+        "/home/user/tdtp-framework/pkg/etl/workspace.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/broker.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync.go",
+        "/home/user/tdtp-framework/examples/live_demo/main.go",
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/export_helper.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import_test.go",
+        "/home/user/tdtp-framework/examples/04-tdtp-xlsx/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
+        "/home/user/tdtp-framework/tests/integration/broker_test.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/examples/adapters/basic_usage/main.go"
+      ]
+    },
+    {
+      "module": "os",
+      "count": 32,
+      "files": [
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/integration_test.go",
+        "/home/user/tdtp-framework/pkg/audit/file_appender.go",
+        "/home/user/tdtp-framework/pkg/retry/retry_test.go",
+        "/home/user/tdtp-framework/pkg/sync/state.go",
+        "/home/user/tdtp-framework/pkg/sync/state_test.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq.go",
+        "/home/user/tdtp-framework/pkg/security/privileges.go",
+        "/home/user/tdtp-framework/examples/01-basic-export/main.go",
+        "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq_test.go",
+        "/home/user/tdtp-framework/pkg/security/privileges_test.go",
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/pkg/etl/config_test.go",
+        "/home/user/tdtp-framework/pkg/etl/exporter.go",
+        "/home/user/tdtp-framework/test_export_import.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser.go",
+        "/home/user/tdtp-framework/pkg/etl/config.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/xlsx.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/config.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/production.go",
+        "/home/user/tdtp-framework/examples/live_demo/main.go",
+        "/home/user/tdtp-framework/examples/xml_filter_demo/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/examples/02b-rabbitmq-mssql-etl/main.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/core/schema",
+      "count": 30,
+      "files": [
+        "/home/user/tdtp-framework/examples/adapters/export_import/main.go",
+        "/home/user/tdtp-framework/examples/xml_filter_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter.go",
+        "/home/user/tdtp-framework/pkg/etl/workspace.go",
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/types.go",
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go",
+        "/home/user/tdtp-framework/examples/schema/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/strategy_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/types.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/filter.go",
+        "/home/user/tdtp-framework/examples/sqlite/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/import_helper.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/comparator.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/comparator_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/executor.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/executor_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter_test.go",
+        "/home/user/tdtp-framework/examples/executor/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/types.go",
+        "/home/user/tdtp-framework/pkg/adapters/database_comparison_benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/filter_test.go"
+      ]
+    },
+    {
+      "module": "log",
+      "count": 14,
+      "files": [
+        "/home/user/tdtp-framework/examples/01-basic-export/main.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+        "/home/user/tdtp-framework/examples/04-tdtp-xlsx/main.go",
+        "/home/user/tdtp-framework/examples/adapters/basic_usage/main.go",
+        "/home/user/tdtp-framework/examples/basic/main.go",
+        "/home/user/tdtp-framework/examples/executor/main.go",
+        "/home/user/tdtp-framework/test_export_import.go",
+        "/home/user/tdtp-framework/examples/02b-rabbitmq-mssql-etl/main.go",
+        "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
+        "/home/user/tdtp-framework/examples/adapters/export_import/main.go",
+        "/home/user/tdtp-framework/examples/schema/main.go",
+        "/home/user/tdtp-framework/examples/tdtql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go"
+      ]
+    },
+    {
+      "module": "database/sql",
+      "count": 12,
+      "files": [
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/test_export_import.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/export.go",
+        "/home/user/tdtp-framework/pkg/audit/database_appender.go",
+        "/home/user/tdtp-framework/pkg/etl/workspace.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/core/tdtql",
+      "count": 11,
+      "files": [
+        "/home/user/tdtp-framework/examples/executor/main.go",
+        "/home/user/tdtp-framework/examples/tdtql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/integration_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/benchmark_test.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/integration_test.go",
+        "/home/user/tdtp-framework/examples/live_demo/main.go",
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/export_helper.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/export.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go"
+      ]
+    },
+    {
+      "module": "strconv",
+      "count": 11,
+      "files": [
+        "/home/user/tdtp-framework/pkg/adapters/mssql/types.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/types.go",
+        "/home/user/tdtp-framework/pkg/core/schema/converter.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/comparator.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/parser.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter.go",
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/query.go"
+      ]
+    },
+    {
+      "module": "sync",
+      "count": 9,
+      "files": [
+        "/home/user/tdtp-framework/pkg/audit/file_appender.go",
+        "/home/user/tdtp-framework/pkg/etl/importer.go",
+        "/home/user/tdtp-framework/pkg/resilience/state.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq.go",
+        "/home/user/tdtp-framework/pkg/adapters/factory.go",
+        "/home/user/tdtp-framework/pkg/audit/logger.go",
+        "/home/user/tdtp-framework/pkg/etl/loader.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker_test.go",
+        "/home/user/tdtp-framework/pkg/sync/state.go"
+      ]
+    },
+    {
+      "module": "encoding/xml",
+      "count": 8,
+      "files": [
+        "/home/user/tdtp-framework/examples/tdtql/main.go",
+        "/home/user/tdtp-framework/examples/xml_filter_demo/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/xml_filter_integration_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/escaping_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser.go",
+        "/home/user/tdtp-framework/tests/integration/broker_test.go",
+        "/home/user/tdtp-framework/examples/pagination_demo/main.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/processors",
+      "count": 8,
+      "files": [
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/pkg/etl/exporter.go",
+        "/home/user/tdtp-framework/pkg/python/libtdtp/main.go",
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/broker.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/processors.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/processors_test.go"
+      ]
+    },
+    {
+      "module": "path/filepath",
+      "count": 7,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/xlsx.go",
+        "/home/user/tdtp-framework/examples/live_demo/main.go",
+        "/home/user/tdtp-framework/pkg/audit/file_appender.go",
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/pkg/etl/config_test.go"
+      ]
+    },
+    {
+      "module": "encoding/json",
+      "count": 7,
+      "files": [
+        "/home/user/tdtp-framework/pkg/audit/database_appender.go",
+        "/home/user/tdtp-framework/pkg/audit/entry.go",
+        "/home/user/tdtp-framework/pkg/python/libtdtp/main.go",
+        "/home/user/tdtp-framework/pkg/retry/dlq.go",
+        "/home/user/tdtp-framework/pkg/sync/state.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go"
+      ]
+    },
+    {
+      "module": "regexp",
+      "count": 6,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/types.go",
+        "/home/user/tdtp-framework/pkg/core/tdtql/comparator.go",
+        "/home/user/tdtp-framework/pkg/processors/field_masker.go",
+        "/home/user/tdtp-framework/pkg/processors/field_normalizer.go",
+        "/home/user/tdtp-framework/pkg/processors/field_validator.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/adapters/base",
+      "count": 6,
+      "files": [
+        "/home/user/tdtp-framework/pkg/adapters/mysql/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/sqlite/import.go",
+        "/home/user/tdtp-framework/pkg/adapters/mssql/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/mysql/adapter.go"
+      ]
+    },
+    {
+      "module": "errors",
+      "count": 5,
+      "files": [
+        "/home/user/tdtp-framework/pkg/retry/retry_test.go",
+        "/home/user/tdtp-framework/pkg/audit/logger_test.go",
+        "/home/user/tdtp-framework/pkg/etl/loader.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker.go",
+        "/home/user/tdtp-framework/pkg/resilience/circuit_breaker_test.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/brokers",
+      "count": 5,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/broker.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go",
+        "/home/user/tdtp-framework/pkg/etl/exporter.go",
+        "/home/user/tdtp-framework/pkg/etl/importer.go",
+        "/home/user/tdtp-framework/tests/integration/broker_test.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/audit",
+      "count": 4,
+      "files": [
+        "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/production.go",
+        "/home/user/tdtp-framework/examples/02-rabbitmq-mssql/main.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/sync",
+      "count": 3,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/sync.go",
+        "/home/user/tdtp-framework/examples/03-incremental-sync/main.go",
+        "/home/user/tdtp-framework/pkg/adapters/adapter.go"
+      ]
+    },
+    {
+      "module": "runtime",
+      "count": 3,
+      "files": [
+        "/home/user/tdtp-framework/pkg/brokers/msmq_stub.go",
+        "/home/user/tdtp-framework/pkg/security/privileges.go",
+        "/home/user/tdtp-framework/pkg/security/privileges_test.go"
+      ]
+    },
+    {
+      "module": "github.com/jackc/pgx/v5",
+      "count": 3,
+      "files": [
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/export.go",
+        "/home/user/tdtp-framework/pkg/adapters/postgres/import.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/etl",
+      "count": 3,
+      "files": [
+        "/home/user/tdtp-framework/examples/05-streaming-rabbitmq/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/pipeline.go",
+        "/home/user/tdtp-framework/examples/02b-rabbitmq-mssql-etl/main.go"
+      ]
+    },
+    {
+      "module": "encoding/base64",
+      "count": 3,
+      "files": [
+        "/home/user/tdtp-framework/pkg/processors/compression.go",
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go",
+        "/home/user/tdtp-framework/pkg/core/schema/converter.go"
+      ]
+    },
+    {
+      "module": "flag",
+      "count": 2,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go",
+        "/home/user/tdtp-framework/cmd/tdtpcli/flags.go"
+      ]
+    },
+    {
+      "module": "reflect",
+      "count": 2,
+      "files": [
+        "/home/user/tdtp-framework/pkg/core/packet/escaping_test.go",
+        "/home/user/tdtp-framework/pkg/core/packet/datapacket_test.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/xlsx",
+      "count": 2,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/xlsx.go",
+        "/home/user/tdtp-framework/examples/04-tdtp-xlsx/main.go"
+      ]
+    },
+    {
+      "module": "gopkg.in/yaml.v3",
+      "count": 2,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/config.go",
+        "/home/user/tdtp-framework/pkg/etl/config.go"
+      ]
+    },
+    {
+      "module": "io",
+      "count": 2,
+      "files": [
+        "/home/user/tdtp-framework/pkg/core/packet/generator.go",
+        "/home/user/tdtp-framework/pkg/core/packet/parser.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite",
+      "count": 2,
+      "files": [
+        "/home/user/tdtp-framework/examples/query_integration/main.go",
+        "/home/user/tdtp-framework/test_export_import.go"
+      ]
+    },
+    {
+      "module": "github.com/segmentio/kafka-go",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/brokers/kafka.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/security",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/pipeline.go"
+      ]
+    },
+    {
+      "module": "C",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/python/libtdtp/main.go"
+      ]
+    },
+    {
+      "module": "unicode/utf8",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/core/schema/converter.go"
+      ]
+    },
+    {
+      "module": "sort",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/core/tdtql/sorter.go"
+      ]
+    },
+    {
+      "module": "github.com/jackc/pgx/v5/pgtype",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/adapters/base/type_converter.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/resilience",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/production.go"
+      ]
+    },
+    {
+      "module": "github.com/go-ole/go-ole/oleutil",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/brokers/msmq.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/main.go"
+      ]
+    },
+    {
+      "module": "bytes",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/etl/importer.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/merge",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/merge.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/export.go"
+      ]
+    },
+    {
+      "module": "math/rand",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/retry/retry.go"
+      ]
+    },
+    {
+      "module": "unicode",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/core/tdtql/lexer.go"
+      ]
+    },
+    {
+      "module": "github.com/jackc/pgx/v5/pgxpool",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/adapters/postgres/adapter.go"
+      ]
+    },
+    {
+      "module": "github.com/go-ole/go-ole",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/brokers/msmq.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/retry",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/production.go"
+      ]
+    },
+    {
+      "module": "github.com/ruslano69/tdtp-framework/pkg/diff",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/cmd/tdtpcli/commands/diff.go"
+      ]
+    },
+    {
+      "module": "github.com/xuri/excelize/v2",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/xlsx/converter.go"
+      ]
+    },
+    {
+      "module": "crypto/tls",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/brokers/rabbitmq.go"
+      ]
+    },
+    {
+      "module": "crypto/rand",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/core/packet/uuid.go"
+      ]
+    },
+    {
+      "module": "math",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/retry/retry.go"
+      ]
+    },
+    {
+      "module": "github.com/klauspost/compress/zstd",
+      "count": 1,
+      "files": [
+        "/home/user/tdtp-framework/pkg/processors/compression.go"
+      ]
+    }
+  ],
+  "external_vs_internal": {
+    "external": 35,
+    "internal": 11,
+    "stdlib": 11
+  }
+}
