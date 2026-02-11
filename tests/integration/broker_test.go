@@ -292,11 +292,9 @@ func TestQueueParametersMatching(t *testing.T) {
 
 func createTestTable(ctx context.Context, adapter adapters.Adapter, tableName string) error {
 	// Простая тестовая таблица
-	_ = `
-		IF OBJECT_ID('` + tableName + `', 'U') IS NOT NULL
-			DROP TABLE ` + tableName + `;
-
-		CREATE TABLE ` + tableName + ` (
+	// TODO: Implement table creation for integration tests
+	/*
+		CREATE TABLE tableName (
 			ID INT PRIMARY KEY,
 			Name NVARCHAR(100),
 			Email NVARCHAR(100),
@@ -305,12 +303,7 @@ func createTestTable(ctx context.Context, adapter adapters.Adapter, tableName st
 			CreatedAt DATETIME2,
 			UpdatedAt DATETIME2
 		);
-
-		INSERT INTO ` + tableName + ` (ID, Name, Email, Balance, IsActive, CreatedAt, UpdatedAt) VALUES
-		(1, 'John Doe', 'john@example.com', 1000.50, 1, GETDATE(), GETDATE()),
-		(2, 'Jane Smith', 'jane@example.com', 2500.00, 1, GETDATE(), GETDATE()),
-		(3, 'Bob Johnson', 'bob@example.com', 750.25, 0, GETDATE(), GETDATE());
-	`
+	*/
 
 	// Для MS SQL выполняем через raw query (если есть такой метод)
 	// Иначе нужно использовать database/sql напрямую
