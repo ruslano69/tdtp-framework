@@ -40,7 +40,8 @@ linters-settings:
 
   govet:
     check-shadowing: true
-    enable-all: true
+    disable:
+      - fieldalignment  # Too noisy, not critical for correctness
 
   gofmt:
     simplify: true
@@ -71,11 +72,11 @@ linters-settings:
       - name: receiver-naming
       - name: time-naming
       - name: unexported-return
-      - name: indent-error-flow
+      # - name: indent-error-flow  # Too opinionated
       - name: errorf
       - name: empty-block
       - name: superfluous-else
-      - name: unused-parameter
+      # - name: unused-parameter  # Too noisy, often intentional for interface compliance
       - name: unreachable-code
       - name: redefines-builtin-id
 
@@ -95,6 +96,7 @@ linters-settings:
       - commentFormatting
       - whyNoLint
       - unnamedResult
+      - hugeParam  # Too noisy, struct-by-value is often intentional
 
 issues:
   exclude-rules:
