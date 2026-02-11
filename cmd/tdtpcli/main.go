@@ -202,7 +202,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
+			return commands.ExportToBroker(ctx, &adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
 		})
 
 	} else if *flags.ImportBroker {
@@ -222,7 +222,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
-			return commands.ImportFromBroker(ctx, adapterConfig, brokerCfg, strategy)
+			return commands.ImportFromBroker(ctx, &adapterConfig, &brokerCfg, strategy)
 		})
 
 		// Incremental Sync command
@@ -282,7 +282,7 @@ func routeCommand(
 		metadata["file_b"] = fileB
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "diff-files", func() error {
-			return commands.DiffFiles(ctx, commands.DiffOptions{
+			return commands.DiffFiles(ctx, &commands.DiffOptions{
 				FileA:         *flags.Diff,
 				FileB:         fileB,
 				KeyFields:     splitCommaSeparated(*flags.KeyFields),
