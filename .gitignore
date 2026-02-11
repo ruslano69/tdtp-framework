@@ -42,9 +42,13 @@ dist/
 *.xlsx
 benchmark_*.db
 audit.log
-config.yaml
 test.go
 tests.txt
+
+# Local configs (use examples from configs/ instead)
+config.yaml
+configs/config.yaml
+deployments/docker-compose.yml
 
 # funcfinder auto-generated code maps (local only)
 docs/analysis/codebase_map.json
