@@ -19,7 +19,7 @@ type DiffOptions struct {
 }
 
 // DiffFiles сравнивает два TDTP файла
-func DiffFiles(ctx context.Context, options DiffOptions) error {
+func DiffFiles(ctx context.Context, options *DiffOptions) error {
 	// Парсим первый файл
 	parser := packet.NewParser()
 	packetA, err := parser.ParseFile(options.FileA)

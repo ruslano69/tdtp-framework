@@ -25,9 +25,9 @@ type BrokerConfig struct {
 }
 
 // ExportToBroker exports table data to message broker
-func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, procMgr ProcessorManager) error {
+func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, procMgr ProcessorManager) error {
 	// Create database adapter
-	adapter, err := adapters.New(ctx, dbConfig)
+	adapter, err := adapters.New(ctx, *dbConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -102,9 +102,9 @@ func ExportToBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg Bro
 }
 
 // ImportFromBroker imports data from message broker to database
-func ImportFromBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg BrokerConfig, strategy adapters.ImportStrategy) error {
+func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, strategy adapters.ImportStrategy) error {
 	// Create database adapter
-	adapter, err := adapters.New(ctx, dbConfig)
+	adapter, err := adapters.New(ctx, *dbConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -174,7 +174,7 @@ func ImportFromBroker(ctx context.Context, dbConfig adapters.Config, brokerCfg B
 }
 
 // createBroker creates a message broker based on configuration
-func createBroker(cfg BrokerConfig) (brokers.MessageBroker, error) {
+func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 	brokerConfig := brokers.Config{
 		Type:       cfg.Type,
 		Host:       cfg.Host,

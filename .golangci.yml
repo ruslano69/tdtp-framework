@@ -96,7 +96,10 @@ linters-settings:
       - commentFormatting
       - whyNoLint
       - unnamedResult
-      - hugeParam  # Too noisy, struct-by-value is often intentional
+      # hugeParam is important for performance - keep enabled
+    settings:
+      hugeParam:
+        sizeThreshold: 160  # Warn for structs > 160 bytes (2 cache lines)
 
 issues:
   exclude-rules:
