@@ -45,3 +45,8 @@ audit.log
 config.yaml
 test.go
 tests.txt
+
+# funcfinder auto-generated code maps (local only)
+docs/analysis/codebase_map.json
+docs/analysis/dependencies.json
+docs/analysis/.last_update

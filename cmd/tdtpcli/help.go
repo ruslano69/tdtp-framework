@@ -246,8 +246,10 @@ func PrintHelp() {
 	fmt.Println("  fi")
 	fmt.Println()
 	fmt.Println("  # Daily export with date in filename (using current date)")
+	//nolint:govet // bash date format, not Printf directive
 	fmt.Println(`  TODAY=$(date +%d.%m.%Y)`)
 	fmt.Println("  tdtpcli --export orders_daily --where \"date eq \\\"$TODAY\\\"\" \\")
+	//nolint:govet // bash date format, not Printf directive
 	fmt.Println(`    --output "exports/orders_$(date +%Y%m%d).tdtp"`)
 	fmt.Println()
 	fmt.Println("  # Export all read-only views automatically")
