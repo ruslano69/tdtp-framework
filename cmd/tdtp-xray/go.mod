@@ -1,6 +1,6 @@
 module github.com/ruslano69/tdtp-framework/cmd/tdtp-xray
 
-go 1.23
+go 1.25
 
 require (
 	github.com/denisenkom/go-mssqldb v0.12.3
