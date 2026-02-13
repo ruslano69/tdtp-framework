@@ -12,7 +12,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 	// Импорт драйвера закомментирован - установите один из:
 	// _ "modernc.org/sqlite"
-	// _ "github.com/mattn/go-sqlite3"
+	// _ "modernc.org/sqlite"
 )
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 		fmt.Println("SQLite driver not installed!")
 		fmt.Println("Install one of:")
 		fmt.Println("  go get modernc.org/sqlite          # Pure Go")
-		fmt.Println("  go get github.com/mattn/go-sqlite3 # CGO, faster")
+		fmt.Println("  go get modernc.org/sqlite # CGO, faster")
 		return
 	}
 	defer adapter.Close(ctx)

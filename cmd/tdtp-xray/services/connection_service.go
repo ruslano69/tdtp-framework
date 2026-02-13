@@ -8,7 +8,7 @@ import (
 	_ "github.com/denisenkom/go-mssqldb"          // MSSQL driver
 	_ "github.com/go-sql-driver/mysql"            // MySQL driver
 	_ "github.com/lib/pq"                         // PostgreSQL driver
-	_ "github.com/mattn/go-sqlite3"               // SQLite driver
+	_ "modernc.org/sqlite"               // SQLite driver
 )
 
 // ConnectionService handles database connection testing

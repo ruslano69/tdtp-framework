@@ -7,7 +7,6 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/klauspost/compress v1.15.9
-	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/segmentio/kafka-go v0.4.49
 	github.com/xuri/excelize/v2 v2.9.0
