@@ -222,19 +222,22 @@ func (a *App) GetTables(dbType, dsn string) ConnectionResult {
 }
 
 // GetTableSchema retrieves schema for a specific table
-func (a *App) GetTableSchema(dbType, dsn, tableName string) services.TableSchema {
-	return a.metadataService.GetTableSchema(dbType, dsn, tableName)
-}
+// TODO: Uncomment after fixing bindings - returns services.TableSchema
+// func (a *App) GetTableSchema(dbType, dsn, tableName string) services.TableSchema {
+// 	return a.metadataService.GetTableSchema(dbType, dsn, tableName)
+// }
 
 // LoadMockSourceFile loads mock source from file
-func (a *App) LoadMockSourceFile(filePath string) (*services.MockSource, error) {
-	return a.sourceService.LoadMockSource(filePath)
-}
+// TODO: Uncomment after fixing bindings - returns *services.MockSource
+// func (a *App) LoadMockSourceFile(filePath string) (*services.MockSource, error) {
+// 	return a.sourceService.LoadMockSource(filePath)
+// }
 
 // ValidateMockSourceData validates mock source data
-func (a *App) ValidateMockSourceData(mockSource *services.MockSource) services.SourceValidationResult {
-	return a.sourceService.ValidateMockSource(mockSource)
-}
+// TODO: Uncomment after fixing bindings - uses services types
+// func (a *App) ValidateMockSourceData(mockSource *services.MockSource) services.SourceValidationResult {
+// 	return a.sourceService.ValidateMockSource(mockSource)
+// }
 
 // --- Step 3: Visual Designer ---
 
