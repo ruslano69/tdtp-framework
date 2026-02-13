@@ -14,7 +14,7 @@ func main() {
 	// Для полноценной работы нужно установить драйвер:
 	// go get modernc.org/sqlite
 	// или
-	// go get github.com/mattn/go-sqlite3
+	// go get modernc.org/sqlite
 
 	fmt.Println("Демонстрация API SQLite адаптера:")
 	fmt.Println()
