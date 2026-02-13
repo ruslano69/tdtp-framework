@@ -1,0 +1,28 @@
+# Wails build artifacts
+build/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+go.sum
+
+# Frontend dist (generated from src)
+# Note: We keep dist/ in repo for easy building
+# But you can uncomment this if you want to exclude it:
+# frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp

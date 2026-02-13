@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TDTP X-Ray</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="styles/wizard.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>🔬 TDTP X-Ray</h1>
+            <div class="mode-switcher">
+                <label>
+                    <input type="radio" name="mode" value="production" checked onchange="switchMode(this.value)">
+                    🏭 Production
+                </label>
+                <label>
+                    <input type="radio" name="mode" value="mock" onchange="switchMode(this.value)">
+                    🧪 Mock
+                </label>
+            </div>
+        </header>
+
+        <!-- Wizard Navigation -->
+        <nav class="wizard-nav">
+            <div class="wizard-step active" data-step="1">
+                <span class="step-number">1</span>
+                <span class="step-title">Project Info</span>
+            </div>
+            <div class="wizard-step" data-step="2">
+                <span class="step-number">2</span>
+                <span class="step-title">Sources</span>
+            </div>
+            <div class="wizard-step" data-step="3">
+                <span class="step-number">3</span>
+                <span class="step-title">Visual Designer</span>
+            </div>
+            <div class="wizard-step" data-step="4">
+                <span class="step-number">4</span>
+                <span class="step-title">Transform</span>
+            </div>
+            <div class="wizard-step" data-step="5">
+                <span class="step-number">5</span>
+                <span class="step-title">Output</span>
+            </div>
+            <div class="wizard-step" data-step="6">
+                <span class="step-number">6</span>
+                <span class="step-title">Settings</span>
+            </div>
+            <div class="wizard-step" data-step="7">
+                <span class="step-number">7</span>
+                <span class="step-title">Review</span>
+            </div>
+        </nav>
+
+        <!-- Content Area -->
+        <main class="wizard-content" id="wizardContent">
+            <!-- Steps will be loaded here -->
+        </main>
+
+        <!-- Footer Navigation -->
+        <footer class="wizard-footer">
+            <button id="btnBack" class="btn btn-secondary" onclick="previousStep()" disabled>
+                ← Back
+            </button>
+            <div class="footer-status" id="footerStatus"></div>
+            <button id="btnNext" class="btn btn-primary" onclick="nextStep()">
+                Next →
+            </button>
+        </footer>
+    </div>
+
+    <!-- Wails Runtime -->
+    <script src="wails/runtime/runtime.js"></script>
+    <script src="scripts/wizard.js"></script>
+</body>
+</html>
