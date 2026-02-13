@@ -17,16 +17,17 @@ import (
 //  1. Генерация (expectedHash == ""): вычисляет хеш и передает через callback
 //  2. Валидация (expectedHash != ""): проверяет соответствие вычисленного хеша ожидаемому
 type ChecksumProcessor struct {
-	validate bool   // true если нужна валидация
-	expected string // ожидаемый хеш (hex-encoded)
+	validate bool         // true если нужна валидация
+	expected string       // ожидаемый хеш (hex-encoded)
 	callback func(string) // callback для передачи вычисленного хеша
 }
 
 // NewChecksumProcessor создает новый процессор контрольных сумм.
 //
 // Параметры:
-//   expectedHash - ожидаемый хеш для валидации (пустая строка для режима генерации)
-//   callback - функция для получения вычисленного хеша (опционально, для генерации)
+//
+//	expectedHash - ожидаемый хеш для валидации (пустая строка для режима генерации)
+//	callback - функция для получения вычисленного хеша (опционально, для генерации)
 func NewChecksumProcessor(expectedHash string, callback func(string)) *ChecksumProcessor {
 	return &ChecksumProcessor{
 		validate: expectedHash != "",
