@@ -8,7 +8,6 @@ linters:
     - errcheck      # Checking for unchecked errors
     - gosimple      # Simplify code
     - govet         # Reports suspicious constructs
-    - shadow        # Reports shadowed variables
     - ineffassign   # Detects ineffectual assignments
     - staticcheck   # Go static analysis
     - typecheck     # Type checking
@@ -42,7 +41,7 @@ linters-settings:
   govet:
     disable:
       - fieldalignment  # Too noisy, not critical for correctness
-      - shadow         # Use separate shadow linter instead
+      - shadow         # Shadowing checks disabled (removed in golangci-lint v1.64+)
 
   gofmt:
     simplify: true
