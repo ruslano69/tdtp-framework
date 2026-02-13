@@ -1,0 +1,23 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "tdtp-xray",
+  "outputfilename": "tdtp-xray",
+  "frontend:install": "echo 'No npm install needed - vanilla JS'",
+  "frontend:build": "echo 'No build needed - vanilla JS'",
+  "frontend:dev:watcher": "echo 'No watcher needed - vanilla JS'",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "TDTP Framework Team",
+    "email": ""
+  },
+  "info": {
+    "companyName": "TDTP",
+    "productName": "TDTP X-Ray",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2025",
+    "comments": "Visual ETL Pipeline Constructor for TDTP Framework"
+  },
+  "wailsjsdir": "./frontend/src",
+  "assetdir": "./frontend/dist",
+  "reloaddirs": "./frontend/src"
+}
