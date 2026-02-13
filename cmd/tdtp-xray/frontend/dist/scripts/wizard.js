@@ -783,6 +783,15 @@ async function saveSourceForm() {
         return;
     }
 
+    // Check for duplicate source names (except when editing)
+    if (editingSourceIndex === -1) {
+        const existingSource = sources.find(s => s.name === name);
+        if (existingSource) {
+            showNotification(`❌ Source '${name}' already exists! Choose a different name.`, 'error');
+            return;
+        }
+    }
+
     const source = {
         name: name,
         type: type,

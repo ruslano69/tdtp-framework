@@ -78,7 +78,8 @@ type Source struct {
 	Name      string           `json:"name"`
 	Type      string           `json:"type"` // postgres, mssql, mysql, sqlite, tdtp, mock
 	DSN       string           `json:"dsn,omitempty"`
-	Query     string           `json:"query,omitempty"`
+	TableName string           `json:"tableName,omitempty"` // Selected table name (for safety - no manual SQL)
+	Query     string           `json:"query,omitempty"`     // DEPRECATED: Use TableName instead
 	TDTQL     *TDTQLFilter     `json:"tdtql,omitempty"`
 	Transport *TransportConfig `json:"transport,omitempty"` // For TDTP sources
 	MockData  *MockSource      `json:"mockData,omitempty"`  // For mock mode
@@ -529,9 +530,19 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 		return a.convertPreviewResult(result)
 	}
 
+	// Generate query from tableName if provided (secure: only SELECT)
+	var queryToExecute string
+	if source != nil && source.DSN != "" && source.TableName != "" {
+		// Generate safe SELECT query from table name
+		queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
+	} else if source != nil && source.DSN != "" && source.Query != "" {
+		// Fallback to legacy query field (deprecated)
+		queryToExecute = source.Query
+	}
+
 	// Preview real database query
-	if source != nil && source.DSN != "" && source.Query != "" {
-		result := a.previewService.PreviewQuery(source.Type, source.DSN, source.Query, req.Limit)
+	if queryToExecute != "" && source != nil && source.DSN != "" {
+		result := a.previewService.PreviewQuery(source.Type, source.DSN, queryToExecute, req.Limit)
 		return a.convertPreviewResult(result)
 	}
 
