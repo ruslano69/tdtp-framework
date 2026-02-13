@@ -75,6 +75,7 @@ func routeCommand(
 				ProcessorMgr:   procMgr,
 				Compress:       compress,
 				CompressLevel:  compressLevel,
+				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
 			})
 		})
