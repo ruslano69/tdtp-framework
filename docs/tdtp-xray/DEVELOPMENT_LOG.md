@@ -127,38 +127,96 @@ cmd/tdtp-xray/
 
 ---
 
-## Next Steps (Phase 2)
+## Phase 2: Core Services ✅ (2025-02-13)
 
-### Priority 1: Core Services
-- [ ] `connection_service.go` - Test DB connections
-  - Implement real connection testing
-  - Return table list, connection time
-  - Handle errors gracefully
+### Completed Tasks
 
-- [ ] `metadata_service.go` - GetTables/GetViews/GetSchema
-  - Query INFORMATION_SCHEMA
-  - Support all DBs (Postgres, MSSQL, MySQL, SQLite)
-  - Return field types, keys, constraints
+#### 1. Core Services Implementation
 
-- [ ] `source_service.go` - Enhanced source management
-  - Mock source loader (from JSON)
-  - Validation rules
-  - Schema inference for TDTP sources
+**connection_service.go** ✅
+- Real database connection testing (Postgres, MySQL, MSSQL, SQLite)
+- Table and view list retrieval
+- Connection timing measurement
+- Driver mapping (user-friendly types → driver names)
+- Quick test mode (fast ping without metadata)
 
-### Priority 2: Step 2 UI (Sources)
-- [ ] Source list with Add/Edit/Remove buttons
-- [ ] Source type dropdown (DB, TDTP, Mock)
-- [ ] Connection test modal
-- [ ] Table/View selector
-- [ ] Query editor with syntax highlighting
-- [ ] Preview button → Preview panel
+**metadata_service.go** ✅
+- GetTableSchema() - retrieves full column metadata
+- Column information: name, data type, nullable, primary key, max length, default value
+- INFORMATION_SCHEMA queries for Postgres, MySQL, MSSQL
+- PRAGMA table_info for SQLite
+- Primary key detection for all databases
+- TDTP schema inference (placeholder for future)
 
-### Priority 3: Preview Service
-- [ ] `preview_service.go` - Data preview
-  - Add LIMIT to user queries (MSSQL: TOP, Oracle: ROWNUM)
-  - Execute preview queries
-  - Format results as JSON
-  - Calculate approximate row count
+**source_service.go** ✅
+- LoadMockSource() - loads JSON mock sources from files
+- ValidateMockSource() - validates schema and data integrity
+- ValidateRealSource() - validates DB sources with connection test
+- Mock source template generation
+- InferSchemaFromTable() - creates mock source from real table
+- Data type mapping (DB types → mock types)
+
+**preview_service.go** ✅
+- PreviewQuery() - executes queries with LIMIT
+- Dialect-aware LIMIT injection (LIMIT for Postgres/MySQL/SQLite, TOP for MSSQL)
+- PreviewMockSource() - previews mock data
+- EstimateRowCount() - approximate row count for tables
+- Query syntax validation (SELECT only, no dangerous keywords)
+- Value conversion for JSON compatibility
+
+#### 2. App Integration (app.go)
+
+**Services Integration** ✅
+- All 4 services instantiated in NewApp()
+- TestSource() now uses ConnectionService
+- GetTables() - retrieves table/view list
+- GetTableSchema() - retrieves full schema
+- LoadMockSourceFile() - loads mock sources
+- PreviewSource() updated to use PreviewService
+- Support for both real DB and mock source previews
+
+#### 3. Step 2 UI (Sources Management)
+
+**UI Components** ✅
+- Source list with visual status indicators (✅/⚠️)
+- Add/Edit/Remove buttons
+- Source form with type selection (Postgres, MySQL, MSSQL, SQLite, Mock)
+- Database connection fields (DSN, Query)
+- Mock source JSON editor
+- Test Connection button with real-time results
+- Preview panel with table rendering
+- Form validation (client-side)
+
+**JavaScript Functions** ✅
+- `renderSourceList()` - dynamic source list rendering
+- `showAddSourceForm()` / `editSource()` - form management
+- `testConnection()` - connection testing with backend
+- `saveSourceForm()` - save to backend + local state
+- `previewSource()` - data preview with table display
+- `onSourceTypeChange()` - dynamic field visibility
+- localStorage fallback for offline mode
+
+---
+
+## Next Steps (Phase 3: Visual Designer)
+
+### Priority 1: SVG Canvas Foundation
+- [ ] Create SVG canvas component
+- [ ] Grid background with zoom/pan support
+- [ ] Drag-n-drop for table elements
+- [ ] Table rendering (fields list)
+
+### Priority 2: JOIN Drawing
+- [ ] Line drawing on field click
+- [ ] JOIN type selector (INNER/LEFT/RIGHT)
+- [ ] JOIN properties modal
+- [ ] Visual line styling
+
+### Priority 3: SQL Generation
+- [ ] Generate SQL from canvas design
+- [ ] Handle multiple JOINs
+- [ ] Field filtering integration
+- [ ] CAST support for type mismatches
 
 ---
 
