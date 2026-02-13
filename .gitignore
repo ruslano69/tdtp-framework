@@ -35,6 +35,8 @@ vendor/
 
 # Build artifacts
 dist/
+# Exception: keep tdtp-xray frontend/dist/ for easy building (vanilla JS, no build step)
+!cmd/tdtp-xray/frontend/dist/
 *.tar.gz
 *.zip
 # Test data files
