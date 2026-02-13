@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # PostgreSQL test database
+  postgres:
+    image: postgres:16-alpine
+    container_name: tdtp-xray-postgres
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./test-data/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MySQL test database
+  mysql:
+    image: mysql:8.0
+    container_name: tdtp-xray-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./test-data/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Microsoft SQL Server test database
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: tdtp-xray-mssql
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: TestPass123!
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./test-data/mssql-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P TestPass123! -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Adminer - Web-based database management
+  adminer:
+    image: adminer:latest
+    container_name: tdtp-xray-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - mysql
+      - mssql
+
+volumes:
+  postgres-data:
+  mysql-data:
+  mssql-data:
