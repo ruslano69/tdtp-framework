@@ -708,12 +708,34 @@ async function testConnection() {
         const result = await window.go.main.App.TestSource(source);
 
         if (result.success) {
-            resultEl.innerHTML = `
+            let html = `
                 <div style="padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px;">
                     <p style="color: #155724; margin: 0;"><strong>✅ Connection Successful!</strong></p>
                     <p style="color: #155724; margin: 5px 0 0 0;"><small>Duration: ${result.duration}ms | Tables: ${result.tables ? result.tables.length : 0}</small></p>
                 </div>
             `;
+
+            // Show table selection if tables are available
+            if (result.tables && result.tables.length > 0) {
+                html += `
+                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">📋 Select Table/View:</label>
+                        <select id="tableSelector" onchange="selectTable()" style="width: 100%; padding: 6px; border: 1px solid #ced4da; border-radius: 3px;">
+                            <option value="">-- Select a table --</option>
+                `;
+
+                result.tables.forEach(table => {
+                    html += `<option value="${table}">${table}</option>`;
+                });
+
+                html += `
+                        </select>
+                        <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">💡 Selecting a table will auto-fill the SQL query below</p>
+                    </div>
+                `;
+            }
+
+            resultEl.innerHTML = html;
         } else {
             resultEl.innerHTML = `
                 <div style="padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 3px;">
@@ -730,6 +752,20 @@ async function testConnection() {
                 <p style="color: #721c24; margin: 5px 0 0 0;"><small>${err}</small></p>
             </div>
         `;
+    }
+}
+
+// Auto-fill SQL query when table is selected
+function selectTable() {
+    const selector = document.getElementById('tableSelector');
+    const queryField = document.getElementById('sourceQuery');
+
+    if (!selector || !queryField) return;
+
+    const tableName = selector.value;
+    if (tableName) {
+        queryField.value = `SELECT * FROM ${tableName}`;
+        showNotification(`Query generated for table: ${tableName}`, 'info');
     }
 }
 
