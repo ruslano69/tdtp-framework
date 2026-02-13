@@ -320,30 +320,143 @@ function getStep2HTML() {
                     <!-- Source Form -->
                     <div id="sourceFormPanel" style="flex: 1; display: none;">
                         <h3 id="sourceFormTitle">Add New Source</h3>
+
                         <div class="form-group">
                             <label for="sourceName">Source Name *</label>
                             <input type="text" id="sourceName" placeholder="e.g., users_db">
                         </div>
 
+                        <!-- Database Type Radio Buttons -->
                         <div class="form-group">
-                            <label for="sourceType">Source Type *</label>
-                            <select id="sourceType" onchange="onSourceTypeChange()">
-                                <option value="">-- Select Type --</option>
-                                <option value="postgres">PostgreSQL</option>
-                                <option value="mysql">MySQL</option>
-                                <option value="mssql">MS SQL Server</option>
-                                <option value="sqlite">SQLite</option>
-                                <option value="mock">Mock (JSON)</option>
-                            </select>
+                            <label>Database Type *</label>
+                            <div style="border: 1px solid #ccc; padding: 10px; border-radius: 3px; background: #fafafa;">
+                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                                    <input type="radio" name="sourceType" value="postgres" onchange="onSourceTypeChange('postgres')">
+                                    <span style="margin-left: 5px;">PostgreSQL</span>
+                                </label>
+                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                                    <input type="radio" name="sourceType" value="mysql" onchange="onSourceTypeChange('mysql')">
+                                    <span style="margin-left: 5px;">MySQL</span>
+                                </label>
+                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                                    <input type="radio" name="sourceType" value="mssql" onchange="onSourceTypeChange('mssql')">
+                                    <span style="margin-left: 5px;">Microsoft SQL Server</span>
+                                </label>
+                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                                    <input type="radio" name="sourceType" value="sqlite" onchange="onSourceTypeChange('sqlite')">
+                                    <span style="margin-left: 5px;">SQLite</span>
+                                </label>
+                                <label style="display: block; cursor: pointer;">
+                                    <input type="radio" name="sourceType" value="mock" onchange="onSourceTypeChange('mock')">
+                                    <span style="margin-left: 5px;">Mock (JSON) - Development only</span>
+                                </label>
+                            </div>
                         </div>
 
-                        <!-- Database Connection Fields -->
-                        <div id="dbFields" style="display: none;">
-                            <div class="form-group">
-                                <label for="sourceDSN">Connection String (DSN) *</label>
-                                <textarea id="sourceDSN" rows="2" placeholder="e.g., host=localhost port=5432 user=postgres password=pwd dbname=mydb"></textarea>
+                        <!-- PostgreSQL Fields -->
+                        <div id="postgresFields" class="db-connection-fields" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 2;">
+                                    <label for="pgHost">Server *</label>
+                                    <input type="text" id="pgHost" value="localhost" placeholder="localhost">
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="pgPort">Port *</label>
+                                    <input type="number" id="pgPort" value="5432" placeholder="5432">
+                                </div>
                             </div>
+                            <div class="form-group">
+                                <label for="pgDatabase">Database *</label>
+                                <input type="text" id="pgDatabase" placeholder="testdb">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="pgUser">User *</label>
+                                    <input type="text" id="pgUser" placeholder="postgres">
+                                </div>
+                                <div class="form-group">
+                                    <label for="pgPassword">Password *</label>
+                                    <input type="password" id="pgPassword" placeholder="password">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="pgSSLMode">SSL Mode</label>
+                                <select id="pgSSLMode">
+                                    <option value="disable">Disable</option>
+                                    <option value="require">Require</option>
+                                    <option value="verify-ca">Verify CA</option>
+                                    <option value="verify-full">Verify Full</option>
+                                </select>
+                            </div>
+                        </div>
 
+                        <!-- MySQL Fields -->
+                        <div id="mysqlFields" class="db-connection-fields" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 2;">
+                                    <label for="myHost">Server *</label>
+                                    <input type="text" id="myHost" value="localhost" placeholder="localhost">
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="myPort">Port *</label>
+                                    <input type="number" id="myPort" value="3306" placeholder="3306">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="myDatabase">Database *</label>
+                                <input type="text" id="myDatabase" placeholder="testdb">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="myUser">User *</label>
+                                    <input type="text" id="myUser" placeholder="root">
+                                </div>
+                                <div class="form-group">
+                                    <label for="myPassword">Password *</label>
+                                    <input type="password" id="myPassword" placeholder="password">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MSSQL Fields -->
+                        <div id="mssqlFields" class="db-connection-fields" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 2;">
+                                    <label for="msServer">Server *</label>
+                                    <input type="text" id="msServer" value="localhost" placeholder="localhost">
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="msPort">Port *</label>
+                                    <input type="number" id="msPort" value="1433" placeholder="1433">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="msDatabase">Database *</label>
+                                <input type="text" id="msDatabase" placeholder="testdb">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="msUser">User *</label>
+                                    <input type="text" id="msUser" value="sa" placeholder="sa">
+                                </div>
+                                <div class="form-group">
+                                    <label for="msPassword">Password *</label>
+                                    <input type="password" id="msPassword" placeholder="password">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SQLite Fields -->
+                        <div id="sqliteFields" class="db-connection-fields" style="display: none;">
+                            <div class="form-group">
+                                <label for="sqliteFile">Database File *</label>
+                                <input type="text" id="sqliteFile" placeholder="C:\\path\\to\\database.db">
+                                <small style="color: #666;">Enter full path or relative path to .db file</small>
+                            </div>
+                        </div>
+
+                        <!-- SQL Query (shown for all database types) -->
+                        <div id="queryField" style="display: none;">
                             <div class="form-group">
                                 <label for="sourceQuery">SQL Query *</label>
                                 <textarea id="sourceQuery" rows="4" placeholder="SELECT * FROM users WHERE active = 1"></textarea>
@@ -357,9 +470,9 @@ function getStep2HTML() {
 
                         <!-- Mock Source Fields -->
                         <div id="mockFields" style="display: none;">
-                            <p style="color: #666; font-size: 12px;">
-                                Mock sources use JSON data for prototyping.<br>
-                                Upload a JSON file or create inline data.
+                            <p style="color: #666; font-size: 12px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 3px;">
+                                ⚠️ <strong>Development Mode Only</strong><br>
+                                Mock sources use JSON data for prototyping without real database connections.
                             </p>
                             <div class="form-group">
                                 <label>Mock Data (JSON)</label>
@@ -467,44 +580,118 @@ function showAddSourceForm() {
 
 function clearSourceForm() {
     document.getElementById('sourceName').value = '';
-    document.getElementById('sourceType').value = '';
-    document.getElementById('sourceDSN').value = '';
-    document.getElementById('sourceQuery').value = '';
-    document.getElementById('mockDataJson').value = '';
-    document.getElementById('dbFields').style.display = 'none';
+
+    // Uncheck all radio buttons
+    const radios = document.getElementsByName('sourceType');
+    radios.forEach(r => r.checked = false);
+
+    // Hide all field groups
+    document.getElementById('postgresFields').style.display = 'none';
+    document.getElementById('mysqlFields').style.display = 'none';
+    document.getElementById('mssqlFields').style.display = 'none';
+    document.getElementById('sqliteFields').style.display = 'none';
+    document.getElementById('queryField').style.display = 'none';
     document.getElementById('mockFields').style.display = 'none';
     document.getElementById('testResult').style.display = 'none';
 }
 
-function onSourceTypeChange() {
-    const type = document.getElementById('sourceType').value;
-    const dbFields = document.getElementById('dbFields');
-    const mockFields = document.getElementById('mockFields');
+function onSourceTypeChange(type) {
+    // Hide all field groups
+    document.getElementById('postgresFields').style.display = 'none';
+    document.getElementById('mysqlFields').style.display = 'none';
+    document.getElementById('mssqlFields').style.display = 'none';
+    document.getElementById('sqliteFields').style.display = 'none';
+    document.getElementById('queryField').style.display = 'none';
+    document.getElementById('mockFields').style.display = 'none';
 
-    if (type === 'mock') {
-        dbFields.style.display = 'none';
-        mockFields.style.display = 'block';
-    } else if (type) {
-        dbFields.style.display = 'block';
-        mockFields.style.display = 'none';
-    } else {
-        dbFields.style.display = 'none';
-        mockFields.style.display = 'none';
+    // Show fields for selected type
+    if (type === 'postgres') {
+        document.getElementById('postgresFields').style.display = 'block';
+        document.getElementById('queryField').style.display = 'block';
+    } else if (type === 'mysql') {
+        document.getElementById('mysqlFields').style.display = 'block';
+        document.getElementById('queryField').style.display = 'block';
+    } else if (type === 'mssql') {
+        document.getElementById('mssqlFields').style.display = 'block';
+        document.getElementById('queryField').style.display = 'block';
+    } else if (type === 'sqlite') {
+        document.getElementById('sqliteFields').style.display = 'block';
+        document.getElementById('queryField').style.display = 'block';
+    } else if (type === 'mock') {
+        document.getElementById('mockFields').style.display = 'block';
     }
 }
 
-async function testConnection() {
-    const type = document.getElementById('sourceType').value;
-    const dsn = document.getElementById('sourceDSN').value;
+// Generate DSN from individual fields
+function generateDSN() {
+    const type = getSelectedSourceType();
 
-    if (!type || !dsn) {
-        showNotification('Please fill in type and DSN', 'error');
+    if (type === 'postgres') {
+        const host = document.getElementById('pgHost').value || 'localhost';
+        const port = document.getElementById('pgPort').value || '5432';
+        const user = document.getElementById('pgUser').value;
+        const password = document.getElementById('pgPassword').value;
+        const database = document.getElementById('pgDatabase').value;
+        const sslmode = document.getElementById('pgSSLMode').value || 'disable';
+
+        return `host=${host} port=${port} user=${user} password=${password} dbname=${database} sslmode=${sslmode}`;
+
+    } else if (type === 'mysql') {
+        const host = document.getElementById('myHost').value || 'localhost';
+        const port = document.getElementById('myPort').value || '3306';
+        const user = document.getElementById('myUser').value;
+        const password = document.getElementById('myPassword').value;
+        const database = document.getElementById('myDatabase').value;
+
+        return `${user}:${password}@tcp(${host}:${port})/${database}`;
+
+    } else if (type === 'mssql') {
+        const server = document.getElementById('msServer').value || 'localhost';
+        const port = document.getElementById('msPort').value || '1433';
+        const user = document.getElementById('msUser').value;
+        const password = document.getElementById('msPassword').value;
+        const database = document.getElementById('msDatabase').value;
+
+        return `sqlserver://${user}:${password}@${server}:${port}?database=${database}`;
+
+    } else if (type === 'sqlite') {
+        const file = document.getElementById('sqliteFile').value;
+        return file;
+    }
+
+    return '';
+}
+
+// Get selected source type from radio buttons
+function getSelectedSourceType() {
+    const radios = document.getElementsByName('sourceType');
+    for (const radio of radios) {
+        if (radio.checked) {
+            return radio.value;
+        }
+    }
+    return '';
+}
+
+async function testConnection() {
+    const type = getSelectedSourceType();
+
+    if (!type) {
+        showNotification('Please select a database type', 'error');
+        return;
+    }
+
+    // Generate DSN from individual fields
+    const dsn = generateDSN();
+
+    if (!dsn) {
+        showNotification('Please fill in all required connection fields', 'error');
         return;
     }
 
     const resultEl = document.getElementById('testResult');
     resultEl.style.display = 'block';
-    resultEl.innerHTML = '<p>Testing connection...</p>';
+    resultEl.innerHTML = '<p>🔄 Testing connection...</p>';
 
     if (!wailsReady || !window.go) {
         resultEl.innerHTML = '<p style="color: orange;">⚠️ Wails not ready, connection test skipped</p>';
@@ -517,24 +704,41 @@ async function testConnection() {
 
         if (result.success) {
             resultEl.innerHTML = `
-                <p style="color: green;">✅ ${result.message}</p>
-                <p><small>Tables found: ${result.tables ? result.tables.length : 0}</small></p>
+                <div style="padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px;">
+                    <p style="color: #155724; margin: 0;"><strong>✅ Connection Successful!</strong></p>
+                    <p style="color: #155724; margin: 5px 0 0 0;"><small>Duration: ${result.duration}ms | Tables: ${result.tables ? result.tables.length : 0}</small></p>
+                </div>
             `;
         } else {
-            resultEl.innerHTML = `<p style="color: red;">❌ ${result.message}</p>`;
+            resultEl.innerHTML = `
+                <div style="padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 3px;">
+                    <p style="color: #721c24; margin: 0;"><strong>❌ Connection Failed</strong></p>
+                    <p style="color: #721c24; margin: 5px 0 0 0;"><small>${result.message}</small></p>
+                </div>
+            `;
         }
     } catch (err) {
         console.error('Test connection error:', err);
-        resultEl.innerHTML = `<p style="color: red;">❌ Error: ${err}</p>`;
+        resultEl.innerHTML = `
+            <div style="padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 3px;">
+                <p style="color: #721c24; margin: 0;"><strong>❌ Error</strong></p>
+                <p style="color: #721c24; margin: 5px 0 0 0;"><small>${err}</small></p>
+            </div>
+        `;
     }
 }
 
 async function saveSourceForm() {
     const name = document.getElementById('sourceName').value.trim();
-    const type = document.getElementById('sourceType').value;
+    const type = getSelectedSourceType();
 
-    if (!name || !type) {
-        showNotification('Name and type are required', 'error');
+    if (!name) {
+        showNotification('Source name is required', 'error');
+        return;
+    }
+
+    if (!type) {
+        showNotification('Please select a database type', 'error');
         return;
     }
 
@@ -555,8 +759,14 @@ async function saveSourceForm() {
             }
         }
     } else {
-        source.dsn = document.getElementById('sourceDSN').value;
+        // Generate DSN from individual fields
+        source.dsn = generateDSN();
         source.query = document.getElementById('sourceQuery').value;
+
+        if (!source.dsn) {
+            showNotification('Please fill in all required connection fields', 'error');
+            return;
+        }
     }
 
     if (editingSourceIndex >= 0) {
@@ -593,15 +803,27 @@ function editSource(index) {
     document.getElementById('sourceFormTitle').textContent = 'Edit Source';
     document.getElementById('sourceFormPanel').style.display = 'block';
     document.getElementById('sourceName').value = src.name;
-    document.getElementById('sourceType').value = src.type;
+
+    // Select the radio button for this type
+    const radios = document.getElementsByName('sourceType');
+    for (const radio of radios) {
+        if (radio.value === src.type) {
+            radio.checked = true;
+            break;
+        }
+    }
+
+    // Show appropriate fields
+    onSourceTypeChange(src.type);
 
     if (src.type === 'mock' && src.mockData) {
         document.getElementById('mockDataJson').value = JSON.stringify(src.mockData, null, 2);
-        onSourceTypeChange();
     } else {
-        document.getElementById('sourceDSN').value = src.dsn || '';
+        // Parse DSN back to individual fields (simplified - TODO: implement full DSN parsing)
         document.getElementById('sourceQuery').value = src.query || '';
-        onSourceTypeChange();
+
+        // For now, show a warning that editing existing sources is limited
+        showNotification('Note: Editing existing sources - please re-enter connection details', 'info');
     }
 }
 
