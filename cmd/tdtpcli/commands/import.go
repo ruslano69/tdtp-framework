@@ -68,6 +68,13 @@ func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions)
 		fmt.Printf("  ✓ %d row(s)\n", len(pkt.Data.Rows))
 	}
 
+	// Validate multi-part session integrity (security: detect batch mixing)
+	if len(packets) > 1 {
+		if err := validateMultiPartSession(packets); err != nil {
+			return fmt.Errorf("multi-part validation failed: %w", err)
+		}
+	}
+
 	// Переопределяем имя таблицы если указан --table
 	if opts.TargetTable != "" {
 		fmt.Printf("Overriding table name: '%s' → '%s'\n", packets[0].Header.TableName, opts.TargetTable)
@@ -161,4 +168,121 @@ func ParseImportStrategy(strategy string) (adapters.ImportStrategy, error) {
 	default:
 		return "", fmt.Errorf("invalid import strategy: %s (valid: replace, ignore, fail, copy)", strategy)
 	}
+}
+
+// validateMultiPartSession performs security validation to ensure all packets
+// belong to the same export session. Prevents data corruption from mixed batches.
+//
+// Checks:
+//  1. All packets share the same batch ID (MessageID base before "-P")
+//  2. All packets have identical schema
+//  3. PartNumber sequence is complete (1..N without gaps)
+//  4. TotalParts is consistent across all packets
+//  5. InReplyTo matches (if present in any packet)
+func validateMultiPartSession(packets []*packet.DataPacket) error {
+	if len(packets) == 0 {
+		return nil
+	}
+
+	// Extract expected values from first packet
+	first := packets[0]
+	expectedBatchID := extractBatchID(first.Header.MessageID)
+	expectedSchema := first.Schema
+	expectedTotalParts := first.Header.TotalParts
+	expectedInReplyTo := first.Header.InReplyTo
+
+	// Track seen part numbers to detect duplicates/gaps
+	seenParts := make(map[int]bool)
+
+	for i, pkt := range packets {
+		// Check batch ID consistency
+		batchID := extractBatchID(pkt.Header.MessageID)
+		if batchID != expectedBatchID {
+			return fmt.Errorf(
+				"batch mismatch at packet %d: expected batch '%s', got '%s' (MessageID: %s). "+
+					"Possible data corruption: parts from different export sessions mixed together",
+				i+1, expectedBatchID, batchID, pkt.Header.MessageID,
+			)
+		}
+
+		// Check schema consistency
+		if !packet.SchemaEquals(expectedSchema, pkt.Schema) {
+			return fmt.Errorf(
+				"schema mismatch at packet %d (batch %s): packet has different schema. "+
+					"Expected %d fields, got %d fields",
+				i+1, batchID, len(expectedSchema.Fields), len(pkt.Schema.Fields),
+			)
+		}
+
+		// Check TotalParts consistency
+		if pkt.Header.TotalParts != expectedTotalParts {
+			return fmt.Errorf(
+				"TotalParts mismatch at packet %d: expected %d, got %d (MessageID: %s)",
+				i+1, expectedTotalParts, pkt.Header.TotalParts, pkt.Header.MessageID,
+			)
+		}
+
+		// Check InReplyTo consistency (if used)
+		if expectedInReplyTo != "" || pkt.Header.InReplyTo != "" {
+			if pkt.Header.InReplyTo != expectedInReplyTo {
+				return fmt.Errorf(
+					"InReplyTo mismatch at packet %d: expected '%s', got '%s'",
+					i+1, expectedInReplyTo, pkt.Header.InReplyTo,
+				)
+			}
+		}
+
+		// Track part numbers
+		partNum := pkt.Header.PartNumber
+		if partNum < 1 || partNum > expectedTotalParts {
+			return fmt.Errorf(
+				"invalid PartNumber %d at packet %d: must be in range [1..%d]",
+				partNum, i+1, expectedTotalParts,
+			)
+		}
+		if seenParts[partNum] {
+			return fmt.Errorf(
+				"duplicate PartNumber %d detected: packet %d is a duplicate",
+				partNum, i+1,
+			)
+		}
+		seenParts[partNum] = true
+	}
+
+	// Verify we have all parts (1..TotalParts)
+	if len(seenParts) != expectedTotalParts {
+		missing := []int{}
+		for i := 1; i <= expectedTotalParts; i++ {
+			if !seenParts[i] {
+				missing = append(missing, i)
+			}
+		}
+		return fmt.Errorf(
+			"incomplete part sequence: expected %d parts, got %d. Missing parts: %v",
+			expectedTotalParts, len(seenParts), missing,
+		)
+	}
+
+	return nil
+}
+
+// extractBatchID extracts batch ID from MessageID (part before "-P").
+// Example: "MSG-2024-01-15-123456-P1" -> "MSG-2024-01-15-123456"
+// This allows grouping packets from the same export session.
+func extractBatchID(messageID string) string {
+	// Find last occurrence of "-P" pattern
+	lastPIndex := -1
+	for i := len(messageID) - 2; i >= 0; i-- {
+		if messageID[i:i+2] == "-P" {
+			lastPIndex = i
+			break
+		}
+	}
+
+	if lastPIndex > 0 {
+		return messageID[:lastPIndex]
+	}
+
+	// No "-P" found, return full MessageID (single-part export)
+	return messageID
 }
