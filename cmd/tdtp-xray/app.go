@@ -589,44 +589,50 @@ func (a *App) GetMode() string {
 
 // --- Validation ---
 
+// ValidationResult holds the result of step validation
+type ValidationResult struct {
+	IsValid bool   `json:"isValid"`
+	Message string `json:"message"`
+}
+
 // ValidateStep validates a specific wizard step
-func (a *App) ValidateStep(step int) (bool, string) {
+func (a *App) ValidateStep(step int) ValidationResult {
 	switch step {
 	case 1: // Project Info
 		if a.pipelineInfo.Name == "" {
-			return false, "Pipeline name is required"
+			return ValidationResult{IsValid: false, Message: "Pipeline name is required"}
 		}
-		return true, ""
+		return ValidationResult{IsValid: true}
 
 	case 2: // Sources
 		if len(a.sources) == 0 {
-			return false, "At least one source is required"
+			return ValidationResult{IsValid: false, Message: "At least one source is required"}
 		}
 		if a.mode == "production" {
 			for _, src := range a.sources {
 				if !src.Tested {
-					return false, fmt.Sprintf("Source '%s' not tested. Click [Test Connection]", src.Name)
+					return ValidationResult{IsValid: false, Message: fmt.Sprintf("Source '%s' not tested. Click [Test Connection]", src.Name)}
 				}
 			}
 		}
-		return true, ""
+		return ValidationResult{IsValid: true}
 
 	case 3: // Designer (optional)
-		return true, "" // Always valid, can skip
+		return ValidationResult{IsValid: true} // Always valid, can skip
 
 	case 4: // Transform (optional)
-		return true, "" // Always valid, can skip
+		return ValidationResult{IsValid: true} // Always valid, can skip
 
 	case 5: // Output
 		if a.output == nil {
-			return false, "Output configuration is required"
+			return ValidationResult{IsValid: false, Message: "Output configuration is required"}
 		}
-		return true, ""
+		return ValidationResult{IsValid: true}
 
 	case 6: // Settings
-		return true, "" // Always valid with defaults
+		return ValidationResult{IsValid: true} // Always valid with defaults
 
 	default:
-		return true, ""
+		return ValidationResult{IsValid: true}
 	}
 }

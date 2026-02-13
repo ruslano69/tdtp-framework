@@ -104,22 +104,22 @@ function loadStep(step) {
 
 // Navigate to next step
 async function nextStep() {
-    // Validate current step
-    const [isValid, message] = await validateCurrentStep();
+    // Save current step data BEFORE validation so backend has up-to-date state
+    await saveCurrentStep();
 
-    if (!isValid) {
+    // Validate current step
+    const validation = await validateCurrentStep();
+
+    if (!validation.isValid) {
         if (appMode === 'production') {
-            showNotification(`❌ ${message}`, 'error');
+            showNotification(`❌ ${validation.message}`, 'error');
             return;
         } else {
             // Mock mode: show warning but allow continue
-            const proceed = confirm(`⚠️ Warning: ${message}\n\nContinue anyway? (Mock mode)`);
+            const proceed = confirm(`⚠️ Warning: ${validation.message}\n\nContinue anyway? (Mock mode)`);
             if (!proceed) return;
         }
     }
-
-    // Save current step data
-    await saveCurrentStep();
 
     // Move to next step
     if (currentStep < totalSteps) {
@@ -158,19 +158,19 @@ async function validateCurrentStep() {
         if (currentStep === 1) {
             const name = document.getElementById('pipelineName');
             if (name && !name.value.trim()) {
-                return [false, 'Pipeline name is required'];
+                return { isValid: false, message: 'Pipeline name is required' };
             }
         }
-        return [true, ''];
+        return { isValid: true, message: '' };
     }
 
     try {
         const result = await window.go.main.App.ValidateStep(currentStep);
         console.log('Validation result:', result);
-        return result; // [isValid, message]
+        return result; // { isValid: bool, message: string }
     } catch (err) {
         console.error('Validation error:', err);
-        return [false, 'Validation failed: ' + err];
+        return { isValid: false, message: 'Validation failed: ' + err };
     }
 }
 
