@@ -21,6 +21,7 @@ type ExportOptions struct {
 	ProcessorMgr   ProcessorManager
 	Compress       bool
 	CompressLevel  int
+	EnableChecksum bool // Add XXH3 checksum for data integrity verification
 	ReadOnlyFields bool // Include read-only fields (timestamp, computed, identity)
 }
 
@@ -87,11 +88,14 @@ func ExportTable(ctx context.Context, config adapters.Config, opts ExportOptions
 	if opts.Compress {
 		fmt.Printf("Compressing data (level %d)...\n", opts.CompressLevel)
 		for _, pkt := range packets {
-			if err := compressPacketData(ctx, pkt, opts.CompressLevel); err != nil {
+			if err := compressPacketData(ctx, pkt, opts.CompressLevel, opts.EnableChecksum); err != nil {
 				return fmt.Errorf("compression failed: %w", err)
 			}
 		}
 		fmt.Printf("✓ Data compressed with zstd\n")
+		if opts.EnableChecksum {
+			fmt.Printf("✓ Checksums generated (xxh3)\n")
+		}
 	}
 
 	// Write to file or stdout
@@ -161,7 +165,8 @@ func generatePacketFilename(baseFile string, n, total int) string {
 }
 
 // compressPacketData compresses the Data section of a packet using zstd
-func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int) error {
+// and optionally generates XXH3 checksum for data integrity verification
+func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int, enableChecksum bool) error {
 	if len(pkt.Data.Rows) == 0 {
 		return nil
 	}
@@ -178,6 +183,12 @@ func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int) 
 		return err
 	}
 
+	// Generate checksum if enabled (hash compressed Base64 data for efficiency)
+	if enableChecksum {
+		checksum := processors.ComputeChecksum([]byte(compressed))
+		pkt.Data.Checksum = checksum
+	}
+
 	// Update packet with compressed data
 	pkt.Data.Compression = "zstd"
 	pkt.Data.Rows = []packet.Row{{Value: compressed}}
@@ -185,11 +196,15 @@ func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int) 
 	// Log compression stats
 	fmt.Printf("  → Compressed: %d → %d bytes (ratio: %.2fx)\n",
 		stats.OriginalSize, stats.CompressedSize, stats.Ratio)
+	if enableChecksum {
+		fmt.Printf("  → Checksum: %s\n", pkt.Data.Checksum)
+	}
 
 	return nil
 }
 
 // decompressPacketData decompresses the Data section of a packet
+// and validates checksum if present (before decompression for efficiency)
 func decompressPacketData(ctx context.Context, pkt *packet.DataPacket) error {
 	if pkt.Data.Compression == "" {
 		return nil // Not compressed
@@ -199,14 +214,25 @@ func decompressPacketData(ctx context.Context, pkt *packet.DataPacket) error {
 		return fmt.Errorf("compressed packet should have exactly 1 row, got %d", len(pkt.Data.Rows))
 	}
 
+	compressedData := pkt.Data.Rows[0].Value
+
+	// Validate checksum if present (BEFORE decompression for speed)
+	if pkt.Data.Checksum != "" {
+		if err := processors.ValidateChecksum([]byte(compressedData), pkt.Data.Checksum); err != nil {
+			return fmt.Errorf("data corruption detected: %w", err)
+		}
+		fmt.Printf("  ✓ Checksum validated: %s\n", pkt.Data.Checksum)
+	}
+
 	// Decompress
-	rows, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
+	rows, err := processors.DecompressDataForTdtp(compressedData)
 	if err != nil {
 		return err
 	}
 
 	// Update packet with decompressed data
 	pkt.Data.Compression = ""
+	pkt.Data.Checksum = "" // Clear checksum after validation
 	pkt.Data.Rows = make([]packet.Row, len(rows))
 	for i, row := range rows {
 		pkt.Data.Rows[i] = packet.Row{Value: row}

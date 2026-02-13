@@ -59,6 +59,7 @@ type Field struct {
 // Data содержит табличные данные
 type Data struct {
 	Compression string `xml:"compression,attr,omitempty"` // Алгоритм сжатия: "zstd" или пусто
+	Checksum    string `xml:"checksum,attr,omitempty"`    // XXH3 хеш сжатых данных (hex)
 	Rows        []Row  `xml:"R"`
 }
 

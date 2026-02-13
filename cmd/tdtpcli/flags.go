@@ -38,6 +38,7 @@ type Flags struct {
 	// Compression
 	Compress      *bool
 	CompressLevel *int
+	Hash          *bool // Add XXH3 checksum for data integrity verification
 
 	// Incremental Sync
 	TrackingField  *string
@@ -108,6 +109,7 @@ func ParseFlags() *Flags {
 	// Compression
 	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1 (fastest) - 19 (best)")
+	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
 
 	// Incremental Sync Options
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")
