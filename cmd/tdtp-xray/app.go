@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+
+	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
 )
 
 // App struct
@@ -17,13 +19,22 @@ type App struct {
 	settings     Settings
 	// Mode: "mock" or "production"
 	mode string
+	// Services
+	connService     *services.ConnectionService
+	metadataService *services.MetadataService
+	sourceService   *services.SourceService
+	previewService  *services.PreviewService
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		sources: make([]Source, 0),
-		mode:    "production", // Default to production mode
+		sources:         make([]Source, 0),
+		mode:            "production", // Default to production mode
+		connService:     services.NewConnectionService(),
+		metadataService: services.NewMetadataService(),
+		sourceService:   services.NewSourceService(),
+		previewService:  services.NewPreviewService(),
 	}
 }
 
@@ -170,14 +181,59 @@ func (a *App) GetSources() []Source {
 
 // TestSource tests database connection
 func (a *App) TestSource(s Source) ConnectionResult {
-	// TODO: Implement actual connection testing
-	// For now, return mock response
-	return ConnectionResult{
-		Success:  true,
-		Message:  fmt.Sprintf("Connected to %s successfully", s.Type),
-		Duration: 127,
-		Tables:   []string{"table1", "table2", "table3"},
+	// Handle mock sources
+	if s.Type == "mock" {
+		if a.mode == "production" {
+			return ConnectionResult{
+				Success: false,
+				Message: "Mock sources not allowed in production mode",
+			}
+		}
+		// Mock sources are always "connected"
+		return ConnectionResult{
+			Success:  true,
+			Message:  "Mock source loaded successfully",
+			Duration: 0,
+		}
 	}
+
+	// Test real database connection
+	result := a.connService.TestConnection(s.Type, s.DSN)
+
+	// Convert service result to app result
+	return ConnectionResult{
+		Success:  result.Success,
+		Message:  result.Message,
+		Duration: int(result.Duration),
+		Tables:   result.Tables,
+	}
+}
+
+// GetTables retrieves list of tables and views for a source
+func (a *App) GetTables(dbType, dsn string) ConnectionResult {
+	result := a.connService.TestConnection(dbType, dsn)
+
+	return ConnectionResult{
+		Success:  result.Success,
+		Message:  result.Message,
+		Duration: int(result.Duration),
+		Tables:   append(result.Tables, result.Views...),
+	}
+}
+
+// GetTableSchema retrieves schema for a specific table
+func (a *App) GetTableSchema(dbType, dsn, tableName string) services.TableSchema {
+	return a.metadataService.GetTableSchema(dbType, dsn, tableName)
+}
+
+// LoadMockSourceFile loads mock source from file
+func (a *App) LoadMockSourceFile(filePath string) (*services.MockSource, error) {
+	return a.sourceService.LoadMockSource(filePath)
+}
+
+// ValidateMockSourceData validates mock source data
+func (a *App) ValidateMockSourceData(mockSource *services.MockSource) services.SourceValidationResult {
+	return a.sourceService.ValidateMockSource(mockSource)
 }
 
 // --- Step 3: Visual Designer ---
@@ -428,12 +484,87 @@ type PreviewResult struct {
 
 // PreviewSource previews data from a source
 func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
-	// TODO: Implement actual preview
+	if req.Limit == 0 {
+		req.Limit = 10 // Default limit
+	}
+
+	// Find source if sourceName provided
+	var source *Source
+	if req.SourceName != "" {
+		for i := range a.sources {
+			if a.sources[i].Name == req.SourceName {
+				source = &a.sources[i]
+				break
+			}
+		}
+		if source == nil {
+			return PreviewResult{
+				Error: fmt.Sprintf("Source '%s' not found", req.SourceName),
+			}
+		}
+	}
+
+	// Handle mock source preview
+	if source != nil && source.Type == "mock" && source.MockData != nil {
+		// Convert app.MockSource to services.MockSource
+		mockSource := &services.MockSource{
+			Name:   source.Name,
+			Type:   "mock",
+			Schema: make([]services.MockColumnSchema, len(source.MockData.Schema)),
+			Data:   source.MockData.Data,
+		}
+		for i, field := range source.MockData.Schema {
+			mockSource.Schema[i] = services.MockColumnSchema{
+				Name: field.Name,
+				Type: field.Type,
+				Key:  field.Key,
+			}
+		}
+
+		result := a.previewService.PreviewMockSource(mockSource, req.Limit)
+		return a.convertPreviewResult(result)
+	}
+
+	// Preview real database query
+	if source != nil && source.DSN != "" && source.Query != "" {
+		result := a.previewService.PreviewQuery(source.Type, source.DSN, source.Query, req.Limit)
+		return a.convertPreviewResult(result)
+	}
+
+	// Preview custom SQL
+	if req.SQL != "" && source != nil && source.DSN != "" {
+		result := a.previewService.PreviewQuery(source.Type, source.DSN, req.SQL, req.Limit)
+		return a.convertPreviewResult(result)
+	}
+
 	return PreviewResult{
-		Columns:   []string{"id", "name", "email"},
-		Rows:      [][]any{{1, "Alice", "alice@example.com"}, {2, "Bob", "bob@example.com"}},
-		TotalRows: 2,
-		QueryTime: 45,
+		Error: "No valid source or query provided for preview",
+	}
+}
+
+// convertPreviewResult converts service PreviewResult to app PreviewResult
+func (a *App) convertPreviewResult(svcResult services.PreviewResult) PreviewResult {
+	if !svcResult.Success {
+		return PreviewResult{
+			Error: svcResult.Message,
+		}
+	}
+
+	// Convert []map[string]interface{} to [][]any
+	rows := make([][]any, len(svcResult.Rows))
+	for i, row := range svcResult.Rows {
+		rowData := make([]any, len(svcResult.Columns))
+		for j, col := range svcResult.Columns {
+			rowData[j] = row[col]
+		}
+		rows[i] = rowData
+	}
+
+	return PreviewResult{
+		Columns:   svcResult.Columns,
+		Rows:      rows,
+		TotalRows: svcResult.TotalRowsEst,
+		QueryTime: svcResult.RowCount * 5, // Mock query time
 	}
 }
 
