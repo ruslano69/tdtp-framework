@@ -450,8 +450,10 @@ function getStep2HTML() {
                         <div id="sqliteFields" class="db-connection-fields" style="display: none;">
                             <div class="form-group">
                                 <label for="sqliteFile">Database File *</label>
-                                <input type="text" id="sqliteFile" placeholder="C:\\path\\to\\database.db">
-                                <small style="color: #666;">Enter full path or relative path to .db file</small>
+                                <div style="display: flex; gap: 5px; flex: 1;">
+                                    <input type="text" id="sqliteFile" placeholder="C:\\path\\to\\database.db" style="flex: 1;">
+                                    <button class="btn btn-secondary" onclick="browseDatabaseFile()" style="padding: 6px 15px;">Browse...</button>
+                                </div>
                             </div>
                         </div>
 
@@ -474,8 +476,11 @@ function getStep2HTML() {
                                 ⚠️ <strong>Development Mode Only</strong><br>
                                 Mock sources use JSON data for prototyping without real database connections.
                             </p>
-                            <div class="form-group">
-                                <label>Mock Data (JSON)</label>
+                            <div class="form-group-full">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                    <label style="margin: 0;">Mock Data (JSON)</label>
+                                    <button class="btn btn-secondary btn-sm" onclick="loadJSONFile()">📁 Load from File...</button>
+                                </div>
                                 <textarea id="mockDataJson" rows="8" placeholder='{"schema": [...], "data": [...]}'></textarea>
                             </div>
                         </div>
@@ -916,3 +921,49 @@ function getStep7HTML() {
     return `<div class="step-content active"><div class="panel"><p class="text-center" style="padding: 40px; color: #666;">🚧 Step 7: Review & Save - Coming soon...</p></div></div>`;
 }
 function loadStep7Data() {}
+async function saveStep7() {}
+
+// ========== FILE PICKERS ==========
+
+// Browse for SQLite database file
+async function browseDatabaseFile() {
+    if (!wailsReady || !window.go) {
+        showNotification('File picker not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        const path = await window.go.main.App.SelectDatabaseFile();
+        if (path) {
+            document.getElementById('sqliteFile').value = path;
+            showNotification('File selected: ' + path, 'info');
+        }
+    } catch (err) {
+        console.error('File picker error:', err);
+        showNotification('Failed to open file picker: ' + err, 'error');
+    }
+}
+
+// Load Mock JSON from file
+async function loadJSONFile() {
+    if (!wailsReady || !window.go) {
+        showNotification('File picker not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        const path = await window.go.main.App.SelectJSONFile();
+        if (path) {
+            // Read file content using Wails runtime
+            // For now, just show the path - user can manually load
+            showNotification('Selected file: ' + path + ' (TODO: auto-load content)', 'info');
+            
+            // TODO: Add backend method to read file content
+            // const content = await window.go.main.App.ReadJSONFile(path);
+            // document.getElementById('mockDataJson').value = content;
+        }
+    } catch (err) {
+        console.error('File picker error:', err);
+        showNotification('Failed to open file picker: ' + err, 'error');
+    }
+}

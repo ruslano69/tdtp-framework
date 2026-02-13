@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App struct
@@ -635,4 +636,42 @@ func (a *App) ValidateStep(step int) ValidationResult {
 	default:
 		return ValidationResult{IsValid: true}
 	}
+}
+
+// --- File Dialogs ---
+
+// SelectDatabaseFile opens file picker for SQLite database files
+func (a *App) SelectDatabaseFile() (string, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select SQLite Database File",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "SQLite Database (*.db, *.sqlite, *.sqlite3)",
+				Pattern:     "*.db;*.sqlite;*.sqlite3;*.db3",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+	return path, err
+}
+
+// SelectJSONFile opens file picker for Mock JSON files
+func (a *App) SelectJSONFile() (string, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Mock JSON File",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "JSON Files (*.json)",
+				Pattern:     "*.json",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+	return path, err
 }
