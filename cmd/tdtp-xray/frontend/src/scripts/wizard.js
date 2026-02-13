@@ -457,13 +457,8 @@ function getStep2HTML() {
                             </div>
                         </div>
 
-                        <!-- SQL Query (shown for all database types) -->
-                        <div id="queryField" style="display: none;">
-                            <div class="form-group">
-                                <label for="sourceQuery">SQL Query *</label>
-                                <textarea id="sourceQuery" rows="4" placeholder="SELECT * FROM users WHERE active = 1"></textarea>
-                            </div>
-
+                        <!-- Connection Test Button -->
+                        <div id="connectionTestPanel" style="display: none;">
                             <button class="btn btn-secondary" onclick="testConnection()" id="btnTestConnection">
                                 🔍 Test Connection
                             </button>
@@ -585,6 +580,7 @@ function showAddSourceForm() {
 
 function clearSourceForm() {
     document.getElementById('sourceName').value = '';
+    selectedTableName = '';
 
     // Uncheck all radio buttons
     const radios = document.getElementsByName('sourceType');
@@ -595,7 +591,7 @@ function clearSourceForm() {
     document.getElementById('mysqlFields').style.display = 'none';
     document.getElementById('mssqlFields').style.display = 'none';
     document.getElementById('sqliteFields').style.display = 'none';
-    document.getElementById('queryField').style.display = 'none';
+    document.getElementById('connectionTestPanel').style.display = 'none';
     document.getElementById('mockFields').style.display = 'none';
     document.getElementById('testResult').style.display = 'none';
 }
@@ -606,22 +602,22 @@ function onSourceTypeChange(type) {
     document.getElementById('mysqlFields').style.display = 'none';
     document.getElementById('mssqlFields').style.display = 'none';
     document.getElementById('sqliteFields').style.display = 'none';
-    document.getElementById('queryField').style.display = 'none';
+    document.getElementById('connectionTestPanel').style.display = 'none';
     document.getElementById('mockFields').style.display = 'none';
 
     // Show fields for selected type
     if (type === 'postgres') {
         document.getElementById('postgresFields').style.display = 'block';
-        document.getElementById('queryField').style.display = 'block';
+        document.getElementById('connectionTestPanel').style.display = 'block';
     } else if (type === 'mysql') {
         document.getElementById('mysqlFields').style.display = 'block';
-        document.getElementById('queryField').style.display = 'block';
+        document.getElementById('connectionTestPanel').style.display = 'block';
     } else if (type === 'mssql') {
         document.getElementById('mssqlFields').style.display = 'block';
-        document.getElementById('queryField').style.display = 'block';
+        document.getElementById('connectionTestPanel').style.display = 'block';
     } else if (type === 'sqlite') {
         document.getElementById('sqliteFields').style.display = 'block';
-        document.getElementById('queryField').style.display = 'block';
+        document.getElementById('connectionTestPanel').style.display = 'block';
     } else if (type === 'mock') {
         document.getElementById('mockFields').style.display = 'block';
     }
@@ -730,7 +726,7 @@ async function testConnection() {
 
                 html += `
                         </select>
-                        <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">💡 Selecting a table will auto-fill the SQL query below</p>
+                        <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">💡 Select table to use as data source</p>
                     </div>
                 `;
             }
@@ -755,17 +751,16 @@ async function testConnection() {
     }
 }
 
-// Auto-fill SQL query when table is selected
+// Store selected table name
+let selectedTableName = '';
+
 function selectTable() {
     const selector = document.getElementById('tableSelector');
-    const queryField = document.getElementById('sourceQuery');
+    if (!selector) return;
 
-    if (!selector || !queryField) return;
-
-    const tableName = selector.value;
-    if (tableName) {
-        queryField.value = `SELECT * FROM ${tableName}`;
-        showNotification(`Query generated for table: ${tableName}`, 'info');
+    selectedTableName = selector.value;
+    if (selectedTableName) {
+        showNotification(`Table selected: ${selectedTableName}`, 'success');
     }
 }
 
@@ -802,10 +797,15 @@ async function saveSourceForm() {
     } else {
         // Generate DSN from individual fields
         source.dsn = generateDSN();
-        source.query = document.getElementById('sourceQuery').value;
+        source.tableName = selectedTableName;
 
         if (!source.dsn) {
             showNotification('Please fill in all required connection fields', 'error');
+            return;
+        }
+
+        if (!source.tableName) {
+            showNotification('Please test connection and select a table', 'error');
             return;
         }
     }
@@ -860,11 +860,11 @@ function editSource(index) {
     if (src.type === 'mock' && src.mockData) {
         document.getElementById('mockDataJson').value = JSON.stringify(src.mockData, null, 2);
     } else {
-        // Parse DSN back to individual fields (simplified - TODO: implement full DSN parsing)
-        document.getElementById('sourceQuery').value = src.query || '';
+        // Restore selected table if available
+        selectedTableName = src.tableName || '';
 
         // For now, show a warning that editing existing sources is limited
-        showNotification('Note: Editing existing sources - please re-enter connection details', 'info');
+        showNotification('Note: Editing existing sources - please re-enter connection details and re-test connection', 'info');
     }
 }
 
