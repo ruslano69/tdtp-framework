@@ -494,7 +494,7 @@ function getStep2HTML() {
                 <!-- Preview Panel -->
                 <div id="previewPanel" style="margin-top: 20px; display: none;">
                     <h3>Data Preview</h3>
-                    <div id="previewContent" style="border: 1px solid #ccc; padding: 10px; background: white; border-radius: 3px;">
+                    <div id="previewContent" style="border: 1px solid #ccc; padding: 10px; background: white; border-radius: 3px; overflow-x: auto; max-width: 100%;">
                     </div>
                 </div>
             </div>
@@ -915,18 +915,18 @@ async function previewSource(index) {
             return;
         }
 
-        // Render table
-        let html = '<table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+        // Render table with horizontal scroll support
+        let html = '<table style="border-collapse: collapse; font-size: 12px; min-width: 100%;">';
         html += '<thead><tr>';
         result.columns.forEach(col => {
-            html += `<th style="border: 1px solid #ddd; padding: 5px; background: #f0f0f0;">${col}</th>`;
+            html += `<th style="border: 1px solid #ddd; padding: 5px; background: #f0f0f0; white-space: nowrap;">${col}</th>`;
         });
         html += '</tr></thead><tbody>';
 
         result.rows.forEach(row => {
             html += '<tr>';
             row.forEach(cell => {
-                html += `<td style="border: 1px solid #ddd; padding: 5px;">${cell !== null ? cell : '<i>null</i>'}</td>`;
+                html += `<td style="border: 1px solid #ddd; padding: 5px; white-space: nowrap;">${cell !== null ? cell : '<i>null</i>'}</td>`;
             });
             html += '</tr>';
         });
