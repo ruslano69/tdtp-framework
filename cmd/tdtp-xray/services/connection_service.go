@@ -87,7 +87,7 @@ func (cs *ConnectionService) mapDriverName(dbType string) string {
 	case "mssql", "sqlserver":
 		return "mssql"
 	case "sqlite", "sqlite3":
-		return "sqlite3"
+		return "sqlite" // modernc.org/sqlite driver name
 	default:
 		return ""
 	}
