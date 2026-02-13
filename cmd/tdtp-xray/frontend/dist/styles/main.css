@@ -131,6 +131,7 @@ body {
 /* Form Elements */
 input[type="text"],
 input[type="number"],
+input[type="password"],
 textarea,
 select {
     padding: 6px 8px;
@@ -139,10 +140,12 @@ select {
     font-size: 11pt;
     font-family: inherit;
     background: #fff;
+    width: 100%;
 }
 
 input[type="text"]:focus,
 input[type="number"]:focus,
+input[type="password"]:focus,
 textarea:focus,
 select:focus {
     outline: none;
@@ -154,6 +157,7 @@ label {
     display: block;
     margin-bottom: 5px;
     font-weight: 600;
+    font-size: 10pt;
 }
 
 .form-group {
@@ -163,10 +167,87 @@ label {
 .form-row {
     display: flex;
     gap: 15px;
+    margin-bottom: 15px;
 }
 
 .form-row .form-group {
     flex: 1;
+    margin-bottom: 0;
+}
+
+/* Radio button container */
+.radio-group {
+    border: 1px solid #ababab;
+    padding: 12px;
+    border-radius: 3px;
+    background: #fafafa;
+}
+
+.radio-group label {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    font-weight: normal;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 2px;
+    transition: background 0.15s;
+}
+
+.radio-group label:hover {
+    background: #e5f3ff;
+}
+
+.radio-group label:last-child {
+    margin-bottom: 0;
+}
+
+.radio-group input[type="radio"] {
+    margin-right: 8px;
+    width: auto;
+}
+
+.radio-group span {
+    font-size: 11pt;
+}
+
+/* Button groups */
+.button-group {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Test result box */
+.test-result {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 3px;
+    font-size: 10pt;
+}
+
+.test-result.success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+.test-result.error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+/* Small button variant */
+.btn-sm {
+    padding: 4px 12px;
+    font-size: 10pt;
 }
 
 /* Tables */

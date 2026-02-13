@@ -329,26 +329,26 @@ function getStep2HTML() {
                         <!-- Database Type Radio Buttons -->
                         <div class="form-group">
                             <label>Database Type *</label>
-                            <div style="border: 1px solid #ccc; padding: 10px; border-radius: 3px; background: #fafafa;">
-                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                            <div class="radio-group">
+                                <label>
                                     <input type="radio" name="sourceType" value="postgres" onchange="onSourceTypeChange('postgres')">
-                                    <span style="margin-left: 5px;">PostgreSQL</span>
+                                    <span>PostgreSQL</span>
                                 </label>
-                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                                <label>
                                     <input type="radio" name="sourceType" value="mysql" onchange="onSourceTypeChange('mysql')">
-                                    <span style="margin-left: 5px;">MySQL</span>
+                                    <span>MySQL</span>
                                 </label>
-                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                                <label>
                                     <input type="radio" name="sourceType" value="mssql" onchange="onSourceTypeChange('mssql')">
-                                    <span style="margin-left: 5px;">Microsoft SQL Server</span>
+                                    <span>Microsoft SQL Server</span>
                                 </label>
-                                <label style="display: block; margin-bottom: 8px; cursor: pointer;">
+                                <label>
                                     <input type="radio" name="sourceType" value="sqlite" onchange="onSourceTypeChange('sqlite')">
-                                    <span style="margin-left: 5px;">SQLite</span>
+                                    <span>SQLite</span>
                                 </label>
-                                <label style="display: block; cursor: pointer;">
+                                <label>
                                     <input type="radio" name="sourceType" value="mock" onchange="onSourceTypeChange('mock')">
-                                    <span style="margin-left: 5px;">Mock (JSON) - Development only</span>
+                                    <span>Mock (JSON) - Development only</span>
                                 </label>
                             </div>
                         </div>
