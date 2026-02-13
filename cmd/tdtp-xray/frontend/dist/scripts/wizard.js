@@ -760,6 +760,11 @@ function selectTable() {
 
     selectedTableName = selector.value;
     if (selectedTableName) {
+        // Auto-fill source name if empty
+        const sourceNameField = document.getElementById('sourceName');
+        if (sourceNameField && !sourceNameField.value.trim()) {
+            sourceNameField.value = selectedTableName;
+        }
         showNotification(`Table selected: ${selectedTableName}`, 'success');
     }
 }
