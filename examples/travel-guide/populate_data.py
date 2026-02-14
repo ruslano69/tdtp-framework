@@ -9,10 +9,11 @@ import json
 from decimal import Decimal
 
 # Database connection settings
-SERVER = 'localhost,1433'  # Change port if using different container
+# From tests/integration/docker-compose.yml
+SERVER = 'localhost,1433'
 DATABASE = 'TravelGuide'
 USERNAME = 'sa'
-PASSWORD = 'YourStrong@Passw0rd'  # Change to your MSSQL password
+PASSWORD = 'YourStrong!Passw0rd'  # From docker-compose.yml
 
 # Sample cities data with attractions
 CITIES_DATA = [

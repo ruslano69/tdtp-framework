@@ -40,20 +40,19 @@
 ### 1. Запустить MS SQL Server в Docker
 
 ```powershell
-# Если контейнер еще не запущен
-docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=YourStrong@Passw0rd" `
-  -p 1433:1433 --name tdtp-mssql `
-  -d mcr.microsoft.com/mssql/server:2022-latest
+# Используйте существующие контейнеры из tests/integration/docker-compose.yml
+cd tests/integration
+docker-compose up -d mssql
 
-# Или использовать существующий контейнер
-docker start tdtp-mssql
+# Или проверьте что контейнер запущен
+docker ps | findstr mssql
 ```
 
 ### 2. Создать БД и таблицу
 
 ```powershell
-# Выполнить SQL скрипт
-sqlcmd -S localhost,1433 -U sa -P "YourStrong@Passw0rd" -i setup_database.sql
+# Выполнить SQL скрипт (пароль из docker-compose.yml)
+sqlcmd -S localhost,1433 -U sa -P "YourStrong!Passw0rd" -i setup_database.sql
 ```
 
 ### 3. Установить Python зависимости
