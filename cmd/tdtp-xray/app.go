@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"gopkg.in/yaml.v3"
 )
 
 // App struct
@@ -689,6 +692,18 @@ func (a *App) SelectJSONFile() (string, error) {
 
 // --- Configuration File Load/Save ---
 
+// TDTPConfig represents complete TDTP pipeline configuration for YAML serialization
+type TDTPConfig struct {
+	Name         string        `yaml:"name" json:"name"`
+	Version      string        `yaml:"version,omitempty" json:"version,omitempty"`
+	Description  string        `yaml:"description,omitempty" json:"description,omitempty"`
+	Sources      []Source      `yaml:"sources" json:"sources"`
+	CanvasDesign *CanvasDesign `yaml:"canvas,omitempty" json:"canvas,omitempty"`
+	Transform    *Transform    `yaml:"transform,omitempty" json:"transform,omitempty"`
+	Output       *Output       `yaml:"output,omitempty" json:"output,omitempty"`
+	Settings     *Settings     `yaml:"settings,omitempty" json:"settings,omitempty"`
+}
+
 // ConfigFileResult holds result of load/save configuration operations
 type ConfigFileResult struct {
 	Success  bool          `json:"success"`
@@ -721,21 +736,80 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// TODO: Implement YAML parsing
-	// For now, just return success with placeholder
+	// Read file
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ConfigFileResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to read file: %v", err),
+		}
+	}
+
+	// Parse YAML
+	var config TDTPConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return ConfigFileResult{
+			Success: false,
+			Error:   fmt.Sprintf("Invalid YAML format: %v", err),
+		}
+	}
+
+	// Validate minimum required fields
+	if config.Name == "" {
+		return ConfigFileResult{
+			Success: false,
+			Error:   "Invalid configuration: 'name' field is required",
+		}
+	}
+
+	if config.Sources == nil {
+		config.Sources = make([]Source, 0)
+	}
+
+	// Load configuration into app state
+	a.pipelineInfo = PipelineInfo{
+		Name:        config.Name,
+		Version:     config.Version,
+		Description: config.Description,
+	}
+	a.sources = config.Sources
+	a.canvasDesign = config.CanvasDesign
+	a.transform = config.Transform
+	a.output = config.Output
+	if config.Settings != nil {
+		a.settings = *config.Settings
+	}
+
 	return ConfigFileResult{
 		Success:  true,
-		Filename: path,
-		Error:    "YAML parsing not yet implemented",
+		Filename: filepath.Base(path),
+		Config: &PipelineInfo{
+			Name:        config.Name,
+			Version:     config.Version,
+			Description: config.Description,
+		},
 	}
 }
 
 // SaveConfigurationFile opens save dialog and saves current configuration as YAML
 func (a *App) SaveConfigurationFile() ConfigFileResult {
+	// Validate pipeline name before saving
+	if a.pipelineInfo.Name == "" {
+		return ConfigFileResult{
+			Success: false,
+			Error:   "Pipeline name is required before saving",
+		}
+	}
+
 	// Open save dialog
+	defaultFilename := a.pipelineInfo.Name + ".yaml"
+	if a.pipelineInfo.Name == "" {
+		defaultFilename = "pipeline.yaml"
+	}
+
 	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save TDTP Pipeline Configuration",
-		DefaultFilename: fmt.Sprintf("%s.yaml", a.pipelineInfo.Name),
+		DefaultFilename: defaultFilename,
 		Filters: []runtime.FileFilter{
 			{
 				DisplayName: "YAML Configuration (*.yaml)",
@@ -755,11 +829,37 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// TODO: Implement YAML generation and file write
-	// For now, just return success with placeholder
+	// Build configuration structure
+	config := TDTPConfig{
+		Name:         a.pipelineInfo.Name,
+		Version:      a.pipelineInfo.Version,
+		Description:  a.pipelineInfo.Description,
+		Sources:      a.sources,
+		CanvasDesign: a.canvasDesign,
+		Transform:    a.transform,
+		Output:       a.output,
+		Settings:     &a.settings,
+	}
+
+	// Marshal to YAML
+	data, err := yaml.Marshal(&config)
+	if err != nil {
+		return ConfigFileResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to generate YAML: %v", err),
+		}
+	}
+
+	// Write to file
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return ConfigFileResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to write file: %v", err),
+		}
+	}
+
 	return ConfigFileResult{
 		Success:  true,
-		Filename: path,
-		Error:    "YAML generation not yet implemented",
+		Filename: filepath.Base(path),
 	}
 }
