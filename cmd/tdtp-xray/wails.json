@@ -6,7 +6,7 @@
   "frontend:dev:watcher": "",
   "frontend:dev:serverUrl": "",
   "wailsjsdir": "./frontend/src",
-  "assetdir": "./frontend/dist",
+  "assetdir": "./frontend/src",
   "reloaddirs": "./frontend/src",
   "debounceMS": 100
 }
