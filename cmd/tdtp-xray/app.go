@@ -28,6 +28,7 @@ type App struct {
 	metadataService *services.MetadataService
 	sourceService   *services.SourceService
 	previewService  *services.PreviewService
+	tdtpService     *services.TDTPService
 }
 
 // NewApp creates a new App application struct
@@ -39,6 +40,7 @@ func NewApp() *App {
 		metadataService: services.NewMetadataService(),
 		sourceService:   services.NewSourceService(),
 		previewService:  services.NewPreviewService(),
+		tdtpService:     services.NewTDTPService(),
 	}
 }
 
@@ -199,6 +201,17 @@ func (a *App) TestSource(s Source) ConnectionResult {
 			Success:  true,
 			Message:  "Mock source loaded successfully",
 			Duration: 0,
+		}
+	}
+
+	// Handle TDTP XML sources (using framework adapters - NO improvisation!)
+	if s.Type == "tdtp" {
+		result := a.tdtpService.TestTDTPFile(s.DSN)
+		return ConnectionResult{
+			Success:  result.Success,
+			Message:  fmt.Sprintf("%s (Table: %s, Rows: %d)", result.Message, result.TableName, result.RowCount),
+			Duration: int(result.Duration),
+			Tables:   []string{result.TableName}, // TDTP has one table per file
 		}
 	}
 
