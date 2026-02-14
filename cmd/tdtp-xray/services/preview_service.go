@@ -143,8 +143,8 @@ func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewR
 	}
 
 	// Get the parsed data packet
-	packet := result.DataPacket
-	if packet == nil {
+	dataPacket := result.DataPacket
+	if dataPacket == nil {
 		return PreviewResult{
 			Success: false,
 			Message: "Failed to parse TDTP file",
@@ -152,14 +152,14 @@ func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewR
 	}
 
 	// Extract column names from schema
-	columns := make([]string, len(packet.Schema.Fields))
-	for i, field := range packet.Schema.Fields {
+	columns := make([]string, len(dataPacket.Schema.Fields))
+	for i, field := range dataPacket.Schema.Fields {
 		columns[i] = field.Name
 	}
 
 	// Convert rows to preview format
-	totalRows := len(packet.Data.Rows)
-	previewRows := packet.Data.Rows
+	totalRows := len(dataPacket.Data.Rows)
+	previewRows := dataPacket.Data.Rows
 	if totalRows > limit {
 		previewRows = previewRows[:limit]
 	}
