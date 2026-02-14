@@ -849,7 +849,7 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Validate minimum required fields
+	// Validate minimum required fields (tdtpcli compatible)
 	if config.Name == "" {
 		return ConfigFileResult{
 			Success: false,
@@ -858,7 +858,20 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 	}
 
 	if config.Sources == nil {
-		config.Sources = make([]Source, 0)
+		config.Sources = make([]SourceConfig, 0)
+	}
+
+	// Convert tdtpcli format (SourceConfig) to GUI format (Source)
+	guiSources := make([]Source, len(config.Sources))
+	for i, srcConfig := range config.Sources {
+		guiSources[i] = Source{
+			Name:  srcConfig.Name,
+			Type:  srcConfig.Type,
+			DSN:   srcConfig.DSN,
+			Query: srcConfig.Query,
+			// Note: TableName will be extracted from Query in GUI if needed
+			Tested: false,
+		}
 	}
 
 	// Load configuration into app state
@@ -867,13 +880,10 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		Version:     config.Version,
 		Description: config.Description,
 	}
-	a.sources = config.Sources
-	a.canvasDesign = config.CanvasDesign
-	a.transform = config.Transform
-	a.output = config.Output
-	if config.Settings != nil {
-		a.settings = *config.Settings
-	}
+	a.sources = guiSources
+
+	// Store raw tdtpcli config for reference (we'll need it for save)
+	// TODO: Store workspace, transform, output, performance, audit, etc.
 
 	return ConfigFileResult{
 		Success:  true,
@@ -924,16 +934,59 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Build configuration structure
+	// Convert GUI format (Source) to tdtpcli format (SourceConfig)
+	tdtpSources := make([]SourceConfig, len(a.sources))
+	for i, guiSource := range a.sources {
+		query := guiSource.Query
+		// If no Query but TableName exists, generate simple SELECT query
+		if query == "" && guiSource.TableName != "" {
+			query = fmt.Sprintf("SELECT * FROM %s", guiSource.TableName)
+		}
+
+		tdtpSources[i] = SourceConfig{
+			Name:  guiSource.Name,
+			Type:  guiSource.Type,
+			DSN:   guiSource.DSN,
+			Query: query,
+		}
+	}
+
+	// Build tdtpcli-compatible configuration structure
 	config := TDTPConfig{
-		Name:         a.pipelineInfo.Name,
-		Version:      a.pipelineInfo.Version,
-		Description:  a.pipelineInfo.Description,
-		Sources:      a.sources,
-		CanvasDesign: a.canvasDesign,
-		Transform:    a.transform,
-		Output:       a.output,
-		Settings:     &a.settings,
+		Name:        a.pipelineInfo.Name,
+		Version:     a.pipelineInfo.Version,
+		Description: a.pipelineInfo.Description,
+		Sources:     tdtpSources,
+
+		// Default workspace (SQLite in-memory)
+		Workspace: WorkspaceConfig{
+			Type: "sqlite",
+			Mode: ":memory:",
+		},
+
+		// Default transform (simple SELECT * from first source)
+		Transform: TransformConfig{
+			ResultTable: "result",
+			SQL:         getDefaultTransformSQL(a.sources),
+		},
+
+		// Default output (TDTP file)
+		Output: OutputConfig{
+			Type: "tdtp",
+			TDTP: &TDTPOutputConfig{
+				Destination: fmt.Sprintf("output/%s.xml", a.pipelineInfo.Name),
+				Format:      "xml",
+				Compression: false,
+			},
+		},
+
+		// Optional: add default performance settings
+		Performance: &PerformanceConfig{
+			Timeout:         300,
+			BatchSize:       1000,
+			ParallelSources: false,
+			MaxMemoryMB:     512,
+		},
 	}
 
 	// Marshal to YAML
@@ -957,4 +1010,13 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 		Success:  true,
 		Filename: filepath.Base(path),
 	}
+}
+
+// getDefaultTransformSQL generates default transform SQL based on sources
+func getDefaultTransformSQL(sources []Source) string {
+	if len(sources) == 0 {
+		return "SELECT 1" // Placeholder if no sources
+	}
+	// Use first source table name
+	return fmt.Sprintf("SELECT * FROM %s", sources[0].Name)
 }
