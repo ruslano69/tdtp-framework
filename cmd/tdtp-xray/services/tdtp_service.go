@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/merge"
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
 // multiPartPattern matches filenames produced by export: {base}_part_{N}_of_{total}{ext}
@@ -65,6 +67,15 @@ func (ts *TDTPService) TestTDTPFile(filePath string) TDTPTestResult {
 		return TDTPTestResult{
 			Success:  false,
 			Message:  fmt.Sprintf("Invalid TDTP format: %v", err),
+			Duration: time.Since(startTime).Milliseconds(),
+		}
+	}
+
+	// Decompress data if compressed
+	if err := ts.decompressPacket(firstPacket); err != nil {
+		return TDTPTestResult{
+			Success:  false,
+			Message:  fmt.Sprintf("Decompression failed: %v", err),
 			Duration: time.Since(startTime).Milliseconds(),
 		}
 	}
@@ -172,8 +183,27 @@ func (ts *TDTPService) collectAllParts(initialPath string, firstPacket *packet.D
 			return nil, fmt.Errorf("failed to parse %s: %w", filename, err)
 		}
 
+		// Decompress data if compressed
+		if err := ts.decompressPacket(packet); err != nil {
+			return nil, fmt.Errorf("failed to decompress %s: %w", filename, err)
+		}
+
 		allPackets[partNum-1] = packet
 	}
 
 	return allPackets, nil
+}
+
+// decompressPacket decompresses packet data if it's compressed
+// Uses framework adapters - same pattern as tdtpcli
+func (ts *TDTPService) decompressPacket(pkt *packet.DataPacket) error {
+	if pkt.Data.Compression == "" {
+		return nil // Not compressed
+	}
+
+	// Use parser.DecompressData with processors.DecompressDataForTdtp
+	// Same pattern as tdtpcli/commands/import.go and broker.go
+	return ts.parser.DecompressData(context.Background(), pkt, func(ctx context.Context, compressed string) ([]string, error) {
+		return processors.DecompressDataForTdtp(compressed)
+	})
 }
