@@ -165,10 +165,15 @@ func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewR
 	// Convert to map[string]interface{} format
 	rows := make([]map[string]interface{}, len(previewRows))
 	for i, row := range previewRows {
+		// Row.Value is a pipe-delimited string: "val1|val2|val3|..."
+		values := strings.Split(row.Value, "|")
+
 		rowMap := make(map[string]interface{})
 		for j, col := range columns {
-			if j < len(row.Values) {
-				rowMap[col] = row.Values[j]
+			if j < len(values) {
+				rowMap[col] = values[j]
+			} else {
+				rowMap[col] = nil
 			}
 		}
 		rows[i] = rowMap
