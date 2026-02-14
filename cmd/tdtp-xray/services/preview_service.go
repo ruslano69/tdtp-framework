@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // PreviewService handles data preview with row limits
@@ -163,10 +165,12 @@ func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewR
 	}
 
 	// Convert to map[string]interface{} format
+	// Use framework parser to correctly handle escaping (\|, \\, etc.)
+	parser := packet.NewParser()
 	rows := make([]map[string]interface{}, len(previewRows))
 	for i, row := range previewRows {
-		// Row.Value is a pipe-delimited string: "val1|val2|val3|..."
-		values := strings.Split(row.Value, "|")
+		// GetRowValues properly handles escaping (e.g., \| becomes |, \\ becomes \)
+		values := parser.GetRowValues(row)
 
 		rowMap := make(map[string]interface{})
 		for j, col := range columns {
