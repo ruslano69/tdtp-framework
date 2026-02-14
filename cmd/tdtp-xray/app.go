@@ -686,3 +686,80 @@ func (a *App) SelectJSONFile() (string, error) {
 	})
 	return path, err
 }
+
+// --- Configuration File Load/Save ---
+
+// ConfigFileResult holds result of load/save configuration operations
+type ConfigFileResult struct {
+	Success  bool          `json:"success"`
+	Filename string        `json:"filename,omitempty"`
+	Error    string        `json:"error,omitempty"`
+	Config   *PipelineInfo `json:"config,omitempty"`
+}
+
+// LoadConfigurationFile opens file picker and loads YAML configuration
+func (a *App) LoadConfigurationFile() ConfigFileResult {
+	// Open file picker
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Load TDTP Pipeline Configuration",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "YAML Configuration (*.yaml, *.yml)",
+				Pattern:     "*.yaml;*.yml",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+
+	if err != nil || path == "" {
+		return ConfigFileResult{
+			Success: false,
+			Error:   "File selection cancelled or failed",
+		}
+	}
+
+	// TODO: Implement YAML parsing
+	// For now, just return success with placeholder
+	return ConfigFileResult{
+		Success:  true,
+		Filename: path,
+		Error:    "YAML parsing not yet implemented",
+	}
+}
+
+// SaveConfigurationFile opens save dialog and saves current configuration as YAML
+func (a *App) SaveConfigurationFile() ConfigFileResult {
+	// Open save dialog
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save TDTP Pipeline Configuration",
+		DefaultFilename: fmt.Sprintf("%s.yaml", a.pipelineInfo.Name),
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "YAML Configuration (*.yaml)",
+				Pattern:     "*.yaml",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+
+	if err != nil || path == "" {
+		return ConfigFileResult{
+			Success: false,
+			Error:   "File save cancelled or failed",
+		}
+	}
+
+	// TODO: Implement YAML generation and file write
+	// For now, just return success with placeholder
+	return ConfigFileResult{
+		Success:  true,
+		Filename: path,
+		Error:    "YAML generation not yet implemented",
+	}
+}

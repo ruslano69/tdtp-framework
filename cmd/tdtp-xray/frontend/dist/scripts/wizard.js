@@ -218,13 +218,29 @@ function getStep1HTML() {
         <div class="step-content active">
             <div class="step-header">
                 <h2>📋 Step 1: Project Information</h2>
-                <p>Enter basic metadata for your ETL pipeline</p>
+                <p>Create new pipeline or load existing configuration</p>
             </div>
 
             <div class="panel">
+                <!-- Load/Save Configuration -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">Configuration File</h3>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-secondary" onclick="loadConfigurationFile()" style="flex: 1;">
+                            📁 Load Configuration...
+                        </button>
+                        <button class="btn btn-secondary" onclick="saveConfigurationFile()" style="flex: 1;">
+                            💾 Save Configuration...
+                        </button>
+                    </div>
+                    <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">
+                        Load existing TDTP pipeline YAML or save current configuration
+                    </p>
+                </div>
+
                 <div class="form-group">
                     <label for="pipelineName">Pipeline Name *</label>
-                    <input type="text" id="pipelineName" placeholder="e.g., User Orders Report" required>
+                    <input type="text" id="pipelineName" placeholder="e.g., User Orders Report" required oninput="validatePipelineName()">
                 </div>
 
                 <div class="form-row">
@@ -287,6 +303,72 @@ async function saveStep1() {
         if (appMode === 'production') {
             throw err;
         }
+    }
+}
+
+// Validate pipeline name in real-time
+function validatePipelineName() {
+    const input = document.getElementById('pipelineName');
+    const value = input.value.trim();
+
+    if (!value) {
+        input.style.borderColor = '#dc3545'; // Red
+        input.style.borderWidth = '2px';
+        return false;
+    } else {
+        input.style.borderColor = '#28a745'; // Green
+        input.style.borderWidth = '2px';
+        return true;
+    }
+}
+
+// Load configuration from YAML file
+async function loadConfigurationFile() {
+    if (!wailsReady || !window.go) {
+        showNotification('File picker not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        const result = await window.go.main.App.LoadConfigurationFile();
+        if (result.success) {
+            showNotification(`✅ Configuration loaded: ${result.filename}`, 'success');
+
+            // Reload all steps with loaded data
+            loadStep1Data();
+            loadStep2Data();
+
+            // Update UI
+            showNotification(`Configuration '${result.config.name}' loaded successfully`, 'success');
+        } else {
+            showNotification(`❌ Failed to load configuration: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        console.error('Load configuration error:', err);
+        showNotification('Failed to load configuration: ' + err, 'error');
+    }
+}
+
+// Save configuration to YAML file
+async function saveConfigurationFile() {
+    if (!wailsReady || !window.go) {
+        showNotification('File save not available (Wails not ready)', 'error');
+        return;
+    }
+
+    // Save current step data first
+    await saveCurrentStep();
+
+    try {
+        const result = await window.go.main.App.SaveConfigurationFile();
+        if (result.success) {
+            showNotification(`✅ Configuration saved: ${result.filename}`, 'success');
+        } else {
+            showNotification(`❌ Failed to save: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        console.error('Save configuration error:', err);
+        showNotification('Failed to save configuration: ' + err, 'error');
     }
 }
 
