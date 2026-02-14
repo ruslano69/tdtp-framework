@@ -1165,8 +1165,7 @@ let selectedJoinId = null;
 let joinStartField = null; // For creating joins
 
 function loadStep3Data() {
-    // Load sources from Step 2
-    const sources = appState.sources || [];
+    // Load sources from Step 2 (global sources variable, not appState!)
     const sourceListEl = document.getElementById('tablesSourceList');
 
     if (sources.length === 0) {
