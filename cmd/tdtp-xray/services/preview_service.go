@@ -126,6 +126,63 @@ func (ps *PreviewService) PreviewMockSource(mockSource *MockSource, limit int) P
 	}
 }
 
+// PreviewTDTPSource previews TDTP XML source data
+func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewResult {
+	tdtpService := NewTDTPService()
+
+	// Test/parse TDTP file (handles multi-volume automatically)
+	result := tdtpService.TestTDTPFile(filePath)
+
+	if !result.Success {
+		return PreviewResult{
+			Success: false,
+			Message: result.Message,
+		}
+	}
+
+	// Get the parsed data packet
+	packet := result.DataPacket
+	if packet == nil {
+		return PreviewResult{
+			Success: false,
+			Message: "Failed to parse TDTP file",
+		}
+	}
+
+	// Extract column names from schema
+	columns := make([]string, len(packet.Schema.Fields))
+	for i, field := range packet.Schema.Fields {
+		columns[i] = field.Name
+	}
+
+	// Convert rows to preview format
+	totalRows := len(packet.Data.Rows)
+	previewRows := packet.Data.Rows
+	if totalRows > limit {
+		previewRows = previewRows[:limit]
+	}
+
+	// Convert to map[string]interface{} format
+	rows := make([]map[string]interface{}, len(previewRows))
+	for i, row := range previewRows {
+		rowMap := make(map[string]interface{})
+		for j, col := range columns {
+			if j < len(row.Values) {
+				rowMap[col] = row.Values[j]
+			}
+		}
+		rows[i] = rowMap
+	}
+
+	return PreviewResult{
+		Success:      true,
+		Columns:      columns,
+		Rows:         rows,
+		RowCount:     len(rows),
+		TotalRowsEst: int64(totalRows),
+	}
+}
+
 // addLimitToQuery adds LIMIT clause to query (dialect-aware)
 func (ps *PreviewService) addLimitToQuery(query string, dbType string, limit int) string {
 	// Normalize query (trim whitespace)

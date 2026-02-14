@@ -19,13 +19,14 @@ type TDTPService struct {
 
 // TDTPTestResult represents the result of TDTP file validation
 type TDTPTestResult struct {
-	Success   bool     `json:"success"`
-	Message   string   `json:"message"`
-	Duration  int64    `json:"duration"`  // milliseconds
-	TableName string   `json:"tableName"` // Table name from TDTP packet
-	RowCount  int      `json:"rowCount"`  // Number of rows in packet
-	Fields    []string `json:"fields"`    // Field names from schema
-	TotalParts int     `json:"totalParts"` // Number of parts in multi-volume source
+	Success    bool                `json:"success"`
+	Message    string              `json:"message"`
+	Duration   int64               `json:"duration"`   // milliseconds
+	TableName  string              `json:"tableName"`  // Table name from TDTP packet
+	RowCount   int                 `json:"rowCount"`   // Number of rows in packet
+	Fields     []string            `json:"fields"`     // Field names from schema
+	TotalParts int                 `json:"totalParts"` // Number of parts in multi-volume source
+	DataPacket *packet.DataPacket  `json:"-"`          // Internal: full data packet (not exported to JSON)
 }
 
 // NewTDTPService creates a new TDTP service
@@ -113,6 +114,7 @@ func (ts *TDTPService) TestTDTPFile(filePath string) TDTPTestResult {
 		RowCount:   len(finalPacket.Data.Rows),
 		Fields:     fields,
 		TotalParts: totalParts,
+		DataPacket: finalPacket, // Include data packet for preview
 	}
 }
 

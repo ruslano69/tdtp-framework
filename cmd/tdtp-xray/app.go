@@ -546,6 +546,12 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 		return a.convertPreviewResult(result)
 	}
 
+	// Handle TDTP source preview
+	if source != nil && source.Type == "tdtp" && source.DSN != "" {
+		result := a.previewService.PreviewTDTPSource(source.DSN, req.Limit)
+		return a.convertPreviewResult(result)
+	}
+
 	// Generate query from tableName if provided (secure: only SELECT)
 	var queryToExecute string
 	if source != nil && source.DSN != "" && source.TableName != "" {
