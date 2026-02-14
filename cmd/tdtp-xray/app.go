@@ -693,15 +693,110 @@ func (a *App) SelectJSONFile() (string, error) {
 // --- Configuration File Load/Save ---
 
 // TDTPConfig represents complete TDTP pipeline configuration for YAML serialization
+// This structure MUST match the format used by tdtpcli examples (examples/02b-rabbitmq-mssql-etl/pipeline.yaml)
 type TDTPConfig struct {
-	Name         string        `yaml:"name" json:"name"`
-	Version      string        `yaml:"version,omitempty" json:"version,omitempty"`
-	Description  string        `yaml:"description,omitempty" json:"description,omitempty"`
-	Sources      []Source      `yaml:"sources" json:"sources"`
-	CanvasDesign *CanvasDesign `yaml:"canvas,omitempty" json:"canvas,omitempty"`
-	Transform    *Transform    `yaml:"transform,omitempty" json:"transform,omitempty"`
-	Output       *Output       `yaml:"output,omitempty" json:"output,omitempty"`
-	Settings     *Settings     `yaml:"settings,omitempty" json:"settings,omitempty"`
+	// Pipeline metadata
+	Name        string `yaml:"name" json:"name"`
+	Version     string `yaml:"version,omitempty" json:"version,omitempty"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+
+	// Pipeline components (tdtpcli compatible format)
+	Sources   []SourceConfig  `yaml:"sources" json:"sources"`
+	Workspace WorkspaceConfig `yaml:"workspace" json:"workspace"`
+	Transform TransformConfig `yaml:"transform" json:"transform"`
+	Output    OutputConfig    `yaml:"output" json:"output"`
+
+	// Optional settings
+	Performance   *PerformanceConfig   `yaml:"performance,omitempty" json:"performance,omitempty"`
+	Audit         *AuditConfig         `yaml:"audit,omitempty" json:"audit,omitempty"`
+	ErrorHandling *ErrorHandlingConfig `yaml:"error_handling,omitempty" json:"error_handling,omitempty"`
+	Security      *SecurityConfig      `yaml:"security,omitempty" json:"security,omitempty"`
+}
+
+// SourceConfig represents a data source (tdtpcli compatible)
+type SourceConfig struct {
+	Name  string `yaml:"name" json:"name"`
+	Type  string `yaml:"type" json:"type"` // postgres, mysql, mssql, sqlite, tdtp, mock
+	DSN   string `yaml:"dsn,omitempty" json:"dsn,omitempty"`
+	Query string `yaml:"query,omitempty" json:"query,omitempty"` // SQL query for data extraction
+}
+
+// WorkspaceConfig represents the workspace database (usually SQLite in-memory)
+type WorkspaceConfig struct {
+	Type string `yaml:"type" json:"type"` // sqlite
+	Mode string `yaml:"mode" json:"mode"` // ":memory:" or file path like "workspace.db"
+}
+
+// TransformConfig represents SQL transformation (tdtpcli compatible)
+type TransformConfig struct {
+	ResultTable string `yaml:"result_table" json:"result_table"` // Name of result table
+	SQL         string `yaml:"sql" json:"sql"`                   // Transformation SQL query
+}
+
+// OutputConfig represents output destination (tdtpcli compatible)
+type OutputConfig struct {
+	Type     string                `yaml:"type" json:"type"` // tdtp, rabbitmq, kafka
+	TDTP     *TDTPOutputConfig     `yaml:"tdtp,omitempty" json:"tdtp,omitempty"`
+	RabbitMQ *RabbitMQOutputConfig `yaml:"rabbitmq,omitempty" json:"rabbitmq,omitempty"`
+	Kafka    *KafkaOutputConfig    `yaml:"kafka,omitempty" json:"kafka,omitempty"`
+}
+
+// TDTPOutputConfig for TDTP protocol output
+type TDTPOutputConfig struct {
+	Destination string `yaml:"destination" json:"destination"` // File path
+	Format      string `yaml:"format" json:"format"`           // xml, json
+	Compression bool   `yaml:"compression,omitempty" json:"compression,omitempty"`
+}
+
+// RabbitMQOutputConfig for RabbitMQ output
+type RabbitMQOutputConfig struct {
+	Host       string `yaml:"host" json:"host"`
+	Port       int    `yaml:"port" json:"port"`
+	User       string `yaml:"user" json:"user"`
+	Password   string `yaml:"password" json:"password"`
+	Queue      string `yaml:"queue" json:"queue"`
+	VHost      string `yaml:"vhost,omitempty" json:"vhost,omitempty"`
+	Exchange   string `yaml:"exchange,omitempty" json:"exchange,omitempty"`
+	RoutingKey string `yaml:"routing_key,omitempty" json:"routing_key,omitempty"`
+}
+
+// KafkaOutputConfig for Kafka output
+type KafkaOutputConfig struct {
+	Brokers     string `yaml:"brokers" json:"brokers"`
+	Topic       string `yaml:"topic" json:"topic"`
+	Partition   int    `yaml:"partition,omitempty" json:"partition,omitempty"`
+	Compression string `yaml:"compression,omitempty" json:"compression,omitempty"`
+}
+
+// PerformanceConfig for performance tuning
+type PerformanceConfig struct {
+	Timeout         int  `yaml:"timeout,omitempty" json:"timeout,omitempty"`                   // seconds
+	BatchSize       int  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`             // rows per batch
+	ParallelSources bool `yaml:"parallel_sources,omitempty" json:"parallel_sources,omitempty"` // load sources in parallel
+	MaxMemoryMB     int  `yaml:"max_memory_mb,omitempty" json:"max_memory_mb,omitempty"`       // memory limit in MB
+}
+
+// AuditConfig for audit and logging
+type AuditConfig struct {
+	Enabled    bool   `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	LogFile    string `yaml:"log_file,omitempty" json:"log_file,omitempty"`
+	LogQueries bool   `yaml:"log_queries,omitempty" json:"log_queries,omitempty"`
+	LogErrors  bool   `yaml:"log_errors,omitempty" json:"log_errors,omitempty"`
+}
+
+// ErrorHandlingConfig for error handling strategy
+type ErrorHandlingConfig struct {
+	OnSourceError    string `yaml:"on_source_error,omitempty" json:"on_source_error,omitempty"`       // continue | fail
+	OnTransformError string `yaml:"on_transform_error,omitempty" json:"on_transform_error,omitempty"` // continue | fail
+	OnExportError    string `yaml:"on_export_error,omitempty" json:"on_export_error,omitempty"`       // continue | fail
+	RetryCount       int    `yaml:"retry_count,omitempty" json:"retry_count,omitempty"`
+	RetryDelaySec    int    `yaml:"retry_delay_sec,omitempty" json:"retry_delay_sec,omitempty"`
+}
+
+// SecurityConfig for security settings
+type SecurityConfig struct {
+	Mode        string `yaml:"mode,omitempty" json:"mode,omitempty"`                 // safe | unsafe
+	ValidateSQL bool   `yaml:"validate_sql,omitempty" json:"validate_sql,omitempty"` // validate SQL for dangerous operations
 }
 
 // ConfigFileResult holds result of load/save configuration operations
