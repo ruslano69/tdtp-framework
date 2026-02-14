@@ -691,6 +691,7 @@ function showAddSourceForm() {
 function clearSourceForm() {
     document.getElementById('sourceName').value = '';
     selectedTableName = '';
+    lastTestedDSN = ''; // Reset test status
 
     // Uncheck all radio buttons
     const radios = document.getElementsByName('sourceType');
@@ -708,6 +709,11 @@ function clearSourceForm() {
 }
 
 function onSourceTypeChange(type) {
+    // Reset test status when changing source type
+    lastTestedDSN = '';
+    selectedTableName = '';
+    document.getElementById('testResult').style.display = 'none';
+
     // Hide all field groups
     document.getElementById('postgresFields').style.display = 'none';
     document.getElementById('mysqlFields').style.display = 'none';
@@ -732,7 +738,7 @@ function onSourceTypeChange(type) {
         document.getElementById('connectionTestPanel').style.display = 'block';
     } else if (type === 'tdtp') {
         document.getElementById('tdtpFields').style.display = 'block';
-        // TDTP files don't need connection test - they're static XML files
+        document.getElementById('connectionTestPanel').style.display = 'block'; // TDTP needs testing too!
     } else if (type === 'mock') {
         document.getElementById('mockFields').style.display = 'block';
     }
@@ -822,15 +828,28 @@ async function testConnection() {
         const result = await window.go.main.App.TestSource(source);
 
         if (result.success) {
+            // Mark this DSN as successfully tested
+            lastTestedDSN = dsn;
+
             let html = `
                 <div style="padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px;">
                     <p style="color: #155724; margin: 0;"><strong>✅ Connection Successful!</strong></p>
-                    <p style="color: #155724; margin: 5px 0 0 0;"><small>Duration: ${result.duration}ms | Tables: ${result.tables ? result.tables.length : 0}</small></p>
+                    <p style="color: #155724; margin: 5px 0 0 0;"><small>${result.message || 'Test passed'}</small></p>
                 </div>
             `;
 
-            // Show table selection if tables are available
-            if (result.tables && result.tables.length > 0) {
+            // For TDTP sources, auto-select the table and mark as tested
+            if (type === 'tdtp' && result.tables && result.tables.length > 0) {
+                selectedTableName = result.tables[0]; // TDTP has one table per file
+                html += `
+                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                        <p style="color: #155724; margin: 0;"><strong>📋 Table: ${selectedTableName}</strong></p>
+                        <p style="margin: 5px 0 0 0; font-size: 11px; color: #6c757d;">Ready to use as data source</p>
+                    </div>
+                `;
+            }
+            // Show table selection for database sources
+            else if (result.tables && result.tables.length > 0) {
                 html += `
                     <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600;">📋 Select Table/View:</label>
@@ -871,6 +890,9 @@ async function testConnection() {
 
 // Store selected table name
 let selectedTableName = '';
+
+// Store DSN of last successful test to mark source as tested
+let lastTestedDSN = '';
 
 function selectTable() {
     const selector = document.getElementById('tableSelector');
@@ -913,7 +935,7 @@ async function saveSourceForm() {
     const source = {
         name: name,
         type: type,
-        tested: false,
+        tested: false, // Will be updated below based on test status
     };
 
     if (type === 'mock') {
@@ -934,7 +956,13 @@ async function saveSourceForm() {
             showNotification('Please select a TDTP XML file', 'error');
             return;
         }
+
         // TDTP files don't need tableName - they contain complete data sets
+        // Auto-select table name from test result
+        source.tableName = selectedTableName;
+
+        // Mark as tested if this DSN was successfully tested
+        source.tested = (source.dsn === lastTestedDSN);
     } else {
         // Database sources (postgres, mysql, mssql, sqlite)
         source.dsn = generateDSN();
@@ -949,6 +977,9 @@ async function saveSourceForm() {
             showNotification('Please test connection and select a table', 'error');
             return;
         }
+
+        // Mark as tested if this DSN was successfully tested
+        source.tested = (source.dsn === lastTestedDSN);
     }
 
     if (editingSourceIndex >= 0) {
