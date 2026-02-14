@@ -44,11 +44,21 @@ async function switchMode(mode) {
         }
     }
 
+    // Show/hide Mock (JSON) source option based on mode
+    const mockOption = document.getElementById('mockSourceOption');
+    const tdtpOption = document.getElementById('tdtpSourceOption');
+    if (mockOption) {
+        mockOption.style.display = mode === 'mock' ? 'inline-block' : 'none';
+    }
+    if (tdtpOption) {
+        tdtpOption.style.display = mode === 'production' ? 'inline-block' : 'none';
+    }
+
     // Show notification
     showNotification(
         mode === 'mock'
-            ? '🧪 Mock Mode: You can experiment freely. Warnings only.'
-            : '🏭 Production Mode: Strict validation enabled.',
+            ? '🧪 Mock Mode: You can experiment freely. Mock sources (JSON) available for testing.'
+            : '🏭 Production Mode: Real data sources only (DB, TDTP XML).',
         mode === 'mock' ? 'warning' : 'info'
     );
 }
@@ -218,13 +228,29 @@ function getStep1HTML() {
         <div class="step-content active">
             <div class="step-header">
                 <h2>📋 Step 1: Project Information</h2>
-                <p>Enter basic metadata for your ETL pipeline</p>
+                <p>Create new pipeline or load existing configuration</p>
             </div>
 
             <div class="panel">
+                <!-- Load/Save Configuration -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">Configuration File</h3>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-secondary" onclick="loadConfigurationFile()" style="flex: 1;">
+                            📁 Load Configuration...
+                        </button>
+                        <button class="btn btn-secondary" onclick="saveConfigurationFile()" style="flex: 1;">
+                            💾 Save Configuration...
+                        </button>
+                    </div>
+                    <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">
+                        Load existing TDTP pipeline YAML or save current configuration
+                    </p>
+                </div>
+
                 <div class="form-group">
                     <label for="pipelineName">Pipeline Name *</label>
-                    <input type="text" id="pipelineName" placeholder="e.g., User Orders Report" required>
+                    <input type="text" id="pipelineName" placeholder="e.g., User Orders Report" required oninput="validatePipelineName()">
                 </div>
 
                 <div class="form-row">
@@ -290,6 +316,72 @@ async function saveStep1() {
     }
 }
 
+// Validate pipeline name in real-time
+function validatePipelineName() {
+    const input = document.getElementById('pipelineName');
+    const value = input.value.trim();
+
+    if (!value) {
+        input.style.borderColor = '#dc3545'; // Red
+        input.style.borderWidth = '2px';
+        return false;
+    } else {
+        input.style.borderColor = '#28a745'; // Green
+        input.style.borderWidth = '2px';
+        return true;
+    }
+}
+
+// Load configuration from YAML file
+async function loadConfigurationFile() {
+    if (!wailsReady || !window.go) {
+        showNotification('File picker not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        const result = await window.go.main.App.LoadConfigurationFile();
+        if (result.success) {
+            showNotification(`✅ Configuration loaded: ${result.filename}`, 'success');
+
+            // Reload all steps with loaded data
+            loadStep1Data();
+            loadStep2Data();
+
+            // Update UI
+            showNotification(`Configuration '${result.config.name}' loaded successfully`, 'success');
+        } else {
+            showNotification(`❌ Failed to load configuration: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        console.error('Load configuration error:', err);
+        showNotification('Failed to load configuration: ' + err, 'error');
+    }
+}
+
+// Save configuration to YAML file
+async function saveConfigurationFile() {
+    if (!wailsReady || !window.go) {
+        showNotification('File save not available (Wails not ready)', 'error');
+        return;
+    }
+
+    // Save current step data first
+    await saveCurrentStep();
+
+    try {
+        const result = await window.go.main.App.SaveConfigurationFile();
+        if (result.success) {
+            showNotification(`✅ Configuration saved: ${result.filename}`, 'success');
+        } else {
+            showNotification(`❌ Failed to save: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        console.error('Save configuration error:', err);
+        showNotification('Failed to save configuration: ' + err, 'error');
+    }
+}
+
 // ========== STEP 2: Sources ==========
 
 let sources = [];
@@ -346,7 +438,11 @@ function getStep2HTML() {
                                     <input type="radio" name="sourceType" value="sqlite" onchange="onSourceTypeChange('sqlite')">
                                     <span>SQLite</span>
                                 </label>
-                                <label>
+                                <label id="tdtpSourceOption">
+                                    <input type="radio" name="sourceType" value="tdtp" onchange="onSourceTypeChange('tdtp')">
+                                    <span>TDTP (XML)</span>
+                                </label>
+                                <label id="mockSourceOption" style="display: none;">
                                     <input type="radio" name="sourceType" value="mock" onchange="onSourceTypeChange('mock')">
                                     <span>Mock (JSON) - Development only</span>
                                 </label>
@@ -455,6 +551,20 @@ function getStep2HTML() {
                                     <button class="btn btn-secondary" onclick="browseDatabaseFile()" style="padding: 6px 15px;">Browse...</button>
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- TDTP Fields -->
+                        <div id="tdtpFields" class="db-connection-fields" style="display: none;">
+                            <div class="form-group">
+                                <label for="tdtpFile">TDTP XML File *</label>
+                                <div style="display: flex; gap: 5px; flex: 1;">
+                                    <input type="text" id="tdtpFile" placeholder="C:\\path\\to\\data.xml" style="flex: 1;">
+                                    <button class="btn btn-secondary" onclick="browseTDTPFile()" style="padding: 6px 15px;">Browse...</button>
+                                </div>
+                            </div>
+                            <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">
+                                💡 TDTP XML format - exported data from another pipeline
+                            </p>
                         </div>
 
                         <!-- Connection Test Button -->
@@ -591,6 +701,7 @@ function clearSourceForm() {
     document.getElementById('mysqlFields').style.display = 'none';
     document.getElementById('mssqlFields').style.display = 'none';
     document.getElementById('sqliteFields').style.display = 'none';
+    document.getElementById('tdtpFields').style.display = 'none';
     document.getElementById('connectionTestPanel').style.display = 'none';
     document.getElementById('mockFields').style.display = 'none';
     document.getElementById('testResult').style.display = 'none';
@@ -602,6 +713,7 @@ function onSourceTypeChange(type) {
     document.getElementById('mysqlFields').style.display = 'none';
     document.getElementById('mssqlFields').style.display = 'none';
     document.getElementById('sqliteFields').style.display = 'none';
+    document.getElementById('tdtpFields').style.display = 'none';
     document.getElementById('connectionTestPanel').style.display = 'none';
     document.getElementById('mockFields').style.display = 'none';
 
@@ -618,6 +730,9 @@ function onSourceTypeChange(type) {
     } else if (type === 'sqlite') {
         document.getElementById('sqliteFields').style.display = 'block';
         document.getElementById('connectionTestPanel').style.display = 'block';
+    } else if (type === 'tdtp') {
+        document.getElementById('tdtpFields').style.display = 'block';
+        // TDTP files don't need connection test - they're static XML files
     } else if (type === 'mock') {
         document.getElementById('mockFields').style.display = 'block';
     }
@@ -658,6 +773,9 @@ function generateDSN() {
     } else if (type === 'sqlite') {
         const file = document.getElementById('sqliteFile').value;
         return file;
+    } else if (type === 'tdtp') {
+        const file = document.getElementById('tdtpFile').value;
+        return file; // TDTP file path is used as DSN
     }
 
     return '';
@@ -808,8 +926,17 @@ async function saveSourceForm() {
                 return;
             }
         }
+    } else if (type === 'tdtp') {
+        // TDTP XML file source
+        source.dsn = generateDSN();
+
+        if (!source.dsn) {
+            showNotification('Please select a TDTP XML file', 'error');
+            return;
+        }
+        // TDTP files don't need tableName - they contain complete data sets
     } else {
-        // Generate DSN from individual fields
+        // Database sources (postgres, mysql, mssql, sqlite)
         source.dsn = generateDSN();
         source.tableName = selectedTableName;
 
@@ -987,6 +1114,25 @@ async function browseDatabaseFile() {
         if (path) {
             document.getElementById('sqliteFile').value = path;
             showNotification('File selected: ' + path, 'info');
+        }
+    } catch (err) {
+        console.error('File picker error:', err);
+        showNotification('Failed to open file picker: ' + err, 'error');
+    }
+}
+
+// Browse for TDTP XML file
+async function browseTDTPFile() {
+    if (!wailsReady || !window.go) {
+        showNotification('File picker not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        const path = await window.go.main.App.SelectTDTPFile();
+        if (path) {
+            document.getElementById('tdtpFile').value = path;
+            showNotification('TDTP file selected: ' + path, 'info');
         }
     } catch (err) {
         console.error('File picker error:', err);
