@@ -690,6 +690,24 @@ func (a *App) SelectJSONFile() (string, error) {
 	return path, err
 }
 
+// SelectTDTPFile opens file picker for TDTP XML files
+func (a *App) SelectTDTPFile() (string, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select TDTP XML File",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "TDTP XML Files (*.xml)",
+				Pattern:     "*.xml",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+	return path, err
+}
+
 // --- Configuration File Load/Save ---
 
 // TDTPConfig represents complete TDTP pipeline configuration for YAML serialization
