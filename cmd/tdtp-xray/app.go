@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -368,9 +369,88 @@ func (a *App) GetCanvasDesign() *CanvasDesign {
 }
 
 // GenerateSQL generates SQL from canvas design
-func (a *App) GenerateSQL(design CanvasDesign) (string, error) {
-	// TODO: Implement SQL generation from canvas
-	return "SELECT * FROM table1", nil
+// GenerateSQLResult holds SQL generation result
+type GenerateSQLResult struct {
+	SQL   string `json:"sql"`
+	Error string `json:"error,omitempty"`
+}
+
+func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
+	fmt.Printf("🔍 GenerateSQL called: tables=%d, joins=%d\n", len(design.Tables), len(design.Joins))
+
+	if len(design.Tables) == 0 {
+		return GenerateSQLResult{Error: "No tables selected"}
+	}
+
+	// Build SELECT clause with visible fields
+	var selectFields []string
+	for _, table := range design.Tables {
+		tableAlias := table.Alias
+		if tableAlias == "" {
+			tableAlias = table.SourceName
+		}
+
+		for _, field := range table.Fields {
+			if field.Visible {
+				selectFields = append(selectFields, fmt.Sprintf("%s.%s", tableAlias, field.Name))
+			}
+		}
+	}
+
+	if len(selectFields) == 0 {
+		return GenerateSQLResult{Error: "No fields selected for output"}
+	}
+
+	// Build FROM clause with first table
+	firstTable := design.Tables[0]
+	fromClause := firstTable.SourceName
+	if firstTable.Alias != "" && firstTable.Alias != firstTable.SourceName {
+		fromClause = fmt.Sprintf("%s AS %s", firstTable.SourceName, firstTable.Alias)
+	}
+
+	// Build JOIN clauses
+	var joinClauses []string
+	for _, join := range design.Joins {
+		// Find table aliases
+		leftAlias := join.LeftTable
+		rightAlias := join.RightTable
+
+		joinType := "INNER JOIN"
+		if join.JoinType == "left" {
+			joinType = "LEFT JOIN"
+		} else if join.JoinType == "right" {
+			joinType = "RIGHT JOIN"
+		}
+
+		// Find the right table source name
+		var rightSource string
+		for _, t := range design.Tables {
+			if t.Alias == rightAlias || t.SourceName == rightAlias {
+				rightSource = t.SourceName
+				break
+			}
+		}
+
+		if rightSource == "" {
+			rightSource = rightAlias
+		}
+
+		joinClause := fmt.Sprintf("%s %s ON %s.%s = %s.%s",
+			joinType, rightSource, leftAlias, join.LeftField, rightAlias, join.RightField)
+		joinClauses = append(joinClauses, joinClause)
+	}
+
+	// Build complete SQL
+	sql := fmt.Sprintf("SELECT\n    %s\nFROM %s",
+		strings.Join(selectFields, ",\n    "),
+		fromClause)
+
+	if len(joinClauses) > 0 {
+		sql += "\n" + strings.Join(joinClauses, "\n")
+	}
+
+	fmt.Printf("✅ Generated SQL:\n%s\n", sql)
+	return GenerateSQLResult{SQL: sql}
 }
 
 // --- Step 4: Transform ---

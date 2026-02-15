@@ -1628,10 +1628,22 @@ function autoLayout() {
 
 async function previewSQL() {
     try {
-        const sql = await window.GenerateSQL(canvasDesign);
-        document.getElementById('sqlPreviewContent').textContent = sql;
+        if (!wailsReady || !window.go) {
+            showNotification('Backend not ready', 'error');
+            return;
+        }
+
+        const result = await window.go.main.App.GenerateSQL(canvasDesign);
+
+        if (result.error) {
+            showNotification('Failed to generate SQL: ' + result.error, 'error');
+            return;
+        }
+
+        document.getElementById('sqlPreviewContent').textContent = result.sql;
         document.getElementById('sqlPreviewModal').style.display = 'flex';
     } catch (err) {
+        console.error('SQL preview error:', err);
         showNotification('Failed to generate SQL: ' + err, 'error');
     }
 }
