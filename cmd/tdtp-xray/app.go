@@ -248,7 +248,7 @@ func (a *App) GetTableSchema(dbType, dsn, tableName string) TableSchemaResult {
 	for i, col := range schema.Columns {
 		columns[i] = ColumnInfo{
 			Name: col.Name,
-			Type: col.Type,
+			Type: col.DataType,
 		}
 	}
 
