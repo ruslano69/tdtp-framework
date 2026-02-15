@@ -1355,13 +1355,16 @@ function createTableCard(table, index) {
             align-items: center;
         `;
         fieldEl.innerHTML = `
-            <span>
-                <input type="checkbox"
-                       ${field.visible ? 'checked' : ''}
-                       onchange="toggleFieldVisibility(${index}, ${fieldIndex})"
-                       style="margin-right: 5px;">
-                <strong>${field.name}</strong>
-                <br><small style="color: #999; margin-left: 20px;">${field.type}</small>
+            <span style="display: flex; align-items: center; gap: 5px;">
+                <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
+                      style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
+                      title="${field.visible ? 'Hide field' : 'Show field'}">
+                    👁
+                </span>
+                <span style="${field.visible ? '' : 'opacity: 0.4;'}">
+                    <strong>${field.name}</strong>
+                    <br><small style="color: #999;">${field.type}</small>
+                </span>
             </span>
             <button onclick="startJoin(${index}, ${fieldIndex})"
                     style="background: #f0f0f0; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 11px;"
@@ -1423,6 +1426,7 @@ function makeDraggable(element, tableIndex) {
 function toggleFieldVisibility(tableIndex, fieldIndex) {
     canvasDesign.tables[tableIndex].fields[fieldIndex].visible =
         !canvasDesign.tables[tableIndex].fields[fieldIndex].visible;
+    renderCanvas(); // Перерисовываем canvas после изменения видимости
 }
 
 function removeTableFromCanvas(tableIndex) {
