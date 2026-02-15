@@ -1,0 +1,456 @@
+#!/usr/bin/env python3
+"""
+Populate TravelAgency database with test data (PostgreSQL)
+Generates realistic travel agency data with JSONB fields
+"""
+
+import psycopg2
+import random
+import json
+from datetime import datetime, timedelta, date
+from decimal import Decimal
+
+# Connection settings
+HOST = 'localhost'
+PORT = 5432
+DATABASE = 'TravelAgency'
+USERNAME = 'tdtp_test'
+PASSWORD = 'tdtp_test_password'
+
+# Sample data (same as MSSQL version)
+COUNTRIES_DATA = [
+    ('USA', 'United States', 'North America', 'USD', '+1', False, ['English']),
+    ('CAN', 'Canada', 'North America', 'CAD', '+1', False, ['English', 'French']),
+    ('MEX', 'Mexico', 'North America', 'MXN', '+52', True, ['Spanish']),
+    ('GBR', 'United Kingdom', 'Europe', 'GBP', '+44', True, ['English']),
+    ('FRA', 'France', 'Europe', 'EUR', '+33', True, ['French']),
+    ('DEU', 'Germany', 'Europe', 'EUR', '+49', True, ['German']),
+    ('ITA', 'Italy', 'Europe', 'EUR', '+39', True, ['Italian']),
+    ('ESP', 'Spain', 'Europe', 'EUR', '+34', True, ['Spanish']),
+    ('PRT', 'Portugal', 'Europe', 'EUR', '+351', True, ['Portuguese']),
+    ('NLD', 'Netherlands', 'Europe', 'EUR', '+31', True, ['Dutch']),
+    ('BEL', 'Belgium', 'Europe', 'EUR', '+32', True, ['Dutch', 'French']),
+    ('CHE', 'Switzerland', 'Europe', 'CHF', '+41', True, ['German', 'French', 'Italian']),
+    ('AUT', 'Austria', 'Europe', 'EUR', '+43', True, ['German']),
+    ('GRC', 'Greece', 'Europe', 'EUR', '+30', True, ['Greek']),
+    ('TUR', 'Turkey', 'Asia', 'TRY', '+90', True, ['Turkish']),
+    ('RUS', 'Russia', 'Europe', 'RUB', '+7', True, ['Russian']),
+    ('POL', 'Poland', 'Europe', 'PLN', '+48', True, ['Polish']),
+    ('CZE', 'Czech Republic', 'Europe', 'CZK', '+420', True, ['Czech']),
+    ('HUN', 'Hungary', 'Europe', 'HUF', '+36', True, ['Hungarian']),
+    ('ROU', 'Romania', 'Europe', 'RON', '+40', True, ['Romanian']),
+    ('JPN', 'Japan', 'Asia', 'JPY', '+81', True, ['Japanese']),
+    ('CHN', 'China', 'Asia', 'CNY', '+86', True, ['Mandarin']),
+    ('KOR', 'South Korea', 'Asia', 'KRW', '+82', True, ['Korean']),
+    ('THA', 'Thailand', 'Asia', 'THB', '+66', True, ['Thai']),
+    ('VNM', 'Vietnam', 'Asia', 'VND', '+84', True, ['Vietnamese']),
+    ('IND', 'India', 'Asia', 'INR', '+91', True, ['Hindi', 'English']),
+    ('IDN', 'Indonesia', 'Asia', 'IDR', '+62', True, ['Indonesian']),
+    ('MYS', 'Malaysia', 'Asia', 'MYR', '+60', True, ['Malay']),
+    ('SGP', 'Singapore', 'Asia', 'SGD', '+65', False, ['English', 'Mandarin', 'Malay']),
+    ('PHL', 'Philippines', 'Asia', 'PHP', '+63', True, ['Filipino', 'English']),
+    ('AUS', 'Australia', 'Oceania', 'AUD', '+61', False, ['English']),
+    ('NZL', 'New Zealand', 'Oceania', 'NZD', '+64', False, ['English']),
+    ('BRA', 'Brazil', 'South America', 'BRL', '+55', True, ['Portuguese']),
+    ('ARG', 'Argentina', 'South America', 'ARS', '+54', True, ['Spanish']),
+    ('CHL', 'Chile', 'South America', 'CLP', '+56', True, ['Spanish']),
+    ('PER', 'Peru', 'South America', 'PEN', '+51', True, ['Spanish']),
+    ('COL', 'Colombia', 'South America', 'COP', '+57', True, ['Spanish']),
+    ('ECU', 'Ecuador', 'South America', 'USD', '+593', True, ['Spanish']),
+    ('ZAF', 'South Africa', 'Africa', 'ZAR', '+27', True, ['Afrikaans', 'English']),
+    ('EGY', 'Egypt', 'Africa', 'EGP', '+20', True, ['Arabic']),
+    ('MAR', 'Morocco', 'Africa', 'MAD', '+212', True, ['Arabic', 'French']),
+    ('KEN', 'Kenya', 'Africa', 'KES', '+254', True, ['Swahili', 'English']),
+    ('TZA', 'Tanzania', 'Africa', 'TZS', '+255', True, ['Swahili', 'English']),
+    ('NOR', 'Norway', 'Europe', 'NOK', '+47', True, ['Norwegian']),
+    ('SWE', 'Sweden', 'Europe', 'SEK', '+46', True, ['Swedish']),
+    ('DNK', 'Denmark', 'Europe', 'DKK', '+45', True, ['Danish']),
+    ('FIN', 'Finland', 'Europe', 'EUR', '+358', True, ['Finnish']),
+    ('ISL', 'Iceland', 'Europe', 'ISK', '+354', True, ['Icelandic']),
+    ('IRL', 'Ireland', 'Europe', 'EUR', '+353', True, ['English', 'Irish']),
+    ('ARE', 'United Arab Emirates', 'Asia', 'AED', '+971', True, ['Arabic']),
+]
+
+FIRST_NAMES = [
+    'John', 'Emma', 'Michael', 'Sophia', 'William', 'Olivia', 'James', 'Ava', 'Robert', 'Isabella',
+    'David', 'Mia', 'Richard', 'Charlotte', 'Joseph', 'Amelia', 'Thomas', 'Harper', 'Charles', 'Evelyn',
+    'Daniel', 'Abigail', 'Matthew', 'Emily', 'Christopher', 'Elizabeth', 'Andrew', 'Sofia', 'Joshua', 'Avery',
+    'Alexander', 'Ella', 'Ryan', 'Scarlett', 'Nathan', 'Grace', 'Benjamin', 'Chloe', 'Samuel', 'Victoria',
+    'Patrick', 'Madison', 'George', 'Luna', 'Henry', 'Penelope', 'Jacob', 'Layla', 'Nicholas', 'Riley'
+]
+
+LAST_NAMES = [
+    'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez',
+    'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin',
+    'Lee', 'Perez', 'Thompson', 'White', 'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson',
+    'Walker', 'Young', 'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores',
+    'Green', 'Adams', 'Nelson', 'Baker', 'Hall', 'Rivera', 'Campbell', 'Mitchell', 'Carter', 'Roberts'
+]
+
+TOUR_TEMPLATES = [
+    ('Alpine Adventure', 'CHE', 7, 'Challenging', 'Experience the Swiss Alps with hiking, mountain climbing, and glacier tours'),
+    ('Beach Paradise', 'THA', 5, 'Easy', 'Relax on pristine beaches, snorkeling, and island hopping in Phuket'),
+    ('Cultural Heritage', 'ITA', 10, 'Moderate', 'Explore ancient Rome, Renaissance Florence, and romantic Venice'),
+    ('Safari Explorer', 'KEN', 8, 'Moderate', 'Wildlife safari in Masai Mara, see the Big Five and Maasai villages'),
+    ('Northern Lights', 'ISL', 6, 'Moderate', 'Chase the Aurora Borealis, hot springs, and volcanic landscapes'),
+    ('Amazon Expedition', 'BRA', 9, 'Challenging', 'Deep jungle trekking, wildlife spotting, and river adventures'),
+    ('Great Wall Trek', 'CHN', 7, 'Challenging', 'Hike less-traveled sections of the Great Wall with expert guides'),
+    ('Machu Picchu Journey', 'PER', 8, 'Challenging', 'Inca Trail trek to the Lost City with acclimatization in Cusco'),
+    ('Mediterranean Cruise', 'GRC', 12, 'Easy', 'Island hopping through Santorini, Mykonos, and Crete'),
+    ('Tokyo Modern', 'JPN', 5, 'Easy', 'Experience cutting-edge Tokyo: technology, fashion, and cuisine'),
+]
+
+GUIDE_SPECIALIZATIONS = [
+    'Mountain Guide', 'Wildlife Expert', 'Cultural Historian', 'Adventure Sports',
+    'Marine Biology', 'Photography', 'Archaeology', 'Culinary Tours',
+    'Wine Tasting', 'Eco-Tourism', 'Urban Explorer', 'Extreme Sports'
+]
+
+CERTIFICATIONS = [
+    'First Aid Certified', 'Wilderness Survival', 'SCUBA Instructor',
+    'Mountain Climbing Level 3', 'CPR Certified', 'Tour Director License',
+    'Foreign Language Proficiency', 'UNESCO Heritage Guide'
+]
+
+DIETARY_PREFERENCES = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Halal', 'Kosher', 'No Restrictions']
+ACTIVITY_PREFERENCES = ['Adventure', 'Relaxation', 'Culture', 'Nature', 'Photography', 'Food & Wine']
+
+PAYMENT_METHODS = ['Credit Card', 'Debit Card', 'PayPal', 'Bank Transfer', 'Cash']
+
+def get_connection():
+    """Create database connection"""
+    return psycopg2.connect(
+        host=HOST,
+        port=PORT,
+        database=DATABASE,
+        user=USERNAME,
+        password=PASSWORD
+    )
+
+def random_date(start_year, end_year):
+    """Generate random date between years"""
+    start = date(start_year, 1, 1)
+    end = date(end_year, 12, 31)
+    delta = end - start
+    random_days = random.randint(0, delta.days)
+    return start + timedelta(days=random_days)
+
+def random_datetime(days_offset_min, days_offset_max):
+    """Generate random datetime offset from now"""
+    days = random.randint(days_offset_min, days_offset_max)
+    hours = random.randint(0, 23)
+    minutes = random.randint(0, 59)
+    return datetime.now() + timedelta(days=days, hours=hours, minutes=minutes)
+
+def populate_countries(cursor):
+    """Insert countries"""
+    print("Inserting countries...")
+    for code, name, continent, currency, phone, visa, langs in COUNTRIES_DATA:
+        cursor.execute("""
+            INSERT INTO countries (country_code, country_name, continent, currency_code, phone_code, is_visa_required, official_languages)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (code, name, continent, currency, phone, visa, json.dumps(langs)))
+    print(f"✓ Inserted {len(COUNTRIES_DATA)} countries")
+
+def populate_customers(cursor, country_ids):
+    """Insert customers"""
+    print("Inserting customers...")
+
+    for i in range(100):
+        first_name = random.choice(FIRST_NAMES)
+        last_name = random.choice(LAST_NAMES)
+        email = f"{first_name.lower()}.{last_name.lower()}{i}@email.com"
+        phone = f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
+        dob = random_date(1950, 2000)
+        passport = f"P{random.randint(10000000, 99999999)}"
+        nationality_id = random.choice(country_ids)
+
+        city = random.choice(['New York', 'London', 'Paris', 'Berlin', 'Tokyo', 'Sydney', 'Toronto', 'Madrid'])
+        address = f"{random.randint(1, 9999)} {random.choice(['Main', 'Oak', 'Elm', 'Maple', 'Park'])} St"
+        postal = f"{random.randint(10000, 99999)}"
+
+        loyalty_points = random.randint(0, 10000)
+        is_vip = loyalty_points > 5000
+
+        # JSONB preferences
+        preferences = {
+            'dietary': random.choice(DIETARY_PREFERENCES),
+            'activities': random.sample(ACTIVITY_PREFERENCES, random.randint(1, 3)),
+            'room_preference': random.choice(['Non-smoking', 'Smoking', 'High Floor', 'Low Floor', 'View']),
+            'seat_preference': random.choice(['Window', 'Aisle', 'No Preference'])
+        }
+
+        # JSONB emergency contact
+        emergency_contact = {
+            'name': f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}",
+            'relationship': random.choice(['Spouse', 'Parent', 'Sibling', 'Friend']),
+            'phone': f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
+        }
+
+        cursor.execute("""
+            INSERT INTO customers (first_name, last_name, email, phone, date_of_birth, passport_number,
+                                   nationality_country_id, address, city, postal_code, loyalty_points,
+                                   is_vip, preferences, emergency_contact)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (first_name, last_name, email, phone, dob, passport, nationality_id, address, city, postal,
+              loyalty_points, is_vip, json.dumps(preferences), json.dumps(emergency_contact)))
+
+    print(f"✓ Inserted 100 customers")
+
+def populate_guides(cursor, country_ids):
+    """Insert guides"""
+    print("Inserting guides...")
+
+    for i in range(20):
+        first_name = random.choice(FIRST_NAMES)
+        last_name = random.choice(LAST_NAMES)
+        email = f"{first_name.lower()}.{last_name.lower()}.guide{i}@travelagency.com"
+        phone = f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
+
+        num_languages = random.randint(2, 5)
+        all_languages = ['English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Mandarin', 'Japanese', 'Arabic', 'Russian']
+        languages = random.sample(all_languages, num_languages)
+
+        specialization = random.choice(GUIDE_SPECIALIZATIONS)
+        rating = round(random.uniform(3.5, 5.0), 2)
+        experience_years = random.randint(1, 20)
+
+        num_certs = random.randint(1, 4)
+        certifications = random.sample(CERTIFICATIONS, num_certs)
+
+        is_active = random.choice([True, True, True, False])
+        hire_date = random_date(2010, 2024)
+        hourly_rate = round(random.uniform(50.0, 200.0), 2)
+
+        bio = f"Experienced {specialization.lower()} with {experience_years} years in the tourism industry. Passionate about creating unforgettable travel experiences."
+        photo_url = f"https://i.pravatar.cc/150?img={i+1}"
+
+        cursor.execute("""
+            INSERT INTO guides (first_name, last_name, email, phone, languages, specialization, rating,
+                                experience_years, certifications, is_active, hire_date, hourly_rate, bio, photo_url)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (first_name, last_name, email, phone, json.dumps(languages), specialization, rating,
+              experience_years, json.dumps(certifications), is_active, hire_date, hourly_rate, bio, photo_url))
+
+    print(f"✓ Inserted 20 guides")
+
+def populate_tours(cursor, country_ids):
+    """Insert tours"""
+    print("Inserting tours...")
+
+    tour_counter = 1
+    for template_name, country_code, duration, difficulty, description in TOUR_TEMPLATES:
+        for variation in range(3):
+            tour_code = f"T{tour_counter:04d}"
+            tour_counter += 1
+
+            cursor.execute("SELECT country_id FROM countries WHERE country_code = %s", (country_code,))
+            country_id = cursor.fetchone()[0]
+
+            if variation == 0:
+                tour_name = template_name
+            elif variation == 1:
+                tour_name = f"{template_name} Premium"
+            else:
+                tour_name = f"{template_name} Express"
+
+            max_group = random.randint(8, 20)
+            min_age = random.choice([0, 12, 18, 21])
+            base_price = round(random.uniform(500.0, 5000.0), 2)
+
+            includes = {
+                'accommodation': random.choice(['3-Star Hotel', '4-Star Hotel', '5-Star Resort', 'Boutique Hotel']),
+                'meals': random.choice(['Breakfast Only', 'Half Board', 'Full Board', 'All Inclusive']),
+                'transport': random.choice(['Private Coach', 'Shared Shuttle', 'Train', 'Domestic Flights']),
+                'entrance_fees': random.choice([True, False]),
+                'guide': 'Professional English-speaking guide'
+            }
+
+            excludes = {
+                'international_flights': True,
+                'visa_fees': True,
+                'travel_insurance': True,
+                'personal_expenses': True,
+                'tips': random.choice([True, False])
+            }
+
+            itinerary = []
+            for day in range(1, duration + 1):
+                day_plan = {
+                    'day': day,
+                    'title': f"Day {day}: {'Arrival' if day == 1 else 'Departure' if day == duration else 'Exploration'}",
+                    'activities': [f"Activity {i+1}" for i in range(random.randint(2, 4))],
+                    'meals': random.choice(['B', 'B,L', 'B,L,D']),
+                    'accommodation': 'Hotel' if day < duration else 'Departure'
+                }
+                itinerary.append(day_plan)
+
+            is_active = random.choice([True, True, True, False])
+
+            cursor.execute("""
+                INSERT INTO tours (tour_code, tour_name, description, destination_country_id, duration_days,
+                                   difficulty_level, max_group_size, min_age, base_price, includes, excludes,
+                                   itinerary, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (tour_code, tour_name, description, country_id, duration, difficulty, max_group, min_age,
+                  base_price, json.dumps(includes), json.dumps(excludes), json.dumps(itinerary), is_active))
+
+    print(f"✓ Inserted 30 tours")
+
+def populate_tour_schedule(cursor, tour_ids, guide_ids):
+    """Insert tour schedule"""
+    print("Inserting tour schedules...")
+
+    for i in range(150):
+        tour_id = random.choice(tour_ids)
+        guide_id = random.choice(guide_ids)
+
+        cursor.execute("SELECT duration_days FROM tours WHERE tour_id = %s", (tour_id,))
+        duration = cursor.fetchone()[0]
+
+        start_date = (datetime.now() + timedelta(days=random.randint(-180, 365))).date()
+        end_date = start_date + timedelta(days=duration)
+        departure_time = f"{random.randint(6, 10):02d}:{random.choice(['00', '30'])}:00"
+
+        available_slots = random.randint(8, 20)
+        booked_slots = random.randint(0, available_slots)
+        price_modifier = round(random.uniform(0.8, 1.5), 2)
+
+        today = datetime.now().date()
+        if start_date > today:
+            status = random.choice(['Scheduled', 'Confirmed'])
+        elif start_date <= today <= end_date:
+            status = 'In Progress'
+        else:
+            status = random.choice(['Completed', 'Cancelled'])
+
+        notes = random.choice([None, 'Peak season', 'Holiday special', 'Last minute deal', 'Group discount available'])
+
+        cursor.execute("""
+            INSERT INTO tour_schedule (tour_id, guide_id, start_date, end_date, departure_time, available_slots,
+                                       booked_slots, price_modifier, status, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (tour_id, guide_id, start_date, end_date, departure_time, available_slots, booked_slots,
+              price_modifier, status, notes))
+
+    print(f"✓ Inserted 150 tour schedules")
+
+def populate_tour_sales(cursor, schedule_ids, customer_ids):
+    """Insert tour sales"""
+    print("Inserting tour sales...")
+
+    for i in range(200):
+        booking_ref = f"BK{random.randint(100000, 999999)}"
+        schedule_id = random.choice(schedule_ids)
+        customer_id = random.choice(customer_ids)
+
+        booking_date = random_datetime(-90, 30)
+        num_travelers = random.randint(1, 6)
+
+        total_amount = round(random.uniform(1000.0, 15000.0), 2)
+        deposit_paid = round(total_amount * random.choice([0.0, 0.2, 0.5, 1.0]), 2)
+        balance_due = round(total_amount - deposit_paid, 2)
+
+        if deposit_paid == 0:
+            payment_status = 'Pending'
+        elif balance_due == 0:
+            payment_status = random.choice(['Fully Paid', 'Fully Paid', 'Fully Paid', 'Refunded', 'Cancelled'])
+        else:
+            payment_status = 'Deposit Paid'
+
+        payment_method = random.choice(PAYMENT_METHODS)
+        special_requests = random.choice([None, 'Vegetarian meals', 'Wheelchair accessible', 'Anniversary celebration', 'Honeymoon package'])
+
+        traveler_details = []
+        for t in range(num_travelers):
+            traveler = {
+                'name': f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}",
+                'age': random.randint(8, 75),
+                'passport': f"P{random.randint(10000000, 99999999)}",
+                'special_needs': random.choice([None, 'Dietary restriction', 'Mobility assistance'])
+            }
+            traveler_details.append(traveler)
+
+        insurance_purchased = random.choice([True, False])
+
+        if payment_status in ['Cancelled', 'Refunded']:
+            cancellation_date = booking_date + timedelta(days=random.randint(1, 30))
+            cancellation_reason = random.choice(['Change of plans', 'Medical emergency', 'Weather concerns', 'Personal reasons'])
+            refund_amount = round(total_amount * random.uniform(0.5, 1.0), 2) if payment_status == 'Refunded' else 0
+        else:
+            cancellation_date = None
+            cancellation_reason = None
+            refund_amount = None
+
+        sales_agent = random.choice(['Sarah Johnson', 'Mike Chen', 'Emma Wilson', 'David Brown', 'Lisa Garcia', 'Online Portal'])
+
+        cursor.execute("""
+            INSERT INTO tour_sales (booking_reference, schedule_id, customer_id, booking_date, number_of_travelers,
+                                    total_amount, deposit_paid, balance_due, payment_status, payment_method,
+                                    special_requests, traveler_details, insurance_purchased, cancellation_date,
+                                    cancellation_reason, refund_amount, sales_agent)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (booking_ref, schedule_id, customer_id, booking_date, num_travelers, total_amount, deposit_paid,
+              balance_due, payment_status, payment_method, special_requests, json.dumps(traveler_details),
+              insurance_purchased, cancellation_date, cancellation_reason, refund_amount, sales_agent))
+
+    print(f"✓ Inserted 200 tour sales")
+
+def populate_data():
+    """Main population function"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        populate_countries(cursor)
+        conn.commit()
+
+        cursor.execute("SELECT country_id FROM countries")
+        country_ids = [row[0] for row in cursor.fetchall()]
+
+        populate_customers(cursor, country_ids)
+        conn.commit()
+
+        cursor.execute("SELECT customer_id FROM customers")
+        customer_ids = [row[0] for row in cursor.fetchall()]
+
+        populate_guides(cursor, country_ids)
+        conn.commit()
+
+        cursor.execute("SELECT guide_id FROM guides")
+        guide_ids = [row[0] for row in cursor.fetchall()]
+
+        populate_tours(cursor, country_ids)
+        conn.commit()
+
+        cursor.execute("SELECT tour_id FROM tours")
+        tour_ids = [row[0] for row in cursor.fetchall()]
+
+        populate_tour_schedule(cursor, tour_ids, guide_ids)
+        conn.commit()
+
+        cursor.execute("SELECT schedule_id FROM tour_schedule")
+        schedule_ids = [row[0] for row in cursor.fetchall()]
+
+        populate_tour_sales(cursor, schedule_ids, customer_ids)
+        conn.commit()
+
+        print("\n✓ TravelAgency database populated successfully!")
+        print("\nData summary:")
+        print(f"  • {len(COUNTRIES_DATA)} countries")
+        print(f"  • 100 customers")
+        print(f"  • 20 guides")
+        print(f"  • 30 tours")
+        print(f"  • 150 tour schedules")
+        print(f"  • 200 tour sales")
+
+    except Exception as e:
+        print(f"✗ Error: {e}")
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+if __name__ == '__main__':
+    populate_data()

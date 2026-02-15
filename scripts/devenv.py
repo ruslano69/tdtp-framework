@@ -246,12 +246,106 @@ class DevEnvironment:
         print("✓ PostgreSQL TravelGuide database setup complete")
         return True
 
+    def setup_mssql_travelagency(self):
+        """Setup MSSQL TravelAgency database"""
+        print("\n--- Setting up MSSQL TravelAgency Database ---")
+
+        # Create database
+        print("Creating TravelAgency database...")
+        self.run_command(
+            ['docker', 'exec', 'tdtp-mssql-test', '/opt/mssql-tools18/bin/sqlcmd',
+             '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password,
+             '-Q', 'CREATE DATABASE TravelAgency', '-C'],
+            check=False
+        )
+
+        # Run setup script
+        setup_sql = self.project_root / 'examples' / 'travel-agency' / 'setup_database.sql'
+        if not setup_sql.exists():
+            print(f"✗ Setup script not found: {setup_sql}")
+            return False
+
+        print(f"Running {setup_sql.name}...")
+
+        with open(setup_sql, 'r') as f:
+            proc = subprocess.Popen(
+                ['docker', 'exec', '-i', 'tdtp-mssql-test', '/opt/mssql-tools18/bin/sqlcmd',
+                 '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password, '-d', 'TravelAgency', '-C'],
+                stdin=f,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = proc.communicate()
+
+            if proc.returncode != 0:
+                print(f"✗ SQL script failed: {stderr}")
+                return False
+
+            print("✓ SQL script executed successfully")
+
+        # Load data
+        populate_script = self.project_root / 'examples' / 'travel-agency' / 'populate_data.py'
+        if populate_script.exists():
+            print(f"Loading data with {populate_script.name}...")
+            self.run_command(['python3', str(populate_script)], check=False)
+
+        print("✓ MSSQL TravelAgency database setup complete")
+        return True
+
+    def setup_postgres_travelagency(self):
+        """Setup PostgreSQL TravelAgency database"""
+        print("\n--- Setting up PostgreSQL TravelAgency Database ---")
+
+        # Create database
+        print("Creating TravelAgency database...")
+        self.run_command(
+            ['docker', 'exec', 'tdtp-postgres-test', 'psql', '-U', self.postgres_user,
+             '-d', 'tdtp_test_db', '-c', 'CREATE DATABASE "TravelAgency";'],
+            check=False
+        )
+
+        # Run setup script
+        setup_sql = self.project_root / 'examples' / 'travel-agency' / 'setup_database_postgres.sql'
+        if not setup_sql.exists():
+            print(f"✗ Setup script not found: {setup_sql}")
+            return False
+
+        print(f"Running {setup_sql.name}...")
+
+        with open(setup_sql, 'r') as f:
+            proc = subprocess.Popen(
+                ['docker', 'exec', '-i', 'tdtp-postgres-test', 'psql', '-U', self.postgres_user, '-d', 'TravelAgency'],
+                stdin=f,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = proc.communicate()
+
+            if proc.returncode != 0:
+                print(f"✗ SQL script failed: {stderr}")
+                return False
+
+            print("✓ SQL script executed successfully")
+
+        # Load data
+        populate_script = self.project_root / 'examples' / 'travel-agency' / 'populate_data_postgres.py'
+        if populate_script.exists():
+            print(f"Loading data with {populate_script.name}...")
+            self.run_command(['python3', str(populate_script)], check=False)
+
+        print("✓ PostgreSQL TravelAgency database setup complete")
+        return True
+
     def setup_databases(self):
         """Setup all test databases"""
         print("\n=== Setting up Test Databases ===")
 
         self.setup_mssql_database()
         self.setup_postgres_database()
+        self.setup_mssql_travelagency()
+        self.setup_postgres_travelagency()
 
         print("\n✓ All databases setup complete!")
 
