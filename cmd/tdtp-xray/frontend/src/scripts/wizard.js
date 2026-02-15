@@ -1244,7 +1244,12 @@ async function addTableToCanvas(sourceName) {
 
     // Get table schema from backend
     try {
-        const tables = await window.GetTables(sourceName);
+        if (!wailsReady || !window.go) {
+            showNotification('Backend not ready', 'error');
+            return;
+        }
+
+        const tables = await window.go.main.App.GetTablesBySourceName(sourceName);
         if (!tables || tables.length === 0) {
             showNotification('Failed to load table schema', 'error');
             return;

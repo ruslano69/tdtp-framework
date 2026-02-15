@@ -240,10 +240,65 @@ func (a *App) GetTables(dbType, dsn string) ConnectionResult {
 }
 
 // GetTableSchema retrieves schema for a specific table
-// TODO: Uncomment after fixing bindings - returns services.TableSchema
-// func (a *App) GetTableSchema(dbType, dsn, tableName string) services.TableSchema {
-// 	return a.metadataService.GetTableSchema(dbType, dsn, tableName)
-// }
+func (a *App) GetTableSchema(dbType, dsn, tableName string) TableSchemaResult {
+	schema := a.metadataService.GetTableSchema(dbType, dsn, tableName)
+
+	// Convert to frontend-friendly format
+	columns := make([]ColumnInfo, len(schema.Columns))
+	for i, col := range schema.Columns {
+		columns[i] = ColumnInfo{
+			Name: col.Name,
+			Type: col.Type,
+		}
+	}
+
+	return TableSchemaResult{
+		TableName: schema.TableName,
+		Columns:   columns,
+	}
+}
+
+// GetTablesBySourceName retrieves table schema by source name (for Visual Designer)
+func (a *App) GetTablesBySourceName(sourceName string) []TableSchemaResult {
+	fmt.Printf("🔍 GetTablesBySourceName called: sourceName='%s'\n", sourceName)
+
+	// Find source in app.sources
+	var source *Source
+	for i := range a.sources {
+		if a.sources[i].Name == sourceName {
+			source = &a.sources[i]
+			break
+		}
+	}
+
+	if source == nil {
+		fmt.Printf("❌ Source '%s' not found in app.sources\n", sourceName)
+		return []TableSchemaResult{}
+	}
+
+	fmt.Printf("✅ Found source: Type='%s', TableName='%s'\n", source.Type, source.TableName)
+
+	// Get table schema
+	if source.TableName == "" {
+		fmt.Printf("❌ Source has no TableName set\n")
+		return []TableSchemaResult{}
+	}
+
+	schema := a.GetTableSchema(source.Type, source.DSN, source.TableName)
+	return []TableSchemaResult{schema}
+}
+
+// TableSchemaResult holds table schema information
+type TableSchemaResult struct {
+	TableName string       `json:"tableName"`
+	Columns   []ColumnInfo `json:"columns"`
+}
+
+// ColumnInfo holds column information
+type ColumnInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
 
 // LoadMockSourceFile loads mock source from file
 // TODO: Uncomment after fixing bindings - returns *services.MockSource
