@@ -467,6 +467,17 @@ def populate_data():
     cursor = conn.cursor()
 
     try:
+        # Clear existing data (respecting foreign keys order)
+        print("Clearing existing data...")
+        cursor.execute("DELETE FROM tour_sales")
+        cursor.execute("DELETE FROM tour_schedule")
+        cursor.execute("DELETE FROM tours")
+        cursor.execute("DELETE FROM guides")
+        cursor.execute("DELETE FROM customers")
+        cursor.execute("DELETE FROM countries")
+        conn.commit()
+        print("✓ Existing data cleared\n")
+
         # Insert countries first
         populate_countries(cursor)
         conn.commit()
