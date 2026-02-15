@@ -1,30 +1,25 @@
-# Utility Scripts
+# TDTP Framework - Automation Scripts
 
-Helper scripts for testing and development.
+Python скрипты для полной автоматизации настройки среды разработки.
 
-## Available Scripts
-
-### `generate_test_db.py`
-
-Generates test database with sample data for testing TDTP framework.
-
-**Usage:**
+## 🚀 Быстрый старт (3 команды!)
 
 ```bash
-python scripts/generate_test_db.py
+# 1. Очистить проект
+python scripts/cleanup.py
+
+# 2. Создать конфиги
+python scripts/setup_config.py
+
+# 3. Запустить среду и загрузить БД
+python scripts/devenv.py start
+python scripts/devenv.py db-setup
 ```
 
-**Requirements:**
-- Python 3.7+
-- SQLite3
+## 📜 Скрипты
 
-**Output:**
-- Creates `test.db` with sample tables
-- Generates test data for customers, orders, products
+### 1️⃣ cleanup.py - Очистка проекта
+### 2️⃣ setup_config.py - Создание конфигов
+### 3️⃣ devenv.py - Управление средой разработки
 
-## Contributing
-
-Add new scripts here following the same structure:
-- Clear README documentation
-- Usage examples
-- Requirements listed
+См. полную документацию в файле.

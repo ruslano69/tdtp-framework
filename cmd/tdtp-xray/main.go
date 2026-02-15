@@ -10,10 +10,10 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
-//go:embed all:frontend/dist
+//go:embed all:frontend/src
 var assets embed.FS
 
-//go:embed frontend/dist/index.html
+//go:embed frontend/src/index.html
 var indexHTML string
 
 func main() {

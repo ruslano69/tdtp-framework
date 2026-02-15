@@ -691,6 +691,7 @@ function showAddSourceForm() {
 function clearSourceForm() {
     document.getElementById('sourceName').value = '';
     selectedTableName = '';
+    lastTestedDSN = ''; // Reset test status
 
     // Uncheck all radio buttons
     const radios = document.getElementsByName('sourceType');
@@ -708,6 +709,11 @@ function clearSourceForm() {
 }
 
 function onSourceTypeChange(type) {
+    // Reset test status when changing source type
+    lastTestedDSN = '';
+    selectedTableName = '';
+    document.getElementById('testResult').style.display = 'none';
+
     // Hide all field groups
     document.getElementById('postgresFields').style.display = 'none';
     document.getElementById('mysqlFields').style.display = 'none';
@@ -732,7 +738,7 @@ function onSourceTypeChange(type) {
         document.getElementById('connectionTestPanel').style.display = 'block';
     } else if (type === 'tdtp') {
         document.getElementById('tdtpFields').style.display = 'block';
-        // TDTP files don't need connection test - they're static XML files
+        document.getElementById('connectionTestPanel').style.display = 'block'; // TDTP needs testing too!
     } else if (type === 'mock') {
         document.getElementById('mockFields').style.display = 'block';
     }
@@ -822,15 +828,28 @@ async function testConnection() {
         const result = await window.go.main.App.TestSource(source);
 
         if (result.success) {
+            // Mark this DSN as successfully tested
+            lastTestedDSN = dsn;
+
             let html = `
                 <div style="padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px;">
                     <p style="color: #155724; margin: 0;"><strong>✅ Connection Successful!</strong></p>
-                    <p style="color: #155724; margin: 5px 0 0 0;"><small>Duration: ${result.duration}ms | Tables: ${result.tables ? result.tables.length : 0}</small></p>
+                    <p style="color: #155724; margin: 5px 0 0 0;"><small>${result.message || 'Test passed'}</small></p>
                 </div>
             `;
 
-            // Show table selection if tables are available
-            if (result.tables && result.tables.length > 0) {
+            // For TDTP sources, auto-select the table and mark as tested
+            if (type === 'tdtp' && result.tables && result.tables.length > 0) {
+                selectedTableName = result.tables[0]; // TDTP has one table per file
+                html += `
+                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                        <p style="color: #155724; margin: 0;"><strong>📋 Table: ${selectedTableName}</strong></p>
+                        <p style="margin: 5px 0 0 0; font-size: 11px; color: #6c757d;">Ready to use as data source</p>
+                    </div>
+                `;
+            }
+            // Show table selection for database sources
+            else if (result.tables && result.tables.length > 0) {
                 html += `
                     <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600;">📋 Select Table/View:</label>
@@ -871,6 +890,9 @@ async function testConnection() {
 
 // Store selected table name
 let selectedTableName = '';
+
+// Store DSN of last successful test to mark source as tested
+let lastTestedDSN = '';
 
 function selectTable() {
     const selector = document.getElementById('tableSelector');
@@ -913,7 +935,7 @@ async function saveSourceForm() {
     const source = {
         name: name,
         type: type,
-        tested: false,
+        tested: false, // Will be updated below based on test status
     };
 
     if (type === 'mock') {
@@ -934,7 +956,13 @@ async function saveSourceForm() {
             showNotification('Please select a TDTP XML file', 'error');
             return;
         }
+
         // TDTP files don't need tableName - they contain complete data sets
+        // Auto-select table name from test result
+        source.tableName = selectedTableName;
+
+        // Mark as tested if this DSN was successfully tested
+        source.tested = (source.dsn === lastTestedDSN);
     } else {
         // Database sources (postgres, mysql, mssql, sqlite)
         source.dsn = generateDSN();
@@ -949,23 +977,34 @@ async function saveSourceForm() {
             showNotification('Please test connection and select a table', 'error');
             return;
         }
+
+        // Mark as tested if this DSN was successfully tested
+        source.tested = (source.dsn === lastTestedDSN);
+    }
+
+    // Save to backend first (before updating local array)
+    if (wailsReady && window.go) {
+        try {
+            if (editingSourceIndex >= 0) {
+                // Update existing source in backend
+                const oldName = sources[editingSourceIndex].name;
+                await window.go.main.App.UpdateSource(oldName, source);
+            } else {
+                // Add new source to backend
+                await window.go.main.App.AddSource(source);
+            }
+        } catch (err) {
+            console.error('Failed to sync source to backend:', err);
+            showNotification(`Warning: Source saved locally but backend sync failed: ${err}`, 'warning');
+        }
     }
 
     if (editingSourceIndex >= 0) {
-        // Update existing
+        // Update existing in local array
         sources[editingSourceIndex] = source;
     } else {
-        // Add new
+        // Add new to local array
         sources.push(source);
-    }
-
-    // Save to backend if available
-    if (wailsReady && window.go) {
-        try {
-            await window.go.main.App.AddSource(source);
-        } catch (err) {
-            console.error('Failed to save source to backend:', err);
-        }
     }
 
     cancelSourceForm();
@@ -1009,9 +1048,20 @@ function editSource(index) {
     }
 }
 
-function removeSource(index) {
+async function removeSource(index) {
     const src = sources[index];
     if (confirm(`Remove source '${src.name}'?`)) {
+        // Remove from backend first
+        if (wailsReady && window.go) {
+            try {
+                await window.go.main.App.RemoveSource(src.name);
+            } catch (err) {
+                console.error('Failed to remove source from backend:', err);
+                showNotification(`Warning: Source removed locally but backend sync failed: ${err}`, 'warning');
+            }
+        }
+
+        // Remove from local array
         sources.splice(index, 1);
         renderSourceList();
         showNotification(`Source '${src.name}' removed`, 'info');
@@ -1071,10 +1121,536 @@ async function previewSource(index) {
 // ========== STEP 3-7: Placeholders ==========
 
 function getStep3HTML() {
-    return `<div class="step-content active"><div class="panel"><p class="text-center" style="padding: 40px; color: #666;">🚧 Step 3: Visual Designer - Coming soon...</p></div></div>`;
+    return `
+<div class="step-content active">
+    <div class="panel">
+        <div class="panel-header">Visual Query Designer</div>
+        <p style="color: #666; margin-bottom: 15px;">
+            Drag tables onto the canvas and connect fields to create JOINs
+        </p>
+
+        <div style="display: flex; gap: 15px; height: 600px;">
+            <!-- Tables Palette -->
+            <div style="width: 250px; border-right: 1px solid #ddd; padding-right: 15px; overflow-y: auto;">
+                <h4 style="margin-top: 0;">Available Tables</h4>
+                <div id="tablesSourceList"></div>
+            </div>
+
+            <!-- Canvas Area -->
+            <div style="flex: 1; position: relative; background: #f9f9f9; border: 1px solid #ddd; border-radius: 3px; overflow: hidden;">
+                <svg id="canvasSVG" width="100%" height="100%" style="position: absolute; top: 0; left: 0; z-index: 1;">
+                    <!-- JOIN lines will be drawn here -->
+                </svg>
+                <div id="canvasArea" style="position: relative; width: 100%; height: 100%; z-index: 2;">
+                    <!-- Table cards will be placed here -->
+                </div>
+            </div>
+
+            <!-- Properties Panel -->
+            <div style="width: 250px; border-left: 1px solid #ddd; padding-left: 15px; overflow-y: auto;">
+                <h4 style="margin-top: 0;">Properties</h4>
+                <div id="propertiesPanel">
+                    <p style="color: #999; font-size: 13px;">Select a table or join to edit properties</p>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px; display: flex; gap: 10px;">
+            <button class="btn" onclick="clearCanvas()">Clear Canvas</button>
+            <button class="btn" onclick="autoLayout()">Auto Layout</button>
+            <button class="btn" onclick="previewSQL()">Preview SQL</button>
+        </div>
+    </div>
+
+    <!-- SQL Preview Modal -->
+    <div id="sqlPreviewModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background: white; padding: 20px; border-radius: 5px; max-width: 800px; width: 90%; max-height: 80%; overflow-y: auto;">
+            <h3>Generated SQL Preview</h3>
+            <pre id="sqlPreviewContent" style="background: #f5f5f5; padding: 15px; border-radius: 3px; overflow-x: auto;"></pre>
+            <button class="btn" onclick="closeSQLPreview()">Close</button>
+        </div>
+    </div>
+</div>
+    `;
 }
-function loadStep3Data() {}
-async function saveStep3() {}
+
+let canvasDesign = {
+    tables: [],
+    joins: []
+};
+
+let selectedTableId = null;
+let selectedJoinId = null;
+let joinStartField = null; // For creating joins
+
+function loadStep3Data() {
+    // Load sources from Step 2 (global sources variable, not appState!)
+    const sourceListEl = document.getElementById('tablesSourceList');
+
+    if (sources.length === 0) {
+        sourceListEl.innerHTML = '<p style="color: #999; font-size: 13px;">No sources defined in Step 2</p>';
+        return;
+    }
+
+    let html = '';
+    sources.forEach(src => {
+        html += `
+            <div style="border: 1px solid #ddd; padding: 10px; margin-bottom: 8px; background: white; border-radius: 3px; cursor: pointer;"
+                 draggable="true"
+                 ondragstart="handleTableDragStart(event, '${src.name}')"
+                 onclick="addTableToCanvas('${src.name}')">
+                <strong>${src.name}</strong>
+                <div style="font-size: 11px; color: #666;">${src.type.toUpperCase()}</div>
+            </div>
+        `;
+    });
+    sourceListEl.innerHTML = html;
+
+    // Load existing canvas design from backend
+    window.GetCanvasDesign().then(design => {
+        if (design && design.tables) {
+            canvasDesign = design;
+            renderCanvas();
+        }
+    }).catch(err => {
+        console.log('No existing canvas design');
+    });
+}
+
+async function saveStep3() {
+    // Save canvas design to backend
+    try {
+        await window.SaveCanvasDesign(canvasDesign);
+        showNotification('Canvas design saved successfully', 'success');
+        return true;
+    } catch (err) {
+        console.error('Failed to save canvas design:', err);
+        showNotification('Failed to save canvas design: ' + err, 'error');
+        return false;
+    }
+}
+
+// Canvas helper functions
+function handleTableDragStart(event, sourceName) {
+    event.dataTransfer.setData('sourceName', sourceName);
+}
+
+async function addTableToCanvas(sourceName) {
+    // Check if table already exists
+    if (canvasDesign.tables.find(t => t.sourceName === sourceName)) {
+        showNotification('Table already on canvas', 'warning');
+        return;
+    }
+
+    // Get table schema from backend
+    try {
+        if (!wailsReady || !window.go) {
+            showNotification('Backend not ready', 'error');
+            return;
+        }
+
+        const tables = await window.go.main.App.GetTablesBySourceName(sourceName);
+        if (!tables || tables.length === 0) {
+            showNotification('Failed to load table schema', 'error');
+            return;
+        }
+
+        const tableInfo = tables[0];
+        const fields = tableInfo.columns.map(col => ({
+            name: col.name,
+            type: col.type,
+            visible: true,
+            condition: null
+        }));
+
+        // Calculate position (offset each new table)
+        const tableCount = canvasDesign.tables.length;
+        const x = 50 + (tableCount * 30) % 400;
+        const y = 50 + (tableCount * 30) % 300;
+
+        const newTable = {
+            sourceName: sourceName,
+            alias: sourceName,
+            x: x,
+            y: y,
+            fields: fields
+        };
+
+        canvasDesign.tables.push(newTable);
+        renderCanvas();
+    } catch (err) {
+        console.error('Failed to add table:', err);
+        showNotification('Failed to add table: ' + err, 'error');
+    }
+}
+
+function renderCanvas() {
+    const canvasArea = document.getElementById('canvasArea');
+    const svg = document.getElementById('canvasSVG');
+
+    // Clear existing
+    canvasArea.innerHTML = '';
+    svg.innerHTML = '';
+
+    // Render tables
+    canvasDesign.tables.forEach((table, index) => {
+        const tableCard = createTableCard(table, index);
+        canvasArea.appendChild(tableCard);
+    });
+
+    // Render joins
+    renderJoins();
+}
+
+function createTableCard(table, index) {
+    const card = document.createElement('div');
+    card.id = `table-${index}`;
+    card.className = 'table-card';
+    card.style.cssText = `
+        position: absolute;
+        left: ${table.x}px;
+        top: ${table.y}px;
+        width: 200px;
+        background: white;
+        border: 2px solid #0066cc;
+        border-radius: 5px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        cursor: move;
+        z-index: 10;
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = `
+        background: #0066cc;
+        color: white;
+        padding: 8px 10px;
+        font-weight: 600;
+        font-size: 13px;
+        border-radius: 3px 3px 0 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    `;
+    header.innerHTML = `
+        <span>${table.alias || table.sourceName}</span>
+        <button onclick="removeTableFromCanvas(${index})" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px; padding: 0; line-height: 1;">&times;</button>
+    `;
+    card.appendChild(header);
+
+    // Fields
+    const fieldsContainer = document.createElement('div');
+    fieldsContainer.style.cssText = 'padding: 5px; max-height: 300px; overflow-y: auto;';
+
+    table.fields.forEach((field, fieldIndex) => {
+        const fieldEl = document.createElement('div');
+        fieldEl.className = 'table-field';
+        fieldEl.style.cssText = `
+            padding: 6px 8px;
+            font-size: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        `;
+        fieldEl.innerHTML = `
+            <span>
+                <input type="checkbox"
+                       ${field.visible ? 'checked' : ''}
+                       onchange="toggleFieldVisibility(${index}, ${fieldIndex})"
+                       style="margin-right: 5px;">
+                <strong>${field.name}</strong>
+                <br><small style="color: #999; margin-left: 20px;">${field.type}</small>
+            </span>
+            <button onclick="startJoin(${index}, ${fieldIndex})"
+                    style="background: #f0f0f0; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 11px;"
+                    title="Create JOIN">⚡</button>
+        `;
+        fieldsContainer.appendChild(fieldEl);
+    });
+
+    card.appendChild(fieldsContainer);
+
+    // Make draggable
+    makeDraggable(card, index);
+
+    return card;
+}
+
+function makeDraggable(element, tableIndex) {
+    let isDragging = false;
+    let startX, startY, initialX, initialY;
+
+    element.addEventListener('mousedown', function(e) {
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        initialX = canvasDesign.tables[tableIndex].x;
+        initialY = canvasDesign.tables[tableIndex].y;
+
+        element.style.zIndex = '100';
+        selectedTableId = tableIndex;
+
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        canvasDesign.tables[tableIndex].x = initialX + dx;
+        canvasDesign.tables[tableIndex].y = initialY + dy;
+
+        element.style.left = canvasDesign.tables[tableIndex].x + 'px';
+        element.style.top = canvasDesign.tables[tableIndex].y + 'px';
+
+        renderJoins();
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (isDragging) {
+            isDragging = false;
+            element.style.zIndex = '10';
+        }
+    });
+}
+
+function toggleFieldVisibility(tableIndex, fieldIndex) {
+    canvasDesign.tables[tableIndex].fields[fieldIndex].visible =
+        !canvasDesign.tables[tableIndex].fields[fieldIndex].visible;
+}
+
+function removeTableFromCanvas(tableIndex) {
+    if (!confirm(`Remove table "${canvasDesign.tables[tableIndex].sourceName}" from canvas?`)) {
+        return;
+    }
+
+    const tableName = canvasDesign.tables[tableIndex].sourceName;
+
+    // Remove associated joins
+    canvasDesign.joins = canvasDesign.joins.filter(join =>
+        join.leftTable !== tableName && join.rightTable !== tableName
+    );
+
+    // Remove table
+    canvasDesign.tables.splice(tableIndex, 1);
+
+    renderCanvas();
+}
+
+function startJoin(tableIndex, fieldIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const field = table.fields[fieldIndex];
+
+    if (!joinStartField) {
+        // First field selected
+        joinStartField = {
+            table: table.sourceName,
+            field: field.name,
+            tableIndex: tableIndex,
+            fieldIndex: fieldIndex
+        };
+        showNotification(`Select target field to join with ${table.sourceName}.${field.name}`, 'info');
+    } else {
+        // Second field selected - create join
+        if (joinStartField.table === table.sourceName) {
+            showNotification('Cannot join table to itself', 'warning');
+            joinStartField = null;
+            return;
+        }
+
+        // Check if join already exists
+        const existingJoin = canvasDesign.joins.find(j =>
+            (j.leftTable === joinStartField.table && j.leftField === joinStartField.field &&
+             j.rightTable === table.sourceName && j.rightField === field.name) ||
+            (j.leftTable === table.sourceName && j.leftField === field.name &&
+             j.rightTable === joinStartField.table && j.rightField === joinStartField.field)
+        );
+
+        if (existingJoin) {
+            showNotification('Join already exists', 'warning');
+            joinStartField = null;
+            return;
+        }
+
+        const newJoin = {
+            leftTable: joinStartField.table,
+            leftField: joinStartField.field,
+            rightTable: table.sourceName,
+            rightField: field.name,
+            joinType: 'INNER'
+        };
+
+        canvasDesign.joins.push(newJoin);
+        joinStartField = null;
+
+        renderCanvas();
+        showNotification('Join created successfully', 'success');
+    }
+}
+
+function renderJoins() {
+    const svg = document.getElementById('canvasSVG');
+    svg.innerHTML = '';
+
+    canvasDesign.joins.forEach((join, joinIndex) => {
+        const leftTableIdx = canvasDesign.tables.findIndex(t => t.sourceName === join.leftTable);
+        const rightTableIdx = canvasDesign.tables.findIndex(t => t.sourceName === join.rightTable);
+
+        if (leftTableIdx === -1 || rightTableIdx === -1) return;
+
+        const leftTable = canvasDesign.tables[leftTableIdx];
+        const rightTable = canvasDesign.tables[rightTableIdx];
+
+        // Calculate line coordinates (simplified - center of tables)
+        const x1 = leftTable.x + 100;
+        const y1 = leftTable.y + 50;
+        const x2 = rightTable.x + 100;
+        const y2 = rightTable.y + 50;
+
+        // Create line
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.setAttribute('stroke', '#0066cc');
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('marker-end', 'url(#arrowhead)');
+        line.style.cursor = 'pointer';
+        line.onclick = () => selectJoin(joinIndex);
+
+        svg.appendChild(line);
+
+        // Add label
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2;
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', midX);
+        text.setAttribute('y', midY - 5);
+        text.setAttribute('fill', '#0066cc');
+        text.setAttribute('font-size', '11');
+        text.setAttribute('font-weight', 'bold');
+        text.textContent = join.joinType;
+        text.style.cursor = 'pointer';
+        text.onclick = () => selectJoin(joinIndex);
+
+        svg.appendChild(text);
+    });
+
+    // Define arrowhead marker
+    if (canvasDesign.joins.length > 0 && !svg.querySelector('#arrowhead')) {
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'arrowhead');
+        marker.setAttribute('markerWidth', '10');
+        marker.setAttribute('markerHeight', '10');
+        marker.setAttribute('refX', '9');
+        marker.setAttribute('refY', '3');
+        marker.setAttribute('orient', 'auto');
+
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', '0 0, 10 3, 0 6');
+        polygon.setAttribute('fill', '#0066cc');
+
+        marker.appendChild(polygon);
+        defs.appendChild(marker);
+        svg.insertBefore(defs, svg.firstChild);
+    }
+}
+
+function selectJoin(joinIndex) {
+    selectedJoinId = joinIndex;
+    const join = canvasDesign.joins[joinIndex];
+
+    const propertiesPanel = document.getElementById('propertiesPanel');
+    propertiesPanel.innerHTML = `
+        <h4 style="margin-top: 0;">Join Properties</h4>
+        <div style="margin-bottom: 10px;">
+            <strong>${join.leftTable}.${join.leftField}</strong>
+            <br>↓<br>
+            <strong>${join.rightTable}.${join.rightField}</strong>
+        </div>
+
+        <label style="display: block; margin-bottom: 10px;">
+            Join Type:
+            <select id="joinTypeSelect" onchange="updateJoinType(${joinIndex})" style="width: 100%; margin-top: 5px; padding: 5px;">
+                <option value="INNER" ${join.joinType === 'INNER' ? 'selected' : ''}>INNER JOIN</option>
+                <option value="LEFT" ${join.joinType === 'LEFT' ? 'selected' : ''}>LEFT JOIN</option>
+                <option value="RIGHT" ${join.joinType === 'RIGHT' ? 'selected' : ''}>RIGHT JOIN</option>
+            </select>
+        </label>
+
+        <button class="btn" onclick="removeJoin(${joinIndex})" style="width: 100%; background: #dc3545; color: white;">Remove Join</button>
+    `;
+}
+
+function updateJoinType(joinIndex) {
+    const select = document.getElementById('joinTypeSelect');
+    canvasDesign.joins[joinIndex].joinType = select.value;
+    renderJoins();
+}
+
+function removeJoin(joinIndex) {
+    canvasDesign.joins.splice(joinIndex, 1);
+    document.getElementById('propertiesPanel').innerHTML = '<p style="color: #999; font-size: 13px;">Select a table or join to edit properties</p>';
+    renderCanvas();
+}
+
+function clearCanvas() {
+    if (!confirm('Clear entire canvas? This will remove all tables and joins.')) {
+        return;
+    }
+
+    canvasDesign.tables = [];
+    canvasDesign.joins = [];
+    renderCanvas();
+}
+
+function autoLayout() {
+    // Simple grid layout
+    const cols = Math.ceil(Math.sqrt(canvasDesign.tables.length));
+    canvasDesign.tables.forEach((table, index) => {
+        const row = Math.floor(index / cols);
+        const col = index % cols;
+        table.x = 50 + col * 250;
+        table.y = 50 + row * 200;
+    });
+
+    renderCanvas();
+}
+
+async function previewSQL() {
+    try {
+        if (!wailsReady || !window.go) {
+            showNotification('Backend not ready', 'error');
+            return;
+        }
+
+        const result = await window.go.main.App.GenerateSQL(canvasDesign);
+
+        if (result.error) {
+            showNotification('Failed to generate SQL: ' + result.error, 'error');
+            return;
+        }
+
+        document.getElementById('sqlPreviewContent').textContent = result.sql;
+        document.getElementById('sqlPreviewModal').style.display = 'flex';
+    } catch (err) {
+        console.error('SQL preview error:', err);
+        showNotification('Failed to generate SQL: ' + err, 'error');
+    }
+}
+
+function closeSQLPreview() {
+    document.getElementById('sqlPreviewModal').style.display = 'none';
+}
 
 function getStep4HTML() {
     return `<div class="step-content active"><div class="panel"><p class="text-center" style="padding: 40px; color: #666;">🚧 Step 4: Transform SQL - Coming soon...</p></div></div>`;

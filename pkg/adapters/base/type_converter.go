@@ -2,6 +2,7 @@ package base
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -207,6 +208,25 @@ func (c *UniversalTypeConverter) mssqlValueToString(val interface{}, field packe
 		// Конвертируем в hex без ведущих нулей: 0x00000000187F825E → "187F825E"
 		if field.Subtype == "rowversion" {
 			return bytesToHexWithoutLeadingZeros(v)
+		}
+
+		// Специальная обработка для UNIQUEIDENTIFIER
+		// MSSQL драйвер может вернуть VARCHAR(36) как []byte, особенно после CONVERT()
+		// Если subtype = "uniqueidentifier", просто конвертируем байты в строку
+		// (если был сделан CONVERT в SQL, то v уже содержит строковое представление UUID)
+		if field.Subtype == "uniqueidentifier" {
+			// Если получены 16 байт (native UNIQUEIDENTIFIER), конвертируем в UUID string
+			if len(v) == 16 {
+				// Формат UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+				return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+					binary.LittleEndian.Uint32(v[0:4]),
+					binary.LittleEndian.Uint16(v[4:6]),
+					binary.LittleEndian.Uint16(v[6:8]),
+					binary.BigEndian.Uint16(v[8:10]),
+					v[10:16])
+			}
+			// Иначе это уже строка (из CONVERT), просто конвертируем []byte → string
+			return string(v)
 		}
 
 		// Для обычных BLOB используем Base64 encoding (TDTP стандарт)

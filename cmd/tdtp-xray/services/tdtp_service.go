@@ -1,15 +1,22 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/merge"
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
+
+// multiPartPattern matches filenames produced by export: {base}_part_{N}_of_{total}{ext}
+// Same pattern as tdtpcli/commands/import.go
+var multiPartPattern = regexp.MustCompile(`^(.+)_part_(\d+)_of_(\d+)(\..+)$`)
 
 // TDTPService handles TDTP XML file operations using framework adapters
 type TDTPService struct {
@@ -19,13 +26,14 @@ type TDTPService struct {
 
 // TDTPTestResult represents the result of TDTP file validation
 type TDTPTestResult struct {
-	Success   bool     `json:"success"`
-	Message   string   `json:"message"`
-	Duration  int64    `json:"duration"`  // milliseconds
-	TableName string   `json:"tableName"` // Table name from TDTP packet
-	RowCount  int      `json:"rowCount"`  // Number of rows in packet
-	Fields    []string `json:"fields"`    // Field names from schema
-	TotalParts int     `json:"totalParts"` // Number of parts in multi-volume source
+	Success    bool                `json:"success"`
+	Message    string              `json:"message"`
+	Duration   int64               `json:"duration"`   // milliseconds
+	TableName  string              `json:"tableName"`  // Table name from TDTP packet
+	RowCount   int                 `json:"rowCount"`   // Number of rows in packet
+	Fields     []string            `json:"fields"`     // Field names from schema
+	TotalParts int                 `json:"totalParts"` // Number of parts in multi-volume source
+	DataPacket *packet.DataPacket  `json:"-"`          // Internal: full data packet (not exported to JSON)
 }
 
 // NewTDTPService creates a new TDTP service
@@ -59,6 +67,15 @@ func (ts *TDTPService) TestTDTPFile(filePath string) TDTPTestResult {
 		return TDTPTestResult{
 			Success:  false,
 			Message:  fmt.Sprintf("Invalid TDTP format: %v", err),
+			Duration: time.Since(startTime).Milliseconds(),
+		}
+	}
+
+	// Decompress data if compressed
+	if err := ts.decompressPacket(firstPacket); err != nil {
+		return TDTPTestResult{
+			Success:  false,
+			Message:  fmt.Sprintf("Decompression failed: %v", err),
 			Duration: time.Since(startTime).Milliseconds(),
 		}
 	}
@@ -113,14 +130,31 @@ func (ts *TDTPService) TestTDTPFile(filePath string) TDTPTestResult {
 		RowCount:   len(finalPacket.Data.Rows),
 		Fields:     fields,
 		TotalParts: totalParts,
+		DataPacket: finalPacket, // Include data packet for preview
 	}
 }
 
 // collectAllParts finds and parses all parts of multi-volume TDTP source
-// Uses framework parser - NO manual XML parsing!
+// Uses the same pattern as tdtpcli: {base}_part_{N}_of_{total}{ext}
+// Example: users.tdtp_part_1_of_14.xml, users.tdtp_part_2_of_14.xml, etc.
 func (ts *TDTPService) collectAllParts(initialPath string, firstPacket *packet.DataPacket, currentPart, totalParts int) ([]*packet.DataPacket, error) {
 	dir := filepath.Dir(initialPath)
 	baseName := filepath.Base(initialPath)
+
+	// Parse filename using tdtpcli pattern: {base}_part_{N}_of_{total}{ext}
+	matches := multiPartPattern.FindStringSubmatch(baseName)
+	if matches == nil {
+		return nil, fmt.Errorf("filename doesn't match multi-part pattern: %s", baseName)
+	}
+
+	base := matches[1]          // e.g., "users.tdtp"
+	ext := matches[4]           // e.g., ".xml"
+	parsedTotal, _ := strconv.Atoi(matches[3])
+
+	// Verify total parts match
+	if parsedTotal != totalParts {
+		return nil, fmt.Errorf("filename indicates %d parts, but header says %d", parsedTotal, totalParts)
+	}
 
 	// Create array for all parts
 	allPackets := make([]*packet.DataPacket, totalParts)
@@ -128,42 +162,48 @@ func (ts *TDTPService) collectAllParts(initialPath string, firstPacket *packet.D
 	// Place the first packet we already have
 	allPackets[currentPart-1] = firstPacket
 
-	// Find remaining parts in the same directory
-	// Common naming patterns: file_part1.xml, file_part2.xml or file-1.xml, file-2.xml
-	baseNameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-
+	// Collect remaining parts using tdtpcli naming: {base}_part_{N}_of_{total}{ext}
 	for partNum := 1; partNum <= totalParts; partNum++ {
 		if partNum == currentPart {
 			continue // Already have this part
 		}
 
-		// Try different naming patterns
-		possibleNames := []string{
-			fmt.Sprintf("%s_part%d.xml", baseNameNoExt, partNum),
-			fmt.Sprintf("%s-part%d.xml", baseNameNoExt, partNum),
-			fmt.Sprintf("%s-%d.xml", baseNameNoExt, partNum),
-			fmt.Sprintf("%s_%d.xml", baseNameNoExt, partNum),
+		// Generate filename using tdtpcli pattern
+		filename := fmt.Sprintf("%s_part_%d_of_%d%s", base, partNum, totalParts, ext)
+		path := filepath.Join(dir, filename)
+
+		// Check if file exists
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil, fmt.Errorf("part %d of %d not found: %s", partNum, totalParts, filename)
 		}
 
-		var packet *packet.DataPacket
-		var err error
-		for _, name := range possibleNames {
-			path := filepath.Join(dir, name)
-			if _, statErr := os.Stat(path); statErr == nil {
-				// File exists, parse it using framework parser
-				packet, err = ts.parser.ParseFile(path)
-				if err == nil {
-					break
-				}
-			}
+		// Parse using framework parser (NO improvisation!)
+		packet, err := ts.parser.ParseFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", filename, err)
 		}
 
-		if packet == nil {
-			return nil, fmt.Errorf("part %d of %d not found (tried multiple naming patterns)", partNum, totalParts)
+		// Decompress data if compressed
+		if err := ts.decompressPacket(packet); err != nil {
+			return nil, fmt.Errorf("failed to decompress %s: %w", filename, err)
 		}
 
 		allPackets[partNum-1] = packet
 	}
 
 	return allPackets, nil
+}
+
+// decompressPacket decompresses packet data if it's compressed
+// Uses framework adapters - same pattern as tdtpcli
+func (ts *TDTPService) decompressPacket(pkt *packet.DataPacket) error {
+	if pkt.Data.Compression == "" {
+		return nil // Not compressed
+	}
+
+	// Use parser.DecompressData with processors.DecompressDataForTdtp
+	// Same pattern as tdtpcli/commands/import.go and broker.go
+	return ts.parser.DecompressData(context.Background(), pkt, func(ctx context.Context, compressed string) ([]string, error) {
+		return processors.DecompressDataForTdtp(compressed)
+	})
 }
