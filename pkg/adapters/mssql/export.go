@@ -463,29 +463,10 @@ func (a *Adapter) readAllRows(ctx context.Context, tableName string, pkgSchema p
 	schemaName, table := a.parseTableName(tableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
-	// Get real SQL schema to detect UNIQUEIDENTIFIER fields
-	sqlSchema, err := a.GetTableSchema(ctx, tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get table schema: %w", err)
-	}
-
-	// Create map of field types from SQL schema
-	fieldTypes := make(map[string]string)
-	for _, field := range sqlSchema.Fields {
-		fieldTypes[field.Name] = field.Type
-	}
-
-	// Формируем список полей для SELECT с конвертацией UNIQUEIDENTIFIER
+	// Формируем список полей для SELECT
 	var columns []string
 	for _, field := range pkgSchema.Fields {
-		// Check if field type contains "uniqueidentifier" (case-insensitive)
-		sqlType := fieldTypes[field.Name]
-		if strings.Contains(strings.ToLower(sqlType), "uniqueidentifier") {
-			// Convert UNIQUEIDENTIFIER to VARCHAR(36) for proper display
-			columns = append(columns, fmt.Sprintf("CONVERT(VARCHAR(36), [%s]) AS [%s]", field.Name, field.Name))
-		} else {
-			columns = append(columns, fmt.Sprintf("[%s]", field.Name))
-		}
+		columns = append(columns, fmt.Sprintf("[%s]", field.Name))
 	}
 
 	query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), fullTableName)
