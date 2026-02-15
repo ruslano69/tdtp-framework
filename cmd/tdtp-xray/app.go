@@ -716,8 +716,25 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 	// Generate query from tableName if provided (secure: only SELECT)
 	var queryToExecute string
 	if source != nil && source.DSN != "" && source.TableName != "" {
-		// Generate safe SELECT query from table name
-		queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
+		// For MSSQL, get table schema and convert UNIQUEIDENTIFIER to VARCHAR
+		if source.Type == "mssql" {
+			schema := a.metadataService.GetTableSchema(source.Type, source.DSN, source.TableName)
+
+			var selectFields []string
+			for _, col := range schema.Columns {
+				// Convert UNIQUEIDENTIFIER to VARCHAR(36) for proper display
+				if strings.Contains(strings.ToUpper(col.DataType), "UNIQUEIDENTIFIER") {
+					selectFields = append(selectFields, fmt.Sprintf("CONVERT(VARCHAR(36), %s) AS %s", col.Name, col.Name))
+				} else {
+					selectFields = append(selectFields, col.Name)
+				}
+			}
+
+			queryToExecute = fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectFields, ", "), source.TableName)
+		} else {
+			// For other databases, use SELECT *
+			queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
+		}
 		fmt.Printf("🔍 Generated query from tableName: '%s'\n", queryToExecute)
 	} else if source != nil && source.DSN != "" && source.Query != "" {
 		// Fallback to legacy query field (deprecated)
