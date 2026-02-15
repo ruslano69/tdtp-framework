@@ -141,8 +141,8 @@ class DevEnvironment:
         max_attempts = 60  # 2 minutes
         for i in range(max_attempts):
             result = self.run_command(
-                ['docker', 'exec', 'tdtp-mssql-test', '/opt/mssql-tools/bin/sqlcmd',
-                 '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password, '-Q', 'SELECT 1'],
+                ['docker', 'exec', 'tdtp-mssql-test', '/opt/mssql-tools18/bin/sqlcmd',
+                 '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password, '-Q', 'SELECT 1', '-C'],
                 check=False, capture=True
             )
             if result and result.returncode == 0:
@@ -169,8 +169,8 @@ class DevEnvironment:
         # Execute SQL via stdin
         with open(setup_sql, 'r') as f:
             proc = subprocess.Popen(
-                ['docker', 'exec', '-i', 'tdtp-mssql-test', '/opt/mssql-tools/bin/sqlcmd',
-                 '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password],
+                ['docker', 'exec', '-i', 'tdtp-mssql-test', '/opt/mssql-tools18/bin/sqlcmd',
+                 '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password, '-C'],
                 stdin=f,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -262,7 +262,7 @@ class DevEnvironment:
         # MSSQL
         print("MSSQL (localhost:1433):", end=" ")
         result = self.run_command(
-            ['docker', 'exec', 'tdtp-mssql-test', '/opt/mssql-tools/bin/sqlcmd',
+            ['docker', 'exec', 'tdtp-mssql-test', '/opt/mssql-tools18/bin/sqlcmd',
              '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password,
              '-d', 'TravelGuide', '-Q', 'SELECT COUNT(*) FROM cities'],
             check=False, capture=True
