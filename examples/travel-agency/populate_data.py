@@ -99,16 +99,16 @@ CITIES = {
 }
 
 TOUR_TEMPLATES = [
-    ('Alpine Adventure', 'Switzerland', 7, 'Challenging', 'Experience the Swiss Alps with hiking, mountain climbing, and glacier tours'),
-    ('Beach Paradise', 'Thailand', 5, 'Easy', 'Relax on pristine beaches, snorkeling, and island hopping in Phuket'),
-    ('Cultural Heritage', 'Italy', 10, 'Moderate', 'Explore ancient Rome, Renaissance Florence, and romantic Venice'),
-    ('Safari Explorer', 'Kenya', 8, 'Moderate', 'Wildlife safari in Masai Mara, see the Big Five and Maasai villages'),
-    ('Northern Lights', 'Iceland', 6, 'Moderate', 'Chase the Aurora Borealis, hot springs, and volcanic landscapes'),
-    ('Amazon Expedition', 'Brazil', 9, 'Challenging', 'Deep jungle trekking, wildlife spotting, and river adventures'),
-    ('Great Wall Trek', 'China', 7, 'Challenging', 'Hike less-traveled sections of the Great Wall with expert guides'),
-    ('Machu Picchu Journey', 'Peru', 8, 'Challenging', 'Inca Trail trek to the Lost City with acclimatization in Cusco'),
-    ('Mediterranean Cruise', 'Greece', 12, 'Easy', 'Island hopping through Santorini, Mykonos, and Crete'),
-    ('Tokyo Modern', 'Japan', 5, 'Easy', 'Experience cutting-edge Tokyo: technology, fashion, and cuisine'),
+    ('Alpine Adventure', 'CHE', 7, 'Challenging', 'Experience the Swiss Alps with hiking, mountain climbing, and glacier tours'),
+    ('Beach Paradise', 'THA', 5, 'Easy', 'Relax on pristine beaches, snorkeling, and island hopping in Phuket'),
+    ('Cultural Heritage', 'ITA', 10, 'Moderate', 'Explore ancient Rome, Renaissance Florence, and romantic Venice'),
+    ('Safari Explorer', 'KEN', 8, 'Moderate', 'Wildlife safari in Masai Mara, see the Big Five and Maasai villages'),
+    ('Northern Lights', 'ISL', 6, 'Moderate', 'Chase the Aurora Borealis, hot springs, and volcanic landscapes'),
+    ('Amazon Expedition', 'BRA', 9, 'Challenging', 'Deep jungle trekking, wildlife spotting, and river adventures'),
+    ('Great Wall Trek', 'CHN', 7, 'Challenging', 'Hike less-traveled sections of the Great Wall with expert guides'),
+    ('Machu Picchu Journey', 'PER', 8, 'Challenging', 'Inca Trail trek to the Lost City with acclimatization in Cusco'),
+    ('Mediterranean Cruise', 'GRC', 12, 'Easy', 'Island hopping through Santorini, Mykonos, and Crete'),
+    ('Tokyo Modern', 'JPN', 5, 'Easy', 'Experience cutting-edge Tokyo: technology, fashion, and cuisine'),
 ]
 
 GUIDE_SPECIALIZATIONS = [
