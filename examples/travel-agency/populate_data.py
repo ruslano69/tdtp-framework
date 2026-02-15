@@ -130,8 +130,20 @@ PAYMENT_METHODS = ['Credit Card', 'Debit Card', 'PayPal', 'Bank Transfer', 'Cash
 
 def get_connection():
     """Create database connection"""
-    conn_str = f'DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={SERVER};DATABASE={DATABASE};UID={USERNAME};PWD={PASSWORD};TrustServerCertificate=yes'
-    return pyodbc.connect(conn_str)
+    # Try Driver 18 first, fallback to Driver 17
+    drivers = ['ODBC Driver 18 for SQL Server', 'ODBC Driver 17 for SQL Server', 'SQL Server']
+
+    for driver in drivers:
+        try:
+            conn_str = f'DRIVER={{{driver}}};SERVER={SERVER};DATABASE={DATABASE};UID={USERNAME};PWD={PASSWORD};TrustServerCertificate=yes'
+            return pyodbc.connect(conn_str)
+        except pyodbc.Error as e:
+            if 'IM002' in str(e):  # Driver not found
+                continue
+            else:
+                raise
+
+    raise Exception(f"No suitable ODBC driver found. Available drivers: {pyodbc.drivers()}")
 
 def random_date(start_year, end_year):
     """Generate random date between years"""
