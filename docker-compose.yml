@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # TDTP UNIFIED TEST ENVIRONMENT
+  # ============================================
+
+  # RabbitMQ - Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: tdtp-rabbitmq-test
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: tdtp_test
+      RABBITMQ_DEFAULT_PASS: tdtp_test_password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tdtp-network
+    restart: unless-stopped
+
+  # Microsoft SQL Server 2019
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: tdtp-mssql-test
+    ports:
+      - "1433:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_PID: "Developer"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -Q 'SELECT 1' -C || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mssql-data:/var/opt/mssql
+    networks:
+      - tdtp-network
+    restart: unless-stopped
+
+  # PostgreSQL 16
+  postgres:
+    image: postgres:16
+    container_name: tdtp-postgres-test
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tdtp_test
+      POSTGRES_PASSWORD: tdtp_test_password
+      POSTGRES_DB: tdtp_test_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tdtp_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - tdtp-network
+    restart: unless-stopped
+
+  # MySQL 8
+  mysql:
+    image: mysql:8
+    container_name: tdtp-mysql-test
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "YourStrong!Passw0rd"
+      MYSQL_DATABASE: tdtp_test_db
+      MYSQL_USER: tdtp_test
+      MYSQL_PASSWORD: tdtp_test_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pYourStrong!Passw0rd"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - tdtp-network
+    restart: unless-stopped
+
+  # Adminer - Database Management UI
+  adminer:
+    image: adminer:latest
+    container_name: tdtp-adminer
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: tdtp-postgres-test
+    networks:
+      - tdtp-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - mssql
+      - mysql
+
+networks:
+  tdtp-network:
+    driver: bridge
+
+volumes:
+  mssql-data:
+    name: tdtp-mssql-data
+  postgres-data:
+    name: tdtp-postgres-data
+  mysql-data:
+    name: tdtp-mysql-data

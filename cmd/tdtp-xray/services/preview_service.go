@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // PreviewService handles data preview with row limits
@@ -123,6 +125,70 @@ func (ps *PreviewService) PreviewMockSource(mockSource *MockSource, limit int) P
 		Rows:         rows,
 		RowCount:     len(rows),
 		TotalRowsEst: int64(len(mockSource.Data)),
+	}
+}
+
+// PreviewTDTPSource previews TDTP XML source data
+func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewResult {
+	tdtpService := NewTDTPService()
+
+	// Test/parse TDTP file (handles multi-volume automatically)
+	result := tdtpService.TestTDTPFile(filePath)
+
+	if !result.Success {
+		return PreviewResult{
+			Success: false,
+			Message: result.Message,
+		}
+	}
+
+	// Get the parsed data packet
+	dataPacket := result.DataPacket
+	if dataPacket == nil {
+		return PreviewResult{
+			Success: false,
+			Message: "Failed to parse TDTP file",
+		}
+	}
+
+	// Extract column names from schema
+	columns := make([]string, len(dataPacket.Schema.Fields))
+	for i, field := range dataPacket.Schema.Fields {
+		columns[i] = field.Name
+	}
+
+	// Convert rows to preview format
+	totalRows := len(dataPacket.Data.Rows)
+	previewRows := dataPacket.Data.Rows
+	if totalRows > limit {
+		previewRows = previewRows[:limit]
+	}
+
+	// Convert to map[string]interface{} format
+	// Use framework parser to correctly handle escaping (\|, \\, etc.)
+	parser := packet.NewParser()
+	rows := make([]map[string]interface{}, len(previewRows))
+	for i, row := range previewRows {
+		// GetRowValues properly handles escaping (e.g., \| becomes |, \\ becomes \)
+		values := parser.GetRowValues(row)
+
+		rowMap := make(map[string]interface{})
+		for j, col := range columns {
+			if j < len(values) {
+				rowMap[col] = values[j]
+			} else {
+				rowMap[col] = nil
+			}
+		}
+		rows[i] = rowMap
+	}
+
+	return PreviewResult{
+		Success:      true,
+		Columns:      columns,
+		Rows:         rows,
+		RowCount:     len(rows),
+		TotalRowsEst: int64(totalRows),
 	}
 }
 

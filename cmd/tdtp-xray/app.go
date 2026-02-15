@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -240,10 +241,65 @@ func (a *App) GetTables(dbType, dsn string) ConnectionResult {
 }
 
 // GetTableSchema retrieves schema for a specific table
-// TODO: Uncomment after fixing bindings - returns services.TableSchema
-// func (a *App) GetTableSchema(dbType, dsn, tableName string) services.TableSchema {
-// 	return a.metadataService.GetTableSchema(dbType, dsn, tableName)
-// }
+func (a *App) GetTableSchema(dbType, dsn, tableName string) TableSchemaResult {
+	schema := a.metadataService.GetTableSchema(dbType, dsn, tableName)
+
+	// Convert to frontend-friendly format
+	columns := make([]ColumnInfo, len(schema.Columns))
+	for i, col := range schema.Columns {
+		columns[i] = ColumnInfo{
+			Name: col.Name,
+			Type: col.DataType,
+		}
+	}
+
+	return TableSchemaResult{
+		TableName: schema.TableName,
+		Columns:   columns,
+	}
+}
+
+// GetTablesBySourceName retrieves table schema by source name (for Visual Designer)
+func (a *App) GetTablesBySourceName(sourceName string) []TableSchemaResult {
+	fmt.Printf("🔍 GetTablesBySourceName called: sourceName='%s'\n", sourceName)
+
+	// Find source in app.sources
+	var source *Source
+	for i := range a.sources {
+		if a.sources[i].Name == sourceName {
+			source = &a.sources[i]
+			break
+		}
+	}
+
+	if source == nil {
+		fmt.Printf("❌ Source '%s' not found in app.sources\n", sourceName)
+		return []TableSchemaResult{}
+	}
+
+	fmt.Printf("✅ Found source: Type='%s', TableName='%s'\n", source.Type, source.TableName)
+
+	// Get table schema
+	if source.TableName == "" {
+		fmt.Printf("❌ Source has no TableName set\n")
+		return []TableSchemaResult{}
+	}
+
+	schema := a.GetTableSchema(source.Type, source.DSN, source.TableName)
+	return []TableSchemaResult{schema}
+}
+
+// TableSchemaResult holds table schema information
+type TableSchemaResult struct {
+	TableName string       `json:"tableName"`
+	Columns   []ColumnInfo `json:"columns"`
+}
+
+// ColumnInfo holds column information
+type ColumnInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
 
 // LoadMockSourceFile loads mock source from file
 // TODO: Uncomment after fixing bindings - returns *services.MockSource
@@ -313,9 +369,88 @@ func (a *App) GetCanvasDesign() *CanvasDesign {
 }
 
 // GenerateSQL generates SQL from canvas design
-func (a *App) GenerateSQL(design CanvasDesign) (string, error) {
-	// TODO: Implement SQL generation from canvas
-	return "SELECT * FROM table1", nil
+// GenerateSQLResult holds SQL generation result
+type GenerateSQLResult struct {
+	SQL   string `json:"sql"`
+	Error string `json:"error,omitempty"`
+}
+
+func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
+	fmt.Printf("🔍 GenerateSQL called: tables=%d, joins=%d\n", len(design.Tables), len(design.Joins))
+
+	if len(design.Tables) == 0 {
+		return GenerateSQLResult{Error: "No tables selected"}
+	}
+
+	// Build SELECT clause with visible fields
+	var selectFields []string
+	for _, table := range design.Tables {
+		tableAlias := table.Alias
+		if tableAlias == "" {
+			tableAlias = table.SourceName
+		}
+
+		for _, field := range table.Fields {
+			if field.Visible {
+				selectFields = append(selectFields, fmt.Sprintf("%s.%s", tableAlias, field.Name))
+			}
+		}
+	}
+
+	if len(selectFields) == 0 {
+		return GenerateSQLResult{Error: "No fields selected for output"}
+	}
+
+	// Build FROM clause with first table
+	firstTable := design.Tables[0]
+	fromClause := firstTable.SourceName
+	if firstTable.Alias != "" && firstTable.Alias != firstTable.SourceName {
+		fromClause = fmt.Sprintf("%s AS %s", firstTable.SourceName, firstTable.Alias)
+	}
+
+	// Build JOIN clauses
+	var joinClauses []string
+	for _, join := range design.Joins {
+		// Find table aliases
+		leftAlias := join.LeftTable
+		rightAlias := join.RightTable
+
+		joinType := "INNER JOIN"
+		if join.JoinType == "left" {
+			joinType = "LEFT JOIN"
+		} else if join.JoinType == "right" {
+			joinType = "RIGHT JOIN"
+		}
+
+		// Find the right table source name
+		var rightSource string
+		for _, t := range design.Tables {
+			if t.Alias == rightAlias || t.SourceName == rightAlias {
+				rightSource = t.SourceName
+				break
+			}
+		}
+
+		if rightSource == "" {
+			rightSource = rightAlias
+		}
+
+		joinClause := fmt.Sprintf("%s %s ON %s.%s = %s.%s",
+			joinType, rightSource, leftAlias, join.LeftField, rightAlias, join.RightField)
+		joinClauses = append(joinClauses, joinClause)
+	}
+
+	// Build complete SQL
+	sql := fmt.Sprintf("SELECT\n    %s\nFROM %s",
+		strings.Join(selectFields, ",\n    "),
+		fromClause)
+
+	if len(joinClauses) > 0 {
+		sql += "\n" + strings.Join(joinClauses, "\n")
+	}
+
+	fmt.Printf("✅ Generated SQL:\n%s\n", sql)
+	return GenerateSQLResult{SQL: sql}
 }
 
 // --- Step 4: Transform ---
@@ -503,10 +638,34 @@ type PreviewResult struct {
 	Error     string         `json:"error,omitempty"`
 }
 
+// Helper function for safe string extraction in debug logs
+func getStringSafe(source *Source, field string) string {
+	if source == nil {
+		return "<nil source>"
+	}
+	switch field {
+	case "DSN":
+		return source.DSN
+	case "TableName":
+		return source.TableName
+	case "Query":
+		return source.Query
+	default:
+		return ""
+	}
+}
+
 // PreviewSource previews data from a source
 func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 	if req.Limit == 0 {
 		req.Limit = 10 // Default limit
+	}
+
+	// DEBUG: Log request
+	fmt.Printf("🔍 PreviewSource called: SourceName='%s', Limit=%d\n", req.SourceName, req.Limit)
+	fmt.Printf("🔍 Total sources in app.sources: %d\n", len(a.sources))
+	for i, s := range a.sources {
+		fmt.Printf("  [%d] Name='%s', Type='%s', TableName='%s', DSN='%s'\n", i, s.Name, s.Type, s.TableName, s.DSN)
 	}
 
 	// Find source if sourceName provided
@@ -519,10 +678,12 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 			}
 		}
 		if source == nil {
+			fmt.Printf("❌ Source '%s' NOT FOUND in app.sources\n", req.SourceName)
 			return PreviewResult{
 				Error: fmt.Sprintf("Source '%s' not found", req.SourceName),
 			}
 		}
+		fmt.Printf("✅ Found source: Name='%s', Type='%s', TableName='%s'\n", source.Name, source.Type, source.TableName)
 	}
 
 	// Handle mock source preview
@@ -546,19 +707,51 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 		return a.convertPreviewResult(result)
 	}
 
+	// Handle TDTP source preview
+	if source != nil && source.Type == "tdtp" && source.DSN != "" {
+		result := a.previewService.PreviewTDTPSource(source.DSN, req.Limit)
+		return a.convertPreviewResult(result)
+	}
+
 	// Generate query from tableName if provided (secure: only SELECT)
 	var queryToExecute string
 	if source != nil && source.DSN != "" && source.TableName != "" {
-		// Generate safe SELECT query from table name
-		queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
+		// For MSSQL, get table schema and convert UNIQUEIDENTIFIER to VARCHAR
+		if source.Type == "mssql" {
+			schema := a.metadataService.GetTableSchema(source.Type, source.DSN, source.TableName)
+
+			var selectFields []string
+			for _, col := range schema.Columns {
+				// Convert UNIQUEIDENTIFIER to VARCHAR(36) for proper display
+				if strings.Contains(strings.ToUpper(col.DataType), "UNIQUEIDENTIFIER") {
+					selectFields = append(selectFields, fmt.Sprintf("CONVERT(VARCHAR(36), %s) AS %s", col.Name, col.Name))
+				} else {
+					selectFields = append(selectFields, col.Name)
+				}
+			}
+
+			queryToExecute = fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectFields, ", "), source.TableName)
+		} else {
+			// For other databases, use SELECT *
+			queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
+		}
+		fmt.Printf("🔍 Generated query from tableName: '%s'\n", queryToExecute)
 	} else if source != nil && source.DSN != "" && source.Query != "" {
 		// Fallback to legacy query field (deprecated)
 		queryToExecute = source.Query
+		fmt.Printf("🔍 Using legacy query field: '%s'\n", queryToExecute)
+	} else {
+		fmt.Printf("⚠️ No query generated: DSN='%s', TableName='%s', Query='%s'\n",
+			getStringSafe(source, "DSN"), getStringSafe(source, "TableName"), getStringSafe(source, "Query"))
 	}
 
 	// Preview real database query
 	if queryToExecute != "" && source != nil && source.DSN != "" {
+		fmt.Printf("🔍 Executing preview query: Type='%s', DSN='%s', Query='%s', Limit=%d\n",
+			source.Type, source.DSN, queryToExecute, req.Limit)
 		result := a.previewService.PreviewQuery(source.Type, source.DSN, queryToExecute, req.Limit)
+		fmt.Printf("🔍 Preview result: Success=%v, Rows=%d, Error='%s'\n",
+			result.Success, len(result.Rows), result.Message)
 		return a.convertPreviewResult(result)
 	}
 
