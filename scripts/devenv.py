@@ -138,7 +138,8 @@ class DevEnvironment:
 
         # Wait for MSSQL to be ready
         print("Waiting for MSSQL to be ready...")
-        for i in range(30):
+        max_attempts = 60  # 2 minutes
+        for i in range(max_attempts):
             result = self.run_command(
                 ['docker', 'exec', 'tdtp-mssql-test', '/opt/mssql-tools/bin/sqlcmd',
                  '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password, '-Q', 'SELECT 1'],
@@ -147,9 +148,14 @@ class DevEnvironment:
             if result and result.returncode == 0:
                 print("✓ MSSQL is ready")
                 break
+
+            if (i + 1) % 10 == 0:
+                print(f"  Still waiting... ({i + 1}/{max_attempts})")
+
             time.sleep(2)
         else:
-            print("✗ MSSQL failed to become ready")
+            print("✗ MSSQL failed to become ready after 2 minutes")
+            print("  Check logs: docker logs tdtp-mssql-test")
             return False
 
         # Run setup script
@@ -159,15 +165,24 @@ class DevEnvironment:
             return False
 
         print(f"Running {setup_sql.name}...")
-        with open(setup_sql, 'r') as f:
-            sql_content = f.read()
 
-        # Execute SQL
-        result = self.run_command(
-            ['docker', 'exec', '-i', 'tdtp-mssql-test', '/opt/mssql-tools/bin/sqlcmd',
-             '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password],
-            check=False, capture=True
-        )
+        # Execute SQL via stdin
+        with open(setup_sql, 'r') as f:
+            proc = subprocess.Popen(
+                ['docker', 'exec', '-i', 'tdtp-mssql-test', '/opt/mssql-tools/bin/sqlcmd',
+                 '-S', 'localhost', '-U', 'sa', '-P', self.mssql_password],
+                stdin=f,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = proc.communicate()
+
+            if proc.returncode != 0:
+                print(f"✗ SQL script failed: {stderr}")
+                return False
+
+            print("✓ SQL script executed successfully")
 
         # Load data with Python script
         populate_script = self.project_root / 'examples' / 'travel-guide' / 'populate_data.py'
@@ -204,11 +219,23 @@ class DevEnvironment:
             return False
 
         print(f"Running {setup_sql.name}...")
+
+        # Execute SQL via stdin
         with open(setup_sql, 'r') as f:
-            result = self.run_command(
+            proc = subprocess.Popen(
                 ['docker', 'exec', '-i', 'tdtp-postgres-test', 'psql', '-U', self.postgres_user, '-d', 'TravelGuide'],
-                check=False
+                stdin=f,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
+            stdout, stderr = proc.communicate()
+
+            if proc.returncode != 0:
+                print(f"✗ SQL script failed: {stderr}")
+                return False
+
+            print("✓ SQL script executed successfully")
 
         # Load data with Python script
         populate_script = self.project_root / 'examples' / 'travel-guide' / 'populate_data_postgres.py'
