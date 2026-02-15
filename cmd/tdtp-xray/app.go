@@ -503,10 +503,34 @@ type PreviewResult struct {
 	Error     string         `json:"error,omitempty"`
 }
 
+// Helper function for safe string extraction in debug logs
+func getStringSafe(source *Source, field string) string {
+	if source == nil {
+		return "<nil source>"
+	}
+	switch field {
+	case "DSN":
+		return source.DSN
+	case "TableName":
+		return source.TableName
+	case "Query":
+		return source.Query
+	default:
+		return ""
+	}
+}
+
 // PreviewSource previews data from a source
 func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 	if req.Limit == 0 {
 		req.Limit = 10 // Default limit
+	}
+
+	// DEBUG: Log request
+	fmt.Printf("🔍 PreviewSource called: SourceName='%s', Limit=%d\n", req.SourceName, req.Limit)
+	fmt.Printf("🔍 Total sources in app.sources: %d\n", len(a.sources))
+	for i, s := range a.sources {
+		fmt.Printf("  [%d] Name='%s', Type='%s', TableName='%s', DSN='%s'\n", i, s.Name, s.Type, s.TableName, s.DSN)
 	}
 
 	// Find source if sourceName provided
@@ -519,10 +543,12 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 			}
 		}
 		if source == nil {
+			fmt.Printf("❌ Source '%s' NOT FOUND in app.sources\n", req.SourceName)
 			return PreviewResult{
 				Error: fmt.Sprintf("Source '%s' not found", req.SourceName),
 			}
 		}
+		fmt.Printf("✅ Found source: Name='%s', Type='%s', TableName='%s'\n", source.Name, source.Type, source.TableName)
 	}
 
 	// Handle mock source preview
@@ -557,14 +583,23 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 	if source != nil && source.DSN != "" && source.TableName != "" {
 		// Generate safe SELECT query from table name
 		queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
+		fmt.Printf("🔍 Generated query from tableName: '%s'\n", queryToExecute)
 	} else if source != nil && source.DSN != "" && source.Query != "" {
 		// Fallback to legacy query field (deprecated)
 		queryToExecute = source.Query
+		fmt.Printf("🔍 Using legacy query field: '%s'\n", queryToExecute)
+	} else {
+		fmt.Printf("⚠️ No query generated: DSN='%s', TableName='%s', Query='%s'\n",
+			getStringSafe(source, "DSN"), getStringSafe(source, "TableName"), getStringSafe(source, "Query"))
 	}
 
 	// Preview real database query
 	if queryToExecute != "" && source != nil && source.DSN != "" {
+		fmt.Printf("🔍 Executing preview query: Type='%s', DSN='%s', Query='%s', Limit=%d\n",
+			source.Type, source.DSN, queryToExecute, req.Limit)
 		result := a.previewService.PreviewQuery(source.Type, source.DSN, queryToExecute, req.Limit)
+		fmt.Printf("🔍 Preview result: Success=%v, Rows=%d, Error='%s'\n",
+			result.Success, len(result.Rows), result.Message)
 		return a.convertPreviewResult(result)
 	}
 
