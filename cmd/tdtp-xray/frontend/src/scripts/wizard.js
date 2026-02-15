@@ -982,21 +982,29 @@ async function saveSourceForm() {
         source.tested = (source.dsn === lastTestedDSN);
     }
 
-    if (editingSourceIndex >= 0) {
-        // Update existing
-        sources[editingSourceIndex] = source;
-    } else {
-        // Add new
-        sources.push(source);
-    }
-
-    // Save to backend if available
+    // Save to backend first (before updating local array)
     if (wailsReady && window.go) {
         try {
-            await window.go.main.App.AddSource(source);
+            if (editingSourceIndex >= 0) {
+                // Update existing source in backend
+                const oldName = sources[editingSourceIndex].name;
+                await window.go.main.App.UpdateSource(oldName, source);
+            } else {
+                // Add new source to backend
+                await window.go.main.App.AddSource(source);
+            }
         } catch (err) {
-            console.error('Failed to save source to backend:', err);
+            console.error('Failed to sync source to backend:', err);
+            showNotification(`Warning: Source saved locally but backend sync failed: ${err}`, 'warning');
         }
+    }
+
+    if (editingSourceIndex >= 0) {
+        // Update existing in local array
+        sources[editingSourceIndex] = source;
+    } else {
+        // Add new to local array
+        sources.push(source);
     }
 
     cancelSourceForm();
@@ -1040,9 +1048,20 @@ function editSource(index) {
     }
 }
 
-function removeSource(index) {
+async function removeSource(index) {
     const src = sources[index];
     if (confirm(`Remove source '${src.name}'?`)) {
+        // Remove from backend first
+        if (wailsReady && window.go) {
+            try {
+                await window.go.main.App.RemoveSource(src.name);
+            } catch (err) {
+                console.error('Failed to remove source from backend:', err);
+                showNotification(`Warning: Source removed locally but backend sync failed: ${err}`, 'warning');
+            }
+        }
+
+        // Remove from local array
         sources.splice(index, 1);
         renderSourceList();
         showNotification(`Source '${src.name}' removed`, 'info');
