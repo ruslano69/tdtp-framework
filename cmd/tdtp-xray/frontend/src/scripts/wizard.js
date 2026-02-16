@@ -89,7 +89,8 @@ function loadStep(step) {
             break;
         case 3:
             content.innerHTML = getStep3HTML();
-            loadStep3Data();
+            // Wait for DOM to be ready before loading data
+            setTimeout(() => loadStep3Data(), 50);
             break;
         case 4:
             content.innerHTML = getStep4HTML();
@@ -1207,13 +1208,32 @@ let selectedJoinId = null;
 let joinStartField = null; // For creating joins
 
 function loadStep3Data() {
-    // Load sources from Step 2 (global sources variable, not appState!)
-    const sourceListEl = document.getElementById('tablesSourceList');
+    console.log('🔄 loadStep3Data() called');
 
+    // Check DOM readiness
+    const sourceListEl = document.getElementById('tablesSourceList');
+    const canvasArea = document.getElementById('canvasArea');
+    const svg = document.getElementById('canvasSVG');
+
+    console.log('DOM elements check:', {
+        sourceListEl: !!sourceListEl,
+        canvasArea: !!canvasArea,
+        svg: !!svg
+    });
+
+    if (!sourceListEl || !canvasArea || !svg) {
+        console.error('❌ DOM elements not ready, retrying in 100ms...');
+        setTimeout(() => loadStep3Data(), 100);
+        return;
+    }
+
+    // Load sources from Step 2 (global sources variable, not appState!)
     if (sources.length === 0) {
         sourceListEl.innerHTML = '<p style="color: #999; font-size: 13px;">No sources defined in Step 2</p>';
         return;
     }
+
+    console.log('📋 Loading sources:', sources.length);
 
     let html = '';
     sources.forEach(src => {
@@ -1230,21 +1250,39 @@ function loadStep3Data() {
     sourceListEl.innerHTML = html;
 
     // Load existing canvas design from backend
+    console.log('🔍 Checking Wails readiness...');
     if (wailsReady && window.go && window.go.main && window.go.main.App) {
+        console.log('✅ Wails ready, loading canvas design...');
         window.go.main.App.GetCanvasDesign().then(design => {
-            if (design && design.tables) {
+            console.log('📦 GetCanvasDesign response:', design);
+            if (design && design.tables && design.tables.length > 0) {
                 canvasDesign = design;
-                console.log('Loaded canvas design:', canvasDesign);
-                // Use setTimeout to ensure DOM is ready
-                setTimeout(() => renderCanvas(), 100);
+                console.log('✅ Canvas design loaded:', {
+                    tables: canvasDesign.tables.length,
+                    joins: canvasDesign.joins ? canvasDesign.joins.length : 0
+                });
+                // Render canvas immediately
+                renderCanvas();
             } else {
-                console.log('No canvas design data');
+                console.log('ℹ️ No canvas design data or empty tables');
+                // Initialize empty design if needed
+                if (!canvasDesign.tables) {
+                    canvasDesign.tables = [];
+                }
+                if (!canvasDesign.joins) {
+                    canvasDesign.joins = [];
+                }
             }
         }).catch(err => {
-            console.log('No existing canvas design:', err);
+            console.error('❌ Failed to load canvas design:', err);
         });
     } else {
-        console.log('Wails not ready, skipping canvas load');
+        console.warn('⚠️ Wails not ready, using existing canvasDesign:', canvasDesign);
+        // Try to render with existing data
+        if (canvasDesign && canvasDesign.tables && canvasDesign.tables.length > 0) {
+            console.log('Rendering with existing canvasDesign');
+            renderCanvas();
+        }
     }
 }
 
@@ -1321,14 +1359,20 @@ async function addTableToCanvas(sourceName) {
 }
 
 function renderCanvas() {
+    console.log('🎨 renderCanvas() called');
     const canvasArea = document.getElementById('canvasArea');
     const svg = document.getElementById('canvasSVG');
 
     // Check if DOM elements exist
     if (!canvasArea || !svg) {
-        console.warn('Canvas DOM elements not ready yet');
+        console.warn('⚠️ Canvas DOM elements not ready yet');
         return;
     }
+
+    console.log('📊 Rendering canvas with:', {
+        tables: canvasDesign.tables.length,
+        joins: canvasDesign.joins ? canvasDesign.joins.length : 0
+    });
 
     // Clear existing
     canvasArea.innerHTML = '';
@@ -1336,10 +1380,12 @@ function renderCanvas() {
 
     // Render tables
     canvasDesign.tables.forEach((table, index) => {
+        console.log(`  ➕ Rendering table ${index}: ${table.sourceName}`);
         const tableCard = createTableCard(table, index);
         canvasArea.appendChild(tableCard);
     });
 
+    console.log('✅ Tables rendered, scheduling JOIN rendering...');
     // Render joins after a small delay to ensure connectors are in DOM
     setTimeout(() => renderJoins(), 50);
 }
@@ -1577,17 +1623,20 @@ function startJoin(tableIndex, fieldIndex) {
 }
 
 function renderJoins() {
+    console.log('🔗 renderJoins() called');
     const svg = document.getElementById('canvasSVG');
 
     // Check if SVG exists
     if (!svg) {
-        console.warn('SVG element not found');
+        console.warn('⚠️ SVG element not found');
         return;
     }
 
+    console.log(`📍 Rendering ${canvasDesign.joins.length} JOINs`);
     svg.innerHTML = '';
 
     canvasDesign.joins.forEach((join, joinIndex) => {
+        console.log(`  🔗 JOIN ${joinIndex}: ${join.leftTable}.${join.leftField} → ${join.rightTable}.${join.rightField}`);
         const leftTableIdx = canvasDesign.tables.findIndex(t => t.sourceName === join.leftTable);
         const rightTableIdx = canvasDesign.tables.findIndex(t => t.sourceName === join.rightTable);
 
