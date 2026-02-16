@@ -73,7 +73,7 @@ func TestComparisonExpression_Implementation(t *testing.T) {
 	tests := []struct {
 		field    string
 		operator string
-		value    interface{}
+		value    any
 	}{
 		{"id", "eq", "123"},
 		{"age", "gt", 18},

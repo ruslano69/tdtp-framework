@@ -472,9 +472,9 @@ func TestFieldValidator_MultipleErrors(t *testing.T) {
 }
 
 func TestFieldValidator_FromConfig(t *testing.T) {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"stop_on_first_error": true,
-		"rules": map[string]interface{}{
+		"rules": map[string]any{
 			"email":  "email",
 			"age":    "range:18-65",
 			"status": "enum:active,inactive",

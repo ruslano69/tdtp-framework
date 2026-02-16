@@ -15,7 +15,7 @@ type DLQEntry struct {
 	Attempts    int         `json:"attempts"`
 	LastError   string      `json:"last_error"`
 	FailureType string      `json:"failure_type"` // max_attempts_exceeded, context_cancelled, etc.
-	Data        interface{} `json:"data,omitempty"`
+	Data        any `json:"data,omitempty"`
 }
 
 // DLQ - Dead Letter Queue для хранения проблемных сообщений

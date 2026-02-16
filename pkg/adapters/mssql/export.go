@@ -378,7 +378,7 @@ func (a *Adapter) buildSelectQuery(
 	tableName string,
 	tableSchema packet.Schema,
 	query *packet.Query,
-) (string, []interface{}, error) {
+) (string, []any, error) {
 	// Используем генератор SQL из ядра (не дублируем код!)
 	sqlGenerator := tdtql.NewSQLGenerator()
 
@@ -503,8 +503,8 @@ func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string,
 
 	// Подготавливаем scanner для всех колонок
 	columnCount := len(pkgSchema.Fields)
-	values := make([]interface{}, columnCount)
-	valuePtrs := make([]interface{}, columnCount)
+	values := make([]any, columnCount)
+	valuePtrs := make([]any, columnCount)
 	for i := range values {
 		valuePtrs[i] = &values[i]
 	}
@@ -532,7 +532,7 @@ func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string,
 
 // valueToString конвертирует значение БД в строку для TDTP
 // Делегирует в UniversalTypeConverter для устранения дублирования кода
-func (a *Adapter) valueToString(value interface{}, field packet.Field) string {
+func (a *Adapter) valueToString(value any, field packet.Field) string {
 	// Делегируем в UniversalTypeConverter с MSSQL-specific обработкой
 	rawStr := a.converter.DBValueToString(value, field, "mssql")
 	// Конвертируем в TDTP формат

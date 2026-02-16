@@ -473,7 +473,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 
 	// Читаем данные
 	var rowsData []packet.Row
-	scanArgs := make([]interface{}, len(columns))
+	scanArgs := make([]any, len(columns))
 	for i := range scanArgs {
 		var v sql.NullString
 		scanArgs[i] = &v

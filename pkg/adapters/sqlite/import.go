@@ -152,7 +152,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 			strings.Join(valuePlaceholders, ", "))
 
 		// Собираем все аргументы для батча
-		args := make([]interface{}, 0, len(batch)*len(pkgSchema.Fields))
+		args := make([]any, 0, len(batch)*len(pkgSchema.Fields))
 		for rowIdx, row := range batch {
 			// Парсим строку
 			values := base.ParseRowValues(row)
@@ -180,6 +180,6 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 // typedValueToSQL конвертирует TypedValue в значение для SQL
 // DEPRECATED: Используйте base.UniversalTypeConverter.TypedValueToSQL()
 // Оставлено для обратной совместимости с существующим кодом
-func (a *Adapter) typedValueToSQL(tv schema.TypedValue) interface{} {
+func (a *Adapter) typedValueToSQL(tv schema.TypedValue) any {
 	return a.converter.TypedValueToSQL(tv, "sqlite")
 }

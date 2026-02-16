@@ -16,7 +16,7 @@ type PreviewResult struct {
 	Success      bool                     `json:"success"`
 	Message      string                   `json:"message,omitempty"`
 	Columns      []string                 `json:"columns"`
-	Rows         []map[string]interface{} `json:"rows"`
+	Rows         []map[string]any `json:"rows"`
 	RowCount     int                      `json:"rowCount"`
 	TotalRowsEst int64                    `json:"totalRowsEst,omitempty"` // Estimated total rows
 }
@@ -76,11 +76,11 @@ func (ps *PreviewService) PreviewQuery(dbType, dsn, query string, limit int) Pre
 	}
 
 	// Scan rows
-	var data []map[string]interface{}
+	var data []map[string]any
 	for rows.Next() {
-		// Create slice of interface{} to hold column values
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
+		// Create slice of any to hold column values
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
 		for i := range columns {
 			valuePtrs[i] = &values[i]
 		}
@@ -90,7 +90,7 @@ func (ps *PreviewService) PreviewQuery(dbType, dsn, query string, limit int) Pre
 		}
 
 		// Convert to map
-		row := make(map[string]interface{})
+		row := make(map[string]any)
 		for i, col := range columns {
 			row[col] = ps.convertValue(values[i])
 		}
@@ -164,15 +164,15 @@ func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewR
 		previewRows = previewRows[:limit]
 	}
 
-	// Convert to map[string]interface{} format
+	// Convert to map[string]any format
 	// Use framework parser to correctly handle escaping (\|, \\, etc.)
 	parser := packet.NewParser()
-	rows := make([]map[string]interface{}, len(previewRows))
+	rows := make([]map[string]any, len(previewRows))
 	for i, row := range previewRows {
 		// GetRowValues properly handles escaping (e.g., \| becomes |, \\ becomes \)
 		values := parser.GetRowValues(row)
 
-		rowMap := make(map[string]interface{})
+		rowMap := make(map[string]any)
 		for j, col := range columns {
 			if j < len(values) {
 				rowMap[col] = values[j]
@@ -229,7 +229,7 @@ func (ps *PreviewService) addLimitToQuery(query string, dbType string, limit int
 }
 
 // convertValue converts SQL value to JSON-friendly type
-func (ps *PreviewService) convertValue(value interface{}) interface{} {
+func (ps *PreviewService) convertValue(value any) any {
 	if value == nil {
 		return nil
 	}

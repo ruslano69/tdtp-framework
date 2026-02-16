@@ -274,13 +274,13 @@ func ConvertRowToSQLValues(
 	pkgSchema packet.Schema,
 	converter *UniversalTypeConverter,
 	dbType string,
-) ([]interface{}, error) {
+) ([]any, error) {
 	if len(rowValues) != len(pkgSchema.Fields) {
 		return nil, fmt.Errorf("expected %d values, got %d", len(pkgSchema.Fields), len(rowValues))
 	}
 
 	schemaConverter := schema.NewConverter()
-	args := make([]interface{}, len(rowValues))
+	args := make([]any, len(rowValues))
 
 	for i, value := range rowValues {
 		field := pkgSchema.Fields[i]

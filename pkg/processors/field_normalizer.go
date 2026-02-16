@@ -206,10 +206,10 @@ func (n *FieldNormalizer) normalizeDate(value string) (string, error) {
 }
 
 // NewFieldNormalizerFromConfig создает FieldNormalizer из конфигурации
-func NewFieldNormalizerFromConfig(params map[string]interface{}) (*FieldNormalizer, error) {
+func NewFieldNormalizerFromConfig(params map[string]any) (*FieldNormalizer, error) {
 	fieldsToNormalize := make(map[string]NormalizeRule)
 
-	fields, ok := params["fields"].(map[string]interface{})
+	fields, ok := params["fields"].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("missing or invalid 'fields' parameter")
 	}

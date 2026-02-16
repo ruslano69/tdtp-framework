@@ -20,11 +20,11 @@ type TypeMapper interface {
 
 	// ValueToString конвертирует значение БД в строку для TDTP пакета
 	// Обрабатывает специфичные типы каждой СУБД (UUID, JSON, массивы и т.д.)
-	ValueToString(value interface{}) string
+	ValueToString(value any) string
 
 	// StringToValue конвертирует строку из TDTP пакета в значение для БД
 	// Используется при импорте данных
-	StringToValue(str string, field packet.Field) (interface{}, error)
+	StringToValue(str string, field packet.Field) (any, error)
 }
 
 // QueryBuilder - интерфейс для построения SQL запросов
@@ -35,7 +35,7 @@ type QueryBuilder interface {
 
 	// BuildSelectWithFilter строит SELECT с WHERE/LIMIT/OFFSET
 	// Возвращает SQL запрос и массив параметров
-	BuildSelectWithFilter(tableName string, query *packet.Query) (sql string, args []interface{}, err error)
+	BuildSelectWithFilter(tableName string, query *packet.Query) (sql string, args []any, err error)
 
 	// BuildInsert строит INSERT INTO table (cols) VALUES (...)
 	BuildInsert(tableName string, fields []packet.Field) string

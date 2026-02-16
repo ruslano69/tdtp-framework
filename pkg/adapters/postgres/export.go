@@ -311,7 +311,7 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 
 // pgValueToRawString конвертирует pgx значение в сырую строку для последующей обработки
 // Делегирует в UniversalTypeConverter для устранения дублирования кода
-func (a *Adapter) pgValueToRawString(val interface{}) string {
+func (a *Adapter) pgValueToRawString(val any) string {
 	// Используем пустое поле для generic conversion
 	emptyField := packet.Field{}
 	return a.converter.DBValueToString(val, emptyField, "postgres")

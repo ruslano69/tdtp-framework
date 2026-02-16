@@ -206,8 +206,8 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 	// Читаем данные
 	var dataRows [][]string
 	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}

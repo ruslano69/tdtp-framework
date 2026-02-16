@@ -513,7 +513,7 @@ func commandWasSpecified(flags *Flags) bool {
 }
 
 // fatal prints error and exits
-func fatal(format string, args ...interface{}) {
+func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
 }

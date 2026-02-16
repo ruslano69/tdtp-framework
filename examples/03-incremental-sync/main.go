@@ -229,7 +229,7 @@ func exportIncremental(
 	adapter adapters.Adapter,
 	config sync.IncrementalConfig,
 	lastValue string,
-) ([]map[string]interface{}, string, error) {
+) ([]map[string]any, string, error) {
 	// В реальном сценарии:
 	// query := fmt.Sprintf(
 	//     "SELECT * FROM users WHERE %s > $1 ORDER BY %s LIMIT %d",
@@ -252,7 +252,7 @@ func exportIncremental(
 	}
 
 	// Generate mock records
-	mockData := []map[string]interface{}{
+	mockData := []map[string]any{
 		{
 			"id":         101,
 			"name":       "John Doe",
@@ -274,7 +274,7 @@ func exportIncremental(
 	}
 
 	// Filter by lastValue
-	var filtered []map[string]interface{}
+	var filtered []map[string]any
 	newLastTime := startTime
 
 	for _, record := range mockData {
@@ -314,7 +314,7 @@ func exportIncremental(
 func importToMySQL(
 	ctx context.Context,
 	adapter adapters.Adapter,
-	data []map[string]interface{},
+	data []map[string]any,
 ) error {
 	// В реальном сценарии:
 	// for _, record := range data {

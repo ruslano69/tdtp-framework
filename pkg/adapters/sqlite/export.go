@@ -139,7 +139,7 @@ func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, er
 	var result [][]string
 
 	// Подготавливаем scanner для всех колонок
-	scanArgs := make([]interface{}, len(schema.Fields))
+	scanArgs := make([]any, len(schema.Fields))
 	for i := range scanArgs {
 		var v sql.NullString
 		scanArgs[i] = &v

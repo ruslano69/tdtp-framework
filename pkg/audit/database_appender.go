@@ -278,7 +278,7 @@ func (da *DatabaseAppender) Close() error {
 // Query - запросить audit entries из базы
 func (da *DatabaseAppender) Query(ctx context.Context, filter QueryFilter) ([]*Entry, error) {
 	query := fmt.Sprintf("SELECT * FROM %s WHERE 1=1", da.tableName)
-	args := make([]interface{}, 0)
+	args := make([]any, 0)
 
 	// Добавляем фильтры
 	if filter.Operation != "" {
@@ -398,7 +398,7 @@ type QueryFilter struct {
 // Count - подсчитать количество audit entries
 func (da *DatabaseAppender) Count(ctx context.Context, filter QueryFilter) (int64, error) {
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE 1=1", da.tableName)
-	args := make([]interface{}, 0)
+	args := make([]any, 0)
 
 	// Добавляем фильтры
 	if filter.Operation != "" {
