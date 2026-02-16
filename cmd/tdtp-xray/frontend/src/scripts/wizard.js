@@ -1379,7 +1379,7 @@ function createTableCard(table, index) {
         `;
 
         // Get filter icon
-        const filterIcon = field.filter ? (field.filter.logic === 'OR' ? '^' : '&') : '*';
+        const filterIcon = field.filter ? (field.filter.logic === 'OR' ? '^' : '&') : '☀';
         const filterColor = field.filter ? '#0066cc' : '#ccc';
 
         fieldEl.innerHTML = `
@@ -1423,7 +1423,15 @@ function makeDraggable(element, tableIndex) {
     let startX, startY, initialX, initialY;
 
     element.addEventListener('mousedown', function(e) {
+        // Ignore buttons and inputs
         if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+
+        // Check if target or its parent is draggable (for field drag-and-drop)
+        let target = e.target;
+        while (target && target !== element) {
+            if (target.draggable === true) return;
+            target = target.parentElement;
+        }
 
         isDragging = true;
         startX = e.clientX;
