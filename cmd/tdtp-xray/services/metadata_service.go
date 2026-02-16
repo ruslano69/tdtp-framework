@@ -3,6 +3,8 @@ package services
 import (
 	"database/sql"
 	"fmt"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // MetadataService handles database metadata retrieval
@@ -32,6 +34,13 @@ func NewMetadataService() *MetadataService {
 
 // GetTableSchema retrieves schema for a specific table
 func (ms *MetadataService) GetTableSchema(dbType, dsn, tableName string) TableSchema {
+	// Special handling for TDTP XML files
+	if dbType == "tdtp" {
+		fmt.Printf("🔍 GetTableSchema: TDTP type detected, using InferTDTPSchema\n")
+		// For TDTP, dsn is the file path
+		return ms.InferTDTPSchema(dsn)
+	}
+
 	connService := NewConnectionService()
 	driverName := connService.mapDriverName(dbType)
 
@@ -307,12 +316,38 @@ func (ms *MetadataService) getPrimaryKeysQuery(dbType, tableName string) string 
 }
 
 // InferTDTPSchema attempts to infer schema from TDTP XML file
-// Returns mock schema for now (will be implemented when TDTP parsing is added)
 func (ms *MetadataService) InferTDTPSchema(filePath string) TableSchema {
-	// TODO: Parse TDTP XML and extract schema from <schema> section
-	// For now, return placeholder
+	fmt.Printf("📄 InferTDTPSchema: Parsing TDTP file: %s\n", filePath)
+
+	// Use the framework's TDTP parser
+	parser := packet.NewParser()
+	dataPacket, err := parser.ParseFile(filePath)
+	if err != nil {
+		fmt.Printf("❌ Failed to parse TDTP file: %v\n", err)
+		return TableSchema{
+			TableName: "tdtp_source",
+			Error:     fmt.Sprintf("Failed to parse TDTP file: %v", err),
+		}
+	}
+
+	fmt.Printf("✅ TDTP parsed successfully. TableName: %s, Fields: %d\n",
+		dataPacket.Header.TableName, len(dataPacket.Schema.Fields))
+
+	// Convert packet.Field to ColumnInfo
+	columns := make([]ColumnInfo, len(dataPacket.Schema.Fields))
+	for i, field := range dataPacket.Schema.Fields {
+		columns[i] = ColumnInfo{
+			Name:         field.Name,
+			DataType:     field.Type,
+			MaxLength:    field.Length,
+			IsNullable:   true, // TDTP doesn't have explicit nullable flag, assume true
+			IsPrimaryKey: field.Key,
+		}
+		fmt.Printf("  📋 Field %d: %s (%s)\n", i, field.Name, field.Type)
+	}
+
 	return TableSchema{
-		TableName: "tdtp_source",
-		Error:     "TDTP schema inference not yet implemented",
+		TableName: dataPacket.Header.TableName,
+		Columns:   columns,
 	}
 }

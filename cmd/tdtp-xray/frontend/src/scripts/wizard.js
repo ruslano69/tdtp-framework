@@ -1376,6 +1376,8 @@ function handleTableDragStart(event, sourceName) {
 }
 
 async function addTableToCanvas(sourceName) {
+    console.log(`🔧 addTableToCanvas called for: ${sourceName}`);
+
     // Check if table already exists
     if (canvasDesign.tables.find(t => t.sourceName === sourceName)) {
         showNotification('Table already on canvas', 'warning');
@@ -1389,19 +1391,34 @@ async function addTableToCanvas(sourceName) {
             return;
         }
 
+        console.log(`📞 Calling GetTablesBySourceName for: ${sourceName}`);
         const tables = await window.go.main.App.GetTablesBySourceName(sourceName);
+        console.log(`📦 GetTablesBySourceName response:`, tables);
+
         if (!tables || tables.length === 0) {
+            console.error(`❌ No tables returned for: ${sourceName}`);
             showNotification('Failed to load table schema', 'error');
             return;
         }
 
         const tableInfo = tables[0];
-        const fields = tableInfo.columns.map(col => ({
+        console.log(`📋 Table info:`, tableInfo);
+        console.log(`📋 Columns:`, tableInfo.columns);
+
+        if (!tableInfo.columns || tableInfo.columns.length === 0) {
+            console.error(`❌ No columns in table info for: ${sourceName}`);
+            showNotification(`⚠️ Table "${sourceName}" has no columns. Check if TDTP XML schema is valid.`, 'error');
+            // Still add the table but with empty fields - maybe user can add fields manually later
+        }
+
+        const fields = (tableInfo.columns || []).map(col => ({
             name: col.name,
             type: col.type,
             visible: true,
             filter: null // { operator: '=|<>|>=|<=|>|<|BW', value: '', value2: '', logic: 'AND|OR' }
         }));
+
+        console.log(`✅ Mapped ${fields.length} fields for ${sourceName}`);
 
         // Calculate position (offset each new table)
         const tableCount = canvasDesign.tables.length;
@@ -1416,10 +1433,11 @@ async function addTableToCanvas(sourceName) {
             fields: fields
         };
 
+        console.log(`➕ Adding table to canvas:`, newTable);
         canvasDesign.tables.push(newTable);
         renderCanvas();
     } catch (err) {
-        console.error('Failed to add table:', err);
+        console.error('❌ Failed to add table:', err);
         showNotification('Failed to add table: ' + err, 'error');
     }
 }
