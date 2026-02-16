@@ -61,28 +61,28 @@ func TestValidateChecksum(t *testing.T) {
 	correctHash := ComputeChecksum(data)
 
 	tests := []struct {
-		name        string
-		data        []byte
+		name         string
+		data         []byte
 		expectedHash string
-		wantErr     bool
+		wantErr      bool
 	}{
 		{
-			name:        "valid checksum",
-			data:        data,
+			name:         "valid checksum",
+			data:         data,
 			expectedHash: correctHash,
-			wantErr:     false,
+			wantErr:      false,
 		},
 		{
-			name:        "invalid checksum",
-			data:        data,
+			name:         "invalid checksum",
+			data:         data,
 			expectedHash: "0000000000000000",
-			wantErr:     true,
+			wantErr:      true,
 		},
 		{
-			name:        "corrupted data",
-			data:        []byte("Modified data"),
+			name:         "corrupted data",
+			data:         []byte("Modified data"),
 			expectedHash: correctHash,
-			wantErr:     true,
+			wantErr:      true,
 		},
 	}
 

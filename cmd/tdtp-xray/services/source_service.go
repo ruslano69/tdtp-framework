@@ -13,10 +13,10 @@ type SourceService struct {
 
 // MockSource represents a JSON-based mock data source
 type MockSource struct {
-	Name        string              `json:"name"`
-	Type        string              `json:"type"` // "mock"
-	Schema      []MockColumnSchema  `json:"schema"`
-	Data        []map[string]interface{} `json:"data"`
+	Name   string                   `json:"name"`
+	Type   string                   `json:"type"` // "mock"
+	Schema []MockColumnSchema       `json:"schema"`
+	Data   []map[string]interface{} `json:"data"`
 }
 
 // MockColumnSchema represents mock column definition
@@ -28,8 +28,8 @@ type MockColumnSchema struct {
 
 // SourceValidationResult represents source validation result
 type SourceValidationResult struct {
-	Valid   bool     `json:"valid"`
-	Errors  []string `json:"errors,omitempty"`
+	Valid    bool     `json:"valid"`
+	Errors   []string `json:"errors,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
 

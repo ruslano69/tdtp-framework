@@ -26,14 +26,14 @@ type TDTPService struct {
 
 // TDTPTestResult represents the result of TDTP file validation
 type TDTPTestResult struct {
-	Success    bool                `json:"success"`
-	Message    string              `json:"message"`
-	Duration   int64               `json:"duration"`   // milliseconds
-	TableName  string              `json:"tableName"`  // Table name from TDTP packet
-	RowCount   int                 `json:"rowCount"`   // Number of rows in packet
-	Fields     []string            `json:"fields"`     // Field names from schema
-	TotalParts int                 `json:"totalParts"` // Number of parts in multi-volume source
-	DataPacket *packet.DataPacket  `json:"-"`          // Internal: full data packet (not exported to JSON)
+	Success    bool               `json:"success"`
+	Message    string             `json:"message"`
+	Duration   int64              `json:"duration"`   // milliseconds
+	TableName  string             `json:"tableName"`  // Table name from TDTP packet
+	RowCount   int                `json:"rowCount"`   // Number of rows in packet
+	Fields     []string           `json:"fields"`     // Field names from schema
+	TotalParts int                `json:"totalParts"` // Number of parts in multi-volume source
+	DataPacket *packet.DataPacket `json:"-"`          // Internal: full data packet (not exported to JSON)
 }
 
 // NewTDTPService creates a new TDTP service
@@ -147,8 +147,8 @@ func (ts *TDTPService) collectAllParts(initialPath string, firstPacket *packet.D
 		return nil, fmt.Errorf("filename doesn't match multi-part pattern: %s", baseName)
 	}
 
-	base := matches[1]          // e.g., "users.tdtp"
-	ext := matches[4]           // e.g., ".xml"
+	base := matches[1] // e.g., "users.tdtp"
+	ext := matches[4]  // e.g., ".xml"
 	parsedTotal, _ := strconv.Atoi(matches[3])
 
 	// Verify total parts match
