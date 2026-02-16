@@ -97,7 +97,7 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 	defer func() {
 		if err != nil {
-			tx.Rollback(ctx)
+			_ = tx.Rollback(ctx) // игнорируем ошибку rollback при ошибке импорта
 		}
 	}()
 
@@ -123,7 +123,7 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
 
 			if err := h.dataInserter.InsertRows(ctx, tempTableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
-				h.tableManager.DropTable(ctx, tempTableName)
+				_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
 				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
 			}
 		}
@@ -133,7 +133,7 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 		// 3. Заменяем продакшен таблицу временной
 		if err := h.replaceTables(ctx, tableName, tempTableName); err != nil {
-			h.tableManager.DropTable(ctx, tempTableName)
+			_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
 			return fmt.Errorf("failed to replace tables: %w", err)
 		}
 
@@ -180,7 +180,7 @@ func (h *ImportHelper) importWithTemporaryTable(ctx context.Context, pkt *packet
 	// 2. Импортируем данные во временную таблицу
 	if err := h.dataInserter.InsertRows(ctx, tempTableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
 		// Откатываем - удаляем временную таблицу
-		h.tableManager.DropTable(ctx, tempTableName)
+		_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
 		return fmt.Errorf("failed to import to temporary table: %w", err)
 	}
 
@@ -190,7 +190,7 @@ func (h *ImportHelper) importWithTemporaryTable(ctx context.Context, pkt *packet
 	// 3. Заменяем продакшен таблицу временной (атомарная операция)
 	if err := h.replaceTables(ctx, tableName, tempTableName); err != nil {
 		// Откатываем - удаляем временную таблицу
-		h.tableManager.DropTable(ctx, tempTableName)
+		_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
 		return fmt.Errorf("failed to replace tables: %w", err)
 	}
 

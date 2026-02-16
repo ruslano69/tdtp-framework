@@ -228,7 +228,10 @@ func (h *ExportHelper) createQueryContextForSQL(
 	tableName string,
 ) *packet.QueryContext {
 	// Получаем общее количество записей в таблице
-	totalCount, _ := h.dataReader.GetRowCount(ctx, tableName)
+	totalCount, err := h.dataReader.GetRowCount(ctx, tableName)
+	if err != nil {
+		totalCount = 0 // игнорируем ошибку, используем 0 если не удалось получить count
+	}
 
 	recordsReturned := len(rows)
 	moreDataAvailable := false

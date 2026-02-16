@@ -39,7 +39,7 @@ func ExecutePipeline(ctx context.Context, configPath string, unsafe bool) error 
 	}
 
 	// 3. Initialize SQL validator based on mode
-	validator := security.NewSQLValidator(!unsafe) // safeMode = !unsafe
+	validator := security.NewSQLValidator(!unsafe) // safe mode is the inverse of unsafe flag
 
 	// 4. Validate all SQL queries in configuration
 	if err := validatePipelineSQL(config, validator); err != nil {

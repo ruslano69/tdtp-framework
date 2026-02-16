@@ -25,7 +25,7 @@ func routeCommand(
 	ctx context.Context,
 	flags *Flags,
 	config *Config,
-	adapterConfig adapters.Config,
+	adapterConfig *adapters.Config,
 	query *packet.Query,
 	prodFeatures *ProductionFeatures,
 	procMgr *ProcessorManager,
@@ -42,7 +42,7 @@ func routeCommand(
 		metadata = map[string]string{"command": "list"}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-tables", func() error {
-			return commands.ListTables(ctx, &adapterConfig)
+			return commands.ListTables(ctx, adapterConfig)
 		})
 
 	} else if *flags.ListViews {
@@ -50,7 +50,7 @@ func routeCommand(
 		metadata = map[string]string{"command": "list-views"}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-views", func() error {
-			return commands.ListViews(ctx, &adapterConfig)
+			return commands.ListViews(ctx, adapterConfig)
 		})
 
 	} else if *flags.Export != "" {
@@ -69,7 +69,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
-			return commands.ExportTable(ctx, &adapterConfig, commands.ExportOptions{
+			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
 				TableName:      *flags.Export,
 				OutputFile:     determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
 				Query:          query,
@@ -95,7 +95,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
-			return commands.ImportFile(ctx, &adapterConfig, commands.ImportOptions{
+			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
 				FilePath:     *flags.Import,
 				TargetTable:  *flags.Table,
 				Strategy:     strategy,
@@ -145,7 +145,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table-to-xlsx", func() error {
-			return commands.ExportTableToXLSX(ctx, &adapterConfig, commands.XLSXOptions{
+			return commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
 				TableName:    *flags.ExportXLSX,
 				OutputFile:   determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
 				SheetName:    *flags.Sheet,
@@ -168,7 +168,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-xlsx-to-table", func() error {
-			return commands.ImportXLSXToTable(ctx, &adapterConfig, commands.XLSXOptions{
+			return commands.ImportXLSXToTable(ctx, adapterConfig, commands.XLSXOptions{
 				InputFile:    *flags.ImportXLSX,
 				SheetName:    *flags.Sheet,
 				Strategy:     strategy,
@@ -204,7 +204,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, &adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
 		})
 
 	} else if *flags.ImportBroker {
@@ -224,7 +224,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
-			return commands.ImportFromBroker(ctx, &adapterConfig, &brokerCfg, strategy)
+			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, strategy)
 		})
 
 		// Incremental Sync command
@@ -239,7 +239,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "incremental-sync", func() error {
-			return commands.IncrementalSync(ctx, &adapterConfig, commands.SyncOptions{
+			return commands.IncrementalSync(ctx, adapterConfig, commands.SyncOptions{
 				TableName:      *flags.SyncIncr,
 				OutputFile:     determineOutputFile(*flags.Output, *flags.SyncIncr, "xml"),
 				TrackingField:  *flags.TrackingField,
@@ -380,7 +380,8 @@ func main() {
 	if err != nil {
 		fatal("Failed to initialize production features: %v", err)
 	}
-	defer prodFeatures.Close()
+	// Не используем defer т.к. os.Exit() не вызовет defer
+	// Close() вызывается явно в конце функции
 
 	// Initialize processor manager
 	procMgr := NewProcessorManager()
@@ -415,7 +416,7 @@ func main() {
 	}
 
 	// Route commands with production features and processors
-	cmdErr := routeCommand(ctx, flags, config, adapterConfig, query, prodFeatures, procMgr)
+	cmdErr := routeCommand(ctx, flags, config, &adapterConfig, query, prodFeatures, procMgr)
 
 	// Handle errors
 	if cmdErr != nil {
@@ -429,6 +430,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Warning: failed to close production features: %v\n", err)
 		}
 		os.Exit(1)
+	}
+
+	// Close production features before normal exit
+	if err := prodFeatures.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to close production features: %v\n", err)
 	}
 }
 
