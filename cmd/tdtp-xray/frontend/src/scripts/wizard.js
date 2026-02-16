@@ -3,6 +3,7 @@
 let currentStep = 1;
 const totalSteps = 7;
 let appMode = 'production'; // production or mock
+let completedSteps = new Set(); // Track completed steps
 
 // Wait for Wails runtime to be ready
 let wailsReady = false;
@@ -63,15 +64,53 @@ async function switchMode(mode) {
     );
 }
 
+// Navigate to a specific step (called when clicking on step in nav)
+function goToStep(targetStep) {
+    // Only allow navigation to current step or earlier completed steps
+    if (targetStep > currentStep && !completedSteps.has(targetStep)) {
+        showNotification('Please complete previous steps first', 'warning');
+        return;
+    }
+
+    // Save current step before navigating
+    saveCurrentStep().then(() => {
+        loadStep(targetStep);
+    });
+}
+
 // Load specific wizard step
 function loadStep(step) {
     currentStep = step;
 
+    // Mark previous steps as completed
+    if (step > 1) {
+        for (let i = 1; i < step; i++) {
+            completedSteps.add(i);
+        }
+    }
+
     // Update step navigation highlights
     document.querySelectorAll('.wizard-step').forEach(el => {
+        const stepNum = parseInt(el.dataset.step);
         el.classList.remove('active');
-        if (parseInt(el.dataset.step) === step) {
+
+        // Mark as completed if it's in completedSteps
+        if (completedSteps.has(stepNum)) {
+            el.classList.add('completed');
+        } else {
+            el.classList.remove('completed');
+        }
+
+        // Mark current step as active
+        if (stepNum === step) {
             el.classList.add('active');
+        }
+
+        // Add pointer cursor for clickable steps
+        if (stepNum <= currentStep || completedSteps.has(stepNum)) {
+            el.style.cursor = 'pointer';
+        } else {
+            el.style.cursor = 'not-allowed';
         }
     });
 
@@ -1253,7 +1292,7 @@ function loadStep3Data() {
     console.log('🔍 Checking Wails readiness...');
     if (wailsReady && window.go && window.go.main && window.go.main.App) {
         console.log('✅ Wails ready, loading canvas design...');
-        window.go.main.App.GetCanvasDesign().then(design => {
+        window.go.main.App.GetCanvasDesign().then(async design => {
             console.log('📦 GetCanvasDesign response:', design);
             if (design && design.tables && design.tables.length > 0) {
                 canvasDesign = design;
@@ -1261,7 +1300,34 @@ function loadStep3Data() {
                     tables: canvasDesign.tables.length,
                     joins: canvasDesign.joins ? canvasDesign.joins.length : 0
                 });
-                // Render canvas immediately
+
+                // CRITICAL: Load fields for each table if they're missing
+                console.log('🔧 Checking table fields...');
+                for (let i = 0; i < canvasDesign.tables.length; i++) {
+                    const table = canvasDesign.tables[i];
+                    console.log(`  📋 Table ${i} (${table.sourceName}): ${table.fields ? table.fields.length : 0} fields`);
+
+                    if (!table.fields || table.fields.length === 0) {
+                        console.log(`  🔄 Loading fields for ${table.sourceName}...`);
+                        try {
+                            const tables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+                            if (tables && tables.length > 0 && tables[0].columns) {
+                                table.fields = tables[0].columns.map(col => ({
+                                    name: col.name,
+                                    type: col.type,
+                                    visible: true,
+                                    filter: null
+                                }));
+                                console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+                            }
+                        } catch (err) {
+                            console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
+                        }
+                    }
+                }
+
+                // Render canvas after all fields are loaded
+                console.log('🎨 All fields loaded, rendering canvas...');
                 renderCanvas();
             } else {
                 console.log('ℹ️ No canvas design data or empty tables');
@@ -2363,35 +2429,54 @@ function getStep5HTML() {
                 <p>Choose where to send transformed data</p>
             </div>
 
-            <div class="panel">
-                <div class="form-group">
-                    <label>Output Type *</label>
-                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="tdtp_file" onchange="onOutputTypeChange()" checked>
-                            📁 TDTP File
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="rabbitmq" onchange="onOutputTypeChange()">
-                            🐰 RabbitMQ
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="kafka" onchange="onOutputTypeChange()">
-                            📨 Kafka
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="database" onchange="onOutputTypeChange()">
-                            🗄️ Database
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="xlsx" onchange="onOutputTypeChange()">
-                            📊 XLSX File
-                        </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; height: calc(100vh - 250px);">
+                <!-- LEFT: Output Configuration -->
+                <div class="panel" style="overflow-y: auto;">
+                    <div class="form-group">
+                        <label>Output Type *</label>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="tdtp_file" onchange="onOutputTypeChange()" checked>
+                                📁 TDTP File
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="rabbitmq" onchange="onOutputTypeChange()">
+                                🐰 RabbitMQ
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="kafka" onchange="onOutputTypeChange()">
+                                📨 Kafka
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="database" onchange="onOutputTypeChange()">
+                                🗄️ Database
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="xlsx" onchange="onOutputTypeChange()">
+                                📊 XLSX File
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="outputConfigPanel" style="margin-top: 20px;">
+                        <!-- Dynamic form will be inserted here -->
                     </div>
                 </div>
 
-                <div id="outputConfigPanel" style="margin-top: 20px;">
-                    <!-- Dynamic form will be inserted here -->
+                <!-- RIGHT: Result Preview -->
+                <div class="panel" style="overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0; font-size: 16px;">📊 Query Result Preview</h3>
+                        <button onclick="refreshStep5Preview()"
+                                style="padding: 6px 12px; font-size: 13px; background: #0066cc; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                    <div id="step5PreviewArea" style="font-size: 13px; color: #666;">
+                        <p style="text-align: center; padding: 40px 20px; color: #999;">
+                            Loading preview...
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2421,9 +2506,67 @@ async function loadStep5Data() {
         } else {
             onOutputTypeChange(); // Show default form
         }
+
+        // Load preview
+        await refreshStep5Preview();
     } catch (err) {
         console.error('Failed to load output:', err);
         onOutputTypeChange();
+    }
+}
+
+async function refreshStep5Preview() {
+    const previewArea = document.getElementById('step5PreviewArea');
+    if (!previewArea) return;
+
+    previewArea.innerHTML = '<p style="text-align: center; padding: 40px 20px; color: #999;">⏳ Loading preview...</p>';
+
+    if (!wailsReady || !window.go) {
+        previewArea.innerHTML = '<p style="text-align: center; padding: 40px 20px; color: #ff6b6b;">Backend not ready</p>';
+        return;
+    }
+
+    try {
+        // Build SQL from canvas design and execute preview
+        const result = await window.go.main.App.PreviewQueryResult();
+        console.log('Step 5 Preview result:', result);
+
+        if (!result || !result.rows || result.rows.length === 0) {
+            previewArea.innerHTML = '<p style="text-align: center; padding: 40px 20px; color: #999;">No data to preview. Configure tables and JOINs in Step 3.</p>';
+            return;
+        }
+
+        // Display as table
+        let html = '<div style="overflow-x: auto;"><table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+
+        // Header
+        html += '<thead><tr style="background: #f5f5f5; border-bottom: 2px solid #ddd;">';
+        result.columns.forEach(col => {
+            html += `<th style="padding: 8px; text-align: left; font-weight: 600; border-right: 1px solid #eee;">${col}</th>`;
+        });
+        html += '</tr></thead>';
+
+        // Rows (limit to first 50)
+        html += '<tbody>';
+        const displayRows = result.rows.slice(0, 50);
+        displayRows.forEach((row, idx) => {
+            html += `<tr style="border-bottom: 1px solid #eee; ${idx % 2 === 0 ? 'background: white;' : 'background: #fafafa;'}">`;
+            row.forEach(cell => {
+                const value = cell === null ? '<span style="color: #999; font-style: italic;">NULL</span>' : String(cell);
+                html += `<td style="padding: 6px 8px; border-right: 1px solid #eee;">${value}</td>`;
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+
+        if (result.rows.length > 50) {
+            html += `<p style="text-align: center; margin-top: 10px; color: #666; font-size: 11px;">Showing first 50 of ${result.rows.length} rows</p>`;
+        }
+
+        previewArea.innerHTML = html;
+    } catch (err) {
+        console.error('Failed to load Step 5 preview:', err);
+        previewArea.innerHTML = `<p style="text-align: center; padding: 40px 20px; color: #ff6b6b;">❌ Failed to load preview:<br/>${err}</p>`;
     }
 }
 

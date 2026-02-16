@@ -61,10 +61,12 @@
 .wizard-step.completed .step-number {
     background: #4caf50;
     color: #fff;
+    font-size: 0; /* Hide the number */
 }
 
 .wizard-step.completed .step-number::before {
     content: "✓";
+    font-size: 16px; /* Show checkmark */
 }
 
 .wizard-step.error .step-number {
