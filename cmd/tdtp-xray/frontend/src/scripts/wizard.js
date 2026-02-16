@@ -1333,7 +1333,9 @@ function createTableCard(table, index) {
         position: absolute;
         left: ${table.x}px;
         top: ${table.y}px;
-        width: 200px;
+        min-width: 200px;
+        width: auto;
+        max-width: 400px;
         background: white;
         border: 2px solid #0066cc;
         border-radius: 5px;
@@ -1369,12 +1371,12 @@ function createTableCard(table, index) {
         const fieldEl = document.createElement('div');
         fieldEl.className = 'table-field';
         fieldEl.style.cssText = `
-            padding: 6px 8px;
+            padding: 4px 8px;
             font-size: 12px;
             border-bottom: 1px solid #f0f0f0;
             display: grid;
-            grid-template-columns: 30px 1fr 30px 35px;
-            gap: 5px;
+            grid-template-columns: 30px auto 30px 30px;
+            gap: 8px;
             align-items: center;
         `;
 
@@ -1394,9 +1396,12 @@ function createTableCard(table, index) {
                   title="${field.visible ? 'Hide field' : 'Show field'}">
                 👁
             </span>
-            <span style="${field.visible ? '' : 'opacity: 0.4;'}">
-                <strong>${field.name}</strong>
-                <br><small style="color: #999;">${field.type}</small>
+            <span class="field-name-wrapper"
+                  data-type="${field.type}"
+                  style="${field.visible ? '' : 'opacity: 0.4;'}"
+                  title="${field.name} (${field.type})">
+                <strong class="field-name">${field.name}</strong>
+                <small class="field-type">${field.type}</small>
             </span>
             <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 16px; font-weight: bold; color: ${filterColor}; user-select: none; text-align: center;"
