@@ -36,12 +36,13 @@ func routeCommand(
 	var metadata map[string]string
 
 	// Database commands
+	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
 	if *flags.List {
 		operation = audit.OpQuery
 		metadata = map[string]string{"command": "list"}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-tables", func() error {
-			return commands.ListTables(ctx, adapterConfig)
+			return commands.ListTables(ctx, &adapterConfig)
 		})
 
 	} else if *flags.ListViews {
@@ -49,7 +50,7 @@ func routeCommand(
 		metadata = map[string]string{"command": "list-views"}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-views", func() error {
-			return commands.ListViews(ctx, adapterConfig)
+			return commands.ListViews(ctx, &adapterConfig)
 		})
 
 	} else if *flags.Export != "" {
@@ -68,7 +69,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
-			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
+			return commands.ExportTable(ctx, &adapterConfig, commands.ExportOptions{
 				TableName:      *flags.Export,
 				OutputFile:     determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
 				Query:          query,
@@ -94,7 +95,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
-			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
+			return commands.ImportFile(ctx, &adapterConfig, commands.ImportOptions{
 				FilePath:     *flags.Import,
 				TargetTable:  *flags.Table,
 				Strategy:     strategy,
@@ -144,7 +145,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table-to-xlsx", func() error {
-			return commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
+			return commands.ExportTableToXLSX(ctx, &adapterConfig, commands.XLSXOptions{
 				TableName:    *flags.ExportXLSX,
 				OutputFile:   determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
 				SheetName:    *flags.Sheet,
@@ -167,7 +168,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-xlsx-to-table", func() error {
-			return commands.ImportXLSXToTable(ctx, adapterConfig, commands.XLSXOptions{
+			return commands.ImportXLSXToTable(ctx, &adapterConfig, commands.XLSXOptions{
 				InputFile:    *flags.ImportXLSX,
 				SheetName:    *flags.Sheet,
 				Strategy:     strategy,
@@ -238,7 +239,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "incremental-sync", func() error {
-			return commands.IncrementalSync(ctx, adapterConfig, commands.SyncOptions{
+			return commands.IncrementalSync(ctx, &adapterConfig, commands.SyncOptions{
 				TableName:      *flags.SyncIncr,
 				OutputFile:     determineOutputFile(*flags.Output, *flags.SyncIncr, "xml"),
 				TrackingField:  *flags.TrackingField,
@@ -424,6 +425,9 @@ func main() {
 	// If no command was specified, show help
 	if !commandWasSpecified(flags) {
 		PrintHelp()
+		if err := prodFeatures.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close production features: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }

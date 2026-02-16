@@ -32,9 +32,9 @@ type ProcessorManager interface {
 }
 
 // ExportTable exports a table to TDTP XML file
-func ExportTable(ctx context.Context, config adapters.Config, opts ExportOptions) error {
+func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOptions) error {
 	// Create adapter
-	adapter, err := adapters.New(ctx, config)
+	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -88,7 +88,7 @@ func ExportTable(ctx context.Context, config adapters.Config, opts ExportOptions
 	if opts.Compress {
 		fmt.Printf("Compressing data (level %d)...\n", opts.CompressLevel)
 		for _, pkt := range packets {
-			if err := compressPacketData(ctx, pkt, opts.CompressLevel, opts.EnableChecksum); err != nil {
+			if err := compressPacketData(pkt, opts.CompressLevel, opts.EnableChecksum); err != nil {
 				return fmt.Errorf("compression failed: %w", err)
 			}
 		}
@@ -137,7 +137,7 @@ func writePacketToFile(pkt *packet.DataPacket, filename string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(filename)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 	}
@@ -150,7 +150,7 @@ func writePacketToFile(pkt *packet.DataPacket, filename string) error {
 	}
 
 	// Write to file
-	if err := os.WriteFile(filename, xml, 0644); err != nil {
+	if err := os.WriteFile(filename, xml, 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -166,7 +166,7 @@ func generatePacketFilename(baseFile string, n, total int) string {
 
 // compressPacketData compresses the Data section of a packet using zstd
 // and optionally generates XXH3 checksum for data integrity verification
-func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int, enableChecksum bool) error {
+func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) error {
 	if len(pkt.Data.Rows) == 0 {
 		return nil
 	}
@@ -205,7 +205,7 @@ func compressPacketData(ctx context.Context, pkt *packet.DataPacket, level int, 
 
 // decompressPacketData decompresses the Data section of a packet
 // and validates checksum if present (before decompression for efficiency)
-func decompressPacketData(ctx context.Context, pkt *packet.DataPacket) error {
+func decompressPacketData(pkt *packet.DataPacket) error {
 	if pkt.Data.Compression == "" {
 		return nil // Not compressed
 	}

@@ -28,7 +28,7 @@ type ImportOptions struct {
 // a part file, all parts are collected automatically. Multiple packets are
 // passed to adapter.ImportPackets — the framework handles temp table creation,
 // sequential insert of all packets, and atomic swap in one transaction.
-func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions) error {
+func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions) error {
 	// Detect multi-part set; fall back to single file
 	filePaths := discoverMultiPartFiles(opts.FilePath)
 	if filePaths == nil {
@@ -53,7 +53,7 @@ func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions)
 
 		if pkt.Data.Compression != "" {
 			fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
-			if err := decompressPacketData(ctx, pkt); err != nil {
+			if err := decompressPacketData(pkt); err != nil {
 				return fmt.Errorf("decompression failed: %w", err)
 			}
 		}
@@ -84,7 +84,7 @@ func ImportFile(ctx context.Context, config adapters.Config, opts ImportOptions)
 	}
 
 	// Connect adapter
-	adapter, err := adapters.New(ctx, config)
+	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -130,15 +130,15 @@ func discoverMultiPartFiles(filePath string) []string {
 		// filePath is already a part file
 		base = m[1]
 		ext = m[4]
-		total, _ = strconv.Atoi(m[3])
+		total, _ = strconv.Atoi(m[3]) //nolint:errcheck // regex guarantees valid integer
 	} else {
 		// filePath is the base name — look for _part_1_of_N on disk
 		ext = filepath.Ext(filePath)
 		base = filePath[:len(filePath)-len(ext)]
-		matches, _ := filepath.Glob(fmt.Sprintf("%s_part_1_of_*%s", base, ext))
-		if len(matches) == 1 {
+		matches, err := filepath.Glob(fmt.Sprintf("%s_part_1_of_*%s", base, ext))
+		if err == nil && len(matches) == 1 {
 			if m := multiPartPattern.FindStringSubmatch(matches[0]); m != nil {
-				total, _ = strconv.Atoi(m[3])
+				total, _ = strconv.Atoi(m[3]) //nolint:errcheck // regex guarantees valid integer
 			}
 		}
 	}

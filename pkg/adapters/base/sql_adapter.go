@@ -17,7 +17,7 @@ type StandardSQLAdapter struct {
 }
 
 // NewStandardSQLAdapter создает StandardSQLAdapter
-func NewStandardSQLAdapter(dbType string, schemaPrefix string, quoteChar string) *StandardSQLAdapter {
+func NewStandardSQLAdapter(dbType, schemaPrefix, quoteChar string) *StandardSQLAdapter {
 	return &StandardSQLAdapter{
 		dbType:        dbType,
 		schemaPrefix:  schemaPrefix,
@@ -27,7 +27,7 @@ func NewStandardSQLAdapter(dbType string, schemaPrefix string, quoteChar string)
 }
 
 // AdaptSQL адаптирует стандартный SQL (не требуется для SQLite/PostgreSQL/MySQL с LIMIT/OFFSET)
-func (a *StandardSQLAdapter) AdaptSQL(standardSQL string, tableName string, schema packet.Schema, query *packet.Query) string {
+func (a *StandardSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Schema, query *packet.Query) string {
 	// Для стандартного SQL адаптация минимальна
 	sql := standardSQL
 
@@ -68,7 +68,7 @@ func NewMSSQLAdapter(schemaName string) *MSSQLAdapter {
 // 3. Добавляет ORDER BY если нужен для OFFSET/FETCH
 // 4. Квалифицирует имена таблиц: [schema].[table]
 // 5. Квалифицирует имена полей: [field]
-func (a *MSSQLAdapter) AdaptSQL(standardSQL string, tableName string, schema packet.Schema, query *packet.Query) string {
+func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Schema, query *packet.Query) string {
 	// Квалифицируем имя таблицы: [schema].[table]
 	fullTableName := fmt.Sprintf("[%s].[%s]", a.schemaName, tableName)
 	sql := strings.Replace(standardSQL, tableName, fullTableName, 1)

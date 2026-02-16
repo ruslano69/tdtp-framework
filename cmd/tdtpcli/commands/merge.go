@@ -43,7 +43,7 @@ func MergeFiles(ctx context.Context, options MergeOptions) error {
 	mergeStrategy := merge.StrategyUnion
 	switch strings.ToLower(options.Strategy) {
 	case "union", "":
-		mergeStrategy = merge.StrategyUnion
+		// default already set above
 	case "intersection", "intersect":
 		mergeStrategy = merge.StrategyIntersection
 	case "left", "left-priority":

@@ -23,7 +23,7 @@ func NewProcessorManager() *ProcessorManager {
 
 // AddMaskProcessor adds field masking processor from CLI flag
 // Format: --mask email,phone,card
-func (pm *ProcessorManager) AddMaskProcessor(maskFields string) error {
+func (pm *ProcessorManager) AddMaskProcessor(maskFields string) error { //nolint:unparam // error return kept for API consistency
 	if maskFields == "" {
 		return nil
 	}
@@ -88,7 +88,7 @@ func (pm *ProcessorManager) AddValidateProcessor(rulesFile string) error {
 
 // AddNormalizeProcessor adds field normalization processor from YAML file
 // Format: --normalize rules.yaml
-func (pm *ProcessorManager) AddNormalizeProcessor(rulesFile string) error {
+func (pm *ProcessorManager) AddNormalizeProcessor(rulesFile string) error { //nolint:unparam // error return kept for API consistency
 	if rulesFile == "" {
 		return nil
 	}
