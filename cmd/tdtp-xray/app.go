@@ -654,21 +654,19 @@ func (a *App) buildSourceConfigs() []SourceConfig {
 		// Set DSN based on source type
 		switch src.Type {
 		case "postgres", "mysql", "mssql", "sqlite":
-			if src.Database != nil {
-				config.DSN = src.Database.DSN
-			}
+			config.DSN = src.DSN
 		case "tdtp":
-			if src.TDTPFile != nil {
-				config.DSN = src.TDTPFile.Path
+			if src.Transport != nil {
+				config.DSN = src.Transport.Source
 			}
 		case "mock":
 			// Mock sources don't need DSN in YAML - they're for GUI testing only
 			continue
 		}
 
-		// Set query if available
-		if src.TDTQLFilter != nil && src.TDTQLFilter.Query != "" {
-			config.Query = src.TDTQLFilter.Query
+		// Set query if available (from TDTQL)
+		if src.TDTQL != nil && src.TDTQL.Where != "" {
+			config.Query = src.TDTQL.Where
 		}
 
 		configs = append(configs, config)
