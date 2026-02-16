@@ -1283,7 +1283,7 @@ async function addTableToCanvas(sourceName) {
             name: col.name,
             type: col.type,
             visible: true,
-            condition: null
+            filter: null // { operator: '=|<>|>=|<=|>|<|BW', value: '', value2: '', logic: 'AND|OR' }
         }));
 
         // Calculate position (offset each new table)
@@ -1372,26 +1372,40 @@ function createTableCard(table, index) {
             padding: 6px 8px;
             font-size: 12px;
             border-bottom: 1px solid #f0f0f0;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: 30px 1fr 30px 30px;
+            gap: 5px;
             align-items: center;
         `;
+
+        // Get filter icon
+        const filterIcon = field.filter ? (field.filter.logic === 'OR' ? '^' : '&') : '*';
+        const filterColor = field.filter ? '#0066cc' : '#ccc';
+
         fieldEl.innerHTML = `
-            <span style="display: flex; align-items: center; gap: 5px;">
-                <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
-                      style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
-                      title="${field.visible ? 'Hide field' : 'Show field'}">
-                    👁
-                </span>
-                <span style="${field.visible ? '' : 'opacity: 0.4;'}">
-                    <strong>${field.name}</strong>
-                    <br><small style="color: #999;">${field.type}</small>
-                </span>
+            <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
+                  style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
+                  title="${field.visible ? 'Hide field' : 'Show field'}">
+                👁
+            </span>
+            <span style="${field.visible ? '' : 'opacity: 0.4;'}"
+                  draggable="true"
+                  ondragstart="handleFieldDragStart(event, ${index}, ${fieldIndex})"
+                  ondragend="handleFieldDragEnd(event)"
+                  ondragover="handleFieldDragOver(event)"
+                  ondrop="handleFieldDrop(event, ${index}, ${fieldIndex})"
+                  style="cursor: grab;">
+                <strong>${field.name}</strong>
+                <br><small style="color: #999;">${field.type}</small>
+            </span>
+            <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
+                  style="cursor: pointer; font-size: 16px; font-weight: bold; color: ${filterColor}; user-select: none; text-align: center;"
+                  title="${field.filter ? 'Edit filter' : 'Add filter'}">
+                ${filterIcon}
             </span>
             <button onclick="startJoin(${index}, ${fieldIndex})"
                     style="background: #f0f0f0; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 11px;"
-                    title="Create JOIN">⚡</button>
+                    title="Create JOIN (legacy)">⚡</button>
         `;
         fieldsContainer.appendChild(fieldEl);
     });
@@ -1551,6 +1565,10 @@ function renderJoins() {
         line.setAttribute('marker-end', 'url(#arrowhead)');
         line.style.cursor = 'pointer';
         line.onclick = () => selectJoin(joinIndex);
+        line.oncontextmenu = (e) => {
+            e.preventDefault();
+            showJoinContextMenu(e, joinIndex);
+        };
 
         svg.appendChild(line);
 
@@ -1567,6 +1585,10 @@ function renderJoins() {
         text.textContent = join.joinType;
         text.style.cursor = 'pointer';
         text.onclick = () => selectJoin(joinIndex);
+        text.oncontextmenu = (e) => {
+            e.preventDefault();
+            showJoinContextMenu(e, joinIndex);
+        };
 
         svg.appendChild(text);
     });
@@ -1596,6 +1618,23 @@ function selectJoin(joinIndex) {
     selectedJoinId = joinIndex;
     const join = canvasDesign.joins[joinIndex];
 
+    let castInfo = '';
+    if (join.cast) {
+        if (join.cast.field === 'left') {
+            castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+                ⚠️ Cast left field to ${join.cast.toType}
+            </div>`;
+        } else if (join.cast.field === 'right') {
+            castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+                ⚠️ Cast right field to ${join.cast.toType}
+            </div>`;
+        } else if (join.cast.field === 'both') {
+            castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+                ⚠️ Cast both fields to ${join.cast.toType}
+            </div>`;
+        }
+    }
+
     const propertiesPanel = document.getElementById('propertiesPanel');
     propertiesPanel.innerHTML = `
         <h4 style="margin-top: 0;">Join Properties</h4>
@@ -1604,6 +1643,8 @@ function selectJoin(joinIndex) {
             <br>↓<br>
             <strong>${join.rightTable}.${join.rightField}</strong>
         </div>
+
+        ${castInfo}
 
         <label style="display: block; margin-bottom: 10px;">
             Join Type:
@@ -1628,6 +1669,381 @@ function removeJoin(joinIndex) {
     canvasDesign.joins.splice(joinIndex, 1);
     document.getElementById('propertiesPanel').innerHTML = '<p style="color: #999; font-size: 13px;">Select a table or join to edit properties</p>';
     renderCanvas();
+}
+
+// ========== FILTER BUILDER ==========
+
+function openFilterBuilder(tableIndex, fieldIndex) {
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+    const currentFilter = field.filter || { operator: '=', value: '', value2: '', logic: 'AND' };
+
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'filterBuilderModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 2000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px; max-width: 500px;">
+            <h3 style="margin-top: 0;">Filter: ${field.name}</h3>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Operator:</label>
+                <select id="filterOperator" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="=" ${currentFilter.operator === '=' ? 'selected' : ''}>= (Equal)</option>
+                    <option value="<>" ${currentFilter.operator === '<>' ? 'selected' : ''}>&lt;&gt; (Not Equal)</option>
+                    <option value=">" ${currentFilter.operator === '>' ? 'selected' : ''}>&gt; (Greater Than)</option>
+                    <option value="<" ${currentFilter.operator === '<' ? 'selected' : ''}>&lt; (Less Than)</option>
+                    <option value=">=" ${currentFilter.operator === '>=' ? 'selected' : ''}>&gt;= (Greater or Equal)</option>
+                    <option value="<=" ${currentFilter.operator === '<=' ? 'selected' : ''}>&lt;= (Less or Equal)</option>
+                    <option value="BW" ${currentFilter.operator === 'BW' ? 'selected' : ''}>BETWEEN</option>
+                </select>
+            </div>
+
+            <div id="filterValue1Container" style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Value:</label>
+                <input type="text" id="filterValue1" value="${currentFilter.value || ''}"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+            </div>
+
+            <div id="filterValue2Container" style="margin-bottom: 15px; display: ${currentFilter.operator === 'BW' ? 'block' : 'none'};">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">End Value:</label>
+                <input type="text" id="filterValue2" value="${currentFilter.value2 || ''}"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Logic Operator:</label>
+                <select id="filterLogic" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="AND" ${currentFilter.logic === 'AND' ? 'selected' : ''}>AND (&amp;)</option>
+                    <option value="OR" ${currentFilter.logic === 'OR' ? 'selected' : ''}>OR (^)</option>
+                </select>
+                <small style="color: #666;">How this filter combines with other filters</small>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn" onclick="saveFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #28a745; color: white;">Apply Filter</button>
+                <button class="btn" onclick="clearFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #dc3545; color: white;">Clear Filter</button>
+                <button class="btn" onclick="closeFilterBuilder()" style="flex: 1;">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Handle operator change
+    document.getElementById('filterOperator').addEventListener('change', function() {
+        const isBetween = this.value === 'BW';
+        document.getElementById('filterValue2Container').style.display = isBetween ? 'block' : 'none';
+    });
+
+    // Close on backdrop click
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeFilterBuilder();
+        }
+    });
+
+    // Close on Escape key
+    const escapeHandler = function(e) {
+        if (e.key === 'Escape') {
+            closeFilterBuilder();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+function saveFilter(tableIndex, fieldIndex) {
+    const operator = document.getElementById('filterOperator').value;
+    const value1 = document.getElementById('filterValue1').value.trim();
+    const value2 = document.getElementById('filterValue2').value.trim();
+    const logic = document.getElementById('filterLogic').value;
+
+    if (!value1) {
+        alert('Please enter a value');
+        return;
+    }
+
+    if (operator === 'BW' && !value2) {
+        alert('Please enter end value for BETWEEN');
+        return;
+    }
+
+    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = {
+        operator: operator,
+        value: value1,
+        value2: value2,
+        logic: logic
+    };
+
+    closeFilterBuilder();
+    renderCanvas();
+    showNotification('Filter applied successfully', 'success');
+}
+
+function clearFilter(tableIndex, fieldIndex) {
+    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = null;
+    closeFilterBuilder();
+    renderCanvas();
+    showNotification('Filter cleared', 'info');
+}
+
+function closeFilterBuilder() {
+    const modal = document.getElementById('filterBuilderModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// ========== DRAG-AND-DROP JOIN ==========
+
+let draggedField = null;
+
+function handleFieldDragStart(event, tableIndex, fieldIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const field = table.fields[fieldIndex];
+
+    draggedField = {
+        tableIndex: tableIndex,
+        fieldIndex: fieldIndex,
+        tableName: table.sourceName,
+        fieldName: field.name,
+        fieldType: field.type
+    };
+
+    event.dataTransfer.effectAllowed = 'link';
+    event.dataTransfer.setData('text/plain', `${table.sourceName}.${field.name}`);
+
+    // Visual feedback
+    event.target.style.opacity = '0.5';
+    showNotification(`Drag to another field to create JOIN`, 'info');
+}
+
+function handleFieldDragEnd(event) {
+    event.target.style.opacity = '1';
+}
+
+function handleFieldDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'link';
+}
+
+function handleFieldDrop(event, tableIndex, fieldIndex) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Reset opacity
+    if (draggedField) {
+        const sourceEl = document.querySelector(`[ondragstart*="${draggedField.tableIndex}, ${draggedField.fieldIndex}"]`);
+        if (sourceEl) {
+            sourceEl.style.opacity = '1';
+        }
+    }
+
+    if (!draggedField) {
+        return;
+    }
+
+    const targetTable = canvasDesign.tables[tableIndex];
+    const targetField = targetTable.fields[fieldIndex];
+
+    // Check if same table
+    if (draggedField.tableName === targetTable.sourceName) {
+        showNotification('Cannot join table to itself', 'warning');
+        draggedField = null;
+        return;
+    }
+
+    // Check if join already exists
+    const existingJoin = canvasDesign.joins.find(j =>
+        (j.leftTable === draggedField.tableName && j.leftField === draggedField.fieldName &&
+         j.rightTable === targetTable.sourceName && j.rightField === targetField.name) ||
+        (j.leftTable === targetTable.sourceName && j.leftField === targetField.name &&
+         j.rightTable === draggedField.tableName && j.rightField === draggedField.fieldName)
+    );
+
+    if (existingJoin) {
+        showNotification('Join already exists', 'warning');
+        draggedField = null;
+        return;
+    }
+
+    // Check if types match
+    if (draggedField.fieldType === targetField.type) {
+        // Types match - create join directly
+        createJoinBetweenFields(draggedField.tableName, draggedField.fieldName,
+                                targetTable.sourceName, targetField.name, null);
+        draggedField = null;
+    } else {
+        // Types don't match - show CAST dialog
+        showCastDialog(draggedField, targetTable.sourceName, targetField);
+    }
+}
+
+function showCastDialog(sourceField, targetTableName, targetField) {
+    const modal = document.createElement('div');
+    modal.id = 'castDialogModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 2000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px;">
+            <h3 style="margin-top: 0; color: #ff6b00;">⚠️ Type Mismatch</h3>
+            <p>Field types don't match:</p>
+            <ul style="margin: 10px 0;">
+                <li><strong>${sourceField.tableName}.${sourceField.fieldName}</strong>: ${sourceField.fieldType}</li>
+                <li><strong>${targetTableName}.${targetField.name}</strong>: ${targetField.type}</li>
+            </ul>
+            <p>Select cast option:</p>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin: 15px 0;">
+                <button class="btn" onclick="createJoinWithCast('${sourceField.tableName}', '${sourceField.fieldName}', '${targetTableName}', '${targetField.name}', 'CAST_LEFT', '${sourceField.fieldType}', '${targetField.type}')"
+                        style="background: #0066cc; color: white; text-align: left; padding: 10px;">
+                    Cast ${sourceField.tableName}.${sourceField.fieldName} to ${targetField.type}
+                </button>
+                <button class="btn" onclick="createJoinWithCast('${sourceField.tableName}', '${sourceField.fieldName}', '${targetTableName}', '${targetField.name}', 'CAST_RIGHT', '${sourceField.fieldType}', '${targetField.type}')"
+                        style="background: #0066cc; color: white; text-align: left; padding: 10px;">
+                    Cast ${targetTableName}.${targetField.name} to ${sourceField.fieldType}
+                </button>
+                <button class="btn" onclick="createJoinWithCast('${sourceField.tableName}', '${sourceField.fieldName}', '${targetTableName}', '${targetField.name}', 'CAST_STRING', '${sourceField.fieldType}', '${targetField.type}')"
+                        style="background: #0066cc; color: white; text-align: left; padding: 10px;">
+                    Cast both to STRING
+                </button>
+            </div>
+            <button class="btn" onclick="closeCastDialog()" style="width: 100%;">Cancel</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Close on backdrop click
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeCastDialog();
+        }
+    });
+
+    // Close on Escape key
+    const escapeHandler = function(e) {
+        if (e.key === 'Escape') {
+            closeCastDialog();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+function createJoinWithCast(leftTable, leftField, rightTable, rightField, castType, leftType, rightType) {
+    let castInfo = null;
+
+    if (castType === 'CAST_LEFT') {
+        castInfo = { field: 'left', toType: rightType };
+    } else if (castType === 'CAST_RIGHT') {
+        castInfo = { field: 'right', toType: leftType };
+    } else if (castType === 'CAST_STRING') {
+        castInfo = { field: 'both', toType: 'STRING' };
+    }
+
+    createJoinBetweenFields(leftTable, leftField, rightTable, rightField, castInfo);
+    closeCastDialog();
+    draggedField = null;
+}
+
+function createJoinBetweenFields(leftTable, leftField, rightTable, rightField, castInfo) {
+    const newJoin = {
+        leftTable: leftTable,
+        leftField: leftField,
+        rightTable: rightTable,
+        rightField: rightField,
+        joinType: 'INNER',
+        cast: castInfo
+    };
+
+    canvasDesign.joins.push(newJoin);
+    renderCanvas();
+    showNotification('Join created successfully', 'success');
+}
+
+function closeCastDialog() {
+    const modal = document.getElementById('castDialogModal');
+    if (modal) {
+        modal.remove();
+    }
+    draggedField = null;
+}
+
+// ========== JOIN CONTEXT MENU ==========
+
+function showJoinContextMenu(event, joinIndex) {
+    // Remove existing menu if any
+    const existingMenu = document.getElementById('joinContextMenu');
+    if (existingMenu) {
+        existingMenu.remove();
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'joinContextMenu';
+    menu.style.cssText = `
+        position: fixed;
+        left: ${event.pageX}px;
+        top: ${event.pageY}px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        z-index: 3000;
+        min-width: 150px;
+    `;
+
+    menu.innerHTML = `
+        <div onclick="selectJoin(${joinIndex}); closeJoinContextMenu();"
+             style="padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #f0f0f0;"
+             onmouseover="this.style.background='#f0f0f0'"
+             onmouseout="this.style.background='white'">
+            ✏️ Edit
+        </div>
+        <div onclick="removeJoin(${joinIndex}); closeJoinContextMenu();"
+             style="padding: 10px 15px; cursor: pointer; color: #dc3545;"
+             onmouseover="this.style.background='#f0f0f0'"
+             onmouseout="this.style.background='white'">
+            🗑️ Delete
+        </div>
+    `;
+
+    document.body.appendChild(menu);
+
+    // Close menu on click outside
+    setTimeout(() => {
+        document.addEventListener('click', closeJoinContextMenu);
+    }, 0);
+}
+
+function closeJoinContextMenu() {
+    const menu = document.getElementById('joinContextMenu');
+    if (menu) {
+        menu.remove();
+    }
+    document.removeEventListener('click', closeJoinContextMenu);
 }
 
 function clearCanvas() {

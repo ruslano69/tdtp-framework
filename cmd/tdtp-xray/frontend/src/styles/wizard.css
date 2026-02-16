@@ -124,3 +124,85 @@
     font-weight: 600;
     margin-left: 8px;
 }
+
+/* Visual Designer Enhancements */
+.table-field {
+    transition: background-color 0.2s;
+}
+
+.table-field:hover {
+    background-color: #f0f8ff;
+}
+
+.table-field [draggable="true"] {
+    cursor: grab;
+}
+
+.table-field [draggable="true"]:active {
+    cursor: grabbing;
+}
+
+/* Filter icon states */
+.filter-icon {
+    user-select: none;
+    transition: transform 0.2s;
+}
+
+.filter-icon:hover {
+    transform: scale(1.2);
+}
+
+/* Modal overlays */
+#filterBuilderModal,
+#castDialogModal,
+#joinContextMenu {
+    animation: fadeIn 0.2s;
+}
+
+/* Context menu hover effects */
+#joinContextMenu > div {
+    transition: background-color 0.15s;
+}
+
+/* Dragging visual feedback */
+.dragging-field {
+    opacity: 0.5;
+    cursor: grabbing;
+}
+
+.drop-target {
+    background-color: #e3f2fd !important;
+    border: 2px dashed #2196f3;
+}
+
+/* CAST warning badge */
+.cast-warning {
+    background: #fff3cd;
+    border-left: 3px solid #ffc107;
+    padding: 8px;
+    margin: 8px 0;
+    font-size: 12px;
+    border-radius: 3px;
+}
+
+/* JOIN line highlight on hover */
+svg line:hover,
+svg text:hover {
+    filter: brightness(0.8);
+}
+
+/* Improved button styles in modals */
+.btn {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
