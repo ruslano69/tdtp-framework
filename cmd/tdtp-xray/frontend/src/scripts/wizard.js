@@ -1165,7 +1165,9 @@ async function previewSource(index) {
 
         result.rows.forEach(row => {
             html += '<tr>';
-            row.forEach(cell => {
+            // Convert object to array in column order
+            const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
+            values.forEach(cell => {
                 html += `<td style="border: 1px solid #ddd; padding: 5px; white-space: nowrap;">${cell !== null ? cell : '<i>null</i>'}</td>`;
             });
             html += '</tr>';
@@ -2583,7 +2585,9 @@ async function refreshStep5Preview() {
         const displayRows = result.rows.slice(0, 50);
         displayRows.forEach((row, idx) => {
             html += `<tr style="border-bottom: 1px solid #eee; ${idx % 2 === 0 ? 'background: white;' : 'background: #fafafa;'}">`;
-            row.forEach(cell => {
+            // Convert object to array in column order
+            const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
+            values.forEach(cell => {
                 const value = cell === null ? '<span style="color: #999; font-style: italic;">NULL</span>' : String(cell);
                 html += `<td style="padding: 6px 8px; border-right: 1px solid #eee;">${value}</td>`;
             });
