@@ -8,9 +8,9 @@ import (
 )
 
 // ListTables lists all tables in the database
-func ListTables(ctx context.Context, config adapters.Config) error {
+func ListTables(ctx context.Context, config *adapters.Config) error {
 	// Create adapter
-	adapter, err := adapters.New(ctx, config)
+	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -37,9 +37,9 @@ func ListTables(ctx context.Context, config adapters.Config) error {
 }
 
 // ListViews lists all database views with updatable status
-func ListViews(ctx context.Context, config adapters.Config) error {
+func ListViews(ctx context.Context, config *adapters.Config) error {
 	// Create adapter
-	adapter, err := adapters.New(ctx, config)
+	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}

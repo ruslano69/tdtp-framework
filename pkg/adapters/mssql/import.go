@@ -84,7 +84,7 @@ func (a *Adapter) buildCreateTableSQL(tableName string, schema packet.Schema) st
 	schemaName, table := a.parseTableName(tableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
-	var columns []string
+	columns := make([]string, 0, len(schema.Fields))
 	var pkColumns []string
 
 	for _, field := range schema.Fields {
@@ -180,7 +180,7 @@ func (a *Adapter) importWithMerge(ctx context.Context, tx *sql.Tx, pkt *packet.D
 		// Отложенное выключение IDENTITY_INSERT
 		defer func() {
 			identityOffSQL := fmt.Sprintf("SET IDENTITY_INSERT %s OFF", fullTableName)
-			tx.ExecContext(ctx, identityOffSQL)
+			tx.ExecContext(ctx, identityOffSQL) //nolint:errcheck // cleanup operation, error can be safely ignored
 		}()
 	}
 
@@ -314,8 +314,8 @@ func (a *Adapter) rowExists(
 	pkIndices []int,
 	row []string,
 ) (bool, error) {
-	var conditions []string
-	var args []interface{}
+	conditions := make([]string, 0, len(pkFields))
+	args := make([]interface{}, 0, len(pkFields))
 
 	for i, field := range pkFields {
 		idx := pkIndices[i]
@@ -396,7 +396,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.
 		}
 		defer func() {
 			identityOffSQL := fmt.Sprintf("SET IDENTITY_INSERT %s OFF", fullTableName)
-			tx.ExecContext(ctx, identityOffSQL)
+			tx.ExecContext(ctx, identityOffSQL) //nolint:errcheck // cleanup operation, error can be safely ignored
 		}()
 	}
 
@@ -416,8 +416,8 @@ func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.
 
 // buildInsertSQL строит INSERT запрос
 func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string {
-	var columns []string
-	var placeholders []string
+	columns := make([]string, 0, len(schema.Fields))
+	placeholders := make([]string, 0, len(schema.Fields))
 
 	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("[%s]", field.Name))

@@ -130,7 +130,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		)
 
 		// Определяем, является ли поле read-only
-		isTimestamp := strings.ToLower(dataType) == "timestamp"
+		isTimestamp := strings.EqualFold(dataType, "timestamp")
 		isComputedBool := isComputed.Valid && isComputed.Int64 == 1
 		isIdentityBool := isIdentity.Valid && isIdentity.Int64 == 1
 
@@ -286,7 +286,7 @@ func (a *Adapter) ExportTableWithQuery(
 
 				// Генерируем Response пакеты
 				// QueryContext создаем с исправленной pagination logic
-				totalCount, _ := a.GetRowCount(ctx, tableName)
+				totalCount, _ := a.GetRowCount(ctx, tableName) //nolint:errcheck // totalCount is optional metadata
 				moreDataAvailable := false
 				nextOffset := 0
 				if query != nil && query.Limit > 0 {
@@ -464,7 +464,7 @@ func (a *Adapter) readAllRows(ctx context.Context, tableName string, pkgSchema p
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
 	// Формируем список полей для SELECT
-	var columns []string
+	columns := make([]string, 0, len(pkgSchema.Fields))
 	for _, field := range pkgSchema.Fields {
 		columns = append(columns, fmt.Sprintf("[%s]", field.Name))
 	}

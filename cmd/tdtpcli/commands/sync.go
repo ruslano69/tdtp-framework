@@ -22,7 +22,7 @@ type SyncOptions struct {
 }
 
 // IncrementalSync performs incremental synchronization of a table
-func IncrementalSync(ctx context.Context, config adapters.Config, opts SyncOptions) error {
+func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOptions) error {
 	fmt.Printf("Starting incremental sync for table '%s'...\n", opts.TableName)
 	fmt.Printf("Tracking field: %s\n", opts.TrackingField)
 	fmt.Printf("Checkpoint file: %s\n", opts.CheckpointFile)
@@ -49,7 +49,7 @@ func IncrementalSync(ctx context.Context, config adapters.Config, opts SyncOptio
 	query := buildIncrementalQuery(opts.TrackingField, lastSyncValue, opts.BatchSize)
 
 	// Create adapter
-	adapter, err := adapters.New(ctx, config)
+	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}

@@ -117,12 +117,17 @@ func initAuditLogger(cfg AuditConfig) (*audit.AuditLogger, error) {
 
 // initCircuitBreaker initializes circuit breaker from config
 func initCircuitBreaker(cfg CircuitBreakerConfig) (*resilience.CircuitBreaker, error) {
+	// Validate MaxConcurrent is within valid range
+	if cfg.MaxConcurrent < 0 {
+		return nil, fmt.Errorf("max_concurrent must be non-negative, got %d", cfg.MaxConcurrent)
+	}
+
 	cbConfig := resilience.Config{
 		Enabled:            true,
 		Name:               "tdtpcli",
 		MaxFailures:        cfg.Threshold,
 		Timeout:            time.Duration(cfg.Timeout) * time.Second,
-		MaxConcurrentCalls: uint32(cfg.MaxConcurrent),
+		MaxConcurrentCalls: uint32(cfg.MaxConcurrent), //nolint:gosec // validated above
 		SuccessThreshold:   cfg.SuccessThreshold,
 		OnStateChange: func(name string, from, to resilience.State) {
 			fmt.Fprintf(os.Stderr, "⚠ Circuit Breaker [%s]: %s → %s\n", name, from, to)
@@ -164,9 +169,9 @@ func initRetryManager(cfg RetryConfig) (*retry.Retryer, error) {
 }
 
 // ExecuteWithResilience executes a function with circuit breaker and retry
-func (pf *ProductionFeatures) ExecuteWithResilience(ctx context.Context, operation string, fn func() error) error {
+func (pf *ProductionFeatures) ExecuteWithResilience(ctx context.Context, operation string, fn func() error) error { //nolint:unparam // operation parameter kept for API consistency
 	// Wrap function to match the ExecuteFunc signature
-	wrappedFn := func(ctx context.Context) error {
+	wrappedFn := func(ctx context.Context) error { //nolint:unparam // ctx required by ExecuteFunc signature
 		return fn()
 	}
 

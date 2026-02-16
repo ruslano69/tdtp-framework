@@ -45,7 +45,7 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 	// Decompress if needed
 	if pkt.Data.Compression != "" {
 		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
-		if err := decompressPacketData(ctx, pkt); err != nil {
+		if err := decompressPacketData(pkt); err != nil {
 			return fmt.Errorf("decompression failed: %w", err)
 		}
 	}
@@ -97,12 +97,12 @@ func ConvertXLSXToTDTP(opts XLSXOptions) error {
 		// Ensure directory exists
 		dir := filepath.Dir(opts.OutputFile)
 		if dir != "" && dir != "." {
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 		}
 
-		if err := os.WriteFile(opts.OutputFile, xml, 0644); err != nil {
+		if err := os.WriteFile(opts.OutputFile, xml, 0o600); err != nil {
 			return fmt.Errorf("failed to write file: %w", err)
 		}
 
@@ -114,9 +114,9 @@ func ConvertXLSXToTDTP(opts XLSXOptions) error {
 }
 
 // ExportTableToXLSX exports a database table directly to XLSX
-func ExportTableToXLSX(ctx context.Context, config adapters.Config, opts XLSXOptions) error {
+func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOptions) error {
 	// Create adapter
-	adapter, err := adapters.New(ctx, config)
+	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -185,7 +185,7 @@ func ExportTableToXLSX(ctx context.Context, config adapters.Config, opts XLSXOpt
 }
 
 // ImportXLSXToTable imports an XLSX file directly to database table
-func ImportXLSXToTable(ctx context.Context, config adapters.Config, opts XLSXOptions) error {
+func ImportXLSXToTable(ctx context.Context, config *adapters.Config, opts XLSXOptions) error {
 	fmt.Printf("Importing XLSX file '%s' to database...\n", opts.InputFile)
 	fmt.Printf("Sheet: %s\n", opts.SheetName)
 	fmt.Printf("Strategy: %s\n", opts.Strategy)
@@ -211,7 +211,7 @@ func ImportXLSXToTable(ctx context.Context, config adapters.Config, opts XLSXOpt
 	}
 
 	// Create adapter
-	adapter, err := adapters.New(ctx, config)
+	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
