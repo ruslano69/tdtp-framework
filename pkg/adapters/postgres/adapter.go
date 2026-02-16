@@ -277,7 +277,7 @@ func (t *postgresTx) Rollback(ctx context.Context) error {
 }
 
 // Exec выполняет SQL команду (helper метод)
-func (a *Adapter) Exec(ctx context.Context, sql string, args ...interface{}) error {
+func (a *Adapter) Exec(ctx context.Context, sql string, args ...any) error {
 	_, err := a.pool.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("failed to execute SQL: %w", err)
@@ -286,7 +286,7 @@ func (a *Adapter) Exec(ctx context.Context, sql string, args ...interface{}) err
 }
 
 // Query выполняет SQL запрос (helper метод)
-func (a *Adapter) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (a *Adapter) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	rows, err := a.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
@@ -295,7 +295,7 @@ func (a *Adapter) Query(ctx context.Context, sql string, args ...interface{}) (p
 }
 
 // QueryRow выполняет SQL запрос возвращающий одну строку (helper метод)
-func (a *Adapter) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (a *Adapter) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	return a.pool.QueryRow(ctx, sql, args...)
 }
 
@@ -432,7 +432,7 @@ func convertPostgresTypeToTDTP(oid uint32) (string, int) {
 }
 
 // formatPostgresValue форматирует значение PostgreSQL в строку для TDTP
-func formatPostgresValue(val interface{}) string {
+func formatPostgresValue(val any) string {
 	if val == nil {
 		return "" // NULL представляется пустой строкой
 	}

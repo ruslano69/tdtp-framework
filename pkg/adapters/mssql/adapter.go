@@ -56,7 +56,7 @@ func init() {
 
 // Connect implements adapters.Adapter interface.
 // Connects to MS SQL Server and performs feature detection.
-func (a *Adapter) Connect(ctx context.Context, cfg *adapters.Config) error {
+func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	// Open database connection
 	db, err := sql.Open("mssql", cfg.DSN)
 	if err != nil {
@@ -70,7 +70,7 @@ func (a *Adapter) Connect(ctx context.Context, cfg *adapters.Config) error {
 	}
 
 	a.db = db
-	a.config = *cfg
+	a.config = cfg
 	a.strictMode = cfg.StrictCompatibility
 	a.warnMode = cfg.WarnOnIncompatible
 
@@ -473,7 +473,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 
 	// Читаем данные
 	var rowsData []packet.Row
-	scanArgs := make([]interface{}, len(columns))
+	scanArgs := make([]any, len(columns))
 	for i := range scanArgs {
 		var v sql.NullString
 		scanArgs[i] = &v

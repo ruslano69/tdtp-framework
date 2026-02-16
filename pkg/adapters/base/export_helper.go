@@ -168,8 +168,8 @@ func (h *ExportHelper) ExportTableIncremental(
 	ctx context.Context,
 	tableName string,
 	incrementalConfig adapters.IncrementalConfig,
-	buildIncrementalSQL func(tableName string, config adapters.IncrementalConfig) (string, []interface{}),
-	executeIncrementalQuery func(ctx context.Context, sql string, args []interface{}, schema packet.Schema) ([][]string, string, error),
+	buildIncrementalSQL func(tableName string, config adapters.IncrementalConfig) (string, []any),
+	executeIncrementalQuery func(ctx context.Context, sql string, args []any, schema packet.Schema) ([][]string, string, error),
 ) ([]*packet.DataPacket, string, error) {
 	// Валидация конфигурации
 	if err := incrementalConfig.Validate(); err != nil {
@@ -228,7 +228,10 @@ func (h *ExportHelper) createQueryContextForSQL(
 	tableName string,
 ) *packet.QueryContext {
 	// Получаем общее количество записей в таблице
-	totalCount, _ := h.dataReader.GetRowCount(ctx, tableName)
+	totalCount, err := h.dataReader.GetRowCount(ctx, tableName)
+	if err != nil {
+		totalCount = 0 // игнорируем ошибку, используем 0 если не удалось получить count
+	}
 
 	recordsReturned := len(rows)
 	moreDataAvailable := false

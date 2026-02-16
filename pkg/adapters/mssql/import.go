@@ -30,7 +30,9 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() // игнорируем ошибку, если tx.Commit() был успешным
+	}()
 
 	for i, pkt := range packets {
 		if pkt == nil {
@@ -315,7 +317,7 @@ func (a *Adapter) rowExists(
 	row []string,
 ) (bool, error) {
 	conditions := make([]string, 0, len(pkFields))
-	args := make([]interface{}, 0, len(pkFields))
+	args := make([]any, 0, len(pkFields))
 
 	for i, field := range pkFields {
 		idx := pkIndices[i]
@@ -424,8 +426,10 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 		placeholders = append(placeholders, "?")
 	}
 
+	// Экранируем tableName для защиты от SQL injection
+	quotedTable := fmt.Sprintf("[%s]", tableName)
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		tableName,
+		quotedTable,
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "))
 }
@@ -462,8 +466,8 @@ func (a *Adapter) parseRow(row packet.Row, schema packet.Schema) []string {
 }
 
 // rowToArgs конвертирует строку TDTP пакета в массив аргументов для SQL
-func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []interface{} {
-	args := make([]interface{}, len(row))
+func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []any {
+	args := make([]any, len(row))
 	for i, val := range row {
 		if i < len(schema.Fields) {
 			args[i] = a.stringToValue(val, schema.Fields[i])
@@ -476,7 +480,7 @@ func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []interface{} {
 
 // stringToValue конвертирует строку из TDTP в значение для БД
 // Использует schema.Converter для строгой типизации и валидации
-func (a *Adapter) stringToValue(str string, field packet.Field) interface{} {
+func (a *Adapter) stringToValue(str string, field packet.Field) any {
 	// Конвертируем packet.Field в schema.FieldDef
 	fieldDef := fieldToFieldDef(field)
 

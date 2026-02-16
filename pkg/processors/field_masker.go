@@ -15,7 +15,7 @@ type MaskPattern string
 const (
 	// MaskPartial маскирует среднюю часть (email: j***@example.com)
 	MaskPartial MaskPattern = "partial"
-	// MaskMiddle маскирует середину (phone: +1 (555) XXX-X567)
+	// MaskMiddle маскирует середину (phone: +1 (555) ***-*567)
 	MaskMiddle MaskPattern = "middle"
 	// MaskStars заменяет все на звездочки (**** *****)
 	MaskStars MaskPattern = "stars"
@@ -133,9 +133,9 @@ func (m *FieldMasker) maskPartial(value string) string {
 }
 
 // maskMiddle маскирует среднюю часть, оставляя начало и конец
-// Примеры:
-//   - Phone: +1 (555) 123-4567 → +1 (555) XXX-X567
-//   - Card: 1234 5678 9012 3456 → 1234 XXXX XXXX 3456
+// Примеры маскированных данных:
+//   - Phone: +1 (555) 123-4567 → +1 (555) ***-*567
+//   - Card: 1234 5678 9012 3456 → 1234 **** **** 3456
 func (m *FieldMasker) maskMiddle(value string) string {
 	// Убираем все не-цифры для определения длины
 	digitsOnly := regexp.MustCompile(`\D`).ReplaceAllString(value, "")
@@ -222,10 +222,10 @@ func (m *FieldMasker) maskFirst2Last2(value string) string {
 }
 
 // NewFieldMaskerFromConfig создает FieldMasker из конфигурации
-func NewFieldMaskerFromConfig(params map[string]interface{}) (*FieldMasker, error) {
+func NewFieldMaskerFromConfig(params map[string]any) (*FieldMasker, error) {
 	fieldsToMask := make(map[string]MaskPattern)
 
-	fields, ok := params["fields"].(map[string]interface{})
+	fields, ok := params["fields"].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("missing or invalid 'fields' parameter")
 	}

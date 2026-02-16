@@ -16,7 +16,7 @@ type MockSource struct {
 	Name   string                   `json:"name"`
 	Type   string                   `json:"type"` // "mock"
 	Schema []MockColumnSchema       `json:"schema"`
-	Data   []map[string]interface{} `json:"data"`
+	Data   []map[string]any `json:"data"`
 }
 
 // MockColumnSchema represents mock column definition
@@ -118,7 +118,7 @@ func (ss *SourceService) ValidateMockSource(mockSource *MockSource) SourceValida
 }
 
 // validateMockDataType validates data type compatibility
-func (ss *SourceService) validateMockDataType(value interface{}, expectedType string) bool {
+func (ss *SourceService) validateMockDataType(value any, expectedType string) bool {
 	switch expectedType {
 	case "int":
 		_, ok := value.(float64) // JSON numbers are float64
@@ -209,7 +209,7 @@ func (ss *SourceService) GenerateMockTemplate(name string, columns []string) *Mo
 		Name:   name,
 		Type:   "mock",
 		Schema: schema,
-		Data:   []map[string]interface{}{},
+		Data:   []map[string]any{},
 	}
 }
 
@@ -248,7 +248,7 @@ func (ss *SourceService) InferSchemaFromTable(dbType, dsn, tableName string) (*M
 		Name:   tableName,
 		Type:   "mock",
 		Schema: mockSchema,
-		Data:   []map[string]interface{}{},
+		Data:   []map[string]any{},
 	}, nil
 }
 

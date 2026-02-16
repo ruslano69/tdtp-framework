@@ -293,7 +293,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 
 		// Строим VALUES для батча
 		var valuePlaceholders []string
-		var args []interface{}
+		var args []any
 		argIndex := 1
 
 		for _, row := range batch {
@@ -391,10 +391,10 @@ func (a *Adapter) importWithCopy(ctx context.Context, pkt *packet.DataPacket) er
 	}
 
 	// Подготавливаем данные для COPY
-	var rows [][]interface{}
+	var rows [][]any
 	for _, row := range pkt.Data.Rows {
 		values := parseRow(row.Value)
-		rowData := make([]interface{}, len(values))
+		rowData := make([]any, len(values))
 
 		for i, val := range values {
 			rowData[i] = a.convertValue(val, pkt.Schema.Fields[i])
@@ -443,7 +443,7 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 
 // convertValue конвертирует строковое значение в правильный тип для PostgreSQL
 // Использует schema.Converter для строгой типизации и валидации
-func (a *Adapter) convertValue(value string, field packet.Field) interface{} {
+func (a *Adapter) convertValue(value string, field packet.Field) any {
 	// Для типов с subtype используем строку без дополнительной конвертации
 	if field.Subtype != "" {
 		if value == "" {

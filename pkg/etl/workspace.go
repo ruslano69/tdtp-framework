@@ -107,7 +107,9 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() // игнорируем ошибку, если tx.Commit() был успешным
+	}()
 
 	txStmt := tx.StmtContext(ctx, stmt)
 
@@ -119,7 +121,7 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 		}
 
 		// Конвертируем значения в правильные типы
-		convertedValues := make([]interface{}, numFields)
+		convertedValues := make([]any, numFields)
 		for j, val := range values {
 			convertedValues[j] = w.convertValue(val, fields[j].Type)
 		}
@@ -170,8 +172,8 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sql string, resultTableName 
 	}
 
 	// Читаем данные
-	values := make([]interface{}, len(columns))
-	valuePtrs := make([]interface{}, len(columns))
+	values := make([]any, len(columns))
+	valuePtrs := make([]any, len(columns))
 	for i := range values {
 		valuePtrs[i] = &values[i]
 	}
@@ -252,8 +254,8 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTabl
 		defer close(errorChan)
 		defer rows.Close()
 
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
@@ -355,7 +357,7 @@ func (w *Workspace) mapSQLiteTypeToTDTP(sqliteType string) string {
 }
 
 // convertValue конвертирует строковое значение в правильный тип для SQLite
-func (w *Workspace) convertValue(value string, fieldType string) interface{} {
+func (w *Workspace) convertValue(value string, fieldType string) any {
 	// NULL значения
 	if value == "" || value == "NULL" {
 		return nil
@@ -382,7 +384,7 @@ func (w *Workspace) convertValue(value string, fieldType string) interface{} {
 }
 
 // formatValue конвертирует значение из SQL в строку для TDTP
-func (w *Workspace) formatValue(val interface{}) string {
+func (w *Workspace) formatValue(val any) string {
 	if val == nil {
 		return ""
 	}

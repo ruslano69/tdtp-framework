@@ -45,12 +45,12 @@ func (r *Retryer) Do(ctx context.Context, fn RetryableFunc) error {
 }
 
 // DoWithData выполняет функцию с retry и сохраняет данные в DLQ при сбое
-func (r *Retryer) DoWithData(ctx context.Context, fn RetryableFunc, data interface{}) error {
+func (r *Retryer) DoWithData(ctx context.Context, fn RetryableFunc, data any) error {
 	return r.doInternal(ctx, fn, data, true)
 }
 
 // doInternal выполняет функцию с retry (внутренняя реализация)
-func (r *Retryer) doInternal(ctx context.Context, fn RetryableFunc, data interface{}, addToDLQ bool) error {
+func (r *Retryer) doInternal(ctx context.Context, fn RetryableFunc, data any, addToDLQ bool) error {
 	if !r.config.Enabled {
 		// Retry отключен, просто выполняем функцию
 		return fn(ctx)

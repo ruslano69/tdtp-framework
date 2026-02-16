@@ -10,7 +10,7 @@ type Factory struct {
 }
 
 // CreatorFunc функция для создания процессора из конфигурации
-type CreatorFunc func(params map[string]interface{}) (Processor, error)
+type CreatorFunc func(params map[string]any) (Processor, error)
 
 // NewFactory создает новую фабрику процессоров
 func NewFactory() *Factory {
@@ -19,15 +19,15 @@ func NewFactory() *Factory {
 	}
 
 	// Регистрируем встроенные процессоры
-	f.Register("field_masker", func(params map[string]interface{}) (Processor, error) {
+	f.Register("field_masker", func(params map[string]any) (Processor, error) {
 		return NewFieldMaskerFromConfig(params)
 	})
 
-	f.Register("field_normalizer", func(params map[string]interface{}) (Processor, error) {
+	f.Register("field_normalizer", func(params map[string]any) (Processor, error) {
 		return NewFieldNormalizerFromConfig(params)
 	})
 
-	f.Register("field_validator", func(params map[string]interface{}) (Processor, error) {
+	f.Register("field_validator", func(params map[string]any) (Processor, error) {
 		return NewFieldValidatorFromConfig(params)
 	})
 

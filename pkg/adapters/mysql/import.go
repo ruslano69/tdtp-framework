@@ -109,7 +109,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 		batch := rows[i:end]
 
 		// Подготавливаем значения
-		var args []interface{}
+		var args []any
 		for _, row := range batch {
 			rowValues := base.ParseRowValues(row)
 			sqlValues, err := base.ConvertRowToSQLValues(rowValues, schema, a.converter, "mysql")

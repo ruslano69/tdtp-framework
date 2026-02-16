@@ -99,10 +99,10 @@ type Entry struct {
 	ErrorMessage string `json:"error_message,omitempty"`
 
 	// Metadata - дополнительные метаданные
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 
 	// Data - данные операции (только для LevelFull)
-	Data interface{} `json:"data,omitempty"`
+	Data any `json:"data,omitempty"`
 
 	// IPAddress - IP адрес источника
 	IPAddress string `json:"ip_address,omitempty"`
@@ -118,7 +118,7 @@ func NewEntry(operation Operation, status Status) *Entry {
 		Timestamp: time.Now(),
 		Operation: operation,
 		Status:    status,
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 }
 
@@ -168,16 +168,16 @@ func (e *Entry) WithError(err error) *Entry {
 }
 
 // WithMetadata - добавить метаданные
-func (e *Entry) WithMetadata(key string, value interface{}) *Entry {
+func (e *Entry) WithMetadata(key string, value any) *Entry {
 	if e.Metadata == nil {
-		e.Metadata = make(map[string]interface{})
+		e.Metadata = make(map[string]any)
 	}
 	e.Metadata[key] = value
 	return e
 }
 
 // WithData - установить данные операции
-func (e *Entry) WithData(data interface{}) *Entry {
+func (e *Entry) WithData(data any) *Entry {
 	e.Data = data
 	return e
 }
@@ -223,7 +223,7 @@ func (e *Entry) Clone() *Entry {
 
 	// Копируем map
 	if e.Metadata != nil {
-		clone.Metadata = make(map[string]interface{}, len(e.Metadata))
+		clone.Metadata = make(map[string]any, len(e.Metadata))
 		for k, v := range e.Metadata {
 			clone.Metadata[k] = v
 		}

@@ -108,8 +108,8 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchem
 
 	var result [][]string
 	columnCount := len(pkgSchema.Fields)
-	values := make([]interface{}, columnCount)
-	valuePtrs := make([]interface{}, columnCount)
+	values := make([]any, columnCount)
+	valuePtrs := make([]any, columnCount)
 	for i := range values {
 		valuePtrs[i] = &values[i]
 	}

@@ -216,7 +216,7 @@ func parseRow(value string) []string {
 }
 
 // convertToExcel - convert TDTP value to Excel format
-func convertToExcel(value string, fieldType schema.DataType) interface{} {
+func convertToExcel(value string, fieldType schema.DataType) any {
 	if value == "" {
 		return ""
 	}

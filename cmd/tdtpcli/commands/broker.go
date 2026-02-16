@@ -61,7 +61,7 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 		for _, pkt := range packets {
 			// Use common compression function from export.go
 			// Note: broker export doesn't support --hash flag yet, so enableChecksum=false
-			if err := compressPacketData(ctx, pkt, compressLevel, false); err != nil {
+			if err := compressPacketData(pkt, compressLevel, false); err != nil {
 				return fmt.Errorf("compression failed: %w", err)
 			}
 		}

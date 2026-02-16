@@ -281,7 +281,7 @@ func (p *Parser) parseCondition() (Expression, error) {
 	p.nextToken()
 
 	// Value
-	var value interface{}
+	var value any
 	if p.curToken.Type == TokenString {
 		value = p.curToken.Literal
 	} else if p.curToken.Type == TokenNumber {

@@ -236,7 +236,7 @@ func (da *DatabaseAppender) flushBatch(ctx context.Context) error {
 		)
 
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback() // игнорируем ошибку rollback при ошибке вставки
 			return fmt.Errorf("failed to insert entry: %w", err)
 		}
 	}
@@ -278,7 +278,7 @@ func (da *DatabaseAppender) Close() error {
 // Query - запросить audit entries из базы
 func (da *DatabaseAppender) Query(ctx context.Context, filter QueryFilter) ([]*Entry, error) {
 	query := fmt.Sprintf("SELECT * FROM %s WHERE 1=1", da.tableName)
-	args := make([]interface{}, 0)
+	args := make([]any, 0)
 
 	// Добавляем фильтры
 	if filter.Operation != "" {
@@ -358,11 +358,17 @@ func (da *DatabaseAppender) Query(ctx context.Context, filter QueryFilter) ([]*E
 
 		// Парсим JSON
 		if metadataJSON != "" {
-			json.Unmarshal([]byte(metadataJSON), &entry.Metadata)
+			if err := json.Unmarshal([]byte(metadataJSON), &entry.Metadata); err != nil {
+				// игнорируем невалидный JSON metadata, оставляем nil
+				entry.Metadata = nil
+			}
 		}
 
 		if dataJSON != "" && dataJSON != "null" {
-			json.Unmarshal([]byte(dataJSON), &entry.Data)
+			if err := json.Unmarshal([]byte(dataJSON), &entry.Data); err != nil {
+				// игнорируем невалидный JSON data, оставляем nil
+				entry.Data = nil
+			}
 		}
 
 		// Конвертируем duration
@@ -392,7 +398,7 @@ type QueryFilter struct {
 // Count - подсчитать количество audit entries
 func (da *DatabaseAppender) Count(ctx context.Context, filter QueryFilter) (int64, error) {
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE 1=1", da.tableName)
-	args := make([]interface{}, 0)
+	args := make([]any, 0)
 
 	// Добавляем фильтры
 	if filter.Operation != "" {

@@ -90,9 +90,10 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 		fieldNames[i] = field.Name
 	}
 
+	quotedTable := fmt.Sprintf("\"%s\"", tableName)
 	query := fmt.Sprintf("SELECT %s FROM %s",
 		strings.Join(fieldNames, ", "),
-		tableName)
+		quotedTable)
 
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
@@ -118,7 +119,8 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 // GetRowCount возвращает количество строк в таблице
 // Реализует base.DataReader интерфейс
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
 
 	var count int64
 	err := a.db.QueryRowContext(ctx, query).Scan(&count)
@@ -137,7 +139,7 @@ func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, er
 	var result [][]string
 
 	// Подготавливаем scanner для всех колонок
-	scanArgs := make([]interface{}, len(schema.Fields))
+	scanArgs := make([]any, len(schema.Fields))
 	for i := range scanArgs {
 		var v sql.NullString
 		scanArgs[i] = &v

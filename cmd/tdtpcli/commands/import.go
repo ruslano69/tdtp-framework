@@ -191,6 +191,12 @@ func validateMultiPartSession(packets []*packet.DataPacket) error {
 	expectedTotalParts := first.Header.TotalParts
 	expectedInReplyTo := first.Header.InReplyTo
 
+	// Single-packet case: no validation needed if TotalParts is 0 or 1
+	// (TotalParts=0 means non-multi-part export, TotalParts=1 means single part)
+	if expectedTotalParts <= 1 {
+		return nil
+	}
+
 	// Track seen part numbers to detect duplicates/gaps
 	seenParts := make(map[int]bool)
 

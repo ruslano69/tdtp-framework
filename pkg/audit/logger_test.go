@@ -42,7 +42,7 @@ func TestEntry_FilterByLevel(t *testing.T) {
 	entry := NewEntry(OpExport, StatusSuccess).
 		WithUser("test-user").
 		WithMetadata("sensitive", "data").
-		WithData(map[string]interface{}{"password": "secret"})
+		WithData(map[string]any{"password": "secret"})
 
 	// Minimal level - только основные поля
 	minimal := entry.FilterByLevel(LevelMinimal)
@@ -158,7 +158,7 @@ func TestFileAppender_Rotation(t *testing.T) {
 	defer appender.Close()
 
 	// Записываем entries с большим количеством данных
-	largeData := make(map[string]interface{})
+	largeData := make(map[string]any)
 	for j := 0; j < 100; j++ {
 		largeData[fmt.Sprintf("field_%d", j)] = "x" + string(make([]byte, 100))
 	}

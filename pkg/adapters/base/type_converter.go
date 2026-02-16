@@ -59,7 +59,7 @@ func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value st
 
 // DBValueToString конвертирует значение БД в строку для последующей обработки
 // Общий метод с поддержкой специфичных типов для разных СУБД
-func (c *UniversalTypeConverter) DBValueToString(value interface{}, field packet.Field, dbType string) string {
+func (c *UniversalTypeConverter) DBValueToString(value any, field packet.Field, dbType string) string {
 	switch dbType {
 	case "postgres":
 		return c.pgValueToString(value, field)
@@ -76,7 +76,7 @@ func (c *UniversalTypeConverter) DBValueToString(value interface{}, field packet
 
 // pgValueToString конвертирует pgx значение в сырую строку для последующей обработки
 // PostgreSQL-специфичные типы: UUID, JSONB, INET, ARRAY, NUMERIC
-func (c *UniversalTypeConverter) pgValueToString(val interface{}, field packet.Field) string {
+func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) string {
 	if val == nil {
 		return ""
 	}
@@ -120,7 +120,7 @@ func (c *UniversalTypeConverter) pgValueToString(val interface{}, field packet.F
 		sb.WriteString(fmt.Sprintf("%x", v[10:16]))
 		return sb.String()
 
-	case map[string]interface{}:
+	case map[string]any:
 		// JSON/JSONB как map - конвертируем в JSON строку
 		jsonBytes, err := json.Marshal(v)
 		if err != nil {
@@ -129,7 +129,7 @@ func (c *UniversalTypeConverter) pgValueToString(val interface{}, field packet.F
 		}
 		return string(jsonBytes)
 
-	case []interface{}:
+	case []any:
 		// JSON array
 		jsonBytes, err := json.Marshal(v)
 		if err != nil {
@@ -197,7 +197,7 @@ func (c *UniversalTypeConverter) pgValueToString(val interface{}, field packet.F
 
 // mssqlValueToString конвертирует MS SQL значение в строку
 // MS SQL-специфичные типы: UNIQUEIDENTIFIER, TIMESTAMP/ROWVERSION, NVARCHAR
-func (c *UniversalTypeConverter) mssqlValueToString(val interface{}, field packet.Field) string {
+func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field) string {
 	if val == nil {
 		return ""
 	}
@@ -269,7 +269,7 @@ func (c *UniversalTypeConverter) mssqlValueToString(val interface{}, field packe
 
 // genericValueToString конвертирует общее значение БД в строку
 // Для SQLite, MySQL и других простых типов
-func (c *UniversalTypeConverter) genericValueToString(val interface{}, field packet.Field) string {
+func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Field) string {
 	if val == nil {
 		return ""
 	}
@@ -343,7 +343,7 @@ func bytesToHexWithoutLeadingZeros(b []byte) string {
 
 // TypedValueToSQL конвертирует TypedValue в значение для SQL
 // Общая реализация для PreparedStatement parameters
-func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType string) interface{} {
+func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType string) any {
 	if tv.IsNull {
 		return nil
 	}

@@ -61,7 +61,7 @@ func (b *BinaryExpression) String() string {
 type ComparisonExpression struct {
 	Field    string
 	Operator string // "=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE"
-	Value    interface{}
+	Value    any
 }
 
 func (c *ComparisonExpression) node()       {}

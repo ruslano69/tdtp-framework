@@ -326,10 +326,10 @@ func (v *FieldValidator) validateDate(value string) error {
 }
 
 // NewFieldValidatorFromConfig создает FieldValidator из конфигурации
-func NewFieldValidatorFromConfig(params map[string]interface{}) (*FieldValidator, error) {
+func NewFieldValidatorFromConfig(params map[string]any) (*FieldValidator, error) {
 	fieldsToValidate := make(map[string][]FieldValidationRule)
 
-	rules, ok := params["rules"].(map[string]interface{})
+	rules, ok := params["rules"].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("missing or invalid 'rules' parameter")
 	}
@@ -352,7 +352,7 @@ func NewFieldValidatorFromConfig(params map[string]interface{}) (*FieldValidator
 			}
 			fieldRules = append(fieldRules, rule)
 
-		case []interface{}:
+		case []any:
 			// Несколько правил в виде списка
 			for _, r := range rc {
 				ruleStr, ok := r.(string)
@@ -366,7 +366,7 @@ func NewFieldValidatorFromConfig(params map[string]interface{}) (*FieldValidator
 				fieldRules = append(fieldRules, rule)
 			}
 
-		case map[string]interface{}:
+		case map[string]any:
 			// Правило с кастомным сообщением об ошибке
 			rule, err := parseValidationRuleFromMap(rc)
 			if err != nil {
@@ -419,7 +419,7 @@ func parseValidationRule(ruleStr string) (FieldValidationRule, error) {
 }
 
 // parseValidationRuleFromMap парсит правило с кастомным сообщением
-func parseValidationRuleFromMap(m map[string]interface{}) (FieldValidationRule, error) {
+func parseValidationRuleFromMap(m map[string]any) (FieldValidationRule, error) {
 	typeStr, ok := m["type"].(string)
 	if !ok {
 		return FieldValidationRule{}, fmt.Errorf("missing 'type' in rule map")

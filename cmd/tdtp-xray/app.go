@@ -827,13 +827,6 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 		req.Limit = 10 // Default limit
 	}
 
-	// DEBUG: Log request
-	fmt.Printf("🔍 PreviewSource called: SourceName='%s', Limit=%d\n", req.SourceName, req.Limit)
-	fmt.Printf("🔍 Total sources in app.sources: %d\n", len(a.sources))
-	for i, s := range a.sources {
-		fmt.Printf("  [%d] Name='%s', Type='%s', TableName='%s', DSN='%s'\n", i, s.Name, s.Type, s.TableName, s.DSN)
-	}
-
 	// Find source if sourceName provided
 	var source *Source
 	if req.SourceName != "" {
@@ -940,7 +933,7 @@ func (a *App) convertPreviewResult(svcResult services.PreviewResult) PreviewResu
 		}
 	}
 
-	// Convert []map[string]interface{} to [][]any
+	// Convert []map[string]any to [][]any
 	rows := make([][]any, len(svcResult.Rows))
 	for i, row := range svcResult.Rows {
 		rowData := make([]any, len(svcResult.Columns))

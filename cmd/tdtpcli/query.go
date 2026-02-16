@@ -9,7 +9,7 @@ import (
 )
 
 // BuildTDTQLQuery constructs a packet.Query from command-line flags
-func BuildTDTQLQuery(where string, orderBy string, limit, offset int) (*packet.Query, error) {
+func BuildTDTQLQuery(where, orderBy string, limit, offset int) (*packet.Query, error) {
 	if where == "" && orderBy == "" && limit == 0 && offset == 0 {
 		return nil, nil
 	}

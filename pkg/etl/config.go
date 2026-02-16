@@ -35,7 +35,7 @@ type SourceConfig struct {
 type WorkspaceConfig struct {
 	Type   string                 `yaml:"type"`   // Тип: sqlite (только sqlite поддерживается)
 	Mode   string                 `yaml:"mode"`   // Режим: memory (:memory:) или путь к файлу
-	Config map[string]interface{} `yaml:"config"` // Дополнительные настройки SQLite
+	Config map[string]any `yaml:"config"` // Дополнительные настройки SQLite
 }
 
 // TransformConfig определяет SQL трансформацию данных в workspace
