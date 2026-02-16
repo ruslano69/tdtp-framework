@@ -1156,10 +1156,10 @@ async function previewSource(index) {
         }
 
         // Render table with horizontal scroll support
-        let html = '<table style="border-collapse: collapse; font-size: 12px; min-width: 100%;">';
+        let html = '<div style="overflow-x: auto; max-height: 400px; overflow-y: auto;"><table style="border-collapse: collapse; font-size: 12px; min-width: 100%;">';
         html += '<thead><tr>';
         result.columns.forEach(col => {
-            html += `<th style="border: 1px solid #ddd; padding: 5px; background: #f0f0f0; white-space: nowrap;">${col}</th>`;
+            html += `<th style="border: 1px solid #ddd; padding: 5px; background: #f0f0f0; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${col}</th>`;
         });
         html += '</tr></thead><tbody>';
 
@@ -1168,12 +1168,12 @@ async function previewSource(index) {
             // Convert object to array in column order
             const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
             values.forEach(cell => {
-                html += `<td style="border: 1px solid #ddd; padding: 5px; white-space: nowrap;">${cell !== null ? cell : '<i>null</i>'}</td>`;
+                html += `<td style="border: 1px solid #ddd; padding: 5px; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${cell !== null ? cell : '<i>null</i>'}</td>`;
             });
             html += '</tr>';
         });
 
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         html += `<p style="margin-top: 10px; color: #666;"><small>Showing ${result.rows.length} rows</small></p>`;
 
         previewContent.innerHTML = html;
@@ -2571,12 +2571,12 @@ async function refreshStep5Preview() {
         }
 
         // Display as table
-        let html = '<div style="overflow-x: auto;"><table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+        let html = '<div style="overflow-x: auto; max-height: 500px; overflow-y: auto;"><table style="min-width: 100%; border-collapse: collapse; font-size: 12px;">';
 
         // Header
         html += '<thead><tr style="background: #f5f5f5; border-bottom: 2px solid #ddd;">';
         result.columns.forEach(col => {
-            html += `<th style="padding: 8px; text-align: left; font-weight: 600; border-right: 1px solid #eee;">${col}</th>`;
+            html += `<th style="padding: 8px; text-align: left; font-weight: 600; border-right: 1px solid #eee; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${col}</th>`;
         });
         html += '</tr></thead>';
 
@@ -2589,7 +2589,7 @@ async function refreshStep5Preview() {
             const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
             values.forEach(cell => {
                 const value = cell === null ? '<span style="color: #999; font-style: italic;">NULL</span>' : String(cell);
-                html += `<td style="padding: 6px 8px; border-right: 1px solid #eee;">${value}</td>`;
+                html += `<td style="padding: 6px 8px; border-right: 1px solid #eee; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${value}</td>`;
             });
             html += '</tr>';
         });
