@@ -1230,20 +1230,33 @@ function loadStep3Data() {
     sourceListEl.innerHTML = html;
 
     // Load existing canvas design from backend
-    window.GetCanvasDesign().then(design => {
-        if (design && design.tables) {
-            canvasDesign = design;
-            renderCanvas();
-        }
-    }).catch(err => {
-        console.log('No existing canvas design');
-    });
+    if (wailsReady && window.go && window.go.main && window.go.main.App) {
+        window.go.main.App.GetCanvasDesign().then(design => {
+            if (design && design.tables) {
+                canvasDesign = design;
+                console.log('Loaded canvas design:', canvasDesign);
+                // Use setTimeout to ensure DOM is ready
+                setTimeout(() => renderCanvas(), 100);
+            } else {
+                console.log('No canvas design data');
+            }
+        }).catch(err => {
+            console.log('No existing canvas design:', err);
+        });
+    } else {
+        console.log('Wails not ready, skipping canvas load');
+    }
 }
 
 async function saveStep3() {
     // Save canvas design to backend
     try {
-        await window.SaveCanvasDesign(canvasDesign);
+        if (!wailsReady || !window.go) {
+            console.warn('Wails not ready, skipping canvas save');
+            return true; // Allow progression anyway
+        }
+        await window.go.main.App.SaveCanvasDesign(canvasDesign);
+        console.log('Canvas design saved:', canvasDesign);
         showNotification('Canvas design saved successfully', 'success');
         return true;
     } catch (err) {
@@ -1311,6 +1324,12 @@ function renderCanvas() {
     const canvasArea = document.getElementById('canvasArea');
     const svg = document.getElementById('canvasSVG');
 
+    // Check if DOM elements exist
+    if (!canvasArea || !svg) {
+        console.warn('Canvas DOM elements not ready yet');
+        return;
+    }
+
     // Clear existing
     canvasArea.innerHTML = '';
     svg.innerHTML = '';
@@ -1321,8 +1340,8 @@ function renderCanvas() {
         canvasArea.appendChild(tableCard);
     });
 
-    // Render joins
-    renderJoins();
+    // Render joins after a small delay to ensure connectors are in DOM
+    setTimeout(() => renderJoins(), 50);
 }
 
 function createTableCard(table, index) {
@@ -1559,6 +1578,13 @@ function startJoin(tableIndex, fieldIndex) {
 
 function renderJoins() {
     const svg = document.getElementById('canvasSVG');
+
+    // Check if SVG exists
+    if (!svg) {
+        console.warn('SVG element not found');
+        return;
+    }
+
     svg.innerHTML = '';
 
     canvasDesign.joins.forEach((join, joinIndex) => {
@@ -2263,11 +2289,14 @@ async function useGeneratedSQL() {
     }
 
     try {
-        const result = await window.go.main.App.GenerateSQL();
+        // Pass canvasDesign to GenerateSQL
+        const result = await window.go.main.App.GenerateSQL(canvasDesign);
         if (result && result.sql) {
             document.getElementById('transformSQL').value = result.sql;
             showNotification('Generated SQL loaded successfully', 'success');
             validateStep4();
+        } else if (result && result.error) {
+            showNotification('Error generating SQL: ' + result.error, 'error');
         } else {
             showNotification('No SQL generated. Please complete Step 3 first.', 'warning');
         }
