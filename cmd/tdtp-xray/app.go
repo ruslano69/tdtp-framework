@@ -435,8 +435,19 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 			rightSource = rightAlias
 		}
 
-		joinClause := fmt.Sprintf("%s %s ON %s.%s = %s.%s",
-			joinType, rightSource, leftAlias, join.LeftField, rightAlias, join.RightField)
+		// Build field expressions with optional CAST
+		leftExpr := fmt.Sprintf("%s.%s", leftAlias, join.LeftField)
+		rightExpr := fmt.Sprintf("%s.%s", rightAlias, join.RightField)
+
+		if join.CastLeft != "" {
+			leftExpr = fmt.Sprintf("CAST(%s AS %s)", leftExpr, join.CastLeft)
+		}
+		if join.CastRight != "" {
+			rightExpr = fmt.Sprintf("CAST(%s AS %s)", rightExpr, join.CastRight)
+		}
+
+		joinClause := fmt.Sprintf("%s %s ON %s = %s",
+			joinType, rightSource, leftExpr, rightExpr)
 		joinClauses = append(joinClauses, joinClause)
 	}
 

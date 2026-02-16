@@ -1373,7 +1373,7 @@ function createTableCard(table, index) {
             font-size: 12px;
             border-bottom: 1px solid #f0f0f0;
             display: grid;
-            grid-template-columns: 30px 1fr 30px 30px;
+            grid-template-columns: 30px 1fr 30px 35px;
             gap: 5px;
             align-items: center;
         `;
@@ -1382,19 +1382,19 @@ function createTableCard(table, index) {
         const filterIcon = field.filter ? (field.filter.logic === 'OR' ? '^' : '&') : '☀';
         const filterColor = field.filter ? '#0066cc' : '#ccc';
 
+        // Check if this field has a connection
+        const hasConnection = canvasDesign.joins.some(j =>
+            (j.leftTable === table.sourceName && j.leftField === field.name) ||
+            (j.rightTable === table.sourceName && j.rightField === field.name)
+        );
+
         fieldEl.innerHTML = `
             <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
                   title="${field.visible ? 'Hide field' : 'Show field'}">
                 👁
             </span>
-            <span style="${field.visible ? '' : 'opacity: 0.4;'}"
-                  draggable="true"
-                  ondragstart="handleFieldDragStart(event, ${index}, ${fieldIndex})"
-                  ondragend="handleFieldDragEnd(event)"
-                  ondragover="handleFieldDragOver(event)"
-                  ondrop="handleFieldDrop(event, ${index}, ${fieldIndex})"
-                  style="cursor: grab;">
+            <span style="${field.visible ? '' : 'opacity: 0.4;'}">
                 <strong>${field.name}</strong>
                 <br><small style="color: #999;">${field.type}</small>
             </span>
@@ -1403,9 +1403,18 @@ function createTableCard(table, index) {
                   title="${field.filter ? 'Edit filter' : 'Add filter'}">
                 ${filterIcon}
             </span>
-            <button onclick="startJoin(${index}, ${fieldIndex})"
-                    style="background: #f0f0f0; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 11px;"
-                    title="Create JOIN (legacy)">⚡</button>
+            <div class="join-connector ${hasConnection ? 'connected' : ''}"
+                 data-table="${index}"
+                 data-field="${fieldIndex}"
+                 draggable="true"
+                 ondragstart="startConnectorDrag(event, ${index}, ${fieldIndex})"
+                 ondragend="endConnectorDrag(event)"
+                 ondrop="connectFields(event, ${index}, ${fieldIndex})"
+                 ondragover="allowDrop(event)"
+                 onclick="showFieldConnections(${index}, ${fieldIndex})"
+                 title="Drag to another connector to create JOIN">
+                ⚡
+            </div>
         `;
         fieldsContainer.appendChild(fieldEl);
     });
@@ -1627,20 +1636,18 @@ function selectJoin(joinIndex) {
     const join = canvasDesign.joins[joinIndex];
 
     let castInfo = '';
-    if (join.cast) {
-        if (join.cast.field === 'left') {
-            castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
-                ⚠️ Cast left field to ${join.cast.toType}
-            </div>`;
-        } else if (join.cast.field === 'right') {
-            castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
-                ⚠️ Cast right field to ${join.cast.toType}
-            </div>`;
-        } else if (join.cast.field === 'both') {
-            castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
-                ⚠️ Cast both fields to ${join.cast.toType}
-            </div>`;
-        }
+    if (join.castLeft && join.castRight) {
+        castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+            ⚠️ Cast both fields to ${join.castLeft}
+        </div>`;
+    } else if (join.castLeft) {
+        castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+            ⚠️ Cast left field to ${join.castLeft}
+        </div>`;
+    } else if (join.castRight) {
+        castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+            ⚠️ Cast right field to ${join.castRight}
+        </div>`;
     }
 
     const propertiesPanel = document.getElementById('propertiesPanel');
@@ -1814,15 +1821,15 @@ function closeFilterBuilder() {
     }
 }
 
-// ========== DRAG-AND-DROP JOIN ==========
+// ========== DRAG-AND-DROP JOIN (Connector Box) ==========
 
-let draggedField = null;
+let activeConnector = null;
 
-function handleFieldDragStart(event, tableIndex, fieldIndex) {
+function startConnectorDrag(event, tableIndex, fieldIndex) {
     const table = canvasDesign.tables[tableIndex];
     const field = table.fields[fieldIndex];
 
-    draggedField = {
+    activeConnector = {
         tableIndex: tableIndex,
         fieldIndex: fieldIndex,
         tableName: table.sourceName,
@@ -1834,32 +1841,25 @@ function handleFieldDragStart(event, tableIndex, fieldIndex) {
     event.dataTransfer.setData('text/plain', `${table.sourceName}.${field.name}`);
 
     // Visual feedback
-    event.target.style.opacity = '0.5';
-    showNotification(`Drag to another field to create JOIN`, 'info');
+    event.target.classList.add('dragging-connector');
+    showNotification(`Drag to another ⚡ to create JOIN`, 'info');
 }
 
-function handleFieldDragEnd(event) {
-    event.target.style.opacity = '1';
+function endConnectorDrag(event) {
+    event.target.classList.remove('dragging-connector');
+    activeConnector = null;
 }
 
-function handleFieldDragOver(event) {
+function allowDrop(event) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'link';
 }
 
-function handleFieldDrop(event, tableIndex, fieldIndex) {
+function connectFields(event, tableIndex, fieldIndex) {
     event.preventDefault();
     event.stopPropagation();
 
-    // Reset opacity
-    if (draggedField) {
-        const sourceEl = document.querySelector(`[ondragstart*="${draggedField.tableIndex}, ${draggedField.fieldIndex}"]`);
-        if (sourceEl) {
-            sourceEl.style.opacity = '1';
-        }
-    }
-
-    if (!draggedField) {
+    if (!activeConnector) {
         return;
     }
 
@@ -1867,35 +1867,35 @@ function handleFieldDrop(event, tableIndex, fieldIndex) {
     const targetField = targetTable.fields[fieldIndex];
 
     // Check if same table
-    if (draggedField.tableName === targetTable.sourceName) {
+    if (activeConnector.tableName === targetTable.sourceName) {
         showNotification('Cannot join table to itself', 'warning');
-        draggedField = null;
+        activeConnector = null;
         return;
     }
 
     // Check if join already exists
     const existingJoin = canvasDesign.joins.find(j =>
-        (j.leftTable === draggedField.tableName && j.leftField === draggedField.fieldName &&
+        (j.leftTable === activeConnector.tableName && j.leftField === activeConnector.fieldName &&
          j.rightTable === targetTable.sourceName && j.rightField === targetField.name) ||
         (j.leftTable === targetTable.sourceName && j.leftField === targetField.name &&
-         j.rightTable === draggedField.tableName && j.rightField === draggedField.fieldName)
+         j.rightTable === activeConnector.tableName && j.rightField === activeConnector.fieldName)
     );
 
     if (existingJoin) {
         showNotification('Join already exists', 'warning');
-        draggedField = null;
+        activeConnector = null;
         return;
     }
 
     // Check if types match
-    if (draggedField.fieldType === targetField.type) {
+    if (activeConnector.fieldType === targetField.type) {
         // Types match - create join directly
-        createJoinBetweenFields(draggedField.tableName, draggedField.fieldName,
+        createJoinBetweenFields(activeConnector.tableName, activeConnector.fieldName,
                                 targetTable.sourceName, targetField.name, null);
-        draggedField = null;
+        activeConnector = null;
     } else {
         // Types don't match - show CAST dialog
-        showCastDialog(draggedField, targetTable.sourceName, targetField);
+        showCastDialog(activeConnector, targetTable.sourceName, targetField);
     }
 }
 
@@ -1974,7 +1974,7 @@ function createJoinWithCast(leftTable, leftField, rightTable, rightField, castTy
 
     createJoinBetweenFields(leftTable, leftField, rightTable, rightField, castInfo);
     closeCastDialog();
-    draggedField = null;
+    activeConnector = null;
 }
 
 function createJoinBetweenFields(leftTable, leftField, rightTable, rightField, castInfo) {
@@ -1983,13 +1983,44 @@ function createJoinBetweenFields(leftTable, leftField, rightTable, rightField, c
         leftField: leftField,
         rightTable: rightTable,
         rightField: rightField,
-        joinType: 'INNER',
-        cast: castInfo
+        joinType: 'INNER'
     };
+
+    // Convert cast object to castLeft/castRight for backend compatibility
+    if (castInfo) {
+        if (castInfo.field === 'left') {
+            newJoin.castLeft = castInfo.toType;
+        } else if (castInfo.field === 'right') {
+            newJoin.castRight = castInfo.toType;
+        } else if (castInfo.field === 'both') {
+            newJoin.castLeft = castInfo.toType;
+            newJoin.castRight = castInfo.toType;
+        }
+    }
 
     canvasDesign.joins.push(newJoin);
     renderCanvas();
     showNotification('Join created successfully', 'success');
+}
+
+function showFieldConnections(tableIndex, fieldIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const field = table.fields[fieldIndex];
+
+    // Find all joins for this field
+    const fieldJoins = canvasDesign.joins.filter(j =>
+        (j.leftTable === table.sourceName && j.leftField === field.name) ||
+        (j.rightTable === table.sourceName && j.rightField === field.name)
+    );
+
+    if (fieldJoins.length === 0) {
+        showNotification(`No joins for ${table.sourceName}.${field.name}`, 'info');
+        return;
+    }
+
+    // Show first join's properties
+    const joinIndex = canvasDesign.joins.indexOf(fieldJoins[0]);
+    selectJoin(joinIndex);
 }
 
 function closeCastDialog() {
@@ -1997,7 +2028,7 @@ function closeCastDialog() {
     if (modal) {
         modal.remove();
     }
-    draggedField = null;
+    activeConnector = null;
 }
 
 // ========== JOIN CONTEXT MENU ==========

@@ -134,12 +134,44 @@
     background-color: #f0f8ff;
 }
 
-.table-field [draggable="true"] {
+/* JOIN Connector Box */
+.join-connector {
+    width: 24px;
+    height: 24px;
+    background: #f0f0f0;
+    border: 2px solid #0066cc;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: grab;
+    font-size: 14px;
+    transition: all 0.2s;
+    user-select: none;
 }
 
-.table-field [draggable="true"]:active {
+.join-connector:hover {
+    background: #e3f2fd;
+    transform: scale(1.1);
+    box-shadow: 0 2px 5px rgba(0,102,204,0.3);
+}
+
+.join-connector:active {
     cursor: grabbing;
+}
+
+.join-connector.dragging-connector {
+    background: #2196f3;
+    border-color: #1976d2;
+    color: white;
+    cursor: grabbing;
+    box-shadow: 0 4px 10px rgba(33,150,243,0.5);
+}
+
+.join-connector.connected {
+    background: #4caf50;
+    border-color: #2e7d32;
+    color: white;
 }
 
 /* Filter icon states */
