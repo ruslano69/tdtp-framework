@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gopkg.in/yaml.v3"
+
+	_ "modernc.org/sqlite" // Pure Go SQLite driver for in-memory workspace
 )
 
 // App struct
@@ -554,6 +557,250 @@ func (a *App) SaveTransform(t Transform) error {
 // GetTransform retrieves transformation
 func (a *App) GetTransform() *Transform {
 	return a.transform
+}
+
+// PreviewQueryResult executes SQL on in-memory SQLite with loaded sources
+func (a *App) PreviewQueryResult() services.PreviewResult {
+	fmt.Println("🔍 PreviewQueryResult called")
+
+	// 1. Generate SQL from canvas design OR use transform SQL
+	var sqlQuery string
+	if a.transform != nil && a.transform.SQL != "" {
+		sqlQuery = a.transform.SQL
+		fmt.Printf("Using transform SQL: %s\n", sqlQuery)
+	} else if a.canvasDesign != nil {
+		result := a.GenerateSQL(*a.canvasDesign)
+		if result.Error != "" {
+			return services.PreviewResult{
+				Success: false,
+				Message: "Failed to generate SQL: " + result.Error,
+			}
+		}
+		sqlQuery = result.SQL
+		fmt.Printf("Generated SQL from canvas: %s\n", sqlQuery)
+	} else {
+		return services.PreviewResult{
+			Success: false,
+			Message: "No SQL query available. Configure tables in Step 3 or enter SQL in Step 4.",
+		}
+	}
+
+	// 2. Create in-memory SQLite database
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return services.PreviewResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create in-memory database: %v", err),
+		}
+	}
+	defer db.Close()
+
+	// 3. Load all sources into in-memory database
+	for _, source := range a.sources {
+		fmt.Printf("📦 Loading source: %s (type: %s)\n", source.Name, source.Type)
+
+		if err := a.loadSourceToMemory(db, source); err != nil {
+			return services.PreviewResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to load source '%s': %v", source.Name, err),
+			}
+		}
+	}
+
+	// 4. Execute SQL query with LIMIT 10
+	limitedSQL := sqlQuery
+	if !strings.Contains(strings.ToLower(sqlQuery), "limit") {
+		limitedSQL = fmt.Sprintf("%s LIMIT 10", sqlQuery)
+	}
+	fmt.Printf("Executing query: %s\n", limitedSQL)
+
+	rows, err := db.Query(limitedSQL)
+	if err != nil {
+		return services.PreviewResult{
+			Success: false,
+			Message: fmt.Sprintf("Query execution failed: %v", err),
+		}
+	}
+	defer rows.Close()
+
+	// 5. Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		return services.PreviewResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get columns: %v", err),
+		}
+	}
+
+	// 6. Scan rows
+	var data []map[string]any
+	for rows.Next() {
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range columns {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+
+		row := make(map[string]any)
+		for i, col := range columns {
+			row[col] = a.convertValue(values[i])
+		}
+
+		data = append(data, row)
+	}
+
+	fmt.Printf("✅ Query returned %d rows\n", len(data))
+
+	return services.PreviewResult{
+		Success:  true,
+		Columns:  columns,
+		Rows:     data,
+		RowCount: len(data),
+	}
+}
+
+// loadSourceToMemory loads a source into in-memory SQLite database
+func (a *App) loadSourceToMemory(db *sql.DB, source Source) error {
+	switch source.Type {
+	case "tdtp":
+		return a.loadTDTPSourceToMemory(db, source)
+	case "mock":
+		return a.loadMockSourceToMemory(db, source)
+	case "postgres", "postgresql", "mysql", "mssql", "sqlserver", "sqlite", "sqlite3":
+		return a.loadDBSourceToMemory(db, source)
+	default:
+		return fmt.Errorf("unsupported source type: %s", source.Type)
+	}
+}
+
+// loadTDTPSourceToMemory loads TDTP XML data into in-memory SQLite
+func (a *App) loadTDTPSourceToMemory(db *sql.DB, source Source) error {
+	// Get preview data (first 1000 rows for compactness)
+	preview := a.previewService.PreviewTDTPSource(source.DSN, 1000)
+	if !preview.Success {
+		return fmt.Errorf("failed to load TDTP data: %s", preview.Message)
+	}
+
+	// Create table
+	createSQL := fmt.Sprintf("CREATE TABLE %s (", source.Name)
+	for i, col := range preview.Columns {
+		if i > 0 {
+			createSQL += ", "
+		}
+		createSQL += fmt.Sprintf("%s TEXT", col) // SQLite: use TEXT for all columns
+	}
+	createSQL += ")"
+
+	if _, err := db.Exec(createSQL); err != nil {
+		return fmt.Errorf("failed to create table: %v", err)
+	}
+
+	// Insert data
+	if len(preview.Rows) > 0 {
+		placeholders := make([]string, len(preview.Columns))
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES (%s)", source.Name, strings.Join(placeholders, ", "))
+
+		stmt, err := db.Prepare(insertSQL)
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert: %v", err)
+		}
+		defer stmt.Close()
+
+		for _, row := range preview.Rows {
+			values := make([]any, len(preview.Columns))
+			for i, col := range preview.Columns {
+				values[i] = row[col]
+			}
+			if _, err := stmt.Exec(values...); err != nil {
+				fmt.Printf("⚠️ Failed to insert row: %v\n", err)
+			}
+		}
+	}
+
+	fmt.Printf("✅ Loaded %d rows from TDTP source '%s'\n", len(preview.Rows), source.Name)
+	return nil
+}
+
+// loadMockSourceToMemory loads mock data into in-memory SQLite
+func (a *App) loadMockSourceToMemory(db *sql.DB, source Source) error {
+	// Mock sources are stored in mockSources map (need to retrieve)
+	// For now, return not implemented
+	return fmt.Errorf("mock source loading not yet implemented")
+}
+
+// loadDBSourceToMemory loads database table data into in-memory SQLite
+func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
+	// Build query (use TableName with LIMIT for compactness)
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT 1000", source.TableName)
+
+	// Get preview data
+	preview := a.previewService.PreviewQuery(source.Type, source.DSN, query, 1000)
+	if !preview.Success {
+		return fmt.Errorf("failed to load database data: %s", preview.Message)
+	}
+
+	// Create table
+	createSQL := fmt.Sprintf("CREATE TABLE %s (", source.Name)
+	for i, col := range preview.Columns {
+		if i > 0 {
+			createSQL += ", "
+		}
+		createSQL += fmt.Sprintf("%s TEXT", col)
+	}
+	createSQL += ")"
+
+	if _, err := db.Exec(createSQL); err != nil {
+		return fmt.Errorf("failed to create table: %v", err)
+	}
+
+	// Insert data
+	if len(preview.Rows) > 0 {
+		placeholders := make([]string, len(preview.Columns))
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES (%s)", source.Name, strings.Join(placeholders, ", "))
+
+		stmt, err := db.Prepare(insertSQL)
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert: %v", err)
+		}
+		defer stmt.Close()
+
+		for _, row := range preview.Rows {
+			values := make([]any, len(preview.Columns))
+			for i, col := range preview.Columns {
+				values[i] = row[col]
+			}
+			if _, err := stmt.Exec(values...); err != nil {
+				fmt.Printf("⚠️ Failed to insert row: %v\n", err)
+			}
+		}
+	}
+
+	fmt.Printf("✅ Loaded %d rows from DB source '%s'\n", len(preview.Rows), source.Name)
+	return nil
+}
+
+// convertValue converts SQL value to JSON-friendly type
+func (a *App) convertValue(value any) any {
+	if value == nil {
+		return nil
+	}
+
+	// Handle byte arrays
+	if b, ok := value.([]byte); ok {
+		return string(b)
+	}
+
+	return value
 }
 
 // --- Step 5: Output ---
