@@ -1315,6 +1315,7 @@ function loadStep3Data() {
                                 table.fields = tables[0].columns.map(col => ({
                                     name: col.name,
                                     type: col.type,
+                                    isPrimaryKey: col.isPrimaryKey || false,
                                     visible: true,
                                     filter: null
                                 }));
@@ -1414,6 +1415,7 @@ async function addTableToCanvas(sourceName) {
         const fields = (tableInfo.columns || []).map(col => ({
             name: col.name,
             type: col.type,
+            isPrimaryKey: col.isPrimaryKey || false,
             visible: true,
             filter: null // { operator: '=|<>|>=|<=|>|<|BW', value: '', value2: '', logic: 'AND|OR' }
         }));
@@ -1519,6 +1521,13 @@ function createTableCard(table, index) {
     table.fields.forEach((field, fieldIndex) => {
         const fieldEl = document.createElement('div');
         fieldEl.className = 'table-field';
+
+        // Check if this is a primary key field
+        const isPrimaryKey = field.key || field.isPrimaryKey || false;
+
+        // Style for primary key fields
+        const pkBackground = isPrimaryKey ? 'background: #fffbea; border-left: 3px solid #f59e0b;' : '';
+
         fieldEl.style.cssText = `
             padding: 4px 8px;
             font-size: 12px;
@@ -1527,6 +1536,7 @@ function createTableCard(table, index) {
             grid-template-columns: 30px auto 30px 30px;
             gap: 8px;
             align-items: center;
+            ${pkBackground}
         `;
 
         // Get filter icon
@@ -1539,6 +1549,10 @@ function createTableCard(table, index) {
             (j.rightTable === table.sourceName && j.rightField === field.name)
         );
 
+        // Key icon and field name styling
+        const keyIcon = isPrimaryKey ? '🔑 ' : '';
+        const fieldNameStyle = isPrimaryKey ? 'color: #f59e0b; font-weight: 700;' : '';
+
         fieldEl.innerHTML = `
             <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
@@ -1548,8 +1562,8 @@ function createTableCard(table, index) {
             <span class="field-name-wrapper"
                   data-type="${field.type}"
                   style="${field.visible ? '' : 'opacity: 0.4;'}"
-                  title="${field.name} (${field.type})">
-                <strong class="field-name">${field.name}</strong>
+                  title="${keyIcon}${field.name} (${field.type})${isPrimaryKey ? ' - PRIMARY KEY' : ''}">
+                <strong class="field-name" style="${fieldNameStyle}">${keyIcon}${field.name}</strong>
                 <small class="field-type">${field.type}</small>
             </span>
             <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
