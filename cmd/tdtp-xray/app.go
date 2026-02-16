@@ -332,10 +332,12 @@ type TableDesign struct {
 
 // FieldDesign represents a field in a table
 type FieldDesign struct {
-	Name      string           `json:"name"`
-	Type      string           `json:"type"`
-	Visible   bool             `json:"visible"`
-	Condition *FilterCondition `json:"condition,omitempty"`
+	Name         string           `json:"name"`
+	Type         string           `json:"type"`
+	IsPrimaryKey bool             `json:"isPrimaryKey,omitempty"`
+	Visible      bool             `json:"visible"`
+	Filter       *FilterCondition `json:"filter,omitempty"`   // Frontend uses "filter"
+	Condition    *FilterCondition `json:"condition,omitempty"` // Backend compatibility
 }
 
 // FilterCondition for field filtering
@@ -451,6 +453,67 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		joinClauses = append(joinClauses, joinClause)
 	}
 
+	// Build WHERE clause from field filters
+	var whereConditions []string
+	var whereLogic string // Track predominant logic (AND/OR)
+
+	for _, table := range design.Tables {
+		tableAlias := table.Alias
+		if tableAlias == "" {
+			tableAlias = table.SourceName
+		}
+
+		for _, field := range table.Fields {
+			// Check both Filter (from frontend) and Condition (backend)
+			filter := field.Filter
+			if filter == nil {
+				filter = field.Condition
+			}
+
+			if filter == nil || filter.Value == "" {
+				continue
+			}
+
+			// Build condition expression
+			fieldExpr := fmt.Sprintf("%s.%s", tableAlias, field.Name)
+			var condition string
+
+			switch filter.Operator {
+			case "=":
+				condition = fmt.Sprintf("%s = '%s'", fieldExpr, filter.Value)
+			case "<>", "!=":
+				condition = fmt.Sprintf("%s <> '%s'", fieldExpr, filter.Value)
+			case ">":
+				condition = fmt.Sprintf("%s > '%s'", fieldExpr, filter.Value)
+			case "<":
+				condition = fmt.Sprintf("%s < '%s'", fieldExpr, filter.Value)
+			case ">=":
+				condition = fmt.Sprintf("%s >= '%s'", fieldExpr, filter.Value)
+			case "<=":
+				condition = fmt.Sprintf("%s <= '%s'", fieldExpr, filter.Value)
+			case "BW", "BETWEEN":
+				if filter.Value2 != "" {
+					condition = fmt.Sprintf("%s BETWEEN '%s' AND '%s'", fieldExpr, filter.Value, filter.Value2)
+				} else {
+					condition = fmt.Sprintf("%s >= '%s'", fieldExpr, filter.Value)
+				}
+			case "LIKE":
+				condition = fmt.Sprintf("%s LIKE '%s'", fieldExpr, filter.Value)
+			case "IN":
+				condition = fmt.Sprintf("%s IN (%s)", fieldExpr, filter.Value)
+			default:
+				condition = fmt.Sprintf("%s = '%s'", fieldExpr, filter.Value)
+			}
+
+			whereConditions = append(whereConditions, condition)
+
+			// Track logic operator (use the last one, or default to AND)
+			if filter.Logic != "" {
+				whereLogic = filter.Logic
+			}
+		}
+	}
+
 	// Build complete SQL
 	sql := fmt.Sprintf("SELECT\n    %s\nFROM %s",
 		strings.Join(selectFields, ",\n    "),
@@ -458,6 +521,16 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 	if len(joinClauses) > 0 {
 		sql += "\n" + strings.Join(joinClauses, "\n")
+	}
+
+	// Add WHERE clause if we have conditions
+	if len(whereConditions) > 0 {
+		// Default to AND if no logic specified
+		if whereLogic == "" {
+			whereLogic = "AND"
+		}
+
+		sql += fmt.Sprintf("\nWHERE\n    %s", strings.Join(whereConditions, "\n    "+whereLogic+" "))
 	}
 
 	fmt.Printf("✅ Generated SQL:\n%s\n", sql)
