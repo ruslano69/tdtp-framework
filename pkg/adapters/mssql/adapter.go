@@ -56,7 +56,7 @@ func init() {
 
 // Connect implements adapters.Adapter interface.
 // Connects to MS SQL Server and performs feature detection.
-func (a *Adapter) Connect(ctx context.Context, cfg *adapters.Config) error {
+func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	// Open database connection
 	db, err := sql.Open("mssql", cfg.DSN)
 	if err != nil {
@@ -70,7 +70,7 @@ func (a *Adapter) Connect(ctx context.Context, cfg *adapters.Config) error {
 	}
 
 	a.db = db
-	a.config = *cfg
+	a.config = cfg
 	a.strictMode = cfg.StrictCompatibility
 	a.warnMode = cfg.WarnOnIncompatible
 
