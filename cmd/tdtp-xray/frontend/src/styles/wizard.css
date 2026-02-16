@@ -61,10 +61,12 @@
 .wizard-step.completed .step-number {
     background: #4caf50;
     color: #fff;
+    font-size: 0; /* Hide the number */
 }
 
 .wizard-step.completed .step-number::before {
     content: "✓";
+    font-size: 16px; /* Show checkmark */
 }
 
 .wizard-step.error .step-number {
@@ -123,4 +125,143 @@
     font-size: 8pt;
     font-weight: 600;
     margin-left: 8px;
+}
+
+/* Visual Designer Enhancements */
+.table-field {
+    transition: background-color 0.2s;
+    padding: 4px 8px !important; /* More compact vertical spacing */
+}
+
+.table-field:hover {
+    background-color: #f0f8ff;
+}
+
+/* Field name wrapper - compact by default */
+.field-name-wrapper {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.field-name {
+    font-weight: 600;
+}
+
+/* Hide field type by default */
+.field-type {
+    display: none;
+    color: #999;
+    font-size: 10px;
+    margin-top: 2px;
+}
+
+/* Show field type on hover */
+.table-field:hover .field-type {
+    display: block;
+}
+
+/* JOIN Connector Box */
+.join-connector {
+    width: 24px;
+    height: 24px;
+    background: #f0f0f0;
+    border: 2px solid #0066cc;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    font-size: 14px;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.join-connector:hover {
+    background: #e3f2fd;
+    transform: scale(1.1);
+    box-shadow: 0 2px 5px rgba(0,102,204,0.3);
+}
+
+.join-connector:active {
+    cursor: grabbing;
+}
+
+.join-connector.dragging-connector {
+    background: #2196f3;
+    border-color: #1976d2;
+    color: white;
+    cursor: grabbing;
+    box-shadow: 0 4px 10px rgba(33,150,243,0.5);
+}
+
+.join-connector.connected {
+    background: #4caf50;
+    border-color: #2e7d32;
+    color: white;
+}
+
+/* Filter icon states */
+.filter-icon {
+    user-select: none;
+    transition: transform 0.2s;
+}
+
+.filter-icon:hover {
+    transform: scale(1.2);
+}
+
+/* Modal overlays */
+#filterBuilderModal,
+#castDialogModal,
+#joinContextMenu {
+    animation: fadeIn 0.2s;
+}
+
+/* Context menu hover effects */
+#joinContextMenu > div {
+    transition: background-color 0.15s;
+}
+
+/* Dragging visual feedback */
+.dragging-field {
+    opacity: 0.5;
+    cursor: grabbing;
+}
+
+.drop-target {
+    background-color: #e3f2fd !important;
+    border: 2px dashed #2196f3;
+}
+
+/* CAST warning badge */
+.cast-warning {
+    background: #fff3cd;
+    border-left: 3px solid #ffc107;
+    padding: 8px;
+    margin: 8px 0;
+    font-size: 12px;
+    border-radius: 3px;
+}
+
+/* JOIN line highlight on hover */
+svg line:hover,
+svg text:hover {
+    filter: brightness(0.8);
+}
+
+/* Improved button styles in modals */
+.btn {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+.btn:active {
+    transform: translateY(0);
 }

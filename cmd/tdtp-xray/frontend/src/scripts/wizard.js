@@ -3,6 +3,7 @@
 let currentStep = 1;
 const totalSteps = 7;
 let appMode = 'production'; // production or mock
+let completedSteps = new Set(); // Track completed steps
 
 // Wait for Wails runtime to be ready
 let wailsReady = false;
@@ -63,15 +64,53 @@ async function switchMode(mode) {
     );
 }
 
+// Navigate to a specific step (called when clicking on step in nav)
+function goToStep(targetStep) {
+    // Only allow navigation to current step or earlier completed steps
+    if (targetStep > currentStep && !completedSteps.has(targetStep)) {
+        showNotification('Please complete previous steps first', 'warning');
+        return;
+    }
+
+    // Save current step before navigating
+    saveCurrentStep().then(() => {
+        loadStep(targetStep);
+    });
+}
+
 // Load specific wizard step
 function loadStep(step) {
     currentStep = step;
 
+    // Mark previous steps as completed
+    if (step > 1) {
+        for (let i = 1; i < step; i++) {
+            completedSteps.add(i);
+        }
+    }
+
     // Update step navigation highlights
     document.querySelectorAll('.wizard-step').forEach(el => {
+        const stepNum = parseInt(el.dataset.step);
         el.classList.remove('active');
-        if (parseInt(el.dataset.step) === step) {
+
+        // Mark as completed if it's in completedSteps
+        if (completedSteps.has(stepNum)) {
+            el.classList.add('completed');
+        } else {
+            el.classList.remove('completed');
+        }
+
+        // Mark current step as active
+        if (stepNum === step) {
             el.classList.add('active');
+        }
+
+        // Add pointer cursor for clickable steps
+        if (stepNum <= currentStep || completedSteps.has(stepNum)) {
+            el.style.cursor = 'pointer';
+        } else {
+            el.style.cursor = 'not-allowed';
         }
     });
 
@@ -89,7 +128,8 @@ function loadStep(step) {
             break;
         case 3:
             content.innerHTML = getStep3HTML();
-            loadStep3Data();
+            // Wait for DOM to be ready before loading data
+            setTimeout(() => loadStep3Data(), 50);
             break;
         case 4:
             content.innerHTML = getStep4HTML();
@@ -1116,22 +1156,24 @@ async function previewSource(index) {
         }
 
         // Render table with horizontal scroll support
-        let html = '<table style="border-collapse: collapse; font-size: 12px; min-width: 100%;">';
+        let html = '<div style="overflow-x: auto; max-height: 400px; overflow-y: auto;"><table style="border-collapse: collapse; font-size: 12px; min-width: 100%;">';
         html += '<thead><tr>';
         result.columns.forEach(col => {
-            html += `<th style="border: 1px solid #ddd; padding: 5px; background: #f0f0f0; white-space: nowrap;">${col}</th>`;
+            html += `<th style="border: 1px solid #ddd; padding: 5px; background: #f0f0f0; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${col}</th>`;
         });
         html += '</tr></thead><tbody>';
 
         result.rows.forEach(row => {
             html += '<tr>';
-            row.forEach(cell => {
-                html += `<td style="border: 1px solid #ddd; padding: 5px; white-space: nowrap;">${cell !== null ? cell : '<i>null</i>'}</td>`;
+            // Convert object to array in column order
+            const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
+            values.forEach(cell => {
+                html += `<td style="border: 1px solid #ddd; padding: 5px; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${cell !== null ? cell : '<i>null</i>'}</td>`;
             });
             html += '</tr>';
         });
 
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         html += `<p style="margin-top: 10px; color: #666;"><small>Showing ${result.rows.length} rows</small></p>`;
 
         previewContent.innerHTML = html;
@@ -1207,13 +1249,32 @@ let selectedJoinId = null;
 let joinStartField = null; // For creating joins
 
 function loadStep3Data() {
-    // Load sources from Step 2 (global sources variable, not appState!)
-    const sourceListEl = document.getElementById('tablesSourceList');
+    console.log('🔄 loadStep3Data() called');
 
+    // Check DOM readiness
+    const sourceListEl = document.getElementById('tablesSourceList');
+    const canvasArea = document.getElementById('canvasArea');
+    const svg = document.getElementById('canvasSVG');
+
+    console.log('DOM elements check:', {
+        sourceListEl: !!sourceListEl,
+        canvasArea: !!canvasArea,
+        svg: !!svg
+    });
+
+    if (!sourceListEl || !canvasArea || !svg) {
+        console.error('❌ DOM elements not ready, retrying in 100ms...');
+        setTimeout(() => loadStep3Data(), 100);
+        return;
+    }
+
+    // Load sources from Step 2 (global sources variable, not appState!)
     if (sources.length === 0) {
         sourceListEl.innerHTML = '<p style="color: #999; font-size: 13px;">No sources defined in Step 2</p>';
         return;
     }
+
+    console.log('📋 Loading sources:', sources.length);
 
     let html = '';
     sources.forEach(src => {
@@ -1230,20 +1291,79 @@ function loadStep3Data() {
     sourceListEl.innerHTML = html;
 
     // Load existing canvas design from backend
-    window.GetCanvasDesign().then(design => {
-        if (design && design.tables) {
-            canvasDesign = design;
+    console.log('🔍 Checking Wails readiness...');
+    if (wailsReady && window.go && window.go.main && window.go.main.App) {
+        console.log('✅ Wails ready, loading canvas design...');
+        window.go.main.App.GetCanvasDesign().then(async design => {
+            console.log('📦 GetCanvasDesign response:', design);
+            if (design && design.tables && design.tables.length > 0) {
+                canvasDesign = design;
+                console.log('✅ Canvas design loaded:', {
+                    tables: canvasDesign.tables.length,
+                    joins: canvasDesign.joins ? canvasDesign.joins.length : 0
+                });
+
+                // CRITICAL: Load fields for each table if they're missing
+                console.log('🔧 Checking table fields...');
+                for (let i = 0; i < canvasDesign.tables.length; i++) {
+                    const table = canvasDesign.tables[i];
+                    console.log(`  📋 Table ${i} (${table.sourceName}): ${table.fields ? table.fields.length : 0} fields`);
+
+                    if (!table.fields || table.fields.length === 0) {
+                        console.log(`  🔄 Loading fields for ${table.sourceName}...`);
+                        try {
+                            const tables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+                            if (tables && tables.length > 0 && tables[0].columns) {
+                                table.fields = tables[0].columns.map(col => ({
+                                    name: col.name,
+                                    type: col.type,
+                                    isPrimaryKey: col.isPrimaryKey || false,
+                                    visible: true,
+                                    filter: null
+                                }));
+                                console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+                            }
+                        } catch (err) {
+                            console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
+                        }
+                    }
+                }
+
+                // Render canvas after all fields are loaded
+                console.log('🎨 All fields loaded, rendering canvas...');
+                renderCanvas();
+            } else {
+                console.log('ℹ️ No canvas design data or empty tables');
+                // Initialize empty design if needed
+                if (!canvasDesign.tables) {
+                    canvasDesign.tables = [];
+                }
+                if (!canvasDesign.joins) {
+                    canvasDesign.joins = [];
+                }
+            }
+        }).catch(err => {
+            console.error('❌ Failed to load canvas design:', err);
+        });
+    } else {
+        console.warn('⚠️ Wails not ready, using existing canvasDesign:', canvasDesign);
+        // Try to render with existing data
+        if (canvasDesign && canvasDesign.tables && canvasDesign.tables.length > 0) {
+            console.log('Rendering with existing canvasDesign');
             renderCanvas();
         }
-    }).catch(err => {
-        console.log('No existing canvas design');
-    });
+    }
 }
 
 async function saveStep3() {
     // Save canvas design to backend
     try {
-        await window.SaveCanvasDesign(canvasDesign);
+        if (!wailsReady || !window.go) {
+            console.warn('Wails not ready, skipping canvas save');
+            return true; // Allow progression anyway
+        }
+        await window.go.main.App.SaveCanvasDesign(canvasDesign);
+        console.log('Canvas design saved:', canvasDesign);
         showNotification('Canvas design saved successfully', 'success');
         return true;
     } catch (err) {
@@ -1259,6 +1379,8 @@ function handleTableDragStart(event, sourceName) {
 }
 
 async function addTableToCanvas(sourceName) {
+    console.log(`🔧 addTableToCanvas called for: ${sourceName}`);
+
     // Check if table already exists
     if (canvasDesign.tables.find(t => t.sourceName === sourceName)) {
         showNotification('Table already on canvas', 'warning');
@@ -1272,19 +1394,35 @@ async function addTableToCanvas(sourceName) {
             return;
         }
 
+        console.log(`📞 Calling GetTablesBySourceName for: ${sourceName}`);
         const tables = await window.go.main.App.GetTablesBySourceName(sourceName);
+        console.log(`📦 GetTablesBySourceName response:`, tables);
+
         if (!tables || tables.length === 0) {
+            console.error(`❌ No tables returned for: ${sourceName}`);
             showNotification('Failed to load table schema', 'error');
             return;
         }
 
         const tableInfo = tables[0];
-        const fields = tableInfo.columns.map(col => ({
+        console.log(`📋 Table info:`, tableInfo);
+        console.log(`📋 Columns:`, tableInfo.columns);
+
+        if (!tableInfo.columns || tableInfo.columns.length === 0) {
+            console.error(`❌ No columns in table info for: ${sourceName}`);
+            showNotification(`⚠️ Table "${sourceName}" has no columns. Check if TDTP XML schema is valid.`, 'error');
+            // Still add the table but with empty fields - maybe user can add fields manually later
+        }
+
+        const fields = (tableInfo.columns || []).map(col => ({
             name: col.name,
             type: col.type,
+            isPrimaryKey: col.isPrimaryKey || false,
             visible: true,
-            condition: null
+            filter: null // { operator: '=|<>|>=|<=|>|<|BW', value: '', value2: '', logic: 'AND|OR' }
         }));
+
+        console.log(`✅ Mapped ${fields.length} fields for ${sourceName}`);
 
         // Calculate position (offset each new table)
         const tableCount = canvasDesign.tables.length;
@@ -1299,17 +1437,30 @@ async function addTableToCanvas(sourceName) {
             fields: fields
         };
 
+        console.log(`➕ Adding table to canvas:`, newTable);
         canvasDesign.tables.push(newTable);
         renderCanvas();
     } catch (err) {
-        console.error('Failed to add table:', err);
+        console.error('❌ Failed to add table:', err);
         showNotification('Failed to add table: ' + err, 'error');
     }
 }
 
 function renderCanvas() {
+    console.log('🎨 renderCanvas() called');
     const canvasArea = document.getElementById('canvasArea');
     const svg = document.getElementById('canvasSVG');
+
+    // Check if DOM elements exist
+    if (!canvasArea || !svg) {
+        console.warn('⚠️ Canvas DOM elements not ready yet');
+        return;
+    }
+
+    console.log('📊 Rendering canvas with:', {
+        tables: canvasDesign.tables.length,
+        joins: canvasDesign.joins ? canvasDesign.joins.length : 0
+    });
 
     // Clear existing
     canvasArea.innerHTML = '';
@@ -1317,12 +1468,14 @@ function renderCanvas() {
 
     // Render tables
     canvasDesign.tables.forEach((table, index) => {
+        console.log(`  ➕ Rendering table ${index}: ${table.sourceName}`);
         const tableCard = createTableCard(table, index);
         canvasArea.appendChild(tableCard);
     });
 
-    // Render joins
-    renderJoins();
+    console.log('✅ Tables rendered, scheduling JOIN rendering...');
+    // Render joins after a small delay to ensure connectors are in DOM
+    setTimeout(() => renderJoins(), 50);
 }
 
 function createTableCard(table, index) {
@@ -1333,7 +1486,9 @@ function createTableCard(table, index) {
         position: absolute;
         left: ${table.x}px;
         top: ${table.y}px;
-        width: 200px;
+        min-width: 200px;
+        width: auto;
+        max-width: 400px;
         background: white;
         border: 2px solid #0066cc;
         border-radius: 5px;
@@ -1368,30 +1523,68 @@ function createTableCard(table, index) {
     table.fields.forEach((field, fieldIndex) => {
         const fieldEl = document.createElement('div');
         fieldEl.className = 'table-field';
+
+        // Check if this is a primary key field
+        const isPrimaryKey = field.key || field.isPrimaryKey || false;
+
+        // Style for primary key fields
+        const pkBackground = isPrimaryKey ? 'background: #fffbea; border-left: 3px solid #f59e0b;' : '';
+
         fieldEl.style.cssText = `
-            padding: 6px 8px;
+            padding: 4px 8px;
             font-size: 12px;
             border-bottom: 1px solid #f0f0f0;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: 30px auto 30px 30px;
+            gap: 8px;
             align-items: center;
+            ${pkBackground}
         `;
+
+        // Get filter icon
+        const filterIcon = field.filter ? (field.filter.logic === 'OR' ? '^' : '&') : '☀';
+        const filterColor = field.filter ? '#0066cc' : '#ccc';
+
+        // Check if this field has a connection
+        const hasConnection = canvasDesign.joins.some(j =>
+            (j.leftTable === table.sourceName && j.leftField === field.name) ||
+            (j.rightTable === table.sourceName && j.rightField === field.name)
+        );
+
+        // Key icon and field name styling
+        const keyIcon = isPrimaryKey ? '🔑 ' : '';
+        const fieldNameStyle = isPrimaryKey ? 'color: #f59e0b; font-weight: 700;' : '';
+
         fieldEl.innerHTML = `
-            <span style="display: flex; align-items: center; gap: 5px;">
-                <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
-                      style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
-                      title="${field.visible ? 'Hide field' : 'Show field'}">
-                    👁
-                </span>
-                <span style="${field.visible ? '' : 'opacity: 0.4;'}">
-                    <strong>${field.name}</strong>
-                    <br><small style="color: #999;">${field.type}</small>
-                </span>
+            <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
+                  style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
+                  title="${field.visible ? 'Hide field' : 'Show field'}">
+                👁
             </span>
-            <button onclick="startJoin(${index}, ${fieldIndex})"
-                    style="background: #f0f0f0; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 11px;"
-                    title="Create JOIN">⚡</button>
+            <span class="field-name-wrapper"
+                  data-type="${field.type}"
+                  style="${field.visible ? '' : 'opacity: 0.4;'}"
+                  title="${keyIcon}${field.name} (${field.type})${isPrimaryKey ? ' - PRIMARY KEY' : ''}">
+                <strong class="field-name" style="${fieldNameStyle}">${keyIcon}${field.name}</strong>
+                <small class="field-type">${field.type}</small>
+            </span>
+            <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
+                  style="cursor: pointer; font-size: 16px; font-weight: bold; color: ${filterColor}; user-select: none; text-align: center;"
+                  title="${field.filter ? 'Edit filter' : 'Add filter'}">
+                ${filterIcon}
+            </span>
+            <div class="join-connector ${hasConnection ? 'connected' : ''}"
+                 data-table="${index}"
+                 data-field="${fieldIndex}"
+                 draggable="true"
+                 ondragstart="startConnectorDrag(event, ${index}, ${fieldIndex})"
+                 ondragend="endConnectorDrag(event)"
+                 ondrop="connectFields(event, ${index}, ${fieldIndex})"
+                 ondragover="allowDrop(event)"
+                 onclick="showFieldConnections(${index}, ${fieldIndex})"
+                 title="Drag to another connector to create JOIN">
+                ⚡
+            </div>
         `;
         fieldsContainer.appendChild(fieldEl);
     });
@@ -1409,7 +1602,15 @@ function makeDraggable(element, tableIndex) {
     let startX, startY, initialX, initialY;
 
     element.addEventListener('mousedown', function(e) {
+        // Ignore buttons and inputs
         if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+
+        // Check if target or its parent is draggable (for field drag-and-drop)
+        let target = e.target;
+        while (target && target !== element) {
+            if (target.draggable === true) return;
+            target = target.parentElement;
+        }
 
         isDragging = true;
         startX = e.clientX;
@@ -1522,10 +1723,20 @@ function startJoin(tableIndex, fieldIndex) {
 }
 
 function renderJoins() {
+    console.log('🔗 renderJoins() called');
     const svg = document.getElementById('canvasSVG');
+
+    // Check if SVG exists
+    if (!svg) {
+        console.warn('⚠️ SVG element not found');
+        return;
+    }
+
+    console.log(`📍 Rendering ${canvasDesign.joins.length} JOINs`);
     svg.innerHTML = '';
 
     canvasDesign.joins.forEach((join, joinIndex) => {
+        console.log(`  🔗 JOIN ${joinIndex}: ${join.leftTable}.${join.leftField} → ${join.rightTable}.${join.rightField}`);
         const leftTableIdx = canvasDesign.tables.findIndex(t => t.sourceName === join.leftTable);
         const rightTableIdx = canvasDesign.tables.findIndex(t => t.sourceName === join.rightTable);
 
@@ -1551,6 +1762,10 @@ function renderJoins() {
         line.setAttribute('marker-end', 'url(#arrowhead)');
         line.style.cursor = 'pointer';
         line.onclick = () => selectJoin(joinIndex);
+        line.oncontextmenu = (e) => {
+            e.preventDefault();
+            showJoinContextMenu(e, joinIndex);
+        };
 
         svg.appendChild(line);
 
@@ -1567,6 +1782,10 @@ function renderJoins() {
         text.textContent = join.joinType;
         text.style.cursor = 'pointer';
         text.onclick = () => selectJoin(joinIndex);
+        text.oncontextmenu = (e) => {
+            e.preventDefault();
+            showJoinContextMenu(e, joinIndex);
+        };
 
         svg.appendChild(text);
     });
@@ -1596,6 +1815,21 @@ function selectJoin(joinIndex) {
     selectedJoinId = joinIndex;
     const join = canvasDesign.joins[joinIndex];
 
+    let castInfo = '';
+    if (join.castLeft && join.castRight) {
+        castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+            ⚠️ Cast both fields to ${join.castLeft}
+        </div>`;
+    } else if (join.castLeft) {
+        castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+            ⚠️ Cast left field to ${join.castLeft}
+        </div>`;
+    } else if (join.castRight) {
+        castInfo = `<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+            ⚠️ Cast right field to ${join.castRight}
+        </div>`;
+    }
+
     const propertiesPanel = document.getElementById('propertiesPanel');
     propertiesPanel.innerHTML = `
         <h4 style="margin-top: 0;">Join Properties</h4>
@@ -1604,6 +1838,8 @@ function selectJoin(joinIndex) {
             <br>↓<br>
             <strong>${join.rightTable}.${join.rightField}</strong>
         </div>
+
+        ${castInfo}
 
         <label style="display: block; margin-bottom: 10px;">
             Join Type:
@@ -1628,6 +1864,405 @@ function removeJoin(joinIndex) {
     canvasDesign.joins.splice(joinIndex, 1);
     document.getElementById('propertiesPanel').innerHTML = '<p style="color: #999; font-size: 13px;">Select a table or join to edit properties</p>';
     renderCanvas();
+}
+
+// ========== FILTER BUILDER ==========
+
+function openFilterBuilder(tableIndex, fieldIndex) {
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+    const currentFilter = field.filter || { operator: '=', value: '', value2: '', logic: 'AND' };
+
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'filterBuilderModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 2000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px; max-width: 500px;">
+            <h3 style="margin-top: 0;">Filter: ${field.name}</h3>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Operator:</label>
+                <select id="filterOperator" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="=" ${currentFilter.operator === '=' ? 'selected' : ''}>= (Equal)</option>
+                    <option value="<>" ${currentFilter.operator === '<>' ? 'selected' : ''}>&lt;&gt; (Not Equal)</option>
+                    <option value=">" ${currentFilter.operator === '>' ? 'selected' : ''}>&gt; (Greater Than)</option>
+                    <option value="<" ${currentFilter.operator === '<' ? 'selected' : ''}>&lt; (Less Than)</option>
+                    <option value=">=" ${currentFilter.operator === '>=' ? 'selected' : ''}>&gt;= (Greater or Equal)</option>
+                    <option value="<=" ${currentFilter.operator === '<=' ? 'selected' : ''}>&lt;= (Less or Equal)</option>
+                    <option value="BW" ${currentFilter.operator === 'BW' ? 'selected' : ''}>BETWEEN</option>
+                </select>
+            </div>
+
+            <div id="filterValue1Container" style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Value:</label>
+                <input type="text" id="filterValue1" value="${currentFilter.value || ''}"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+            </div>
+
+            <div id="filterValue2Container" style="margin-bottom: 15px; display: ${currentFilter.operator === 'BW' ? 'block' : 'none'};">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">End Value:</label>
+                <input type="text" id="filterValue2" value="${currentFilter.value2 || ''}"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Logic Operator:</label>
+                <select id="filterLogic" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="AND" ${currentFilter.logic === 'AND' ? 'selected' : ''}>AND (&amp;)</option>
+                    <option value="OR" ${currentFilter.logic === 'OR' ? 'selected' : ''}>OR (^)</option>
+                </select>
+                <small style="color: #666;">How this filter combines with other filters</small>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn" onclick="saveFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #28a745; color: white;">Apply Filter</button>
+                <button class="btn" onclick="clearFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #dc3545; color: white;">Clear Filter</button>
+                <button class="btn" onclick="closeFilterBuilder()" style="flex: 1;">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Handle operator change
+    document.getElementById('filterOperator').addEventListener('change', function() {
+        const isBetween = this.value === 'BW';
+        document.getElementById('filterValue2Container').style.display = isBetween ? 'block' : 'none';
+    });
+
+    // Close on backdrop click
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeFilterBuilder();
+        }
+    });
+
+    // Close on Escape key
+    const escapeHandler = function(e) {
+        if (e.key === 'Escape') {
+            closeFilterBuilder();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+function saveFilter(tableIndex, fieldIndex) {
+    const operator = document.getElementById('filterOperator').value;
+    const value1 = document.getElementById('filterValue1').value.trim();
+    const value2 = document.getElementById('filterValue2').value.trim();
+    const logic = document.getElementById('filterLogic').value;
+
+    if (!value1) {
+        alert('Please enter a value');
+        return;
+    }
+
+    if (operator === 'BW' && !value2) {
+        alert('Please enter end value for BETWEEN');
+        return;
+    }
+
+    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = {
+        operator: operator,
+        value: value1,
+        value2: value2,
+        logic: logic
+    };
+
+    closeFilterBuilder();
+    renderCanvas();
+    showNotification('Filter applied successfully', 'success');
+}
+
+function clearFilter(tableIndex, fieldIndex) {
+    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = null;
+    closeFilterBuilder();
+    renderCanvas();
+    showNotification('Filter cleared', 'info');
+}
+
+function closeFilterBuilder() {
+    const modal = document.getElementById('filterBuilderModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// ========== DRAG-AND-DROP JOIN (Connector Box) ==========
+
+let activeConnector = null;
+
+function startConnectorDrag(event, tableIndex, fieldIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const field = table.fields[fieldIndex];
+
+    activeConnector = {
+        tableIndex: tableIndex,
+        fieldIndex: fieldIndex,
+        tableName: table.sourceName,
+        fieldName: field.name,
+        fieldType: field.type
+    };
+
+    event.dataTransfer.effectAllowed = 'link';
+    event.dataTransfer.setData('text/plain', `${table.sourceName}.${field.name}`);
+
+    // Visual feedback
+    event.target.classList.add('dragging-connector');
+    showNotification(`Drag to another ⚡ to create JOIN`, 'info');
+}
+
+function endConnectorDrag(event) {
+    event.target.classList.remove('dragging-connector');
+    activeConnector = null;
+}
+
+function allowDrop(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'link';
+}
+
+function connectFields(event, tableIndex, fieldIndex) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!activeConnector) {
+        return;
+    }
+
+    const targetTable = canvasDesign.tables[tableIndex];
+    const targetField = targetTable.fields[fieldIndex];
+
+    // Check if same table
+    if (activeConnector.tableName === targetTable.sourceName) {
+        showNotification('Cannot join table to itself', 'warning');
+        activeConnector = null;
+        return;
+    }
+
+    // Check if join already exists
+    const existingJoin = canvasDesign.joins.find(j =>
+        (j.leftTable === activeConnector.tableName && j.leftField === activeConnector.fieldName &&
+         j.rightTable === targetTable.sourceName && j.rightField === targetField.name) ||
+        (j.leftTable === targetTable.sourceName && j.leftField === targetField.name &&
+         j.rightTable === activeConnector.tableName && j.rightField === activeConnector.fieldName)
+    );
+
+    if (existingJoin) {
+        showNotification('Join already exists', 'warning');
+        activeConnector = null;
+        return;
+    }
+
+    // Check if types match
+    if (activeConnector.fieldType === targetField.type) {
+        // Types match - create join directly
+        createJoinBetweenFields(activeConnector.tableName, activeConnector.fieldName,
+                                targetTable.sourceName, targetField.name, null);
+        activeConnector = null;
+    } else {
+        // Types don't match - show CAST dialog
+        showCastDialog(activeConnector, targetTable.sourceName, targetField);
+    }
+}
+
+function showCastDialog(sourceField, targetTableName, targetField) {
+    const modal = document.createElement('div');
+    modal.id = 'castDialogModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 2000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px;">
+            <h3 style="margin-top: 0; color: #ff6b00;">⚠️ Type Mismatch</h3>
+            <p>Field types don't match:</p>
+            <ul style="margin: 10px 0;">
+                <li><strong>${sourceField.tableName}.${sourceField.fieldName}</strong>: ${sourceField.fieldType}</li>
+                <li><strong>${targetTableName}.${targetField.name}</strong>: ${targetField.type}</li>
+            </ul>
+            <p>Select cast option:</p>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin: 15px 0;">
+                <button class="btn" onclick="createJoinWithCast('${sourceField.tableName}', '${sourceField.fieldName}', '${targetTableName}', '${targetField.name}', 'CAST_LEFT', '${sourceField.fieldType}', '${targetField.type}')"
+                        style="background: #0066cc; color: white; text-align: left; padding: 10px;">
+                    Cast ${sourceField.tableName}.${sourceField.fieldName} to ${targetField.type}
+                </button>
+                <button class="btn" onclick="createJoinWithCast('${sourceField.tableName}', '${sourceField.fieldName}', '${targetTableName}', '${targetField.name}', 'CAST_RIGHT', '${sourceField.fieldType}', '${targetField.type}')"
+                        style="background: #0066cc; color: white; text-align: left; padding: 10px;">
+                    Cast ${targetTableName}.${targetField.name} to ${sourceField.fieldType}
+                </button>
+                <button class="btn" onclick="createJoinWithCast('${sourceField.tableName}', '${sourceField.fieldName}', '${targetTableName}', '${targetField.name}', 'CAST_STRING', '${sourceField.fieldType}', '${targetField.type}')"
+                        style="background: #0066cc; color: white; text-align: left; padding: 10px;">
+                    Cast both to STRING
+                </button>
+            </div>
+            <button class="btn" onclick="closeCastDialog()" style="width: 100%;">Cancel</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Close on backdrop click
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeCastDialog();
+        }
+    });
+
+    // Close on Escape key
+    const escapeHandler = function(e) {
+        if (e.key === 'Escape') {
+            closeCastDialog();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+function createJoinWithCast(leftTable, leftField, rightTable, rightField, castType, leftType, rightType) {
+    let castInfo = null;
+
+    if (castType === 'CAST_LEFT') {
+        castInfo = { field: 'left', toType: rightType };
+    } else if (castType === 'CAST_RIGHT') {
+        castInfo = { field: 'right', toType: leftType };
+    } else if (castType === 'CAST_STRING') {
+        castInfo = { field: 'both', toType: 'STRING' };
+    }
+
+    createJoinBetweenFields(leftTable, leftField, rightTable, rightField, castInfo);
+    closeCastDialog();
+    activeConnector = null;
+}
+
+function createJoinBetweenFields(leftTable, leftField, rightTable, rightField, castInfo) {
+    const newJoin = {
+        leftTable: leftTable,
+        leftField: leftField,
+        rightTable: rightTable,
+        rightField: rightField,
+        joinType: 'INNER'
+    };
+
+    // Convert cast object to castLeft/castRight for backend compatibility
+    if (castInfo) {
+        if (castInfo.field === 'left') {
+            newJoin.castLeft = castInfo.toType;
+        } else if (castInfo.field === 'right') {
+            newJoin.castRight = castInfo.toType;
+        } else if (castInfo.field === 'both') {
+            newJoin.castLeft = castInfo.toType;
+            newJoin.castRight = castInfo.toType;
+        }
+    }
+
+    canvasDesign.joins.push(newJoin);
+    renderCanvas();
+    showNotification('Join created successfully', 'success');
+}
+
+function showFieldConnections(tableIndex, fieldIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const field = table.fields[fieldIndex];
+
+    // Find all joins for this field
+    const fieldJoins = canvasDesign.joins.filter(j =>
+        (j.leftTable === table.sourceName && j.leftField === field.name) ||
+        (j.rightTable === table.sourceName && j.rightField === field.name)
+    );
+
+    if (fieldJoins.length === 0) {
+        showNotification(`No joins for ${table.sourceName}.${field.name}`, 'info');
+        return;
+    }
+
+    // Show first join's properties
+    const joinIndex = canvasDesign.joins.indexOf(fieldJoins[0]);
+    selectJoin(joinIndex);
+}
+
+function closeCastDialog() {
+    const modal = document.getElementById('castDialogModal');
+    if (modal) {
+        modal.remove();
+    }
+    activeConnector = null;
+}
+
+// ========== JOIN CONTEXT MENU ==========
+
+function showJoinContextMenu(event, joinIndex) {
+    // Remove existing menu if any
+    const existingMenu = document.getElementById('joinContextMenu');
+    if (existingMenu) {
+        existingMenu.remove();
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'joinContextMenu';
+    menu.style.cssText = `
+        position: fixed;
+        left: ${event.pageX}px;
+        top: ${event.pageY}px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        z-index: 3000;
+        min-width: 150px;
+    `;
+
+    menu.innerHTML = `
+        <div onclick="selectJoin(${joinIndex}); closeJoinContextMenu();"
+             style="padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #f0f0f0;"
+             onmouseover="this.style.background='#f0f0f0'"
+             onmouseout="this.style.background='white'">
+            ✏️ Edit
+        </div>
+        <div onclick="removeJoin(${joinIndex}); closeJoinContextMenu();"
+             style="padding: 10px 15px; cursor: pointer; color: #dc3545;"
+             onmouseover="this.style.background='#f0f0f0'"
+             onmouseout="this.style.background='white'">
+            🗑️ Delete
+        </div>
+    `;
+
+    document.body.appendChild(menu);
+
+    // Close menu on click outside
+    setTimeout(() => {
+        document.addEventListener('click', closeJoinContextMenu);
+    }, 0);
+}
+
+function closeJoinContextMenu() {
+    const menu = document.getElementById('joinContextMenu');
+    if (menu) {
+        menu.remove();
+    }
+    document.removeEventListener('click', closeJoinContextMenu);
 }
 
 function clearCanvas() {
@@ -1803,11 +2438,14 @@ async function useGeneratedSQL() {
     }
 
     try {
-        const result = await window.go.main.App.GenerateSQL();
+        // Pass canvasDesign to GenerateSQL
+        const result = await window.go.main.App.GenerateSQL(canvasDesign);
         if (result && result.sql) {
             document.getElementById('transformSQL').value = result.sql;
             showNotification('Generated SQL loaded successfully', 'success');
             validateStep4();
+        } else if (result && result.error) {
+            showNotification('Error generating SQL: ' + result.error, 'error');
         } else {
             showNotification('No SQL generated. Please complete Step 3 first.', 'warning');
         }
@@ -1825,35 +2463,54 @@ function getStep5HTML() {
                 <p>Choose where to send transformed data</p>
             </div>
 
-            <div class="panel">
-                <div class="form-group">
-                    <label>Output Type *</label>
-                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="tdtp_file" onchange="onOutputTypeChange()" checked>
-                            📁 TDTP File
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="rabbitmq" onchange="onOutputTypeChange()">
-                            🐰 RabbitMQ
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="kafka" onchange="onOutputTypeChange()">
-                            📨 Kafka
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="database" onchange="onOutputTypeChange()">
-                            🗄️ Database
-                        </label>
-                        <label style="flex: 1; min-width: 150px;">
-                            <input type="radio" name="outputType" value="xlsx" onchange="onOutputTypeChange()">
-                            📊 XLSX File
-                        </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; height: calc(100vh - 250px);">
+                <!-- LEFT: Output Configuration -->
+                <div class="panel" style="overflow-y: auto;">
+                    <div class="form-group">
+                        <label>Output Type *</label>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="tdtp_file" onchange="onOutputTypeChange()" checked>
+                                📁 TDTP File
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="rabbitmq" onchange="onOutputTypeChange()">
+                                🐰 RabbitMQ
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="kafka" onchange="onOutputTypeChange()">
+                                📨 Kafka
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="database" onchange="onOutputTypeChange()">
+                                🗄️ Database
+                            </label>
+                            <label style="flex: 1; min-width: 150px;">
+                                <input type="radio" name="outputType" value="xlsx" onchange="onOutputTypeChange()">
+                                📊 XLSX File
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="outputConfigPanel" style="margin-top: 20px;">
+                        <!-- Dynamic form will be inserted here -->
                     </div>
                 </div>
 
-                <div id="outputConfigPanel" style="margin-top: 20px;">
-                    <!-- Dynamic form will be inserted here -->
+                <!-- RIGHT: Result Preview -->
+                <div class="panel" style="overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0; font-size: 16px;">📊 Query Result Preview</h3>
+                        <button onclick="refreshStep5Preview()"
+                                style="padding: 6px 12px; font-size: 13px; background: #0066cc; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                    <div id="step5PreviewArea" style="font-size: 13px; color: #666;">
+                        <p style="text-align: center; padding: 40px 20px; color: #999;">
+                            Loading preview...
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1883,9 +2540,69 @@ async function loadStep5Data() {
         } else {
             onOutputTypeChange(); // Show default form
         }
+
+        // Load preview
+        await refreshStep5Preview();
     } catch (err) {
         console.error('Failed to load output:', err);
         onOutputTypeChange();
+    }
+}
+
+async function refreshStep5Preview() {
+    const previewArea = document.getElementById('step5PreviewArea');
+    if (!previewArea) return;
+
+    previewArea.innerHTML = '<p style="text-align: center; padding: 40px 20px; color: #999;">⏳ Loading preview...</p>';
+
+    if (!wailsReady || !window.go) {
+        previewArea.innerHTML = '<p style="text-align: center; padding: 40px 20px; color: #ff6b6b;">Backend not ready</p>';
+        return;
+    }
+
+    try {
+        // Build SQL from canvas design and execute preview
+        const result = await window.go.main.App.PreviewQueryResult();
+        console.log('Step 5 Preview result:', result);
+
+        if (!result || !result.rows || result.rows.length === 0) {
+            previewArea.innerHTML = '<p style="text-align: center; padding: 40px 20px; color: #999;">No data to preview. Configure tables and JOINs in Step 3.</p>';
+            return;
+        }
+
+        // Display as table
+        let html = '<div style="overflow-x: auto; max-height: 500px; overflow-y: auto;"><table style="min-width: 100%; border-collapse: collapse; font-size: 12px;">';
+
+        // Header
+        html += '<thead><tr style="background: #f5f5f5; border-bottom: 2px solid #ddd;">';
+        result.columns.forEach(col => {
+            html += `<th style="padding: 8px; text-align: left; font-weight: 600; border-right: 1px solid #eee; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${col}</th>`;
+        });
+        html += '</tr></thead>';
+
+        // Rows (limit to first 50)
+        html += '<tbody>';
+        const displayRows = result.rows.slice(0, 50);
+        displayRows.forEach((row, idx) => {
+            html += `<tr style="border-bottom: 1px solid #eee; ${idx % 2 === 0 ? 'background: white;' : 'background: #fafafa;'}">`;
+            // Convert object to array in column order
+            const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
+            values.forEach(cell => {
+                const value = cell === null ? '<span style="color: #999; font-style: italic;">NULL</span>' : String(cell);
+                html += `<td style="padding: 6px 8px; border-right: 1px solid #eee; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${value}</td>`;
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+
+        if (result.rows.length > 50) {
+            html += `<p style="text-align: center; margin-top: 10px; color: #666; font-size: 11px;">Showing first 50 of ${result.rows.length} rows</p>`;
+        }
+
+        previewArea.innerHTML = html;
+    } catch (err) {
+        console.error('Failed to load Step 5 preview:', err);
+        previewArea.innerHTML = `<p style="text-align: center; padding: 40px 20px; color: #ff6b6b;">❌ Failed to load preview:<br/>${err}</p>`;
     }
 }
 
