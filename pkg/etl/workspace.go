@@ -107,7 +107,9 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() // игнорируем ошибку, если tx.Commit() был успешным
+	}()
 
 	txStmt := tx.StmtContext(ctx, stmt)
 

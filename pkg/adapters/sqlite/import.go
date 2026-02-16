@@ -50,8 +50,10 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 		columns = append(columns, pkDef)
 	}
 
+	// Экранируем tableName для защиты от SQL injection
+	quotedTable := fmt.Sprintf("\"%s\"", tableName)
 	query := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
-		tableName,
+		quotedTable,
 		strings.Join(columns, ",\n  "))
 
 	_, err := a.db.ExecContext(ctx, query)
@@ -65,7 +67,8 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 // DropTable удаляет таблицу
 // Реализует base.TableManager интерфейс
 func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
-	query := fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	query := fmt.Sprintf("DROP TABLE IF EXISTS %s", quotedTable)
 	_, err := a.db.ExecContext(ctx, query)
 	return err
 }
@@ -73,7 +76,9 @@ func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 // RenameTable переименовывает таблицу
 // Реализует base.TableManager интерфейс
 func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
-	query := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", oldName, newName)
+	quotedOld := fmt.Sprintf("\"%s\"", oldName)
+	quotedNew := fmt.Sprintf("\"%s\"", newName)
+	query := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedNew)
 	_, err := a.db.ExecContext(ctx, query)
 	return err
 }

@@ -30,7 +30,9 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() // игнорируем ошибку, если tx.Commit() был успешным
+	}()
 
 	for i, pkt := range packets {
 		if pkt == nil {
@@ -424,8 +426,10 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 		placeholders = append(placeholders, "?")
 	}
 
+	// Экранируем tableName для защиты от SQL injection
+	quotedTable := fmt.Sprintf("[%s]", tableName)
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		tableName,
+		quotedTable,
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "))
 }

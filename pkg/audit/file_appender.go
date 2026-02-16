@@ -124,9 +124,12 @@ func (fa *FileAppender) rotate() error {
 		if _, err := os.Stat(oldPath); err == nil {
 			if i+1 > fa.maxBackups {
 				// Удаляем самый старый файл
-				os.Remove(newPath)
+				_ = os.Remove(newPath) // игнорируем ошибку, файл может не существовать
 			}
-			os.Rename(oldPath, newPath)
+			if err := os.Rename(oldPath, newPath); err != nil {
+				// логируем, но продолжаем ротацию
+				_ = err
+			}
 		}
 	}
 

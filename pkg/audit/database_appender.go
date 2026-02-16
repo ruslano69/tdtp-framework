@@ -236,7 +236,7 @@ func (da *DatabaseAppender) flushBatch(ctx context.Context) error {
 		)
 
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback() // игнорируем ошибку rollback при ошибке вставки
 			return fmt.Errorf("failed to insert entry: %w", err)
 		}
 	}
@@ -358,11 +358,17 @@ func (da *DatabaseAppender) Query(ctx context.Context, filter QueryFilter) ([]*E
 
 		// Парсим JSON
 		if metadataJSON != "" {
-			json.Unmarshal([]byte(metadataJSON), &entry.Metadata)
+			if err := json.Unmarshal([]byte(metadataJSON), &entry.Metadata); err != nil {
+				// игнорируем невалидный JSON metadata, оставляем nil
+				entry.Metadata = nil
+			}
 		}
 
 		if dataJSON != "" && dataJSON != "null" {
-			json.Unmarshal([]byte(dataJSON), &entry.Data)
+			if err := json.Unmarshal([]byte(dataJSON), &entry.Data); err != nil {
+				// игнорируем невалидный JSON data, оставляем nil
+				entry.Data = nil
+			}
 		}
 
 		// Конвертируем duration
