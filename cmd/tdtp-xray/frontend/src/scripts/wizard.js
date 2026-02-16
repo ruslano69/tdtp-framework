@@ -345,8 +345,7 @@ async function loadConfigurationFile() {
             showNotification(`✅ Configuration loaded: ${result.filename}`, 'success');
 
             // Reload all steps with loaded data
-            loadStep1Data();
-            loadStep2Data();
+            await refreshAllSteps();
 
             // Update UI
             showNotification(`Configuration '${result.config.name}' loaded successfully`, 'success');
@@ -356,6 +355,30 @@ async function loadConfigurationFile() {
     } catch (err) {
         console.error('Load configuration error:', err);
         showNotification('Failed to load configuration: ' + err, 'error');
+    }
+}
+
+// Refresh all wizard steps after loading configuration
+async function refreshAllSteps() {
+    console.log('Refreshing all wizard steps...');
+    try {
+        // Load each step's data
+        await loadStep1Data();
+        await loadStep2Data();
+        await loadStep3Data();
+        await loadStep4Data();
+        await loadStep5Data();
+        await loadStep6Data();
+        await loadStep7Data();
+
+        // If we're currently on one of these steps, reload the content
+        if (currentStep >= 1 && currentStep <= 7) {
+            loadStep(currentStep);
+        }
+
+        console.log('All steps refreshed successfully');
+    } catch (err) {
+        console.error('Failed to refresh steps:', err);
     }
 }
 
@@ -1657,28 +1680,846 @@ function closeSQLPreview() {
 }
 
 function getStep4HTML() {
-    return `<div class="step-content active"><div class="panel"><p class="text-center" style="padding: 40px; color: #666;">🚧 Step 4: Transform SQL - Coming soon...</p></div></div>`;
+    return `
+        <div class="step-content active">
+            <div class="step-header">
+                <h2>🔄 Step 4: Transform SQL</h2>
+                <p>Define transformation logic using SQL</p>
+            </div>
+
+            <div class="panel">
+                <div class="form-group">
+                    <label for="resultTable">Result Table Name *</label>
+                    <input type="text" id="resultTable" placeholder="e.g., transformed_data" required oninput="validateStep4()">
+                    <small>The name of the temporary table to store transformation results</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="transformSQL">SQL Query *</label>
+                    <textarea id="transformSQL" rows="15" placeholder="SELECT * FROM source_table WHERE ..." required oninput="validateStep4()" style="font-family: 'Courier New', monospace; font-size: 13px;"></textarea>
+                    <small>Write SQL to transform data from loaded sources. Available tables are shown in Step 3.</small>
+                </div>
+
+                <div style="margin-top: 10px;">
+                    <button class="btn btn-secondary" onclick="previewTransform()" id="previewTransformBtn">
+                        👁️ Preview SQL Result
+                    </button>
+                    <button class="btn btn-secondary" onclick="useGeneratedSQL()" style="margin-left: 10px;">
+                        📋 Use Generated SQL from Step 3
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
 }
-function loadStep4Data() {}
-async function saveStep4() {}
+
+async function loadStep4Data() {
+    if (!wailsReady || !window.go) {
+        console.log('Wails not ready, skipping Step 4 data load');
+        return;
+    }
+
+    try {
+        const transform = await window.go.main.App.GetTransform();
+        console.log('Loaded transform:', transform);
+        if (transform) {
+            document.getElementById('resultTable').value = transform.resultTable || '';
+            document.getElementById('transformSQL').value = transform.sql || '';
+        }
+        validateStep4();
+    } catch (err) {
+        console.error('Failed to load transform:', err);
+    }
+}
+
+async function saveStep4() {
+    const transform = {
+        resultTable: document.getElementById('resultTable').value.trim(),
+        sql: document.getElementById('transformSQL').value.trim(),
+    };
+
+    console.log('Saving transform:', transform);
+
+    if (!wailsReady || !window.go) {
+        console.warn('Wails not ready, data saved locally only');
+        localStorage.setItem('transform', JSON.stringify(transform));
+        return;
+    }
+
+    try {
+        await window.go.main.App.SaveTransform(transform);
+        console.log('Transform saved to backend');
+    } catch (err) {
+        console.error('Failed to save transform:', err);
+        if (appMode === 'production') {
+            throw err;
+        }
+    }
+}
+
+function validateStep4() {
+    const resultTable = document.getElementById('resultTable');
+    const transformSQL = document.getElementById('transformSQL');
+
+    const tableValid = resultTable.value.trim().length > 0;
+    const sqlValid = transformSQL.value.trim().length > 0;
+
+    // Visual feedback
+    resultTable.style.borderColor = tableValid ? '#28a745' : '#dc3545';
+    resultTable.style.borderWidth = '2px';
+    transformSQL.style.borderColor = sqlValid ? '#28a745' : '#dc3545';
+    transformSQL.style.borderWidth = '2px';
+
+    return tableValid && sqlValid;
+}
+
+async function previewTransform() {
+    const sql = document.getElementById('transformSQL').value.trim();
+    if (!sql) {
+        showNotification('Please enter SQL query first', 'warning');
+        return;
+    }
+
+    if (!wailsReady || !window.go) {
+        showNotification('Preview not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        showNotification('Executing SQL preview...', 'info');
+        // TODO: Implement PreviewTransform backend method
+        // const result = await window.go.main.App.PreviewTransform(sql);
+        showNotification('Preview feature coming soon', 'info');
+    } catch (err) {
+        console.error('Transform preview error:', err);
+        showNotification('Failed to preview transform: ' + err, 'error');
+    }
+}
+
+async function useGeneratedSQL() {
+    if (!wailsReady || !window.go) {
+        showNotification('Cannot load generated SQL (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        const result = await window.go.main.App.GenerateSQL();
+        if (result && result.sql) {
+            document.getElementById('transformSQL').value = result.sql;
+            showNotification('Generated SQL loaded successfully', 'success');
+            validateStep4();
+        } else {
+            showNotification('No SQL generated. Please complete Step 3 first.', 'warning');
+        }
+    } catch (err) {
+        console.error('Failed to load generated SQL:', err);
+        showNotification('Failed to load generated SQL: ' + err, 'error');
+    }
+}
 
 function getStep5HTML() {
-    return `<div class="step-content active"><div class="panel"><p class="text-center" style="padding: 40px; color: #666;">🚧 Step 5: Configure Output - Coming soon...</p></div></div>`;
+    return `
+        <div class="step-content active">
+            <div class="step-header">
+                <h2>📤 Step 5: Configure Output</h2>
+                <p>Choose where to send transformed data</p>
+            </div>
+
+            <div class="panel">
+                <div class="form-group">
+                    <label>Output Type *</label>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+                        <label style="flex: 1; min-width: 150px;">
+                            <input type="radio" name="outputType" value="tdtp_file" onchange="onOutputTypeChange()" checked>
+                            📁 TDTP File
+                        </label>
+                        <label style="flex: 1; min-width: 150px;">
+                            <input type="radio" name="outputType" value="rabbitmq" onchange="onOutputTypeChange()">
+                            🐰 RabbitMQ
+                        </label>
+                        <label style="flex: 1; min-width: 150px;">
+                            <input type="radio" name="outputType" value="kafka" onchange="onOutputTypeChange()">
+                            📨 Kafka
+                        </label>
+                        <label style="flex: 1; min-width: 150px;">
+                            <input type="radio" name="outputType" value="database" onchange="onOutputTypeChange()">
+                            🗄️ Database
+                        </label>
+                        <label style="flex: 1; min-width: 150px;">
+                            <input type="radio" name="outputType" value="xlsx" onchange="onOutputTypeChange()">
+                            📊 XLSX File
+                        </label>
+                    </div>
+                </div>
+
+                <div id="outputConfigPanel" style="margin-top: 20px;">
+                    <!-- Dynamic form will be inserted here -->
+                </div>
+            </div>
+        </div>
+    `;
 }
-function loadStep5Data() {}
-async function saveStep5() {}
+
+async function loadStep5Data() {
+    if (!wailsReady || !window.go) {
+        console.log('Wails not ready, using default output type');
+        onOutputTypeChange(); // Show default form
+        return;
+    }
+
+    try {
+        const output = await window.go.main.App.GetOutput();
+        console.log('Loaded output:', output);
+        if (output && output.type) {
+            // Select the correct radio button
+            const radio = document.querySelector(`input[name="outputType"][value="${output.type}"]`);
+            if (radio) {
+                radio.checked = true;
+            }
+            onOutputTypeChange();
+
+            // Load type-specific data
+            setTimeout(() => loadOutputFormData(output), 100);
+        } else {
+            onOutputTypeChange(); // Show default form
+        }
+    } catch (err) {
+        console.error('Failed to load output:', err);
+        onOutputTypeChange();
+    }
+}
+
+function loadOutputFormData(output) {
+    switch (output.type) {
+        case 'tdtp_file':
+            if (output.file) {
+                document.getElementById('tdtpDestination').value = output.file.destination || '';
+                document.getElementById('tdtpCompression').checked = output.file.compression || false;
+                document.getElementById('tdtpCompressLevel').value = output.file.compressLevel || 3;
+            }
+            break;
+        case 'rabbitmq':
+            if (output.broker) {
+                document.getElementById('rabbitmqConfig').value = output.broker.config || '';
+                document.getElementById('rabbitmqQueue').value = output.broker.queue || '';
+                document.getElementById('rabbitmqCompression').checked = output.broker.compression || false;
+            }
+            break;
+        case 'kafka':
+            if (output.broker) {
+                document.getElementById('kafkaBrokers').value = output.broker.config || '';
+                document.getElementById('kafkaTopic').value = output.broker.queue || '';
+                document.getElementById('kafkaCompression').checked = output.broker.compression || false;
+            }
+            break;
+        case 'database':
+            if (output.database) {
+                document.getElementById('dbType').value = output.database.type || 'postgres';
+                document.getElementById('dbDSN').value = output.database.dsn || '';
+                document.getElementById('dbTable').value = output.database.table || '';
+                document.getElementById('dbStrategy').value = output.database.strategy || 'replace';
+            }
+            break;
+        case 'xlsx':
+            if (output.xlsx) {
+                document.getElementById('xlsxDestination').value = output.xlsx.destination || '';
+                document.getElementById('xlsxSheet').value = output.xlsx.sheet || 'Sheet1';
+            }
+            break;
+    }
+}
+
+async function saveStep5() {
+    const outputType = document.querySelector('input[name="outputType"]:checked').value;
+    const output = { type: outputType };
+
+    switch (outputType) {
+        case 'tdtp_file':
+            output.file = {
+                destination: document.getElementById('tdtpDestination').value.trim(),
+                compression: document.getElementById('tdtpCompression').checked,
+                compressLevel: parseInt(document.getElementById('tdtpCompressLevel').value) || 3,
+            };
+            break;
+        case 'rabbitmq':
+            output.broker = {
+                type: 'rabbitmq',
+                config: document.getElementById('rabbitmqConfig').value.trim(),
+                queue: document.getElementById('rabbitmqQueue').value.trim(),
+                compression: document.getElementById('rabbitmqCompression').checked,
+                compressLevel: 3,
+            };
+            break;
+        case 'kafka':
+            output.broker = {
+                type: 'kafka',
+                config: document.getElementById('kafkaBrokers').value.trim(),
+                queue: document.getElementById('kafkaTopic').value.trim(),
+                compression: document.getElementById('kafkaCompression').checked,
+                compressLevel: 3,
+            };
+            break;
+        case 'database':
+            output.database = {
+                type: document.getElementById('dbType').value,
+                dsn: document.getElementById('dbDSN').value.trim(),
+                table: document.getElementById('dbTable').value.trim(),
+                strategy: document.getElementById('dbStrategy').value,
+            };
+            break;
+        case 'xlsx':
+            output.xlsx = {
+                destination: document.getElementById('xlsxDestination').value.trim(),
+                sheet: document.getElementById('xlsxSheet').value.trim() || 'Sheet1',
+            };
+            break;
+    }
+
+    console.log('Saving output:', output);
+
+    if (!wailsReady || !window.go) {
+        console.warn('Wails not ready, data saved locally only');
+        localStorage.setItem('output', JSON.stringify(output));
+        return;
+    }
+
+    try {
+        await window.go.main.App.SaveOutput(output);
+        console.log('Output saved to backend');
+    } catch (err) {
+        console.error('Failed to save output:', err);
+        if (appMode === 'production') {
+            throw err;
+        }
+    }
+}
+
+function onOutputTypeChange() {
+    const outputType = document.querySelector('input[name="outputType"]:checked').value;
+    const panel = document.getElementById('outputConfigPanel');
+
+    let html = '';
+    switch (outputType) {
+        case 'tdtp_file':
+            html = `
+                <h3>TDTP File Output</h3>
+                <div class="form-group">
+                    <label for="tdtpDestination">Destination Path *</label>
+                    <input type="text" id="tdtpDestination" placeholder="/path/to/output.tdtp" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="tdtpCompression" checked>
+                        Enable Compression
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="tdtpCompressLevel">Compression Level (1-9)</label>
+                    <input type="number" id="tdtpCompressLevel" value="3" min="1" max="9">
+                </div>
+            `;
+            break;
+        case 'rabbitmq':
+            html = `
+                <h3>RabbitMQ Output</h3>
+                <div class="form-group">
+                    <label for="rabbitmqConfig">Connection String *</label>
+                    <input type="text" id="rabbitmqConfig" placeholder="amqp://user:pass@localhost:5672/" required>
+                </div>
+                <div class="form-group">
+                    <label for="rabbitmqQueue">Queue Name *</label>
+                    <input type="text" id="rabbitmqQueue" placeholder="tdtp_queue" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="rabbitmqCompression">
+                        Enable Compression
+                    </label>
+                </div>
+            `;
+            break;
+        case 'kafka':
+            html = `
+                <h3>Kafka Output</h3>
+                <div class="form-group">
+                    <label for="kafkaBrokers">Brokers *</label>
+                    <input type="text" id="kafkaBrokers" placeholder="localhost:9092,localhost:9093" required>
+                </div>
+                <div class="form-group">
+                    <label for="kafkaTopic">Topic *</label>
+                    <input type="text" id="kafkaTopic" placeholder="tdtp_topic" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="kafkaCompression">
+                        Enable Compression
+                    </label>
+                </div>
+            `;
+            break;
+        case 'database':
+            html = `
+                <h3>Database Output</h3>
+                <div class="form-group">
+                    <label for="dbType">Database Type *</label>
+                    <select id="dbType">
+                        <option value="postgres">PostgreSQL</option>
+                        <option value="mssql">MS SQL Server</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="sqlite">SQLite</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="dbDSN">Connection String (DSN) *</label>
+                    <input type="text" id="dbDSN" placeholder="postgres://user:pass@localhost/dbname" required>
+                </div>
+                <div class="form-group">
+                    <label for="dbTable">Target Table *</label>
+                    <input type="text" id="dbTable" placeholder="output_table" required>
+                </div>
+                <div class="form-group">
+                    <label for="dbStrategy">Write Strategy *</label>
+                    <select id="dbStrategy">
+                        <option value="replace">Replace (DROP + CREATE)</option>
+                        <option value="ignore">Ignore Duplicates</option>
+                        <option value="copy">Copy (Append)</option>
+                        <option value="fail">Fail on Duplicates</option>
+                    </select>
+                </div>
+            `;
+            break;
+        case 'xlsx':
+            html = `
+                <h3>XLSX File Output</h3>
+                <div class="form-group">
+                    <label for="xlsxDestination">Destination Path *</label>
+                    <input type="text" id="xlsxDestination" placeholder="/path/to/output.xlsx" required>
+                </div>
+                <div class="form-group">
+                    <label for="xlsxSheet">Sheet Name</label>
+                    <input type="text" id="xlsxSheet" value="Sheet1" placeholder="Sheet1">
+                </div>
+            `;
+            break;
+    }
+
+    panel.innerHTML = html;
+}
 
 function getStep6HTML() {
-    return `<div class="step-content active"><div class="panel"><p class="text-center" style="padding: 40px; color: #666;">🚧 Step 6: Settings - Coming soon...</p></div></div>`;
+    return `
+        <div class="step-content active">
+            <div class="step-header">
+                <h2>⚙️ Step 6: Settings</h2>
+                <p>Configure performance, audit, and error handling</p>
+            </div>
+
+            <!-- Performance Settings -->
+            <div class="panel">
+                <h3>⚡ Performance</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="timeout">Timeout (seconds)</label>
+                        <input type="number" id="timeout" value="300" min="1">
+                        <small>Maximum execution time</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="batchSize">Batch Size (rows)</label>
+                        <input type="number" id="batchSize" value="1000" min="100">
+                        <small>Rows per batch</small>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="maxMemoryMB">Max Memory (MB)</label>
+                        <input type="number" id="maxMemoryMB" value="512" min="64">
+                        <small>Memory limit for processing</small>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="parallelSources">
+                            Parallel Sources
+                        </label>
+                        <small>Load sources in parallel</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Settings -->
+            <div class="panel">
+                <h3>📝 Audit</h3>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="auditEnabled">
+                        Enable Audit Logging
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="auditLogFile">Log File Path</label>
+                    <input type="text" id="auditLogFile" placeholder="/path/to/audit.log">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="logQueries">
+                            Log SQL Queries
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="logErrors" checked>
+                            Log Errors
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Handling Settings -->
+            <div class="panel">
+                <h3>🚨 Error Handling</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="onSourceError">On Source Error</label>
+                        <select id="onSourceError">
+                            <option value="fail">Fail Immediately</option>
+                            <option value="continue">Continue Processing</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="onTransformError">On Transform Error</label>
+                        <select id="onTransformError">
+                            <option value="fail">Fail Immediately</option>
+                            <option value="continue">Continue Processing</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="onExportError">On Export Error</label>
+                        <select id="onExportError">
+                            <option value="fail">Fail Immediately</option>
+                            <option value="continue">Continue Processing</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="retryCount">Retry Count</label>
+                        <input type="number" id="retryCount" value="3" min="0" max="10">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="retryDelaySec">Retry Delay (seconds)</label>
+                    <input type="number" id="retryDelaySec" value="5" min="1" max="60">
+                </div>
+            </div>
+        </div>
+    `;
 }
-function loadStep6Data() {}
-async function saveStep6() {}
+
+async function loadStep6Data() {
+    if (!wailsReady || !window.go) {
+        console.log('Wails not ready, using default settings');
+        setDefaultSettings();
+        return;
+    }
+
+    try {
+        const settings = await window.go.main.App.GetSettings();
+        console.log('Loaded settings:', settings);
+
+        if (settings && settings.performance) {
+            // Performance
+            document.getElementById('timeout').value = settings.performance.timeout || 300;
+            document.getElementById('batchSize').value = settings.performance.batchSize || 1000;
+            document.getElementById('maxMemoryMB').value = settings.performance.maxMemoryMB || 512;
+            document.getElementById('parallelSources').checked = settings.performance.parallelSources || false;
+
+            // Audit
+            if (settings.audit) {
+                document.getElementById('auditEnabled').checked = settings.audit.enabled || false;
+                document.getElementById('auditLogFile').value = settings.audit.logFile || '';
+                document.getElementById('logQueries').checked = settings.audit.logQueries || false;
+                document.getElementById('logErrors').checked = settings.audit.logErrors !== false; // default true
+            }
+
+            // Error Handling
+            if (settings.errorHandling) {
+                document.getElementById('onSourceError').value = settings.errorHandling.onSourceError || 'fail';
+                document.getElementById('onTransformError').value = settings.errorHandling.onTransformError || 'fail';
+                document.getElementById('onExportError').value = settings.errorHandling.onExportError || 'fail';
+                document.getElementById('retryCount').value = settings.errorHandling.retryCount || 3;
+                document.getElementById('retryDelaySec').value = settings.errorHandling.retryDelaySec || 5;
+            }
+        } else {
+            setDefaultSettings();
+        }
+    } catch (err) {
+        console.error('Failed to load settings:', err);
+        setDefaultSettings();
+    }
+}
+
+function setDefaultSettings() {
+    // Performance defaults
+    document.getElementById('timeout').value = 300;
+    document.getElementById('batchSize').value = 1000;
+    document.getElementById('maxMemoryMB').value = 512;
+    document.getElementById('parallelSources').checked = false;
+
+    // Audit defaults
+    document.getElementById('auditEnabled').checked = false;
+    document.getElementById('auditLogFile').value = '';
+    document.getElementById('logQueries').checked = false;
+    document.getElementById('logErrors').checked = true;
+
+    // Error Handling defaults
+    document.getElementById('onSourceError').value = 'fail';
+    document.getElementById('onTransformError').value = 'fail';
+    document.getElementById('onExportError').value = 'fail';
+    document.getElementById('retryCount').value = 3;
+    document.getElementById('retryDelaySec').value = 5;
+}
+
+async function saveStep6() {
+    const settings = {
+        performance: {
+            timeout: parseInt(document.getElementById('timeout').value) || 300,
+            batchSize: parseInt(document.getElementById('batchSize').value) || 1000,
+            maxMemoryMB: parseInt(document.getElementById('maxMemoryMB').value) || 512,
+            parallelSources: document.getElementById('parallelSources').checked,
+        },
+        workspace: {
+            type: 'sqlite',
+            mode: ':memory:',
+        },
+        audit: {
+            enabled: document.getElementById('auditEnabled').checked,
+            logFile: document.getElementById('auditLogFile').value.trim(),
+            logQueries: document.getElementById('logQueries').checked,
+            logErrors: document.getElementById('logErrors').checked,
+        },
+        errorHandling: {
+            onSourceError: document.getElementById('onSourceError').value,
+            onTransformError: document.getElementById('onTransformError').value,
+            onExportError: document.getElementById('onExportError').value,
+            retryCount: parseInt(document.getElementById('retryCount').value) || 3,
+            retryDelaySec: parseInt(document.getElementById('retryDelaySec').value) || 5,
+        },
+        dataProcessors: {
+            // Empty for now - Phase 4 feature
+        },
+    };
+
+    console.log('Saving settings:', settings);
+
+    if (!wailsReady || !window.go) {
+        console.warn('Wails not ready, data saved locally only');
+        localStorage.setItem('settings', JSON.stringify(settings));
+        return;
+    }
+
+    try {
+        await window.go.main.App.SaveSettings(settings);
+        console.log('Settings saved to backend');
+    } catch (err) {
+        console.error('Failed to save settings:', err);
+        if (appMode === 'production') {
+            throw err;
+        }
+    }
+}
 
 function getStep7HTML() {
-    return `<div class="step-content active"><div class="panel"><p class="text-center" style="padding: 40px; color: #666;">🚧 Step 7: Review & Save - Coming soon...</p></div></div>`;
+    return `
+        <div class="step-content active">
+            <div class="step-header">
+                <h2>✅ Step 7: Review & Generate YAML</h2>
+                <p>Review configuration and generate TDTP pipeline YAML</p>
+            </div>
+
+            <div class="panel">
+                <h3>📋 Configuration Summary</h3>
+                <div id="configSummary" style="background: #f8f9fa; padding: 15px; border-radius: 3px; margin-bottom: 20px;">
+                    <p style="color: #666;">Loading configuration summary...</p>
+                </div>
+
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="generateAndShowYAML()" style="flex: 1;">
+                        📄 Generate YAML
+                    </button>
+                    <button class="btn btn-secondary" onclick="saveYAMLToFile()" style="flex: 1;">
+                        💾 Save YAML to File
+                    </button>
+                    <button class="btn btn-secondary" onclick="copyYAMLToClipboard()" style="flex: 1;">
+                        📋 Copy to Clipboard
+                    </button>
+                </div>
+            </div>
+
+            <!-- YAML Preview Modal -->
+            <div id="yamlPreviewModal" class="modal">
+                <div class="modal-content" style="max-width: 800px; max-height: 80vh;">
+                    <div class="modal-header">
+                        <h3>Generated YAML</h3>
+                        <button class="btn-close" onclick="closeYAMLPreview()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <pre id="yamlPreview" style="background: #f8f9fa; padding: 15px; overflow: auto; max-height: 60vh; font-family: 'Courier New', monospace; font-size: 12px;"></pre>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="copyYAMLToClipboard()">📋 Copy</button>
+                        <button class="btn btn-primary" onclick="closeYAMLPreview()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
-function loadStep7Data() {}
-async function saveStep7() {}
+
+async function loadStep7Data() {
+    await renderConfigSummary();
+}
+
+async function saveStep7() {
+    // No data to save on Step 7, it's a review step
+    console.log('Step 7 has no data to save');
+}
+
+async function renderConfigSummary() {
+    const summaryDiv = document.getElementById('configSummary');
+
+    if (!wailsReady || !window.go) {
+        summaryDiv.innerHTML = '<p style="color: #dc3545;">Cannot load configuration (Wails not ready)</p>';
+        return;
+    }
+
+    try {
+        const pipelineInfo = await window.go.main.App.GetPipelineInfo();
+        const sources = await window.go.main.App.GetSources();
+        const transform = await window.go.main.App.GetTransform();
+        const output = await window.go.main.App.GetOutput();
+        const settings = await window.go.main.App.GetSettings();
+
+        let html = '<table style="width: 100%; font-size: 13px;">';
+
+        // Pipeline Info
+        html += `<tr><td style="padding: 5px; font-weight: bold;">Pipeline Name:</td><td style="padding: 5px;">${pipelineInfo.name || '<span style="color: #dc3545;">Not set</span>'}</td></tr>`;
+        html += `<tr><td style="padding: 5px; font-weight: bold;">Version:</td><td style="padding: 5px;">${pipelineInfo.version || '1.0'}</td></tr>`;
+        if (pipelineInfo.description) {
+            html += `<tr><td style="padding: 5px; font-weight: bold;">Description:</td><td style="padding: 5px;">${pipelineInfo.description}</td></tr>`;
+        }
+
+        // Sources
+        html += `<tr><td style="padding: 5px; font-weight: bold;">Sources:</td><td style="padding: 5px;">${sources.length} source(s) configured</td></tr>`;
+        if (sources.length > 0) {
+            sources.forEach((src, idx) => {
+                html += `<tr><td style="padding: 5px 5px 5px 20px;">Source ${idx + 1}:</td><td style="padding: 5px;">${src.name} (${src.type})</td></tr>`;
+            });
+        }
+
+        // Transform
+        if (transform && transform.resultTable) {
+            html += `<tr><td style="padding: 5px; font-weight: bold;">Transform:</td><td style="padding: 5px;">Result table: ${transform.resultTable}</td></tr>`;
+            html += `<tr><td style="padding: 5px 5px 5px 20px;">SQL:</td><td style="padding: 5px;"><code style="font-size: 11px;">${transform.sql.substring(0, 100)}${transform.sql.length > 100 ? '...' : ''}</code></td></tr>`;
+        } else {
+            html += `<tr><td style="padding: 5px; font-weight: bold;">Transform:</td><td style="padding: 5px; color: #dc3545;">Not configured</td></tr>`;
+        }
+
+        // Output
+        if (output && output.type) {
+            html += `<tr><td style="padding: 5px; font-weight: bold;">Output:</td><td style="padding: 5px;">${output.type}</td></tr>`;
+            if (output.type === 'tdtp_file' && output.file) {
+                html += `<tr><td style="padding: 5px 5px 5px 20px;">Destination:</td><td style="padding: 5px;">${output.file.destination}</td></tr>`;
+            } else if (output.type === 'rabbitmq' && output.broker) {
+                html += `<tr><td style="padding: 5px 5px 5px 20px;">Queue:</td><td style="padding: 5px;">${output.broker.queue}</td></tr>`;
+            } else if (output.type === 'kafka' && output.broker) {
+                html += `<tr><td style="padding: 5px 5px 5px 20px;">Topic:</td><td style="padding: 5px;">${output.broker.queue}</td></tr>`;
+            } else if (output.type === 'database' && output.database) {
+                html += `<tr><td style="padding: 5px 5px 5px 20px;">Table:</td><td style="padding: 5px;">${output.database.table}</td></tr>`;
+            }
+        } else {
+            html += `<tr><td style="padding: 5px; font-weight: bold;">Output:</td><td style="padding: 5px; color: #dc3545;">Not configured</td></tr>`;
+        }
+
+        // Settings summary
+        if (settings && settings.performance) {
+            html += `<tr><td style="padding: 5px; font-weight: bold;">Performance:</td><td style="padding: 5px;">Timeout: ${settings.performance.timeout}s, Batch: ${settings.performance.batchSize}, Memory: ${settings.performance.maxMemoryMB}MB</td></tr>`;
+        }
+
+        html += '</table>';
+        summaryDiv.innerHTML = html;
+    } catch (err) {
+        console.error('Failed to render config summary:', err);
+        summaryDiv.innerHTML = `<p style="color: #dc3545;">Error loading configuration: ${err}</p>`;
+    }
+}
+
+let generatedYAML = '';
+
+async function generateAndShowYAML() {
+    if (!wailsReady || !window.go) {
+        showNotification('YAML generation not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        showNotification('Generating YAML...', 'info');
+
+        // Save all current step data first
+        await saveCurrentStep();
+
+        const yaml = await window.go.main.App.GenerateYAML();
+        generatedYAML = yaml;
+
+        document.getElementById('yamlPreview').textContent = yaml;
+        document.getElementById('yamlPreviewModal').style.display = 'flex';
+
+        showNotification('YAML generated successfully', 'success');
+    } catch (err) {
+        console.error('Failed to generate YAML:', err);
+        showNotification('Failed to generate YAML: ' + err, 'error');
+    }
+}
+
+async function saveYAMLToFile() {
+    if (!generatedYAML) {
+        await generateAndShowYAML();
+    }
+
+    if (!wailsReady || !window.go) {
+        showNotification('File save not available (Wails not ready)', 'error');
+        return;
+    }
+
+    try {
+        const result = await window.go.main.App.SaveConfigurationFile();
+        if (result.success) {
+            showNotification(`YAML saved: ${result.filename}`, 'success');
+        } else {
+            showNotification(`Failed to save: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        console.error('Failed to save YAML:', err);
+        showNotification('Failed to save YAML: ' + err, 'error');
+    }
+}
+
+async function copyYAMLToClipboard() {
+    if (!generatedYAML) {
+        await generateAndShowYAML();
+    }
+
+    try {
+        await navigator.clipboard.writeText(generatedYAML);
+        showNotification('YAML copied to clipboard', 'success');
+    } catch (err) {
+        console.error('Failed to copy to clipboard:', err);
+        showNotification('Failed to copy to clipboard', 'error');
+    }
+}
+
+function closeYAMLPreview() {
+    document.getElementById('yamlPreviewModal').style.display = 'none';
+}
 
 // ========== FILE PICKERS ==========
 

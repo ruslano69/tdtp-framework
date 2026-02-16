@@ -111,7 +111,7 @@ type TransportConfig struct {
 
 // MockSource for mock mode
 type MockSource struct {
-	Schema []MockField       `json:"schema"`
+	Schema []MockField      `json:"schema"`
 	Data   []map[string]any `json:"data"`
 }
 
@@ -476,12 +476,12 @@ func (a *App) GetTransform() *Transform {
 
 // Output configuration
 type Output struct {
-	Type            string                  `json:"type"` // tdtp_file, tdtp_broker, database, xlsx
-	File            *TDTPFileOutput         `json:"file,omitempty"`
-	Broker          *TDTPBrokerOutput       `json:"broker,omitempty"`
-	Database        *DatabaseOutput         `json:"database,omitempty"`
-	XLSX            *XLSXOutput             `json:"xlsx,omitempty"`
-	IncrementalSync *IncrementalSyncOutput  `json:"incrementalSync,omitempty"`
+	Type            string                 `json:"type"` // tdtp_file, tdtp_broker, database, xlsx
+	File            *TDTPFileOutput        `json:"file,omitempty"`
+	Broker          *TDTPBrokerOutput      `json:"broker,omitempty"`
+	Database        *DatabaseOutput        `json:"database,omitempty"`
+	XLSX            *XLSXOutput            `json:"xlsx,omitempty"`
+	IncrementalSync *IncrementalSyncOutput `json:"incrementalSync,omitempty"`
 }
 
 // TDTPFileOutput for TDTP file output
@@ -617,8 +617,174 @@ func (a *App) GetSettings() Settings {
 
 // GenerateYAML generates final YAML configuration
 func (a *App) GenerateYAML() (string, error) {
-	// TODO: Implement YAML generation
-	return "# YAML configuration\n", nil
+	// Build TDTPConfig from App state
+	config := TDTPConfig{
+		Name:        a.pipelineInfo.Name,
+		Version:     a.pipelineInfo.Version,
+		Description: a.pipelineInfo.Description,
+		Sources:     a.buildSourceConfigs(),
+		Workspace: WorkspaceConfig{
+			Type: "sqlite",
+			Mode: ":memory:",
+		},
+		Transform:     a.buildTransformConfig(),
+		Output:        a.buildOutputConfig(),
+		Performance:   a.buildPerformanceConfig(),
+		Audit:         a.buildAuditConfig(),
+		ErrorHandling: a.buildErrorHandlingConfig(),
+	}
+
+	// Marshal to YAML
+	yamlBytes, err := yaml.Marshal(&config)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal YAML: %w", err)
+	}
+
+	return string(yamlBytes), nil
+}
+
+func (a *App) buildSourceConfigs() []SourceConfig {
+	configs := make([]SourceConfig, 0, len(a.sources))
+	for _, src := range a.sources {
+		config := SourceConfig{
+			Name: src.Name,
+			Type: src.Type,
+		}
+
+		// Set DSN based on source type
+		switch src.Type {
+		case "postgres", "mysql", "mssql", "sqlite":
+			if src.Database != nil {
+				config.DSN = src.Database.DSN
+			}
+		case "tdtp":
+			if src.TDTPFile != nil {
+				config.DSN = src.TDTPFile.Path
+			}
+		case "mock":
+			// Mock sources don't need DSN in YAML - they're for GUI testing only
+			continue
+		}
+
+		// Set query if available
+		if src.TDTQLFilter != nil && src.TDTQLFilter.Query != "" {
+			config.Query = src.TDTQLFilter.Query
+		}
+
+		configs = append(configs, config)
+	}
+	return configs
+}
+
+func (a *App) buildTransformConfig() TransformConfig {
+	if a.transform == nil {
+		return TransformConfig{
+			ResultTable: "result",
+			SQL:         "SELECT * FROM source_table",
+		}
+	}
+	return TransformConfig{
+		ResultTable: a.transform.ResultTable,
+		SQL:         a.transform.SQL,
+	}
+}
+
+func (a *App) buildOutputConfig() OutputConfig {
+	if a.output == nil {
+		return OutputConfig{
+			Type: "tdtp",
+			TDTP: &TDTPOutputConfig{
+				Destination: "output.tdtp",
+				Format:      "xml",
+				Compression: false,
+			},
+		}
+	}
+
+	config := OutputConfig{
+		Type: a.output.Type,
+	}
+
+	switch a.output.Type {
+	case "tdtp_file":
+		if a.output.File != nil {
+			config.Type = "tdtp" // Normalize to tdtpcli format
+			config.TDTP = &TDTPOutputConfig{
+				Destination: a.output.File.Destination,
+				Format:      "xml",
+				Compression: a.output.File.Compression,
+			}
+		}
+	case "rabbitmq":
+		if a.output.Broker != nil {
+			config.RabbitMQ = parseRabbitMQConfig(a.output.Broker.Config, a.output.Broker.Queue)
+		}
+	case "kafka":
+		if a.output.Broker != nil {
+			config.Kafka = &KafkaOutputConfig{
+				Brokers: a.output.Broker.Config,
+				Topic:   a.output.Broker.Queue,
+			}
+			if a.output.Broker.Compression {
+				config.Kafka.Compression = "zstd"
+			}
+		}
+	}
+
+	return config
+}
+
+func parseRabbitMQConfig(connStr, queue string) *RabbitMQOutputConfig {
+	// Parse RabbitMQ connection string format: amqp://user:pass@host:port/vhost
+	// For simplicity, return basic config - can be enhanced later
+	return &RabbitMQOutputConfig{
+		Host:     "localhost",
+		Port:     5672,
+		User:     "guest",
+		Password: "guest",
+		Queue:    queue,
+		VHost:    "/",
+	}
+}
+
+func (a *App) buildPerformanceConfig() *PerformanceConfig {
+	if a.settings.Performance.Timeout == 0 && a.settings.Performance.BatchSize == 0 {
+		// Return nil to omit empty performance section
+		return nil
+	}
+	return &PerformanceConfig{
+		Timeout:         a.settings.Performance.Timeout,
+		BatchSize:       a.settings.Performance.BatchSize,
+		ParallelSources: a.settings.Performance.ParallelSources,
+		MaxMemoryMB:     a.settings.Performance.MaxMemoryMB,
+	}
+}
+
+func (a *App) buildAuditConfig() *AuditConfig {
+	if !a.settings.Audit.Enabled {
+		// Return nil to omit disabled audit section
+		return nil
+	}
+	return &AuditConfig{
+		Enabled:    a.settings.Audit.Enabled,
+		LogFile:    a.settings.Audit.LogFile,
+		LogQueries: a.settings.Audit.LogQueries,
+		LogErrors:  a.settings.Audit.LogErrors,
+	}
+}
+
+func (a *App) buildErrorHandlingConfig() *ErrorHandlingConfig {
+	if a.settings.ErrorHandling.OnSourceError == "" {
+		// Return nil to omit empty error handling section
+		return nil
+	}
+	return &ErrorHandlingConfig{
+		OnSourceError:    a.settings.ErrorHandling.OnSourceError,
+		OnTransformError: a.settings.ErrorHandling.OnTransformError,
+		OnExportError:    a.settings.ErrorHandling.OnExportError,
+		RetryCount:       a.settings.ErrorHandling.RetryCount,
+		RetryDelaySec:    a.settings.ErrorHandling.RetryDelaySec,
+	}
 }
 
 // PreviewRequest for data preview
@@ -630,12 +796,12 @@ type PreviewRequest struct {
 
 // PreviewResult holds preview data
 type PreviewResult struct {
-	Columns   []string       `json:"columns"`
-	Rows      [][]any        `json:"rows"`
-	TotalRows int64          `json:"totalRows"`
-	QueryTime int            `json:"queryTime"` // ms
-	Warnings  []string       `json:"warnings"`
-	Error     string         `json:"error,omitempty"`
+	Columns   []string `json:"columns"`
+	Rows      [][]any  `json:"rows"`
+	TotalRows int64    `json:"totalRows"`
+	QueryTime int      `json:"queryTime"` // ms
+	Warnings  []string `json:"warnings"`
+	Error     string   `json:"error,omitempty"`
 }
 
 // Helper function for safe string extraction in debug logs
@@ -1106,8 +1272,19 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 	}
 	a.sources = guiSources
 
-	// Store raw tdtpcli config for reference (we'll need it for save)
-	// TODO: Store workspace, transform, output, performance, audit, etc.
+	// Load Transform
+	if config.Transform.ResultTable != "" || config.Transform.SQL != "" {
+		a.transform = &Transform{
+			ResultTable: config.Transform.ResultTable,
+			SQL:         config.Transform.SQL,
+		}
+	}
+
+	// Load Output
+	a.output = a.loadOutputFromConfig(&config.Output)
+
+	// Load Settings
+	a.loadSettingsFromConfig(&config)
 
 	return ConfigFileResult{
 		Success:  true,
@@ -1118,6 +1295,123 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 			Description: config.Description,
 		},
 	}
+}
+
+// loadOutputFromConfig converts OutputConfig from YAML to GUI Output format
+func (a *App) loadOutputFromConfig(outputConfig *OutputConfig) *Output {
+	if outputConfig == nil {
+		return nil
+	}
+
+	output := &Output{
+		Type: outputConfig.Type,
+	}
+
+	switch outputConfig.Type {
+	case "tdtp":
+		if outputConfig.TDTP != nil {
+			output.Type = "tdtp_file" // Convert to GUI format
+			output.File = &TDTPFileOutput{
+				Destination:   outputConfig.TDTP.Destination,
+				Compression:   outputConfig.TDTP.Compression,
+				CompressLevel: 3,
+			}
+		}
+	case "rabbitmq":
+		if outputConfig.RabbitMQ != nil {
+			output.Broker = &TDTPBrokerOutput{
+				Type:          "rabbitmq",
+				Config:        fmt.Sprintf("amqp://%s:%s@%s:%d%s", outputConfig.RabbitMQ.User, outputConfig.RabbitMQ.Password, outputConfig.RabbitMQ.Host, outputConfig.RabbitMQ.Port, outputConfig.RabbitMQ.VHost),
+				Queue:         outputConfig.RabbitMQ.Queue,
+				Compression:   false,
+				CompressLevel: 3,
+			}
+		}
+	case "kafka":
+		if outputConfig.Kafka != nil {
+			output.Broker = &TDTPBrokerOutput{
+				Type:          "kafka",
+				Config:        outputConfig.Kafka.Brokers,
+				Queue:         outputConfig.Kafka.Topic,
+				Compression:   outputConfig.Kafka.Compression != "",
+				CompressLevel: 3,
+			}
+		}
+	}
+
+	return output
+}
+
+// loadSettingsFromConfig loads performance, audit, and error handling settings from YAML config
+func (a *App) loadSettingsFromConfig(config *TDTPConfig) {
+	// Initialize with defaults if sections are nil
+	if config.Performance == nil && config.Audit == nil && config.ErrorHandling == nil {
+		// Keep existing defaults
+		return
+	}
+
+	// Performance
+	if config.Performance != nil {
+		a.settings.Performance = Performance{
+			Timeout:         config.Performance.Timeout,
+			BatchSize:       config.Performance.BatchSize,
+			ParallelSources: config.Performance.ParallelSources,
+			MaxMemoryMB:     config.Performance.MaxMemoryMB,
+		}
+	} else {
+		// Set defaults
+		a.settings.Performance = Performance{
+			Timeout:         300,
+			BatchSize:       1000,
+			MaxMemoryMB:     512,
+			ParallelSources: false,
+		}
+	}
+
+	// Workspace (always SQLite in-memory for GUI)
+	a.settings.Workspace = Workspace{
+		Type: "sqlite",
+		Mode: ":memory:",
+	}
+
+	// Audit
+	if config.Audit != nil {
+		a.settings.Audit = Audit{
+			Enabled:    config.Audit.Enabled,
+			LogFile:    config.Audit.LogFile,
+			LogQueries: config.Audit.LogQueries,
+			LogErrors:  config.Audit.LogErrors,
+		}
+	} else {
+		a.settings.Audit = Audit{
+			Enabled:    false,
+			LogFile:    "",
+			LogQueries: false,
+			LogErrors:  true,
+		}
+	}
+
+	// Error Handling
+	if config.ErrorHandling != nil {
+		a.settings.ErrorHandling = ErrorHandling{
+			OnSourceError:    config.ErrorHandling.OnSourceError,
+			OnTransformError: config.ErrorHandling.OnTransformError,
+			OnExportError:    config.ErrorHandling.OnExportError,
+			RetryCount:       config.ErrorHandling.RetryCount,
+			RetryDelaySec:    config.ErrorHandling.RetryDelaySec,
+		}
+	} else {
+		a.settings.ErrorHandling = ErrorHandling{
+			OnSourceError:    "fail",
+			OnTransformError: "fail",
+			OnExportError:    "fail",
+			RetryCount:       3,
+			RetryDelaySec:    5,
+		}
+	}
+
+	// Data Processors (empty for now - Phase 4 feature)
+	a.settings.DataProcessors = DataProcessors{}
 }
 
 // SaveConfigurationFile opens save dialog and saves current configuration as YAML
