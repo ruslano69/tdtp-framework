@@ -977,9 +977,18 @@ func (a *App) buildSourceConfigs() []SourceConfig {
 			continue
 		}
 
-		// Set query if available (from TDTQL)
+		// Set query: TDTQL filter takes priority; otherwise use the real DB table name.
+		// We must use the actual TableName (not src.Name alias) here because this query
+		// runs against the real database BEFORE data is loaded into in-memory SQLite.
 		if src.TDTQL != nil && src.TDTQL.Where != "" {
 			config.Query = src.TDTQL.Where
+		} else if src.TableName != "" {
+			switch src.Type {
+			case "mssql", "sqlserver":
+				config.Query = fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(src.TableName))
+			default:
+				config.Query = fmt.Sprintf("SELECT * FROM %s", src.TableName)
+			}
 		}
 
 		configs = append(configs, config)
