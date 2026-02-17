@@ -1141,7 +1141,7 @@ type PreviewResult struct {
 
 // Helper function for safe string extraction in debug logs
 // quoteMSSQLIdent wraps an identifier in MSSQL brackets, escaping any ] inside.
-// Example: "First Name" → "[First Name]", "E-Mail" → "[E-Mail]"
+// Example: "First Name" -> "[First Name]", "E-Mail" -> "[E-Mail]"
 func quoteMSSQLIdent(name string) string {
 	return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
 }
