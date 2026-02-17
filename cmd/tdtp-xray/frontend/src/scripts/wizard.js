@@ -1645,9 +1645,20 @@ async function addTableToCanvas(sourceName) {
         const x = 50 + (tableCount * 30) % 400;
         const y = 50 + (tableCount * 30) % 300;
 
+        // Look up the actual DB table name for this source.
+        // Source.Name is the user alias; Source.TableName is the real DB table.
+        // If they differ, store it as tableRef so GenerateSQL can emit:
+        //   FROM [actual_table] AS [alias]
+        const sourceInfo = sources.find(s => s.name === sourceName);
+        const actualTableName = (sourceInfo && sourceInfo.tableName &&
+                                 sourceInfo.tableName !== sourceName)
+            ? sourceInfo.tableName
+            : '';
+
         const newTable = {
-            sourceName: sourceName,
-            alias: sourceName,
+            sourceName: sourceName,   // = Source.Name (user alias, for schema lookup)
+            tableRef:   actualTableName, // = Source.TableName (actual DB table, '' if same)
+            alias:      sourceName,   // = Source.Name (used in field references)
             x: x,
             y: y,
             fields: fields
