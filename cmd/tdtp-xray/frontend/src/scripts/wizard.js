@@ -625,6 +625,12 @@ function getStep2HTML() {
                                     <input type="password" id="msPassword" placeholder="password" oninput="clearConnectionStatus()">
                                 </div>
                             </div>
+                            <div class="form-group" style="margin-top: 4px;">
+                                <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; color: #555;">
+                                    <input type="checkbox" id="msTrustCert" checked onchange="clearConnectionStatus()">
+                                    Trust Server Certificate (skip TLS verify)
+                                </label>
+                            </div>
                         </div>
 
                         <!-- SQLite Fields -->
@@ -866,15 +872,17 @@ function generateDSN() {
         const port = document.getElementById('msPort').value || '1433';
         const database = document.getElementById('msDatabase').value;
         const winAuth = document.getElementById('msWinAuth').checked;
+        const trustCert = document.getElementById('msTrustCert').checked;
+        const tlsParam = trustCert ? '&TrustServerCertificate=true' : '';
 
         if (winAuth) {
-            return `sqlserver://${server}:${port}?database=${database}&trusted_connection=yes`;
+            return `sqlserver://${server}:${port}?database=${database}&trusted_connection=yes${tlsParam}`;
         }
 
         const user = document.getElementById('msUser').value;
         const password = document.getElementById('msPassword').value;
 
-        return `sqlserver://${user}:${password}@${server}:${port}?database=${database}`;
+        return `sqlserver://${user}:${password}@${server}:${port}?database=${database}${tlsParam}`;
 
     } else if (type === 'sqlite') {
         const file = document.getElementById('sqliteFile').value;
