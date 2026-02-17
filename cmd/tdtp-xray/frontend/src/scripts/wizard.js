@@ -1689,6 +1689,13 @@ function renderCanvas() {
         joins: canvasDesign.joins ? canvasDesign.joins.length : 0
     });
 
+    // Preserve scroll positions of each table's field list before clearing
+    const fieldScrollTops = {};
+    canvasDesign.tables.forEach((_, index) => {
+        const fc = document.getElementById(`fields-${index}`);
+        if (fc) fieldScrollTops[index] = fc.scrollTop;
+    });
+
     // Clear existing
     canvasArea.innerHTML = '';
     svg.innerHTML = '';
@@ -1698,6 +1705,11 @@ function renderCanvas() {
         console.log(`  ➕ Rendering table ${index}: ${table.sourceName}`);
         const tableCard = createTableCard(table, index);
         canvasArea.appendChild(tableCard);
+        // Restore scroll position so the field the user acted on stays in view
+        if (fieldScrollTops[index]) {
+            const fc = document.getElementById(`fields-${index}`);
+            if (fc) fc.scrollTop = fieldScrollTops[index];
+        }
     });
 
     console.log('✅ Tables rendered, scheduling JOIN rendering...');
@@ -1745,6 +1757,7 @@ function createTableCard(table, index) {
 
     // Fields
     const fieldsContainer = document.createElement('div');
+    fieldsContainer.id = `fields-${index}`;
     fieldsContainer.style.cssText = 'padding: 5px; max-height: 300px; overflow-y: auto;';
 
     table.fields.forEach((field, fieldIndex) => {
