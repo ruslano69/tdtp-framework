@@ -312,6 +312,62 @@ func TestSQLGenerator_StringEscaping(t *testing.T) {
 	}
 }
 
+func TestSQLGenerator_EmptyStringValue(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{
+		Filters: &packet.Filters{
+			And: &packet.LogicalGroup{
+				Filters: []packet.Filter{
+					{
+						Field:    "Name",
+						Operator: "eq",
+						Value:    "",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := generator.GenerateSQL("Users", query)
+	if err != nil {
+		t.Fatalf("SQL generation failed: %v", err)
+	}
+
+	// Пустая строка должна давать '' (не NULL), иначе field = NULL всегда false
+	expected := "SELECT * FROM Users WHERE Name = ''"
+	if result != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, result)
+	}
+}
+
+func TestSQLGenerator_IS_NOT_NULL(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{
+		Filters: &packet.Filters{
+			And: &packet.LogicalGroup{
+				Filters: []packet.Filter{
+					{
+						Field:    "Email",
+						Operator: "is_not_null",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := generator.GenerateSQL("Users", query)
+	if err != nil {
+		t.Fatalf("SQL generation failed: %v", err)
+	}
+
+	expected := "SELECT * FROM Users WHERE Email IS NOT NULL"
+	if result != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, result)
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
