@@ -54,6 +54,11 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// Quit closes the application window.
+func (a *App) Quit() {
+	runtime.Quit(a.ctx)
+}
+
 // --- Step 1: Project Info ---
 
 // PipelineInfo holds pipeline metadata
@@ -688,46 +693,11 @@ func (a *App) loadTDTPSourceToMemory(db *sql.DB, source Source) error {
 		return fmt.Errorf("failed to load TDTP data: %s", preview.Message)
 	}
 
-	// Create table
-	createSQL := fmt.Sprintf("CREATE TABLE %s (", source.Name)
-	for i, col := range preview.Columns {
-		if i > 0 {
-			createSQL += ", "
-		}
-		createSQL += fmt.Sprintf("%s TEXT", col) // SQLite: use TEXT for all columns
-	}
-	createSQL += ")"
-
-	if _, err := db.Exec(createSQL); err != nil {
-		return fmt.Errorf("failed to create table: %v", err)
+	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.Rows); err != nil {
+		return err
 	}
 
-	// Insert data
-	if len(preview.Rows) > 0 {
-		placeholders := make([]string, len(preview.Columns))
-		for i := range placeholders {
-			placeholders[i] = "?"
-		}
-		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES (%s)", source.Name, strings.Join(placeholders, ", "))
-
-		stmt, err := db.Prepare(insertSQL)
-		if err != nil {
-			return fmt.Errorf("failed to prepare insert: %v", err)
-		}
-		defer stmt.Close()
-
-		for _, row := range preview.Rows {
-			values := make([]any, len(preview.Columns))
-			for i, col := range preview.Columns {
-				values[i] = row[col]
-			}
-			if _, err := stmt.Exec(values...); err != nil {
-				fmt.Printf("⚠️ Failed to insert row: %v\n", err)
-			}
-		}
-	}
-
-	fmt.Printf("✅ Loaded %d rows from TDTP source '%s'\n", len(preview.Rows), source.Name)
+	fmt.Printf("Loaded %d rows from TDTP source '%s'\n", len(preview.Rows), source.Name)
 	return nil
 }
 
@@ -755,46 +725,56 @@ func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
 		return fmt.Errorf("failed to load database data: %s", preview.Message)
 	}
 
-	// Create table
-	createSQL := fmt.Sprintf("CREATE TABLE %s (", source.Name)
-	for i, col := range preview.Columns {
-		if i > 0 {
-			createSQL += ", "
-		}
-		createSQL += fmt.Sprintf("%s TEXT", col)
+	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.Rows); err != nil {
+		return err
 	}
-	createSQL += ")"
 
+	fmt.Printf("Loaded %d rows from DB source '%s'\n", len(preview.Rows), source.Name)
+	return nil
+}
+
+// createAndFillTable creates a TEXT-typed SQLite table and bulk-inserts rows.
+// All identifiers are double-quoted to handle names containing $, spaces, etc.
+func (a *App) createAndFillTable(db *sql.DB, tableName string, columns []string, rows []map[string]any) error {
+	colDefs := make([]string, len(columns))
+	for i, col := range columns {
+		colDefs[i] = quoteSQLiteIdent(col) + " TEXT"
+	}
+	createSQL := fmt.Sprintf("CREATE TABLE %s (%s)", quoteSQLiteIdent(tableName), strings.Join(colDefs, ", "))
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create table: %v", err)
 	}
 
-	// Insert data
-	if len(preview.Rows) > 0 {
-		placeholders := make([]string, len(preview.Columns))
-		for i := range placeholders {
-			placeholders[i] = "?"
-		}
-		insertSQL := fmt.Sprintf("INSERT INTO %s VALUES (%s)", source.Name, strings.Join(placeholders, ", "))
-
-		stmt, err := db.Prepare(insertSQL)
-		if err != nil {
-			return fmt.Errorf("failed to prepare insert: %v", err)
-		}
-		defer stmt.Close()
-
-		for _, row := range preview.Rows {
-			values := make([]any, len(preview.Columns))
-			for i, col := range preview.Columns {
-				values[i] = row[col]
-			}
-			if _, err := stmt.Exec(values...); err != nil {
-				fmt.Printf("⚠️ Failed to insert row: %v\n", err)
-			}
-		}
+	if len(rows) == 0 {
+		return nil
 	}
 
-	fmt.Printf("✅ Loaded %d rows from DB source '%s'\n", len(preview.Rows), source.Name)
+	quotedCols := make([]string, len(columns))
+	placeholders := make([]string, len(columns))
+	for i, col := range columns {
+		quotedCols[i] = quoteSQLiteIdent(col)
+		placeholders[i] = "?"
+	}
+	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		quoteSQLiteIdent(tableName),
+		strings.Join(quotedCols, ", "),
+		strings.Join(placeholders, ", "))
+
+	stmt, err := db.Prepare(insertSQL)
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert: %v", err)
+	}
+	defer stmt.Close()
+
+	for _, row := range rows {
+		values := make([]any, len(columns))
+		for i, col := range columns {
+			values[i] = row[col]
+		}
+		if _, err := stmt.Exec(values...); err != nil {
+			fmt.Printf("failed to insert row: %v\n", err)
+		}
+	}
 	return nil
 }
 
@@ -1143,6 +1123,11 @@ type PreviewResult struct {
 }
 
 // Helper function for safe string extraction in debug logs
+// quoteSQLiteIdent wraps an identifier in double quotes for SQLite, escaping inner double quotes.
+func quoteSQLiteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
 // quoteMSSQLIdent wraps an identifier in MSSQL brackets, escaping any ] inside.
 // Example: "First Name" -> "[First Name]", "E-Mail" -> "[E-Mail]"
 func quoteMSSQLIdent(name string) string {
@@ -1533,7 +1518,9 @@ type SecurityConfig struct {
 // ConfigFileResult holds result of load/save configuration operations
 type ConfigFileResult struct {
 	Success  bool          `json:"success"`
-	Filename string        `json:"filename,omitempty"`
+	Filename string        `json:"filename,omitempty"` // base name only
+	Path     string        `json:"path,omitempty"`     // full absolute path
+	Dir      string        `json:"dir,omitempty"`      // parent directory
 	Error    string        `json:"error,omitempty"`
 	Config   *PipelineInfo `json:"config,omitempty"`
 }
@@ -1868,6 +1855,8 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 	return ConfigFileResult{
 		Success:  true,
 		Filename: filepath.Base(path),
+		Path:     path,
+		Dir:      filepath.Dir(path),
 	}
 }
 

@@ -192,10 +192,12 @@ function updateNavigation() {
     btnBack.disabled = currentStep === 1;
 
     if (currentStep === totalSteps) {
-        btnNext.textContent = 'Save Configuration';
+        btnNext.textContent = 'Save & Exit';
+        btnNext.onclick = saveAndExit;
         btnNext.classList.add('btn-success');
     } else {
         btnNext.textContent = 'Next →';
+        btnNext.onclick = nextStep;
         btnNext.classList.remove('btn-success');
     }
 }
@@ -445,18 +447,47 @@ async function saveConfigurationFile() {
         return;
     }
 
-    // Save current step data first
+    const btn = event && event.currentTarget;
+    const originalText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Opening dialog...'; }
+
     await saveCurrentStep();
 
     try {
         const result = await window.go.main.App.SaveConfigurationFile();
         if (result.success) {
-            showNotification(`✅ Configuration saved: ${result.filename}`, 'success');
-        } else {
-            showNotification(`❌ Failed to save: ${result.error}`, 'error');
+            showNotification(`Saved: ${result.filename}  →  ${result.dir}`, 'success');
+        } else if (result.error && !result.error.includes('cancelled')) {
+            showNotification(`Save failed: ${result.error}`, 'error');
         }
     } catch (err) {
         console.error('Save configuration error:', err);
+        showNotification('Failed to save configuration: ' + err, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
+    }
+}
+
+// Save config to file and quit the application
+async function saveAndExit() {
+    if (!wailsReady || !window.go) {
+        showNotification('Not available (Wails not ready)', 'error');
+        return;
+    }
+
+    await saveCurrentStep();
+
+    try {
+        const result = await window.go.main.App.SaveConfigurationFile();
+        if (result.success) {
+            showNotification(`Saved: ${result.filename}  →  ${result.dir}`, 'success');
+            await window.go.main.App.Quit();
+        } else if (result.error && !result.error.includes('cancelled')) {
+            showNotification(`Failed to save: ${result.error}`, 'error');
+        }
+        // пользователь нажал Cancel в диалоге - остаёмся молча
+    } catch (err) {
+        console.error('Save & Exit error:', err);
         showNotification('Failed to save configuration: ' + err, 'error');
     }
 }
@@ -3256,25 +3287,30 @@ async function generateAndShowYAML() {
 }
 
 async function saveYAMLToFile() {
-    if (!generatedYAML) {
-        await generateAndShowYAML();
-    }
-
     if (!wailsReady || !window.go) {
         showNotification('File save not available (Wails not ready)', 'error');
         return;
     }
 
+    const btn = event && event.currentTarget;
+    const originalText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Opening dialog...'; }
+
     try {
+        if (!generatedYAML) {
+            await generateAndShowYAML();
+        }
         const result = await window.go.main.App.SaveConfigurationFile();
         if (result.success) {
-            showNotification(`YAML saved: ${result.filename}`, 'success');
-        } else {
+            showNotification(`Saved: ${result.filename}  →  ${result.dir}`, 'success');
+        } else if (result.error && !result.error.includes('cancelled')) {
             showNotification(`Failed to save: ${result.error}`, 'error');
         }
     } catch (err) {
         console.error('Failed to save YAML:', err);
         showNotification('Failed to save YAML: ' + err, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
     }
 }
 
