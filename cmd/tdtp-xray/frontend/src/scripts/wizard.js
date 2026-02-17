@@ -192,10 +192,12 @@ function updateNavigation() {
     btnBack.disabled = currentStep === 1;
 
     if (currentStep === totalSteps) {
-        btnNext.textContent = 'Save Configuration';
+        btnNext.textContent = 'Save & Exit';
+        btnNext.onclick = saveAndExit;
         btnNext.classList.add('btn-success');
     } else {
         btnNext.textContent = 'Next →';
+        btnNext.onclick = nextStep;
         btnNext.classList.remove('btn-success');
     }
 }
@@ -457,6 +459,30 @@ async function saveConfigurationFile() {
         }
     } catch (err) {
         console.error('Save configuration error:', err);
+        showNotification('Failed to save configuration: ' + err, 'error');
+    }
+}
+
+// Save config to file and quit the application
+async function saveAndExit() {
+    if (!wailsReady || !window.go) {
+        showNotification('Not available (Wails not ready)', 'error');
+        return;
+    }
+
+    await saveCurrentStep();
+
+    try {
+        const result = await window.go.main.App.SaveConfigurationFile();
+        if (result.success) {
+            showNotification(`Configuration saved: ${result.filename}`, 'success');
+            await window.go.main.App.Quit();
+        } else if (result.error && result.error !== 'File save cancelled or failed') {
+            showNotification(`Failed to save: ${result.error}`, 'error');
+        }
+        // если пользователь нажал Cancel в диалоге - просто остаёмся
+    } catch (err) {
+        console.error('Save & Exit error:', err);
         showNotification('Failed to save configuration: ' + err, 'error');
     }
 }

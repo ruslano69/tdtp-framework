@@ -54,6 +54,11 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// Quit closes the application window.
+func (a *App) Quit() {
+	runtime.Quit(a.ctx)
+}
+
 // --- Step 1: Project Info ---
 
 // PipelineInfo holds pipeline metadata
