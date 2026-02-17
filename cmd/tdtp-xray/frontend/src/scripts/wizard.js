@@ -1487,25 +1487,57 @@ function loadStep3Data() {
                     joins: canvasDesign.joins ? canvasDesign.joins.length : 0
                 });
 
-                // CRITICAL: Load fields for each table if they're missing
+                // Load / merge fields for each table
                 console.log('🔧 Checking table fields...');
                 for (let i = 0; i < canvasDesign.tables.length; i++) {
                     const table = canvasDesign.tables[i];
                     console.log(`  📋 Table ${i} (${table.sourceName}): ${table.fields ? table.fields.length : 0} fields`);
 
-                    if (!table.fields || table.fields.length === 0) {
-                        console.log(`  🔄 Loading fields for ${table.sourceName}...`);
+                    // Fields are considered "from SQL parse" (no type info) when they have no type strings.
+                    // In that case, fetch full schema from DB and MERGE: restore visibility + filter from
+                    // parsed fields, add missing columns as visible:false.
+                    const hasTypeInfo = table.fields && table.fields.length > 0 &&
+                                        table.fields.some(f => f.type && f.type !== '');
+                    const needsLoad = !table.fields || table.fields.length === 0;
+                    const needsMerge = !needsLoad && !hasTypeInfo; // fields from SQL parse
+
+                    if (needsLoad || needsMerge) {
+                        console.log(`  🔄 ${needsMerge ? 'Merging' : 'Loading'} fields for ${table.sourceName}...`);
                         try {
-                            const tables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
-                            if (tables && tables.length > 0 && tables[0].columns) {
-                                table.fields = tables[0].columns.map(col => ({
-                                    name: col.name,
-                                    type: col.type,
-                                    isPrimaryKey: col.isPrimaryKey || false,
-                                    visible: true,
-                                    filter: null
-                                }));
-                                console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+                            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+                            if (dbTables && dbTables.length > 0 && dbTables[0].columns) {
+                                if (needsMerge) {
+                                    // Build lookup from parsed fields (name → {visible, filter})
+                                    const parsedLookup = {};
+                                    (table.fields || []).forEach(f => {
+                                        parsedLookup[f.name.toLowerCase()] = f;
+                                    });
+                                    const hasAnyParsed = Object.keys(parsedLookup).length > 0;
+
+                                    table.fields = dbTables[0].columns.map(col => {
+                                        const parsed = parsedLookup[col.name.toLowerCase()];
+                                        return {
+                                            name: col.name,
+                                            type: col.type,
+                                            isPrimaryKey: col.isPrimaryKey || false,
+                                            // If we had parsed fields: visible only if it was in SELECT;
+                                            // otherwise (fresh load): all visible
+                                            visible: parsed ? parsed.visible : !hasAnyParsed,
+                                            filter: parsed ? (parsed.filter || null) : null
+                                        };
+                                    });
+                                    console.log(`  ✅ Merged: ${table.fields.filter(f=>f.visible).length} visible, ` +
+                                                `${table.fields.filter(f=>f.filter).length} with filters`);
+                                } else {
+                                    table.fields = dbTables[0].columns.map(col => ({
+                                        name: col.name,
+                                        type: col.type,
+                                        isPrimaryKey: col.isPrimaryKey || false,
+                                        visible: true,
+                                        filter: null
+                                    }));
+                                    console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+                                }
                             }
                         } catch (err) {
                             console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
