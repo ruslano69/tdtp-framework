@@ -209,7 +209,7 @@ func TestConverterDate(t *testing.T) {
 		t.Errorf("Expected %v, got %v", expected, tv.TimeValue)
 	}
 
-	// ISO8601 date from SQLite (e.g. "1984-04-13T00:00:00Z") — временная часть отбрасывается
+	// ISO8601 date from SQLite (e.g. "1984-04-13T00:00:00Z") - временная часть отбрасывается
 	tv, err = converter.ParseValue("1984-04-13T00:00:00Z", field)
 	if err != nil {
 		t.Fatalf("Failed to parse ISO8601 date: %v", err)
@@ -219,7 +219,7 @@ func TestConverterDate(t *testing.T) {
 		t.Errorf("Expected %v, got %v", expectedISO, tv.TimeValue)
 	}
 
-	// ISO8601 date с ненулевым временем — время всё равно отбрасывается
+	// ISO8601 date с ненулевым временем - время всё равно отбрасывается
 	tv, err = converter.ParseValue("2024-06-15T14:30:00Z", field)
 	if err != nil {
 		t.Fatalf("Failed to parse ISO8601 date with time: %v", err)
@@ -352,7 +352,7 @@ func TestValidateSchema(t *testing.T) {
 		t.Error("Expected error for invalid type")
 	}
 
-	// TEXT без length (Length = 0) — неограниченная длина (SQLite TEXT, PG text, MSSQL VARCHAR(MAX))
+	// TEXT без length (Length = 0) - неограниченная длина (SQLite TEXT, PG text, MSSQL VARCHAR(MAX))
 	noLengthSchema := packet.Schema{
 		Fields: []packet.Field{
 			{Name: "Name", Type: "TEXT"},
@@ -363,7 +363,7 @@ func TestValidateSchema(t *testing.T) {
 		t.Errorf("TEXT with Length=0 should be valid (unlimited), got: %v", err)
 	}
 
-	// TEXT с Length = -1 — неограниченная длина (PostgreSQL uuid/json/jsonb subtype)
+	// TEXT с Length = -1 - неограниченная длина (PostgreSQL uuid/json/jsonb subtype)
 	negOneSchema := packet.Schema{
 		Fields: []packet.Field{
 			{Name: "Data", Type: "TEXT", Length: -1},
@@ -374,7 +374,7 @@ func TestValidateSchema(t *testing.T) {
 		t.Errorf("TEXT with Length=-1 should be valid (PG subtype unlimited), got: %v", err)
 	}
 
-	// TEXT с явной длиной — валидно
+	// TEXT с явной длиной - валидно
 	withLengthSchema := packet.Schema{
 		Fields: []packet.Field{
 			{Name: "Name", Type: "TEXT", Length: 100},

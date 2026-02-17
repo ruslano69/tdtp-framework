@@ -202,7 +202,7 @@ func (c *Converter) parseDate(tv *TypedValue, field FieldDef) (*TypedValue, erro
 				Value:   tv.RawValue,
 			}
 		}
-		// Отбрасываем временную часть — сохраняем только дату
+		// Отбрасываем временную часть - сохраняем только дату
 		val = time.Date(val.Year(), val.Month(), val.Day(), 0, 0, 0, 0, time.UTC)
 	}
 	tv.TimeValue = &val

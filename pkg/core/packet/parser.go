@@ -100,7 +100,7 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 		return fmt.Errorf("InReplyTo is required for response messages")
 	}
 
-	// InReplyTo не может быть пустой строкой — проверка выше,
+	// InReplyTo не может быть пустой строкой - проверка выше,
 	// но зарезервированное значение DirectExport допустимо (автономный экспорт без запроса)
 
 	// Для многочастных сообщений
