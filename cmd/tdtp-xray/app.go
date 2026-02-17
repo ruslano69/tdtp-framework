@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
@@ -1583,12 +1584,12 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 	guiSources := make([]Source, len(config.Sources))
 	for i, srcConfig := range config.Sources {
 		guiSources[i] = Source{
-			Name:  srcConfig.Name,
-			Type:  srcConfig.Type,
-			DSN:   srcConfig.DSN,
-			Query: srcConfig.Query,
-			// Note: TableName will be extracted from Query in GUI if needed
-			Tested: false,
+			Name:      srcConfig.Name,
+			Type:      srcConfig.Type,
+			DSN:       srcConfig.DSN,
+			Query:     srcConfig.Query,
+			TableName: extractTableNameFromQuery(srcConfig.Query),
+			Tested:    false,
 		}
 	}
 
@@ -1623,6 +1624,21 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 			Description: config.Description,
 		},
 	}
+}
+
+// extractTableNameFromQuery tries to parse a simple "SELECT ... FROM tablename ..." query
+// and return the table name. Returns empty string for complex queries.
+func extractTableNameFromQuery(query string) string {
+	if query == "" {
+		return ""
+	}
+	// Match: SELECT ... FROM <table> [WHERE|ORDER|LIMIT|;|EOF]
+	re := regexp.MustCompile(`(?i)\bFROM\s+["` + "`" + `\[]?(\w+)["` + "`" + `\]]?(?:\s|;|$)`)
+	m := re.FindStringSubmatch(query)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // loadOutputFromConfig converts OutputConfig from YAML to GUI Output format
