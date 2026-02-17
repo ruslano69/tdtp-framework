@@ -1218,7 +1218,20 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 	if source != nil && source.DSN != "" && source.TableName != "" {
 		// For MSSQL, get table schema and convert UNIQUEIDENTIFIER to VARCHAR
 		if source.Type == "mssql" {
-			schema := a.metadataService.GetTableSchema(source.Type, source.DSN, source.TableName)
+			tableRef := source.TableName
+			schema := a.metadataService.GetTableSchema(source.Type, source.DSN, tableRef)
+
+			// If schema lookup failed, retry with source Name as table reference.
+			// Handles cases like Name='ZTR$Department IW' where extractTableNameFromQuery
+			// returned only 'ZTR$Department' (stopped at the space) but the actual
+			// SQL Server table is 'ZTR$Department IW' (with a space).
+			if len(schema.Columns) == 0 && source.Name != tableRef {
+				schema = a.metadataService.GetTableSchema(source.Type, source.DSN, source.Name)
+				if len(schema.Columns) > 0 {
+					tableRef = source.Name
+					fmt.Printf("🔍 Schema retry succeeded with source.Name='%s'\n", tableRef)
+				}
+			}
 
 			var selectFields []string
 			for _, col := range schema.Columns {
@@ -1232,9 +1245,14 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 				}
 			}
 
-			queryToExecute = fmt.Sprintf("SELECT %s FROM %s",
-				strings.Join(selectFields, ", "),
-				quoteMSSQLIdent(source.TableName))
+			if len(selectFields) == 0 {
+				// Schema unavailable; fall back to SELECT * so we don't generate 'SELECT  FROM ...'
+				queryToExecute = fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(tableRef))
+			} else {
+				queryToExecute = fmt.Sprintf("SELECT %s FROM %s",
+					strings.Join(selectFields, ", "),
+					quoteMSSQLIdent(tableRef))
+			}
 		} else {
 			// For other databases, use SELECT *
 			queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
