@@ -1135,6 +1135,17 @@ func quoteMSSQLIdent(name string) string {
 	return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
 }
 
+// containsUnquotedDollar reports whether query has a $ followed by a letter
+// outside of bracket-quoted identifiers, double-quoted identifiers, and string literals.
+// go-mssqldb and go-sqlite3 both treat $identifier as a named parameter placeholder,
+// so queries with unquoted $ in table/column names must be re-quoted.
+func containsUnquotedDollar(query string) bool {
+	cleaned := regexp.MustCompile(`\[[^\]]*\]`).ReplaceAllString(query, "[]")
+	cleaned = regexp.MustCompile(`"[^"]*"`).ReplaceAllString(cleaned, `""`)
+	cleaned = regexp.MustCompile(`'[^']*'`).ReplaceAllString(cleaned, "''")
+	return regexp.MustCompile(`\$[a-zA-Z]`).MatchString(cleaned)
+}
+
 func getStringSafe(source *Source, field string) string {
 	if source == nil {
 		return "<nil source>"
@@ -1232,6 +1243,13 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 	} else if source != nil && source.DSN != "" && source.Query != "" {
 		// Fallback to legacy query field (deprecated)
 		queryToExecute = source.Query
+		// MSSQL / SQLite: go-mssqldb (and go-sqlite3) treat $identifier as a named
+		// parameter placeholder. If the query has an unquoted $ outside brackets/strings,
+		// regenerate it using the properly bracket-quoted source name.
+		if (source.Type == "mssql" || source.Type == "sqlite") && containsUnquotedDollar(queryToExecute) {
+			queryToExecute = fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(source.Name))
+			fmt.Printf("🔍 Re-quoted legacy query ($ in identifier): '%s'\n", queryToExecute)
+		}
 		fmt.Printf("🔍 Using legacy query field: '%s'\n", queryToExecute)
 	} else {
 		fmt.Printf("⚠️ No query generated: DSN='%s', TableName='%s', Query='%s'\n",
@@ -1639,10 +1657,20 @@ func extractTableNameFromQuery(query string) string {
 	if query == "" {
 		return ""
 	}
-	// Match: SELECT ... FROM <table> [WHERE|ORDER|LIMIT|;|EOF]
-	re := regexp.MustCompile(`(?i)\bFROM\s+["` + "`" + `\[]?(\w+)["` + "`" + `\]]?(?:\s|;|$)`)
-	m := re.FindStringSubmatch(query)
-	if len(m) >= 2 {
+	// Bracket-quoted: FROM [table name with spaces and $]
+	if m := regexp.MustCompile(`(?i)\bFROM\s+\[([^\]]+)\]`).FindStringSubmatch(query); len(m) >= 2 {
+		return m[1]
+	}
+	// Double-quoted: FROM "tablename"
+	if m := regexp.MustCompile(`(?i)\bFROM\s+"([^"]+)"`).FindStringSubmatch(query); len(m) >= 2 {
+		return m[1]
+	}
+	// Backtick-quoted: FROM `tablename`
+	if m := regexp.MustCompile("(?i)\\bFROM\\s+`([^`]+)`").FindStringSubmatch(query); len(m) >= 2 {
+		return m[1]
+	}
+	// Unquoted plain identifier (word chars + $, ends at whitespace/;/EOF)
+	if m := regexp.MustCompile(`(?i)\bFROM\s+([\w$]+)(?:\s|;|$)`).FindStringSubmatch(query); len(m) >= 2 {
 		return m[1]
 	}
 	return ""
@@ -2010,9 +2038,13 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 	tdtpSources := make([]SourceConfig, len(a.sources))
 	for i, guiSource := range a.sources {
 		query := guiSource.Query
-		// If no Query but TableName exists, generate simple SELECT query
+		// If no Query but TableName exists, generate simple SELECT query with proper quoting
 		if query == "" && guiSource.TableName != "" {
-			query = fmt.Sprintf("SELECT * FROM %s", guiSource.TableName)
+			if guiSource.Type == "mssql" || guiSource.Type == "sqlserver" {
+				query = fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(guiSource.TableName))
+			} else {
+				query = fmt.Sprintf("SELECT * FROM %s", guiSource.TableName)
+			}
 		}
 
 		tdtpSources[i] = SourceConfig{
@@ -2091,6 +2123,7 @@ func getDefaultTransformSQL(sources []Source) string {
 	if len(sources) == 0 {
 		return "SELECT 1" // Placeholder if no sources
 	}
-	// Use first source table name
-	return fmt.Sprintf("SELECT * FROM %s", sources[0].Name)
+	// Bracket-quote the name: works for MSSQL and in-memory SQLite;
+	// both drivers interpret $identifier as a named parameter placeholder.
+	return fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(sources[0].Name))
 }
