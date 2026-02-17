@@ -1518,7 +1518,9 @@ type SecurityConfig struct {
 // ConfigFileResult holds result of load/save configuration operations
 type ConfigFileResult struct {
 	Success  bool          `json:"success"`
-	Filename string        `json:"filename,omitempty"`
+	Filename string        `json:"filename,omitempty"` // base name only
+	Path     string        `json:"path,omitempty"`     // full absolute path
+	Dir      string        `json:"dir,omitempty"`      // parent directory
 	Error    string        `json:"error,omitempty"`
 	Config   *PipelineInfo `json:"config,omitempty"`
 }
@@ -1853,6 +1855,8 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 	return ConfigFileResult{
 		Success:  true,
 		Filename: filepath.Base(path),
+		Path:     path,
+		Dir:      filepath.Dir(path),
 	}
 }
 
