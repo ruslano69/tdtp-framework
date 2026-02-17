@@ -782,14 +782,35 @@ function renderSourceList() {
         const statusIcon = src.tested ? '✅' : '⚠️';
         const typeLabel = src.type.toUpperCase();
 
+        // Build a human-readable connection summary
+        let connSummary = '';
+        if (src.dsn) {
+            if (src.type === 'postgres' || src.type === 'mysql' || src.type === 'mssql') {
+                // Extract host+db from DSN for display
+                const hostMatch = src.dsn.match(/host=([^\s]+)/i) ||
+                                  src.dsn.match(/@(?:tcp\()?([^:/]+)/) ||
+                                  src.dsn.match(/sqlserver:\/\/[^@]*@([^:/]+)/i);
+                const dbMatch   = src.dsn.match(/dbname=([^\s]+)/i)  ||
+                                  src.dsn.match(/\/([^?]+)$/)         ||
+                                  src.dsn.match(/database=([^&]+)/i);
+                const hostStr   = hostMatch ? hostMatch[1] : '';
+                const dbStr     = dbMatch   ? dbMatch[1]   : '';
+                if (hostStr || dbStr) connSummary = `${hostStr}${dbStr ? '/' + dbStr : ''}`;
+            } else {
+                // sqlite / tdtp — just show short filename
+                connSummary = src.dsn.split(/[\\/]/).pop();
+            }
+        }
+        const tableStr = src.tableName ? ` · <em>${src.tableName}</em>` : '';
+
         html += `
             <div style="border: 1px solid #ddd; padding: 10px; border-radius: 3px; background: #fafafa;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
+                    <div style="overflow: hidden;">
                         <strong>${src.name}</strong> ${statusIcon}
-                        <br><small style="color: #666;">${typeLabel}</small>
+                        <br><small style="color: #666;">${typeLabel}${connSummary ? ' · ' + connSummary : ''}${tableStr}</small>
                     </div>
-                    <div>
+                    <div style="flex-shrink: 0; margin-left: 8px;">
                         <button class="btn btn-sm" onclick="editSource(${index})">Edit</button>
                         <button class="btn btn-sm" onclick="previewSource(${index})">Preview</button>
                         <button class="btn btn-sm" onclick="removeSource(${index})">Remove</button>
@@ -924,6 +945,74 @@ function generateDSN() {
     }
 
     return '';
+}
+
+// Parse DSN string and populate connection form fields
+function parseDSNToFields(type, dsn) {
+    if (!dsn) return;
+
+    try {
+        if (type === 'postgres') {
+            // Format: host=localhost port=5432 user=postgres password=xxx dbname=testdb sslmode=disable
+            const get = (key) => {
+                const m = dsn.match(new RegExp(`(?:^|\\s)${key}=([^\\s]+)`));
+                return m ? m[1] : '';
+            };
+            document.getElementById('pgHost').value     = get('host')     || 'localhost';
+            document.getElementById('pgPort').value     = get('port')     || '5432';
+            document.getElementById('pgUser').value     = get('user')     || '';
+            document.getElementById('pgPassword').value = get('password') || '';
+            document.getElementById('pgDatabase').value = get('dbname')   || '';
+            const sslmode = get('sslmode') || 'disable';
+            const sslSel = document.getElementById('pgSSLMode');
+            if (sslSel) {
+                for (const opt of sslSel.options) {
+                    if (opt.value === sslmode) { sslSel.value = sslmode; break; }
+                }
+            }
+
+        } else if (type === 'mysql') {
+            // Format: user:password@tcp(host:port)/database
+            const m = dsn.match(/^([^:]*):([^@]*)@tcp\(([^:)]+):(\d+)\)\/(.+)$/);
+            if (m) {
+                document.getElementById('myUser').value     = m[1];
+                document.getElementById('myPassword').value = m[2];
+                document.getElementById('myHost').value     = m[3];
+                document.getElementById('myPort').value     = m[4];
+                document.getElementById('myDatabase').value = m[5];
+            }
+
+        } else if (type === 'mssql') {
+            // Format: sqlserver://user:password@server:port?database=db
+            // OR:     sqlserver://server:port?database=db&trusted_connection=true
+            const url = new URL(dsn);
+            const server   = url.hostname || 'localhost';
+            const port     = url.port || '1433';
+            const database = url.searchParams.get('database') || '';
+            const winAuth  = url.searchParams.get('trusted_connection') === 'true';
+            const encrypt  = url.searchParams.get('encrypt') === 'disable';
+
+            document.getElementById('msServer').value = server;
+            document.getElementById('msPort').value   = port;
+            document.getElementById('msDatabase').value = database;
+            document.getElementById('msWinAuth').checked = winAuth;
+            document.getElementById('msEncryptDisable').checked = encrypt;
+            onMsWinAuthChange();
+
+            if (!winAuth) {
+                document.getElementById('msUser').value     = url.username || 'sa';
+                document.getElementById('msPassword').value = url.password || '';
+            }
+
+        } else if (type === 'sqlite') {
+            document.getElementById('sqliteFile').value = dsn;
+
+        } else if (type === 'tdtp') {
+            document.getElementById('tdtpFile').value = dsn;
+        }
+    } catch (e) {
+        console.warn('parseDSNToFields error for type', type, ':', e);
+    }
 }
 
 // Get selected source type from radio buttons
@@ -1183,11 +1272,26 @@ function editSource(index) {
     if (src.type === 'mock' && src.mockData) {
         document.getElementById('mockDataJson').value = JSON.stringify(src.mockData, null, 2);
     } else {
-        // Restore selected table if available
+        // Restore selected table
         selectedTableName = src.tableName || '';
 
-        // For now, show a warning that editing existing sources is limited
-        showNotification('Note: Editing existing sources - please re-enter connection details and re-test connection', 'info');
+        // Populate connection form fields from DSN
+        if (src.dsn) {
+            parseDSNToFields(src.type, src.dsn);
+            // If table was loaded from config, show it in testResult panel
+            if (selectedTableName) {
+                const resultEl = document.getElementById('testResult');
+                if (resultEl) {
+                    resultEl.style.display = 'block';
+                    resultEl.innerHTML = `
+                        <div style="padding: 8px 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                            <p style="color: #155724; margin: 0;"><strong>📋 Table: ${selectedTableName}</strong></p>
+                            <p style="margin: 5px 0 0 0; font-size: 11px; color: #6c757d;">Loaded from config — click "Test Connection" to verify</p>
+                        </div>`;
+                    lastTestedDSN = src.dsn; // treat as pre-tested to allow saving without re-test
+                }
+            }
+        }
     }
 }
 
@@ -1383,25 +1487,57 @@ function loadStep3Data() {
                     joins: canvasDesign.joins ? canvasDesign.joins.length : 0
                 });
 
-                // CRITICAL: Load fields for each table if they're missing
+                // Load / merge fields for each table
                 console.log('🔧 Checking table fields...');
                 for (let i = 0; i < canvasDesign.tables.length; i++) {
                     const table = canvasDesign.tables[i];
                     console.log(`  📋 Table ${i} (${table.sourceName}): ${table.fields ? table.fields.length : 0} fields`);
 
-                    if (!table.fields || table.fields.length === 0) {
-                        console.log(`  🔄 Loading fields for ${table.sourceName}...`);
+                    // Fields are considered "from SQL parse" (no type info) when they have no type strings.
+                    // In that case, fetch full schema from DB and MERGE: restore visibility + filter from
+                    // parsed fields, add missing columns as visible:false.
+                    const hasTypeInfo = table.fields && table.fields.length > 0 &&
+                                        table.fields.some(f => f.type && f.type !== '');
+                    const needsLoad = !table.fields || table.fields.length === 0;
+                    const needsMerge = !needsLoad && !hasTypeInfo; // fields from SQL parse
+
+                    if (needsLoad || needsMerge) {
+                        console.log(`  🔄 ${needsMerge ? 'Merging' : 'Loading'} fields for ${table.sourceName}...`);
                         try {
-                            const tables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
-                            if (tables && tables.length > 0 && tables[0].columns) {
-                                table.fields = tables[0].columns.map(col => ({
-                                    name: col.name,
-                                    type: col.type,
-                                    isPrimaryKey: col.isPrimaryKey || false,
-                                    visible: true,
-                                    filter: null
-                                }));
-                                console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+                            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+                            if (dbTables && dbTables.length > 0 && dbTables[0].columns) {
+                                if (needsMerge) {
+                                    // Build lookup from parsed fields (name → {visible, filter})
+                                    const parsedLookup = {};
+                                    (table.fields || []).forEach(f => {
+                                        parsedLookup[f.name.toLowerCase()] = f;
+                                    });
+                                    const hasAnyParsed = Object.keys(parsedLookup).length > 0;
+
+                                    table.fields = dbTables[0].columns.map(col => {
+                                        const parsed = parsedLookup[col.name.toLowerCase()];
+                                        return {
+                                            name: col.name,
+                                            type: col.type,
+                                            isPrimaryKey: col.isPrimaryKey || false,
+                                            // If we had parsed fields: visible only if it was in SELECT;
+                                            // otherwise (fresh load): all visible
+                                            visible: parsed ? parsed.visible : !hasAnyParsed,
+                                            filter: parsed ? (parsed.filter || null) : null
+                                        };
+                                    });
+                                    console.log(`  ✅ Merged: ${table.fields.filter(f=>f.visible).length} visible, ` +
+                                                `${table.fields.filter(f=>f.filter).length} with filters`);
+                                } else {
+                                    table.fields = dbTables[0].columns.map(col => ({
+                                        name: col.name,
+                                        type: col.type,
+                                        isPrimaryKey: col.isPrimaryKey || false,
+                                        visible: true,
+                                        filter: null
+                                    }));
+                                    console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+                                }
                             }
                         } catch (err) {
                             console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
