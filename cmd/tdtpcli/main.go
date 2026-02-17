@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -266,6 +267,26 @@ func routeCommand(
 			return commands.ExecutePipeline(ctx, *flags.Pipeline, *flags.Unsafe)
 		})
 
+		// Process Request command
+	} else if *flags.ProcessRequest != "" {
+		operation = audit.OpQuery
+		metadata = map[string]string{
+			"command": "process-request",
+			"file":    *flags.ProcessRequest,
+		}
+
+		// Директория для поиска конфигов: рядом с файлом запроса, затем текущая директория
+		configsDir := filepath.Dir(*flags.ProcessRequest)
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "process-request", func() error {
+			return commands.ProcessRequest(ctx, commands.ProcessRequestOptions{
+				RequestFile:   *flags.ProcessRequest,
+				OutputFile:    *flags.Output,
+				ConfigsDir:    configsDir,
+				DefaultConfig: adapterConfig,
+			})
+		})
+
 		// Diff command
 	} else if *flags.Diff != "" {
 		operation = audit.OpQuery
@@ -509,7 +530,10 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ExportBroker != "" ||
 		*flags.ImportBroker ||
 		*flags.SyncIncr != "" ||
-		*flags.Pipeline != ""
+		*flags.Pipeline != "" ||
+		*flags.ProcessRequest != "" ||
+		*flags.Diff != "" ||
+		*flags.Merge != ""
 }
 
 // fatal prints error and exits

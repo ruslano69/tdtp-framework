@@ -247,7 +247,7 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 				}
 
 				generator := packet.NewGenerator()
-				return generator.GenerateResponse(tableName, "", pkgSchema, rows, queryContext, sender, recipient)
+				return generator.GenerateResponse(tableName, packet.InReplyToDirectExport, pkgSchema, rows, queryContext, sender, recipient)
 			}
 		}
 	}
@@ -274,7 +274,7 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 
 	// Генерируем Response пакеты
 	generator := packet.NewGenerator()
-	return generator.GenerateResponse(tableName, "", pkgSchema, result.FilteredRows, result.QueryContext, sender, recipient)
+	return generator.GenerateResponse(tableName, packet.InReplyToDirectExport, pkgSchema, result.FilteredRows, result.QueryContext, sender, recipient)
 }
 
 // readRowsWithSQL выполняет SQL запрос и возвращает строки
