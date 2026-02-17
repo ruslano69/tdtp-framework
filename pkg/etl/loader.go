@@ -87,7 +87,10 @@ func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
 		return nil, fmt.Errorf("tdtp source requires 'dsn' to be the file path")
 	}
 
-	filePaths := tdtpMultiPartFiles(source.DSN)
+	var filePaths []string
+	if source.MultiPart {
+		filePaths = tdtpMultiPartFiles(source.DSN)
+	}
 	if filePaths == nil {
 		filePaths = []string{source.DSN}
 	}

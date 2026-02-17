@@ -83,17 +83,41 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 		f.SetCellStyle(sheetName, cell, cell, headerStyle)
 	}
 
-	// Parse and write data rows
+	// Pre-build schema.FieldDef slice for the core converter (reuse across rows)
+	pktParser := packet.NewParser()
+	conv := schema.NewConverter()
+	fieldDefs := make([]schema.FieldDef, len(pkt.Schema.Fields))
+	for i, fld := range pkt.Schema.Fields {
+		fieldDefs[i] = schema.FieldDef{
+			Name:      fld.Name,
+			Type:      schema.DataType(fld.Type),
+			Length:    fld.Length,
+			Precision: fld.Precision,
+			Scale:     fld.Scale,
+			Timezone:  fld.Timezone,
+			Key:       fld.Key,
+			Nullable:  true,
+		}
+	}
+
+	// Parse and write data rows using core framework primitives
 	for rowIdx, row := range pkt.Data.Rows {
-		values := parseRow(row.Value)
-		for col, field := range pkt.Schema.Fields {
+		// GetRowValues handles escape sequences (\| inside field values)
+		values := pktParser.GetRowValues(row)
+		for col, fld := range pkt.Schema.Fields {
 			if col >= len(values) {
 				continue
 			}
 			cell := columnName(col+1) + strconv.Itoa(rowIdx+2)
-			value := convertToExcel(values[col], schema.DataType(field.Type))
-			f.SetCellValue(sheetName, cell, value)
-			applyCellFormat(f, sheetName, cell, schema.DataType(field.Type))
+			tv, err := conv.ParseValue(values[col], fieldDefs[col])
+			var cellValue any
+			if err != nil || tv.IsNull {
+				cellValue = ""
+			} else {
+				cellValue = typedValueToExcel(tv)
+			}
+			f.SetCellValue(sheetName, cell, cellValue)
+			applyCellFormat(f, sheetName, cell, schema.DataType(fld.Type))
 		}
 	}
 
@@ -207,37 +231,26 @@ func parseHeader(header string) (name string, fieldType schema.DataType, isKey b
 	return name, fieldType, isKey
 }
 
-// parseRow - parse TDTP row value (pipe-delimited)
-func parseRow(value string) []string {
-	if value == "" {
-		return []string{}
-	}
-	return strings.Split(value, "|")
-}
-
-// convertToExcel - convert TDTP value to Excel format
-func convertToExcel(value string, fieldType schema.DataType) any {
-	if value == "" {
-		return ""
-	}
-
-	switch fieldType {
-	case schema.TypeInteger, schema.TypeInt:
-		if i, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return i
-		}
-	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
-		if f, err := strconv.ParseFloat(value, 64); err == nil {
-			return f
-		}
-	case schema.TypeBoolean, schema.TypeBool:
-		if value == "1" || value == "true" || value == "TRUE" {
+// typedValueToExcel extracts a Go native value from a core TypedValue for excelize.
+// Delegates all type interpretation to the framework — no duplicate logic here.
+func typedValueToExcel(tv *schema.TypedValue) any {
+	switch {
+	case tv.IntValue != nil:
+		return *tv.IntValue
+	case tv.FloatValue != nil:
+		return *tv.FloatValue
+	case tv.BoolValue != nil:
+		if *tv.BoolValue {
 			return "TRUE"
 		}
 		return "FALSE"
+	case tv.TimeValue != nil:
+		return *tv.TimeValue
+	case tv.StringValue != nil:
+		return *tv.StringValue
+	default:
+		return tv.RawValue
 	}
-
-	return value
 }
 
 // convertFromExcel - convert Excel value to TDTP format
