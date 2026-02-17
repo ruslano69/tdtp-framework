@@ -627,8 +627,8 @@ function getStep2HTML() {
                             </div>
                             <div class="form-group" style="margin-top: 4px;">
                                 <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; color: #555;">
-                                    <input type="checkbox" id="msTrustCert" checked onchange="clearConnectionStatus()">
-                                    Trust Server Certificate (skip TLS verify)
+                                    <input type="checkbox" id="msEncryptDisable" checked onchange="clearConnectionStatus()">
+                                    Disable encryption (sslmode=disable, для локальных серверов)
                                 </label>
                             </div>
                         </div>
@@ -872,17 +872,17 @@ function generateDSN() {
         const port = document.getElementById('msPort').value || '1433';
         const database = document.getElementById('msDatabase').value;
         const winAuth = document.getElementById('msWinAuth').checked;
-        const trustCert = document.getElementById('msTrustCert').checked;
-        const tlsParam = trustCert ? '&TrustServerCertificate=true' : '';
+        const encryptDisable = document.getElementById('msEncryptDisable').checked;
+        const encryptParam = encryptDisable ? '&encrypt=disable' : '';
 
         if (winAuth) {
-            return `sqlserver://${server}:${port}?database=${database}&trusted_connection=yes${tlsParam}`;
+            return `sqlserver://${server}:${port}?database=${database}${encryptParam}&trusted_connection=true`;
         }
 
         const user = document.getElementById('msUser').value;
         const password = document.getElementById('msPassword').value;
 
-        return `sqlserver://${user}:${password}@${server}:${port}?database=${database}${tlsParam}`;
+        return `sqlserver://${user}:${password}@${server}:${port}?database=${database}${encryptParam}`;
 
     } else if (type === 'sqlite') {
         const file = document.getElementById('sqliteFile').value;
