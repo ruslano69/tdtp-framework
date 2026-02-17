@@ -170,9 +170,18 @@ func (a *App) AddSource(s Source) error {
 
 // UpdateSource updates an existing source
 func (a *App) UpdateSource(name string, s Source) error {
+	// If renaming, check that the new alias doesn't conflict with another source.
+	// Source.Name is the in-memory SQLite table alias — duplicates would cause
+	// "table already exists" when loading sources for the transform query.
+	if s.Name != name {
+		for _, existing := range a.sources {
+			if existing.Name == s.Name {
+				return fmt.Errorf("source alias '%s' already used by another source", s.Name)
+			}
+		}
+	}
 	for i, src := range a.sources {
 		if src.Name == name {
-			s.Name = name // Preserve name
 			a.sources[i] = s
 			return nil
 		}
@@ -332,7 +341,8 @@ type CanvasDesign struct {
 
 // TableDesign represents a table on canvas
 type TableDesign struct {
-	SourceName string        `json:"sourceName"`
+	SourceName string        `json:"sourceName"` // = Source.Name (user alias); used for schema lookup
+	TableRef   string        `json:"tableRef,omitempty"` // actual DB table name when different from SourceName
 	Alias      string        `json:"alias"`
 	X          int           `json:"x"`
 	Y          int           `json:"y"`
@@ -396,6 +406,7 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 	// Build SELECT clause with visible fields
 	var selectFields []string
 	for _, table := range design.Tables {
+		// Field references always use the user alias (SourceName when Alias not set)
 		tableAlias := table.Alias
 		if tableAlias == "" {
 			tableAlias = table.SourceName
@@ -412,17 +423,20 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		return GenerateSQLResult{Error: "No fields selected for output"}
 	}
 
-	// Build FROM clause with first table
+	// Build FROM clause.
+	// The transform SQL runs in in-memory SQLite where each source is loaded
+	// under its Source.Name (= Alias). Use the alias directly — TableRef
+	// (the actual MSSQL table) must NOT appear here.
 	firstTable := design.Tables[0]
-	fromClause := quoteMSSQLIdent(firstTable.SourceName)
-	if firstTable.Alias != "" && firstTable.Alias != firstTable.SourceName {
-		fromClause = fmt.Sprintf("%s AS %s", quoteMSSQLIdent(firstTable.SourceName), quoteMSSQLIdent(firstTable.Alias))
+	firstAlias := firstTable.Alias
+	if firstAlias == "" {
+		firstAlias = firstTable.SourceName
 	}
+	fromClause := quoteMSSQLIdent(firstAlias)
 
-	// Build JOIN clauses
+	// Build JOIN clauses — same rule: use alias, not TableRef
 	var joinClauses []string
 	for _, join := range design.Joins {
-		// Find table aliases
 		leftAlias := join.LeftTable
 		rightAlias := join.RightTable
 
@@ -431,19 +445,6 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 			joinType = "LEFT JOIN"
 		} else if join.JoinType == "right" {
 			joinType = "RIGHT JOIN"
-		}
-
-		// Find the right table source name
-		var rightSource string
-		for _, t := range design.Tables {
-			if t.Alias == rightAlias || t.SourceName == rightAlias {
-				rightSource = t.SourceName
-				break
-			}
-		}
-
-		if rightSource == "" {
-			rightSource = rightAlias
 		}
 
 		// Build field expressions with optional CAST
@@ -458,7 +459,7 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		}
 
 		joinClause := fmt.Sprintf("%s %s ON %s = %s",
-			joinType, quoteMSSQLIdent(rightSource), leftExpr, rightExpr)
+			joinType, quoteMSSQLIdent(rightAlias), leftExpr, rightExpr)
 		joinClauses = append(joinClauses, joinClause)
 	}
 
@@ -567,6 +568,20 @@ func (a *App) GetTransform() *Transform {
 
 // runPreviewSQL executes sqlQuery on in-memory SQLite loaded with all current sources.
 func (a *App) runPreviewSQL(sqlQuery string) services.PreviewResult {
+	// Pre-flight: verify alias uniqueness before touching in-memory SQLite.
+	// Each Source.Name becomes a table name in SQLite; duplicates would cause
+	// "table already exists" and leave the combined dataset incomplete.
+	seenAliases := make(map[string]bool, len(a.sources))
+	for _, src := range a.sources {
+		if seenAliases[src.Name] {
+			return services.PreviewResult{
+				Success: false,
+				Message: fmt.Sprintf("Duplicate source alias '%s': go to Step 2 and give each source a unique name", src.Name),
+			}
+		}
+		seenAliases[src.Name] = true
+	}
+
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		return services.PreviewResult{
@@ -985,9 +1000,18 @@ func (a *App) buildSourceConfigs() []SourceConfig {
 			continue
 		}
 
-		// Set query if available (from TDTQL)
+		// Set query: TDTQL filter takes priority; otherwise use the real DB table name.
+		// We must use the actual TableName (not src.Name alias) here because this query
+		// runs against the real database BEFORE data is loaded into in-memory SQLite.
 		if src.TDTQL != nil && src.TDTQL.Where != "" {
 			config.Query = src.TDTQL.Where
+		} else if src.TableName != "" {
+			switch src.Type {
+			case "mssql", "sqlserver":
+				config.Query = fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(src.TableName))
+			default:
+				config.Query = fmt.Sprintf("SELECT * FROM %s", src.TableName)
+			}
 		}
 
 		configs = append(configs, config)
@@ -1218,7 +1242,20 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 	if source != nil && source.DSN != "" && source.TableName != "" {
 		// For MSSQL, get table schema and convert UNIQUEIDENTIFIER to VARCHAR
 		if source.Type == "mssql" {
-			schema := a.metadataService.GetTableSchema(source.Type, source.DSN, source.TableName)
+			tableRef := source.TableName
+			schema := a.metadataService.GetTableSchema(source.Type, source.DSN, tableRef)
+
+			// If schema lookup failed, retry with source Name as table reference.
+			// Handles cases like Name='ZTR$Department IW' where extractTableNameFromQuery
+			// returned only 'ZTR$Department' (stopped at the space) but the actual
+			// SQL Server table is 'ZTR$Department IW' (with a space).
+			if len(schema.Columns) == 0 && source.Name != tableRef {
+				schema = a.metadataService.GetTableSchema(source.Type, source.DSN, source.Name)
+				if len(schema.Columns) > 0 {
+					tableRef = source.Name
+					fmt.Printf("🔍 Schema retry succeeded with source.Name='%s'\n", tableRef)
+				}
+			}
 
 			var selectFields []string
 			for _, col := range schema.Columns {
@@ -1232,9 +1269,14 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 				}
 			}
 
-			queryToExecute = fmt.Sprintf("SELECT %s FROM %s",
-				strings.Join(selectFields, ", "),
-				quoteMSSQLIdent(source.TableName))
+			if len(selectFields) == 0 {
+				// Schema unavailable; fall back to SELECT * so we don't generate 'SELECT  FROM ...'
+				queryToExecute = fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(tableRef))
+			} else {
+				queryToExecute = fmt.Sprintf("SELECT %s FROM %s",
+					strings.Join(selectFields, ", "),
+					quoteMSSQLIdent(tableRef))
+			}
 		} else {
 			// For other databases, use SELECT *
 			queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
@@ -1339,6 +1381,25 @@ func (a *App) ValidateStep(step int) ValidationResult {
 	case 2: // Sources
 		if len(a.sources) == 0 {
 			return ValidationResult{IsValid: false, Message: "At least one source is required"}
+		}
+		// Alias uniqueness: Source.Name becomes the in-memory SQLite table name.
+		// Duplicates would cause "table already exists" when building the combined dataset.
+		seenAliases := make(map[string]bool, len(a.sources))
+		for _, src := range a.sources {
+			if seenAliases[src.Name] {
+				return ValidationResult{IsValid: false, Message: fmt.Sprintf("Duplicate source alias '%s': each source must have a unique name", src.Name)}
+			}
+			seenAliases[src.Name] = true
+		}
+		// Every DB source must have a TableName so it can be queried on the real DB
+		// before data is loaded into in-memory SQLite.
+		for _, src := range a.sources {
+			switch src.Type {
+			case "postgres", "postgresql", "mysql", "mssql", "sqlserver", "sqlite", "sqlite3":
+				if src.TableName == "" {
+					return ValidationResult{IsValid: false, Message: fmt.Sprintf("Source '%s': no table selected. Test connection and pick a table.", src.Name)}
+				}
+			}
 		}
 		if a.mode == "production" {
 			for _, src := range a.sources {
@@ -1714,24 +1775,27 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 
 	// tableAlias → ordered list of FieldDesign (preserving SELECT order)
 	type tableEntry struct {
-		sourceName string
-		alias      string
+		sourceName string // = user alias (Source.Name), used for schema lookup
+		alias      string // = user alias for field references
+		tableRef   string // actual DB table (may differ from alias), used in FROM
 		fields     []*FieldDesign          // ordered
 		fieldIndex map[string]*FieldDesign // name → ptr
 	}
 	tableByAlias := map[string]*tableEntry{}
 	tableOrder := []*tableEntry{}
 
-	ensureTable := func(alias, source string) *tableEntry {
+	ensureTable := func(alias, dbTable string) *tableEntry {
 		if te, ok := tableByAlias[alias]; ok {
+			// If we now know the actual DB table, fill it in
+			if dbTable != "" && dbTable != alias && te.tableRef == "" {
+				te.tableRef = dbTable
+			}
 			return te
 		}
-		if source == "" {
-			source = alias
-		}
 		te := &tableEntry{
-			sourceName: source,
+			sourceName: alias, // lookup key = user alias
 			alias:      alias,
+			tableRef:   dbTable, // blank when same as alias
 			fields:     []*FieldDesign{},
 			fieldIndex: map[string]*FieldDesign{},
 		}
@@ -1768,31 +1832,39 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 	}
 
 	// ---------- FROM ----------
+	// Format: FROM [actual_table] AS [alias]  OR  FROM [table]  (no alias)
 	fromRe := regexp.MustCompile(`(?i)\bFROM\s+(` + ident + `)(?:\s+AS\s+(` + ident + `))?`)
 	if m := fromRe.FindStringSubmatch(sql); len(m) >= 2 {
-		src := unquote(m[1])
-		alias := src
+		first := unquote(m[1])
 		if len(m) >= 3 && m[2] != "" {
-			alias = unquote(m[2])
+			// FROM [actual_table] AS [alias]: alias is the Source.Name lookup key
+			alias := unquote(m[2])
+			ensureTable(alias, first) // tableRef = first (actual DB table)
+		} else {
+			// FROM [table] — no alias; tableRef == alias
+			ensureTable(first, "")
 		}
-		ensureTable(alias, src)
 	}
 
 	// ---------- JOINs ----------
 	joinRe := regexp.MustCompile(`(?i)(INNER|LEFT|RIGHT)\s+JOIN\s+(` + ident + `)(?:\s+AS\s+(` + ident + `))?\s+ON\s+(` + ident + `)\.(` + ident + `)\s*=\s*(` + ident + `)\.(` + ident + `)`)
 	for _, jm := range joinRe.FindAllStringSubmatch(sql, -1) {
 		joinType := strings.ToLower(jm[1])
-		rightSrc := unquote(jm[2])
-		rightAlias := rightSrc
+		rightDb := unquote(jm[2])    // actual DB table
+		rightAlias := rightDb
 		if jm[3] != "" {
-			rightAlias = unquote(jm[3])
+			rightAlias = unquote(jm[3]) // user alias
 		}
 		lTable := unquote(jm[4])
 		lField := unquote(jm[5])
 		rTable := unquote(jm[6])
 		rField := unquote(jm[7])
 
-		ensureTable(rightAlias, rightSrc)
+		if rightAlias != rightDb {
+			ensureTable(rightAlias, rightDb) // tableRef = actual DB table
+		} else {
+			ensureTable(rightAlias, "")
+		}
 		design.Joins = append(design.Joins, JoinDesign{
 			LeftTable:  lTable,
 			LeftField:  lField,
@@ -1863,8 +1935,13 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 		for i, fp := range te.fields {
 			fields[i] = *fp
 		}
+		tableRef := te.tableRef
+		if tableRef == te.sourceName {
+			tableRef = "" // omit when same as alias (no AS needed)
+		}
 		design.Tables = append(design.Tables, TableDesign{
-			SourceName: te.sourceName,
+			SourceName: te.sourceName, // user alias = Source.Name for lookup
+			TableRef:   tableRef,      // actual DB table when different from alias
 			Alias:      te.alias,
 			X:          posX,
 			Y:          50,
