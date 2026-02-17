@@ -2392,6 +2392,8 @@ function getStep4HTML() {
                         📋 Use Generated SQL from Step 3
                     </button>
                 </div>
+
+                <div id="step4PreviewArea" style="margin-top: 15px; display: none; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;"></div>
             </div>
         </div>
     `;
@@ -2457,6 +2459,43 @@ function validateStep4() {
     return tableValid && sqlValid;
 }
 
+function renderPreviewResult(result, container) {
+    if (!container) return;
+    container.style.display = 'block';
+
+    if (!result || !result.success) {
+        const msg = (result && result.message) ? result.message : 'No data returned';
+        container.innerHTML = `<p style="text-align:center;padding:20px;color:#ff6b6b;">${msg}</p>`;
+        return;
+    }
+
+    if (!result.rows || result.rows.length === 0) {
+        container.innerHTML = '<p style="text-align:center;padding:20px;color:#999;">Query returned 0 rows.</p>';
+        return;
+    }
+
+    let html = '<div style="overflow-x:auto;max-height:300px;overflow-y:auto;"><table style="min-width:100%;border-collapse:collapse;font-size:12px;">';
+    html += '<thead><tr style="background:#f5f5f5;border-bottom:2px solid #ddd;">';
+    result.columns.forEach(col => {
+        html += `<th style="padding:8px;text-align:left;font-weight:600;border-right:1px solid #eee;white-space:nowrap;">${col}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+    result.rows.slice(0, 50).forEach((row, idx) => {
+        html += `<tr style="border-bottom:1px solid #eee;${idx % 2 === 0 ? 'background:white;' : 'background:#fafafa;'}">`;
+        const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
+        values.forEach(cell => {
+            const value = cell === null ? '<span style="color:#999;font-style:italic;">NULL</span>' : String(cell);
+            html += `<td style="padding:6px 8px;border-right:1px solid #eee;white-space:nowrap;max-width:300px;overflow:hidden;text-overflow:ellipsis;">${value}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    if (result.rows.length > 50) {
+        html += `<p style="text-align:center;margin:6px 0;color:#666;font-size:11px;">Showing first 50 of ${result.rows.length} rows</p>`;
+    }
+    container.innerHTML = html;
+}
+
 async function previewTransform() {
     const sql = document.getElementById('transformSQL').value.trim();
     if (!sql) {
@@ -2469,14 +2508,20 @@ async function previewTransform() {
         return;
     }
 
+    const previewArea = document.getElementById('step4PreviewArea');
+
     try {
         showNotification('Executing SQL preview...', 'info');
-        // TODO: Implement PreviewTransform backend method
-        // const result = await window.go.main.App.PreviewTransform(sql);
-        showNotification('Preview feature coming soon', 'info');
+        const result = await window.go.main.App.PreviewTransform(sql);
+        console.log('Step 4 PreviewTransform result:', result);
+        renderPreviewResult(result, previewArea);
     } catch (err) {
         console.error('Transform preview error:', err);
         showNotification('Failed to preview transform: ' + err, 'error');
+        if (previewArea) {
+            previewArea.style.display = 'block';
+            previewArea.innerHTML = `<p style="text-align:center;padding:20px;color:#ff6b6b;">Failed to preview: ${err}</p>`;
+        }
     }
 }
 
@@ -2610,48 +2655,12 @@ async function refreshStep5Preview() {
     }
 
     try {
-        // Build SQL from canvas design and execute preview
         const result = await window.go.main.App.PreviewQueryResult();
         console.log('Step 5 Preview result:', result);
-
-        if (!result || !result.rows || result.rows.length === 0) {
-            previewArea.innerHTML = '<p style="text-align: center; padding: 40px 20px; color: #999;">No data to preview. Configure tables and JOINs in Step 3.</p>';
-            return;
-        }
-
-        // Display as table
-        let html = '<div style="overflow-x: auto; max-height: 500px; overflow-y: auto;"><table style="min-width: 100%; border-collapse: collapse; font-size: 12px;">';
-
-        // Header
-        html += '<thead><tr style="background: #f5f5f5; border-bottom: 2px solid #ddd;">';
-        result.columns.forEach(col => {
-            html += `<th style="padding: 8px; text-align: left; font-weight: 600; border-right: 1px solid #eee; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${col}</th>`;
-        });
-        html += '</tr></thead>';
-
-        // Rows (limit to first 50)
-        html += '<tbody>';
-        const displayRows = result.rows.slice(0, 50);
-        displayRows.forEach((row, idx) => {
-            html += `<tr style="border-bottom: 1px solid #eee; ${idx % 2 === 0 ? 'background: white;' : 'background: #fafafa;'}">`;
-            // Convert object to array in column order
-            const values = Array.isArray(row) ? row : result.columns.map(col => row[col]);
-            values.forEach(cell => {
-                const value = cell === null ? '<span style="color: #999; font-style: italic;">NULL</span>' : String(cell);
-                html += `<td style="padding: 6px 8px; border-right: 1px solid #eee; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${value}</td>`;
-            });
-            html += '</tr>';
-        });
-        html += '</tbody></table></div>';
-
-        if (result.rows.length > 50) {
-            html += `<p style="text-align: center; margin-top: 10px; color: #666; font-size: 11px;">Showing first 50 of ${result.rows.length} rows</p>`;
-        }
-
-        previewArea.innerHTML = html;
+        renderPreviewResult(result, previewArea);
     } catch (err) {
         console.error('Failed to load Step 5 preview:', err);
-        previewArea.innerHTML = `<p style="text-align: center; padding: 40px 20px; color: #ff6b6b;">❌ Failed to load preview:<br/>${err}</p>`;
+        previewArea.innerHTML = `<p style="text-align: center; padding: 40px 20px; color: #ff6b6b;">Failed to load preview:<br/>${err}</p>`;
     }
 }
 
