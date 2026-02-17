@@ -2,8 +2,11 @@ package services
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
@@ -234,12 +237,51 @@ func (ps *PreviewService) convertValue(value any) any {
 		return nil
 	}
 
-	// Handle byte arrays (often used for strings in SQL drivers)
+	// Handle byte arrays: text columns come as []byte in many drivers.
+	// Binary columns (timestamp/rowversion, binary, varbinary) must NOT be
+	// cast to string - that produces garbage. Detect and hex-encode them.
 	if b, ok := value.([]byte); ok {
-		return string(b)
+		if isTextBytes(b) {
+			return string(b)
+		}
+		return hexPreview(b)
 	}
 
 	return value
+}
+
+// isTextBytes returns true when b is valid UTF-8 text with no control characters.
+// Used to distinguish text columns (varchar, ntext) from binary columns.
+func isTextBytes(b []byte) bool {
+	if !utf8.Valid(b) {
+		return false
+	}
+	for _, r := range string(b) {
+		if r == utf8.RuneError {
+			return false
+		}
+		if !unicode.IsPrint(r) && !unicode.IsSpace(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// hexPreview converts binary data to an uppercase hex string without leading
+// zeros, prefixed with 0x - matching the tdtpcli rowversion display format.
+// Example: []byte{0x00,0x00,0x00,0x00,0x18,0x7F,0x82,0x5E} -> "0x187F825E"
+func hexPreview(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	start := 0
+	for start < len(b) && b[start] == 0 {
+		start++
+	}
+	if start >= len(b) {
+		return "0x00"
+	}
+	return "0x" + strings.ToUpper(hex.EncodeToString(b[start:]))
 }
 
 // EstimateRowCount attempts to estimate total row count for a table

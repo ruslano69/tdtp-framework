@@ -212,7 +212,7 @@ func (e *Executor) validateOrderByFields(orderBy *packet.OrderBy, schemaObj pack
 }
 
 // NormalizeQueryFields заменяет имена полей в запросе на канонические из схемы.
-// Должен вызываться после ValidateQuery — гарантирует что все поля существуют.
+// Должен вызываться после ValidateQuery - гарантирует что все поля существуют.
 // Это важно для PostgreSQL где кавычки в CREATE TABLE сохраняют регистр.
 func (e *Executor) NormalizeQueryFields(query *packet.Query, schemaObj packet.Schema) {
 	if query.Filters != nil {
