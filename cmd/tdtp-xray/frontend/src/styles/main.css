@@ -81,6 +81,18 @@ body {
     font-size: 10pt;
 }
 
+.footer-status.status-connected {
+    color: #107c10;
+    font-weight: 600;
+    animation: pulse-connected 2s ease-in-out infinite;
+}
+
+@keyframes pulse-connected {
+    0%   { opacity: 1; }
+    50%  { opacity: 0.65; }
+    100% { opacity: 1; }
+}
+
 /* Buttons */
 .btn {
     padding: 8px 20px;
