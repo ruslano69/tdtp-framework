@@ -16,9 +16,10 @@ type Flags struct {
 	ExportXLSX   *string
 	ImportXLSX   *string
 	SyncIncr     *string
-	Pipeline     *string
-	Diff         *string // First file for diff (second as positional arg)
-	Merge        *string // Comma-separated list of files to merge
+	Pipeline       *string
+	ProcessRequest *string // Process incoming TDTP request file and generate response
+	Diff           *string // First file for diff (second as positional arg)
+	Merge          *string // Comma-separated list of files to merge
 
 	// TDTQL Filters
 	Where   *string
@@ -88,6 +89,7 @@ func ParseFlags() *Flags {
 	f.ImportXLSX = flag.String("import-xlsx", "", "Import XLSX file directly to database (file path)")
 	f.SyncIncr = flag.String("sync-incremental", "", "Incremental sync from table (table name)")
 	f.Pipeline = flag.String("pipeline", "", "Execute ETL pipeline from YAML config (file path)")
+	f.ProcessRequest = flag.String("process-request", "", "Process TDTP request file and generate response (file path)")
 	f.Diff = flag.String("diff", "", "Compare two TDTP files: --diff file1.xml file2.xml")
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
 

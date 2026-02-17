@@ -125,7 +125,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 				generator := packet.NewGenerator()
 				return generator.GenerateResponse(
 					tableName,
-					"",
+					packet.InReplyToDirectExport,
 					pkgSchema,
 					rows,
 					queryContext,
@@ -153,7 +153,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 	generator := packet.NewGenerator()
 	return generator.GenerateResponse(
 		tableName,
-		"",
+		packet.InReplyToDirectExport,
 		pkgSchema,
 		result.FilteredRows,
 		result.QueryContext,

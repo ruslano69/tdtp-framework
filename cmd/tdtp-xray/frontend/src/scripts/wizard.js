@@ -248,7 +248,7 @@ async function saveCurrentStep() {
     }
 }
 
-// Show notification message
+// Show notification message (auto-clears after 5s)
 function showNotification(message, type = 'info') {
     const status = document.getElementById('footerStatus');
     status.textContent = message;
@@ -259,6 +259,22 @@ function showNotification(message, type = 'info') {
         status.textContent = '';
         status.className = 'footer-status';
     }, 5000);
+}
+
+// Set persistent connected status in footer (stays until clearConnectionStatus is called)
+function setStatusConnected(info) {
+    const status = document.getElementById('footerStatus');
+    status.textContent = '● ' + info;
+    status.className = 'footer-status status-connected';
+}
+
+// Clear connection status from footer (only if it shows connected state)
+function clearConnectionStatus() {
+    const status = document.getElementById('footerStatus');
+    if (status && status.classList.contains('status-connected')) {
+        status.textContent = '';
+        status.className = 'footer-status';
+    }
 }
 
 // ========== STEP 1: Project Info ==========
@@ -582,25 +598,31 @@ function getStep2HTML() {
                             <div class="form-row">
                                 <div class="form-group" style="flex: 2;">
                                     <label for="msServer">Server *</label>
-                                    <input type="text" id="msServer" value="localhost" placeholder="localhost">
+                                    <input type="text" id="msServer" value="localhost" placeholder="localhost" oninput="clearConnectionStatus()">
                                 </div>
                                 <div class="form-group" style="flex: 1;">
                                     <label for="msPort">Port *</label>
-                                    <input type="number" id="msPort" value="1433" placeholder="1433">
+                                    <input type="number" id="msPort" value="1433" placeholder="1433" oninput="clearConnectionStatus()">
                                 </div>
                             </div>
                             <div class="form-group">
                                 <label for="msDatabase">Database *</label>
-                                <input type="text" id="msDatabase" placeholder="testdb">
+                                <input type="text" id="msDatabase" placeholder="testdb" oninput="clearConnectionStatus()">
                             </div>
-                            <div class="form-row">
+                            <div class="form-group" style="margin-bottom: 8px;">
+                                <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer;">
+                                    <input type="checkbox" id="msWinAuth" onchange="onMsWinAuthChange()">
+                                    Windows Authentication (Integrated Security)
+                                </label>
+                            </div>
+                            <div id="msSqlAuthFields" class="form-row">
                                 <div class="form-group">
                                     <label for="msUser">User *</label>
-                                    <input type="text" id="msUser" value="sa" placeholder="sa">
+                                    <input type="text" id="msUser" value="sa" placeholder="sa" oninput="clearConnectionStatus()">
                                 </div>
                                 <div class="form-group">
                                     <label for="msPassword">Password *</label>
-                                    <input type="password" id="msPassword" placeholder="password">
+                                    <input type="password" id="msPassword" placeholder="password" oninput="clearConnectionStatus()">
                                 </div>
                             </div>
                         </div>
@@ -755,6 +777,7 @@ function clearSourceForm() {
     document.getElementById('sourceName').value = '';
     selectedTableName = '';
     lastTestedDSN = ''; // Reset test status
+    clearConnectionStatus();
 
     // Uncheck all radio buttons
     const radios = document.getElementsByName('sourceType');
@@ -771,10 +794,18 @@ function clearSourceForm() {
     document.getElementById('testResult').style.display = 'none';
 }
 
+function onMsWinAuthChange() {
+    const winAuth = document.getElementById('msWinAuth').checked;
+    const sqlAuthFields = document.getElementById('msSqlAuthFields');
+    sqlAuthFields.style.display = winAuth ? 'none' : 'flex';
+    clearConnectionStatus();
+}
+
 function onSourceTypeChange(type) {
     // Reset test status when changing source type
     lastTestedDSN = '';
     selectedTableName = '';
+    clearConnectionStatus();
     document.getElementById('testResult').style.display = 'none';
 
     // Hide all field groups
@@ -833,9 +864,15 @@ function generateDSN() {
     } else if (type === 'mssql') {
         const server = document.getElementById('msServer').value || 'localhost';
         const port = document.getElementById('msPort').value || '1433';
+        const database = document.getElementById('msDatabase').value;
+        const winAuth = document.getElementById('msWinAuth').checked;
+
+        if (winAuth) {
+            return `sqlserver://${server}:${port}?database=${database}&trusted_connection=yes`;
+        }
+
         const user = document.getElementById('msUser').value;
         const password = document.getElementById('msPassword').value;
-        const database = document.getElementById('msDatabase').value;
 
         return `sqlserver://${user}:${password}@${server}:${port}?database=${database}`;
 
@@ -879,10 +916,10 @@ async function testConnection() {
 
     const resultEl = document.getElementById('testResult');
     resultEl.style.display = 'block';
-    resultEl.innerHTML = '<p>🔄 Testing connection...</p>';
+    resultEl.innerHTML = '<p style="margin: 0; color: #666;">🔄 Testing connection...</p>';
 
     if (!wailsReady || !window.go) {
-        resultEl.innerHTML = '<p style="color: orange;">⚠️ Wails not ready, connection test skipped</p>';
+        resultEl.innerHTML = '<p style="color: orange; margin: 0;">⚠️ Wails not ready, connection test skipped</p>';
         return;
     }
 
@@ -894,18 +931,16 @@ async function testConnection() {
             // Mark this DSN as successfully tested
             lastTestedDSN = dsn;
 
-            let html = `
-                <div style="padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px;">
-                    <p style="color: #155724; margin: 0;"><strong>✅ Connection Successful!</strong></p>
-                    <p style="color: #155724; margin: 5px 0 0 0;"><small>${result.message || 'Test passed'}</small></p>
-                </div>
-            `;
+            // Show connection info in status bar (persistent while connected)
+            setStatusConnected(`${type.toUpperCase()} — ${result.message || 'Connected'}`);
+
+            let html = '';
 
             // For TDTP sources, auto-select the table and mark as tested
             if (type === 'tdtp' && result.tables && result.tables.length > 0) {
                 selectedTableName = result.tables[0]; // TDTP has one table per file
-                html += `
-                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                html = `
+                    <div style="padding: 8px 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
                         <p style="color: #155724; margin: 0;"><strong>📋 Table: ${selectedTableName}</strong></p>
                         <p style="margin: 5px 0 0 0; font-size: 11px; color: #6c757d;">Ready to use as data source</p>
                     </div>
@@ -913,8 +948,8 @@ async function testConnection() {
             }
             // Show table selection for database sources
             else if (result.tables && result.tables.length > 0) {
-                html += `
-                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                html = `
+                    <div style="padding: 8px 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600;">📋 Select Table/View:</label>
                         <select id="tableSelector" onchange="selectTable()" style="width: 100%; padding: 6px; border: 1px solid #ced4da; border-radius: 3px;">
                             <option value="">-- Select a table --</option>
@@ -931,21 +966,27 @@ async function testConnection() {
                 `;
             }
 
-            resultEl.innerHTML = html;
+            if (html) {
+                resultEl.innerHTML = html;
+            } else {
+                resultEl.style.display = 'none';
+            }
         } else {
+            clearConnectionStatus();
             resultEl.innerHTML = `
-                <div style="padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 3px;">
+                <div style="padding: 8px 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 3px;">
                     <p style="color: #721c24; margin: 0;"><strong>❌ Connection Failed</strong></p>
-                    <p style="color: #721c24; margin: 5px 0 0 0;"><small>${result.message}</small></p>
+                    <p style="color: #721c24; margin: 5px 0 0 0; font-size: 11px;">${result.message}</p>
                 </div>
             `;
         }
     } catch (err) {
         console.error('Test connection error:', err);
+        clearConnectionStatus();
         resultEl.innerHTML = `
-            <div style="padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 3px;">
+            <div style="padding: 8px 10px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 3px;">
                 <p style="color: #721c24; margin: 0;"><strong>❌ Error</strong></p>
-                <p style="color: #721c24; margin: 5px 0 0 0;"><small>${err}</small></p>
+                <p style="color: #721c24; margin: 5px 0 0 0; font-size: 11px;">${err}</p>
             </div>
         `;
     }

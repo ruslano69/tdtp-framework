@@ -12,6 +12,10 @@ const (
 	TypeAlarm     MessageType = "alarm"
 )
 
+// InReplyToDirectExport — зарезервированное значение для response-пакетов,
+// сгенерированных командой --export без входящего request (автономный экспорт).
+const InReplyToDirectExport = "DirectExport"
+
 // DataPacket представляет корневой элемент TDTP сообщения
 type DataPacket struct {
 	Protocol     string        `xml:"protocol,attr"`
