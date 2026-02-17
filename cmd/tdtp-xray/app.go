@@ -480,7 +480,13 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 				filter = field.Condition
 			}
 
-			if filter == nil || filter.Value == "" {
+			// IS_NULL / IS_NOT_NULL / IS_EMPTY / IS_NOT_EMPTY have no value — all other
+			// operators require a non-empty value.
+			noValueOp := filter != nil && (filter.Operator == "IS_NULL" ||
+				filter.Operator == "IS_NOT_NULL" ||
+				filter.Operator == "IS_EMPTY" ||
+				filter.Operator == "IS_NOT_EMPTY")
+			if filter == nil || (!noValueOp && filter.Value == "") {
 				continue
 			}
 
@@ -489,6 +495,14 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 			var condition string
 
 			switch filter.Operator {
+			case "IS_NULL":
+				condition = fmt.Sprintf("%s IS NULL", fieldExpr)
+			case "IS_NOT_NULL":
+				condition = fmt.Sprintf("%s IS NOT NULL", fieldExpr)
+			case "IS_EMPTY":
+				condition = fmt.Sprintf("%s = ''", fieldExpr)
+			case "IS_NOT_EMPTY":
+				condition = fmt.Sprintf("%s <> ''", fieldExpr)
 			case "=":
 				condition = fmt.Sprintf("%s = '%s'", fieldExpr, filter.Value)
 			case "<>", "!=":
