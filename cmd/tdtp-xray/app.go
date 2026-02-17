@@ -414,27 +414,18 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		return GenerateSQLResult{Error: "No fields selected for output"}
 	}
 
-	// tableRef returns the actual DB table name (TableRef if set, else SourceName)
-	tableRefFor := func(t TableDesign) string {
-		if t.TableRef != "" {
-			return t.TableRef
-		}
-		return t.SourceName
-	}
-
-	// Build FROM clause with first table
+	// Build FROM clause.
+	// The transform SQL runs in in-memory SQLite where each source is loaded
+	// under its Source.Name (= Alias). Use the alias directly — TableRef
+	// (the actual MSSQL table) must NOT appear here.
 	firstTable := design.Tables[0]
-	firstRef := tableRefFor(firstTable)
 	firstAlias := firstTable.Alias
 	if firstAlias == "" {
 		firstAlias = firstTable.SourceName
 	}
-	fromClause := quoteMSSQLIdent(firstRef)
-	if firstAlias != firstRef {
-		fromClause = fmt.Sprintf("%s AS %s", quoteMSSQLIdent(firstRef), quoteMSSQLIdent(firstAlias))
-	}
+	fromClause := quoteMSSQLIdent(firstAlias)
 
-	// Build JOIN clauses
+	// Build JOIN clauses — same rule: use alias, not TableRef
 	var joinClauses []string
 	for _, join := range design.Joins {
 		leftAlias := join.LeftTable
@@ -445,23 +436,6 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 			joinType = "LEFT JOIN"
 		} else if join.JoinType == "right" {
 			joinType = "RIGHT JOIN"
-		}
-
-		// Resolve right table: find actual DB table name via TableRef
-		var rightRef string
-		for _, t := range design.Tables {
-			tAlias := t.Alias
-			if tAlias == "" {
-				tAlias = t.SourceName
-			}
-			if tAlias == rightAlias || t.SourceName == rightAlias {
-				rightRef = tableRefFor(t)
-				break
-			}
-		}
-
-		if rightRef == "" {
-			rightRef = rightAlias
 		}
 
 		// Build field expressions with optional CAST
@@ -475,13 +449,8 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 			rightExpr = fmt.Sprintf("CAST(%s AS %s)", rightExpr, join.CastRight)
 		}
 
-		// JOIN target: use actual DB table name; if alias differs, add AS
-		joinTarget := quoteMSSQLIdent(rightRef)
-		if rightAlias != rightRef {
-			joinTarget = fmt.Sprintf("%s AS %s", quoteMSSQLIdent(rightRef), quoteMSSQLIdent(rightAlias))
-		}
 		joinClause := fmt.Sprintf("%s %s ON %s = %s",
-			joinType, joinTarget, leftExpr, rightExpr)
+			joinType, quoteMSSQLIdent(rightAlias), leftExpr, rightExpr)
 		joinClauses = append(joinClauses, joinClause)
 	}
 
