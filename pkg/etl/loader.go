@@ -11,6 +11,22 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
+// loadTDTPFile читает TDTP XML-файл напрямую, минуя адаптерный слой.
+// DSN для tdtp-источника — это путь к файлу.
+func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
+	if source.DSN == "" {
+		return nil, fmt.Errorf("tdtp source requires 'dsn' to be the file path")
+	}
+	pkt, err := packet.NewParser().ParseFile(source.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse TDTP file '%s': %w", source.DSN, err)
+	}
+	// Переименовываем таблицу в alias источника — загрузчик workspace
+	// использует это имя как имя SQLite-таблицы.
+	pkt.Header.TableName = source.Name
+	return pkt, nil
+}
+
 // SourceData представляет загруженные данные из одного источника
 type SourceData struct {
 	SourceName string
@@ -150,6 +166,12 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	} else {
 		timeoutCtx = ctx
 	}
+
+	// TDTP-файл не требует адаптера — данные уже в TDTP-формате, читаем напрямую.
+	if source.Type == "tdtp" {
+		return loadTDTPFile(source)
+	}
+	_ = timeoutCtx // используется далее
 
 	// Создаем адаптер для источника
 	adapter, err := adapters.New(timeoutCtx, adapters.Config{

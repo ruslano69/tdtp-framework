@@ -47,10 +47,17 @@ type TransformConfig struct {
 
 // OutputConfig определяет назначение для результатов
 type OutputConfig struct {
-	Type     string                `yaml:"type"`               // Тип: tdtp, rabbitmq, kafka
+	Type     string                `yaml:"type"`               // Тип: tdtp, rabbitmq, kafka, xlsx
 	TDTP     *TDTPOutputConfig     `yaml:"tdtp,omitempty"`     // Конфигурация для TDTP
 	RabbitMQ *RabbitMQOutputConfig `yaml:"rabbitmq,omitempty"` // Конфигурация для RabbitMQ
 	Kafka    *KafkaOutputConfig    `yaml:"kafka,omitempty"`    // Конфигурация для Kafka
+	XLSX     *XLSXOutputConfig     `yaml:"xlsx,omitempty"`     // Конфигурация для XLSX
+}
+
+// XLSXOutputConfig определяет параметры экспорта в Excel формат
+type XLSXOutputConfig struct {
+	Destination string `yaml:"destination"` // Путь к выходному файлу
+	Sheet       string `yaml:"sheet"`       // Имя листа (пустое = имя таблицы результата)
 }
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
@@ -179,9 +186,10 @@ func (s *SourceConfig) Validate() error {
 		"mssql":    true,
 		"mysql":    true,
 		"sqlite":   true,
+		"tdtp":     true, // TDTP XML/JSON file — DSN is the file path
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp", s.Type)
 	}
 
 	return nil
@@ -269,8 +277,16 @@ func (o *OutputConfig) Validate() error {
 			return fmt.Errorf("kafka.topic is required")
 		}
 
+	case "xlsx":
+		if o.XLSX == nil {
+			return fmt.Errorf("xlsx configuration is required when type is 'xlsx'")
+		}
+		if o.XLSX.Destination == "" {
+			return fmt.Errorf("xlsx.destination is required")
+		}
+
 	default:
-		return fmt.Errorf("unsupported output type '%s', must be one of: tdtp, rabbitmq, kafka", o.Type)
+		return fmt.Errorf("unsupported output type '%s', must be one of: tdtp, rabbitmq, kafka, xlsx", o.Type)
 	}
 
 	return nil

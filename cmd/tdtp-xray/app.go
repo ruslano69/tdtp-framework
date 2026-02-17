@@ -992,7 +992,11 @@ func (a *App) buildSourceConfigs() []SourceConfig {
 		case "postgres", "mysql", "mssql", "sqlite":
 			config.DSN = src.DSN
 		case "tdtp":
-			if src.Transport != nil {
+			// For TDTP file sources, DSN is the file path set during source setup.
+			// Transport.Source is only used for broker-backed TDTP sources.
+			if src.DSN != "" {
+				config.DSN = src.DSN
+			} else if src.Transport != nil && src.Transport.Source != "" {
 				config.DSN = src.Transport.Source
 			}
 		case "mock":
@@ -1070,6 +1074,13 @@ func (a *App) buildOutputConfig() OutputConfig {
 			}
 			if a.output.Broker.Compression {
 				config.Kafka.Compression = "zstd"
+			}
+		}
+	case "xlsx":
+		if a.output.XLSX != nil {
+			config.XLSX = &XLSXOutputConfig{
+				Destination: a.output.XLSX.Destination,
+				Sheet:       a.output.XLSX.Sheet,
 			}
 		}
 	}
@@ -1531,10 +1542,17 @@ type TransformConfig struct {
 
 // OutputConfig represents output destination (tdtpcli compatible)
 type OutputConfig struct {
-	Type     string                `yaml:"type" json:"type"` // tdtp, rabbitmq, kafka
+	Type     string                `yaml:"type" json:"type"` // tdtp, rabbitmq, kafka, xlsx
 	TDTP     *TDTPOutputConfig     `yaml:"tdtp,omitempty" json:"tdtp,omitempty"`
 	RabbitMQ *RabbitMQOutputConfig `yaml:"rabbitmq,omitempty" json:"rabbitmq,omitempty"`
 	Kafka    *KafkaOutputConfig    `yaml:"kafka,omitempty" json:"kafka,omitempty"`
+	XLSX     *XLSXOutputConfig     `yaml:"xlsx,omitempty" json:"xlsx,omitempty"`
+}
+
+// XLSXOutputConfig определяет параметры XLSX-вывода (tdtpcli-compatible)
+type XLSXOutputConfig struct {
+	Destination string `yaml:"destination" json:"destination"`
+	Sheet       string `yaml:"sheet,omitempty" json:"sheet,omitempty"`
 }
 
 // TDTPOutputConfig for TDTP protocol output

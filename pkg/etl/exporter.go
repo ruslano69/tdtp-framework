@@ -8,6 +8,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/xlsx"
 )
 
 // ExportResult представляет результат экспорта
@@ -55,6 +56,11 @@ func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*
 
 	case "kafka":
 		err := e.exportToKafka(ctx, dataPacket)
+		result.Error = err
+		return result, err
+
+	case "xlsx":
+		err := e.exportToXLSX(dataPacket)
 		result.Error = err
 		return result, err
 
@@ -182,6 +188,38 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 	return nil
 }
 
+// exportToXLSX записывает DataPacket в Excel-файл (.xlsx).
+// Формат данных тот же TDTP — xlsx.ToXLSX знает о структуре пакета.
+func (e *Exporter) exportToXLSX(dataPacket *packet.DataPacket) error {
+	if e.config.XLSX == nil {
+		return fmt.Errorf("xlsx configuration is not set")
+	}
+	destination := e.config.XLSX.Destination
+	if destination == "" {
+		return fmt.Errorf("xlsx.destination is not set")
+	}
+
+	// Создаём директорию если не существует
+	dir := destination[:max(0, lastSep(destination))]
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create output directory: %w", err)
+		}
+	}
+
+	return xlsx.ToXLSX(dataPacket, destination, e.config.XLSX.Sheet)
+}
+
+// lastSep возвращает позицию последнего разделителя пути (/ или \).
+func lastSep(path string) int {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return i
+		}
+	}
+	return 0
+}
+
 // getDestination возвращает назначение экспорта в виде строки
 func (e *Exporter) getDestination() string {
 	switch e.config.Type {
@@ -201,6 +239,10 @@ func (e *Exporter) getDestination() string {
 			return fmt.Sprintf("%s/%s",
 				e.config.Kafka.Brokers,
 				e.config.Kafka.Topic)
+		}
+	case "xlsx":
+		if e.config.XLSX != nil {
+			return e.config.XLSX.Destination
 		}
 	}
 	return "unknown"
