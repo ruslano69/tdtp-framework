@@ -559,11 +559,89 @@ func (a *App) GetTransform() *Transform {
 	return a.transform
 }
 
+// runPreviewSQL executes sqlQuery on in-memory SQLite loaded with all current sources.
+func (a *App) runPreviewSQL(sqlQuery string) services.PreviewResult {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return services.PreviewResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create in-memory database: %v", err),
+		}
+	}
+	defer db.Close()
+
+	for _, source := range a.sources {
+		fmt.Printf("Loading source: %s (type: %s)\n", source.Name, source.Type)
+		if err := a.loadSourceToMemory(db, source); err != nil {
+			return services.PreviewResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to load source '%s': %v", source.Name, err),
+			}
+		}
+	}
+
+	limitedSQL := sqlQuery
+	if !strings.Contains(strings.ToLower(sqlQuery), "limit") {
+		limitedSQL = fmt.Sprintf("%s LIMIT 10", sqlQuery)
+	}
+	fmt.Printf("Executing query: %s\n", limitedSQL)
+
+	rows, err := db.Query(limitedSQL)
+	if err != nil {
+		return services.PreviewResult{
+			Success: false,
+			Message: fmt.Sprintf("Query execution failed: %v", err),
+		}
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return services.PreviewResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get columns: %v", err),
+		}
+	}
+
+	var data []map[string]any
+	for rows.Next() {
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range columns {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+		row := make(map[string]any)
+		for i, col := range columns {
+			row[col] = a.convertValue(values[i])
+		}
+		data = append(data, row)
+	}
+
+	fmt.Printf("Query returned %d rows\n", len(data))
+	return services.PreviewResult{
+		Success:  true,
+		Columns:  columns,
+		Rows:     data,
+		RowCount: len(data),
+	}
+}
+
+// PreviewTransform executes the provided SQL against in-memory SQLite with loaded sources.
+func (a *App) PreviewTransform(sqlQuery string) services.PreviewResult {
+	fmt.Println("PreviewTransform called")
+	if sqlQuery == "" {
+		return services.PreviewResult{Success: false, Message: "SQL query is empty"}
+	}
+	return a.runPreviewSQL(sqlQuery)
+}
+
 // PreviewQueryResult executes SQL on in-memory SQLite with loaded sources
 func (a *App) PreviewQueryResult() services.PreviewResult {
-	fmt.Println("🔍 PreviewQueryResult called")
+	fmt.Println("PreviewQueryResult called")
 
-	// 1. Generate SQL from canvas design OR use transform SQL
 	var sqlQuery string
 	if a.transform != nil && a.transform.SQL != "" {
 		sqlQuery = a.transform.SQL
@@ -585,82 +663,7 @@ func (a *App) PreviewQueryResult() services.PreviewResult {
 		}
 	}
 
-	// 2. Create in-memory SQLite database
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		return services.PreviewResult{
-			Success: false,
-			Message: fmt.Sprintf("Failed to create in-memory database: %v", err),
-		}
-	}
-	defer db.Close()
-
-	// 3. Load all sources into in-memory database
-	for _, source := range a.sources {
-		fmt.Printf("📦 Loading source: %s (type: %s)\n", source.Name, source.Type)
-
-		if err := a.loadSourceToMemory(db, source); err != nil {
-			return services.PreviewResult{
-				Success: false,
-				Message: fmt.Sprintf("Failed to load source '%s': %v", source.Name, err),
-			}
-		}
-	}
-
-	// 4. Execute SQL query with LIMIT 10
-	limitedSQL := sqlQuery
-	if !strings.Contains(strings.ToLower(sqlQuery), "limit") {
-		limitedSQL = fmt.Sprintf("%s LIMIT 10", sqlQuery)
-	}
-	fmt.Printf("Executing query: %s\n", limitedSQL)
-
-	rows, err := db.Query(limitedSQL)
-	if err != nil {
-		return services.PreviewResult{
-			Success: false,
-			Message: fmt.Sprintf("Query execution failed: %v", err),
-		}
-	}
-	defer rows.Close()
-
-	// 5. Get column names
-	columns, err := rows.Columns()
-	if err != nil {
-		return services.PreviewResult{
-			Success: false,
-			Message: fmt.Sprintf("Failed to get columns: %v", err),
-		}
-	}
-
-	// 6. Scan rows
-	var data []map[string]any
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range columns {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			continue
-		}
-
-		row := make(map[string]any)
-		for i, col := range columns {
-			row[col] = a.convertValue(values[i])
-		}
-
-		data = append(data, row)
-	}
-
-	fmt.Printf("✅ Query returned %d rows\n", len(data))
-
-	return services.PreviewResult{
-		Success:  true,
-		Columns:  columns,
-		Rows:     data,
-		RowCount: len(data),
-	}
+	return a.runPreviewSQL(sqlQuery)
 }
 
 // loadSourceToMemory loads a source into in-memory SQLite database
