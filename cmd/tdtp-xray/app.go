@@ -170,9 +170,18 @@ func (a *App) AddSource(s Source) error {
 
 // UpdateSource updates an existing source
 func (a *App) UpdateSource(name string, s Source) error {
+	// If renaming, check that the new alias doesn't conflict with another source.
+	// Source.Name is the in-memory SQLite table alias — duplicates would cause
+	// "table already exists" when loading sources for the transform query.
+	if s.Name != name {
+		for _, existing := range a.sources {
+			if existing.Name == s.Name {
+				return fmt.Errorf("source alias '%s' already used by another source", s.Name)
+			}
+		}
+	}
 	for i, src := range a.sources {
 		if src.Name == name {
-			s.Name = name // Preserve name
 			a.sources[i] = s
 			return nil
 		}
@@ -559,6 +568,20 @@ func (a *App) GetTransform() *Transform {
 
 // runPreviewSQL executes sqlQuery on in-memory SQLite loaded with all current sources.
 func (a *App) runPreviewSQL(sqlQuery string) services.PreviewResult {
+	// Pre-flight: verify alias uniqueness before touching in-memory SQLite.
+	// Each Source.Name becomes a table name in SQLite; duplicates would cause
+	// "table already exists" and leave the combined dataset incomplete.
+	seenAliases := make(map[string]bool, len(a.sources))
+	for _, src := range a.sources {
+		if seenAliases[src.Name] {
+			return services.PreviewResult{
+				Success: false,
+				Message: fmt.Sprintf("Duplicate source alias '%s': go to Step 2 and give each source a unique name", src.Name),
+			}
+		}
+		seenAliases[src.Name] = true
+	}
+
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		return services.PreviewResult{
@@ -1358,6 +1381,25 @@ func (a *App) ValidateStep(step int) ValidationResult {
 	case 2: // Sources
 		if len(a.sources) == 0 {
 			return ValidationResult{IsValid: false, Message: "At least one source is required"}
+		}
+		// Alias uniqueness: Source.Name becomes the in-memory SQLite table name.
+		// Duplicates would cause "table already exists" when building the combined dataset.
+		seenAliases := make(map[string]bool, len(a.sources))
+		for _, src := range a.sources {
+			if seenAliases[src.Name] {
+				return ValidationResult{IsValid: false, Message: fmt.Sprintf("Duplicate source alias '%s': each source must have a unique name", src.Name)}
+			}
+			seenAliases[src.Name] = true
+		}
+		// Every DB source must have a TableName so it can be queried on the real DB
+		// before data is loaded into in-memory SQLite.
+		for _, src := range a.sources {
+			switch src.Type {
+			case "postgres", "postgresql", "mysql", "mssql", "sqlserver", "sqlite", "sqlite3":
+				if src.TableName == "" {
+					return ValidationResult{IsValid: false, Message: fmt.Sprintf("Source '%s': no table selected. Test connection and pick a table.", src.Name)}
+				}
+			}
 		}
 		if a.mode == "production" {
 			for _, src := range a.sources {
