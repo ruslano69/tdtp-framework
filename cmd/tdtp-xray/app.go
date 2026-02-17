@@ -2132,42 +2132,26 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Build tdtpcli-compatible configuration structure
+	// Build tdtpcli-compatible configuration structure.
+	// Use the same builder helpers as GenerateYAML() so that the saved file
+	// always reflects the actual pipeline state (transform SQL, output type,
+	// XLSX settings, etc.) rather than hardcoded defaults.
 	config := TDTPConfig{
 		Name:        a.pipelineInfo.Name,
 		Version:     a.pipelineInfo.Version,
 		Description: a.pipelineInfo.Description,
 		Sources:     tdtpSources,
 
-		// Default workspace (SQLite in-memory)
 		Workspace: WorkspaceConfig{
 			Type: "sqlite",
 			Mode: ":memory:",
 		},
 
-		// Default transform (simple SELECT * from first source)
-		Transform: TransformConfig{
-			ResultTable: "result",
-			SQL:         getDefaultTransformSQL(a.sources),
-		},
-
-		// Default output (TDTP file)
-		Output: OutputConfig{
-			Type: "tdtp",
-			TDTP: &TDTPOutputConfig{
-				Destination: fmt.Sprintf("output/%s.xml", a.pipelineInfo.Name),
-				Format:      "xml",
-				Compression: false,
-			},
-		},
-
-		// Optional: add default performance settings
-		Performance: &PerformanceConfig{
-			Timeout:         300,
-			BatchSize:       1000,
-			ParallelSources: false,
-			MaxMemoryMB:     512,
-		},
+		Transform:     a.buildTransformConfig(),
+		Output:        a.buildOutputConfig(),
+		Performance:   a.buildPerformanceConfig(),
+		Audit:         a.buildAuditConfig(),
+		ErrorHandling: a.buildErrorHandlingConfig(),
 	}
 
 	// Marshal to YAML
