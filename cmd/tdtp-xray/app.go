@@ -737,8 +737,14 @@ func (a *App) loadMockSourceToMemory(db *sql.DB, source Source) error {
 
 // loadDBSourceToMemory loads database table data into in-memory SQLite
 func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
-	// Build query (use TableName with LIMIT for compactness)
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT 1000", source.TableName)
+	// Build query; MSSQL needs bracket-quoted table name, other DBs use plain name
+	var tableRef string
+	if source.Type == "mssql" || source.Type == "sqlserver" {
+		tableRef = quoteMSSQLIdent(source.TableName)
+	} else {
+		tableRef = source.TableName
+	}
+	query := fmt.Sprintf("SELECT * FROM %s", tableRef)
 
 	// Get preview data
 	preview := a.previewService.PreviewQuery(source.Type, source.DSN, query, 1000)
@@ -1134,6 +1140,12 @@ type PreviewResult struct {
 }
 
 // Helper function for safe string extraction in debug logs
+// quoteMSSQLIdent wraps an identifier in MSSQL brackets, escaping any ] inside.
+// Example: "First Name" → "[First Name]", "E-Mail" → "[E-Mail]"
+func quoteMSSQLIdent(name string) string {
+	return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
+}
+
 func getStringSafe(source *Source, field string) string {
 	if source == nil {
 		return "<nil source>"
@@ -1210,15 +1222,19 @@ func (a *App) PreviewSource(req PreviewRequest) PreviewResult {
 
 			var selectFields []string
 			for _, col := range schema.Columns {
+				// Wrap identifier in brackets (handles spaces, hyphens, reserved words like 'timestamp')
+				quoted := quoteMSSQLIdent(col.Name)
 				// Convert UNIQUEIDENTIFIER to VARCHAR(36) for proper display
 				if strings.Contains(strings.ToUpper(col.DataType), "UNIQUEIDENTIFIER") {
-					selectFields = append(selectFields, fmt.Sprintf("CONVERT(VARCHAR(36), %s) AS %s", col.Name, col.Name))
+					selectFields = append(selectFields, fmt.Sprintf("CONVERT(VARCHAR(36), %s) AS %s", quoted, quoted))
 				} else {
-					selectFields = append(selectFields, col.Name)
+					selectFields = append(selectFields, quoted)
 				}
 			}
 
-			queryToExecute = fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectFields, ", "), source.TableName)
+			queryToExecute = fmt.Sprintf("SELECT %s FROM %s",
+				strings.Join(selectFields, ", "),
+				quoteMSSQLIdent(source.TableName))
 		} else {
 			// For other databases, use SELECT *
 			queryToExecute = fmt.Sprintf("SELECT * FROM %s", source.TableName)
