@@ -239,7 +239,7 @@ func (ps *PreviewService) convertValue(value any) any {
 
 	// Handle byte arrays: text columns come as []byte in many drivers.
 	// Binary columns (timestamp/rowversion, binary, varbinary) must NOT be
-	// cast to string — that produces garbage. Detect and hex-encode them.
+	// cast to string - that produces garbage. Detect and hex-encode them.
 	if b, ok := value.([]byte); ok {
 		if isTextBytes(b) {
 			return string(b)
@@ -268,8 +268,8 @@ func isTextBytes(b []byte) bool {
 }
 
 // hexPreview converts binary data to an uppercase hex string without leading
-// zeros, prefixed with 0x — matching the tdtpcli rowversion display format.
-// Example: []byte{0x00,0x00,0x00,0x00,0x18,0x7F,0x82,0x5E} → "0x187F825E"
+// zeros, prefixed with 0x - matching the tdtpcli rowversion display format.
+// Example: []byte{0x00,0x00,0x00,0x00,0x18,0x7F,0x82,0x5E} -> "0x187F825E"
 func hexPreview(b []byte) string {
 	if len(b) == 0 {
 		return ""
