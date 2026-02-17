@@ -397,7 +397,7 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 		for _, field := range table.Fields {
 			if field.Visible {
-				selectFields = append(selectFields, fmt.Sprintf("%s.%s", tableAlias, field.Name))
+				selectFields = append(selectFields, fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name)))
 			}
 		}
 	}
@@ -408,9 +408,9 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 	// Build FROM clause with first table
 	firstTable := design.Tables[0]
-	fromClause := firstTable.SourceName
+	fromClause := quoteMSSQLIdent(firstTable.SourceName)
 	if firstTable.Alias != "" && firstTable.Alias != firstTable.SourceName {
-		fromClause = fmt.Sprintf("%s AS %s", firstTable.SourceName, firstTable.Alias)
+		fromClause = fmt.Sprintf("%s AS %s", quoteMSSQLIdent(firstTable.SourceName), quoteMSSQLIdent(firstTable.Alias))
 	}
 
 	// Build JOIN clauses
@@ -441,8 +441,8 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		}
 
 		// Build field expressions with optional CAST
-		leftExpr := fmt.Sprintf("%s.%s", leftAlias, join.LeftField)
-		rightExpr := fmt.Sprintf("%s.%s", rightAlias, join.RightField)
+		leftExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(leftAlias), quoteMSSQLIdent(join.LeftField))
+		rightExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(rightAlias), quoteMSSQLIdent(join.RightField))
 
 		if join.CastLeft != "" {
 			leftExpr = fmt.Sprintf("CAST(%s AS %s)", leftExpr, join.CastLeft)
@@ -452,7 +452,7 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		}
 
 		joinClause := fmt.Sprintf("%s %s ON %s = %s",
-			joinType, rightSource, leftExpr, rightExpr)
+			joinType, quoteMSSQLIdent(rightSource), leftExpr, rightExpr)
 		joinClauses = append(joinClauses, joinClause)
 	}
 
@@ -478,7 +478,7 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 			}
 
 			// Build condition expression
-			fieldExpr := fmt.Sprintf("%s.%s", tableAlias, field.Name)
+			fieldExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name))
 			var condition string
 
 			switch filter.Operator {
