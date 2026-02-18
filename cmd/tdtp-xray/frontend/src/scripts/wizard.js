@@ -803,6 +803,9 @@ function renderSourceList() {
         }
         const tableStr = src.tableName ? ` · <em>${src.tableName}</em>` : '';
 
+        const validateBtn = !src.tested
+            ? `<button class="btn btn-sm" style="background:#0066cc;color:white;" id="validateBtn-${index}" onclick="validateSource(${index})">Validate</button>`
+            : '';
         html += `
             <div style="border: 1px solid #ddd; padding: 10px; border-radius: 3px; background: #fafafa;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -811,6 +814,7 @@ function renderSourceList() {
                         <br><small style="color: #666;">${typeLabel}${connSummary ? ' · ' + connSummary : ''}${tableStr}</small>
                     </div>
                     <div style="flex-shrink: 0; margin-left: 8px;">
+                        ${validateBtn}
                         <button class="btn btn-sm" onclick="editSource(${index})">Edit</button>
                         <button class="btn btn-sm" onclick="previewSource(${index})">Preview</button>
                         <button class="btn btn-sm" onclick="removeSource(${index})">Remove</button>
@@ -822,6 +826,31 @@ function renderSourceList() {
     html += '</div>';
 
     listEl.innerHTML = html;
+}
+
+async function validateSource(index) {
+    const src = sources[index];
+    if (!src) return;
+
+    const btn = document.getElementById(`validateBtn-${index}`);
+    if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
+
+    try {
+        if (!wailsReady || !window.go) {
+            showNotification('Backend not ready', 'error');
+            return;
+        }
+        const result = await window.go.main.App.ValidateSourceByName(src.name);
+        if (result.success) {
+            sources[index].tested = true;
+            showNotification(`✅ ${src.name}: ${result.message || 'Connected'}`, 'success');
+        } else {
+            showNotification(`❌ ${src.name}: ${result.message || 'Connection failed'}`, 'error');
+        }
+    } catch (err) {
+        showNotification(`Validation error: ${err}`, 'error');
+    }
+    renderSourcesList();
 }
 
 function showAddSourceForm() {
@@ -1432,6 +1461,60 @@ let selectedTableId = null;
 let selectedJoinId = null;
 let joinStartField = null; // For creating joins
 
+// loadFieldsForDesign fetches/merges DB column schemas into canvas design tables.
+// Tables with no fields → load all columns (all visible).
+// Tables with fields but no type info (from SQL parse) → merge: restore visibility+filters, fill types from DB.
+// Tables with full type info → skip (already complete).
+async function loadFieldsForDesign(design) {
+    if (!design || !design.tables) return;
+    for (let i = 0; i < design.tables.length; i++) {
+        const table = design.tables[i];
+        const hasTypeInfo = table.fields && table.fields.length > 0 &&
+                            table.fields.some(f => f.type && f.type !== '');
+        const needsLoad  = !table.fields || table.fields.length === 0;
+        const needsMerge = !needsLoad && !hasTypeInfo;
+
+        if (!needsLoad && !needsMerge) continue;
+
+        console.log(`  🔄 ${needsMerge ? 'Merging' : 'Loading'} fields for ${table.sourceName}...`);
+        try {
+            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+            if (!dbTables || dbTables.length === 0 || !dbTables[0].columns) {
+                console.warn(`  ⚠️ No schema from DB for ${table.sourceName}, keeping parsed fields`);
+                continue;
+            }
+            if (needsMerge) {
+                const parsedLookup = {};
+                (table.fields || []).forEach(f => { parsedLookup[f.name.toLowerCase()] = f; });
+                const hasAnyParsed = Object.keys(parsedLookup).length > 0;
+                table.fields = dbTables[0].columns.map(col => {
+                    const parsed = parsedLookup[col.name.toLowerCase()];
+                    return {
+                        name: col.name,
+                        type: col.type,
+                        isPrimaryKey: col.isPrimaryKey || false,
+                        visible: parsed ? parsed.visible : !hasAnyParsed,
+                        filter: parsed ? (parsed.filter || null) : null
+                    };
+                });
+                console.log(`  ✅ Merged: ${table.fields.filter(f=>f.visible).length} visible, ` +
+                            `${table.fields.filter(f=>f.filter).length} with filters`);
+            } else {
+                table.fields = dbTables[0].columns.map(col => ({
+                    name: col.name,
+                    type: col.type,
+                    isPrimaryKey: col.isPrimaryKey || false,
+                    visible: true,
+                    filter: null
+                }));
+                console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+            }
+        } catch (err) {
+            console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
+        }
+    }
+}
+
 function loadStep3Data() {
     console.log('🔄 loadStep3Data() called');
 
@@ -1439,12 +1522,6 @@ function loadStep3Data() {
     const sourceListEl = document.getElementById('tablesSourceList');
     const canvasArea = document.getElementById('canvasArea');
     const svg = document.getElementById('canvasSVG');
-
-    console.log('DOM elements check:', {
-        sourceListEl: !!sourceListEl,
-        canvasArea: !!canvasArea,
-        svg: !!svg
-    });
 
     if (!sourceListEl || !canvasArea || !svg) {
         console.error('❌ DOM elements not ready, retrying in 100ms...');
@@ -1474,101 +1551,61 @@ function loadStep3Data() {
     });
     sourceListEl.innerHTML = html;
 
-    // Load existing canvas design from backend
-    console.log('🔍 Checking Wails readiness...');
-    if (wailsReady && window.go && window.go.main && window.go.main.App) {
-        console.log('✅ Wails ready, loading canvas design...');
-        window.go.main.App.GetCanvasDesign().then(async design => {
-            console.log('📦 GetCanvasDesign response:', design);
-            if (design && design.tables && design.tables.length > 0) {
-                canvasDesign = design;
-                console.log('✅ Canvas design loaded:', {
-                    tables: canvasDesign.tables.length,
-                    joins: canvasDesign.joins ? canvasDesign.joins.length : 0
-                });
-
-                // Load / merge fields for each table
-                console.log('🔧 Checking table fields...');
-                for (let i = 0; i < canvasDesign.tables.length; i++) {
-                    const table = canvasDesign.tables[i];
-                    console.log(`  📋 Table ${i} (${table.sourceName}): ${table.fields ? table.fields.length : 0} fields`);
-
-                    // Fields are considered "from SQL parse" (no type info) when they have no type strings.
-                    // In that case, fetch full schema from DB and MERGE: restore visibility + filter from
-                    // parsed fields, add missing columns as visible:false.
-                    const hasTypeInfo = table.fields && table.fields.length > 0 &&
-                                        table.fields.some(f => f.type && f.type !== '');
-                    const needsLoad = !table.fields || table.fields.length === 0;
-                    const needsMerge = !needsLoad && !hasTypeInfo; // fields from SQL parse
-
-                    if (needsLoad || needsMerge) {
-                        console.log(`  🔄 ${needsMerge ? 'Merging' : 'Loading'} fields for ${table.sourceName}...`);
-                        try {
-                            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
-                            if (dbTables && dbTables.length > 0 && dbTables[0].columns) {
-                                if (needsMerge) {
-                                    // Build lookup from parsed fields (name → {visible, filter})
-                                    const parsedLookup = {};
-                                    (table.fields || []).forEach(f => {
-                                        parsedLookup[f.name.toLowerCase()] = f;
-                                    });
-                                    const hasAnyParsed = Object.keys(parsedLookup).length > 0;
-
-                                    table.fields = dbTables[0].columns.map(col => {
-                                        const parsed = parsedLookup[col.name.toLowerCase()];
-                                        return {
-                                            name: col.name,
-                                            type: col.type,
-                                            isPrimaryKey: col.isPrimaryKey || false,
-                                            // If we had parsed fields: visible only if it was in SELECT;
-                                            // otherwise (fresh load): all visible
-                                            visible: parsed ? parsed.visible : !hasAnyParsed,
-                                            filter: parsed ? (parsed.filter || null) : null
-                                        };
-                                    });
-                                    console.log(`  ✅ Merged: ${table.fields.filter(f=>f.visible).length} visible, ` +
-                                                `${table.fields.filter(f=>f.filter).length} with filters`);
-                                } else {
-                                    table.fields = dbTables[0].columns.map(col => ({
-                                        name: col.name,
-                                        type: col.type,
-                                        isPrimaryKey: col.isPrimaryKey || false,
-                                        visible: true,
-                                        filter: null
-                                    }));
-                                    console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
-                                }
-                            }
-                        } catch (err) {
-                            console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
-                        }
-                    }
-                }
-
-                // Render canvas after all fields are loaded
-                console.log('🎨 All fields loaded, rendering canvas...');
-                renderCanvas();
-            } else {
-                console.log('ℹ️ No canvas design data or empty tables');
-                // Initialize empty design if needed
-                if (!canvasDesign.tables) {
-                    canvasDesign.tables = [];
-                }
-                if (!canvasDesign.joins) {
-                    canvasDesign.joins = [];
-                }
-            }
-        }).catch(err => {
-            console.error('❌ Failed to load canvas design:', err);
-        });
-    } else {
-        console.warn('⚠️ Wails not ready, using existing canvasDesign:', canvasDesign);
-        // Try to render with existing data
+    if (!wailsReady || !window.go || !window.go.main || !window.go.main.App) {
+        console.warn('⚠️ Wails not ready, rendering with existing canvasDesign');
         if (canvasDesign && canvasDesign.tables && canvasDesign.tables.length > 0) {
-            console.log('Rendering with existing canvasDesign');
             renderCanvas();
         }
+        return;
     }
+
+    window.go.main.App.GetCanvasDesign().then(async design => {
+        console.log('📦 GetCanvasDesign response:', design);
+
+        if (design && design.tables && design.tables.length > 0) {
+            // Canvas design exists — load/merge field schemas then render
+            canvasDesign = design;
+            console.log('✅ Canvas design loaded:', {
+                tables: canvasDesign.tables.length,
+                joins: canvasDesign.joins ? canvasDesign.joins.length : 0
+            });
+            await loadFieldsForDesign(canvasDesign);
+            console.log('🎨 Rendering canvas from loaded design...');
+            renderCanvas();
+        } else {
+            // Canvas is empty (fresh load or parseSQLToCanvasDesign returned nil).
+            // Ask backend to reconstruct from transform SQL or source list.
+            console.log('ℹ️ Canvas design empty — attempting auto-reconstruction...');
+            try {
+                const reconstructed = await window.go.main.App.ReconstructCanvas();
+                if (reconstructed && reconstructed.tables && reconstructed.tables.length > 0) {
+                    canvasDesign = reconstructed;
+                    console.log(`🔄 Reconstructed canvas: ${canvasDesign.tables.length} table(s), ` +
+                                `${canvasDesign.joins ? canvasDesign.joins.length : 0} join(s)`);
+                    await loadFieldsForDesign(canvasDesign);
+                    console.log('🎨 Rendering reconstructed canvas...');
+                    renderCanvas();
+                    const fromSQL = canvasDesign.tables.some(t => t.fields && t.fields.some(f => !f.visible));
+                    showNotification(
+                        fromSQL
+                            ? 'Canvas restored from saved SQL (field visibility & filters preserved)'
+                            : 'Canvas reconstructed from sources — add JOINs as needed',
+                        'info'
+                    );
+                } else {
+                    console.log('ℹ️ No tables to reconstruct (no sources or empty config)');
+                    canvasDesign.tables = canvasDesign.tables || [];
+                    canvasDesign.joins  = canvasDesign.joins  || [];
+                }
+            } catch (err) {
+                console.error('❌ Auto-reconstruction failed:', err);
+                canvasDesign.tables = canvasDesign.tables || [];
+                canvasDesign.joins  = canvasDesign.joins  || [];
+            }
+        }
+    }).catch(err => {
+        console.error('❌ Failed to load canvas design:', err);
+    });
 }
 
 async function saveStep3() {

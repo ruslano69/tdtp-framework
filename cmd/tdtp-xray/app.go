@@ -389,6 +389,53 @@ func (a *App) GetCanvasDesign() *CanvasDesign {
 	return a.canvasDesign
 }
 
+// ValidateSourceByName tests connection for a loaded source and marks it as tested
+func (a *App) ValidateSourceByName(name string) ConnectionResult {
+	for i := range a.sources {
+		if a.sources[i].Name == name {
+			src := a.sources[i]
+			result := a.TestSource(src)
+			if result.Success {
+				a.sources[i].Tested = true
+			}
+			return result
+		}
+	}
+	return ConnectionResult{Success: false, Message: fmt.Sprintf("source '%s' not found", name)}
+}
+
+// ReconstructCanvas rebuilds canvas design from transform SQL or from sources list.
+// Returns a non-nil CanvasDesign even if SQL parsing fails (fallback: one table per source).
+func (a *App) ReconstructCanvas() CanvasDesign {
+	// Try SQL parse first
+	if a.transform != nil && a.transform.SQL != "" {
+		if cd := parseSQLToCanvasDesign(a.transform.SQL); cd != nil {
+			a.canvasDesign = cd
+			return *cd
+		}
+	}
+
+	// Fallback: create one table card per source with empty fields
+	// (frontend will load field schemas after receiving this)
+	design := CanvasDesign{
+		Tables: make([]TableDesign, 0, len(a.sources)),
+		Joins:  []JoinDesign{},
+	}
+	for i, src := range a.sources {
+		design.Tables = append(design.Tables, TableDesign{
+			SourceName: src.Name,
+			Alias:      src.Name,
+			X:          50 + (i * 270),
+			Y:          50,
+			Fields:     []FieldDesign{},
+		})
+	}
+	if len(design.Tables) > 0 {
+		a.canvasDesign = &design
+	}
+	return design
+}
+
 // GenerateSQL generates SQL from canvas design
 // GenerateSQLResult holds SQL generation result
 type GenerateSQLResult struct {
