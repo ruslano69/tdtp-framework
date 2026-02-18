@@ -493,9 +493,10 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		rightAlias := join.RightTable
 
 		joinType := "INNER JOIN"
-		if join.JoinType == "left" {
+		switch strings.ToUpper(join.JoinType) {
+		case "LEFT":
 			joinType = "LEFT JOIN"
-		} else if join.JoinType == "right" {
+		case "RIGHT":
 			joinType = "RIGHT JOIN"
 		}
 
