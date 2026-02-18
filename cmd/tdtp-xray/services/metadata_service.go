@@ -302,12 +302,18 @@ func (ms *MetadataService) getPrimaryKeysQuery(dbType, tableName string) string 
 		`, tableName)
 
 	case "mssql", "sqlserver":
+		// Use TABLE_CONSTRAINTS join instead of OBJECTPROPERTY/OBJECT_ID,
+		// which can return NULL for names containing special characters (e.g. $).
 		return fmt.Sprintf(`
-			SELECT COLUMN_NAME
-			FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-			WHERE OBJECTPROPERTY(OBJECT_ID(CONSTRAINT_SCHEMA + '.' + CONSTRAINT_NAME), 'IsPrimaryKey') = 1
-			AND TABLE_NAME = '%s'
-			ORDER BY ORDINAL_POSITION
+			SELECT ku.COLUMN_NAME
+			FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+			INNER JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
+				ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+				AND tc.TABLE_SCHEMA = ku.TABLE_SCHEMA
+				AND tc.TABLE_NAME = ku.TABLE_NAME
+			WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+			AND tc.TABLE_NAME = '%s'
+			ORDER BY ku.ORDINAL_POSITION
 		`, tableName)
 
 	default:

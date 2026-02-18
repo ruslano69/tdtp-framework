@@ -269,8 +269,9 @@ func (a *App) GetTableSchema(dbType, dsn, tableName string) TableSchemaResult {
 	columns := make([]ColumnInfo, len(schema.Columns))
 	for i, col := range schema.Columns {
 		columns[i] = ColumnInfo{
-			Name: col.Name,
-			Type: col.DataType,
+			Name:         col.Name,
+			Type:         col.DataType,
+			IsPrimaryKey: col.IsPrimaryKey,
 		}
 	}
 
@@ -318,8 +319,9 @@ type TableSchemaResult struct {
 
 // ColumnInfo holds column information
 type ColumnInfo struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	IsPrimaryKey bool   `json:"isPrimaryKey,omitempty"`
 }
 
 // LoadMockSourceFile loads mock source from file
