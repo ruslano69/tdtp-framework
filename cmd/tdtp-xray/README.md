@@ -1,179 +1,257 @@
-# TDTP X-Ray - Visual ETL Pipeline Constructor
+# TDTP X-Ray — Visual ETL Pipeline Constructor
 
-🔬 **Desktop application for visual ETL pipeline design** based on TDTP Framework.
-
-## Overview
-
-TDTP X-Ray replaces manual YAML/Go coding with a visual wizard:
-- 🧙‍♂️ **7-step wizard** - From sources to output
-- 🎨 **SVG canvas designer** - Visual JOINs and filtering
-- 👁️ **Live preview** - See data before running
-- ⚡ **Quick generation** - 10 minutes instead of 2-3 hours
-
-## Quick Start
-
-### Prerequisites
-- Go 1.21+
-- [Wails v2](https://wails.io/docs/gettingstarted/installation)
-- Windows 10/11 (primary target)
-
-### Installation
-
-```bash
-# Install Wails CLI (if not installed)
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-
-# Navigate to project
-cd tdtp-framework/cmd/tdtp-xray
-
-# Run in development mode
-wails dev
-
-# Build for production
-wails build
-```
-
-## Development Status
-
-### ✅ Phase 1: Foundation (COMPLETE)
-- [x] Project structure
-- [x] Wails setup
-- [x] Go API (app.go)
-- [x] Wizard navigation (7 steps)
-- [x] Step 1: Project Info (fully functional)
-- [x] Mock/Production mode switching
-- [x] Windows Forms inspired UI
-
-### 🚧 Phase 2: Core Services (IN PROGRESS)
-- [ ] Connection testing (Postgres, MSSQL, MySQL, SQLite)
-- [ ] Metadata service (tables, views, schemas)
-- [ ] Step 2: Sources UI
-- [ ] Preview service with LIMIT detection
-
-### 📅 Phase 3: Visual Designer (PLANNED)
-- [ ] SVG canvas for table drag-n-drop
-- [ ] Visual JOIN drawing
-- [ ] Field filtering UI
-- [ ] Live preview panel
-
-### 📅 Phase 4-5: Polish & Release
-- [ ] Templates (common use cases)
-- [ ] Error handling
-- [ ] Windows installer (.exe)
-
-## Architecture
-
-```
-cmd/tdtp-xray/
-├── main.go              # Wails entry point
-├── app.go               # Go API (state + methods)
-├── services/            # Business logic services
-│   ├── connection_service.go
-│   ├── metadata_service.go
-│   ├── yaml_generator.go
-│   └── preview_service.go
-└── frontend/
-    ├── src/             # Source files
-    │   ├── index.html
-    │   ├── styles/
-    │   └── scripts/
-    └── dist/            # Built files (Wails serves from here)
-```
-
-## Key Features
-
-### Mock vs Production Modes
-
-**Mock Mode** (🧪 experimental):
-- JSON mock sources
-- ⚠️ Warnings only
-- For learning/prototyping
-
-**Production Mode** (🏭 strict):
-- Real DB/TDTP/RabbitMQ only
-- ❌ Validation blocks invalid steps
-- Test connection required
-
-### Integration with tdtpcli
-
-X-Ray generates YAML configs, then:
-```bash
-# X-Ray saves config
-configs/my_pipeline.yaml
-
-# Execute via existing CLI
-tdtpcli --pipeline configs/my_pipeline.yaml
-
-# Preview in X-Ray (uses tdtpcli)
-tdtpcli --pipeline temp.yaml --preview --limit 10
-```
-
-## Top 3 Use Cases
-
-### 1. SQLite Export with Filtering
-```yaml
-sources:
-  - name: users
-    type: sqlite
-    query: "SELECT id, name, email FROM users WHERE active = 1"
-output:
-  type: tdtp_file
-  file: "users.xml"
-```
-
-### 2. MSSQL Multi-Table JOIN → RabbitMQ
-```yaml
-sources:
-  - name: orders
-    type: mssql
-  - name: products
-    type: mssql
-transform:
-  sql: "SELECT o.*, p.name FROM orders o JOIN products p ON ..."
-output:
-  type: tdtp_broker
-  rabbitmq:
-    queue: "enriched-orders"
-```
-
-### 3. RabbitMQ → DB Enrichment → RabbitMQ
-```yaml
-sources:
-  - name: raw_orders
-    type: tdtp
-    transport: rabbitmq
-  - name: catalog
-    type: mssql
-transform:
-  sql: "SELECT o.*, c.price FROM raw_orders o JOIN catalog c ..."
-output:
-  type: tdtp_broker
-```
-
-## Tech Stack
-
-- **Backend:** Go 1.21+, Wails v2
-- **Frontend:** HTML5, CSS3, Vanilla JavaScript (no frameworks)
-- **Canvas:** SVG (for visual designer)
-- **Style:** Windows Forms inspired (classic desktop look)
-- **Integration:** tdtpcli (for execution + preview)
-
-## Documentation
-
-- [Technical Specification](../../docs/tdtp-xray/TECHNICAL_SPEC.md)
-- [Development Log](../../docs/tdtp-xray/DEVELOPMENT_LOG.md)
-- [TDTP Framework Docs](../../README.md)
-
-## Contributing
-
-See [DEVELOPMENT_LOG.md](../../docs/tdtp-xray/DEVELOPMENT_LOG.md) for development roadmap and current tasks.
-
-## License
-
-Same as TDTP Framework parent project.
+Desktop-приложение для визуального проектирования ETL-пайплайнов на базе TDTP Framework.
+Заменяет ручное написание YAML/Go-кода семишаговым визуальным мастером.
 
 ---
 
-**Status:** 🚧 Phase 1 Complete | Phase 2 In Progress
-**Platform:** Windows 10/11 (Linux optional)
-**Version:** 1.0.0-alpha
+## Статус
+
+**Полностью реализован.** Все 7 шагов мастера функциональны.
+
+---
+
+## Быстрый старт
+
+### Требования
+
+- Go 1.25+
+- [Wails v2](https://wails.io/docs/gettingstarted/installation)
+- Windows 10/11 (основная платформа) / Linux (опционально)
+
+### Запуск
+
+```bash
+cd tdtp-framework/cmd/tdtp-xray
+
+# Режим разработки (hot-reload)
+wails dev
+
+# Сборка продакшн-бинарника
+wails build
+```
+
+---
+
+## Архитектура
+
+```
+cmd/tdtp-xray/
+├── main.go                        # Точка входа Wails
+├── app.go                         # Go API: состояние + все Wails-методы
+├── services/
+│   ├── connection_service.go      # Тест соединений с БД
+│   ├── metadata_service.go        # Схемы таблиц, PK-детектирование
+│   ├── preview_service.go         # Превью данных (LIMIT 10)
+│   ├── source_service.go          # Работа с mock-источниками
+│   └── tdtp_service.go            # Интеграция с TDTP-пакетами
+└── frontend/
+    └── src/
+        ├── index.html
+        ├── styles/main.css
+        └── scripts/wizard.js      # Вся логика UI (~3800 строк)
+```
+
+### Хранилище состояния
+
+Приложение держит весь pipeline-конфиг в памяти через поля `App`:
+
+| Поле | Тип | Назначение |
+|------|-----|------------|
+| `pipelineInfo` | `PipelineInfo` | Шаг 1: имя, описание |
+| `sources` | `[]Source` | Шаг 2: источники данных |
+| `canvasDesign` | `*CanvasDesign` | Шаг 3: визуальный дизайнер |
+| `transform` | `*Transform` | Шаг 4: SQL трансформация |
+| `output` | `*Output` | Шаг 5: конфигурация вывода |
+| `settings` | `Settings` | Шаг 6: производительность, аудит |
+| `mode` | `string` | `"mock"` / `"production"` |
+
+Сохранение — YAML-файл (`SaveConfigurationFile`) или встроенный репозиторий SQLite (`configs.db`).
+
+---
+
+## 7 шагов мастера
+
+### Шаг 1 — Project Information
+
+Поля: название пайплайна, описание, версия.
+Живая валидация имени (допустимые символы, уникальность).
+
+**Дополнительно в боковой панели:**
+- Переключатель режима: **Mock** 🧪 / **Production** 🏭
+- Кнопки сохранения/загрузки YAML-файла
+- **Репозиторий** (`configs.db`) — сохранение и загрузка конфигураций с фильтрацией по тегам типов источников/вывода
+
+### Шаг 2 — Configure Sources
+
+Поддерживаемые типы источников:
+
+| Тип | DSN / параметры |
+|-----|----------------|
+| PostgreSQL | host, port, user, password, database, schema |
+| MySQL | host, port, user, password, database |
+| MSSQL / SQL Server | host, port, database, user, password; Windows Auth |
+| SQLite | путь к файлу (диалог выбора) |
+| TDTP File | путь к `.xml`/`.tdtp` файлу |
+| Mock (JSON) | inline JSON-данные |
+
+Возможности:
+- **DSN-генератор** — собирает строку подключения из полей формы
+- **Обратный парсинг DSN** — при редактировании заполняет поля из готового DSN
+- **Test Connection** — проверяет подключение до сохранения источника
+- **Select Table** — список таблиц/представлений из живой БД
+- **Validate** — проверяет уже сохранённый источник
+- **Preview** — показывает первые 10 строк таблицы; при успехе автоматически помечает источник как проверенный (убирает кнопку Validate)
+- Краткое отображение соединения: `host/database · table_name`
+
+### Шаг 3 — Visual Query Designer
+
+Визуальный конструктор запросов на SVG-канвасе.
+
+**Таблицы:**
+- Перетаскивание таблиц из левой панели на канвас (drag-and-drop или клик)
+- Перемещение карточек таблицы по канвасу (drag)
+- Удаление таблицы с канваса
+- Подсветка первичных ключей: золотой фон + иконка 🔑
+
+**Тулбар карточки таблицы** (строка над списком полей):
+
+| Элемент | Действие |
+|---------|---------|
+| 👁 зелёный | Все поля видимы → клик скрывает все |
+| 👁 серый | Есть скрытые → клик показывает все |
+| `N fields` | Счётчик полей |
+| ✱ красный | Есть фильтры → очистить все условия отбора |
+| ✱ серый | Фильтров нет |
+| `AZ▲` | Сортировка полей A→Z |
+| `ZA▼` | Сортировка полей Z→A |
+| `⟲` | Сброс к исходному порядку колонок из БД |
+
+**Поля таблицы** (каждая строка):
+- 👁 — переключить видимость поля в SELECT
+- Имя поля + тип (тип отображается серым)
+- ☀ / `&` / `^` — иконка фильтра (открывает редактор условия)
+- ⚡ — коннектор JOIN (перетаскивание между таблицами)
+
+**Фильтр поля** (`openFilterBuilder`):
+- Заголовок: `Filter: FieldName (тип)` — тип виден сразу
+- Операторы: `=`, `<>`, `>`, `<`, `>=`, `<=`, `BETWEEN`, `IS NULL`, `IS NOT NULL`, `= ''`, `<> ''`
+- Для BETWEEN — два поля значений
+- Логический оператор: AND / OR (комбинирование с другими фильтрами)
+
+**JOIN-ы:**
+- Создание: перетащить ⚡ одного поля на ⚡ другого
+- При несовместимости типов — диалог CAST (CAST LEFT / CAST RIGHT / без CAST)
+- Редактирование JOIN: клик на линию → боковая панель
+  - Тип: INNER / LEFT / RIGHT
+  - CAST для левого/правого поля
+  - Удаление
+- Визуализация: SVG-линии между коннекторами; активный JOIN — синяя линия
+
+**Генерация SQL:**
+- Кнопка «Preview SQL» — показывает итоговый SELECT в модальном окне
+- SQL учитывает: видимость полей, фильтры, тип JOIN (регистронезависимо), CAST, алиасы
+
+**Восстановление канваса при загрузке:**
+- Если дизайн есть в памяти (загружен из репозитория) — рендерится сразу без запроса к бэкенду
+- Если только YAML — реконструкция через `ReconstructCanvas` по SQL трансформации
+- При сбросе сортировки (`⟲`) — оригинальный порядок берётся из кеша или запрашивается у БД
+
+### Шаг 4 — Transform SQL
+
+- Поле имени результирующей таблицы
+- Редактор SQL (моноширинный шрифт, `Courier New`)
+- Кнопка «Preview SQL Result» — выполняет SQL в SQLite in-memory на загруженных источниках, показывает первые строки
+- Живая валидация: имя таблицы + непустой SQL
+
+### Шаг 5 — Configure Output
+
+Поддерживаемые типы вывода:
+
+| Тип | Параметры |
+|-----|-----------|
+| TDTP File | путь к файлу, сжатие |
+| RabbitMQ | connection string, queue |
+| Kafka | brokers, topic |
+| Database | тип (postgres/mysql/mssql/sqlite), DSN, таблица |
+| XLSX | путь к файлу |
+
+### Шаг 6 — Settings
+
+**Performance:**
+- Timeout (сек), Batch Size (строк), Max Memory (МБ)
+- Parallel Sources (чекбокс)
+
+**Audit:**
+- Включить аудит, путь к лог-файлу
+- Log Queries / Log Errors
+
+**Error Handling:**
+- Стратегия на ошибку источника / трансформации / экспорта: `abort`, `skip`, `retry`
+- Retry Count, Retry Delay (сек)
+
+### Шаг 7 — Review & Generate YAML
+
+- Сводка всей конфигурации
+- Генерация YAML (`GenerateYAML`)
+- Сохранение файла
+
+---
+
+## Репозиторий конфигураций
+
+Встроенный SQLite-репозиторий (`configs.db`) рядом с бинарником.
+
+- **Сохранить** — INSERT или UPDATE существующей записи (по имени пайплайна)
+- **Загрузить** — восстанавливает все 7 шагов включая canvas JSON
+- **Удалить** — удаляет запись
+- **Фильтрация** в модальном окне по тегам типов (PostgreSQL, MSSQL, MySQL, SQLite, RabbitMQ, Kafka, TDTP, XLSX)
+
+---
+
+## Режимы работы
+
+| | Mock 🧪 | Production 🏭 |
+|---|---------|--------------|
+| Источники | JSON mock данные | Только реальные БД/TDTP |
+| Валидация | Предупреждения | Блокирует переход |
+| Test Connection | Не требуется | Обязателен |
+| Назначение | Прототипирование | Реальные пайплайны |
+
+---
+
+## Детектирование первичных ключей
+
+| СУБД | Метод |
+|------|-------|
+| PostgreSQL | `pg_index` + `pg_attribute` (системные каталоги) |
+| MySQL | `information_schema.columns.column_key = 'PRI'` |
+| MSSQL | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` JOIN `KEY_COLUMN_USAGE` WHERE `CONSTRAINT_TYPE = 'PRIMARY KEY'` |
+| SQLite | `PRAGMA table_info` — поле `pk > 0` |
+
+> MSSQL: намеренно не используется `OBJECTPROPERTY(OBJECT_ID(...))` — возвращает NULL для имён с символом `$`.
+
+---
+
+## Интеграция с tdtpcli
+
+X-Ray генерирует YAML-конфиг, который запускается через CLI:
+
+```bash
+# Сохранённый X-Ray конфиг
+tdtpcli --pipeline configs/my_pipeline.yaml
+
+# Preview без записи
+tdtpcli --pipeline configs/my_pipeline.yaml --preview --limit 10
+```
+
+---
+
+## Tech Stack
+
+- **Backend:** Go 1.25, Wails v2
+- **Frontend:** HTML5, CSS3, Vanilla JS (без фреймворков), ~3800 строк
+- **Canvas:** SVG (линии JOIN-ов) + абсолютно позиционированные div-карточки
+- **In-memory SQL:** SQLite (`:memory:`) для Preview трансформации
+- **Repository:** SQLite (`configs.db`) для хранения конфигураций
+- **Стиль UI:** Windows Forms-inspired, классический desktop-вид
