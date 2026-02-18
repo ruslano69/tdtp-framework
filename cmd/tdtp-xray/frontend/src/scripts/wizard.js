@@ -1782,6 +1782,11 @@ async function loadFieldsForDesign(design) {
                 }));
                 console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
             }
+            // Save original DB column order for sort-reset
+            window._origFieldOrder = window._origFieldOrder || {};
+            if (!window._origFieldOrder[table.sourceName]) {
+                window._origFieldOrder[table.sourceName] = table.fields.map(f => f.name);
+            }
         } catch (err) {
             console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
         }
@@ -1982,6 +1987,9 @@ async function addTableToCanvas(sourceName) {
         };
 
         console.log(`➕ Adding table to canvas:`, newTable);
+        // Save original DB column order for sort-reset
+        window._origFieldOrder = window._origFieldOrder || {};
+        window._origFieldOrder[sourceName] = fields.map(f => f.name);
         canvasDesign.tables.push(newTable);
         renderCanvas();
     } catch (err) {
@@ -2099,6 +2107,9 @@ function createTableCard(table, index) {
         <span onclick="sortTableFields(${index}, 'ZA')"
               title="Sort Z→A"
               style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">ZA▼</span>
+        <span onclick="resetFieldSort(${index})"
+              title="Reset to original order"
+              style="cursor:pointer; font-weight:700; color:#888; user-select:none; font-size:13px; line-height:1;">⟲</span>
     `;
     card.appendChild(toolbar);
 
@@ -2626,6 +2637,20 @@ function sortTableFields(tableIndex, direction) {
         const cmp = a.name.localeCompare(b.name);
         return direction === 'ZA' ? -cmp : cmp;
     });
+    renderCanvas();
+}
+
+function resetFieldSort(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const orig = (window._origFieldOrder || {})[table.sourceName];
+    if (!orig) return;
+    const fieldMap = {};
+    table.fields.forEach(f => { fieldMap[f.name] = f; });
+    const reordered = orig.map(name => fieldMap[name]).filter(Boolean);
+    // Append any fields not captured in orig (edge case)
+    const inOrig = new Set(orig);
+    table.fields.filter(f => !inOrig.has(f.name)).forEach(f => reordered.push(f));
+    table.fields = reordered;
     renderCanvas();
 }
 
