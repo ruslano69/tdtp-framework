@@ -2286,6 +2286,14 @@ type RepositoryEntry struct {
 	Description string `json:"description"`
 	CreatedAt   string `json:"createdAt"`
 	UpdatedAt   string `json:"updatedAt"`
+	// Usage flags — which technologies are used in this pipeline
+	UsSQLite bool `json:"usSqlite"`
+	UsMSSQL  bool `json:"usMssql"`
+	UsMySQL  bool `json:"usMysql"`
+	UsRabbit bool `json:"usRabbit"`
+	UsKafka  bool `json:"usKafka"`
+	UsTDTP   bool `json:"usTdtp"`
+	UsXLSX   bool `json:"usXlsx"`
 }
 
 // RepoSaveResult is returned by SaveToRepository.
@@ -2326,7 +2334,14 @@ func (a *App) initRepository() {
 		yaml_config TEXT    NOT NULL DEFAULT '',
 		canvas_json TEXT    NOT NULL DEFAULT '{}',
 		created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-		updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+		updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+		us_sqlite   INTEGER NOT NULL DEFAULT 0,
+		us_mssql    INTEGER NOT NULL DEFAULT 0,
+		us_mysql    INTEGER NOT NULL DEFAULT 0,
+		us_rabbit   INTEGER NOT NULL DEFAULT 0,
+		us_kafka    INTEGER NOT NULL DEFAULT 0,
+		us_tdtp     INTEGER NOT NULL DEFAULT 0,
+		us_xlsx     INTEGER NOT NULL DEFAULT 0
 	)`)
 	if err != nil {
 		fmt.Printf("⚠️ Repository: failed to create table: %v\n", err)
@@ -2334,8 +2349,45 @@ func (a *App) initRepository() {
 		return
 	}
 
+	// Migrate existing databases: add us_* columns if they don't exist yet
+	for _, col := range []string{"us_sqlite", "us_mssql", "us_mysql", "us_rabbit", "us_kafka", "us_tdtp", "us_xlsx"} {
+		db.Exec(fmt.Sprintf("ALTER TABLE pipelines ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", col))
+		// ignore error — column already exists in new databases
+	}
+
 	a.repoDB = db
 	fmt.Printf("✅ Repository opened: %s\n", dbPath)
+}
+
+// repoUsageFlags computes which technologies are used in the current pipeline state.
+func (a *App) repoUsageFlags() (usSQLite, usMSSQL, usMySQL, usRabbit, usKafka, usTDTP, usXLSX bool) {
+	for _, src := range a.sources {
+		switch strings.ToLower(src.Type) {
+		case "sqlite":
+			usSQLite = true
+		case "mssql":
+			usMSSQL = true
+		case "mysql":
+			usMySQL = true
+		case "tdtp":
+			usTDTP = true
+		}
+	}
+	if a.output != nil {
+		switch strings.ToLower(a.output.Type) {
+		case "tdtp", "tdtp_file":
+			usTDTP = true
+		case "rabbitmq", "rabbit":
+			usRabbit = true
+		case "kafka":
+			usKafka = true
+		case "xlsx":
+			usXLSX = true
+		case "database", "sqlite":
+			usSQLite = true
+		}
+	}
+	return
 }
 
 // SaveToRepository saves the current pipeline (YAML + canvas JSON) to configs.db.
@@ -2355,6 +2407,14 @@ func (a *App) SaveToRepository(canvasJSON string) RepoSaveResult {
 
 	name := a.pipelineInfo.Name
 
+	usSQLite, usMSSQL, usMySQL, usRabbit, usKafka, usTDTP, usXLSX := a.repoUsageFlags()
+	b2i := func(v bool) int {
+		if v {
+			return 1
+		}
+		return 0
+	}
+
 	// Upsert: check if a record with this name exists
 	var existingID int64
 	lookupErr := a.repoDB.QueryRow("SELECT id FROM pipelines WHERE name = ?", name).Scan(&existingID)
@@ -2362,8 +2422,12 @@ func (a *App) SaveToRepository(canvasJSON string) RepoSaveResult {
 	if lookupErr == nil {
 		// Update existing record
 		_, err = a.repoDB.Exec(
-			`UPDATE pipelines SET version=?, description=?, yaml_config=?, canvas_json=?, updated_at=datetime('now') WHERE id=?`,
-			a.pipelineInfo.Version, a.pipelineInfo.Description, yamlStr, canvasJSON, existingID,
+			`UPDATE pipelines SET version=?, description=?, yaml_config=?, canvas_json=?,
+			 us_sqlite=?, us_mssql=?, us_mysql=?, us_rabbit=?, us_kafka=?, us_tdtp=?, us_xlsx=?,
+			 updated_at=datetime('now') WHERE id=?`,
+			a.pipelineInfo.Version, a.pipelineInfo.Description, yamlStr, canvasJSON,
+			b2i(usSQLite), b2i(usMSSQL), b2i(usMySQL), b2i(usRabbit), b2i(usKafka), b2i(usTDTP), b2i(usXLSX),
+			existingID,
 		)
 		if err != nil {
 			return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to update: %v", err)}
@@ -2373,8 +2437,11 @@ func (a *App) SaveToRepository(canvasJSON string) RepoSaveResult {
 
 	// Insert new record
 	res, err := a.repoDB.Exec(
-		`INSERT INTO pipelines (name, version, description, yaml_config, canvas_json) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO pipelines (name, version, description, yaml_config, canvas_json,
+		 us_sqlite, us_mssql, us_mysql, us_rabbit, us_kafka, us_tdtp, us_xlsx)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		name, a.pipelineInfo.Version, a.pipelineInfo.Description, yamlStr, canvasJSON,
+		b2i(usSQLite), b2i(usMSSQL), b2i(usMySQL), b2i(usRabbit), b2i(usKafka), b2i(usTDTP), b2i(usXLSX),
 	)
 	if err != nil {
 		return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to insert: %v", err)}
@@ -2389,7 +2456,9 @@ func (a *App) ListRepositoryConfigs() []RepositoryEntry {
 		return []RepositoryEntry{}
 	}
 	rows, err := a.repoDB.Query(
-		`SELECT id, name, version, description, created_at, updated_at FROM pipelines ORDER BY updated_at DESC`,
+		`SELECT id, name, version, description, created_at, updated_at,
+		        us_sqlite, us_mssql, us_mysql, us_rabbit, us_kafka, us_tdtp, us_xlsx
+		 FROM pipelines ORDER BY updated_at DESC`,
 	)
 	if err != nil {
 		fmt.Printf("⚠️ Repository: list error: %v\n", err)
@@ -2400,7 +2469,19 @@ func (a *App) ListRepositoryConfigs() []RepositoryEntry {
 	var entries []RepositoryEntry
 	for rows.Next() {
 		var e RepositoryEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.Version, &e.Description, &e.CreatedAt, &e.UpdatedAt); err == nil {
+		var sqlite, mssql, mysql, rabbit, kafka, tdtp, xlsx int
+		err := rows.Scan(
+			&e.ID, &e.Name, &e.Version, &e.Description, &e.CreatedAt, &e.UpdatedAt,
+			&sqlite, &mssql, &mysql, &rabbit, &kafka, &tdtp, &xlsx,
+		)
+		if err == nil {
+			e.UsSQLite = sqlite != 0
+			e.UsMSSQL = mssql != 0
+			e.UsMySQL = mysql != 0
+			e.UsRabbit = rabbit != 0
+			e.UsKafka = kafka != 0
+			e.UsTDTP = tdtp != 0
+			e.UsXLSX = xlsx != 0
 			entries = append(entries, e)
 		}
 	}

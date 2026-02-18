@@ -558,18 +558,47 @@ async function openRepositoryModal() {
         display: flex; justify-content: center; align-items: center;
     `;
 
-    let tableRows = '';
-    if (!entries || entries.length === 0) {
-        tableRows = `<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">
-            Repository is empty. Save a pipeline on Step 7 first.</td></tr>`;
-    } else {
-        entries.forEach(e => {
+    // Store entries for client-side filtering
+    window._repoEntries = entries || [];
+
+    const filterDefs = [
+        ['fSQLite', 'usSqlite', 'SQLite'],
+        ['fMSSQL',  'usMssql',  'MSSQL'],
+        ['fMySQL',  'usMysql',  'MySQL'],
+        ['fRabbit', 'usRabbit', 'RabbitMQ'],
+        ['fKafka',  'usKafka',  'Kafka'],
+        ['fTDTP',   'usTdtp',   'TDTP'],
+        ['fXLSX',   'usXlsx',   'XLSX'],
+    ];
+
+    function buildRepoRows(list) {
+        if (!list || list.length === 0) {
+            return `<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">
+                No pipelines match the selected filters (or repository is empty).</td></tr>`;
+        }
+        return list.map(e => {
             const updated = e.updatedAt ? e.updatedAt.replace('T', ' ').substring(0, 16) : '';
             const desc = e.description ? `<br><small style="color:#888">${e.description}</small>` : '';
-            tableRows += `
+            const tagStyles = {
+                usSqlite: 'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
+                usMssql:  'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
+                usMysql:  'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
+                usRabbit: 'background:#fff3e0;color:#c96a00;border:1px solid #f0c080',
+                usKafka:  'background:#fff3e0;color:#c96a00;border:1px solid #f0c080',
+                usTdtp:   'background:#eef4ee;color:#2a6a2a;border:1px solid #a0c8a0',
+                usXlsx:   'background:#eef4ee;color:#2a6a2a;border:1px solid #a0c8a0',
+            };
+            const tagLabels = { usSqlite:'SQLite', usMssql:'MSSQL', usMysql:'MySQL',
+                                usRabbit:'RabbitMQ', usKafka:'Kafka', usTdtp:'TDTP', usXlsx:'XLSX' };
+            const tags = Object.keys(tagLabels)
+                .filter(k => e[k])
+                .map(k => `<span style="${tagStyles[k]};padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;">${tagLabels[k]}</span>`)
+                .join('');
+            return `
                 <tr>
                     <td style="padding:8px 10px;border-bottom:1px solid #eee;">
                         <strong>${e.name}</strong>${desc}
+                        <div style="margin-top:3px;">${tags}</div>
                     </td>
                     <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#666;">${e.version || ''}</td>
                     <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#888;font-size:11px;">${updated}</td>
@@ -581,33 +610,45 @@ async function openRepositoryModal() {
                     </td>
                 </tr>
             `;
-        });
+        }).join('');
     }
+    window._buildRepoRows = buildRepoRows;
+
+    const totalCount = entries ? entries.length : 0;
 
     modal.innerHTML = `
-        <div style="background:white;border-radius:5px;min-width:650px;max-width:90%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+        <div style="background:white;border-radius:5px;min-width:700px;max-width:92%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
             <div style="padding:15px 20px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;background:#0055aa;color:white;border-radius:5px 5px 0 0;">
                 <h3 style="margin:0;">📚 Pipeline Repository</h3>
                 <button onclick="closeRepositoryModal()" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;line-height:1;">×</button>
+            </div>
+            <div style="padding:8px 15px;background:#f0f5ff;border-bottom:1px solid #ccd8f0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <span style="font-size:12px;font-weight:600;color:#444;">Filter:</span>
+                ${filterDefs.map(([id,,label]) =>
+                    `<label style="font-size:12px;cursor:pointer;display:flex;gap:4px;align-items:center;">
+                        <input type="checkbox" id="${id}" onchange="applyRepoFilter()"> ${label}
+                    </label>`
+                ).join('')}
+                <button class="btn btn-sm" onclick="applyRepoFilter(true)" style="margin-left:auto;font-size:11px;">Clear</button>
             </div>
             <div style="overflow-y:auto;flex:1;">
                 <table style="width:100%;border-collapse:collapse;">
                     <thead>
                         <tr style="background:#f8f9fa;">
-                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Name</th>
+                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Name / Technologies</th>
                             <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Version</th>
                             <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Last Updated</th>
                             <th colspan="2" style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="repositoryTableBody">
-                        ${tableRows}
+                        ${buildRepoRows(entries)}
                     </tbody>
                 </table>
             </div>
-            <div style="padding:12px 20px;border-top:1px solid #ddd;text-align:right;background:#f8f9fa;border-radius:0 0 5px 5px;">
-                <small style="color:#888;">configs.db — ${entries ? entries.length : 0} pipeline(s)</small>
-                <button class="btn" onclick="closeRepositoryModal()" style="margin-left:10px;">Close</button>
+            <div style="padding:12px 20px;border-top:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;background:#f8f9fa;border-radius:0 0 5px 5px;">
+                <small style="color:#888;" id="repoCount">configs.db — ${totalCount} pipeline(s)</small>
+                <button class="btn" onclick="closeRepositoryModal()">Close</button>
             </div>
         </div>
     `;
@@ -619,6 +660,44 @@ async function openRepositoryModal() {
 function closeRepositoryModal() {
     const modal = document.getElementById('repositoryModal');
     if (modal) modal.remove();
+}
+
+function applyRepoFilter(clear) {
+    const filterMap = [
+        ['fSQLite', 'usSqlite'],
+        ['fMSSQL',  'usMssql'],
+        ['fMySQL',  'usMysql'],
+        ['fRabbit', 'usRabbit'],
+        ['fKafka',  'usKafka'],
+        ['fTDTP',   'usTdtp'],
+        ['fXLSX',   'usXlsx'],
+    ];
+    if (clear) {
+        filterMap.forEach(([id]) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = false;
+        });
+    }
+    const active = filterMap.filter(([id]) => {
+        const el = document.getElementById(id);
+        return el && el.checked;
+    }).map(([,key]) => key);
+
+    const all = window._repoEntries || [];
+    const filtered = active.length === 0
+        ? all
+        : all.filter(e => active.every(k => e[k]));
+
+    const tbody = document.getElementById('repositoryTableBody');
+    if (tbody && window._buildRepoRows) {
+        tbody.innerHTML = window._buildRepoRows(filtered);
+    }
+    const countEl = document.getElementById('repoCount');
+    if (countEl) {
+        countEl.textContent = active.length === 0
+            ? `configs.db — ${all.length} pipeline(s)`
+            : `Showing ${filtered.length} of ${all.length} pipeline(s)`;
+    }
 }
 
 async function loadFromRepositoryEntry(id) {
