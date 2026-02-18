@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -393,7 +394,12 @@ func main() {
 	// Load configuration
 	config, err := LoadConfig(*flags.Config)
 	if err != nil {
-		fatal("Failed to load config: %v", err)
+		if *flags.Pipeline != "" && errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "WARNING: config file %q not found. Audit log and Circuit Breaker set to defaults (disabled).\n", *flags.Config)
+			config = &Config{}
+		} else {
+			fatal("Failed to load config: %v", err)
+		}
 	}
 
 	// Initialize production features (Circuit Breaker, Audit, Retry)
