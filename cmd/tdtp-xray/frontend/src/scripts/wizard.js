@@ -1656,6 +1656,13 @@ async function previewSource(index) {
         html += `<p style="margin-top: 10px; color: #666;"><small>Showing ${result.rows.length} rows</small></p>`;
 
         previewContent.innerHTML = html;
+
+        // Preview succeeded — mark source as validated automatically
+        if (!sources[index].tested) {
+            sources[index].tested = true;
+            renderSourcesList();
+            showNotification(`✅ ${src.name}: validated via preview`, 'success');
+        }
     } catch (err) {
         console.error('Preview error:', err);
         previewContent.innerHTML = `<p style="color: red;">❌ Error: ${err}</p>`;
@@ -1822,6 +1829,13 @@ function loadStep3Data() {
         if (canvasDesign && canvasDesign.tables && canvasDesign.tables.length > 0) {
             renderCanvas();
         }
+        return;
+    }
+
+    // If canvasDesign already populated (e.g. loaded from repository), skip backend fetch
+    if (canvasDesign && canvasDesign.tables && canvasDesign.tables.length > 0) {
+        console.log('✅ canvasDesign already loaded (from repository), rendering directly');
+        loadFieldsForDesign(canvasDesign).then(() => renderCanvas());
         return;
     }
 
