@@ -562,6 +562,7 @@ async function openRepositoryModal() {
     window._repoEntries = entries || [];
 
     const filterDefs = [
+        ['fPG',     'usPg',     'PostgreSQL'],
         ['fSQLite', 'usSqlite', 'SQLite'],
         ['fMSSQL',  'usMssql',  'MSSQL'],
         ['fMySQL',  'usMysql',  'MySQL'],
@@ -580,6 +581,7 @@ async function openRepositoryModal() {
             const updated = e.updatedAt ? e.updatedAt.replace('T', ' ').substring(0, 16) : '';
             const desc = e.description ? `<br><small style="color:#888">${e.description}</small>` : '';
             const tagStyles = {
+                usPg:     'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
                 usSqlite: 'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
                 usMssql:  'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
                 usMysql:  'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
@@ -588,7 +590,7 @@ async function openRepositoryModal() {
                 usTdtp:   'background:#eef4ee;color:#2a6a2a;border:1px solid #a0c8a0',
                 usXlsx:   'background:#eef4ee;color:#2a6a2a;border:1px solid #a0c8a0',
             };
-            const tagLabels = { usSqlite:'SQLite', usMssql:'MSSQL', usMysql:'MySQL',
+            const tagLabels = { usPg:'PostgreSQL', usSqlite:'SQLite', usMssql:'MSSQL', usMysql:'MySQL',
                                 usRabbit:'RabbitMQ', usKafka:'Kafka', usTdtp:'TDTP', usXlsx:'XLSX' };
             const tags = Object.keys(tagLabels)
                 .filter(k => e[k])
@@ -670,6 +672,7 @@ function closeRepositoryModal() {
 
 function applyRepoFilter(clear) {
     const filterMap = [
+        ['fPG',     'usPg'],
         ['fSQLite', 'usSqlite'],
         ['fMSSQL',  'usMssql'],
         ['fMySQL',  'usMysql'],
