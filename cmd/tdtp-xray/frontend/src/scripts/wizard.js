@@ -2640,15 +2640,32 @@ function sortTableFields(tableIndex, direction) {
     renderCanvas();
 }
 
-function resetFieldSort(tableIndex) {
+async function resetFieldSort(tableIndex) {
     const table = canvasDesign.tables[tableIndex];
-    const orig = (window._origFieldOrder || {})[table.sourceName];
-    if (!orig) return;
+
+    // Try cache first; if missing (e.g. loaded from DB) fetch from backend
+    let origNames = (window._origFieldOrder || {})[table.sourceName];
+
+    if (!origNames) {
+        if (!wailsReady || !window.go) return;
+        try {
+            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+            if (!dbTables || !dbTables[0] || !dbTables[0].columns) return;
+            origNames = dbTables[0].columns.map(c => c.name);
+            // Cache for next time
+            window._origFieldOrder = window._origFieldOrder || {};
+            window._origFieldOrder[table.sourceName] = origNames;
+        } catch (err) {
+            showNotification('Failed to fetch original order: ' + err, 'error');
+            return;
+        }
+    }
+
     const fieldMap = {};
     table.fields.forEach(f => { fieldMap[f.name] = f; });
-    const reordered = orig.map(name => fieldMap[name]).filter(Boolean);
-    // Append any fields not captured in orig (edge case)
-    const inOrig = new Set(orig);
+    const reordered = origNames.map(name => fieldMap[name]).filter(Boolean);
+    // Append any fields not in DB result (edge case)
+    const inOrig = new Set(origNames);
     table.fields.filter(f => !inOrig.has(f.name)).forEach(f => reordered.push(f));
     table.fields = reordered;
     renderCanvas();
