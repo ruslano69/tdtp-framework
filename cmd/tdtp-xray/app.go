@@ -1116,12 +1116,11 @@ func parseRabbitMQConfig(connStr, queue string) *RabbitMQOutputConfig {
 }
 
 func (a *App) buildPerformanceConfig() *PerformanceConfig {
-	if a.settings.Performance.Timeout == 0 && a.settings.Performance.BatchSize == 0 {
+	if a.settings.Performance.BatchSize == 0 && a.settings.Performance.MaxMemoryMB == 0 {
 		// Return nil to omit empty performance section
 		return nil
 	}
 	return &PerformanceConfig{
-		Timeout:         a.settings.Performance.Timeout,
 		BatchSize:       a.settings.Performance.BatchSize,
 		ParallelSources: a.settings.Performance.ParallelSources,
 		MaxMemoryMB:     a.settings.Performance.MaxMemoryMB,
@@ -1147,11 +1146,11 @@ func (a *App) buildErrorHandlingConfig() *ErrorHandlingConfig {
 		return nil
 	}
 	return &ErrorHandlingConfig{
-		OnSourceError:    a.settings.ErrorHandling.OnSourceError,
-		OnTransformError: a.settings.ErrorHandling.OnTransformError,
-		OnExportError:    a.settings.ErrorHandling.OnExportError,
-		RetryCount:       a.settings.ErrorHandling.RetryCount,
-		RetryDelaySec:    a.settings.ErrorHandling.RetryDelaySec,
+		OnSourceError:     a.settings.ErrorHandling.OnSourceError,
+		OnTransformError:  a.settings.ErrorHandling.OnTransformError,
+		OnOutputError:     a.settings.ErrorHandling.OnExportError,
+		RetryAttempts:     a.settings.ErrorHandling.RetryCount,
+		RetryDelaySeconds: a.settings.ErrorHandling.RetryDelaySec,
 	}
 }
 
@@ -1598,7 +1597,6 @@ type KafkaOutputConfig struct {
 
 // PerformanceConfig for performance tuning
 type PerformanceConfig struct {
-	Timeout         int  `yaml:"timeout,omitempty" json:"timeout,omitempty"`                   // seconds
 	BatchSize       int  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`             // rows per batch
 	ParallelSources bool `yaml:"parallel_sources,omitempty" json:"parallel_sources,omitempty"` // load sources in parallel
 	MaxMemoryMB     int  `yaml:"max_memory_mb,omitempty" json:"max_memory_mb,omitempty"`       // memory limit in MB
@@ -1616,9 +1614,9 @@ type AuditConfig struct {
 type ErrorHandlingConfig struct {
 	OnSourceError    string `yaml:"on_source_error,omitempty" json:"on_source_error,omitempty"`       // continue | fail
 	OnTransformError string `yaml:"on_transform_error,omitempty" json:"on_transform_error,omitempty"` // continue | fail
-	OnExportError    string `yaml:"on_export_error,omitempty" json:"on_export_error,omitempty"`       // continue | fail
-	RetryCount       int    `yaml:"retry_count,omitempty" json:"retry_count,omitempty"`
-	RetryDelaySec    int    `yaml:"retry_delay_sec,omitempty" json:"retry_delay_sec,omitempty"`
+	OnOutputError    string `yaml:"on_output_error,omitempty" json:"on_output_error,omitempty"`       // continue | fail
+	RetryAttempts    int    `yaml:"retry_attempts,omitempty" json:"retry_attempts,omitempty"`
+	RetryDelaySeconds int   `yaml:"retry_delay_seconds,omitempty" json:"retry_delay_seconds,omitempty"`
 }
 
 // SecurityConfig for security settings
@@ -2044,7 +2042,7 @@ func (a *App) loadSettingsFromConfig(config *TDTPConfig) {
 	// Performance
 	if config.Performance != nil {
 		a.settings.Performance = Performance{
-			Timeout:         config.Performance.Timeout,
+			Timeout:         300, // UI-only field, not written to YAML
 			BatchSize:       config.Performance.BatchSize,
 			ParallelSources: config.Performance.ParallelSources,
 			MaxMemoryMB:     config.Performance.MaxMemoryMB,
@@ -2087,9 +2085,9 @@ func (a *App) loadSettingsFromConfig(config *TDTPConfig) {
 		a.settings.ErrorHandling = ErrorHandling{
 			OnSourceError:    config.ErrorHandling.OnSourceError,
 			OnTransformError: config.ErrorHandling.OnTransformError,
-			OnExportError:    config.ErrorHandling.OnExportError,
-			RetryCount:       config.ErrorHandling.RetryCount,
-			RetryDelaySec:    config.ErrorHandling.RetryDelaySec,
+			OnExportError:    config.ErrorHandling.OnOutputError,
+			RetryCount:       config.ErrorHandling.RetryAttempts,
+			RetryDelaySec:    config.ErrorHandling.RetryDelaySeconds,
 		}
 	} else {
 		a.settings.ErrorHandling = ErrorHandling{
