@@ -291,18 +291,31 @@ function getStep1HTML() {
 
             <div class="panel">
                 <!-- Load/Save Configuration -->
-                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
-                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">Configuration File</h3>
+                <div style="margin-bottom: 15px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">📁 YAML File</h3>
                     <div style="display: flex; gap: 10px;">
                         <button class="btn btn-secondary" onclick="loadConfigurationFile()" style="flex: 1;">
-                            📁 Load Configuration...
+                            📁 Load from File...
                         </button>
                         <button class="btn btn-secondary" onclick="saveConfigurationFile()" style="flex: 1;">
-                            💾 Save Configuration...
+                            💾 Save to File...
                         </button>
                     </div>
                     <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">
                         Load existing TDTP pipeline YAML or save current configuration
+                    </p>
+                </div>
+
+                <!-- Repository -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #eef4ff; border: 1px solid #b8d0f0; border-radius: 3px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">📚 Repository (configs.db)</h3>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="openRepositoryModal()" style="flex: 1;">
+                            📚 Open Repository...
+                        </button>
+                    </div>
+                    <p style="margin: 5px 0 0 0; font-size: 10px; color: #5a7fa0;">
+                        Load configs with full canvas state (field visibility, filters, JOINs)
                     </p>
                 </div>
 
@@ -489,6 +502,166 @@ async function saveAndExit() {
     } catch (err) {
         console.error('Save & Exit error:', err);
         showNotification('Failed to save configuration: ' + err, 'error');
+    }
+}
+
+// ========== REPOSITORY ==========
+
+async function saveToRepository() {
+    if (!wailsReady || !window.go) {
+        showNotification('Backend not ready', 'error');
+        return;
+    }
+
+    // Ensure current step data is saved first
+    await saveCurrentStep();
+
+    const btn = event && event.currentTarget;
+    const originalText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Saving...'; }
+
+    try {
+        const canvasJSON = JSON.stringify(canvasDesign || { tables: [], joins: [] });
+        const result = await window.go.main.App.SaveToRepository(canvasJSON);
+        if (result.success) {
+            const action = result.updated ? 'Updated' : 'Saved';
+            showNotification(`✅ ${action} in repository (ID: ${result.id})`, 'success');
+        } else {
+            showNotification(`❌ Repository save failed: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        showNotification('Repository save error: ' + err, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
+    }
+}
+
+async function openRepositoryModal() {
+    if (!wailsReady || !window.go) {
+        showNotification('Backend not ready', 'error');
+        return;
+    }
+
+    let entries = [];
+    try {
+        entries = await window.go.main.App.ListRepositoryConfigs();
+    } catch (err) {
+        showNotification('Failed to list repository: ' + err, 'error');
+        return;
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'repositoryModal';
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5); z-index: 3000;
+        display: flex; justify-content: center; align-items: center;
+    `;
+
+    let tableRows = '';
+    if (!entries || entries.length === 0) {
+        tableRows = `<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">
+            Repository is empty. Save a pipeline on Step 7 first.</td></tr>`;
+    } else {
+        entries.forEach(e => {
+            const updated = e.updatedAt ? e.updatedAt.replace('T', ' ').substring(0, 16) : '';
+            const desc = e.description ? `<br><small style="color:#888">${e.description}</small>` : '';
+            tableRows += `
+                <tr>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+                        <strong>${e.name}</strong>${desc}
+                    </td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#666;">${e.version || ''}</td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#888;font-size:11px;">${updated}</td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;white-space:nowrap;">
+                        <button class="btn btn-sm btn-primary" onclick="loadFromRepositoryEntry(${e.id})">Load</button>
+                    </td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+                        <button class="btn btn-sm" style="color:#dc3545;border-color:#dc3545;" onclick="deleteFromRepositoryEntry(${e.id})">Delete</button>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    modal.innerHTML = `
+        <div style="background:white;border-radius:5px;min-width:650px;max-width:90%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+            <div style="padding:15px 20px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;background:#0055aa;color:white;border-radius:5px 5px 0 0;">
+                <h3 style="margin:0;">📚 Pipeline Repository</h3>
+                <button onclick="closeRepositoryModal()" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;line-height:1;">×</button>
+            </div>
+            <div style="overflow-y:auto;flex:1;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:#f8f9fa;">
+                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Name</th>
+                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Version</th>
+                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Last Updated</th>
+                            <th colspan="2" style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="repositoryTableBody">
+                        ${tableRows}
+                    </tbody>
+                </table>
+            </div>
+            <div style="padding:12px 20px;border-top:1px solid #ddd;text-align:right;background:#f8f9fa;border-radius:0 0 5px 5px;">
+                <small style="color:#888;">configs.db — ${entries ? entries.length : 0} pipeline(s)</small>
+                <button class="btn" onclick="closeRepositoryModal()" style="margin-left:10px;">Close</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeRepositoryModal(); });
+}
+
+function closeRepositoryModal() {
+    const modal = document.getElementById('repositoryModal');
+    if (modal) modal.remove();
+}
+
+async function loadFromRepositoryEntry(id) {
+    if (!wailsReady || !window.go) return;
+
+    try {
+        const result = await window.go.main.App.LoadFromRepository(id);
+        if (!result.success) {
+            showNotification(`❌ Load failed: ${result.error}`, 'error');
+            return;
+        }
+
+        // Restore canvas design directly from stored JSON — no SQL parsing needed!
+        if (result.canvasJson && result.canvasJson !== '{}') {
+            try {
+                canvasDesign = JSON.parse(result.canvasJson);
+            } catch (e) {
+                canvasDesign = { tables: [], joins: [] };
+            }
+        } else {
+            canvasDesign = { tables: [], joins: [] };
+        }
+
+        closeRepositoryModal();
+        await refreshAllSteps();
+        showNotification(
+            `✅ Loaded "${result.config ? result.config.name : ''}" from repository`,
+            'success'
+        );
+    } catch (err) {
+        showNotification('Load from repository error: ' + err, 'error');
+    }
+}
+
+async function deleteFromRepositoryEntry(id) {
+    if (!confirm('Delete this pipeline from repository?')) return;
+    try {
+        await window.go.main.App.DeleteFromRepository(id);
+        // Refresh the modal table
+        closeRepositoryModal();
+        await openRepositoryModal();
+    } catch (err) {
+        showNotification('Delete error: ' + err, 'error');
     }
 }
 
@@ -3359,7 +3532,7 @@ function getStep7HTML() {
                     <p style="color: #666;">Loading configuration summary...</p>
                 </div>
 
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;">
                     <button class="btn btn-primary" onclick="generateAndShowYAML()" style="flex: 1;">
                         📄 Generate YAML
                     </button>
@@ -3369,6 +3542,14 @@ function getStep7HTML() {
                     <button class="btn btn-secondary" onclick="copyYAMLToClipboard()" style="flex: 1;">
                         📋 Copy to Clipboard
                     </button>
+                </div>
+                <div style="padding: 12px; background: #eef4ff; border: 1px solid #b8d0f0; border-radius: 3px;">
+                    <button class="btn btn-primary" onclick="saveToRepository()" style="width: 100%; background: #0055aa;">
+                        📚 Save to Repository (configs.db)
+                    </button>
+                    <p style="margin: 6px 0 0 0; font-size: 10px; color: #5a7fa0; text-align: center;">
+                        Saves YAML + full canvas state (visibility, filters, JOINs, positions)
+                    </p>
                 </div>
             </div>
 

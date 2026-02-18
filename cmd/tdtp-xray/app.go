@@ -34,6 +34,8 @@ type App struct {
 	sourceService   *services.SourceService
 	previewService  *services.PreviewService
 	tdtpService     *services.TDTPService
+	// Local SQLite repository (configs.db next to the binary)
+	repoDB *sql.DB
 }
 
 // NewApp creates a new App application struct
@@ -53,6 +55,7 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.initRepository()
 }
 
 // Quit closes the application window.
@@ -1736,7 +1739,34 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		config.Sources = make([]SourceConfig, 0)
 	}
 
-	// Convert tdtpcli format (SourceConfig) to GUI format (Source)
+	// Load config into app state (shared helper)
+	a.loadConfigFromYAML(&config)
+
+	// For YAML files: try to restore canvas from SQL (best-effort; repo loads use stored canvas JSON)
+	if a.transform != nil && a.transform.SQL != "" {
+		if cd := parseSQLToCanvasDesign(a.transform.SQL); cd != nil {
+			a.canvasDesign = cd
+		}
+	}
+
+	return ConfigFileResult{
+		Success:  true,
+		Filename: filepath.Base(path),
+		Config: &PipelineInfo{
+			Name:        config.Name,
+			Version:     config.Version,
+			Description: config.Description,
+		},
+	}
+}
+
+// loadConfigFromYAML loads a parsed TDTPConfig into App state (sources, transform, output, settings).
+// Does NOT set canvasDesign — callers decide canvas restoration strategy.
+func (a *App) loadConfigFromYAML(config *TDTPConfig) {
+	if config.Sources == nil {
+		config.Sources = make([]SourceConfig, 0)
+	}
+
 	guiSources := make([]Source, len(config.Sources))
 	for i, srcConfig := range config.Sources {
 		guiSources[i] = Source{
@@ -1749,7 +1779,6 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Load configuration into app state
 	a.pipelineInfo = PipelineInfo{
 		Name:        config.Name,
 		Version:     config.Version,
@@ -1757,7 +1786,6 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 	}
 	a.sources = guiSources
 
-	// Load Transform
 	if config.Transform.ResultTable != "" || config.Transform.SQL != "" {
 		a.transform = &Transform{
 			ResultTable: config.Transform.ResultTable,
@@ -1765,28 +1793,8 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Restore canvas design from transform SQL (field visibility + WHERE conditions + JOINs)
-	if a.transform != nil && a.transform.SQL != "" {
-		if cd := parseSQLToCanvasDesign(a.transform.SQL); cd != nil {
-			a.canvasDesign = cd
-		}
-	}
-
-	// Load Output
 	a.output = a.loadOutputFromConfig(&config.Output)
-
-	// Load Settings
-	a.loadSettingsFromConfig(&config)
-
-	return ConfigFileResult{
-		Success:  true,
-		Filename: filepath.Base(path),
-		Config: &PipelineInfo{
-			Name:        config.Name,
-			Version:     config.Version,
-			Description: config.Description,
-		},
-	}
+	a.loadSettingsFromConfig(config)
 }
 
 // extractTableNameFromQuery tries to parse a simple "SELECT ... FROM tablename ..." query
@@ -2264,4 +2272,189 @@ func getDefaultTransformSQL(sources []Source) string {
 	// Bracket-quote the name: works for MSSQL and in-memory SQLite;
 	// both drivers interpret $identifier as a named parameter placeholder.
 	return fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(sources[0].Name))
+}
+
+// ============================================================
+// --- Local Repository (configs.db) ---
+// ============================================================
+
+// RepositoryEntry is a row returned by ListRepositoryConfigs.
+type RepositoryEntry struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+// RepoSaveResult is returned by SaveToRepository.
+type RepoSaveResult struct {
+	Success bool   `json:"success"`
+	ID      int64  `json:"id"`
+	Updated bool   `json:"updated"` // true = existing record updated, false = new record
+	Error   string `json:"error,omitempty"`
+}
+
+// RepoLoadResult is returned by LoadFromRepository.
+type RepoLoadResult struct {
+	Success    bool          `json:"success"`
+	CanvasJSON string        `json:"canvasJson"`
+	Config     *PipelineInfo `json:"config,omitempty"`
+	Error      string        `json:"error,omitempty"`
+}
+
+// initRepository opens (or creates) configs.db next to the executable.
+func (a *App) initRepository() {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "."
+	}
+	dbPath := filepath.Join(filepath.Dir(exe), "configs.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		fmt.Printf("⚠️ Repository: failed to open %s: %v\n", dbPath, err)
+		return
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS pipelines (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		name        TEXT    NOT NULL,
+		version     TEXT    NOT NULL DEFAULT '',
+		description TEXT    NOT NULL DEFAULT '',
+		yaml_config TEXT    NOT NULL DEFAULT '',
+		canvas_json TEXT    NOT NULL DEFAULT '{}',
+		created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+		updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+	)`)
+	if err != nil {
+		fmt.Printf("⚠️ Repository: failed to create table: %v\n", err)
+		db.Close()
+		return
+	}
+
+	a.repoDB = db
+	fmt.Printf("✅ Repository opened: %s\n", dbPath)
+}
+
+// SaveToRepository saves the current pipeline (YAML + canvas JSON) to configs.db.
+// If a pipeline with the same name already exists it is updated (upsert by name).
+func (a *App) SaveToRepository(canvasJSON string) RepoSaveResult {
+	if a.repoDB == nil {
+		return RepoSaveResult{Success: false, Error: "Repository not initialized"}
+	}
+	if a.pipelineInfo.Name == "" {
+		return RepoSaveResult{Success: false, Error: "Pipeline name is required"}
+	}
+
+	yamlStr, err := a.GenerateYAML()
+	if err != nil {
+		return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to generate YAML: %v", err)}
+	}
+
+	name := a.pipelineInfo.Name
+
+	// Upsert: check if a record with this name exists
+	var existingID int64
+	lookupErr := a.repoDB.QueryRow("SELECT id FROM pipelines WHERE name = ?", name).Scan(&existingID)
+
+	if lookupErr == nil {
+		// Update existing record
+		_, err = a.repoDB.Exec(
+			`UPDATE pipelines SET version=?, description=?, yaml_config=?, canvas_json=?, updated_at=datetime('now') WHERE id=?`,
+			a.pipelineInfo.Version, a.pipelineInfo.Description, yamlStr, canvasJSON, existingID,
+		)
+		if err != nil {
+			return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to update: %v", err)}
+		}
+		return RepoSaveResult{Success: true, ID: existingID, Updated: true}
+	}
+
+	// Insert new record
+	res, err := a.repoDB.Exec(
+		`INSERT INTO pipelines (name, version, description, yaml_config, canvas_json) VALUES (?, ?, ?, ?, ?)`,
+		name, a.pipelineInfo.Version, a.pipelineInfo.Description, yamlStr, canvasJSON,
+	)
+	if err != nil {
+		return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to insert: %v", err)}
+	}
+	id, _ := res.LastInsertId()
+	return RepoSaveResult{Success: true, ID: id, Updated: false}
+}
+
+// ListRepositoryConfigs returns all repository entries ordered by last update descending.
+func (a *App) ListRepositoryConfigs() []RepositoryEntry {
+	if a.repoDB == nil {
+		return []RepositoryEntry{}
+	}
+	rows, err := a.repoDB.Query(
+		`SELECT id, name, version, description, created_at, updated_at FROM pipelines ORDER BY updated_at DESC`,
+	)
+	if err != nil {
+		fmt.Printf("⚠️ Repository: list error: %v\n", err)
+		return []RepositoryEntry{}
+	}
+	defer rows.Close()
+
+	var entries []RepositoryEntry
+	for rows.Next() {
+		var e RepositoryEntry
+		if err := rows.Scan(&e.ID, &e.Name, &e.Version, &e.Description, &e.CreatedAt, &e.UpdatedAt); err == nil {
+			entries = append(entries, e)
+		}
+	}
+	if entries == nil {
+		entries = []RepositoryEntry{}
+	}
+	return entries
+}
+
+// LoadFromRepository loads a pipeline by ID, restores app state, and returns the stored canvas JSON.
+// The canvas JSON is returned to the frontend so it can restore canvasDesign directly
+// without any SQL parsing — unlike loading from a YAML file.
+func (a *App) LoadFromRepository(id int64) RepoLoadResult {
+	if a.repoDB == nil {
+		return RepoLoadResult{Success: false, Error: "Repository not initialized"}
+	}
+
+	var yamlConfig, canvasJSON string
+	err := a.repoDB.QueryRow(
+		`SELECT yaml_config, canvas_json FROM pipelines WHERE id = ?`, id,
+	).Scan(&yamlConfig, &canvasJSON)
+	if err != nil {
+		return RepoLoadResult{Success: false, Error: fmt.Sprintf("Record not found: %v", err)}
+	}
+
+	var config TDTPConfig
+	if err := yaml.Unmarshal([]byte(yamlConfig), &config); err != nil {
+		return RepoLoadResult{Success: false, Error: fmt.Sprintf("Invalid YAML in repository: %v", err)}
+	}
+	if config.Name == "" {
+		return RepoLoadResult{Success: false, Error: "Stored configuration is missing 'name' field"}
+	}
+
+	// Load app state (sources, transform, output, settings) from YAML
+	a.loadConfigFromYAML(&config)
+	// Canvas is restored by the frontend from canvasJSON — no SQL parse needed
+	a.canvasDesign = nil
+
+	return RepoLoadResult{
+		Success:    true,
+		CanvasJSON: canvasJSON,
+		Config: &PipelineInfo{
+			Name:        config.Name,
+			Version:     config.Version,
+			Description: config.Description,
+		},
+	}
+}
+
+// DeleteFromRepository removes a pipeline record by ID.
+func (a *App) DeleteFromRepository(id int64) error {
+	if a.repoDB == nil {
+		return fmt.Errorf("repository not initialized")
+	}
+	_, err := a.repoDB.Exec("DELETE FROM pipelines WHERE id = ?", id)
+	return err
 }
