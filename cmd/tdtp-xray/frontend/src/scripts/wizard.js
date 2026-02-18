@@ -1116,7 +1116,7 @@ async function validateSource(index) {
     } catch (err) {
         showNotification(`Validation error: ${err}`, 'error');
     }
-    renderSourcesList();
+    renderSourceList();
 }
 
 function showAddSourceForm() {
@@ -1660,7 +1660,7 @@ async function previewSource(index) {
         // Preview succeeded — mark source as validated automatically
         if (!sources[index].tested) {
             sources[index].tested = true;
-            renderSourcesList();
+            renderSourceList();
             showNotification(`✅ ${src.name}: validated via preview`, 'success');
         }
     } catch (err) {
