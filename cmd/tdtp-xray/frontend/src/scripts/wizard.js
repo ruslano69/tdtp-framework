@@ -629,6 +629,12 @@ async function openRepositoryModal() {
                         <input type="checkbox" id="${id}" onchange="applyRepoFilter()"> ${label}
                     </label>`
                 ).join('')}
+                <select id="repoFilterLogic" onchange="applyRepoFilter()"
+                        style="font-size:11px;padding:2px 5px;border:1px solid #b0c4de;border-radius:3px;background:#fff;cursor:pointer;"
+                        title="How to combine selected filters">
+                    <option value="AND">AND</option>
+                    <option value="OR">OR</option>
+                </select>
                 <button class="btn btn-sm" onclick="applyRepoFilter(true)" style="margin-left:auto;font-size:11px;">Clear</button>
             </div>
             <div style="overflow-y:auto;flex:1;">
@@ -683,10 +689,15 @@ function applyRepoFilter(clear) {
         return el && el.checked;
     }).map(([,key]) => key);
 
+    const logicEl = document.getElementById('repoFilterLogic');
+    const logic = logicEl ? logicEl.value : 'AND';
+
     const all = window._repoEntries || [];
     const filtered = active.length === 0
         ? all
-        : all.filter(e => active.every(k => e[k]));
+        : logic === 'OR'
+            ? all.filter(e => active.some(k => e[k]))
+            : all.filter(e => active.every(k => e[k]));
 
     const tbody = document.getElementById('repositoryTableBody');
     if (tbody && window._buildRepoRows) {
@@ -696,7 +707,7 @@ function applyRepoFilter(clear) {
     if (countEl) {
         countEl.textContent = active.length === 0
             ? `configs.db — ${all.length} pipeline(s)`
-            : `Showing ${filtered.length} of ${all.length} pipeline(s)`;
+            : `Showing ${filtered.length} of ${all.length} pipeline(s) [${logic}]`;
     }
 }
 
