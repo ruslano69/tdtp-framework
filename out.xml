@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>u2</TableName>
+    <MessageID></MessageID>
+    <Timestamp>2026-02-18T05:54:42.095813405Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="ID" type="INTEGER"></Field>
+    <Field name="Name" type="TEXT"></Field>
+    <Field name="Email" type="TEXT"></Field>
+    <Field name="City" type="TEXT"></Field>
+    <Field name="Balance" type="TEXT"></Field>
+    <Field name="IsActive" type="INTEGER"></Field>
+    <Field name="CreatedAt" type="TEXT"></Field>
+  </Schema>
+  <Data>
+    <R>1|John Doe|john@example.com|Moscow|1500|1|2025-01-15T10:00:00Z</R>
+    <R>2|Jane Smith|jane@example.com|SPb|2000|1|2025-02-20T11:00:00Z</R>
+    <R>4|Alice Brown|alice@example.com|Kazan|2500|1|2025-01-05T09:00:00Z</R>
+    <R>5|Charlie Davis|charlie@example.com|SPb|800|1|2025-04-12T13:00:00Z</R>
+    <R>6|Emma Wilson|emma@example.com|Moscow|3000|1|2024-12-20T10:00:00Z</R>
+    <R>8|Grace Lee|grace@example.com|SPb|1800|1|2025-02-28T15:00:00Z</R>
+    <R>9|Henry Taylor|henry@example.com|Kazan|400|1|2025-06-01T16:00:00Z</R>
+    <R>10|Ivy Anderson|ivy@example.com|Moscow|2200|1|2025-01-30T17:00:00Z</R>
+  </Data>
+</DataPacket>
