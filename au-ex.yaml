@@ -1,0 +1,39 @@
+name: active_users_export
+version: "1.0"
+sources:
+    - name: Users
+      type: sqlite
+      dsn: ./test_data.db
+      query: SELECT * FROM Users
+workspace:
+    type: sqlite
+    mode: ':memory:'
+transform:
+    result_table: u2
+    sql: |-
+        SELECT
+            [Users].[ID],
+            [Users].[Name],
+            [Users].[Email],
+            [Users].[City],
+            [Users].[Balance],
+            [Users].[IsActive],
+            [Users].[CreatedAt]
+        FROM [Users]
+        WHERE
+            [Users].[IsActive] = 1
+output:
+    type: tdtp
+    tdtp:
+        destination: ./out.xml
+        format: xml
+        compression: true
+performance:
+    batch_size: 1000
+    max_memory_mb: 512
+error_handling:
+    on_source_error: fail
+    on_transform_error: fail
+    on_output_error: fail
+    retry_attempts: 3
+    retry_delay_seconds: 5

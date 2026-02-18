@@ -34,6 +34,8 @@ type App struct {
 	sourceService   *services.SourceService
 	previewService  *services.PreviewService
 	tdtpService     *services.TDTPService
+	// Local SQLite repository (configs.db next to the binary)
+	repoDB *sql.DB
 }
 
 // NewApp creates a new App application struct
@@ -53,6 +55,7 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.initRepository()
 }
 
 // Quit closes the application window.
@@ -266,8 +269,9 @@ func (a *App) GetTableSchema(dbType, dsn, tableName string) TableSchemaResult {
 	columns := make([]ColumnInfo, len(schema.Columns))
 	for i, col := range schema.Columns {
 		columns[i] = ColumnInfo{
-			Name: col.Name,
-			Type: col.DataType,
+			Name:         col.Name,
+			Type:         col.DataType,
+			IsPrimaryKey: col.IsPrimaryKey,
 		}
 	}
 
@@ -315,8 +319,9 @@ type TableSchemaResult struct {
 
 // ColumnInfo holds column information
 type ColumnInfo struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	IsPrimaryKey bool   `json:"isPrimaryKey,omitempty"`
 }
 
 // LoadMockSourceFile loads mock source from file
@@ -389,6 +394,53 @@ func (a *App) GetCanvasDesign() *CanvasDesign {
 	return a.canvasDesign
 }
 
+// ValidateSourceByName tests connection for a loaded source and marks it as tested
+func (a *App) ValidateSourceByName(name string) ConnectionResult {
+	for i := range a.sources {
+		if a.sources[i].Name == name {
+			src := a.sources[i]
+			result := a.TestSource(src)
+			if result.Success {
+				a.sources[i].Tested = true
+			}
+			return result
+		}
+	}
+	return ConnectionResult{Success: false, Message: fmt.Sprintf("source '%s' not found", name)}
+}
+
+// ReconstructCanvas rebuilds canvas design from transform SQL or from sources list.
+// Returns a non-nil CanvasDesign even if SQL parsing fails (fallback: one table per source).
+func (a *App) ReconstructCanvas() CanvasDesign {
+	// Try SQL parse first
+	if a.transform != nil && a.transform.SQL != "" {
+		if cd := parseSQLToCanvasDesign(a.transform.SQL); cd != nil {
+			a.canvasDesign = cd
+			return *cd
+		}
+	}
+
+	// Fallback: create one table card per source with empty fields
+	// (frontend will load field schemas after receiving this)
+	design := CanvasDesign{
+		Tables: make([]TableDesign, 0, len(a.sources)),
+		Joins:  []JoinDesign{},
+	}
+	for i, src := range a.sources {
+		design.Tables = append(design.Tables, TableDesign{
+			SourceName: src.Name,
+			Alias:      src.Name,
+			X:          50 + (i * 270),
+			Y:          50,
+			Fields:     []FieldDesign{},
+		})
+	}
+	if len(design.Tables) > 0 {
+		a.canvasDesign = &design
+	}
+	return design
+}
+
 // GenerateSQL generates SQL from canvas design
 // GenerateSQLResult holds SQL generation result
 type GenerateSQLResult struct {
@@ -441,9 +493,10 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		rightAlias := join.RightTable
 
 		joinType := "INNER JOIN"
-		if join.JoinType == "left" {
+		switch strings.ToUpper(join.JoinType) {
+		case "LEFT":
 			joinType = "LEFT JOIN"
-		} else if join.JoinType == "right" {
+		case "RIGHT":
 			joinType = "RIGHT JOIN"
 		}
 
@@ -1116,12 +1169,11 @@ func parseRabbitMQConfig(connStr, queue string) *RabbitMQOutputConfig {
 }
 
 func (a *App) buildPerformanceConfig() *PerformanceConfig {
-	if a.settings.Performance.Timeout == 0 && a.settings.Performance.BatchSize == 0 {
+	if a.settings.Performance.BatchSize == 0 && a.settings.Performance.MaxMemoryMB == 0 {
 		// Return nil to omit empty performance section
 		return nil
 	}
 	return &PerformanceConfig{
-		Timeout:         a.settings.Performance.Timeout,
 		BatchSize:       a.settings.Performance.BatchSize,
 		ParallelSources: a.settings.Performance.ParallelSources,
 		MaxMemoryMB:     a.settings.Performance.MaxMemoryMB,
@@ -1147,11 +1199,11 @@ func (a *App) buildErrorHandlingConfig() *ErrorHandlingConfig {
 		return nil
 	}
 	return &ErrorHandlingConfig{
-		OnSourceError:    a.settings.ErrorHandling.OnSourceError,
-		OnTransformError: a.settings.ErrorHandling.OnTransformError,
-		OnExportError:    a.settings.ErrorHandling.OnExportError,
-		RetryCount:       a.settings.ErrorHandling.RetryCount,
-		RetryDelaySec:    a.settings.ErrorHandling.RetryDelaySec,
+		OnSourceError:     a.settings.ErrorHandling.OnSourceError,
+		OnTransformError:  a.settings.ErrorHandling.OnTransformError,
+		OnOutputError:     a.settings.ErrorHandling.OnExportError,
+		RetryAttempts:     a.settings.ErrorHandling.RetryCount,
+		RetryDelaySeconds: a.settings.ErrorHandling.RetryDelaySec,
 	}
 }
 
@@ -1598,7 +1650,6 @@ type KafkaOutputConfig struct {
 
 // PerformanceConfig for performance tuning
 type PerformanceConfig struct {
-	Timeout         int  `yaml:"timeout,omitempty" json:"timeout,omitempty"`                   // seconds
 	BatchSize       int  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`             // rows per batch
 	ParallelSources bool `yaml:"parallel_sources,omitempty" json:"parallel_sources,omitempty"` // load sources in parallel
 	MaxMemoryMB     int  `yaml:"max_memory_mb,omitempty" json:"max_memory_mb,omitempty"`       // memory limit in MB
@@ -1616,9 +1667,9 @@ type AuditConfig struct {
 type ErrorHandlingConfig struct {
 	OnSourceError    string `yaml:"on_source_error,omitempty" json:"on_source_error,omitempty"`       // continue | fail
 	OnTransformError string `yaml:"on_transform_error,omitempty" json:"on_transform_error,omitempty"` // continue | fail
-	OnExportError    string `yaml:"on_export_error,omitempty" json:"on_export_error,omitempty"`       // continue | fail
-	RetryCount       int    `yaml:"retry_count,omitempty" json:"retry_count,omitempty"`
-	RetryDelaySec    int    `yaml:"retry_delay_sec,omitempty" json:"retry_delay_sec,omitempty"`
+	OnOutputError    string `yaml:"on_output_error,omitempty" json:"on_output_error,omitempty"`       // continue | fail
+	RetryAttempts    int    `yaml:"retry_attempts,omitempty" json:"retry_attempts,omitempty"`
+	RetryDelaySeconds int   `yaml:"retry_delay_seconds,omitempty" json:"retry_delay_seconds,omitempty"`
 }
 
 // SecurityConfig for security settings
@@ -1691,7 +1742,34 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		config.Sources = make([]SourceConfig, 0)
 	}
 
-	// Convert tdtpcli format (SourceConfig) to GUI format (Source)
+	// Load config into app state (shared helper)
+	a.loadConfigFromYAML(&config)
+
+	// For YAML files: try to restore canvas from SQL (best-effort; repo loads use stored canvas JSON)
+	if a.transform != nil && a.transform.SQL != "" {
+		if cd := parseSQLToCanvasDesign(a.transform.SQL); cd != nil {
+			a.canvasDesign = cd
+		}
+	}
+
+	return ConfigFileResult{
+		Success:  true,
+		Filename: filepath.Base(path),
+		Config: &PipelineInfo{
+			Name:        config.Name,
+			Version:     config.Version,
+			Description: config.Description,
+		},
+	}
+}
+
+// loadConfigFromYAML loads a parsed TDTPConfig into App state (sources, transform, output, settings).
+// Does NOT set canvasDesign — callers decide canvas restoration strategy.
+func (a *App) loadConfigFromYAML(config *TDTPConfig) {
+	if config.Sources == nil {
+		config.Sources = make([]SourceConfig, 0)
+	}
+
 	guiSources := make([]Source, len(config.Sources))
 	for i, srcConfig := range config.Sources {
 		guiSources[i] = Source{
@@ -1704,7 +1782,6 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Load configuration into app state
 	a.pipelineInfo = PipelineInfo{
 		Name:        config.Name,
 		Version:     config.Version,
@@ -1712,7 +1789,6 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 	}
 	a.sources = guiSources
 
-	// Load Transform
 	if config.Transform.ResultTable != "" || config.Transform.SQL != "" {
 		a.transform = &Transform{
 			ResultTable: config.Transform.ResultTable,
@@ -1720,28 +1796,8 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Restore canvas design from transform SQL (field visibility + WHERE conditions + JOINs)
-	if a.transform != nil && a.transform.SQL != "" {
-		if cd := parseSQLToCanvasDesign(a.transform.SQL); cd != nil {
-			a.canvasDesign = cd
-		}
-	}
-
-	// Load Output
 	a.output = a.loadOutputFromConfig(&config.Output)
-
-	// Load Settings
-	a.loadSettingsFromConfig(&config)
-
-	return ConfigFileResult{
-		Success:  true,
-		Filename: filepath.Base(path),
-		Config: &PipelineInfo{
-			Name:        config.Name,
-			Version:     config.Version,
-			Description: config.Description,
-		},
-	}
+	a.loadSettingsFromConfig(config)
 }
 
 // extractTableNameFromQuery tries to parse a simple "SELECT ... FROM tablename ..." query
@@ -2044,7 +2100,7 @@ func (a *App) loadSettingsFromConfig(config *TDTPConfig) {
 	// Performance
 	if config.Performance != nil {
 		a.settings.Performance = Performance{
-			Timeout:         config.Performance.Timeout,
+			Timeout:         300, // UI-only field, not written to YAML
 			BatchSize:       config.Performance.BatchSize,
 			ParallelSources: config.Performance.ParallelSources,
 			MaxMemoryMB:     config.Performance.MaxMemoryMB,
@@ -2087,9 +2143,9 @@ func (a *App) loadSettingsFromConfig(config *TDTPConfig) {
 		a.settings.ErrorHandling = ErrorHandling{
 			OnSourceError:    config.ErrorHandling.OnSourceError,
 			OnTransformError: config.ErrorHandling.OnTransformError,
-			OnExportError:    config.ErrorHandling.OnExportError,
-			RetryCount:       config.ErrorHandling.RetryCount,
-			RetryDelaySec:    config.ErrorHandling.RetryDelaySec,
+			OnExportError:    config.ErrorHandling.OnOutputError,
+			RetryCount:       config.ErrorHandling.RetryAttempts,
+			RetryDelaySec:    config.ErrorHandling.RetryDelaySeconds,
 		}
 	} else {
 		a.settings.ErrorHandling = ErrorHandling{
@@ -2219,4 +2275,275 @@ func getDefaultTransformSQL(sources []Source) string {
 	// Bracket-quote the name: works for MSSQL and in-memory SQLite;
 	// both drivers interpret $identifier as a named parameter placeholder.
 	return fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(sources[0].Name))
+}
+
+// ============================================================
+// --- Local Repository (configs.db) ---
+// ============================================================
+
+// RepositoryEntry is a row returned by ListRepositoryConfigs.
+type RepositoryEntry struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+	// Usage flags — which technologies are used in this pipeline
+	UsPG     bool `json:"usPg"`
+	UsSQLite bool `json:"usSqlite"`
+	UsMSSQL  bool `json:"usMssql"`
+	UsMySQL  bool `json:"usMysql"`
+	UsRabbit bool `json:"usRabbit"`
+	UsKafka  bool `json:"usKafka"`
+	UsTDTP   bool `json:"usTdtp"`
+	UsXLSX   bool `json:"usXlsx"`
+}
+
+// RepoSaveResult is returned by SaveToRepository.
+type RepoSaveResult struct {
+	Success bool   `json:"success"`
+	ID      int64  `json:"id"`
+	Updated bool   `json:"updated"` // true = existing record updated, false = new record
+	Error   string `json:"error,omitempty"`
+}
+
+// RepoLoadResult is returned by LoadFromRepository.
+type RepoLoadResult struct {
+	Success    bool          `json:"success"`
+	CanvasJSON string        `json:"canvasJson"`
+	Config     *PipelineInfo `json:"config,omitempty"`
+	Error      string        `json:"error,omitempty"`
+}
+
+// initRepository opens (or creates) configs.db next to the executable.
+func (a *App) initRepository() {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "."
+	}
+	dbPath := filepath.Join(filepath.Dir(exe), "configs.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		fmt.Printf("⚠️ Repository: failed to open %s: %v\n", dbPath, err)
+		return
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS pipelines (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		name        TEXT    NOT NULL,
+		version     TEXT    NOT NULL DEFAULT '',
+		description TEXT    NOT NULL DEFAULT '',
+		yaml_config TEXT    NOT NULL DEFAULT '',
+		canvas_json TEXT    NOT NULL DEFAULT '{}',
+		created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+		updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+		us_pg       INTEGER NOT NULL DEFAULT 0,
+		us_sqlite   INTEGER NOT NULL DEFAULT 0,
+		us_mssql    INTEGER NOT NULL DEFAULT 0,
+		us_mysql    INTEGER NOT NULL DEFAULT 0,
+		us_rabbit   INTEGER NOT NULL DEFAULT 0,
+		us_kafka    INTEGER NOT NULL DEFAULT 0,
+		us_tdtp     INTEGER NOT NULL DEFAULT 0,
+		us_xlsx     INTEGER NOT NULL DEFAULT 0
+	)`)
+	if err != nil {
+		fmt.Printf("⚠️ Repository: failed to create table: %v\n", err)
+		db.Close()
+		return
+	}
+
+	// Migrate existing databases: add us_* columns if they don't exist yet
+	for _, col := range []string{"us_pg", "us_sqlite", "us_mssql", "us_mysql", "us_rabbit", "us_kafka", "us_tdtp", "us_xlsx"} {
+		db.Exec(fmt.Sprintf("ALTER TABLE pipelines ADD COLUMN %s INTEGER NOT NULL DEFAULT 0", col))
+		// ignore error — column already exists in new databases
+	}
+
+	a.repoDB = db
+	fmt.Printf("✅ Repository opened: %s\n", dbPath)
+}
+
+// repoUsageFlags computes which technologies are used in the current pipeline state.
+func (a *App) repoUsageFlags() (usPG, usSQLite, usMSSQL, usMySQL, usRabbit, usKafka, usTDTP, usXLSX bool) {
+	for _, src := range a.sources {
+		switch strings.ToLower(src.Type) {
+		case "postgres", "postgresql":
+			usPG = true
+		case "sqlite":
+			usSQLite = true
+		case "mssql":
+			usMSSQL = true
+		case "mysql":
+			usMySQL = true
+		case "tdtp":
+			usTDTP = true
+		}
+	}
+	if a.output != nil {
+		switch strings.ToLower(a.output.Type) {
+		case "tdtp", "tdtp_file":
+			usTDTP = true
+		case "rabbitmq", "rabbit":
+			usRabbit = true
+		case "kafka":
+			usKafka = true
+		case "xlsx":
+			usXLSX = true
+		case "database", "sqlite":
+			usSQLite = true
+		}
+	}
+	return
+}
+
+// SaveToRepository saves the current pipeline (YAML + canvas JSON) to configs.db.
+// If a pipeline with the same name already exists it is updated (upsert by name).
+func (a *App) SaveToRepository(canvasJSON string) RepoSaveResult {
+	if a.repoDB == nil {
+		return RepoSaveResult{Success: false, Error: "Repository not initialized"}
+	}
+	if a.pipelineInfo.Name == "" {
+		return RepoSaveResult{Success: false, Error: "Pipeline name is required"}
+	}
+
+	yamlStr, err := a.GenerateYAML()
+	if err != nil {
+		return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to generate YAML: %v", err)}
+	}
+
+	name := a.pipelineInfo.Name
+
+	usPG, usSQLite, usMSSQL, usMySQL, usRabbit, usKafka, usTDTP, usXLSX := a.repoUsageFlags()
+	b2i := func(v bool) int {
+		if v {
+			return 1
+		}
+		return 0
+	}
+
+	// Upsert: check if a record with this name exists
+	var existingID int64
+	lookupErr := a.repoDB.QueryRow("SELECT id FROM pipelines WHERE name = ?", name).Scan(&existingID)
+
+	if lookupErr == nil {
+		// Update existing record
+		_, err = a.repoDB.Exec(
+			`UPDATE pipelines SET version=?, description=?, yaml_config=?, canvas_json=?,
+			 us_pg=?, us_sqlite=?, us_mssql=?, us_mysql=?, us_rabbit=?, us_kafka=?, us_tdtp=?, us_xlsx=?,
+			 updated_at=datetime('now') WHERE id=?`,
+			a.pipelineInfo.Version, a.pipelineInfo.Description, yamlStr, canvasJSON,
+			b2i(usPG), b2i(usSQLite), b2i(usMSSQL), b2i(usMySQL), b2i(usRabbit), b2i(usKafka), b2i(usTDTP), b2i(usXLSX),
+			existingID,
+		)
+		if err != nil {
+			return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to update: %v", err)}
+		}
+		return RepoSaveResult{Success: true, ID: existingID, Updated: true}
+	}
+
+	// Insert new record
+	res, err := a.repoDB.Exec(
+		`INSERT INTO pipelines (name, version, description, yaml_config, canvas_json,
+		 us_pg, us_sqlite, us_mssql, us_mysql, us_rabbit, us_kafka, us_tdtp, us_xlsx)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, a.pipelineInfo.Version, a.pipelineInfo.Description, yamlStr, canvasJSON,
+		b2i(usPG), b2i(usSQLite), b2i(usMSSQL), b2i(usMySQL), b2i(usRabbit), b2i(usKafka), b2i(usTDTP), b2i(usXLSX),
+	)
+	if err != nil {
+		return RepoSaveResult{Success: false, Error: fmt.Sprintf("Failed to insert: %v", err)}
+	}
+	id, _ := res.LastInsertId()
+	return RepoSaveResult{Success: true, ID: id, Updated: false}
+}
+
+// ListRepositoryConfigs returns all repository entries ordered by last update descending.
+func (a *App) ListRepositoryConfigs() []RepositoryEntry {
+	if a.repoDB == nil {
+		return []RepositoryEntry{}
+	}
+	rows, err := a.repoDB.Query(
+		`SELECT id, name, version, description, created_at, updated_at,
+		        us_pg, us_sqlite, us_mssql, us_mysql, us_rabbit, us_kafka, us_tdtp, us_xlsx
+		 FROM pipelines ORDER BY updated_at DESC`,
+	)
+	if err != nil {
+		fmt.Printf("⚠️ Repository: list error: %v\n", err)
+		return []RepositoryEntry{}
+	}
+	defer rows.Close()
+
+	var entries []RepositoryEntry
+	for rows.Next() {
+		var e RepositoryEntry
+		var pg, sqlite, mssql, mysql, rabbit, kafka, tdtp, xlsx int
+		err := rows.Scan(
+			&e.ID, &e.Name, &e.Version, &e.Description, &e.CreatedAt, &e.UpdatedAt,
+			&pg, &sqlite, &mssql, &mysql, &rabbit, &kafka, &tdtp, &xlsx,
+		)
+		if err == nil {
+			e.UsPG = pg != 0
+			e.UsSQLite = sqlite != 0
+			e.UsMSSQL = mssql != 0
+			e.UsMySQL = mysql != 0
+			e.UsRabbit = rabbit != 0
+			e.UsKafka = kafka != 0
+			e.UsTDTP = tdtp != 0
+			e.UsXLSX = xlsx != 0
+			entries = append(entries, e)
+		}
+	}
+	if entries == nil {
+		entries = []RepositoryEntry{}
+	}
+	return entries
+}
+
+// LoadFromRepository loads a pipeline by ID, restores app state, and returns the stored canvas JSON.
+// The canvas JSON is returned to the frontend so it can restore canvasDesign directly
+// without any SQL parsing — unlike loading from a YAML file.
+func (a *App) LoadFromRepository(id int64) RepoLoadResult {
+	if a.repoDB == nil {
+		return RepoLoadResult{Success: false, Error: "Repository not initialized"}
+	}
+
+	var yamlConfig, canvasJSON string
+	err := a.repoDB.QueryRow(
+		`SELECT yaml_config, canvas_json FROM pipelines WHERE id = ?`, id,
+	).Scan(&yamlConfig, &canvasJSON)
+	if err != nil {
+		return RepoLoadResult{Success: false, Error: fmt.Sprintf("Record not found: %v", err)}
+	}
+
+	var config TDTPConfig
+	if err := yaml.Unmarshal([]byte(yamlConfig), &config); err != nil {
+		return RepoLoadResult{Success: false, Error: fmt.Sprintf("Invalid YAML in repository: %v", err)}
+	}
+	if config.Name == "" {
+		return RepoLoadResult{Success: false, Error: "Stored configuration is missing 'name' field"}
+	}
+
+	// Load app state (sources, transform, output, settings) from YAML
+	a.loadConfigFromYAML(&config)
+	// Canvas is restored by the frontend from canvasJSON — no SQL parse needed
+	a.canvasDesign = nil
+
+	return RepoLoadResult{
+		Success:    true,
+		CanvasJSON: canvasJSON,
+		Config: &PipelineInfo{
+			Name:        config.Name,
+			Version:     config.Version,
+			Description: config.Description,
+		},
+	}
+}
+
+// DeleteFromRepository removes a pipeline record by ID.
+func (a *App) DeleteFromRepository(id int64) error {
+	if a.repoDB == nil {
+		return fmt.Errorf("repository not initialized")
+	}
+	_, err := a.repoDB.Exec("DELETE FROM pipelines WHERE id = ?", id)
+	return err
 }

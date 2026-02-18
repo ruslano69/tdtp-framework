@@ -291,18 +291,31 @@ function getStep1HTML() {
 
             <div class="panel">
                 <!-- Load/Save Configuration -->
-                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
-                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">Configuration File</h3>
+                <div style="margin-bottom: 15px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">📁 YAML File</h3>
                     <div style="display: flex; gap: 10px;">
                         <button class="btn btn-secondary" onclick="loadConfigurationFile()" style="flex: 1;">
-                            📁 Load Configuration...
+                            📁 Load from File...
                         </button>
                         <button class="btn btn-secondary" onclick="saveConfigurationFile()" style="flex: 1;">
-                            💾 Save Configuration...
+                            💾 Save to File...
                         </button>
                     </div>
                     <p style="margin: 5px 0 0 0; font-size: 10px; color: #6c757d;">
                         Load existing TDTP pipeline YAML or save current configuration
+                    </p>
+                </div>
+
+                <!-- Repository -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #eef4ff; border: 1px solid #b8d0f0; border-radius: 3px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 14px;">📚 Repository (configs.db)</h3>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="openRepositoryModal()" style="flex: 1;">
+                            📚 Open Repository...
+                        </button>
+                    </div>
+                    <p style="margin: 5px 0 0 0; font-size: 10px; color: #5a7fa0;">
+                        Load configs with full canvas state (field visibility, filters, JOINs)
                     </p>
                 </div>
 
@@ -489,6 +502,259 @@ async function saveAndExit() {
     } catch (err) {
         console.error('Save & Exit error:', err);
         showNotification('Failed to save configuration: ' + err, 'error');
+    }
+}
+
+// ========== REPOSITORY ==========
+
+async function saveToRepository() {
+    if (!wailsReady || !window.go) {
+        showNotification('Backend not ready', 'error');
+        return;
+    }
+
+    // Ensure current step data is saved first
+    await saveCurrentStep();
+
+    const btn = event && event.currentTarget;
+    const originalText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Saving...'; }
+
+    try {
+        const canvasJSON = JSON.stringify(canvasDesign || { tables: [], joins: [] });
+        const result = await window.go.main.App.SaveToRepository(canvasJSON);
+        if (result.success) {
+            const action = result.updated ? 'Updated' : 'Saved';
+            showNotification(`✅ ${action} in repository (ID: ${result.id})`, 'success');
+        } else {
+            showNotification(`❌ Repository save failed: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        showNotification('Repository save error: ' + err, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
+    }
+}
+
+async function openRepositoryModal() {
+    if (!wailsReady || !window.go) {
+        showNotification('Backend not ready', 'error');
+        return;
+    }
+
+    let entries = [];
+    try {
+        entries = await window.go.main.App.ListRepositoryConfigs();
+    } catch (err) {
+        showNotification('Failed to list repository: ' + err, 'error');
+        return;
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'repositoryModal';
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5); z-index: 3000;
+        display: flex; justify-content: center; align-items: center;
+    `;
+
+    // Store entries for client-side filtering
+    window._repoEntries = entries || [];
+
+    const filterDefs = [
+        ['fPG',     'usPg',     'PostgreSQL'],
+        ['fSQLite', 'usSqlite', 'SQLite'],
+        ['fMSSQL',  'usMssql',  'MSSQL'],
+        ['fMySQL',  'usMysql',  'MySQL'],
+        ['fRabbit', 'usRabbit', 'RabbitMQ'],
+        ['fKafka',  'usKafka',  'Kafka'],
+        ['fTDTP',   'usTdtp',   'TDTP'],
+        ['fXLSX',   'usXlsx',   'XLSX'],
+    ];
+
+    function buildRepoRows(list) {
+        if (!list || list.length === 0) {
+            return `<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">
+                No pipelines match the selected filters (or repository is empty).</td></tr>`;
+        }
+        return list.map(e => {
+            const updated = e.updatedAt ? e.updatedAt.replace('T', ' ').substring(0, 16) : '';
+            const desc = e.description ? `<br><small style="color:#888">${e.description}</small>` : '';
+            const tagStyles = {
+                usPg:     'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
+                usSqlite: 'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
+                usMssql:  'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
+                usMysql:  'background:#e8f4f8;color:#0066aa;border:1px solid #b0d0e8',
+                usRabbit: 'background:#fff3e0;color:#c96a00;border:1px solid #f0c080',
+                usKafka:  'background:#fff3e0;color:#c96a00;border:1px solid #f0c080',
+                usTdtp:   'background:#eef4ee;color:#2a6a2a;border:1px solid #a0c8a0',
+                usXlsx:   'background:#eef4ee;color:#2a6a2a;border:1px solid #a0c8a0',
+            };
+            const tagLabels = { usPg:'PostgreSQL', usSqlite:'SQLite', usMssql:'MSSQL', usMysql:'MySQL',
+                                usRabbit:'RabbitMQ', usKafka:'Kafka', usTdtp:'TDTP', usXlsx:'XLSX' };
+            const tags = Object.keys(tagLabels)
+                .filter(k => e[k])
+                .map(k => `<span style="${tagStyles[k]};padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;">${tagLabels[k]}</span>`)
+                .join('');
+            return `
+                <tr>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+                        <strong>${e.name}</strong>${desc}
+                        <div style="margin-top:3px;">${tags}</div>
+                    </td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#666;">${e.version || ''}</td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#888;font-size:11px;">${updated}</td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;white-space:nowrap;">
+                        <button class="btn btn-sm btn-primary" onclick="loadFromRepositoryEntry(${e.id})">Load</button>
+                    </td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #eee;">
+                        <button class="btn btn-sm" style="color:#dc3545;border-color:#dc3545;" onclick="deleteFromRepositoryEntry(${e.id})">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+    window._buildRepoRows = buildRepoRows;
+
+    const totalCount = entries ? entries.length : 0;
+
+    modal.innerHTML = `
+        <div style="background:white;border-radius:5px;min-width:700px;max-width:92%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+            <div style="padding:15px 20px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;background:#0055aa;color:white;border-radius:5px 5px 0 0;">
+                <h3 style="margin:0;">📚 Pipeline Repository</h3>
+                <button onclick="closeRepositoryModal()" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;line-height:1;">×</button>
+            </div>
+            <div style="padding:8px 15px;background:#f0f5ff;border-bottom:1px solid #ccd8f0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <span style="font-size:12px;font-weight:600;color:#444;">Filter:</span>
+                ${filterDefs.map(([id,,label]) =>
+                    `<label style="font-size:12px;cursor:pointer;display:flex;gap:4px;align-items:center;">
+                        <input type="checkbox" id="${id}" onchange="applyRepoFilter()"> ${label}
+                    </label>`
+                ).join('')}
+                <select id="repoFilterLogic" onchange="applyRepoFilter()"
+                        style="font-size:11px;padding:2px 5px;border:1px solid #b0c4de;border-radius:3px;background:#fff;cursor:pointer;"
+                        title="How to combine selected filters">
+                    <option value="AND">AND</option>
+                    <option value="OR">OR</option>
+                </select>
+                <button class="btn btn-sm" onclick="applyRepoFilter(true)" style="margin-left:auto;font-size:11px;">Clear</button>
+            </div>
+            <div style="overflow-y:auto;flex:1;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:#f8f9fa;">
+                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Name / Technologies</th>
+                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Version</th>
+                            <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Last Updated</th>
+                            <th colspan="2" style="padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="repositoryTableBody">
+                        ${buildRepoRows(entries)}
+                    </tbody>
+                </table>
+            </div>
+            <div style="padding:12px 20px;border-top:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;background:#f8f9fa;border-radius:0 0 5px 5px;">
+                <small style="color:#888;" id="repoCount">configs.db — ${totalCount} pipeline(s)</small>
+                <button class="btn" onclick="closeRepositoryModal()">Close</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeRepositoryModal(); });
+}
+
+function closeRepositoryModal() {
+    const modal = document.getElementById('repositoryModal');
+    if (modal) modal.remove();
+}
+
+function applyRepoFilter(clear) {
+    const filterMap = [
+        ['fPG',     'usPg'],
+        ['fSQLite', 'usSqlite'],
+        ['fMSSQL',  'usMssql'],
+        ['fMySQL',  'usMysql'],
+        ['fRabbit', 'usRabbit'],
+        ['fKafka',  'usKafka'],
+        ['fTDTP',   'usTdtp'],
+        ['fXLSX',   'usXlsx'],
+    ];
+    if (clear) {
+        filterMap.forEach(([id]) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = false;
+        });
+    }
+    const active = filterMap.filter(([id]) => {
+        const el = document.getElementById(id);
+        return el && el.checked;
+    }).map(([,key]) => key);
+
+    const logicEl = document.getElementById('repoFilterLogic');
+    const logic = logicEl ? logicEl.value : 'AND';
+
+    const all = window._repoEntries || [];
+    const filtered = active.length === 0
+        ? all
+        : logic === 'OR'
+            ? all.filter(e => active.some(k => e[k]))
+            : all.filter(e => active.every(k => e[k]));
+
+    const tbody = document.getElementById('repositoryTableBody');
+    if (tbody && window._buildRepoRows) {
+        tbody.innerHTML = window._buildRepoRows(filtered);
+    }
+    const countEl = document.getElementById('repoCount');
+    if (countEl) {
+        countEl.textContent = active.length === 0
+            ? `configs.db — ${all.length} pipeline(s)`
+            : `Showing ${filtered.length} of ${all.length} pipeline(s) [${logic}]`;
+    }
+}
+
+async function loadFromRepositoryEntry(id) {
+    if (!wailsReady || !window.go) return;
+
+    try {
+        const result = await window.go.main.App.LoadFromRepository(id);
+        if (!result.success) {
+            showNotification(`❌ Load failed: ${result.error}`, 'error');
+            return;
+        }
+
+        // Restore canvas design directly from stored JSON — no SQL parsing needed!
+        if (result.canvasJson && result.canvasJson !== '{}') {
+            try {
+                canvasDesign = JSON.parse(result.canvasJson);
+            } catch (e) {
+                canvasDesign = { tables: [], joins: [] };
+            }
+        } else {
+            canvasDesign = { tables: [], joins: [] };
+        }
+
+        closeRepositoryModal();
+        await refreshAllSteps();
+        showNotification(
+            `✅ Loaded "${result.config ? result.config.name : ''}" from repository`,
+            'success'
+        );
+    } catch (err) {
+        showNotification('Load from repository error: ' + err, 'error');
+    }
+}
+
+async function deleteFromRepositoryEntry(id) {
+    if (!confirm('Delete this pipeline from repository?')) return;
+    try {
+        await window.go.main.App.DeleteFromRepository(id);
+        // Refresh the modal table
+        closeRepositoryModal();
+        await openRepositoryModal();
+    } catch (err) {
+        showNotification('Delete error: ' + err, 'error');
     }
 }
 
@@ -803,6 +1069,9 @@ function renderSourceList() {
         }
         const tableStr = src.tableName ? ` · <em>${src.tableName}</em>` : '';
 
+        const validateBtn = !src.tested
+            ? `<button class="btn btn-sm" style="background:#0066cc;color:white;" id="validateBtn-${index}" onclick="validateSource(${index})">Validate</button>`
+            : '';
         html += `
             <div style="border: 1px solid #ddd; padding: 10px; border-radius: 3px; background: #fafafa;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -811,6 +1080,7 @@ function renderSourceList() {
                         <br><small style="color: #666;">${typeLabel}${connSummary ? ' · ' + connSummary : ''}${tableStr}</small>
                     </div>
                     <div style="flex-shrink: 0; margin-left: 8px;">
+                        ${validateBtn}
                         <button class="btn btn-sm" onclick="editSource(${index})">Edit</button>
                         <button class="btn btn-sm" onclick="previewSource(${index})">Preview</button>
                         <button class="btn btn-sm" onclick="removeSource(${index})">Remove</button>
@@ -822,6 +1092,31 @@ function renderSourceList() {
     html += '</div>';
 
     listEl.innerHTML = html;
+}
+
+async function validateSource(index) {
+    const src = sources[index];
+    if (!src) return;
+
+    const btn = document.getElementById(`validateBtn-${index}`);
+    if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
+
+    try {
+        if (!wailsReady || !window.go) {
+            showNotification('Backend not ready', 'error');
+            return;
+        }
+        const result = await window.go.main.App.ValidateSourceByName(src.name);
+        if (result.success) {
+            sources[index].tested = true;
+            showNotification(`✅ ${src.name}: ${result.message || 'Connected'}`, 'success');
+        } else {
+            showNotification(`❌ ${src.name}: ${result.message || 'Connection failed'}`, 'error');
+        }
+    } catch (err) {
+        showNotification(`Validation error: ${err}`, 'error');
+    }
+    renderSourcesList();
 }
 
 function showAddSourceForm() {
@@ -1361,6 +1656,13 @@ async function previewSource(index) {
         html += `<p style="margin-top: 10px; color: #666;"><small>Showing ${result.rows.length} rows</small></p>`;
 
         previewContent.innerHTML = html;
+
+        // Preview succeeded — mark source as validated automatically
+        if (!sources[index].tested) {
+            sources[index].tested = true;
+            renderSourcesList();
+            showNotification(`✅ ${src.name}: validated via preview`, 'success');
+        }
     } catch (err) {
         console.error('Preview error:', err);
         previewContent.innerHTML = `<p style="color: red;">❌ Error: ${err}</p>`;
@@ -1432,6 +1734,65 @@ let selectedTableId = null;
 let selectedJoinId = null;
 let joinStartField = null; // For creating joins
 
+// loadFieldsForDesign fetches/merges DB column schemas into canvas design tables.
+// Tables with no fields → load all columns (all visible).
+// Tables with fields but no type info (from SQL parse) → merge: restore visibility+filters, fill types from DB.
+// Tables with full type info → skip (already complete).
+async function loadFieldsForDesign(design) {
+    if (!design || !design.tables) return;
+    for (let i = 0; i < design.tables.length; i++) {
+        const table = design.tables[i];
+        const hasTypeInfo = table.fields && table.fields.length > 0 &&
+                            table.fields.some(f => f.type && f.type !== '');
+        const needsLoad  = !table.fields || table.fields.length === 0;
+        const needsMerge = !needsLoad && !hasTypeInfo;
+
+        if (!needsLoad && !needsMerge) continue;
+
+        console.log(`  🔄 ${needsMerge ? 'Merging' : 'Loading'} fields for ${table.sourceName}...`);
+        try {
+            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+            if (!dbTables || dbTables.length === 0 || !dbTables[0].columns) {
+                console.warn(`  ⚠️ No schema from DB for ${table.sourceName}, keeping parsed fields`);
+                continue;
+            }
+            if (needsMerge) {
+                const parsedLookup = {};
+                (table.fields || []).forEach(f => { parsedLookup[f.name.toLowerCase()] = f; });
+                const hasAnyParsed = Object.keys(parsedLookup).length > 0;
+                table.fields = dbTables[0].columns.map(col => {
+                    const parsed = parsedLookup[col.name.toLowerCase()];
+                    return {
+                        name: col.name,
+                        type: col.type,
+                        isPrimaryKey: col.isPrimaryKey || false,
+                        visible: parsed ? parsed.visible : !hasAnyParsed,
+                        filter: parsed ? (parsed.filter || null) : null
+                    };
+                });
+                console.log(`  ✅ Merged: ${table.fields.filter(f=>f.visible).length} visible, ` +
+                            `${table.fields.filter(f=>f.filter).length} with filters`);
+            } else {
+                table.fields = dbTables[0].columns.map(col => ({
+                    name: col.name,
+                    type: col.type,
+                    isPrimaryKey: col.isPrimaryKey || false,
+                    visible: true,
+                    filter: null
+                }));
+                console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
+            }
+            // Save original DB column order for sort-reset
+            window._origFieldOrder = window._origFieldOrder || {};
+            if (!window._origFieldOrder[table.sourceName]) {
+                window._origFieldOrder[table.sourceName] = table.fields.map(f => f.name);
+            }
+        } catch (err) {
+            console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
+        }
+    }
+}
+
 function loadStep3Data() {
     console.log('🔄 loadStep3Data() called');
 
@@ -1439,12 +1800,6 @@ function loadStep3Data() {
     const sourceListEl = document.getElementById('tablesSourceList');
     const canvasArea = document.getElementById('canvasArea');
     const svg = document.getElementById('canvasSVG');
-
-    console.log('DOM elements check:', {
-        sourceListEl: !!sourceListEl,
-        canvasArea: !!canvasArea,
-        svg: !!svg
-    });
 
     if (!sourceListEl || !canvasArea || !svg) {
         console.error('❌ DOM elements not ready, retrying in 100ms...');
@@ -1474,101 +1829,68 @@ function loadStep3Data() {
     });
     sourceListEl.innerHTML = html;
 
-    // Load existing canvas design from backend
-    console.log('🔍 Checking Wails readiness...');
-    if (wailsReady && window.go && window.go.main && window.go.main.App) {
-        console.log('✅ Wails ready, loading canvas design...');
-        window.go.main.App.GetCanvasDesign().then(async design => {
-            console.log('📦 GetCanvasDesign response:', design);
-            if (design && design.tables && design.tables.length > 0) {
-                canvasDesign = design;
-                console.log('✅ Canvas design loaded:', {
-                    tables: canvasDesign.tables.length,
-                    joins: canvasDesign.joins ? canvasDesign.joins.length : 0
-                });
-
-                // Load / merge fields for each table
-                console.log('🔧 Checking table fields...');
-                for (let i = 0; i < canvasDesign.tables.length; i++) {
-                    const table = canvasDesign.tables[i];
-                    console.log(`  📋 Table ${i} (${table.sourceName}): ${table.fields ? table.fields.length : 0} fields`);
-
-                    // Fields are considered "from SQL parse" (no type info) when they have no type strings.
-                    // In that case, fetch full schema from DB and MERGE: restore visibility + filter from
-                    // parsed fields, add missing columns as visible:false.
-                    const hasTypeInfo = table.fields && table.fields.length > 0 &&
-                                        table.fields.some(f => f.type && f.type !== '');
-                    const needsLoad = !table.fields || table.fields.length === 0;
-                    const needsMerge = !needsLoad && !hasTypeInfo; // fields from SQL parse
-
-                    if (needsLoad || needsMerge) {
-                        console.log(`  🔄 ${needsMerge ? 'Merging' : 'Loading'} fields for ${table.sourceName}...`);
-                        try {
-                            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
-                            if (dbTables && dbTables.length > 0 && dbTables[0].columns) {
-                                if (needsMerge) {
-                                    // Build lookup from parsed fields (name → {visible, filter})
-                                    const parsedLookup = {};
-                                    (table.fields || []).forEach(f => {
-                                        parsedLookup[f.name.toLowerCase()] = f;
-                                    });
-                                    const hasAnyParsed = Object.keys(parsedLookup).length > 0;
-
-                                    table.fields = dbTables[0].columns.map(col => {
-                                        const parsed = parsedLookup[col.name.toLowerCase()];
-                                        return {
-                                            name: col.name,
-                                            type: col.type,
-                                            isPrimaryKey: col.isPrimaryKey || false,
-                                            // If we had parsed fields: visible only if it was in SELECT;
-                                            // otherwise (fresh load): all visible
-                                            visible: parsed ? parsed.visible : !hasAnyParsed,
-                                            filter: parsed ? (parsed.filter || null) : null
-                                        };
-                                    });
-                                    console.log(`  ✅ Merged: ${table.fields.filter(f=>f.visible).length} visible, ` +
-                                                `${table.fields.filter(f=>f.filter).length} with filters`);
-                                } else {
-                                    table.fields = dbTables[0].columns.map(col => ({
-                                        name: col.name,
-                                        type: col.type,
-                                        isPrimaryKey: col.isPrimaryKey || false,
-                                        visible: true,
-                                        filter: null
-                                    }));
-                                    console.log(`  ✅ Loaded ${table.fields.length} fields for ${table.sourceName}`);
-                                }
-                            }
-                        } catch (err) {
-                            console.error(`  ❌ Failed to load fields for ${table.sourceName}:`, err);
-                        }
-                    }
-                }
-
-                // Render canvas after all fields are loaded
-                console.log('🎨 All fields loaded, rendering canvas...');
-                renderCanvas();
-            } else {
-                console.log('ℹ️ No canvas design data or empty tables');
-                // Initialize empty design if needed
-                if (!canvasDesign.tables) {
-                    canvasDesign.tables = [];
-                }
-                if (!canvasDesign.joins) {
-                    canvasDesign.joins = [];
-                }
-            }
-        }).catch(err => {
-            console.error('❌ Failed to load canvas design:', err);
-        });
-    } else {
-        console.warn('⚠️ Wails not ready, using existing canvasDesign:', canvasDesign);
-        // Try to render with existing data
+    if (!wailsReady || !window.go || !window.go.main || !window.go.main.App) {
+        console.warn('⚠️ Wails not ready, rendering with existing canvasDesign');
         if (canvasDesign && canvasDesign.tables && canvasDesign.tables.length > 0) {
-            console.log('Rendering with existing canvasDesign');
             renderCanvas();
         }
+        return;
     }
+
+    // If canvasDesign already populated (e.g. loaded from repository), skip backend fetch
+    if (canvasDesign && canvasDesign.tables && canvasDesign.tables.length > 0) {
+        console.log('✅ canvasDesign already loaded (from repository), rendering directly');
+        loadFieldsForDesign(canvasDesign).then(() => renderCanvas());
+        return;
+    }
+
+    window.go.main.App.GetCanvasDesign().then(async design => {
+        console.log('📦 GetCanvasDesign response:', design);
+
+        if (design && design.tables && design.tables.length > 0) {
+            // Canvas design exists — load/merge field schemas then render
+            canvasDesign = design;
+            console.log('✅ Canvas design loaded:', {
+                tables: canvasDesign.tables.length,
+                joins: canvasDesign.joins ? canvasDesign.joins.length : 0
+            });
+            await loadFieldsForDesign(canvasDesign);
+            console.log('🎨 Rendering canvas from loaded design...');
+            renderCanvas();
+        } else {
+            // Canvas is empty (fresh load or parseSQLToCanvasDesign returned nil).
+            // Ask backend to reconstruct from transform SQL or source list.
+            console.log('ℹ️ Canvas design empty — attempting auto-reconstruction...');
+            try {
+                const reconstructed = await window.go.main.App.ReconstructCanvas();
+                if (reconstructed && reconstructed.tables && reconstructed.tables.length > 0) {
+                    canvasDesign = reconstructed;
+                    console.log(`🔄 Reconstructed canvas: ${canvasDesign.tables.length} table(s), ` +
+                                `${canvasDesign.joins ? canvasDesign.joins.length : 0} join(s)`);
+                    await loadFieldsForDesign(canvasDesign);
+                    console.log('🎨 Rendering reconstructed canvas...');
+                    renderCanvas();
+                    const fromSQL = canvasDesign.tables.some(t => t.fields && t.fields.some(f => !f.visible));
+                    showNotification(
+                        fromSQL
+                            ? 'Canvas restored from saved SQL (field visibility & filters preserved)'
+                            : 'Canvas reconstructed from sources — add JOINs as needed',
+                        'info'
+                    );
+                } else {
+                    console.log('ℹ️ No tables to reconstruct (no sources or empty config)');
+                    canvasDesign.tables = canvasDesign.tables || [];
+                    canvasDesign.joins  = canvasDesign.joins  || [];
+                }
+            } catch (err) {
+                console.error('❌ Auto-reconstruction failed:', err);
+                canvasDesign.tables = canvasDesign.tables || [];
+                canvasDesign.joins  = canvasDesign.joins  || [];
+            }
+        }
+    }).catch(err => {
+        console.error('❌ Failed to load canvas design:', err);
+    });
 }
 
 async function saveStep3() {
@@ -1665,6 +1987,9 @@ async function addTableToCanvas(sourceName) {
         };
 
         console.log(`➕ Adding table to canvas:`, newTable);
+        // Save original DB column order for sort-reset
+        window._origFieldOrder = window._origFieldOrder || {};
+        window._origFieldOrder[sourceName] = fields.map(f => f.name);
         canvasDesign.tables.push(newTable);
         renderCanvas();
     } catch (err) {
@@ -1754,6 +2079,39 @@ function createTableCard(table, index) {
         <button onclick="removeTableFromCanvas(${index})" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px; padding: 0; line-height: 1;">&times;</button>
     `;
     card.appendChild(header);
+
+    // Toolbar: bulk toggle visibility / clear filters / sort
+    const allVisible = table.fields.every(f => f.visible);
+    const hasFilters  = table.fields.some(f => f.filter);
+    const toolbar = document.createElement('div');
+    toolbar.style.cssText = `
+        padding: 3px 8px;
+        border-bottom: 2px solid #dde;
+        background: #f0f4ff;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+    `;
+    toolbar.innerHTML = `
+        <span onclick="toggleAllVisibility(${index})"
+              title="${allVisible ? 'Hide all fields' : 'Show all fields'}"
+              style="cursor:pointer; font-size:15px; color:${allVisible ? '#28a745' : '#aaa'}; user-select:none; line-height:1;">👁</span>
+        <span style="flex:1; font-size:11px; color:#888;">${table.fields.length} fields</span>
+        <span onclick="clearAllFilters(${index})"
+              title="Clear all filters"
+              style="cursor:pointer; font-weight:bold; color:${hasFilters ? '#dc3545' : '#ccc'}; user-select:none; font-size:15px; line-height:1;">✱</span>
+        <span onclick="sortTableFields(${index}, 'AZ')"
+              title="Sort A→Z"
+              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">AZ▲</span>
+        <span onclick="sortTableFields(${index}, 'ZA')"
+              title="Sort Z→A"
+              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">ZA▼</span>
+        <span onclick="resetFieldSort(${index})"
+              title="Reset to original order"
+              style="cursor:pointer; font-weight:700; color:#888; user-select:none; font-size:13px; line-height:1;">⟲</span>
+    `;
+    card.appendChild(toolbar);
 
     // Fields
     const fieldsContainer = document.createElement('div');
@@ -2130,7 +2488,7 @@ function openFilterBuilder(tableIndex, fieldIndex) {
 
     modal.innerHTML = `
         <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px; max-width: 500px;">
-            <h3 style="margin-top: 0;">Filter: ${field.name}</h3>
+            <h3 style="margin-top: 0;">Filter: ${field.name} <span style="font-size: 13px; font-weight: 400; color: #888;">(${field.type || 'unknown'})</span></h3>
 
             <div style="margin-bottom: 15px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Operator:</label>
@@ -2253,6 +2611,64 @@ function closeFilterBuilder() {
     if (modal) {
         modal.remove();
     }
+}
+
+// ========== TABLE TOOLBAR ACTIONS ==========
+
+function toggleAllVisibility(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const allVisible = table.fields.every(f => f.visible);
+    table.fields.forEach(f => f.visible = !allVisible);
+    renderCanvas();
+}
+
+function clearAllFilters(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const hasFilters = table.fields.some(f => f.filter);
+    if (!hasFilters) return;
+    table.fields.forEach(f => f.filter = null);
+    renderCanvas();
+    showNotification('All filters cleared', 'info');
+}
+
+function sortTableFields(tableIndex, direction) {
+    const table = canvasDesign.tables[tableIndex];
+    table.fields.sort((a, b) => {
+        const cmp = a.name.localeCompare(b.name);
+        return direction === 'ZA' ? -cmp : cmp;
+    });
+    renderCanvas();
+}
+
+async function resetFieldSort(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+
+    // Try cache first; if missing (e.g. loaded from DB) fetch from backend
+    let origNames = (window._origFieldOrder || {})[table.sourceName];
+
+    if (!origNames) {
+        if (!wailsReady || !window.go) return;
+        try {
+            const dbTables = await window.go.main.App.GetTablesBySourceName(table.sourceName);
+            if (!dbTables || !dbTables[0] || !dbTables[0].columns) return;
+            origNames = dbTables[0].columns.map(c => c.name);
+            // Cache for next time
+            window._origFieldOrder = window._origFieldOrder || {};
+            window._origFieldOrder[table.sourceName] = origNames;
+        } catch (err) {
+            showNotification('Failed to fetch original order: ' + err, 'error');
+            return;
+        }
+    }
+
+    const fieldMap = {};
+    table.fields.forEach(f => { fieldMap[f.name] = f; });
+    const reordered = origNames.map(name => fieldMap[name]).filter(Boolean);
+    // Append any fields not in DB result (edge case)
+    const inOrig = new Set(origNames);
+    table.fields.filter(f => !inOrig.has(f.name)).forEach(f => reordered.push(f));
+    table.fields = reordered;
+    renderCanvas();
 }
 
 // ========== DRAG-AND-DROP JOIN (Connector Box) ==========
@@ -3322,7 +3738,7 @@ function getStep7HTML() {
                     <p style="color: #666;">Loading configuration summary...</p>
                 </div>
 
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;">
                     <button class="btn btn-primary" onclick="generateAndShowYAML()" style="flex: 1;">
                         📄 Generate YAML
                     </button>
@@ -3332,6 +3748,14 @@ function getStep7HTML() {
                     <button class="btn btn-secondary" onclick="copyYAMLToClipboard()" style="flex: 1;">
                         📋 Copy to Clipboard
                     </button>
+                </div>
+                <div style="padding: 12px; background: #eef4ff; border: 1px solid #b8d0f0; border-radius: 3px;">
+                    <button class="btn btn-primary" onclick="saveToRepository()" style="width: 100%; background: #0055aa;">
+                        📚 Save to Repository (configs.db)
+                    </button>
+                    <p style="margin: 6px 0 0 0; font-size: 10px; color: #5a7fa0; text-align: center;">
+                        Saves YAML + full canvas state (visibility, filters, JOINs, positions)
+                    </p>
                 </div>
             </div>
 
