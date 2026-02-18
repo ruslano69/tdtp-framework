@@ -2447,7 +2447,7 @@ function openFilterBuilder(tableIndex, fieldIndex) {
 
     modal.innerHTML = `
         <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px; max-width: 500px;">
-            <h3 style="margin-top: 0;">Filter: ${field.name}</h3>
+            <h3 style="margin-top: 0;">Filter: ${field.name} <span style="font-size: 13px; font-weight: 400; color: #888;">(${field.type || 'unknown'})</span></h3>
 
             <div style="margin-bottom: 15px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Operator:</label>
