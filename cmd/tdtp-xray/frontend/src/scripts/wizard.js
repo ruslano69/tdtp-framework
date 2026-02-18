@@ -2072,6 +2072,36 @@ function createTableCard(table, index) {
     `;
     card.appendChild(header);
 
+    // Toolbar: bulk toggle visibility / clear filters / sort
+    const allVisible = table.fields.every(f => f.visible);
+    const hasFilters  = table.fields.some(f => f.filter);
+    const toolbar = document.createElement('div');
+    toolbar.style.cssText = `
+        padding: 3px 8px;
+        border-bottom: 2px solid #dde;
+        background: #f0f4ff;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+    `;
+    toolbar.innerHTML = `
+        <span onclick="toggleAllVisibility(${index})"
+              title="${allVisible ? 'Hide all fields' : 'Show all fields'}"
+              style="cursor:pointer; font-size:15px; color:${allVisible ? '#28a745' : '#aaa'}; user-select:none; line-height:1;">👁</span>
+        <span style="flex:1; font-size:11px; color:#888;">${table.fields.length} fields</span>
+        <span onclick="clearAllFilters(${index})"
+              title="Clear all filters"
+              style="cursor:pointer; font-weight:bold; color:${hasFilters ? '#dc3545' : '#ccc'}; user-select:none; font-size:15px; line-height:1;">✱</span>
+        <span onclick="sortTableFields(${index}, 'AZ')"
+              title="Sort A→Z"
+              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">AZ▲</span>
+        <span onclick="sortTableFields(${index}, 'ZA')"
+              title="Sort Z→A"
+              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">ZA▼</span>
+    `;
+    card.appendChild(toolbar);
+
     // Fields
     const fieldsContainer = document.createElement('div');
     fieldsContainer.id = `fields-${index}`;
@@ -2570,6 +2600,33 @@ function closeFilterBuilder() {
     if (modal) {
         modal.remove();
     }
+}
+
+// ========== TABLE TOOLBAR ACTIONS ==========
+
+function toggleAllVisibility(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const allVisible = table.fields.every(f => f.visible);
+    table.fields.forEach(f => f.visible = !allVisible);
+    renderCanvas();
+}
+
+function clearAllFilters(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const hasFilters = table.fields.some(f => f.filter);
+    if (!hasFilters) return;
+    table.fields.forEach(f => f.filter = null);
+    renderCanvas();
+    showNotification('All filters cleared', 'info');
+}
+
+function sortTableFields(tableIndex, direction) {
+    const table = canvasDesign.tables[tableIndex];
+    table.fields.sort((a, b) => {
+        const cmp = a.name.localeCompare(b.name);
+        return direction === 'ZA' ? -cmp : cmp;
+    });
+    renderCanvas();
 }
 
 // ========== DRAG-AND-DROP JOIN (Connector Box) ==========
