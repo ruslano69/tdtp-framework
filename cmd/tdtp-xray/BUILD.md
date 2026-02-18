@@ -1,125 +1,141 @@
-# TDTP X-Ray - Build Instructions
+# TDTP X-Ray — Сборка
 
-## Prerequisites
+## Требования
 
-- Go 1.21+
-- Wails CLI v2.11+
+- **Go 1.25+**
+- **Wails CLI v2.11+**
+- **Windows 10/11** (для нативной сборки)
+- **WebView2 Runtime** — обычно уже установлен в Windows 11; для Windows 10: [скачать](https://developer.microsoft.com/microsoft-edge/webview2/)
 
-### Install Wails
+### Установка Wails
 
-```bash
+```powershell
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
-## Building
+Убедитесь что `%GOPATH%\bin` в `PATH`:
 
-### Development Mode
-
-```bash
-cd cmd/tdtp-xray
-wails dev
+```powershell
+$env:Path += ";$(go env GOPATH)\bin"
+wails version
 ```
 
-This will:
-- Compile Go backend
-- Open application window
-- Enable hot reload (changes in `frontend/src/` trigger rebuild)
+---
 
-### Production Build
+## Сборка EXE
 
-```bash
-cd cmd/tdtp-xray
+```powershell
+cd tdtp-framework\cmd\tdtp-xray
 wails build
 ```
 
-Output: `build/bin/tdtp-xray.exe` (Windows)
+Результат: `build\bin\tdtp-xray.exe`
 
-## Project Structure
+> **Важно:** Wails читает фронтенд напрямую из `frontend/src/` (см. `wails.json` → `"assetdir"`).
+> Копировать файлы в `frontend/dist/` **не нужно**.
+
+### Без консольного окна (рекомендуется для релиза)
+
+```powershell
+wails build -windowsconsole
+```
+
+Или без подсказок (тихая сборка):
+
+```powershell
+wails build -nocolour
+```
+
+---
+
+## Режим разработки (hot-reload)
+
+```powershell
+cd tdtp-framework\cmd\tdtp-xray
+wails dev
+```
+
+- Go-бэкенд перекомпилируется при изменении `.go` файлов
+- Фронтенд обновляется при изменении файлов в `frontend/src/`
+- DevTools доступны по `F12`
+
+---
+
+## Кросс-компиляция с Linux → Windows
+
+Для сборки `.exe` с Linux-машины (например, CI):
+
+```bash
+# Установить MinGW-w64
+sudo apt-get install gcc-mingw-w64-x86-64
+
+# Собрать
+cd tdtp-framework/cmd/tdtp-xray
+GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
+  wails build -platform windows/amd64
+```
+
+---
+
+## Структура проекта
 
 ```
 cmd/tdtp-xray/
-├── main.go              # Wails entry point
-├── app.go               # Go API (backend)
-├── wails.json           # Wails configuration
-├── go.mod               # Go dependencies
+├── main.go              # Точка входа Wails
+├── app.go               # Go API (бэкенд, ~2500 строк)
+├── wails.json           # Конфигурация Wails (assetdir → frontend/src)
+├── go.mod               # Go 1.25
+├── services/            # Сервисы бизнес-логики
+│   ├── connection_service.go
+│   ├── metadata_service.go
+│   ├── preview_service.go
+│   ├── source_service.go
+│   └── tdtp_service.go
 ├── frontend/
-│   ├── src/             # Source files (edit these)
-│   │   ├── index.html
-│   │   ├── styles/
-│   │   │   ├── main.css
-│   │   │   └── wizard.css
-│   │   └── scripts/
-│   │       └── wizard.js
-│   └── dist/            # Built files (auto-generated)
-│       └── (mirrors src/)
-└── build/               # Wails build output (gitignored)
+│   └── src/             # ← Wails берёт файлы отсюда напрямую
+│       ├── index.html
+│       ├── styles/
+│       │   ├── main.css
+│       │   └── wizard.css
+│       └── scripts/
+│           └── wizard.js  # Вся логика UI (~3800 строк)
+└── build/               # Результат wails build (gitignored)
     └── bin/
         └── tdtp-xray.exe
 ```
 
-## Updating Frontend
+---
 
-After editing files in `frontend/src/`:
+## Рабочий процесс разработки
 
-```bash
-# Copy to dist/
-cp -r frontend/src/* frontend/dist/
-
-# Rebuild
-wails build
+```
+1. Правите frontend/src/ или *.go
+2. wails build
+3. .\build\bin\tdtp-xray.exe
 ```
 
-## Troubleshooting
+Или `wails dev` для автоперезагрузки.
 
-### "wails: command not found"
+---
 
-```bash
-# Check GOPATH/bin is in PATH
-echo $PATH | grep "go/bin"
+## Устранение проблем
 
-# Add to PATH (Windows PowerShell)
+### `wails: command not found`
+```powershell
 $env:Path += ";$(go env GOPATH)\bin"
 ```
 
-### "Cannot find wails.json"
+### `go.mod requires go >= 1.25 (running go 1.XX)`
+Обновите Go: https://go.dev/dl/
 
-Make sure you're in `cmd/tdtp-xray/` directory:
-```bash
-cd cmd/tdtp-xray
-pwd  # Should end with: .../tdtp-framework/cmd/tdtp-xray
-```
-
-### "Failed to find Vite server URL"
-
-This is expected - we use Vanilla JS (no Vite). Ignore this error or use:
-```bash
-wails build  # Instead of wails dev
-```
-
-### JavaScript not working
-
-Open DevTools in the app (F12) and check Console for errors. Common issues:
-- Wails runtime not loaded → check `wails/runtime/runtime.js`
-- Path issues → verify `frontend/dist/` structure matches `frontend/src/`
-
-## Windows-Specific
-
-### WebView2 Required
-
-Download from: https://developer.microsoft.com/microsoft-edge/webview2/
-
-### MinGW (Optional)
-
-For faster builds, install MinGW-w64. Or use:
+### `Cannot find wails.json`
+Убедитесь что вы в правильной директории:
 ```powershell
-wails build -tags nopie
+cd tdtp-framework\cmd\tdtp-xray
 ```
 
-## Development Workflow
+### Приложение запускается но экран пустой
+Нет WebView2. Установите: https://developer.microsoft.com/microsoft-edge/webview2/
 
-1. Edit files in `frontend/src/`
-2. Copy to `dist/`: `cp -r frontend/src/* frontend/dist/`
-3. Rebuild: `wails build`
-4. Test: `.\build\bin\tdtp-xray.exe`
-
-Or use `wails dev` for auto-reload (though it may show Vite errors - ignore them).
+### `Failed to find Vite server URL`
+Игнорируйте — проект использует Vanilla JS без Vite/npm.
