@@ -22,13 +22,14 @@ type PipelineConfig struct {
 	ErrorHandling ErrorHandlingConfig `yaml:"error_handling"`
 }
 
-// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite)
+// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP)
 type SourceConfig struct {
-	Name    string `yaml:"name"`    // Имя источника (будет использовано как имя таблицы в workspace)
-	Type    string `yaml:"type"`    // Тип: postgres, mssql, mysql, sqlite
-	DSN     string `yaml:"dsn"`     // Data Source Name (строка подключения)
-	Query   string `yaml:"query"`   // SQL запрос для извлечения данных
-	Timeout int    `yaml:"timeout"` // Таймаут в секундах (0 = без таймаута)
+	Name      string `yaml:"name"`       // Имя источника (будет использовано как имя таблицы в workspace)
+	Type      string `yaml:"type"`       // Тип: postgres, mssql, mysql, sqlite, tdtp
+	DSN       string `yaml:"dsn"`        // Data Source Name (строка подключения или путь к TDTP-файлу)
+	Query     string `yaml:"query"`      // SQL запрос для извлечения данных (не используется для type: tdtp)
+	Timeout   int    `yaml:"timeout"`    // Таймаут в секундах (0 = без таймаута)
+	MultiPart bool   `yaml:"multi_part"` // Только для type: tdtp — загружать все части набора автоматически
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -47,10 +48,17 @@ type TransformConfig struct {
 
 // OutputConfig определяет назначение для результатов
 type OutputConfig struct {
-	Type     string                `yaml:"type"`               // Тип: tdtp, rabbitmq, kafka
+	Type     string                `yaml:"type"`               // Тип: tdtp, rabbitmq, kafka, xlsx
 	TDTP     *TDTPOutputConfig     `yaml:"tdtp,omitempty"`     // Конфигурация для TDTP
 	RabbitMQ *RabbitMQOutputConfig `yaml:"rabbitmq,omitempty"` // Конфигурация для RabbitMQ
 	Kafka    *KafkaOutputConfig    `yaml:"kafka,omitempty"`    // Конфигурация для Kafka
+	XLSX     *XLSXOutputConfig     `yaml:"xlsx,omitempty"`     // Конфигурация для XLSX
+}
+
+// XLSXOutputConfig определяет параметры экспорта в Excel формат
+type XLSXOutputConfig struct {
+	Destination string `yaml:"destination"` // Путь к выходному файлу
+	Sheet       string `yaml:"sheet"`       // Имя листа (пустое = имя таблицы результата)
 }
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
@@ -169,9 +177,6 @@ func (s *SourceConfig) Validate() error {
 	if s.DSN == "" {
 		return fmt.Errorf("dsn is required")
 	}
-	if s.Query == "" {
-		return fmt.Errorf("query is required")
-	}
 
 	// Проверка поддерживаемых типов
 	validTypes := map[string]bool{
@@ -179,9 +184,20 @@ func (s *SourceConfig) Validate() error {
 		"mssql":    true,
 		"mysql":    true,
 		"sqlite":   true,
+		"tdtp":     true, // TDTP XML/JSON file — DSN is the file path, query not required
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp", s.Type)
+	}
+
+	// query обязателен для DB-источников, для TDTP-файла не нужен
+	if s.Type != "tdtp" && s.Query == "" {
+		return fmt.Errorf("query is required for type '%s'", s.Type)
+	}
+
+	// multi_part имеет смысл только для TDTP
+	if s.MultiPart && s.Type != "tdtp" {
+		return fmt.Errorf("multi_part is only supported for type 'tdtp'")
 	}
 
 	return nil
@@ -269,8 +285,16 @@ func (o *OutputConfig) Validate() error {
 			return fmt.Errorf("kafka.topic is required")
 		}
 
+	case "xlsx":
+		if o.XLSX == nil {
+			return fmt.Errorf("xlsx configuration is required when type is 'xlsx'")
+		}
+		if o.XLSX.Destination == "" {
+			return fmt.Errorf("xlsx.destination is required")
+		}
+
 	default:
-		return fmt.Errorf("unsupported output type '%s', must be one of: tdtp, rabbitmq, kafka", o.Type)
+		return fmt.Errorf("unsupported output type '%s', must be one of: tdtp, rabbitmq, kafka, xlsx", o.Type)
 	}
 
 	return nil

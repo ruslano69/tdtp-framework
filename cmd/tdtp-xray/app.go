@@ -480,7 +480,13 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 				filter = field.Condition
 			}
 
-			if filter == nil || filter.Value == "" {
+			// IS_NULL / IS_NOT_NULL / IS_EMPTY / IS_NOT_EMPTY have no value — all other
+			// operators require a non-empty value.
+			noValueOp := filter != nil && (filter.Operator == "IS_NULL" ||
+				filter.Operator == "IS_NOT_NULL" ||
+				filter.Operator == "IS_EMPTY" ||
+				filter.Operator == "IS_NOT_EMPTY")
+			if filter == nil || (!noValueOp && filter.Value == "") {
 				continue
 			}
 
@@ -489,6 +495,14 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 			var condition string
 
 			switch filter.Operator {
+			case "IS_NULL":
+				condition = fmt.Sprintf("%s IS NULL", fieldExpr)
+			case "IS_NOT_NULL":
+				condition = fmt.Sprintf("%s IS NOT NULL", fieldExpr)
+			case "IS_EMPTY":
+				condition = fmt.Sprintf("%s = ''", fieldExpr)
+			case "IS_NOT_EMPTY":
+				condition = fmt.Sprintf("%s <> ''", fieldExpr)
 			case "=":
 				condition = fmt.Sprintf("%s = '%s'", fieldExpr, filter.Value)
 			case "<>", "!=":
@@ -992,7 +1006,11 @@ func (a *App) buildSourceConfigs() []SourceConfig {
 		case "postgres", "mysql", "mssql", "sqlite":
 			config.DSN = src.DSN
 		case "tdtp":
-			if src.Transport != nil {
+			// For TDTP file sources, DSN is the file path set during source setup.
+			// Transport.Source is only used for broker-backed TDTP sources.
+			if src.DSN != "" {
+				config.DSN = src.DSN
+			} else if src.Transport != nil && src.Transport.Source != "" {
 				config.DSN = src.Transport.Source
 			}
 		case "mock":
@@ -1070,6 +1088,13 @@ func (a *App) buildOutputConfig() OutputConfig {
 			}
 			if a.output.Broker.Compression {
 				config.Kafka.Compression = "zstd"
+			}
+		}
+	case "xlsx":
+		if a.output.XLSX != nil {
+			config.XLSX = &XLSXOutputConfig{
+				Destination: a.output.XLSX.Destination,
+				Sheet:       a.output.XLSX.Sheet,
 			}
 		}
 	}
@@ -1531,10 +1556,17 @@ type TransformConfig struct {
 
 // OutputConfig represents output destination (tdtpcli compatible)
 type OutputConfig struct {
-	Type     string                `yaml:"type" json:"type"` // tdtp, rabbitmq, kafka
+	Type     string                `yaml:"type" json:"type"` // tdtp, rabbitmq, kafka, xlsx
 	TDTP     *TDTPOutputConfig     `yaml:"tdtp,omitempty" json:"tdtp,omitempty"`
 	RabbitMQ *RabbitMQOutputConfig `yaml:"rabbitmq,omitempty" json:"rabbitmq,omitempty"`
 	Kafka    *KafkaOutputConfig    `yaml:"kafka,omitempty" json:"kafka,omitempty"`
+	XLSX     *XLSXOutputConfig     `yaml:"xlsx,omitempty" json:"xlsx,omitempty"`
+}
+
+// XLSXOutputConfig определяет параметры XLSX-вывода (tdtpcli-compatible)
+type XLSXOutputConfig struct {
+	Destination string `yaml:"destination" json:"destination"`
+	Sheet       string `yaml:"sheet,omitempty" json:"sheet,omitempty"`
 }
 
 // TDTPOutputConfig for TDTP protocol output
@@ -2132,42 +2164,26 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 		}
 	}
 
-	// Build tdtpcli-compatible configuration structure
+	// Build tdtpcli-compatible configuration structure.
+	// Use the same builder helpers as GenerateYAML() so that the saved file
+	// always reflects the actual pipeline state (transform SQL, output type,
+	// XLSX settings, etc.) rather than hardcoded defaults.
 	config := TDTPConfig{
 		Name:        a.pipelineInfo.Name,
 		Version:     a.pipelineInfo.Version,
 		Description: a.pipelineInfo.Description,
 		Sources:     tdtpSources,
 
-		// Default workspace (SQLite in-memory)
 		Workspace: WorkspaceConfig{
 			Type: "sqlite",
 			Mode: ":memory:",
 		},
 
-		// Default transform (simple SELECT * from first source)
-		Transform: TransformConfig{
-			ResultTable: "result",
-			SQL:         getDefaultTransformSQL(a.sources),
-		},
-
-		// Default output (TDTP file)
-		Output: OutputConfig{
-			Type: "tdtp",
-			TDTP: &TDTPOutputConfig{
-				Destination: fmt.Sprintf("output/%s.xml", a.pipelineInfo.Name),
-				Format:      "xml",
-				Compression: false,
-			},
-		},
-
-		// Optional: add default performance settings
-		Performance: &PerformanceConfig{
-			Timeout:         300,
-			BatchSize:       1000,
-			ParallelSources: false,
-			MaxMemoryMB:     512,
-		},
+		Transform:     a.buildTransformConfig(),
+		Output:        a.buildOutputConfig(),
+		Performance:   a.buildPerformanceConfig(),
+		Audit:         a.buildAuditConfig(),
+		ErrorHandling: a.buildErrorHandlingConfig(),
 	}
 
 	// Marshal to YAML

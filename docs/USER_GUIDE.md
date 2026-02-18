@@ -575,6 +575,15 @@ Key 55: used_new
 --where "is_verified = 0"
 ```
 
+**NULL проверки:**
+```bash
+--where "deleted_at IS NULL"
+--where "email IS NOT NULL"
+```
+
+> **Важно:** Для проверки NULL всегда используй `IS NULL` / `IS NOT NULL`.
+> Конструкция `field = NULL` в SQL некорректна — всегда возвращает false.
+
 ### Сортировка
 
 **Одиночная:**

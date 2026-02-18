@@ -4,12 +4,122 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
+
+// multiPartRe matches filenames like: base_part_N_of_Total.ext
+var multiPartRe = regexp.MustCompile(`^(.+)_part_(\d+)_of_(\d+)(\..+)$`)
+
+// tdtpMultiPartFiles возвращает все части multi-part набора, если DSN указывает
+// на одну из частей или на базовое имя файла.  Возвращает nil для одиночных файлов.
+func tdtpMultiPartFiles(filePath string) []string {
+	var base, ext string
+	var total int
+
+	if m := multiPartRe.FindStringSubmatch(filePath); m != nil {
+		base = m[1]
+		ext = m[4]
+		total, _ = strconv.Atoi(m[3])
+	} else {
+		ext = filepath.Ext(filePath)
+		base = filePath[:len(filePath)-len(ext)]
+		matches, err := filepath.Glob(fmt.Sprintf("%s_part_1_of_*%s", base, ext))
+		if err == nil && len(matches) == 1 {
+			if m := multiPartRe.FindStringSubmatch(matches[0]); m != nil {
+				total, _ = strconv.Atoi(m[3])
+			}
+		}
+	}
+
+	if total < 2 {
+		return nil
+	}
+
+	parts := make([]string, total)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("%s_part_%d_of_%d%s", base, i+1, total, ext)
+	}
+	return parts
+}
+
+// decompressTDTPPacket распаковывает строки пакета если они сжаты (zstd).
+// Алгоритм идентичен ImportFile: checksum → decompress → замена rows.
+func decompressTDTPPacket(pkt *packet.DataPacket) error {
+	if pkt.Data.Compression == "" {
+		return nil
+	}
+	if len(pkt.Data.Rows) != 1 {
+		return fmt.Errorf("compressed TDTP packet must have exactly 1 row, got %d", len(pkt.Data.Rows))
+	}
+	compressed := pkt.Data.Rows[0].Value
+	if pkt.Data.Checksum != "" {
+		if err := processors.ValidateChecksum([]byte(compressed), pkt.Data.Checksum); err != nil {
+			return fmt.Errorf("checksum mismatch: %w", err)
+		}
+	}
+	rows, err := processors.DecompressDataForTdtp(compressed)
+	if err != nil {
+		return fmt.Errorf("failed to decompress: %w", err)
+	}
+	pkt.Data.Compression = ""
+	pkt.Data.Checksum = ""
+	pkt.Data.Rows = make([]packet.Row, len(rows))
+	for i, r := range rows {
+		pkt.Data.Rows[i] = packet.Row{Value: r}
+	}
+	return nil
+}
+
+// loadTDTPFile читает TDTP XML-файл напрямую, минуя адаптерный слой.
+// DSN для tdtp-источника — это путь к файлу.
+// Поведение совпадает с ImportFile: multi-part-набор объединяется в один пакет,
+// сжатые данные распаковываются до загрузки в SQLite workspace.
+func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
+	if source.DSN == "" {
+		return nil, fmt.Errorf("tdtp source requires 'dsn' to be the file path")
+	}
+
+	var filePaths []string
+	if source.MultiPart {
+		filePaths = tdtpMultiPartFiles(source.DSN)
+	}
+	if filePaths == nil {
+		filePaths = []string{source.DSN}
+	}
+
+	parser := packet.NewParser()
+	var merged *packet.DataPacket
+
+	for _, fp := range filePaths {
+		pkt, err := parser.ParseFile(fp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse TDTP file '%s': %w", fp, err)
+		}
+		if err := decompressTDTPPacket(pkt); err != nil {
+			return nil, fmt.Errorf("file '%s': %w", fp, err)
+		}
+		if merged == nil {
+			merged = pkt
+		} else {
+			// Склеиваем строки последующих частей в первый пакет.
+			merged.Data.Rows = append(merged.Data.Rows, pkt.Data.Rows...)
+			merged.Header.RecordsInPart += pkt.Header.RecordsInPart
+		}
+	}
+
+	// Переименовываем таблицу в alias источника — workspace использует это
+	// имя как имя SQLite-таблицы, и именно это имя используется в transform SQL.
+	merged.Header.TableName = source.Name
+	return merged, nil
+}
 
 // SourceData представляет загруженные данные из одного источника
 type SourceData struct {
@@ -150,6 +260,12 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	} else {
 		timeoutCtx = ctx
 	}
+
+	// TDTP-файл не требует адаптера — данные уже в TDTP-формате, читаем напрямую.
+	if source.Type == "tdtp" {
+		return loadTDTPFile(source)
+	}
+	_ = timeoutCtx // используется далее
 
 	// Создаем адаптер для источника
 	adapter, err := adapters.New(timeoutCtx, adapters.Config{

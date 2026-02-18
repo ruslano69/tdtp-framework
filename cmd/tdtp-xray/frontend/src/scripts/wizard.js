@@ -1689,6 +1689,13 @@ function renderCanvas() {
         joins: canvasDesign.joins ? canvasDesign.joins.length : 0
     });
 
+    // Preserve scroll positions of each table's field list before clearing
+    const fieldScrollTops = {};
+    canvasDesign.tables.forEach((_, index) => {
+        const fc = document.getElementById(`fields-${index}`);
+        if (fc) fieldScrollTops[index] = fc.scrollTop;
+    });
+
     // Clear existing
     canvasArea.innerHTML = '';
     svg.innerHTML = '';
@@ -1698,6 +1705,11 @@ function renderCanvas() {
         console.log(`  ➕ Rendering table ${index}: ${table.sourceName}`);
         const tableCard = createTableCard(table, index);
         canvasArea.appendChild(tableCard);
+        // Restore scroll position so the field the user acted on stays in view
+        if (fieldScrollTops[index]) {
+            const fc = document.getElementById(`fields-${index}`);
+            if (fc) fc.scrollTop = fieldScrollTops[index];
+        }
     });
 
     console.log('✅ Tables rendered, scheduling JOIN rendering...');
@@ -1745,6 +1757,7 @@ function createTableCard(table, index) {
 
     // Fields
     const fieldsContainer = document.createElement('div');
+    fieldsContainer.id = `fields-${index}`;
     fieldsContainer.style.cssText = 'padding: 5px; max-height: 300px; overflow-y: auto;';
 
     table.fields.forEach((field, fieldIndex) => {
@@ -2122,17 +2135,27 @@ function openFilterBuilder(tableIndex, fieldIndex) {
             <div style="margin-bottom: 15px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Operator:</label>
                 <select id="filterOperator" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
-                    <option value="=" ${currentFilter.operator === '=' ? 'selected' : ''}>= (Equal)</option>
-                    <option value="<>" ${currentFilter.operator === '<>' ? 'selected' : ''}>&lt;&gt; (Not Equal)</option>
-                    <option value=">" ${currentFilter.operator === '>' ? 'selected' : ''}>&gt; (Greater Than)</option>
-                    <option value="<" ${currentFilter.operator === '<' ? 'selected' : ''}>&lt; (Less Than)</option>
-                    <option value=">=" ${currentFilter.operator === '>=' ? 'selected' : ''}>&gt;= (Greater or Equal)</option>
-                    <option value="<=" ${currentFilter.operator === '<=' ? 'selected' : ''}>&lt;= (Less or Equal)</option>
-                    <option value="BW" ${currentFilter.operator === 'BW' ? 'selected' : ''}>BETWEEN</option>
+                    <optgroup label="Comparison">
+                        <option value="=" ${currentFilter.operator === '=' ? 'selected' : ''}>= (Equal)</option>
+                        <option value="<>" ${currentFilter.operator === '<>' ? 'selected' : ''}>&lt;&gt; (Not Equal)</option>
+                        <option value=">" ${currentFilter.operator === '>' ? 'selected' : ''}>&gt; (Greater Than)</option>
+                        <option value="<" ${currentFilter.operator === '<' ? 'selected' : ''}>&lt; (Less Than)</option>
+                        <option value=">=" ${currentFilter.operator === '>=' ? 'selected' : ''}>&gt;= (Greater or Equal)</option>
+                        <option value="<=" ${currentFilter.operator === '<=' ? 'selected' : ''}>&lt;= (Less or Equal)</option>
+                        <option value="BW" ${currentFilter.operator === 'BW' ? 'selected' : ''}>BETWEEN</option>
+                    </optgroup>
+                    <optgroup label="NULL checks">
+                        <option value="IS_NULL" ${currentFilter.operator === 'IS_NULL' ? 'selected' : ''}>IS NULL</option>
+                        <option value="IS_NOT_NULL" ${currentFilter.operator === 'IS_NOT_NULL' ? 'selected' : ''}>IS NOT NULL</option>
+                    </optgroup>
+                    <optgroup label="Empty string checks">
+                        <option value="IS_EMPTY" ${currentFilter.operator === 'IS_EMPTY' ? 'selected' : ''}> = '' (Empty string)</option>
+                        <option value="IS_NOT_EMPTY" ${currentFilter.operator === 'IS_NOT_EMPTY' ? 'selected' : ''}>&lt;&gt; '' (Not empty string)</option>
+                    </optgroup>
                 </select>
             </div>
 
-            <div id="filterValue1Container" style="margin-bottom: 15px;">
+            <div id="filterValue1Container" style="margin-bottom: 15px; display: ${['IS_NULL','IS_NOT_NULL','IS_EMPTY','IS_NOT_EMPTY'].includes(currentFilter.operator) ? 'none' : 'block'};">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Value:</label>
                 <input type="text" id="filterValue1" value="${currentFilter.value || ''}"
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
@@ -2163,10 +2186,13 @@ function openFilterBuilder(tableIndex, fieldIndex) {
 
     document.body.appendChild(modal);
 
-    // Handle operator change
+    // Handle operator change — show/hide value inputs based on selected operator
     document.getElementById('filterOperator').addEventListener('change', function() {
-        const isBetween = this.value === 'BW';
-        document.getElementById('filterValue2Container').style.display = isBetween ? 'block' : 'none';
+        const noValueOps = ['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'];
+        const needsValue = !noValueOps.includes(this.value);
+        const isBetween  = this.value === 'BW';
+        document.getElementById('filterValue1Container').style.display = needsValue ? 'block' : 'none';
+        document.getElementById('filterValue2Container').style.display = isBetween  ? 'block' : 'none';
     });
 
     // Close on backdrop click
@@ -2192,7 +2218,8 @@ function saveFilter(tableIndex, fieldIndex) {
     const value2 = document.getElementById('filterValue2').value.trim();
     const logic = document.getElementById('filterLogic').value;
 
-    if (!value1) {
+    const noValueOps = ['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'];
+    if (!noValueOps.includes(operator) && !value1) {
         alert('Please enter a value');
         return;
     }

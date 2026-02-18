@@ -198,7 +198,7 @@ func (g *SQLGenerator) generateFilterCondition(filter packet.Filter) (string, er
 // escapeSQLValue экранирует значение для SQL
 func (g *SQLGenerator) escapeSQLValue(value string) string {
 	if value == "" {
-		return "NULL"
+		return "''"
 	}
 
 	// Проверяем является ли значение числом
