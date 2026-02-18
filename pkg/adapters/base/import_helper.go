@@ -241,7 +241,9 @@ func (h *ImportHelper) replaceTables(ctx context.Context, targetTable, tempTable
 		// 2. Переименовываем временную таблицу в продакшен
 		if err := h.tableManager.RenameTable(ctx, tempTable, targetTable); err != nil {
 			// Откатываем - возвращаем старое имя
-			h.tableManager.RenameTable(ctx, oldTableName, targetTable)
+			if rollbackErr := h.tableManager.RenameTable(ctx, oldTableName, targetTable); rollbackErr != nil {
+				return fmt.Errorf("failed to rename temp table: %w; rollback also failed: %v", err, rollbackErr)
+			}
 			return fmt.Errorf("failed to rename temp table: %w", err)
 		}
 

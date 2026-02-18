@@ -114,8 +114,9 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	txStmt := tx.StmtContext(ctx, stmt)
 
 	// Вставляем каждую строку
+	parser := packet.NewParser()
 	for i, row := range dataPacket.Data.Rows {
-		values := strings.Split(row.Value, "|")
+		values := parser.GetRowValues(row)
 		if len(values) != numFields {
 			return fmt.Errorf("row %d has %d values, expected %d", i, len(values), numFields)
 		}

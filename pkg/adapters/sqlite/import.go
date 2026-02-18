@@ -113,16 +113,16 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 		fieldNames[i] = field.Name
 	}
 
-	// Батчинг: вставляем по 500 строк за раз
-	// SQLite имеет ограничение на количество параметров (999 по умолчанию)
-	// 500 строк × N колонок должно быть < 999
-	batchSize := 500
-	if len(pkgSchema.Fields) > 10 {
-		// Для таблиц с большим количеством колонок уменьшаем batch
-		batchSize = 999 / len(pkgSchema.Fields)
-		if batchSize < 1 {
-			batchSize = 1
-		}
+	// Батчинг: вставляем строки батчами.
+	// SQLite ограничивает число параметров до 999 (SQLITE_LIMIT_VARIABLE_NUMBER).
+	// batchSize × len(fields) должно быть < 999.
+	numFields := len(pkgSchema.Fields)
+	batchSize := 999 / numFields
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	if batchSize > 500 {
+		batchSize = 500 // разумный верхний предел для экономии памяти
 	}
 
 	// Вставляем батчами

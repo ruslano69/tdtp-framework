@@ -54,6 +54,11 @@ func InitProductionFeatures(config *Config) (*ProductionFeatures, error) {
 
 // Close closes all production features
 func (pf *ProductionFeatures) Close() error {
+	if pf.RetryManager != nil {
+		if err := pf.RetryManager.Close(); err != nil {
+			return fmt.Errorf("failed to close retry manager: %w", err)
+		}
+	}
 	if pf.AuditLogger != nil {
 		if err := pf.AuditLogger.Close(); err != nil {
 			return fmt.Errorf("failed to close audit logger: %w", err)
