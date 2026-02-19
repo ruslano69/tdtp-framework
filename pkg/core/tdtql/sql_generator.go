@@ -218,19 +218,28 @@ func (g *SQLGenerator) isNumeric(s string) bool {
 		return false
 	}
 
-	// Простая проверка на число (включая отрицательные и дробные)
+	dots := 0
 	for i, c := range s {
 		if c == '-' && i == 0 {
 			continue
 		}
 		if c == '.' {
+			dots++
+			if dots > 1 {
+				return false // "1.2.3" не является числом
+			}
 			continue
 		}
 		if c < '0' || c > '9' {
 			return false
 		}
 	}
-	return true
+	// Строка только из "-" или "." не является числом
+	stripped := s
+	if len(stripped) > 0 && stripped[0] == '-' {
+		stripped = stripped[1:]
+	}
+	return len(stripped) > 0 && stripped != "."
 }
 
 // generateOrderByClause конвертирует OrderBy в SQL ORDER BY

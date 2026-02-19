@@ -88,6 +88,7 @@ func NewDataPacket(msgType MessageType, tableName string) *DataPacket {
 		Header: Header{
 			Type:      msgType,
 			TableName: tableName,
+			MessageID: generateUUID(),
 			Timestamp: time.Now().UTC(),
 		},
 	}

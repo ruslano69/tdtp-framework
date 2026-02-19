@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -169,6 +170,7 @@ func (cb *CircuitBreaker) String() string {
 
 // CircuitBreakerGroup - группа circuit breakers
 type CircuitBreakerGroup struct {
+	mu       sync.RWMutex
 	breakers map[string]*CircuitBreaker
 }
 
@@ -181,17 +183,24 @@ func NewGroup() *CircuitBreakerGroup {
 
 // Add - добавить circuit breaker в группу
 func (g *CircuitBreakerGroup) Add(name string, cb *CircuitBreaker) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.breakers[name] = cb
 }
 
 // Get - получить circuit breaker по имени
 func (g *CircuitBreakerGroup) Get(name string) (*CircuitBreaker, bool) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	cb, ok := g.breakers[name]
 	return cb, ok
 }
 
 // GetOrCreate - получить или создать circuit breaker
 func (g *CircuitBreakerGroup) GetOrCreate(name string, config Config) (*CircuitBreaker, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	if cb, ok := g.breakers[name]; ok {
 		return cb, nil
 	}
@@ -208,7 +217,10 @@ func (g *CircuitBreakerGroup) GetOrCreate(name string, config Config) (*CircuitB
 
 // Execute - выполнить функцию с circuit breaker по имени
 func (g *CircuitBreakerGroup) Execute(ctx context.Context, name string, fn ExecuteFunc) error {
+	g.mu.RLock()
 	cb, ok := g.breakers[name]
+	g.mu.RUnlock()
+
 	if !ok {
 		return fmt.Errorf("circuit breaker '%s' not found", name)
 	}
@@ -218,6 +230,8 @@ func (g *CircuitBreakerGroup) Execute(ctx context.Context, name string, fn Execu
 
 // ResetAll - сбросить все circuit breakers
 func (g *CircuitBreakerGroup) ResetAll() {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	for _, cb := range g.breakers {
 		cb.Reset()
 	}
@@ -225,6 +239,8 @@ func (g *CircuitBreakerGroup) ResetAll() {
 
 // StatsAll - получить статистику всех circuit breakers
 func (g *CircuitBreakerGroup) StatsAll() map[string]Stats {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	result := make(map[string]Stats, len(g.breakers))
 	for name, cb := range g.breakers {
 		result[name] = cb.Stats()

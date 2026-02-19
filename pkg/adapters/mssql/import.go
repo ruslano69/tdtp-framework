@@ -426,10 +426,8 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 		placeholders = append(placeholders, "?")
 	}
 
-	// Экранируем tableName для защиты от SQL injection
-	quotedTable := fmt.Sprintf("[%s]", tableName)
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		quotedTable,
+		tableName,
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "))
 }
@@ -553,8 +551,10 @@ func (a *Adapter) tableHasIdentityColumn(ctx context.Context, tableName string) 
 	var count int
 	err := a.db.QueryRowContext(ctx, query, schemaName, table).Scan(&count)
 	if err != nil {
-		// Если ошибка - предполагаем что IDENTITY есть (безопаснее)
-		return true
+		// При ошибке запроса предполагаем что IDENTITY нет.
+		// Попытка включить IDENTITY_INSERT на таблице без identity-колонки
+		// приводит к ошибке SQL Server, что хуже чем пропустить IDENTITY_INSERT.
+		return false
 	}
 
 	return count > 0
