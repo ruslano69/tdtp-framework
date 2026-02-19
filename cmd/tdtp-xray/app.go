@@ -1986,6 +1986,29 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 		return nil
 	}
 
+	// ---------- ORDER BY ----------
+	// Parse before WHERE so ORDER BY tokens don't bleed into WHERE regex.
+	// Supports: [table].[field] ASC|DESC  (default ASC when direction omitted)
+	orderByRe := regexp.MustCompile(`(?is)\bORDER\s+BY\b\s+(.+?)(?:\s*;|\s*$)`)
+	if om := orderByRe.FindStringSubmatch(sql); len(om) >= 2 {
+		sql = orderByRe.ReplaceAllString(sql, "") // strip from sql before WHERE parse
+
+		entryRe := regexp.MustCompile(`(?i)(` + ident + `)\.(` + ident + `)(?:\s+(ASC|DESC))?`)
+		for _, em := range entryRe.FindAllStringSubmatch(om[1], -1) {
+			tAlias := unquote(em[1])
+			fName  := unquote(em[2])
+			dir    := "ASC"
+			if len(em) >= 4 && strings.ToUpper(em[3]) == "DESC" {
+				dir = "DESC"
+			}
+			ensureTable(tAlias, "")
+			fd := addField(tAlias, fName, false)
+			if fd != nil {
+				fd.Sort = dir
+			}
+		}
+	}
+
 	// ---------- WHERE conditions ----------
 	whereRe := regexp.MustCompile(`(?is)\bWHERE\b\s+(.+)$`)
 	if wm := whereRe.FindStringSubmatch(sql); len(wm) >= 2 {
