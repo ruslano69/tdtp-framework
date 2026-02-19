@@ -360,8 +360,9 @@ type FieldDesign struct {
 	Type         string           `json:"type"`
 	IsPrimaryKey bool             `json:"isPrimaryKey,omitempty"`
 	Visible      bool             `json:"visible"`
-	Filter       *FilterCondition `json:"filter,omitempty"`   // Frontend uses "filter"
+	Filter       *FilterCondition `json:"filter,omitempty"`    // Frontend uses "filter"
 	Condition    *FilterCondition `json:"condition,omitempty"` // Backend compatibility
+	Sort         string           `json:"sort,omitempty"`      // ASC, DESC, or "" (no sort)
 }
 
 // FilterCondition for field filtering
@@ -608,6 +609,25 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		}
 
 		sql += fmt.Sprintf("\nWHERE\n    %s", strings.Join(whereConditions, "\n    "+whereLogic+" "))
+	}
+
+	// Build ORDER BY clause from field sort states (in table/field order = priority)
+	var orderByFields []string
+	for _, table := range design.Tables {
+		tableAlias := table.Alias
+		if tableAlias == "" {
+			tableAlias = table.SourceName
+		}
+		for _, field := range table.Fields {
+			if field.Sort == "ASC" || field.Sort == "DESC" {
+				orderByFields = append(orderByFields,
+					fmt.Sprintf("%s.%s %s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name), field.Sort))
+			}
+		}
+	}
+
+	if len(orderByFields) > 0 {
+		sql += fmt.Sprintf("\nORDER BY\n    %s", strings.Join(orderByFields, ",\n    "))
 	}
 
 	fmt.Printf("✅ Generated SQL:\n%s\n", sql)

@@ -2139,9 +2139,17 @@ function createTableCard(table, index) {
             ${pkBackground}
         `;
 
-        // Get filter icon
-        const filterIcon = field.filter ? (field.filter.logic === 'OR' ? '^' : '&') : '☀';
-        const filterColor = field.filter ? '#0066cc' : '#ccc';
+        // Build combined filter+sort icon and color
+        const hasFilter = !!field.filter;
+        const hasSort   = field.sort === 'ASC' || field.sort === 'DESC';
+        const filterSymbol = hasFilter
+            ? (field.filter.logic === 'OR' ? '^' : '&')
+            : (hasSort ? '*' : '☀');
+        const sortArrow  = field.sort === 'ASC' ? '↑' : (field.sort === 'DESC' ? '↓' : '');
+        const filterIcon = filterSymbol + sortArrow;
+        const filterColor = hasSort
+            ? (field.sort === 'ASC' ? '#28a745' : '#e67e22')
+            : (hasFilter ? '#0066cc' : '#ccc');
 
         // Check if this field has a connection
         const hasConnection = canvasDesign.joins.some(j =>
@@ -2168,7 +2176,7 @@ function createTableCard(table, index) {
             </span>
             <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 16px; font-weight: bold; color: ${filterColor}; user-select: none; text-align: center;"
-                  title="${field.filter ? 'Edit filter' : 'Add filter'}">
+                  title="${hasFilter && hasSort ? 'Edit filter & sort' : hasFilter ? 'Edit filter' : hasSort ? 'Edit sort' : 'Add filter / sort'}">
                 ${filterIcon}
             </span>
             <div class="join-connector ${hasConnection ? 'connected' : ''}"
@@ -2469,6 +2477,7 @@ function removeJoin(joinIndex) {
 function openFilterBuilder(tableIndex, fieldIndex) {
     const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
     const currentFilter = field.filter || { operator: '=', value: '', value2: '', logic: 'AND' };
+    const currentSort   = field.sort || '';
 
     // Create modal
     const modal = document.createElement('div');
@@ -2534,8 +2543,18 @@ function openFilterBuilder(tableIndex, fieldIndex) {
                 <small style="color: #666;">How this filter combines with other filters</small>
             </div>
 
+            <div style="margin-bottom: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Sort (ORDER BY):</label>
+                <select id="filterSort" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value=""    ${currentSort === ''     ? 'selected' : ''}>— No sort</option>
+                    <option value="ASC" ${currentSort === 'ASC'  ? 'selected' : ''}>↑ Ascending (ASC)</option>
+                    <option value="DESC"${currentSort === 'DESC' ? 'selected' : ''}>↓ Descending (DESC)</option>
+                </select>
+                <small style="color: #666;">Contributes to ORDER BY (priority = field order in table)</small>
+            </div>
+
             <div style="display: flex; gap: 10px; margin-top: 20px;">
-                <button class="btn" onclick="saveFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #28a745; color: white;">Apply Filter</button>
+                <button class="btn" onclick="saveFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #28a745; color: white;">Apply</button>
                 <button class="btn" onclick="clearFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #dc3545; color: white;">Clear Filter</button>
                 <button class="btn" onclick="closeFilterBuilder()" style="flex: 1;">Cancel</button>
             </div>
@@ -2575,10 +2594,11 @@ function saveFilter(tableIndex, fieldIndex) {
     const value1 = document.getElementById('filterValue1').value.trim();
     const value2 = document.getElementById('filterValue2').value.trim();
     const logic = document.getElementById('filterLogic').value;
+    const sort  = document.getElementById('filterSort').value;
 
     const noValueOps = ['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'];
-    if (!noValueOps.includes(operator) && !value1) {
-        alert('Please enter a value');
+    if (!noValueOps.includes(operator) && !value1 && !sort) {
+        alert('Please enter a filter value or select a sort order');
         return;
     }
 
@@ -2587,16 +2607,19 @@ function saveFilter(tableIndex, fieldIndex) {
         return;
     }
 
-    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = {
-        operator: operator,
-        value: value1,
-        value2: value2,
-        logic: logic
-    };
+    // Save filter only if a value (or no-value operator) is present
+    const hasFilterValue = noValueOps.includes(operator) || value1;
+    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = hasFilterValue
+        ? { operator, value: value1, value2, logic }
+        : null;
+
+    // Save sort state
+    canvasDesign.tables[tableIndex].fields[fieldIndex].sort = sort || null;
 
     closeFilterBuilder();
     renderCanvas();
-    showNotification('Filter applied successfully', 'success');
+    const msg = hasFilterValue && sort ? 'Filter & sort applied' : hasFilterValue ? 'Filter applied' : 'Sort applied';
+    showNotification(msg, 'success');
 }
 
 function clearFilter(tableIndex, fieldIndex) {
