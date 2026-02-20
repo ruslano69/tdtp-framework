@@ -2680,7 +2680,7 @@ function openFilterBuilder(tableIndex, fieldIndex) {
 
             <div style="display: flex; gap: 10px; margin-top: 20px;">
                 <button class="btn" onclick="saveFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #28a745; color: white;">Apply</button>
-                <button class="btn" onclick="clearFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #dc3545; color: white;">Clear Filter</button>
+                <button class="btn" onclick="clearFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #dc3545; color: white;">Clear All</button>
                 <button class="btn" onclick="closeFilterBuilder()" style="flex: 1;">Cancel</button>
             </div>
         </div>
@@ -2774,10 +2774,16 @@ function saveFilter(tableIndex, fieldIndex) {
 }
 
 function clearFilter(tableIndex, fieldIndex) {
-    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = null;
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+
+    // Clear filter, sort, and sortCast to fully reset the field
+    field.filter = null;
+    field.sort = null;
+    field.sortCast = null;
+
     closeFilterBuilder();
     renderCanvas();
-    showNotification('Filter cleared', 'info');
+    showNotification('Filter and sort cleared', 'info');
 }
 
 function closeFilterBuilder() {
