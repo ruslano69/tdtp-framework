@@ -41,8 +41,8 @@ type ValidationResult struct {
 	ErrorMessages []string          `json:"errorMessages"`
 }
 
-// SQLSQLColumnInfo represents parsed column information from SQL SELECT
-type SQLSQLColumnInfo struct {
+// SQLColumnInfo represents parsed column information from SQL SELECT
+type SQLColumnInfo struct {
 	Table string
 	Name  string
 	Alias string
