@@ -4,6 +4,7 @@ package processors
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 
@@ -69,10 +70,7 @@ func (p *ChecksumProcessor) ProcessBlock(ctx context.Context, input []byte) ([]b
 // uint64ToBytes конвертирует uint64 в байтовый массив (big-endian).
 func uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
-	for i := 7; i >= 0; i-- {
-		b[i] = byte(v)
-		v >>= 8
-	}
+	binary.BigEndian.PutUint64(b, v)
 	return b
 }
 
@@ -81,11 +79,7 @@ func bytesToUint64(b []byte) uint64 {
 	if len(b) != 8 {
 		return 0
 	}
-	var v uint64
-	for i := 0; i < 8; i++ {
-		v = (v << 8) | uint64(b[i])
-	}
-	return v
+	return binary.BigEndian.Uint64(b)
 }
 
 // --- Helper Functions ---
