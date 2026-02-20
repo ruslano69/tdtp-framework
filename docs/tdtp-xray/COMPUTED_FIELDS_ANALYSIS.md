@@ -579,6 +579,229 @@ Target System (готовые данные):
 
 ---
 
+### ⚙️ НО добавляем CAST() в ETL для миграций
+
+**Разделение ответственности:**
+- **Computed Fields** = бизнес-логика (формулы, правила) → остаются в SQL views ✅
+- **CAST()** = утилитарная трансформация (конвертация типов) → добавляем в ETL ✅
+
+**Зачем CAST() в ETL:**
+- Разные СУБД имеют разные типы данных (SQL Server `money` ≠ PostgreSQL `numeric`)
+- При миграции между системами нужна конвертация типов
+- Автоматический суффикс `_C` показывает что это cast field
+- Упрощает миграцию систем с ограничениями типов
+
+#### Примеры использования CAST():
+
+**1. Миграция SQL Server → PostgreSQL:**
+```xml
+<!-- Source: SQL Server -->
+<Source name="orders" system="sqlserver">
+  <Field name="order_id" type="int"/>
+  <Field name="order_date" type="datetime"/>    <!-- SQL Server type -->
+  <Field name="amount" type="money"/>           <!-- SQL Server type -->
+  <Field name="description" type="nvarchar"/>
+</Source>
+
+<!-- ETL Transformation -->
+<Transformation>
+  <Cast field="order_date" from="datetime" to="timestamp" as="order_date_C"/>
+  <Cast field="amount" from="money" to="numeric(10,2)" as="amount_C"/>
+</Transformation>
+
+<!-- Target: PostgreSQL -->
+<Target name="orders_target" system="postgresql">
+  <Field name="order_id" type="int"/>           <!-- без изменений -->
+  <Field name="order_date_C" type="timestamp"/> <!-- cast! -->
+  <Field name="amount_C" type="numeric"/>       <!-- cast! -->
+  <Field name="description" type="text"/>       <!-- автоконверсия -->
+</Target>
+```
+
+**2. Миграция Oracle → MySQL:**
+```xml
+<!-- Source: Oracle -->
+<Source name="employees" system="oracle">
+  <Field name="emp_id" type="NUMBER"/>
+  <Field name="salary" type="NUMBER(10,2)"/>
+  <Field name="hire_date" type="DATE"/>
+  <Field name="notes" type="CLOB"/>
+</Source>
+
+<!-- ETL Transformation -->
+<Transformation>
+  <Cast field="emp_id" from="NUMBER" to="int" as="emp_id_C"/>
+  <Cast field="salary" from="NUMBER(10,2)" to="decimal(10,2)" as="salary_C"/>
+  <Cast field="notes" from="CLOB" to="text" as="notes_C"/>
+</Transformation>
+
+<!-- Target: MySQL -->
+<Target name="employees_target" system="mysql">
+  <Field name="emp_id_C" type="int"/>
+  <Field name="salary_C" type="decimal(10,2)"/>
+  <Field name="hire_date" type="datetime"/>
+  <Field name="notes_C" type="text"/>
+</Target>
+```
+
+**3. Упрощение работы с legacy системами:**
+```xml
+<!-- Source: старая система с VARCHAR для всего -->
+<Source name="legacy_data">
+  <Field name="id" type="varchar(10)"/>        <!-- на самом деле число! -->
+  <Field name="amount" type="varchar(20)"/>    <!-- на самом деле decimal! -->
+  <Field name="created_at" type="varchar(30)"/><!-- на самом деле date! -->
+</Source>
+
+<!-- ETL Transformation: исправляем типы -->
+<Transformation>
+  <Cast field="id" from="varchar" to="int" as="id_C"/>
+  <Cast field="amount" from="varchar" to="decimal(10,2)" as="amount_C"/>
+  <Cast field="created_at" from="varchar" to="timestamp" as="created_at_C"/>
+</Transformation>
+
+<!-- Target: правильные типы -->
+<Target name="normalized_data">
+  <Field name="id_C" type="int"/>               <!-- ✅ можем фильтровать по числу -->
+  <Field name="amount_C" type="decimal"/>       <!-- ✅ можем суммировать -->
+  <Field name="created_at_C" type="timestamp"/> <!-- ✅ можем сортировать по дате -->
+</Target>
+```
+
+#### Преимущества суффикса `_C`:
+
+✅ **Явность:**
+- Видно что поле прошло CAST
+- Понятно что это не оригинальное поле из source
+
+✅ **Без конфликтов:**
+- Оригинальное поле: `order_date` (datetime)
+- Cast поле: `order_date_C` (timestamp)
+- Можно оставить оба если нужно!
+
+✅ **Совместимость:**
+```sql
+-- В target системе можно выбрать что использовать:
+SELECT order_date_C FROM orders;  -- используем cast версию
+
+-- Или маппинг на оригинальное имя:
+CREATE VIEW orders_view AS
+SELECT
+    order_id,
+    order_date_C AS order_date,  -- alias убирает суффикс
+    amount_C AS amount
+FROM orders_target;
+```
+
+✅ **Упрощение миграции:**
+- Не нужно вручную писать CAST в каждом запросе
+- ETL автоматически генерирует правильные типы
+- Visual Designer видит правильные типы для фильтрации
+
+#### Отличие от Computed Fields:
+
+| Аспект | Computed Fields ❌ | CAST() ✅ |
+|--------|-------------------|-----------|
+| **Назначение** | Бизнес-логика (формулы) | Утилитарная трансформация (типы) |
+| **Примеры** | `price * (1 - discount/100)` | `CAST(price AS decimal)` |
+| **Где живёт** | SQL view (правильно) <br>или UI (неправильно) | ETL pipeline |
+| **Реализация** | НЕ добавляем в UI/ETL | ✅ Добавляем в ETL |
+| **Когда использовать** | Создать SQL view с формулой | Миграция между СУБД |
+| **Риски** | Дублирование логики | Минимальные (просто конверсия типов) |
+
+#### XML Schema расширение для TDTP:
+
+```xml
+<!-- Новый элемент в TDTP spec для ETL -->
+<Transformation>
+  <Cast
+    field="source_field_name"
+    from="source_type"
+    to="target_type"
+    as="target_field_name"
+    nullable="true|false"
+    default="value"
+  />
+</Transformation>
+```
+
+**Параметры:**
+- `field` — имя поля в source
+- `from` — тип в source системе (опционально, для валидации)
+- `to` — целевой тип
+- `as` — имя в target (по умолчанию: `{field}_C`)
+- `nullable` — разрешить NULL (опционально)
+- `default` — значение по умолчанию при ошибке конверсии (опционально)
+
+**Примеры валидации:**
+```xml
+<!-- ✅ Корректный CAST -->
+<Cast field="price" from="varchar" to="decimal(10,2)" as="price_C"/>
+
+<!-- ⚠️ Потенциальная потеря точности (warning) -->
+<Cast field="precise_value" from="decimal(20,10)" to="decimal(10,2)" as="value_C"/>
+
+<!-- ❌ Невозможная конверсия (error) -->
+<Cast field="text_description" from="text" to="int" as="description_C"/>
+```
+
+#### Реальный пример полного пайплайна:
+
+```xml
+<Pipeline name="migrate_orders_sqlserver_to_postgres">
+  <!-- 1. Source: SQL Server -->
+  <Source name="orders" system="sqlserver" connection="source_db">
+    <Field name="order_id" type="int"/>
+    <Field name="order_date" type="datetime"/>
+    <Field name="amount" type="money"/>
+    <Field name="quantity" type="smallint"/>
+    <Field name="notes" type="nvarchar(max)"/>
+  </Source>
+
+  <!-- 2. Transformation: конвертация типов -->
+  <Transformation>
+    <!-- SQL Server datetime → PostgreSQL timestamp -->
+    <Cast field="order_date" from="datetime" to="timestamp" as="order_date_C"/>
+
+    <!-- SQL Server money → PostgreSQL numeric -->
+    <Cast field="amount" from="money" to="numeric(10,2)" as="amount_C"/>
+
+    <!-- SQL Server smallint → PostgreSQL int (расширение) -->
+    <Cast field="quantity" from="smallint" to="int" as="quantity_C"/>
+
+    <!-- SQL Server nvarchar(max) → PostgreSQL text -->
+    <Cast field="notes" from="nvarchar" to="text" as="notes_C"/>
+  </Transformation>
+
+  <!-- 3. Target: PostgreSQL -->
+  <Target name="orders_normalized" system="postgresql" connection="target_db">
+    <Field name="order_id" type="int"/>
+    <Field name="order_date_C" type="timestamp"/>
+    <Field name="amount_C" type="numeric(10,2)"/>
+    <Field name="quantity_C" type="int"/>
+    <Field name="notes_C" type="text"/>
+  </Target>
+
+  <!-- 4. Маппинг (опционально): убираем суффиксы -->
+  <View name="orders">
+    <Mapping source="order_id" target="order_id"/>
+    <Mapping source="order_date_C" target="order_date"/>
+    <Mapping source="amount_C" target="amount"/>
+    <Mapping source="quantity_C" target="quantity"/>
+    <Mapping source="notes_C" target="notes"/>
+  </View>
+</Pipeline>
+```
+
+**Результат:**
+- ✅ Автоматическая конвертация типов
+- ✅ Явность через суффикс `_C`
+- ✅ Опциональный маппинг для удобства
+- ✅ Версионность (XML в git)
+- ✅ Документация встроена в XML
+
+---
+
 ### 🔑 Принцип абстракции TDTP
 
 **ВАЖНО:** TDTP спецификацию **НЕ ТРОГАЕМ** при использовании computed fields!
@@ -1024,5 +1247,42 @@ SELECT * FROM target_warehouse;
 ---
 
 **Документация создана:** 2026-02-20
-**Финальное решение:** 2026-02-20 — Computed fields отклонены (архитектурно неверно)
-**Статус:** ✅ Закрыто — не реализуется
+**Финальное решение:**
+- 2026-02-20 — Computed fields отклонены (архитектурно неверно)
+- 2026-02-20 — CAST() в ETL одобрен (утилитарная трансформация)
+
+**Статус:**
+- ❌ Computed Fields в UI/ETL — НЕ реализуется (используй SQL views)
+- ✅ CAST() трансформации в ETL — К реализации (с суффиксом `_C`)
+
+---
+
+## 📝 Краткая шпаргалка
+
+### Когда использовать что:
+
+| Задача | Решение | Где реализовать |
+|--------|---------|-----------------|
+| Вычислить скидку: `price * (1 - discount/100)` | SQL View | CREATE VIEW products_pricing AS ... |
+| Вычислить возраст: `YEAR(NOW()) - YEAR(birth_date)` | SQL View | CREATE VIEW employees_with_age AS ... |
+| Конвертировать `datetime` → `timestamp` | CAST() в ETL | `<Cast field="date" to="timestamp" as="date_C"/>` |
+| Конвертировать `money` → `numeric` | CAST() в ETL | `<Cast field="amount" to="numeric" as="amount_C"/>` |
+| Конвертировать `VARCHAR` → `INT` (legacy) | CAST() в ETL | `<Cast field="id" to="int" as="id_C"/>` |
+| Показать данные в UI | Visual Designer | SELECT * FROM view_name |
+| Фильтровать/сортировать | Visual Designer | Используй готовые поля из view |
+
+### Золотое правило:
+
+```
+┌──────────────────────────────────────────────────────┐
+│  Бизнес-логика (формулы)   → SQL Views              │
+│  Конвертация типов          → ETL CAST()            │
+│  Визуализация               → Visual Designer        │
+└──────────────────────────────────────────────────────┘
+```
+
+**НЕ ПУТАТЬ:**
+- **Computed Field** = бизнес-правило (`discount_price = price * 0.8`)
+- **CAST Field** = технический тип (`datetime` → `timestamp`)
+
+**Один делает логику, другой меняет упаковку!**
