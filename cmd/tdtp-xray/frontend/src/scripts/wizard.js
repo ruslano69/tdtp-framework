@@ -1983,7 +1983,9 @@ async function addTableToCanvas(sourceName) {
             alias:      sourceName,   // = Source.Name (used in field references)
             x: x,
             y: y,
-            fields: fields
+            fields: fields,
+            limit: null,     // LIMIT for pagination (null = no limit)
+            offset: null     // OFFSET for pagination (null = no offset)
         };
 
         console.log(`➕ Adding table to canvas:`, newTable);
@@ -2093,11 +2095,15 @@ function createTableCard(table, index) {
         gap: 6px;
         font-size: 12px;
     `;
+    const hasLimit = table.limit !== null && table.limit !== undefined;
     toolbar.innerHTML = `
         <span onclick="toggleAllVisibility(${index})"
               title="${allVisible ? 'Hide all fields' : 'Show all fields'}"
               style="cursor:pointer; font-size:15px; color:${allVisible ? '#28a745' : '#aaa'}; user-select:none; line-height:1;">👁</span>
         <span style="flex:1; font-size:11px; color:#888;">${table.fields.length} fields</span>
+        <span onclick="openLimitSettings(${index})"
+              title="${hasLimit ? `LIMIT ${table.limit}${table.offset ? ' OFFSET ' + table.offset : ''}` : 'Set LIMIT/OFFSET'}"
+              style="cursor:pointer; font-weight:bold; color:${hasLimit ? '#0066cc' : '#ccc'}; user-select:none; font-size:13px; line-height:1;">📊</span>
         <span onclick="clearAllFilters(${index})"
               title="Clear all filters"
               style="cursor:pointer; font-weight:bold; color:${hasFilters ? '#dc3545' : '#ccc'}; user-select:none; font-size:15px; line-height:1;">✱</span>
@@ -2502,16 +2508,40 @@ function formatFilterTooltip(filter, fieldName) {
         '<=': '≤',
         '>': '>',
         '<': '<',
-        'BW': 'BETWEEN'
+        'BW': 'BETWEEN',
+        'LIKE': 'LIKE',
+        'NOT_LIKE': 'NOT LIKE',
+        'IN': 'IN',
+        'NOT_IN': 'NOT IN',
+        'IS_NULL': 'IS NULL',
+        'IS_NOT_NULL': 'IS NOT NULL',
+        'IS_EMPTY': '= \'\'',
+        'IS_NOT_EMPTY': '<> \'\''
     };
 
     const op = operatorMap[filter.operator] || filter.operator;
     const logic = filter.logic === 'OR' ? '^' : '&';
 
     let condition = '';
-    if (filter.operator === 'BW' && filter.value2) {
+
+    // Operators without value
+    if (['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'].includes(filter.operator)) {
+        condition = `${fieldName} ${op}`;
+    }
+    // BETWEEN
+    else if (filter.operator === 'BW' && filter.value2) {
         condition = `${fieldName} ${op} ${filter.value} AND ${filter.value2}`;
-    } else {
+    }
+    // IN / NOT IN
+    else if (['IN', 'NOT_IN'].includes(filter.operator)) {
+        condition = `${fieldName} ${op} (${filter.value})`;
+    }
+    // LIKE / NOT LIKE
+    else if (['LIKE', 'NOT_LIKE'].includes(filter.operator)) {
+        condition = `${fieldName} ${op} '${filter.value}'`;
+    }
+    // Standard operators
+    else {
         condition = `${fieldName} ${op} ${filter.value}`;
     }
 
@@ -2559,6 +2589,14 @@ function openFilterBuilder(tableIndex, fieldIndex) {
                         <option value="IS_NULL" ${currentFilter.operator === 'IS_NULL' ? 'selected' : ''}>IS NULL</option>
                         <option value="IS_NOT_NULL" ${currentFilter.operator === 'IS_NOT_NULL' ? 'selected' : ''}>IS NOT NULL</option>
                     </optgroup>
+                    <optgroup label="Pattern Matching">
+                        <option value="LIKE" ${currentFilter.operator === 'LIKE' ? 'selected' : ''}>LIKE (%, _)</option>
+                        <option value="NOT_LIKE" ${currentFilter.operator === 'NOT_LIKE' ? 'selected' : ''}>NOT LIKE (%, _)</option>
+                    </optgroup>
+                    <optgroup label="List Matching">
+                        <option value="IN" ${currentFilter.operator === 'IN' ? 'selected' : ''}>IN (comma-separated)</option>
+                        <option value="NOT_IN" ${currentFilter.operator === 'NOT_IN' ? 'selected' : ''}>NOT IN (comma-separated)</option>
+                    </optgroup>
                     <optgroup label="Empty string checks">
                         <option value="IS_EMPTY" ${currentFilter.operator === 'IS_EMPTY' ? 'selected' : ''}> = '' (Empty string)</option>
                         <option value="IS_NOT_EMPTY" ${currentFilter.operator === 'IS_NOT_EMPTY' ? 'selected' : ''}>&lt;&gt; '' (Not empty string)</option>
@@ -2569,7 +2607,10 @@ function openFilterBuilder(tableIndex, fieldIndex) {
             <div id="filterValue1Container" style="margin-bottom: 15px; display: ${['IS_NULL','IS_NOT_NULL','IS_EMPTY','IS_NOT_EMPTY'].includes(currentFilter.operator) ? 'none' : 'block'};">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Value:</label>
                 <input type="text" id="filterValue1" value="${currentFilter.value || ''}"
-                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;"
+                       placeholder="${currentFilter.operator === 'LIKE' || currentFilter.operator === 'NOT_LIKE' ? '%@example.com' : currentFilter.operator === 'IN' || currentFilter.operator === 'NOT_IN' ? 'Moscow,SPb,Kazan' : ''}">
+                <small id="filterValue1Hint" style="color: #666; display: ${['LIKE','NOT_LIKE'].includes(currentFilter.operator) ? 'block' : 'none'};">Use % (any chars) and _ (one char) as wildcards</small>
+                <small id="filterValue1HintList" style="color: #666; display: ${['IN','NOT_IN'].includes(currentFilter.operator) ? 'block' : 'none'};">Comma-separated values (e.g., value1,value2,value3)</small>
             </div>
 
             <div id="filterValue2Container" style="margin-bottom: 15px; display: ${currentFilter.operator === 'BW' ? 'block' : 'none'};">
@@ -2612,8 +2653,31 @@ function openFilterBuilder(tableIndex, fieldIndex) {
         const noValueOps = ['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'];
         const needsValue = !noValueOps.includes(this.value);
         const isBetween  = this.value === 'BW';
+        const isLike     = ['LIKE', 'NOT_LIKE'].includes(this.value);
+        const isList     = ['IN', 'NOT_IN'].includes(this.value);
+
+        // Show/hide value containers
         document.getElementById('filterValue1Container').style.display = needsValue ? 'block' : 'none';
         document.getElementById('filterValue2Container').style.display = isBetween  ? 'block' : 'none';
+
+        // Update placeholder and hints
+        const input = document.getElementById('filterValue1');
+        const hintLike = document.getElementById('filterValue1Hint');
+        const hintList = document.getElementById('filterValue1HintList');
+
+        if (isLike) {
+            input.placeholder = '%@example.com';
+            hintLike.style.display = 'block';
+            hintList.style.display = 'none';
+        } else if (isList) {
+            input.placeholder = 'Moscow,SPb,Kazan';
+            hintLike.style.display = 'none';
+            hintList.style.display = 'block';
+        } else {
+            input.placeholder = '';
+            hintLike.style.display = 'none';
+            hintList.style.display = 'none';
+        }
     });
 
     // Close on backdrop click
@@ -2681,6 +2745,147 @@ function closeFilterBuilder() {
 }
 
 // ========== TABLE TOOLBAR ACTIONS ==========
+
+function openLimitSettings(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const currentLimit = table.limit || '';
+    const currentOffset = table.offset || '';
+
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'limitSettingsModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 2000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px; max-width: 500px;">
+            <h3 style="margin-top: 0;">Pagination Settings: ${table.sourceName}</h3>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">LIMIT (max rows):</label>
+                <input type="number" id="limitValue" value="${currentLimit}" min="0" step="1"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;"
+                       placeholder="Leave empty for no limit">
+                <small style="color: #666;">Maximum number of rows to return. Leave empty for no limit.</small>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">OFFSET (skip rows):</label>
+                <input type="number" id="offsetValue" value="${currentOffset}" min="0" step="1"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;"
+                       placeholder="0">
+                <small style="color: #666;">Number of rows to skip. Useful for pagination.</small>
+            </div>
+
+            <div style="padding: 10px; background: #f0f4ff; border-radius: 3px; margin-bottom: 15px;">
+                <strong>💡 Quick Presets:</strong>
+                <div style="display: flex; gap: 5px; margin-top: 8px;">
+                    <button class="btn" onclick="setLimitPreset(10)" style="flex: 1; font-size: 11px;">10 rows</button>
+                    <button class="btn" onclick="setLimitPreset(100)" style="flex: 1; font-size: 11px;">100 rows</button>
+                    <button class="btn" onclick="setLimitPreset(1000)" style="flex: 1; font-size: 11px;">1000 rows</button>
+                    <button class="btn" onclick="clearLimitPreset()" style="flex: 1; font-size: 11px;">No limit</button>
+                </div>
+            </div>
+
+            <div style="padding: 10px; background: #fff9e6; border-radius: 3px; margin-bottom: 15px; font-size: 12px;">
+                <strong>📝 Example SQL:</strong><br>
+                <code style="font-family: monospace; color: #0066cc;">
+                    SELECT * FROM ${table.sourceName}
+                    ${currentLimit ? `LIMIT ${currentLimit}` : ''}
+                    ${currentOffset ? ` OFFSET ${currentOffset}` : ''}
+                </code>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn" onclick="saveLimitSettings(${tableIndex})" style="flex: 1; background: #28a745; color: white;">Apply</button>
+                <button class="btn" onclick="clearLimitSettings(${tableIndex})" style="flex: 1; background: #dc3545; color: white;">Clear</button>
+                <button class="btn" onclick="closeLimitSettings()" style="flex: 1;">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Close on backdrop click
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeLimitSettings();
+        }
+    });
+
+    // Close on Escape key
+    const escapeHandler = function(e) {
+        if (e.key === 'Escape') {
+            closeLimitSettings();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+function setLimitPreset(value) {
+    document.getElementById('limitValue').value = value;
+    document.getElementById('offsetValue').value = 0;
+}
+
+function clearLimitPreset() {
+    document.getElementById('limitValue').value = '';
+    document.getElementById('offsetValue').value = '';
+}
+
+function saveLimitSettings(tableIndex) {
+    const limitVal = document.getElementById('limitValue').value.trim();
+    const offsetVal = document.getElementById('offsetValue').value.trim();
+
+    const limit = limitVal ? parseInt(limitVal, 10) : null;
+    const offset = offsetVal ? parseInt(offsetVal, 10) : null;
+
+    if (limit !== null && limit < 0) {
+        alert('LIMIT cannot be negative');
+        return;
+    }
+
+    if (offset !== null && offset < 0) {
+        alert('OFFSET cannot be negative');
+        return;
+    }
+
+    canvasDesign.tables[tableIndex].limit = limit;
+    canvasDesign.tables[tableIndex].offset = offset;
+
+    closeLimitSettings();
+    renderCanvas();
+
+    const msg = limit !== null
+        ? `LIMIT ${limit}${offset ? ` OFFSET ${offset}` : ''} applied`
+        : 'LIMIT/OFFSET cleared';
+    showNotification(msg, 'success');
+}
+
+function clearLimitSettings(tableIndex) {
+    canvasDesign.tables[tableIndex].limit = null;
+    canvasDesign.tables[tableIndex].offset = null;
+    closeLimitSettings();
+    renderCanvas();
+    showNotification('LIMIT/OFFSET cleared', 'info');
+}
+
+function closeLimitSettings() {
+    const modal = document.getElementById('limitSettingsModal');
+    if (modal) {
+        modal.remove();
+    }
+}
 
 function toggleAllVisibility(tableIndex) {
     const table = canvasDesign.tables[tableIndex];
