@@ -354,6 +354,9 @@ type TableDesign struct {
 	X          int           `json:"x"`
 	Y          int           `json:"y"`
 	Fields     []FieldDesign `json:"fields"`
+	Limit      *int          `json:"limit,omitempty"`  // LIMIT for pagination (nil = no limit)
+	Offset     *int          `json:"offset,omitempty"` // OFFSET for pagination (nil = no offset)
+	SortState  string        `json:"sortState,omitempty"` // Field sort state: "" | "AZ" | "ZA"
 }
 
 // FieldDesign represents a field in a table
@@ -644,6 +647,17 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 	if len(orderByFields) > 0 {
 		sql += fmt.Sprintf("\nORDER BY\n    %s", strings.Join(orderByFields, ",\n    "))
+	}
+
+	// Add LIMIT/OFFSET from first table that has it set
+	for _, table := range design.Tables {
+		if table.Limit != nil && *table.Limit > 0 {
+			sql += fmt.Sprintf("\nLIMIT %d", *table.Limit)
+			if table.Offset != nil && *table.Offset > 0 {
+				sql += fmt.Sprintf(" OFFSET %d", *table.Offset)
+			}
+			break // Apply only first LIMIT found
+		}
 	}
 
 	fmt.Printf("✅ Generated SQL:\n%s\n", sql)
