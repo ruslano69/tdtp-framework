@@ -1286,3 +1286,276 @@ SELECT * FROM target_warehouse;
 - **CAST Field** = технический тип (`datetime` → `timestamp`)
 
 **Один делает логику, другой меняет упаковку!**
+
+---
+
+## 🏗️ Архитектура CAST(): Где что живёт?
+
+### ❓ Вопрос 1: Нужно ли что-то менять в Visual Designer?
+
+**Ответ: НЕТ! ❌ Ничего менять не нужно!**
+
+Visual Designer работает с **результатом** ETL pipeline, а не с процессом трансформации.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  ETL Pipeline (выполняется ДО Visual Designer)      │
+├─────────────────────────────────────────────────────┤
+│  Source DB → ETL Tool → Target DB                   │
+│  (SQL Server)  (трансформация)  (PostgreSQL)        │
+│                                                     │
+│  order_date (datetime) ──CAST──→ order_date_C (timestamp) │
+│  amount (money)        ──CAST──→ amount_C (numeric)       │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│  Visual Designer (работает с результатом)           │
+├─────────────────────────────────────────────────────┤
+│  Читает TDTP XML для Target DB:                    │
+│                                                     │
+│  <Source name="orders_target">                      │
+│    <Field name="order_id" type="int"/>              │
+│    <Field name="order_date_C" type="timestamp"/>    │
+│    <Field name="amount_C" type="numeric"/>          │
+│  </Source>                                          │
+│                                                     │
+│  ☑ Видит уже трансформированные поля               │
+│  ☑ Работает с ними как с обычными полями           │
+│  ☑ НЕ знает о процессе трансформации               │
+└─────────────────────────────────────────────────────┘
+```
+
+**Visual Designer не изменяется!** Он просто видит поля с суффиксом `_C` как обычные поля.
+
+---
+
+### ❓ Вопрос 2: Нужна ли секция `<Transformation>` в TDTP XML?
+
+**Ответ: ЗАВИСИТ от контекста!**
+
+#### Сценарий A: TDTP для Visual Designer (после ETL)
+
+```xml
+<!-- ❌ НЕТ секции <Transformation>! -->
+<Source name="orders_target" connection="postgres_db">
+  <Field name="order_id" type="int"/>
+  <Field name="order_date_C" type="timestamp"/>  <!-- уже трансформировано! -->
+  <Field name="amount_C" type="numeric"/>        <!-- уже трансформировано! -->
+</Source>
+```
+
+**Почему НЕТ `<Transformation>`:**
+- ETL уже выполнен
+- Данные уже лежат в Target DB
+- TDTP описывает **результирующую схему**
+- Visual Designer работает с готовыми данными
+
+**Суффикс `_C` — это просто соглашение об именовании** в target БД!
+
+---
+
+#### Сценарий B: Конфигурация ETL Pipeline (до выполнения)
+
+```xml
+<!-- ✅ ДА, секция <Transformation> нужна! -->
+<Pipeline name="migrate_orders">
+  <!-- 1. Source: откуда берём -->
+  <Source name="orders" system="sqlserver" connection="source_db">
+    <Field name="order_date" type="datetime"/>
+    <Field name="amount" type="money"/>
+  </Source>
+
+  <!-- 2. Transformation: ЧТО ДЕЛАТЬ -->
+  <Transformation>
+    <Cast field="order_date" from="datetime" to="timestamp" as="order_date_C"/>
+    <Cast field="amount" from="money" to="numeric(10,2)" as="amount_C"/>
+  </Transformation>
+
+  <!-- 3. Target: куда записываем -->
+  <Target name="orders_target" system="postgresql" connection="target_db">
+    <Field name="order_date_C" type="timestamp"/>
+    <Field name="amount_C" type="numeric"/>
+  </Target>
+</Pipeline>
+```
+
+**Почему ДА `<Transformation>`:**
+- Это **конфигурация для ETL инструмента**
+- Описывает **ЧТО делать** при миграции
+- Используется **до** выполнения ETL
+- Генерирует код для трансформации
+
+---
+
+### 📂 Разделение файлов:
+
+```
+project/
+├── etl/
+│   └── pipeline_config.xml          ← Конфигурация ETL (с <Transformation>)
+│       <Pipeline>
+│         <Source>...</Source>
+│         <Transformation>...</Transformation>
+│         <Target>...</Target>
+│       </Pipeline>
+│
+├── tdtp/
+│   └── target_schema.xml            ← Схема для Visual Designer (БЕЗ <Transformation>)
+│       <Source name="orders_target">
+│         <Field name="order_date_C" type="timestamp"/>
+│       </Source>
+│
+└── visual-designer/
+    └── wizard.html                  ← Читает target_schema.xml
+```
+
+**Два разных файла, два разных назначения!**
+
+---
+
+### 🔄 Workflow полной миграции:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Шаг 1: Создаём ETL конфигурацию                   │
+├─────────────────────────────────────────────────────┤
+│  File: etl/pipeline_config.xml                      │
+│                                                     │
+│  <Pipeline>                                         │
+│    <Source system="sqlserver">...</Source>          │
+│    <Transformation>                                 │
+│      <Cast field="order_date" to="timestamp" as="order_date_C"/> │
+│    </Transformation>                                │
+│    <Target system="postgresql">...</Target>         │
+│  </Pipeline>                                        │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│  Шаг 2: Запускаем ETL инструмент                   │
+├─────────────────────────────────────────────────────┤
+│  $ etl-tool run etl/pipeline_config.xml             │
+│                                                     │
+│  Processing...                                      │
+│  ✅ Cast order_date → order_date_C (timestamp)      │
+│  ✅ Cast amount → amount_C (numeric)                │
+│  ✅ Migrated 10,000 rows                            │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│  Шаг 3: Генерируем TDTP схему для Target DB        │
+├─────────────────────────────────────────────────────┤
+│  $ tdtp-export --connection postgres_db \           │
+│                --output tdtp/target_schema.xml      │
+│                                                     │
+│  Generated:                                         │
+│  <Source name="orders_target">                      │
+│    <Field name="order_date_C" type="timestamp"/>    │
+│    <Field name="amount_C" type="numeric"/>          │
+│  </Source>                                          │
+│                                                     │
+│  ☑ НЕТ <Transformation> — данные уже трансформированы! │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│  Шаг 4: Visual Designer использует Target схему    │
+├─────────────────────────────────────────────────────┤
+│  Открываем: visual-designer/wizard.html             │
+│  Загружаем: tdtp/target_schema.xml                  │
+│                                                     │
+│  Видим:                                             │
+│  ☑ order_date_C (timestamp)  ← обычное поле!       │
+│  ☑ amount_C (numeric)        ← обычное поле!       │
+│                                                     │
+│  Можем фильтровать, сортировать, визуализировать   │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+### 💡 Ключевые выводы:
+
+#### 1️⃣ Visual Designer НЕ НУЖНО МЕНЯТЬ
+
+```javascript
+// ❌ НЕ НУЖНО добавлять:
+if (field.name.endsWith('_C')) {
+  // special handling...
+}
+
+// ✅ Работает как есть:
+fields.forEach(field => {
+  renderField(field);  // order_date_C — обычное поле!
+});
+```
+
+**Суффикс `_C` — это просто имя поля**, ничего особенного!
+
+---
+
+#### 2️⃣ Секция `<Transformation>` — только для ETL инструмента
+
+| Файл | Назначение | `<Transformation>` |
+|------|------------|-------------------|
+| `etl/pipeline_config.xml` | Конфигурация ETL | ✅ ДА (описывает процесс) |
+| `tdtp/target_schema.xml` | Схема для Visual Designer | ❌ НЕТ (описывает результат) |
+
+**Это разные файлы для разных инструментов!**
+
+---
+
+#### 3️⃣ TDTP описывает результат, а не процесс
+
+```
+ETL Config (процесс):          TDTP Schema (результат):
+┌──────────────────────┐       ┌──────────────────────┐
+│ <Transformation>     │       │ <Source>             │
+│   <Cast              │       │   <Field             │
+│     field="date"     │       │     name="date_C"    │
+│     to="timestamp"   │  →→→  │     type="timestamp" │
+│     as="date_C"/>    │       │   />                 │
+│ </Transformation>    │       │ </Source>            │
+└──────────────────────┘       └──────────────────────┘
+  Как трансформировать           Что получилось
+```
+
+**TDTP не знает (и не должен знать) о процессе трансформации!**
+
+---
+
+#### 4️⃣ Суффикс `_C` — это соглашение, а не магия
+
+```sql
+-- В Target DB просто есть колонка с таким именем:
+CREATE TABLE orders_target (
+    order_id INT,
+    order_date_C TIMESTAMP,  -- просто имя колонки!
+    amount_C NUMERIC         -- просто имя колонки!
+);
+
+-- Visual Designer видит:
+SELECT order_date_C FROM orders_target;  -- обычное поле!
+```
+
+**Суффикс помогает понять происхождение** (было cast), но технически это просто имя!
+
+---
+
+### 🎯 Финальный ответ на вопросы:
+
+**Q1: Что нужно добавить в Visual Designer?**
+**A1: НИЧЕГО! ❌**
+- Visual Designer работает с результатом ETL
+- Поля с суффиксом `_C` — обычные поля
+- Не нужно никакой специальной обработки
+
+**Q2: Нужна ли секция `<Transformation>` в TDTP?**
+**A2: НЕТ для Visual Designer! ✅ ДА для ETL config!**
+- **ETL Config** (`pipeline_config.xml`) — содержит `<Transformation>` (описывает процесс)
+- **TDTP Schema** (`target_schema.xml`) — НЕ содержит `<Transformation>` (описывает результат)
+
+**Q3: Зачем тащить `<Transformation>` если она выполнена?**
+**A3: НЕ тащим!**
+- После выполнения ETL, TDTP содержит только результирующую схему
+- `<Transformation>` живёт только в ETL config, не в TDTP!
+
+---
