@@ -509,6 +509,29 @@ FROM warehouse;
 SELECT * FROM warehouse_stock;
 ```
 
+**⚡ Ключевой момент: TDTP не знает о вычислениях!**
+
+При экспорте view в TDTP, вычисляемые поля выглядят как обычные:
+
+```xml
+<!-- TDTP Export из warehouse_stock view -->
+<Source name="warehouse_stock" type="view">
+  <Field name="quantity" type="int"/>
+  <Field name="reserve" type="int"/>
+  <Field name="available_stock" type="int"/>  <!-- выглядит как обычное поле! -->
+</Source>
+```
+
+**Это правильная абстракция!** TDTP работает на уровне **результирующей схемы**, а не реализации.
+
+Visual Designer видит просто три поля и не знает (и не должен знать!) что `available_stock` вычисляемое:
+```
+warehouse_stock:
+  ☑ quantity
+  ☑ reserve
+  ☑ available_stock  ← не знает что computed, просто поле!
+```
+
 **3. ETL Pipeline для трансформаций:**
 
 ```
@@ -553,6 +576,94 @@ Target System (готовые данные):
 - **Visual Designer только показывает** что есть
 - **ETL делает трансформации** между системами
 - **Бизнес-логика в одном месте** (SQL view/stored proc)
+
+---
+
+### 🔑 Принцип абстракции TDTP
+
+**ВАЖНО:** TDTP спецификацию **НЕ ТРОГАЕМ** при использовании computed fields!
+
+#### Как это работает:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  1. SQL Layer (реализация):                        │
+├─────────────────────────────────────────────────────┤
+│  CREATE VIEW warehouse_stock AS                     │
+│  SELECT                                             │
+│      quantity,                                      │
+│      reserve,                                       │
+│      quantity - reserve AS available_stock  ← вычисл│
+│  FROM warehouse;                                    │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│  2. TDTP Layer (абстракция):                        │
+├─────────────────────────────────────────────────────┤
+│  <Source name="warehouse_stock">                    │
+│    <Field name="quantity" type="int"/>              │
+│    <Field name="reserve" type="int"/>               │
+│    <Field name="available_stock" type="int"/>       │
+│  </Source>                                          │
+│                                                     │
+│  ☑ available_stock выглядит как ОБЫЧНОЕ поле!      │
+│  ☑ TDTP не знает (и не должен знать) о вычислениях │
+└─────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────┐
+│  3. Visual Designer (UI):                           │
+├─────────────────────────────────────────────────────┤
+│  warehouse_stock:                                   │
+│    ☑ quantity         [filter]                      │
+│    ☑ reserve          [filter]                      │
+│    ☑ available_stock  [filter]  ← просто поле!     │
+│                                                     │
+│  ☑ UI видит три обычных поля                       │
+│  ☑ Может фильтровать, сортировать любое из них     │
+└─────────────────────────────────────────────────────┘
+```
+
+#### Преимущества этого подхода:
+
+✅ **Separation of Concerns:**
+- SQL знает о вычислениях (CREATE VIEW)
+- TDTP знает о схеме (Field name/type)
+- UI знает о визуализации (filters/sort)
+
+✅ **Гибкость реализации:**
+TDTP не зависит от того, как реализовано поле:
+- Обычная колонка в таблице
+- Computed column в SQL Server
+- Virtual column в MySQL
+- Generated column в PostgreSQL
+- View с expression
+- Materialized view
+
+Для TDTP это **просто поле** → одинаковый XML!
+
+✅ **Изменения не ломают контракт:**
+```sql
+-- Было: обычная колонка
+CREATE TABLE warehouse (
+    quantity INT,
+    reserve INT,
+    available_stock INT  -- дублирование, нужно синхронизировать
+);
+
+-- Стало: view с вычислением
+CREATE VIEW warehouse_stock AS
+SELECT quantity, reserve,
+       quantity - reserve AS available_stock  -- автоматически!
+FROM warehouse;
+
+-- TDTP XML НЕ МЕНЯЕТСЯ! Тот же контракт.
+```
+
+✅ **Single Source of Truth остаётся в SQL:**
+- Формула `available_stock = quantity - reserve` живёт ТОЛЬКО в SQL
+- TDTP экспортирует результат
+- UI показывает результат
+- Все системы видят одинаковую логику
 
 ---
 
@@ -633,6 +744,40 @@ SELECT
 FROM warehouse;
 ```
 
+**TDTP Export (автоматический):**
+```xml
+<Source name="warehouse_stock" type="view">
+  <Field name="warehouse_id" type="int"/>
+  <Field name="product_id" type="int"/>
+  <Field name="quantity" type="int"/>
+  <Field name="reserve" type="int"/>
+  <Field name="available_stock" type="int"/>      <!-- computed! -->
+  <Field name="stock_status" type="varchar"/>     <!-- computed! -->
+</Source>
+```
+
+**Visual Designer видит:**
+```
+warehouse_stock (6 fields):
+  ☑ warehouse_id    [filter]
+  ☑ product_id      [filter]
+  ☑ quantity        [filter]
+  ☑ reserve         [filter]
+  ☑ available_stock [filter]  ← работает как обычное поле!
+  ☑ stock_status    [filter]  ← работает как обычное поле!
+```
+
+**Можно фильтровать computed fields:**
+```sql
+-- Пользователь в UI выбирает:
+available_stock > 0 AND stock_status = 'In Stock'
+
+-- Visual Designer генерирует корректный SQL:
+SELECT * FROM warehouse_stock
+WHERE available_stock > 0
+  AND stock_status = 'In Stock';
+```
+
 ### Пример 3: HR — возраст сотрудников
 
 **❌ Неправильно:**
@@ -662,7 +807,78 @@ SELECT
 FROM employees;
 ```
 
-### Пример 4: ETL Pipeline трансформация
+### Пример 4: Эволюция схемы (миграция таблица → view)
+
+**Сценарий:** Было дублирование данных, переходим на вычисляемое поле
+
+**Шаг 1: Было (плохо) — дублирование:**
+```sql
+-- Таблица с дублированием
+CREATE TABLE products (
+    id INT PRIMARY KEY,
+    price DECIMAL(10,2),
+    discount INT,
+    discount_price DECIMAL(10,2)  -- дублирование! нужна синхронизация
+);
+
+-- При INSERT нужно вычислять вручную:
+INSERT INTO products (id, price, discount, discount_price)
+VALUES (1, 1000, 20, 800);  -- 800 = 1000 * (1 - 20/100)
+
+-- Проблема: может рассинхронизироваться!
+UPDATE products SET discount = 30 WHERE id = 1;
+-- ❌ Забыли обновить discount_price!
+```
+
+**TDTP Export (было):**
+```xml
+<Source name="products">
+  <Field name="id" type="int"/>
+  <Field name="price" type="decimal"/>
+  <Field name="discount" type="int"/>
+  <Field name="discount_price" type="decimal"/>  <!-- дубль! -->
+</Source>
+```
+
+**Шаг 2: Стало (хорошо) — computed field в view:**
+```sql
+-- 1. Удаляем дублирующую колонку
+ALTER TABLE products DROP COLUMN discount_price;
+
+-- 2. Создаём view с вычислением
+CREATE VIEW products_pricing AS
+SELECT
+    id,
+    price,
+    discount,
+    ROUND(price * (1 - discount / 100.0), 2) AS discount_price  -- автоматически!
+FROM products;
+
+-- 3. Используем view вместо таблицы
+SELECT * FROM products_pricing;
+```
+
+**TDTP Export (стало):**
+```xml
+<!-- ☑ ТОТ ЖЕ XML! Контракт не изменился! -->
+<Source name="products_pricing" type="view">
+  <Field name="id" type="int"/>
+  <Field name="price" type="decimal"/>
+  <Field name="discount" type="int"/>
+  <Field name="discount_price" type="decimal"/>  <!-- теперь computed! -->
+</Source>
+```
+
+**Результат:**
+- ✅ TDTP XML не изменился (совместимость!)
+- ✅ Visual Designer работает как раньше
+- ✅ Нет дублирования (single source of truth)
+- ✅ Автоматическая синхронизация
+- ✅ Невозможна рассинхронизация
+
+---
+
+### Пример 5: ETL Pipeline трансформация
 
 **Сценарий:** Синхронизация складов между системами
 
