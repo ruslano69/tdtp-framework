@@ -29,11 +29,12 @@ type App struct {
 	// Mode: "mock" or "production"
 	mode string
 	// Services
-	connService     *services.ConnectionService
-	metadataService *services.MetadataService
-	sourceService   *services.SourceService
-	previewService  *services.PreviewService
-	tdtpService     *services.TDTPService
+	connService       *services.ConnectionService
+	metadataService   *services.MetadataService
+	sourceService     *services.SourceService
+	previewService    *services.PreviewService
+	tdtpService       *services.TDTPService
+	validationService *services.ValidationService
 	// Local SQLite repository (configs.db next to the binary)
 	repoDB *sql.DB
 }
@@ -41,13 +42,14 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		sources:         make([]Source, 0),
-		mode:            "production", // Default to production mode
-		connService:     services.NewConnectionService(),
-		metadataService: services.NewMetadataService(),
-		sourceService:   services.NewSourceService(),
-		previewService:  services.NewPreviewService(),
-		tdtpService:     services.NewTDTPService(),
+		sources:           make([]Source, 0),
+		mode:              "production", // Default to production mode
+		connService:       services.NewConnectionService(),
+		metadataService:   services.NewMetadataService(),
+		sourceService:     services.NewSourceService(),
+		previewService:    services.NewPreviewService(),
+		tdtpService:       services.NewTDTPService(),
+		validationService: services.NewValidationService(),
 	}
 }
 
@@ -2589,4 +2591,14 @@ func (a *App) DeleteFromRepository(id int64) error {
 	}
 	_, err := a.repoDB.Exec("DELETE FROM pipelines WHERE id = ?", id)
 	return err
+}
+
+// ValidateTransformationSQL validates SQL transformation for column conflicts and CAST syntax
+func (a *App) ValidateTransformationSQL(sql string) services.ValidationResult {
+	return a.validationService.ValidateTransformationSQL(sql)
+}
+
+// GenerateCastStatement generates CAST statement with proper prefix and suffix
+func (a *App) GenerateCastStatement(table, column, targetType string) string {
+	return a.validationService.GenerateCastWithPrefix(table, column, targetType)
 }

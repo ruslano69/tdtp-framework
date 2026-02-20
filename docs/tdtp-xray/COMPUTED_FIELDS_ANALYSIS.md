@@ -734,6 +734,229 @@ FROM orders_target;
 | **Когда использовать** | Создать SQL view с формулой | Миграция между СУБД |
 | **Риски** | Дублирование логики | Минимальные (просто конверсия типов) |
 
+---
+
+### 🔥 Multi-Source Naming Convention (критический раздел!)
+
+**ПРОБЛЕМА:** При объединении данных из нескольких источников возникают **конфликты имён**!
+
+#### ❌ Пример проблемы:
+
+```sql
+-- До CAST: Объединение Users + User2
+SELECT
+    [Users].[ID],        -- ID #1
+    [Users].[Name],      -- Name #1
+    [Users].[Balance],   -- Balance #1
+    [User2].[ID],        -- ID #2 - КОНФЛИКТ!
+    [User2].[Name],      -- Name #2 - КОНФЛИКТ!
+    [User2].[Balance]    -- Balance #2 - КОНФЛИКТ!
+FROM [Users]
+INNER JOIN [User2] ON [Users].[ID] = [User2].[ID]
+WHERE [Users].[Balance] > 0
+```
+
+**Результат:**
+```
+ERROR: duplicate column names 'ID', 'Name', 'Balance'
+```
+
+#### ❌ Пример синтаксической ошибки CAST:
+
+```sql
+-- НЕПРАВИЛЬНО: запятая не на месте!
+CAST([Users].[Balance] AS INT) AS , [Users].[Balance_C]
+                                  ↑ ошибка!
+```
+
+#### ✅ РЕШЕНИЕ: Префикс источника + суффикс CAST
+
+**Формат:** `{SourceName}_{FieldName}[_C]`
+
+Где:
+- **SourceName** = имя таблицы/источника (Users, User2, Orders...)
+- **FieldName** = оригинальное имя поля (ID, Name, Balance...)
+- **_C** = суффикс CAST (только если был CAST)
+
+**Примеры:**
+
+| Источник | Поле | Операция | Результирующее имя | Описание |
+|----------|------|----------|-------------------|----------|
+| Users | ID | нет CAST | `Users_ID` | Простой префикс |
+| Users | Balance | CAST → INT | `Users_Balance_C` | Префикс + суффикс |
+| User2 | ID | нет CAST | `User2_ID` | Префикс |
+| User2 | Balance | CAST → DECIMAL | `User2_Balance_C` | Префикс + суффикс |
+| Orders | Amount | CAST → NUMERIC | `Orders_Amount_C` | Префикс + суффикс |
+
+#### ✅ Правильный SQL с CAST и префиксами:
+
+```sql
+SELECT
+    -- Source 1: Users (префикс: Users_)
+    [Users].[ID] AS [Users_ID],
+    [Users].[Name] AS [Users_Name],
+    [Users].[City] AS [Users_City],
+    CAST([Users].[Balance] AS INT) AS [Users_Balance_C],     -- CAST!
+    [Users].[IsActive] AS [Users_IsActive],
+    [Users].[RegisteredAt] AS [Users_RegisteredAt],
+
+    -- Source 2: User2 (префикс: User2_)
+    [User2].[ID] AS [User2_ID],
+    [User2].[Name] AS [User2_Name],
+    [User2].[Email] AS [User2_Email],
+    CAST([User2].[Balance] AS DECIMAL(10,2)) AS [User2_Balance_C]  -- CAST!
+
+FROM [Users]
+INNER JOIN [User2] ON [Users].[ID] = [User2].[ID]
+WHERE
+    [Users].[Balance] > 0
+    AND [Users].[IsActive] = 1
+```
+
+**Результат (без конфликтов!):**
+```
+Users_ID | Users_Name | Users_Balance_C | User2_ID | User2_Name | User2_Balance_C
+---------|------------|-----------------|----------|------------|----------------
+   1     |   Alice    |      1000       |    1     |   Alice    |     1000.00
+   2     |   Bob      |       500       |    2     |   Bobby    |      500.50
+```
+
+#### 📋 YAML Config для Multi-Source ETL:
+
+```yaml
+# etl/multi_source_pipeline.yaml
+name: merge_users_data
+
+sources:
+  - name: Users
+    type: sqlserver
+    connection: db1
+    query: "SELECT ID, Name, City, Balance, IsActive, RegisteredAt FROM Users"
+
+  - name: User2
+    type: sqlserver
+    connection: db2
+    query: "SELECT ID, Name, Email, Balance FROM User2"
+
+transformation:
+  sql: |
+    SELECT
+      -- Source 1: Users (префикс Users_)
+      u1.ID AS Users_ID,
+      u1.Name AS Users_Name,
+      u1.City AS Users_City,
+      CAST(u1.Balance AS INT) AS Users_Balance_C,
+      u1.IsActive AS Users_IsActive,
+      u1.RegisteredAt AS Users_RegisteredAt,
+
+      -- Source 2: User2 (префикс User2_)
+      u2.ID AS User2_ID,
+      u2.Name AS User2_Name,
+      u2.Email AS User2_Email,
+      CAST(u2.Balance AS DECIMAL(10,2)) AS User2_Balance_C
+
+    FROM Users u1
+    INNER JOIN User2 u2 ON u1.ID = u2.ID
+    WHERE
+      u1.Balance > 0
+      AND u1.IsActive = 1
+
+target:
+  type: postgresql
+  connection: target_db
+  table: merged_users
+```
+
+#### 📊 TDTP Schema для Multi-Source результата:
+
+```xml
+<!-- tdtp/merged_users.xml -->
+<Source name="merged_users">
+  <!-- Users columns -->
+  <Field name="Users_ID" type="int" source="Users"/>
+  <Field name="Users_Name" type="varchar" source="Users"/>
+  <Field name="Users_City" type="varchar" source="Users"/>
+  <Field name="Users_Balance_C" type="int" source="Users" cast="true"/>
+  <Field name="Users_IsActive" type="bit" source="Users"/>
+  <Field name="Users_RegisteredAt" type="datetime" source="Users"/>
+
+  <!-- User2 columns -->
+  <Field name="User2_ID" type="int" source="User2"/>
+  <Field name="User2_Name" type="varchar" source="User2"/>
+  <Field name="User2_Email" type="varchar" source="User2"/>
+  <Field name="User2_Balance_C" type="decimal" source="User2" cast="true"/>
+</Source>
+```
+
+#### 🎯 Ключевые правила для Multi-Source:
+
+##### 1️⃣ Всегда используй префиксы источников:
+
+```sql
+-- ❌ BAD: Конфликт имён!
+SELECT ID, Name FROM Users
+UNION
+SELECT ID, Name FROM User2
+-- ERROR: duplicate column names!
+
+-- ✅ GOOD: Уникальные имена!
+SELECT
+  ID AS Users_ID,
+  Name AS Users_Name
+FROM Users
+UNION
+SELECT
+  ID AS User2_ID,
+  Name AS User2_Name
+FROM User2
+```
+
+##### 2️⃣ CAST с префиксом и суффиксом:
+
+```sql
+-- Формула: {Source}_{Field}_C
+CAST([Users].[Balance] AS INT) AS [Users_Balance_C]
+CAST([User2].[Balance] AS DECIMAL) AS [User2_Balance_C]
+CAST([Orders].[Amount] AS NUMERIC) AS [Orders_Amount_C]
+```
+
+##### 3️⃣ WHERE условия с оригинальными типами:
+
+```sql
+-- ✅ Фильтруем ДО CAST (эффективнее!)
+WHERE
+    [Users].[Balance] > 0           -- оригинальный тип
+    AND [Users].[IsActive] = 1      -- оригинальный тип
+
+-- Не нужно:
+WHERE Users_Balance_C > 0  -- ❌ поле ещё не существует!
+```
+
+##### 4️⃣ Атрибут source в TDTP Schema (опционально):
+
+```xml
+<!-- Указываем откуда пришло поле -->
+<Field name="Users_Balance_C" type="int" source="Users" cast="true"/>
+<Field name="User2_Balance_C" type="decimal" source="User2" cast="true"/>
+```
+
+**Преимущества:**
+- ✅ Трассировка: видно из какого источника поле
+- ✅ Документация: понятна структура merge
+- ✅ Валидация: можно проверить что все источники учтены
+
+#### 📈 Сравнение подходов:
+
+| Подход | Пример | Конфликты? | CAST? | Читаемость |
+|--------|--------|------------|-------|------------|
+| **Без префиксов** | `ID`, `Name` | ❌ ДА | ❌ | ⭐⭐⭐⭐⭐ |
+| **Только префикс** | `Users_ID`, `User2_ID` | ✅ НЕТ | ❌ | ⭐⭐⭐⭐ |
+| **Префикс + суффикс _C** | `Users_Balance_C`, `User2_Balance_C` | ✅ НЕТ | ✅ ДА | ⭐⭐⭐⭐⭐ |
+
+**Вывод:** Используй **префикс + суффикс _C** для максимальной ясности!
+
+---
+
 #### ✅ ПРАВИЛЬНАЯ архитектура: ETL Config (YAML) + SQL Transformation
 
 **ВАЖНО:** Трансформация живёт в **SQL коде**, который хранится в **YAML конфиге**!
@@ -1567,5 +1790,253 @@ SELECT order_date_C FROM orders_target;  -- обычное поле!
 - Трансформация = **SQL код** в **YAML файле**
 - TDTP XML содержит только **результирующую схему**
 - SQL не попадает в TDTP!
+
+**Q4: Как избежать конфликтов имён при Multi-Source ETL?**
+**A4: Используй префикс источника + суффикс _C!**
+- **Формат:** `{SourceName}_{FieldName}[_C]`
+- **Пример:** `Users_Balance_C`, `User2_Balance_C`
+- **Подробнее:** См. раздел "Multi-Source Naming Convention" выше
+
+---
+
+## 🛡️ Валидация конфликтов имён (Implementation)
+
+### Автоматическая проверка дубликатов колонок
+
+При генерации ETL конфигурации нужно валидировать конфликты имён!
+
+#### ✅ Validator псевдокод:
+
+```python
+# etl_validator.py
+def validate_column_names(transformation_sql: str) -> List[str]:
+    """
+    Проверяет SQL на дублирующиеся имена колонок в SELECT.
+
+    Returns:
+        List[str]: Список конфликтующих имён (пустой если всё ОК)
+    """
+    # Извлекаем колонки из SELECT
+    columns = extract_select_columns(transformation_sql)
+
+    # Проверяем дубликаты
+    duplicates = []
+    seen = {}
+
+    for col in columns:
+        col_name = col.alias or col.name  # берём alias если есть, иначе имя
+
+        if col_name in seen:
+            duplicates.append({
+                'column': col_name,
+                'first_source': seen[col_name],
+                'second_source': col.table
+            })
+        else:
+            seen[col_name] = col.table
+
+    return duplicates
+
+
+def suggest_prefixes(conflicts: List[dict]) -> List[str]:
+    """
+    Генерирует рекомендации по исправлению конфликтов.
+
+    Example output:
+        [
+            "Column 'ID' conflicts between 'Users' and 'User2'",
+            "  Suggestion: Use 'Users_ID' and 'User2_ID'",
+            "  SQL: [Users].[ID] AS [Users_ID], [User2].[ID] AS [User2_ID]"
+        ]
+    """
+    suggestions = []
+
+    for conflict in conflicts:
+        col = conflict['column']
+        src1 = conflict['first_source']
+        src2 = conflict['second_source']
+
+        suggestions.append(
+            f"❌ Column '{col}' conflicts between '{src1}' and '{src2}'"
+        )
+        suggestions.append(
+            f"   ✅ Suggestion: Use '{src1}_{col}' and '{src2}_{col}'"
+        )
+        suggestions.append(
+            f"   SQL: [{src1}].[{col}] AS [{src1}_{col}], "
+            f"[{src2}].[{col}] AS [{src2}_{col}]"
+        )
+
+    return suggestions
+
+
+# Пример использования:
+yaml_config = load_yaml("etl/pipeline_config.yaml")
+sql = yaml_config['transformation']['sql']
+
+conflicts = validate_column_names(sql)
+
+if conflicts:
+    print("⚠️ Column name conflicts detected!")
+    suggestions = suggest_prefixes(conflicts)
+    for suggestion in suggestions:
+        print(suggestion)
+
+    # FAIL: блокируем выполнение ETL
+    raise ValueError("Fix column conflicts before running ETL!")
+else:
+    print("✅ No column conflicts. Safe to run ETL!")
+```
+
+#### 📋 Пример вывода валидатора:
+
+```bash
+$ etl-tool validate etl/multi_source_pipeline.yaml
+
+⚠️ Column name conflicts detected!
+
+❌ Column 'ID' conflicts between 'Users' and 'User2'
+   ✅ Suggestion: Use 'Users_ID' and 'User2_ID'
+   SQL: [Users].[ID] AS [Users_ID], [User2].[ID] AS [User2_ID]
+
+❌ Column 'Name' conflicts between 'Users' and 'User2'
+   ✅ Suggestion: Use 'Users_Name' and 'User2_Name'
+   SQL: [Users].[Name] AS [Users_Name], [User2].[Name] AS [User2_Name]
+
+❌ Column 'Balance' conflicts between 'Users' and 'User2'
+   ✅ Suggestion: Use 'Users_Balance_C' and 'User2_Balance_C' (with CAST)
+   SQL: CAST([Users].[Balance] AS INT) AS [Users_Balance_C],
+        CAST([User2].[Balance] AS DECIMAL) AS [User2_Balance_C]
+
+❌ ETL validation FAILED! Fix conflicts before running.
+```
+
+#### ✅ После исправления:
+
+```bash
+$ etl-tool validate etl/multi_source_pipeline.yaml
+
+✅ No column conflicts detected
+✅ All column names are unique
+✅ CAST syntax is correct
+✅ Safe to run ETL!
+
+$ etl-tool run etl/multi_source_pipeline.yaml
+Processing...
+✅ Migrated 10,000 rows successfully!
+```
+
+### 🔍 Проверка синтаксиса CAST
+
+Дополнительная валидация для корректности SQL:
+
+```python
+def validate_cast_syntax(sql: str) -> List[str]:
+    """
+    Проверяет синтаксис CAST() выражений.
+
+    Типичные ошибки:
+    - CAST(...) AS , field_C  ← запятая не на месте
+    - CAST(...) AS            ← нет имени alias
+    - CAST(... AS type        ← нет закрывающей скобки
+    """
+    errors = []
+
+    # Regex для поиска CAST выражений
+    cast_pattern = r'CAST\s*\([^)]+\)\s*AS\s*([,\s]|$)'
+
+    matches = re.finditer(cast_pattern, sql, re.IGNORECASE)
+
+    for match in matches:
+        if match.group(1).startswith(','):
+            errors.append({
+                'type': 'syntax_error',
+                'message': 'Missing alias after CAST() AS',
+                'position': match.start(),
+                'fix': 'Add column alias: CAST(...) AS [column_name]'
+            })
+
+    return errors
+
+
+# Пример:
+sql = """
+SELECT
+    CAST([Users].[Balance] AS INT) AS , [Users].[Balance_C]
+FROM Users
+"""
+
+errors = validate_cast_syntax(sql)
+
+if errors:
+    print("❌ CAST syntax errors:")
+    for err in errors:
+        print(f"   {err['message']}")
+        print(f"   Fix: {err['fix']}")
+```
+
+**Вывод:**
+```
+❌ CAST syntax errors:
+   Missing alias after CAST() AS
+   Fix: Add column alias: CAST(...) AS [column_name]
+
+   Correct syntax:
+   CAST([Users].[Balance] AS INT) AS [Users_Balance_C]
+```
+
+### 📊 CI/CD Integration
+
+Добавить валидацию в CI pipeline:
+
+```yaml
+# .github/workflows/validate-etl.yml
+name: Validate ETL Configs
+
+on:
+  pull_request:
+    paths:
+      - 'etl/**/*.yaml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Validate ETL configs
+        run: |
+          for config in etl/**/*.yaml; do
+            echo "Validating $config..."
+            etl-tool validate "$config"
+          done
+
+      - name: Check for column conflicts
+        run: |
+          python scripts/validate_column_names.py
+
+      - name: Check CAST syntax
+        run: |
+          python scripts/validate_cast_syntax.py
+```
+
+**Результат:** Автоматическое блокирование PR если есть конфликты имён!
+
+---
+
+## 📝 Checklist для Multi-Source ETL
+
+При создании multi-source ETL конфигурации, проверь:
+
+- [ ] **Префиксы источников** — все колонки имеют префикс `{SourceName}_`
+- [ ] **Суффикс _C для CAST** — все CAST используют суффикс `_C`
+- [ ] **Нет дубликатов** — все имена колонок уникальны
+- [ ] **Синтаксис CAST** — нет запятых перед alias
+- [ ] **WHERE до CAST** — фильтры используют оригинальные типы
+- [ ] **TDTP Schema** — содержит атрибут `source="..."` (опционально)
+- [ ] **Валидация пройдена** — `etl-tool validate` успешно
+- [ ] **Тесты** — проверены JOIN условия и типы данных
+
+---
 
 ---
