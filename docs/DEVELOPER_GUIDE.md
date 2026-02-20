@@ -2,31 +2,62 @@
 
 **Руководство разработчика** для TDTP (Table Data Transfer Protocol) Framework.
 
-**Версия:** 1.2
-**Дата:** 17.11.2025
+**Версия:** 1.3
+**Дата:** 2026-02-20
 **Репозиторий:** https://github.com/ruslano69/tdtp-framework
+
+---
+
+## ⚠️ НЕ ИЗОБРЕТАЙ ВЕЛОСИПЕДЫ!
+
+**Перед написанием нового кода прочитай эту секцию!**
+
+TDTP Framework — это зрелый проект с готовой архитектурой. Большинство задач уже решены:
+
+1. **Type Conversion** → Используй `pkg/core/schema.Converter` ✅
+2. **Data Validation** → Используй `pkg/core/schema.Validator` ✅
+3. **XML Parsing** → Используй `pkg/core/packet.Parser` ✅
+4. **SQL Generation** → Используй `pkg/core/tdtql.SQLGenerator` ✅
+5. **Database Access** → Используй `pkg/adapters.Adapter` ✅
+6. **XLSX Import/Export** → Используй `pkg/xlsx.Converter` ✅
+7. **In-memory Workspace** → Используй `pkg/etl.Workspace` ✅
+8. **Data Processing** → Используй `pkg/processors` ✅
+
+**НЕ пиши свои:**
+- ❌ Type mappers (используй `schema.Converter`)
+- ❌ XML parsers (используй `packet.Parser`)
+- ❌ SQL builders (используй `tdtql.SQLGenerator`)
+- ❌ Database connectors (используй `adapters.New()`)
+- ❌ Excel converters (используй `xlsx.ToXLSX/FromXLSX`)
 
 ---
 
 ## Содержание
 
-1. [Архитектура фреймворка](#архитектура-фреймворка)
-2. [Настройка тестовой среды](#настройка-тестовой-среды)
-3. [Core Modules](#core-modules)
+1. [НЕ ИЗОБРЕТАЙ ВЕЛОСИПЕДЫ](#-не-изобретай-велосипеды)
+2. [Архитектура фреймворка](#архитектура-фреймворка)
+3. [Настройка тестовой среды](#настройка-тестовой-среды)
+4. [Core Modules](#core-modules)
    - [Packet Module](#packet-module)
    - [Schema Module](#schema-module)
    - [TDTQL Module](#tdtql-module)
-4. [Database Adapters](#database-adapters)
+5. [ETL Pipeline](#etl-pipeline)
+   - [Workspace Module](#workspace-module)
+   - [Pipeline Processing](#pipeline-processing)
+   - [XLSX Adapter](#xlsx-adapter)
+6. [Database Adapters](#database-adapters)
    - [Universal Interface](#universal-interface)
    - [SQLite Adapter](#sqlite-adapter)
    - [PostgreSQL Adapter](#postgresql-adapter)
    - [MS SQL Server Adapter](#mssql-adapter)
    - [MySQL Adapter](#mysql-adapter)
-5. [Message Brokers](#message-brokers)
-6. [Production Features](#production-features-v12)
-7. [Разработка нового адаптера](#разработка-нового-адаптера)
-8. [Best Practices](#best-practices)
-9. [Testing](#testing)
+7. [Message Brokers](#message-brokers)
+8. [Production Features](#production-features-v12)
+9. [Разработка нового адаптера](#разработка-нового-адаптера)
+10. [Частые Ошибки и Антипаттерны](#-частые-ошибки-и-антипаттерны)
+11. [Архитектурные Принципы](#-архитектурные-принципы)
+12. [Best Practices](#best-practices)
+13. [Testing](#testing)
 
 ---
 
@@ -589,13 +620,270 @@ if generator.CanTranslateToSQL(query) {
 
 ---
 
+## ETL Pipeline
+
+**Расположение:** `pkg/etl/`
+
+**Назначение:** ETL (Extract-Transform-Load) операции с данными через in-memory SQLite workspace.
+
+### Workspace Module
+
+**Расположение:** `pkg/etl/workspace.go`
+
+**Что это:** In-memory SQLite database для трансформации данных без создания файлов.
+
+#### Основные возможности
+
+```go
+import "github.com/ruslano69/tdtp-framework/pkg/etl"
+
+// Создание workspace (in-memory SQLite)
+ws, err := etl.NewWorkspace()
+if err != nil {
+    log.Fatal(err)
+}
+defer ws.Close()
+
+// Загрузка TDTP пакета в workspace
+packet, _ := parser.ParseFile("data.tdtp.xml")
+err = ws.LoadDataPacket(packet)
+
+// Выполнение SQL трансформаций
+results, err := ws.ExecuteSQL("SELECT * FROM users WHERE age > 18")
+
+// Создание нового TDTP пакета из результатов
+outputPacket, err := ws.CreateDataPacket("adults", results)
+```
+
+#### CreateTable - создание таблиц
+
+**⚠️ НЕ ПИШИ СВОЙ TYPE MAPPER!**
+
+Workspace уже имеет правильный маппинг TDTP → SQLite:
+
+```go
+// ✅ ПРАВИЛЬНО: Используй встроенный CreateTable
+func (ws *Workspace) CreateTable(tableName string, schema packet.Schema) error {
+    // Автоматически маппит типы:
+    // INTEGER → INTEGER ✅
+    // REAL, DECIMAL → REAL ✅
+    // TEXT → TEXT ✅
+    // BOOLEAN → INTEGER (0/1) ✅
+    // DATE, DATETIME, TIMESTAMP → TEXT ✅
+    // BLOB → BLOB ✅
+}
+
+// ❌ НЕПРАВИЛЬНО: Не пиши свой!
+func myCustomTypeMapper(tdtpType string) string {
+    // НЕ НУЖНО! Уже есть в workspace.go
+}
+```
+
+#### LoadData - загрузка данных
+
+**⚠️ НЕ ИСПОЛЬЗУЙ INSERT В ЦИКЛЕ!**
+
+```go
+// ✅ ПРАВИЛЬНО: Используй LoadData (bulk insert)
+ws.LoadData(tableName, rows)
+
+// ❌ НЕПРАВИЛЬНО: INSERT в цикле (медленно!)
+for _, row := range rows {
+    ws.ExecuteSQL("INSERT INTO table VALUES (?)", row)
+}
+```
+
+#### ExecuteSQL - выполнение запросов
+
+```go
+// SELECT
+rows, err := ws.ExecuteSQL("SELECT id, name FROM users WHERE active = 1")
+
+// JOIN
+rows, err := ws.ExecuteSQL(`
+    SELECT u.name, o.total
+    FROM users u
+    JOIN orders o ON u.id = o.user_id
+`)
+
+// Aggregations
+rows, err := ws.ExecuteSQL("SELECT COUNT(*), AVG(balance) FROM accounts")
+```
+
+---
+
+### Pipeline Processing
+
+**Расположение:** `pkg/etl/pipeline.go`
+
+**Что это:** Multi-step data transformations с поддержкой цепочек операций.
+
+#### Pipeline Stages
+
+```go
+import "github.com/ruslano69/tdtp-framework/pkg/etl"
+
+// Создание пайплайна
+pipeline := etl.NewPipeline()
+
+// Добавление стадий
+pipeline.AddStage("extract", func(ctx context.Context, data interface{}) (interface{}, error) {
+    // Извлечение данных
+    adapter := data.(adapters.Adapter)
+    return adapter.ExportTable(ctx, "source_table")
+})
+
+pipeline.AddStage("transform", func(ctx context.Context, data interface{}) (interface{}, error) {
+    // Трансформация через workspace
+    packets := data.([]*packet.DataPacket)
+    ws, _ := etl.NewWorkspace()
+    defer ws.Close()
+
+    ws.LoadDataPacket(packets[0])
+    results, _ := ws.ExecuteSQL("SELECT * FROM source_table WHERE valid = 1")
+
+    return ws.CreateDataPacket("cleaned_data", results)
+})
+
+pipeline.AddStage("load", func(ctx context.Context, data interface{}) (interface{}, error) {
+    // Загрузка в целевую БД
+    pkt := data.(*packet.DataPacket)
+    return nil, targetAdapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
+})
+
+// Выполнение
+result, err := pipeline.Execute(ctx, sourceAdapter)
+```
+
+#### Встроенные Processors
+
+**⚠️ НЕ ПИШИ СВОИ ПРОЦЕССОРЫ!** Используй `pkg/processors`:
+
+```go
+import "github.com/ruslano69/tdtp-framework/pkg/processors"
+
+// ✅ Field Masking (PII protection)
+masker := processors.NewFieldMasker(map[string]processors.MaskPattern{
+    "email": processors.MaskPartial,      // j***@example.com
+    "phone": processors.MaskMiddle,       // +7 (9**) ***-45-67
+    "ssn":   processors.MaskFirst2Last2,  // 12*-**-**89
+})
+
+// ✅ Field Validation
+validator, err := processors.NewFieldValidator(map[string][]processors.FieldValidationRule{
+    "email": {{Type: processors.ValidateEmail}},
+    "age":   {{Type: processors.ValidateRange, Param: "0,120"}},
+    "phone": {{Type: processors.ValidateRegex, Param: `^\+\d{10,15}$`}},
+}, false)
+
+// ✅ Field Normalization
+normalizer, err := processors.NewFieldNormalizer(map[string]processors.NormalizationType{
+    "email": processors.NormalizeEmail,  // ToLower, trim
+    "phone": processors.NormalizePhone,  // Remove formatting
+})
+
+// ✅ Processor Chain
+chain := processors.NewChain()
+chain.Add(validator)    // Шаг 1: Валидация
+chain.Add(normalizer)   // Шаг 2: Нормализация
+chain.Add(masker)       // Шаг 3: Маскирование
+
+// Применение
+result, err := chain.Process(ctx, packet.Data, packet.Schema)
+```
+
+---
+
+### XLSX Adapter
+
+**Расположение:** `pkg/xlsx/converter.go`
+
+**Что это:** Двунаправленная конвертация TDTP ↔ Excel (.xlsx).
+
+#### ⚠️ ВАЖНО: Типы НЕ теряются!
+
+XLSX adapter **сохраняет типы данных** двумя способами:
+
+1. **В заголовках:** `field_name (TYPE)`
+2. **В форматировании:** Excel native formats
+
+```go
+import "github.com/ruslano69/tdtp-framework/pkg/xlsx"
+
+converter := xlsx.NewConverter()
+
+// ===== EXPORT: TDTP → XLSX =====
+
+packets, _ := adapter.ExportTable(ctx, "users")
+
+// ✅ Типы сохраняются в заголовках
+err := converter.ToXLSX(packets[0], "users.xlsx")
+
+// Результат в Excel:
+// | id (INTEGER) | name (TEXT) | balance (DECIMAL) | created_at (TIMESTAMP) |
+// |--------------|-------------|-------------------|------------------------|
+// | 1            | John        | 1500.50           | 2024-01-15T10:30:00Z  |
+
+// ===== IMPORT: XLSX → TDTP =====
+
+packet, err := converter.FromXLSX("users.xlsx")
+
+// ✅ Типы восстанавливаются из заголовков
+fmt.Println(packet.Schema.Fields[0].Type)  // "INTEGER"
+fmt.Println(packet.Schema.Fields[2].Type)  // "DECIMAL"
+```
+
+#### НЕ ПИШИ СВОЙ EXCEL CONVERTER!
+
+```go
+// ❌ НЕПРАВИЛЬНО: Не делай так!
+func myExcelExport(data [][]string) {
+    f := excelize.NewFile()
+    for i, row := range data {
+        for j, cell := range row {
+            f.SetCellValue("Sheet1", fmt.Sprintf("%s%d", ...), cell)
+        }
+    }
+}
+
+// ✅ ПРАВИЛЬНО: Используй готовый!
+converter.ToXLSX(packet, "output.xlsx")
+```
+
+#### Type-aware Excel Formatting
+
+Converter автоматически применяет правильные форматы:
+
+| TDTP Type | Excel Format |
+|-----------|--------------|
+| INTEGER | Number (no decimals) |
+| REAL | Number (2 decimals) |
+| DECIMAL(p,s) | Number (s decimals) |
+| DATE | Date (yyyy-mm-dd) |
+| DATETIME | DateTime |
+| TIMESTAMP | DateTime with timezone |
+| BOOLEAN | TRUE/FALSE |
+| TEXT | General |
+
+---
+
 ## Database Adapters
+
+**⚠️ НЕ ПИШИ СВОЙ DATABASE CONNECTOR!**
+
+Фреймворк уже поддерживает:
+- ✅ SQLite (modernc.org/sqlite)
+- ✅ PostgreSQL (pgx/v5)
+- ✅ MySQL (go-sql-driver)
+- ✅ MS SQL Server (go-mssqldb)
+
+Все адаптеры используют **одинаковый интерфейс** и **автоматически** маппят типы данных.
 
 ### Universal Interface
 
 **Расположение:** `pkg/adapters/adapter.go`
 
-**Назначение:** Универсальный интерфейс для всех адаптеров БД.
+**Назначение:** Единый интерфейс для работы со всеми БД без изменения кода.
 
 #### Интерфейс Adapter
 
@@ -630,6 +918,10 @@ type Adapter interface {
 
 #### Фабрика адаптеров
 
+**⚠️ ВСЕГДА используй фабрику `adapters.New()`!**
+
+Не создавай адаптеры напрямую (`postgres.NewAdapter()`), используй фабрику:
+
 ```go
 import (
     "github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -640,9 +932,9 @@ import (
 
 ctx := context.Background()
 
-// Создание адаптера через фабрику
+// ✅ ПРАВИЛЬНО: Фабрика
 cfg := adapters.Config{
-    Type: "postgres",
+    Type: "postgres",  // "sqlite", "postgres", "mysql", "mssql"
     DatabaseConfig: adapters.DatabaseConfig{
         Host:     "localhost",
         Port:     5432,
@@ -660,9 +952,43 @@ if err != nil {
 }
 defer adapter.Close(ctx)
 
-// Использование
-tables, err := adapter.ListTables(ctx)
-packets, err := adapter.ExportTable(ctx, "users")
+// ❌ НЕПРАВИЛЬНО: Прямое создание
+// adapter := postgres.NewAdapter(...)  // НЕ ДЕЛАЙ ТАК!
+```
+
+#### Универсальный код для всех БД
+
+**Ключевая особенность:** Код работает с **любой БД** без изменений!
+
+```go
+// Этот код работает с PostgreSQL, MySQL, MSSQL, SQLite
+func exportAndTransform(ctx context.Context, adapter adapters.Adapter) error {
+    // 1. Export
+    packets, err := adapter.ExportTable(ctx, "users")
+    if err != nil {
+        return err
+    }
+
+    // 2. Transform
+    ws, _ := etl.NewWorkspace()
+    defer ws.Close()
+
+    ws.LoadDataPacket(packets[0])
+    results, _ := ws.ExecuteSQL("SELECT * FROM users WHERE age > 18")
+
+    // 3. Load to another DB
+    newPacket, _ := ws.CreateDataPacket("adults", results)
+    return adapter.ImportPacket(ctx, newPacket, adapters.StrategyReplace)
+}
+
+// Использование:
+pgAdapter, _ := adapters.New(ctx, postgresConfig)
+exportAndTransform(ctx, pgAdapter)  // ✅ PostgreSQL
+
+mysqlAdapter, _ := adapters.New(ctx, mysqlConfig)
+exportAndTransform(ctx, mysqlAdapter)  // ✅ MySQL
+
+// Тот же код!
 ```
 
 #### Стратегии импорта
@@ -1424,14 +1750,303 @@ go test ./tests/e2e/... -v
 
 ---
 
+## 🚫 Частые Ошибки и Антипаттерны
+
+### 1. Дублирование функциональности
+
+#### ❌ НЕПРАВИЛЬНО: Писать свой type converter
+
+```go
+// НЕ ДЕЛАЙ ТАК!
+func convertTDTPType(value string, fieldType string) (interface{}, error) {
+    switch fieldType {
+    case "INTEGER":
+        return strconv.Atoi(value)
+    case "REAL":
+        return strconv.ParseFloat(value, 64)
+    // ...
+    }
+}
+```
+
+#### ✅ ПРАВИЛЬНО: Использовать schema.Converter
+
+```go
+import "github.com/ruslano69/tdtp-framework/pkg/core/schema"
+
+converter := schema.NewConverter()
+value, err := converter.ParseValue(stringValue, fieldDef)
+```
+
+---
+
+### 2. Игнорирование встроенных адаптеров
+
+#### ❌ НЕПРАВИЛЬНО: database/sql напрямую
+
+```go
+// НЕ ДЕЛАЙ ТАК!
+db, _ := sql.Open("postgres", connString)
+rows, _ := db.Query("SELECT * FROM users")
+
+// Ручной парсинг типов, создание TDTP пакетов...
+```
+
+#### ✅ ПРАВИЛЬНО: Использовать adapters
+
+```go
+adapter, _ := adapters.New(ctx, config)
+packets, _ := adapter.ExportTable(ctx, "users")
+// Типы автоматически маппятся! ✅
+```
+
+---
+
+### 3. Неэффективная работа с данными
+
+#### ❌ НЕПРАВИЛЬНО: INSERT в цикле
+
+```go
+// МЕДЛЕННО! Не делай так!
+for _, row := range rows {
+    db.Exec("INSERT INTO table VALUES (?, ?)", row[0], row[1])
+}
+```
+
+#### ✅ ПРАВИЛЬНО: Bulk operations
+
+```go
+// Адаптеры используют bulk insert автоматически
+adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
+
+// Workspace тоже использует bulk
+ws.LoadData(tableName, rows)
+```
+
+---
+
+### 4. Создание "UI адаптеров"
+
+**⚠️ ConnectionService в tdtp-xray — это НЕ дубликат!**
+
+#### Почему ConnectionService нужен:
+
+```go
+// UI-специфичные методы (НЕТ в pkg/adapters):
+type ConnectionService interface {
+    GetTables(ctx context.Context) ([]string, error)      // ✅ Для dropdown
+    GetViews(ctx context.Context) ([]string, error)       // ✅ Для dropdown
+    GetTablePreview(ctx, table, limit) (PreviewResult, error)  // ✅ Для UI
+}
+
+// pkg/adapters.Adapter:
+type Adapter interface {
+    ListTables(ctx context.Context) ([]string, error)     // ❌ Нет GetViews
+    ExportTable(ctx, table) ([]*DataPacket, error)        // ❌ Нет Preview
+}
+```
+
+**Вывод:** UI-слой (tdtp-xray) может иметь свои сервисы! Это **не дублирование**.
+
+---
+
+### 5. Переизобретение XLSX converter
+
+#### ❌ НЕПРАВИЛЬНО: github.com/xuri/excelize напрямую
+
+```go
+// НЕ ДЕЛАЙ ТАК!
+f := excelize.NewFile()
+for i, row := range data {
+    for j, cell := range row {
+        axis, _ := excelize.CoordinatesToCellName(j+1, i+1)
+        f.SetCellValue("Sheet1", axis, cell)
+    }
+}
+// Типы потеряны! ❌
+```
+
+#### ✅ ПРАВИЛЬНО: Использовать pkg/xlsx
+
+```go
+converter := xlsx.NewConverter()
+converter.ToXLSX(packet, "output.xlsx")
+// Типы сохранены в заголовках и форматировании! ✅
+```
+
+---
+
+### 6. Ручной маппинг типов БД
+
+#### ❌ НЕПРАВИЛЬНО: Свой маппер для каждой БД
+
+```go
+// НЕ ДЕЛАЙ ТАК!
+func postgresTypeToTDTP(pgType string) string {
+    switch pgType {
+    case "int4": return "INTEGER"
+    case "float8": return "REAL"
+    // ...
+    }
+}
+
+func mysqlTypeToTDTP(mysqlType string) string {
+    // Дубликат логики!
+}
+```
+
+#### ✅ ПРАВИЛЬНО: Адаптеры делают это автоматически
+
+```go
+// Адаптер сам знает свои типы!
+schema, _ := adapter.GetTableSchema(ctx, "users")
+// schema.Fields[0].Type уже в TDTP формате ✅
+
+// Для UI-слоя (tdtp-xray):
+func mapDatabaseTypeToSQLite(dbType string, sourceDB string) string {
+    // Это OK для UI! Разные входные данные (string, а не schema.DataType)
+}
+```
+
+**Правило:** Если твоя функция принимает `string` (название типа БД), а не `schema.DataType` — это нормально для UI-слоя.
+
+---
+
+### 7. Игнорирование TDTQL
+
+#### ❌ НЕПРАВИЛЬНО: Фильтрация после загрузки
+
+```go
+// НЕЭФФЕКТИВНО!
+packets, _ := adapter.ExportTable(ctx, "users")  // Все 1M записей!
+
+// Фильтрация in-memory
+filtered := []Row{}
+for _, row := range packets[0].Data.Rows {
+    if row.Age > 18 {
+        filtered = append(filtered, row)
+    }
+}
+```
+
+#### ✅ ПРАВИЛЬНО: Фильтрация на SQL-level
+
+```go
+// ЭФФЕКТИВНО!
+query := packet.NewQuery()
+query.Filters = &packet.Filters{
+    And: &packet.LogicalGroup{
+        Filters: []packet.Filter{
+            {Field: "age", Operator: "gt", Value: "18"},
+        },
+    },
+}
+
+packets, _ := adapter.ExportTableWithQuery(ctx, "users", query, "", "")
+// Только нужные записи с БД! ✅
+```
+
+---
+
+### 8. Неправильное использование Context
+
+#### ❌ НЕПРАВИЛЬНО: context.Background() везде
+
+```go
+// Нет timeout!
+packets, _ := adapter.ExportTable(context.Background(), "huge_table")
+// Может зависнуть навсегда!
+```
+
+#### ✅ ПРАВИЛЬНО: Timeout для долгих операций
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+defer cancel()
+
+packets, err := adapter.ExportTable(ctx, "huge_table")
+if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) {
+        log.Println("Timeout! Table too large.")
+    }
+}
+```
+
+---
+
+## 📚 Архитектурные Принципы
+
+### 1. Separation of Concerns
+
+**Framework (pkg/):**
+- Типы данных (schema)
+- Протокол (packet)
+- Адаптеры БД (adapters)
+- Трансформации (etl, processors)
+
+**UI Layer (cmd/tdtp-xray/):**
+- UI-специфичные сервисы (ConnectionService, PreviewService)
+- HTTP handlers
+- Frontend integration
+
+**Правило:** UI может иметь свои сервисы, если они используют Framework primitives.
+
+---
+
+### 2. Type Safety
+
+**ВСЕГДА** используй типизированные значения:
+
+```go
+// ✅ ПРАВИЛЬНО
+converter := schema.NewConverter()
+typedValue, _ := converter.ParseValue("123", intField)
+
+// ❌ НЕПРАВИЛЬНО
+value := "123"  // String вместо int
+```
+
+---
+
+### 3. Reuse Framework Primitives
+
+**Перед написанием кода спроси себя:**
+
+1. Есть ли это в `pkg/core`? → Используй!
+2. Есть ли это в `pkg/adapters`? → Используй!
+3. Есть ли это в `pkg/etl`? → Используй!
+4. Есть ли это в `pkg/processors`? → Используй!
+
+**Только если нет** — тогда создавай новое.
+
+---
+
+## 🎓 Best Practices Summary
+
+| Задача | ✅ Используй | ❌ Не используй |
+|--------|--------------|-----------------|
+| Type conversion | `schema.Converter` | Свой switch |
+| Data validation | `schema.Validator` | Свою функцию |
+| XML parsing | `packet.Parser` | encoding/xml |
+| SQL generation | `tdtql.SQLGenerator` | fmt.Sprintf |
+| Database access | `adapters.New()` | database/sql |
+| XLSX export | `xlsx.ToXLSX()` | excelize напрямую |
+| In-memory SQL | `etl.Workspace` | Свой SQLite |
+| Data masking | `processors.FieldMasker` | Свою функцию |
+| Bulk insert | `adapter.ImportPacket()` | INSERT в цикле |
+| Filtering | TDTQL + ExportTableWithQuery | In-memory filter |
+
+---
+
 ## Дополнительные ресурсы
 
 - **[SPECIFICATION.md](SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
 - **[USER_GUIDE.md](USER_GUIDE.md)** - Руководство пользователя CLI
-- **[ROADMAP.md](../ROADMAP.md)** - Дорожная карта развития
+- **[SESSION_SUMMARY.md](SESSION_SUMMARY.md)** - Последние изменения
+- **[MAP_SUMMARY.md](analysis/MAP_SUMMARY.md)** - Карта проекта
 - **GitHub:** https://github.com/ruslano69/tdtp-framework
 - **Issues:** https://github.com/ruslano69/tdtp-framework/issues
 
 ---
 
-*Последнее обновление: 17.11.2025*
+*Последнее обновление: 2026-02-20*
