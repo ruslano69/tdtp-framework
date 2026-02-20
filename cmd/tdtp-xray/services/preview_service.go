@@ -16,12 +16,13 @@ type PreviewService struct{}
 
 // PreviewResult represents preview data result
 type PreviewResult struct {
-	Success      bool                     `json:"success"`
-	Message      string                   `json:"message,omitempty"`
-	Columns      []string                 `json:"columns"`
-	Rows         []map[string]any `json:"rows"`
-	RowCount     int                      `json:"rowCount"`
-	TotalRowsEst int64                    `json:"totalRowsEst,omitempty"` // Estimated total rows
+	Success      bool                 `json:"success"`
+	Message      string               `json:"message,omitempty"`
+	Columns      []string             `json:"columns"`
+	ColumnTypes  map[string]string    `json:"columnTypes,omitempty"` // Column name -> TDTP type
+	Rows         []map[string]any     `json:"rows"`
+	RowCount     int                  `json:"rowCount"`
+	TotalRowsEst int64                `json:"totalRowsEst,omitempty"` // Estimated total rows
 }
 
 // NewPreviewService creates a new preview service
@@ -154,10 +155,12 @@ func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewR
 		}
 	}
 
-	// Extract column names from schema
+	// Extract column names and types from schema
 	columns := make([]string, len(dataPacket.Schema.Fields))
+	columnTypes := make(map[string]string)
 	for i, field := range dataPacket.Schema.Fields {
 		columns[i] = field.Name
+		columnTypes[field.Name] = field.Type
 	}
 
 	// Convert rows to preview format
@@ -189,6 +192,7 @@ func (ps *PreviewService) PreviewTDTPSource(filePath string, limit int) PreviewR
 	return PreviewResult{
 		Success:      true,
 		Columns:      columns,
+		ColumnTypes:  columnTypes,
 		Rows:         rows,
 		RowCount:     len(rows),
 		TotalRowsEst: int64(totalRows),

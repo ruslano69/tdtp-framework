@@ -839,11 +839,11 @@ func (a *App) loadTDTPSourceToMemory(db *sql.DB, source Source) error {
 		return fmt.Errorf("failed to load TDTP data: %s", preview.Message)
 	}
 
-	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.Rows); err != nil {
+	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.ColumnTypes, preview.Rows); err != nil {
 		return err
 	}
 
-	fmt.Printf("Loaded %d rows from TDTP source '%s'\n", len(preview.Rows), source.Name)
+	fmt.Printf("Loaded %d rows from TDTP source '%s' with schema types\n", len(preview.Rows), source.Name)
 	return nil
 }
 
@@ -871,7 +871,9 @@ func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
 		return fmt.Errorf("failed to load database data: %s", preview.Message)
 	}
 
-	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.Rows); err != nil {
+	// For DB sources, use empty columnTypes map (will default to TEXT)
+	// TODO: Extract column types from database schema if needed
+	if err := a.createAndFillTable(db, source.Name, preview.Columns, make(map[string]string), preview.Rows); err != nil {
 		return err
 	}
 
@@ -879,12 +881,32 @@ func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
 	return nil
 }
 
-// createAndFillTable creates a TEXT-typed SQLite table and bulk-inserts rows.
+// mapTDTPToSQLiteType maps TDTP type to SQLite type
+func mapTDTPToSQLiteType(tdtpType string) string {
+	switch strings.ToUpper(tdtpType) {
+	case "INTEGER", "INT", "BIGINT", "SMALLINT":
+		return "INTEGER"
+	case "DECIMAL", "NUMERIC", "REAL", "DOUBLE", "FLOAT":
+		return "REAL"
+	case "DATE", "DATETIME", "TIMESTAMP":
+		return "TEXT" // SQLite stores dates as TEXT/INTEGER/REAL
+	case "BOOLEAN", "BOOL":
+		return "INTEGER" // SQLite uses 0/1 for boolean
+	case "BLOB", "BINARY":
+		return "BLOB"
+	default:
+		return "TEXT" // Default fallback
+	}
+}
+
+// createAndFillTable creates SQLite table with proper types from schema and bulk-inserts rows.
 // All identifiers are double-quoted to handle names containing $, spaces, etc.
-func (a *App) createAndFillTable(db *sql.DB, tableName string, columns []string, rows []map[string]any) error {
+func (a *App) createAndFillTable(db *sql.DB, tableName string, columns []string, columnTypes map[string]string, rows []map[string]any) error {
 	colDefs := make([]string, len(columns))
 	for i, col := range columns {
-		colDefs[i] = quoteSQLiteIdent(col) + " TEXT"
+		// Map TDTP type to SQLite type, fallback to TEXT
+		sqliteType := mapTDTPToSQLiteType(columnTypes[col])
+		colDefs[i] = quoteSQLiteIdent(col) + " " + sqliteType
 	}
 	createSQL := fmt.Sprintf("CREATE TABLE %s (%s)", quoteSQLiteIdent(tableName), strings.Join(colDefs, ", "))
 	if _, err := db.Exec(createSQL); err != nil {
