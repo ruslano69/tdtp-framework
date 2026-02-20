@@ -115,9 +115,19 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 		endIdx = startIdx
 	}
 
-	// Apply --limit (after range offset)
-	if opts.Limit > 0 && (endIdx-startIdx) > opts.Limit {
-		endIdx = startIdx + opts.Limit
+	// Apply --limit
+	if opts.Limit > 0 {
+		// Positive: first N rows from range
+		if (endIdx - startIdx) > opts.Limit {
+			endIdx = startIdx + opts.Limit
+		}
+	} else if opts.Limit < 0 {
+		// Negative: last N rows from range (like tail -n)
+		rowCount := endIdx - startIdx
+		wantedRows := -opts.Limit
+		if rowCount > wantedRows {
+			startIdx = endIdx - wantedRows
+		}
 	}
 
 	parsedRows := allRows[startIdx:endIdx]
