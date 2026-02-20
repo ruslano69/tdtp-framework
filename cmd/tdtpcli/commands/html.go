@@ -15,9 +15,12 @@ import (
 
 // HTMLOptions holds options for TDTP → HTML conversion
 type HTMLOptions struct {
-	InputFile  string
-	OutputFile string // if empty, auto-generated next to input file
-	OpenBrowser bool  // open result in default browser
+	InputFile   string
+	OutputFile  string // if empty, auto-generated next to input file
+	OpenBrowser bool   // open result in default browser
+	Limit       int    // max rows to render (0 = all)
+	RowStart    int    // first row to render, 1-indexed (0 = from beginning)
+	RowEnd      int    // last row to render, 1-indexed inclusive (0 = to end)
 }
 
 // ConvertTDTPToHTML converts a TDTP XML file to a beautiful standalone HTML page.
@@ -53,18 +56,23 @@ func ConvertTDTPToHTML(opts HTMLOptions) error {
 	}
 
 	// Generate HTML
-	htmlContent := renderHTML(opts.InputFile, pkt)
+	htmlContent, renderedRows := renderHTML(opts.InputFile, pkt, opts)
 
 	// Write output
 	if err := os.WriteFile(outputFile, []byte(htmlContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write HTML file: %w", err)
 	}
 
+	totalRows := len(pkt.Data.Rows)
 	fmt.Printf("HTML viewer: %s\n", outputFile)
 	fmt.Printf("  Table:  %s\n", pkt.Header.TableName)
 	fmt.Printf("  Type:   %s\n", pkt.Header.Type)
 	fmt.Printf("  Fields: %d\n", len(pkt.Schema.Fields))
-	fmt.Printf("  Rows:   %d\n", len(pkt.Data.Rows))
+	if renderedRows < totalRows {
+		fmt.Printf("  Rows:   %d / %d\n", renderedRows, totalRows)
+	} else {
+		fmt.Printf("  Rows:   %d\n", totalRows)
+	}
 
 	if opts.OpenBrowser {
 		openInBrowser(outputFile)
@@ -73,16 +81,42 @@ func ConvertTDTPToHTML(opts HTMLOptions) error {
 	return nil
 }
 
-// renderHTML generates a complete standalone HTML page for the TDTP packet
-func renderHTML(inputFile string, pkt *packet.DataPacket) string {
+// renderHTML generates a complete standalone HTML page for the TDTP packet.
+// Returns the HTML string and the number of rows actually rendered.
+func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (string, int) {
 	var b strings.Builder
 
-	// Parse all rows for rendering
+	// Parse all rows
 	p := packet.NewParser()
-	parsedRows := make([][]string, 0, len(pkt.Data.Rows))
+	allRows := make([][]string, 0, len(pkt.Data.Rows))
 	for _, row := range pkt.Data.Rows {
-		parsedRows = append(parsedRows, p.GetRowValues(row))
+		allRows = append(allRows, p.GetRowValues(row))
 	}
+	totalRows := len(allRows)
+
+	// Apply --row range (1-indexed, inclusive)
+	startIdx := 0
+	endIdx := totalRows
+	if opts.RowStart > 0 {
+		startIdx = opts.RowStart - 1
+		if startIdx > totalRows {
+			startIdx = totalRows
+		}
+	}
+	if opts.RowEnd > 0 {
+		endIdx = opts.RowEnd
+		if endIdx > totalRows {
+			endIdx = totalRows
+		}
+	}
+
+	// Apply --limit (after range offset)
+	if opts.Limit > 0 && (endIdx-startIdx) > opts.Limit {
+		endIdx = startIdx + opts.Limit
+	}
+
+	parsedRows := allRows[startIdx:endIdx]
+	displayOffset := startIdx // used for actual row numbers in the table
 
 	b.WriteString(`<!DOCTYPE html>
 <html lang="en">
@@ -306,7 +340,12 @@ func renderHTML(inputFile string, pkt *packet.DataPacket) string {
 
 	// --- Data card ---
 	b.WriteString(`<div class="card">`)
-	b.WriteString(fmt.Sprintf(`<div class="card-header">Data <span class="pill">%d rows</span></div>`, len(parsedRows)))
+	if len(parsedRows) < totalRows {
+		b.WriteString(fmt.Sprintf(`<div class="card-header">Data <span class="pill">%d–%d of %d rows</span></div>`,
+			displayOffset+1, displayOffset+len(parsedRows), totalRows))
+	} else {
+		b.WriteString(fmt.Sprintf(`<div class="card-header">Data <span class="pill">%d rows</span></div>`, len(parsedRows)))
+	}
 	b.WriteString(`<div class="data-wrapper"><table class="data-table"><thead><tr>`)
 
 	// Row number header
@@ -327,7 +366,7 @@ func renderHTML(inputFile string, pkt *packet.DataPacket) string {
 	// Data rows
 	for rowIdx, vals := range parsedRows {
 		b.WriteString(`<tr>`)
-		b.WriteString(fmt.Sprintf(`<td class="row-num">%d</td>`, rowIdx+1))
+		b.WriteString(fmt.Sprintf(`<td class="row-num">%d</td>`, rowIdx+displayOffset+1))
 
 		for colIdx, val := range vals {
 			if colIdx >= len(pkt.Schema.Fields) {
@@ -368,11 +407,19 @@ func renderHTML(inputFile string, pkt *packet.DataPacket) string {
 			keyCount++
 		}
 	}
-	b.WriteString(fmt.Sprintf(`<div class="stats-bar">
+	if len(parsedRows) < totalRows {
+		b.WriteString(fmt.Sprintf(`<div class="stats-bar">
+  <span>showing rows <strong>%d–%d</strong> of <strong>%d</strong></span>
+  <span><strong>%d</strong> columns</span>
+  <span><strong>%d</strong> primary key(s)</span>
+</div>`, displayOffset+1, displayOffset+len(parsedRows), totalRows, len(pkt.Schema.Fields), keyCount))
+	} else {
+		b.WriteString(fmt.Sprintf(`<div class="stats-bar">
   <span><strong>%d</strong> rows</span>
   <span><strong>%d</strong> columns</span>
   <span><strong>%d</strong> primary key(s)</span>
 </div>`, len(parsedRows), len(pkt.Schema.Fields), keyCount))
+	}
 
 	b.WriteString(`</div>`) // data card
 
@@ -380,7 +427,7 @@ func renderHTML(inputFile string, pkt *packet.DataPacket) string {
 	b.WriteString(`<div class="footer">Generated by <a href="https://github.com/ruslano69/tdtp-framework">TDTP Framework</a> &mdash; Table Data Transfer Protocol</div>`)
 
 	b.WriteString(`</div></body></html>`)
-	return b.String()
+	return b.String(), len(parsedRows)
 }
 
 // writeMetaItem writes a metadata label+value pair

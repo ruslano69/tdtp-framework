@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,11 +116,26 @@ func routeCommand(
 			"output":  outputHTML,
 		}
 
+		// Parse optional --row range (format: "n1-n2", 1-indexed inclusive)
+		rowStart, rowEnd := 0, 0
+		if *flags.Row != "" {
+			parts := strings.SplitN(*flags.Row, "-", 2)
+			if len(parts) == 2 {
+				rowStart, _ = strconv.Atoi(parts[0])
+				rowEnd, _ = strconv.Atoi(parts[1])
+			} else if len(parts) == 1 {
+				rowStart, _ = strconv.Atoi(parts[0])
+			}
+		}
+
 		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-html", func() error {
 			return commands.ConvertTDTPToHTML(commands.HTMLOptions{
 				InputFile:   *flags.ToHTML,
 				OutputFile:  outputHTML,
 				OpenBrowser: *flags.OpenBrowser,
+				Limit:       *flags.Limit,
+				RowStart:    rowStart,
+				RowEnd:      rowEnd,
 			})
 		})
 
