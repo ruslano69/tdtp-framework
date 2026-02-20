@@ -1,0 +1,10 @@
+INFO: Scanning directory: pkg/xlsx (mode=functions, recursive=true, workers=0, gitignore=true)
+pkg/xlsx/converter.go:25: ToXLSX
+pkg/xlsx/converter.go:142: FromXLSX
+pkg/xlsx/converter.go:211: parseHeader
+pkg/xlsx/converter.go:236: typedValueToExcel
+pkg/xlsx/converter.go:257: convertFromExcel
+pkg/xlsx/converter.go:274: applyCellFormat
+pkg/xlsx/converter.go:290: columnName
+
+INFO: Processed 1 files, found 7 functions
