@@ -360,8 +360,9 @@ type FieldDesign struct {
 	Type         string           `json:"type"`
 	IsPrimaryKey bool             `json:"isPrimaryKey,omitempty"`
 	Visible      bool             `json:"visible"`
-	Filter       *FilterCondition `json:"filter,omitempty"`   // Frontend uses "filter"
+	Filter       *FilterCondition `json:"filter,omitempty"`    // Frontend uses "filter"
 	Condition    *FilterCondition `json:"condition,omitempty"` // Backend compatibility
+	Sort         string           `json:"sort,omitempty"`      // ASC, DESC, or "" (no sort)
 }
 
 // FilterCondition for field filtering
@@ -608,6 +609,25 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		}
 
 		sql += fmt.Sprintf("\nWHERE\n    %s", strings.Join(whereConditions, "\n    "+whereLogic+" "))
+	}
+
+	// Build ORDER BY clause from field sort states (in table/field order = priority)
+	var orderByFields []string
+	for _, table := range design.Tables {
+		tableAlias := table.Alias
+		if tableAlias == "" {
+			tableAlias = table.SourceName
+		}
+		for _, field := range table.Fields {
+			if field.Sort == "ASC" || field.Sort == "DESC" {
+				orderByFields = append(orderByFields,
+					fmt.Sprintf("%s.%s %s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name), field.Sort))
+			}
+		}
+	}
+
+	if len(orderByFields) > 0 {
+		sql += fmt.Sprintf("\nORDER BY\n    %s", strings.Join(orderByFields, ",\n    "))
 	}
 
 	fmt.Printf("✅ Generated SQL:\n%s\n", sql)
@@ -1964,6 +1984,29 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 
 	if len(tableByAlias) == 0 {
 		return nil
+	}
+
+	// ---------- ORDER BY ----------
+	// Parse before WHERE so ORDER BY tokens don't bleed into WHERE regex.
+	// Supports: [table].[field] ASC|DESC  (default ASC when direction omitted)
+	orderByRe := regexp.MustCompile(`(?is)\bORDER\s+BY\b\s+(.+?)(?:\s*;|\s*$)`)
+	if om := orderByRe.FindStringSubmatch(sql); len(om) >= 2 {
+		sql = orderByRe.ReplaceAllString(sql, "") // strip from sql before WHERE parse
+
+		entryRe := regexp.MustCompile(`(?i)(` + ident + `)\.(` + ident + `)(?:\s+(ASC|DESC))?`)
+		for _, em := range entryRe.FindAllStringSubmatch(om[1], -1) {
+			tAlias := unquote(em[1])
+			fName  := unquote(em[2])
+			dir    := "ASC"
+			if len(em) >= 4 && strings.ToUpper(em[3]) == "DESC" {
+				dir = "DESC"
+			}
+			ensureTable(tAlias, "")
+			fd := addField(tAlias, fName, false)
+			if fd != nil {
+				fd.Sort = dir
+			}
+		}
 	}
 
 	// ---------- WHERE conditions ----------
