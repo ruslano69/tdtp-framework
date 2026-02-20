@@ -11,6 +11,9 @@ type Flags struct {
 	Import       *string
 	ExportBroker *string
 	ImportBroker *bool
+	ToHTML       *string
+	OpenBrowser  *bool
+	Row          *string // Row range for HTML viewer (e.g., "100-150")
 	ToXLSX       *string
 	FromXLSX     *string
 	ExportXLSX   *string
@@ -70,6 +73,7 @@ type Flags struct {
 	// Misc
 	Version *bool
 	Help    *bool
+	ShortHelp *bool
 }
 
 // ParseFlags defines and parses all command-line flags
@@ -83,6 +87,9 @@ func ParseFlags() *Flags {
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
 	f.ExportBroker = flag.String("export-broker", "", "Export table to message broker (table name)")
 	f.ImportBroker = flag.Bool("import-broker", false, "Import from message broker to database")
+	f.ToHTML = flag.String("to-html", "", "Convert TDTP XML file to HTML for browser viewing (input TDTP file)")
+	f.OpenBrowser = flag.Bool("open", false, "Open generated HTML file in default browser (use with --to-html)")
+	f.Row = flag.String("row", "", "Row range to display in HTML viewer, e.g. 100-150 (use with --to-html)")
 	f.ToXLSX = flag.String("to-xlsx", "", "Convert TDTP XML file to XLSX (input TDTP file)")
 	f.FromXLSX = flag.String("from-xlsx", "", "Convert XLSX file to TDTP XML (input XLSX file)")
 	f.ExportXLSX = flag.String("export-xlsx", "", "Export table directly to XLSX (table name)")
@@ -96,7 +103,7 @@ func ParseFlags() *Flags {
 	// TDTQL Filters
 	f.Where = flag.String("where", "", "TDTQL WHERE clause (e.g., 'age > 18 AND status = active')")
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
-	f.Limit = flag.Int("limit", 0, "LIMIT number of rows (0 = no limit)")
+	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")
 
 	// Options
@@ -141,7 +148,8 @@ func ParseFlags() *Flags {
 
 	// Misc
 	f.Version = flag.Bool("version", false, "Show version information")
-	f.Help = flag.Bool("help", false, "Show help information")
+	f.Help = flag.Bool("help", false, "Show detailed help with examples")
+	f.ShortHelp = flag.Bool("h", false, "Show brief help (commands and options)")
 
 	flag.Parse()
 

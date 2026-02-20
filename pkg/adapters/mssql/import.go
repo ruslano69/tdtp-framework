@@ -561,3 +561,73 @@ func (a *Adapter) tableHasIdentityColumn(ctx context.Context, tableName string) 
 }
 
 // Transaction methods (BeginTx, transaction struct) are implemented in adapter.go
+
+// ========== base.TableManager interface methods ==========
+
+// CreateTable implements base.TableManager interface
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
+	exists, err := a.TableExists(ctx, tableName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	sqlCreate := a.buildCreateTableSQL(tableName, schema)
+	_, err = a.db.ExecContext(ctx, sqlCreate)
+	if err != nil {
+		return fmt.Errorf("failed to execute CREATE TABLE: %w\nSQL: %s", err, sqlCreate)
+	}
+	return nil
+}
+
+// DropTable implements base.TableManager interface
+func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
+	schemaName, table := a.parseTableName(tableName)
+	sql := fmt.Sprintf("IF OBJECT_ID('[%s].[%s]', 'U') IS NOT NULL DROP TABLE [%s].[%s]",
+		schemaName, table, schemaName, table)
+	_, err := a.db.ExecContext(ctx, sql)
+	return err
+}
+
+// RenameTable implements base.TableManager interface
+// Uses sp_rename which is the standard way to rename objects in SQL Server
+func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
+	schemaName, table := a.parseTableName(oldName)
+	_, newTableName := a.parseTableName(newName)
+	sql := fmt.Sprintf("EXEC sp_rename '[%s].[%s]', '%s', 'OBJECT'", schemaName, table, newTableName)
+	_, err := a.db.ExecContext(ctx, sql)
+	if err != nil {
+		return fmt.Errorf("failed to rename table %s to %s: %w", oldName, newName, err)
+	}
+	return nil
+}
+
+// ========== base.DataInserter interface methods ==========
+
+// InsertRows implements base.DataInserter interface
+func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	pkt := &packet.DataPacket{
+		Header: packet.Header{TableName: tableName},
+		Schema: schema,
+	}
+	pkt.Data.Rows = rows
+
+	if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
+		return fmt.Errorf("failed to insert rows: %w", err)
+	}
+
+	return tx.Commit()
+}

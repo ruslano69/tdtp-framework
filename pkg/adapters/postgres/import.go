@@ -518,7 +518,13 @@ func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 
 // RenameTable implements base.TableManager interface
 func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
-	return a.replaceTables(ctx, oldName, newName)
+	quotedOld := QuoteIdentifier(oldName)
+	if a.schema != "public" {
+		quotedOld = QuoteIdentifier(a.schema) + "." + quotedOld
+	}
+	quotedNew := QuoteIdentifier(newName)
+	sql := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedNew)
+	return a.Exec(ctx, sql)
 }
 
 // ========== base.DataInserter interface methods ==========

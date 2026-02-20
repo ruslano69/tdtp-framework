@@ -637,22 +637,24 @@ if generator.CanTranslateToSQL(query) {
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/etl"
 
+ctx := context.Background()
+
 // Создание workspace (in-memory SQLite)
-ws, err := etl.NewWorkspace()
+ws, err := etl.NewWorkspace(ctx)
 if err != nil {
     log.Fatal(err)
 }
-defer ws.Close()
+defer ws.Close(ctx)
 
 // Загрузка TDTP пакета в workspace
 packet, _ := parser.ParseFile("data.tdtp.xml")
-err = ws.LoadDataPacket(packet)
+err = ws.LoadDataPacket(ctx, packet)
 
 // Выполнение SQL трансформаций
-results, err := ws.ExecuteSQL("SELECT * FROM users WHERE age > 18")
+results, err := ws.ExecuteSQL(ctx, "SELECT * FROM users WHERE age > 18")
 
 // Создание нового TDTP пакета из результатов
-outputPacket, err := ws.CreateDataPacket("adults", results)
+outputPacket, err := ws.CreateDataPacket(ctx, "adults", results)
 ```
 
 #### CreateTable - создание таблиц
@@ -663,17 +665,16 @@ Workspace уже имеет правильный маппинг TDTP → SQLite:
 
 ```go
 // ✅ ПРАВИЛЬНО: Используй встроенный CreateTable
-func (ws *Workspace) CreateTable(tableName string, schema packet.Schema) error {
-    // Автоматически маппит типы:
-    // INTEGER → INTEGER ✅
-    // REAL, DECIMAL → REAL ✅
-    // TEXT → TEXT ✅
-    // BOOLEAN → INTEGER (0/1) ✅
-    // DATE, DATETIME, TIMESTAMP → TEXT ✅
-    // BLOB → BLOB ✅
-}
+err = ws.CreateTable(ctx, "users", packet.Schema.Fields)
+// Автоматически маппит типы:
+// INTEGER → INTEGER ✅
+// REAL, DECIMAL → REAL ✅
+// TEXT → TEXT ✅
+// BOOLEAN → INTEGER (0/1) ✅
+// DATE, DATETIME, TIMESTAMP → TEXT ✅
+// BLOB → BLOB ✅
 
-// ❌ НЕПРАВИЛЬНО: Не пиши свой!
+// ❌ НЕПРАВИЛЬНО: Не пиши свой type mapper!
 func myCustomTypeMapper(tdtpType string) string {
     // НЕ НУЖНО! Уже есть в workspace.go
 }
@@ -685,11 +686,11 @@ func myCustomTypeMapper(tdtpType string) string {
 
 ```go
 // ✅ ПРАВИЛЬНО: Используй LoadData (bulk insert)
-ws.LoadData(tableName, rows)
+ws.LoadData(ctx, tableName, dataPacket)
 
 // ❌ НЕПРАВИЛЬНО: INSERT в цикле (медленно!)
 for _, row := range rows {
-    ws.ExecuteSQL("INSERT INTO table VALUES (?)", row)
+    ws.ExecuteSQL(ctx, "INSERT INTO table VALUES (?)", row)
 }
 ```
 
@@ -697,17 +698,17 @@ for _, row := range rows {
 
 ```go
 // SELECT
-rows, err := ws.ExecuteSQL("SELECT id, name FROM users WHERE active = 1")
+rows, err := ws.ExecuteSQL(ctx, "SELECT id, name FROM users WHERE active = 1")
 
 // JOIN
-rows, err := ws.ExecuteSQL(`
+rows, err := ws.ExecuteSQL(ctx, `
     SELECT u.name, o.total
     FROM users u
     JOIN orders o ON u.id = o.user_id
 `)
 
 // Aggregations
-rows, err := ws.ExecuteSQL("SELECT COUNT(*), AVG(balance) FROM accounts")
+rows, err := ws.ExecuteSQL(ctx, "SELECT COUNT(*), AVG(balance) FROM accounts")
 ```
 
 ---
@@ -736,13 +737,13 @@ pipeline.AddStage("extract", func(ctx context.Context, data interface{}) (interf
 pipeline.AddStage("transform", func(ctx context.Context, data interface{}) (interface{}, error) {
     // Трансформация через workspace
     packets := data.([]*packet.DataPacket)
-    ws, _ := etl.NewWorkspace()
-    defer ws.Close()
+    ws, _ := etl.NewWorkspace(ctx)
+    defer ws.Close(ctx)
 
-    ws.LoadDataPacket(packets[0])
-    results, _ := ws.ExecuteSQL("SELECT * FROM source_table WHERE valid = 1")
+    ws.LoadDataPacket(ctx, packets[0])
+    results, _ := ws.ExecuteSQL(ctx, "SELECT * FROM source_table WHERE valid = 1")
 
-    return ws.CreateDataPacket("cleaned_data", results)
+    return ws.CreateDataPacket(ctx, "cleaned_data", results)
 })
 
 pipeline.AddStage("load", func(ctx context.Context, data interface{}) (interface{}, error) {
@@ -810,14 +811,12 @@ XLSX adapter **сохраняет типы данных** двумя спосо�
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/xlsx"
 
-converter := xlsx.NewConverter()
-
 // ===== EXPORT: TDTP → XLSX =====
 
 packets, _ := adapter.ExportTable(ctx, "users")
 
 // ✅ Типы сохраняются в заголовках
-err := converter.ToXLSX(packets[0], "users.xlsx")
+err := xlsx.ToXLSX(packets[0], "users.xlsx", "Sheet1")
 
 // Результат в Excel:
 // | id (INTEGER) | name (TEXT) | balance (DECIMAL) | created_at (TIMESTAMP) |
@@ -826,7 +825,7 @@ err := converter.ToXLSX(packets[0], "users.xlsx")
 
 // ===== IMPORT: XLSX → TDTP =====
 
-packet, err := converter.FromXLSX("users.xlsx")
+packet, err := xlsx.FromXLSX("users.xlsx", "Sheet1")
 
 // ✅ Типы восстанавливаются из заголовков
 fmt.Println(packet.Schema.Fields[0].Type)  // "INTEGER"
@@ -847,7 +846,7 @@ func myExcelExport(data [][]string) {
 }
 
 // ✅ ПРАВИЛЬНО: Используй готовый!
-converter.ToXLSX(packet, "output.xlsx")
+xlsx.ToXLSX(packet, "output.xlsx", "Sheet1")
 ```
 
 #### Type-aware Excel Formatting
@@ -934,15 +933,11 @@ ctx := context.Background()
 
 // ✅ ПРАВИЛЬНО: Фабрика
 cfg := adapters.Config{
-    Type: "postgres",  // "sqlite", "postgres", "mysql", "mssql"
-    DatabaseConfig: adapters.DatabaseConfig{
-        Host:     "localhost",
-        Port:     5432,
-        User:     "myuser",
-        Password: "mypass",
-        DBName:   "mydb",
-        Schema:   "public",
-        SSLMode:  "disable",
+    Type:   "postgres",  // "sqlite", "postgres", "mysql", "mssql"
+    DSN:    "postgresql://myuser:mypass@localhost:5432/mydb?sslmode=disable",
+    Schema: "public",    // Схема по умолчанию (для PostgreSQL/MSSQL)
+    SSL: adapters.SSLConfig{
+        Mode: "disable", // "disable", "require", "verify-ca", "verify-full"
     },
 }
 
@@ -970,14 +965,14 @@ func exportAndTransform(ctx context.Context, adapter adapters.Adapter) error {
     }
 
     // 2. Transform
-    ws, _ := etl.NewWorkspace()
-    defer ws.Close()
+    ws, _ := etl.NewWorkspace(ctx)
+    defer ws.Close(ctx)
 
-    ws.LoadDataPacket(packets[0])
-    results, _ := ws.ExecuteSQL("SELECT * FROM users WHERE age > 18")
+    ws.LoadDataPacket(ctx, packets[0])
+    results, _ := ws.ExecuteSQL(ctx, "SELECT * FROM users WHERE age > 18")
 
     // 3. Load to another DB
-    newPacket, _ := ws.CreateDataPacket("adults", results)
+    newPacket, _ := ws.CreateDataPacket(ctx, "adults", results)
     return adapter.ImportPacket(ctx, newPacket, adapters.StrategyReplace)
 }
 
@@ -1027,9 +1022,7 @@ import (
 
 cfg := adapters.Config{
     Type: "sqlite",
-    DatabaseConfig: adapters.DatabaseConfig{
-        Path: "./database.db",
-    },
+    DSN:  "file:./database.db",  // или просто "./database.db"
 }
 
 adapter, err := adapters.New(ctx, cfg)
@@ -1090,15 +1083,11 @@ import (
 )
 
 cfg := adapters.Config{
-    Type: "postgres",
-    DatabaseConfig: adapters.DatabaseConfig{
-        Host:     "localhost",
-        Port:     5432,
-        User:     "tdtp_user",
-        Password: "password",
-        DBName:   "tdtp_db",
-        Schema:   "public",
-        SSLMode:  "disable",
+    Type:   "postgres",
+    DSN:    "postgresql://tdtp_user:password@localhost:5432/tdtp_db?sslmode=disable",
+    Schema: "public",
+    SSL: adapters.SSLConfig{
+        Mode: "disable",
     },
 }
 
@@ -1158,17 +1147,9 @@ import (
 )
 
 cfg := adapters.Config{
-    Type: "mssql",
-    DatabaseConfig: adapters.DatabaseConfig{
-        Host:     "localhost",
-        Port:     1433,
-        User:     "sa",
-        Password: "YourStrong@Passw0rd",
-        DBName:   "TestDB",
-        Instance: "SQLEXPRESS",
-        Encrypt:  false,
-        TrustServerCertificate: true,
-    },
+    Type:   "mssql",
+    DSN:    "sqlserver://sa:YourStrong@Passw0rd@localhost:1433?database=TestDB&encrypt=disable&TrustServerCertificate=true",
+    Schema: "dbo",  // Схема по умолчанию
 }
 
 adapter, err := adapters.New(ctx, cfg)
@@ -1215,14 +1196,7 @@ import (
 
 cfg := adapters.Config{
     Type: "mysql",
-    DatabaseConfig: adapters.DatabaseConfig{
-        Host:     "localhost",
-        Port:     3306,
-        User:     "tdtp_user",
-        Password: "password",
-        DBName:   "tdtp_db",
-        Charset:  "utf8mb4",
-    },
+    DSN:  "tdtp_user:password@tcp(localhost:3306)/tdtp_db?charset=utf8mb4&parseTime=true",
 }
 
 adapter, err := adapters.New(ctx, cfg)
@@ -1869,8 +1843,7 @@ for i, row := range data {
 #### ✅ ПРАВИЛЬНО: Использовать pkg/xlsx
 
 ```go
-converter := xlsx.NewConverter()
-converter.ToXLSX(packet, "output.xlsx")
+xlsx.ToXLSX(packet, "output.xlsx", "Sheet1")
 // Типы сохранены в заголовках и форматировании! ✅
 ```
 

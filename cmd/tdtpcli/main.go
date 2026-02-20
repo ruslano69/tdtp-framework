@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +103,39 @@ func routeCommand(
 				TargetTable:  *flags.Table,
 				Strategy:     strategy,
 				ProcessorMgr: procMgr,
+			})
+		})
+
+		// HTML viewer command
+	} else if *flags.ToHTML != "" {
+		operation = audit.OpTransform
+		outputHTML := determineOutputFile(*flags.Output, *flags.ToHTML, "html")
+		metadata = map[string]string{
+			"command": "to-html",
+			"input":   *flags.ToHTML,
+			"output":  outputHTML,
+		}
+
+		// Parse optional --row range (format: "n1-n2", 1-indexed inclusive)
+		rowStart, rowEnd := 0, 0
+		if *flags.Row != "" {
+			parts := strings.SplitN(*flags.Row, "-", 2)
+			if len(parts) == 2 {
+				rowStart, _ = strconv.Atoi(parts[0])
+				rowEnd, _ = strconv.Atoi(parts[1])
+			} else if len(parts) == 1 {
+				rowStart, _ = strconv.Atoi(parts[0])
+			}
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-html", func() error {
+			return commands.ConvertTDTPToHTML(commands.HTMLOptions{
+				InputFile:   *flags.ToHTML,
+				OutputFile:  outputHTML,
+				OpenBrowser: *flags.OpenBrowser,
+				Limit:       *flags.Limit,
+				RowStart:    rowStart,
+				RowEnd:      rowEnd,
 			})
 		})
 
@@ -373,6 +407,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle short help
+	if *flags.ShortHelp {
+		PrintShortHelp()
+		os.Exit(0)
+	}
+
 	// Handle config creation
 	if *flags.CreateConfigPG {
 		createConfigTemplate("postgres")
@@ -529,6 +569,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
+		*flags.ToHTML != "" ||
 		*flags.ToXLSX != "" ||
 		*flags.FromXLSX != "" ||
 		*flags.ExportXLSX != "" ||
