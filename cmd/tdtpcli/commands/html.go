@@ -110,6 +110,11 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 		}
 	}
 
+	// Validate range (prevent panic on reverse range like --row 100-50)
+	if endIdx < startIdx {
+		endIdx = startIdx
+	}
+
 	// Apply --limit (after range offset)
 	if opts.Limit > 0 && (endIdx-startIdx) > opts.Limit {
 		endIdx = startIdx + opts.Limit
