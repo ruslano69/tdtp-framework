@@ -41,8 +41,8 @@ type ValidationResult struct {
 	ErrorMessages []string          `json:"errorMessages"`
 }
 
-// ColumnInfo represents parsed column information
-type ColumnInfo struct {
+// SQLSQLColumnInfo represents parsed column information from SQL SELECT
+type SQLSQLColumnInfo struct {
 	Table string
 	Name  string
 	Alias string
@@ -99,7 +99,7 @@ func (vs *ValidationService) findColumnConflicts(sql string) []ColumnConflict {
 
 	// Find duplicates
 	conflicts := []ColumnConflict{}
-	seen := make(map[string]ColumnInfo)
+	seen := make(map[string]SQLColumnInfo)
 
 	for _, col := range columns {
 		// Use alias if present, otherwise use column name
@@ -127,8 +127,8 @@ func (vs *ValidationService) findColumnConflicts(sql string) []ColumnConflict {
 }
 
 // parseSelectColumns parses columns from SELECT clause
-func (vs *ValidationService) parseSelectColumns(selectClause string) []ColumnInfo {
-	columns := []ColumnInfo{}
+func (vs *ValidationService) parseSelectColumns(selectClause string) []SQLColumnInfo {
+	columns := []SQLColumnInfo{}
 
 	// Split by comma (simplified - doesn't handle commas in functions)
 	parts := strings.Split(selectClause, ",")
@@ -139,7 +139,7 @@ func (vs *ValidationService) parseSelectColumns(selectClause string) []ColumnInf
 			continue
 		}
 
-		col := ColumnInfo{Raw: part}
+		col := SQLColumnInfo{Raw: part}
 
 		// Extract alias (AS keyword)
 		asRegex := regexp.MustCompile(`(?i)\s+AS\s+\[?(\w+)\]?`)
@@ -167,7 +167,7 @@ func (vs *ValidationService) parseSelectColumns(selectClause string) []ColumnInf
 }
 
 // generateConflictSuggestion generates suggestion for fixing conflict
-func (vs *ValidationService) generateConflictSuggestion(first, second ColumnInfo) string {
+func (vs *ValidationService) generateConflictSuggestion(first, second SQLColumnInfo) string {
 	if first.Table != "" && second.Table != "" {
 		return fmt.Sprintf(
 			"Use prefixes: [%s].[%s] AS [%s_%s], [%s].[%s] AS [%s_%s]",
@@ -216,7 +216,7 @@ func (vs *ValidationService) validateCastSyntax(sql string) []CastSyntaxError {
 }
 
 // SuggestMultiSourcePrefixes suggests prefixes for multi-source columns
-func (vs *ValidationService) SuggestMultiSourcePrefixes(columns []ColumnInfo) []string {
+func (vs *ValidationService) SuggestMultiSourcePrefixes(columns []SQLColumnInfo) []string {
 	suggestions := []string{}
 
 	for _, col := range columns {
