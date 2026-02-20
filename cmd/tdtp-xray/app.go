@@ -365,6 +365,7 @@ type FieldDesign struct {
 	Filter       *FilterCondition `json:"filter,omitempty"`    // Frontend uses "filter"
 	Condition    *FilterCondition `json:"condition,omitempty"` // Backend compatibility
 	Sort         string           `json:"sort,omitempty"`      // ASC, DESC, or "" (no sort)
+	SortCast     string           `json:"sortCast,omitempty"`  // CAST type for ORDER BY: STRING, REAL, INTEGER, NUMERIC, BLOB
 }
 
 // FilterCondition for field filtering
@@ -373,6 +374,7 @@ type FilterCondition struct {
 	Operator string `json:"operator"` // =, !=, >, <, >=, <=, BETWEEN, LIKE, IN
 	Value    string `json:"value"`
 	Value2   string `json:"value2,omitempty"` // For BETWEEN
+	CastType string `json:"castType,omitempty"` // CAST type for WHERE: STRING, REAL, INTEGER, NUMERIC, BLOB
 }
 
 // JoinDesign represents a JOIN between tables
@@ -548,6 +550,12 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 			// Build condition expression
 			fieldExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name))
+
+			// Apply CAST if CastType is specified
+			if filter.CastType != "" {
+				fieldExpr = fmt.Sprintf("CAST(%s AS %s)", fieldExpr, filter.CastType)
+			}
+
 			var condition string
 
 			switch filter.Operator {
@@ -622,8 +630,14 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		}
 		for _, field := range table.Fields {
 			if field.Sort == "ASC" || field.Sort == "DESC" {
-				orderByFields = append(orderByFields,
-					fmt.Sprintf("%s.%s %s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name), field.Sort))
+				fieldExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name))
+
+				// Apply CAST if SortCast is specified
+				if field.SortCast != "" {
+					fieldExpr = fmt.Sprintf("CAST(%s AS %s)", fieldExpr, field.SortCast)
+				}
+
+				orderByFields = append(orderByFields, fmt.Sprintf("%s %s", fieldExpr, field.Sort))
 			}
 		}
 	}

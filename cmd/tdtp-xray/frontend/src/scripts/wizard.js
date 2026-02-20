@@ -2563,8 +2563,9 @@ function formatFilterTooltip(filter, fieldName) {
 
 function openFilterBuilder(tableIndex, fieldIndex) {
     const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
-    const currentFilter = field.filter || { operator: '=', value: '', value2: '', logic: 'AND' };
+    const currentFilter = field.filter || { operator: '=', value: '', value2: '', logic: 'AND', castType: '' };
     const currentSort   = field.sort || '';
+    const currentSortCast = field.sortCast || '';
 
     // Create modal
     const modal = document.createElement('div');
@@ -2617,6 +2618,19 @@ function openFilterBuilder(tableIndex, fieldIndex) {
                 </select>
             </div>
 
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">CAST as Type (for WHERE):</label>
+                <select id="filterCastType" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="" ${(currentFilter.castType || '') === '' ? 'selected' : ''}>— No CAST (use original type)</option>
+                    <option value="STRING" ${currentFilter.castType === 'STRING' ? 'selected' : ''}>STRING (text comparison)</option>
+                    <option value="REAL" ${currentFilter.castType === 'REAL' ? 'selected' : ''}>REAL (floating point)</option>
+                    <option value="INTEGER" ${currentFilter.castType === 'INTEGER' ? 'selected' : ''}>INTEGER (whole number)</option>
+                    <option value="NUMERIC" ${currentFilter.castType === 'NUMERIC' ? 'selected' : ''}>NUMERIC (decimal)</option>
+                    <option value="BLOB" ${currentFilter.castType === 'BLOB' ? 'selected' : ''}>BLOB (binary)</option>
+                </select>
+                <small style="color: #666;">Apply type conversion for comparison (useful for SQLite weak typing)</small>
+            </div>
+
             <div id="filterValue1Container" style="margin-bottom: 15px; display: ${['IS_NULL','IS_NOT_NULL','IS_EMPTY','IS_NOT_EMPTY'].includes(currentFilter.operator) ? 'none' : 'block'};">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Value:</label>
                 <input type="text" id="filterValue1" value="${currentFilter.value || ''}"
@@ -2649,6 +2663,19 @@ function openFilterBuilder(tableIndex, fieldIndex) {
                     <option value="DESC"${currentSort === 'DESC' ? 'selected' : ''}>↓ Descending (DESC)</option>
                 </select>
                 <small style="color: #666;">Contributes to ORDER BY (priority = field order in table)</small>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">CAST as Type (for ORDER BY):</label>
+                <select id="filterSortCast" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="" ${currentSortCast === '' ? 'selected' : ''}>— No CAST (use original type)</option>
+                    <option value="STRING" ${currentSortCast === 'STRING' ? 'selected' : ''}>STRING (text sort)</option>
+                    <option value="REAL" ${currentSortCast === 'REAL' ? 'selected' : ''}>REAL (numeric sort)</option>
+                    <option value="INTEGER" ${currentSortCast === 'INTEGER' ? 'selected' : ''}>INTEGER (integer sort)</option>
+                    <option value="NUMERIC" ${currentSortCast === 'NUMERIC' ? 'selected' : ''}>NUMERIC (decimal sort)</option>
+                    <option value="BLOB" ${currentSortCast === 'BLOB' ? 'selected' : ''}>BLOB (binary sort)</option>
+                </select>
+                <small style="color: #666;">Apply type conversion for sorting (e.g., sort "10" after "2" with INTEGER cast)</small>
             </div>
 
             <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -2715,7 +2742,9 @@ function saveFilter(tableIndex, fieldIndex) {
     const value1 = document.getElementById('filterValue1').value.trim();
     const value2 = document.getElementById('filterValue2').value.trim();
     const logic = document.getElementById('filterLogic').value;
+    const castType = document.getElementById('filterCastType').value;
     const sort  = document.getElementById('filterSort').value;
+    const sortCast = document.getElementById('filterSortCast').value;
 
     const noValueOps = ['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'];
     if (!noValueOps.includes(operator) && !value1 && !sort) {
@@ -2731,11 +2760,12 @@ function saveFilter(tableIndex, fieldIndex) {
     // Save filter only if a value (or no-value operator) is present
     const hasFilterValue = noValueOps.includes(operator) || value1;
     canvasDesign.tables[tableIndex].fields[fieldIndex].filter = hasFilterValue
-        ? { operator, value: value1, value2, logic }
+        ? { operator, value: value1, value2, logic, castType }
         : null;
 
-    // Save sort state
+    // Save sort state and sortCast
     canvasDesign.tables[tableIndex].fields[fieldIndex].sort = sort || null;
+    canvasDesign.tables[tableIndex].fields[fieldIndex].sortCast = sortCast || null;
 
     closeFilterBuilder();
     renderCanvas();
