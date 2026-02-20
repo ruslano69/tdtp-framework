@@ -1985,7 +1985,8 @@ async function addTableToCanvas(sourceName) {
             y: y,
             fields: fields,
             limit: null,     // LIMIT for pagination (null = no limit)
-            offset: null     // OFFSET for pagination (null = no offset)
+            offset: null,    // OFFSET for pagination (null = no offset)
+            sortState: null  // Field sort state: null (original) | 'AZ' | 'ZA'
         };
 
         console.log(`➕ Adding table to canvas:`, newTable);
@@ -2096,6 +2097,24 @@ function createTableCard(table, index) {
         font-size: 12px;
     `;
     const hasLimit = table.limit !== null && table.limit !== undefined;
+    const sortState = table.sortState || null;
+
+    // Cyclic sort button: null → AZ → ZA → null
+    let sortIcon, sortTitle, sortColor;
+    if (sortState === 'AZ') {
+        sortIcon = 'AZ↑';
+        sortTitle = 'Sorted A→Z (click for Z→A)';
+        sortColor = '#0066cc';
+    } else if (sortState === 'ZA') {
+        sortIcon = 'ZA↓';
+        sortTitle = 'Sorted Z→A (click to reset)';
+        sortColor = '#0066cc';
+    } else {
+        sortIcon = '⟲';
+        sortTitle = 'Original order (click to sort A→Z)';
+        sortColor = '#888';
+    }
+
     toolbar.innerHTML = `
         <span onclick="toggleAllVisibility(${index})"
               title="${allVisible ? 'Hide all fields' : 'Show all fields'}"
@@ -2107,15 +2126,9 @@ function createTableCard(table, index) {
         <span onclick="clearAllFilters(${index})"
               title="Clear all filters"
               style="cursor:pointer; font-weight:bold; color:${hasFilters ? '#dc3545' : '#ccc'}; user-select:none; font-size:15px; line-height:1;">✱</span>
-        <span onclick="sortTableFields(${index}, 'AZ')"
-              title="Sort A→Z"
-              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">AZ▲</span>
-        <span onclick="sortTableFields(${index}, 'ZA')"
-              title="Sort Z→A"
-              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">ZA▼</span>
-        <span onclick="resetFieldSort(${index})"
-              title="Reset to original order"
-              style="cursor:pointer; font-weight:700; color:#888; user-select:none; font-size:13px; line-height:1;">⟲</span>
+        <span onclick="cycleSortState(${index})"
+              title="${sortTitle}"
+              style="cursor:pointer; font-weight:700; color:${sortColor}; user-select:none; font-size:11px; line-height:1;">${sortIcon}</span>
     `;
     card.appendChild(toolbar);
 
@@ -2903,16 +2916,54 @@ function clearAllFilters(tableIndex) {
     showNotification('All filters cleared', 'info');
 }
 
+// Cyclic sort: null → AZ → ZA → null
+async function cycleSortState(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const currentState = table.sortState || null;
+
+    // Determine next state
+    let nextState;
+    if (currentState === null) {
+        nextState = 'AZ';
+    } else if (currentState === 'AZ') {
+        nextState = 'ZA';
+    } else {
+        nextState = null; // Reset to original
+    }
+
+    table.sortState = nextState;
+
+    // Apply sorting based on new state
+    if (nextState === 'AZ') {
+        table.fields.sort((a, b) => a.name.localeCompare(b.name));
+        renderCanvas();
+    } else if (nextState === 'ZA') {
+        table.fields.sort((a, b) => b.name.localeCompare(a.name));
+        renderCanvas();
+    } else {
+        // Reset to original order
+        await resetFieldSortToOriginal(tableIndex);
+    }
+}
+
+// Legacy functions for compatibility (kept for now, can be removed later)
 function sortTableFields(tableIndex, direction) {
     const table = canvasDesign.tables[tableIndex];
     table.fields.sort((a, b) => {
         const cmp = a.name.localeCompare(b.name);
         return direction === 'ZA' ? -cmp : cmp;
     });
+    table.sortState = direction;
     renderCanvas();
 }
 
 async function resetFieldSort(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    table.sortState = null;
+    await resetFieldSortToOriginal(tableIndex);
+}
+
+async function resetFieldSortToOriginal(tableIndex) {
     const table = canvasDesign.tables[tableIndex];
 
     // Try cache first; if missing (e.g. loaded from DB) fetch from backend
