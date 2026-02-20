@@ -407,6 +407,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle short help
+	if *flags.ShortHelp {
+		PrintShortHelp()
+		os.Exit(0)
+	}
+
 	// Handle config creation
 	if *flags.CreateConfigPG {
 		createConfigTemplate("postgres")

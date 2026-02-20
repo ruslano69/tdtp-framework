@@ -73,6 +73,7 @@ type Flags struct {
 	// Misc
 	Version *bool
 	Help    *bool
+	ShortHelp *bool
 }
 
 // ParseFlags defines and parses all command-line flags
@@ -102,7 +103,7 @@ func ParseFlags() *Flags {
 	// TDTQL Filters
 	f.Where = flag.String("where", "", "TDTQL WHERE clause (e.g., 'age > 18 AND status = active')")
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
-	f.Limit = flag.Int("limit", 0, "LIMIT number of rows (0 = no limit)")
+	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")
 
 	// Options
@@ -147,7 +148,8 @@ func ParseFlags() *Flags {
 
 	// Misc
 	f.Version = flag.Bool("version", false, "Show version information")
-	f.Help = flag.Bool("help", false, "Show help information")
+	f.Help = flag.Bool("help", false, "Show detailed help with examples")
+	f.ShortHelp = flag.Bool("h", false, "Show brief help (commands and options)")
 
 	flag.Parse()
 
