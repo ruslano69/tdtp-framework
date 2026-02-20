@@ -369,6 +369,8 @@ type FieldDesign struct {
 	Condition    *FilterCondition `json:"condition,omitempty"` // Backend compatibility
 	Sort         string           `json:"sort,omitempty"`      // ASC, DESC, or "" (no sort)
 	SortCast     string           `json:"sortCast,omitempty"`  // CAST type for ORDER BY: STRING, REAL, INTEGER, NUMERIC, BLOB
+	SelectCast   string           `json:"selectCast,omitempty"` // CAST type for SELECT: TEXT, INTEGER, REAL, BLOB, etc.
+	SelectAlias  string           `json:"selectAlias,omitempty"` // Alias for CAST field in SELECT
 }
 
 // FilterCondition for field filtering
@@ -474,7 +476,18 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 		for _, field := range table.Fields {
 			if field.Visible {
-				selectFields = append(selectFields, fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name)))
+				fieldExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name))
+
+				// Apply CAST for SELECT if specified
+				if field.SelectCast != "" {
+					alias := field.SelectAlias
+					if alias == "" {
+						alias = field.Name + "_C"
+					}
+					fieldExpr = fmt.Sprintf("CAST(%s AS %s) AS %s", fieldExpr, field.SelectCast, quoteMSSQLIdent(alias))
+				}
+
+				selectFields = append(selectFields, fieldExpr)
 			}
 		}
 	}

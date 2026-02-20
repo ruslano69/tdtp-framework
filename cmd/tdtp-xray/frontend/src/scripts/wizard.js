@@ -2180,6 +2180,14 @@ function createTableCard(table, index) {
         const keyIcon = isPrimaryKey ? '🔑 ' : '';
         const fieldNameStyle = isPrimaryKey ? 'color: #f59e0b; font-weight: 700;' : '';
 
+        // CAST indicator and display name
+        const hasSelectCast = field.selectCast && field.selectCast !== '';
+        const displayName = hasSelectCast && field.selectAlias ? field.selectAlias : field.name;
+        const castIndicator = hasSelectCast ? '🔧' : '';
+        const castTooltip = hasSelectCast
+            ? `CAST(${field.name} AS ${field.selectCast}) AS ${field.selectAlias || field.name}\nClick to edit CAST`
+            : `Click to add CAST for SELECT`;
+
         // Build detailed filter tooltip
         let filterTooltip = '';
         if (hasFilter && hasSort) {
@@ -2199,11 +2207,12 @@ function createTableCard(table, index) {
                 👁
             </span>
             <span class="field-name-wrapper"
+                  onclick="openSelectCastDialog(${index}, ${fieldIndex})"
                   data-type="${field.type}"
-                  style="${field.visible ? '' : 'opacity: 0.4;'}"
-                  title="${keyIcon}${field.name} (${field.type})${isPrimaryKey ? ' - PRIMARY KEY' : ''}">
-                <strong class="field-name" style="${fieldNameStyle}">${keyIcon}${field.name}</strong>
-                <small class="field-type">${field.type}</small>
+                  style="cursor: pointer; ${field.visible ? '' : 'opacity: 0.4;'}"
+                  title="${castTooltip}">
+                <strong class="field-name" style="${fieldNameStyle}">${castIndicator}${keyIcon}${displayName}</strong>
+                <small class="field-type">${field.type}${hasSelectCast ? ' → ' + field.selectCast : ''}</small>
             </span>
             <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 16px; font-weight: bold; color: ${filterColor}; user-select: none; text-align: center;"
@@ -2788,6 +2797,137 @@ function clearFilter(tableIndex, fieldIndex) {
 
 function closeFilterBuilder() {
     const modal = document.getElementById('filterBuilderModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// ========== SELECT CAST DIALOG ==========
+
+function openSelectCastDialog(tableIndex, fieldIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const field = table.fields[fieldIndex];
+
+    // Close any existing dialog
+    closeSelectCastDialog();
+
+    const modal = document.createElement('div');
+    modal.id = 'selectCastModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 2000;
+    `;
+
+    const currentCast = field.selectCast || '';
+    const currentAlias = field.selectAlias || `${field.name}_C`;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 8px; min-width: 450px; max-width: 600px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            <h3 style="margin-top: 0; color: #2c3e50;">🔧 SELECT CAST: ${field.name}</h3>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">CAST Type:</label>
+                <select id="selectCastType" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <option value="" ${currentCast === '' ? 'selected' : ''}>No CAST (original type)</option>
+                    <option value="TEXT" ${currentCast === 'TEXT' ? 'selected' : ''}>TEXT (string conversion)</option>
+                    <option value="INTEGER" ${currentCast === 'INTEGER' ? 'selected' : ''}>INTEGER (integer conversion)</option>
+                    <option value="REAL" ${currentCast === 'REAL' ? 'selected' : ''}>REAL (floating point)</option>
+                    <option value="NUMERIC" ${currentCast === 'NUMERIC' ? 'selected' : ''}>NUMERIC (decimal)</option>
+                    <option value="BLOB" ${currentCast === 'BLOB' ? 'selected' : ''}>BLOB (binary)</option>
+                </select>
+                <small style="color: #666; display: block; margin-top: 3px;">Convert field type in SELECT clause</small>
+            </div>
+
+            <div style="margin-bottom: 15px;" id="aliasContainer">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">Field Alias:</label>
+                <input type="text" id="selectAlias" value="${currentAlias}"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+                       placeholder="Enter alias (e.g., ${field.name}_C)">
+                <small style="color: #666; display: block; margin-top: 3px;">Name for the CAST field in result set</small>
+            </div>
+
+            <div style="padding: 12px; background: #e8f4fd; border-left: 4px solid #3498db; border-radius: 3px; margin-bottom: 15px; font-size: 13px;">
+                <strong>📝 Example SQL:</strong><br>
+                <code style="font-family: monospace; color: #0066cc; display: block; margin-top: 5px;" id="castPreview">
+                    SELECT ${field.name}
+                </code>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn" onclick="saveSelectCast(${tableIndex}, ${fieldIndex})"
+                        style="flex: 1; background: #28a745; color: white; font-weight: 600;">✓ Apply</button>
+                <button class="btn" onclick="clearSelectCast(${tableIndex}, ${fieldIndex})"
+                        style="flex: 1; background: #dc3545; color: white; font-weight: 600;">✗ Clear CAST</button>
+                <button class="btn" onclick="closeSelectCastDialog()"
+                        style="flex: 1; background: #6c757d; color: white;">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Update preview when user changes values
+    const updatePreview = () => {
+        const castType = document.getElementById('selectCastType').value;
+        const alias = document.getElementById('selectAlias').value || field.name;
+        const preview = document.getElementById('castPreview');
+        const aliasContainer = document.getElementById('aliasContainer');
+
+        if (castType) {
+            preview.textContent = `SELECT CAST(${field.name} AS ${castType}) AS ${alias}`;
+            aliasContainer.style.display = 'block';
+        } else {
+            preview.textContent = `SELECT ${field.name}`;
+            aliasContainer.style.display = 'none';
+        }
+    };
+
+    document.getElementById('selectCastType').addEventListener('change', updatePreview);
+    document.getElementById('selectAlias').addEventListener('input', updatePreview);
+
+    // Initial preview
+    updatePreview();
+}
+
+function saveSelectCast(tableIndex, fieldIndex) {
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+    const castType = document.getElementById('selectCastType').value;
+    const alias = document.getElementById('selectAlias').value.trim();
+
+    if (castType) {
+        field.selectCast = castType;
+        field.selectAlias = alias || `${field.name}_C`;
+        showNotification(`CAST applied: ${field.name} → ${field.selectAlias}`, 'success');
+    } else {
+        field.selectCast = '';
+        field.selectAlias = '';
+        showNotification('CAST removed', 'info');
+    }
+
+    closeSelectCastDialog();
+    renderCanvas();
+}
+
+function clearSelectCast(tableIndex, fieldIndex) {
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+    field.selectCast = '';
+    field.selectAlias = '';
+
+    closeSelectCastDialog();
+    renderCanvas();
+    showNotification('SELECT CAST cleared', 'info');
+}
+
+function closeSelectCastDialog() {
+    const modal = document.getElementById('selectCastModal');
     if (modal) {
         modal.remove();
     }
