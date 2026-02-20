@@ -79,6 +79,17 @@ func (ps *PreviewService) PreviewQuery(dbType, dsn, query string, limit int) Pre
 		}
 	}
 
+	// Get column types from database
+	columnTypes := make(map[string]string)
+	if colTypes, err := rows.ColumnTypes(); err == nil {
+		for i, colType := range colTypes {
+			if i < len(columns) {
+				// Get database type name (e.g., "VARCHAR", "INTEGER", "BIGINT")
+				columnTypes[columns[i]] = colType.DatabaseTypeName()
+			}
+		}
+	}
+
 	// Scan rows
 	var data []map[string]any
 	for rows.Next() {
@@ -103,10 +114,11 @@ func (ps *PreviewService) PreviewQuery(dbType, dsn, query string, limit int) Pre
 	}
 
 	return PreviewResult{
-		Success:  true,
-		Columns:  columns,
-		Rows:     data,
-		RowCount: len(data),
+		Success:     true,
+		Columns:     columns,
+		ColumnTypes: columnTypes,
+		Rows:        data,
+		RowCount:    len(data),
 	}
 }
 

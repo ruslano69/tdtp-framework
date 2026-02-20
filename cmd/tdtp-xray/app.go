@@ -871,32 +871,53 @@ func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
 		return fmt.Errorf("failed to load database data: %s", preview.Message)
 	}
 
-	// For DB sources, use empty columnTypes map (will default to TEXT)
-	// TODO: Extract column types from database schema if needed
-	if err := a.createAndFillTable(db, source.Name, preview.Columns, make(map[string]string), preview.Rows); err != nil {
+	// Use column types from database schema
+	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.ColumnTypes, preview.Rows); err != nil {
 		return err
 	}
 
-	fmt.Printf("Loaded %d rows from DB source '%s'\n", len(preview.Rows), source.Name)
+	fmt.Printf("Loaded %d rows from DB source '%s' with schema types\n", len(preview.Rows), source.Name)
 	return nil
 }
 
-// mapTDTPToSQLiteType maps TDTP type to SQLite type
-func mapTDTPToSQLiteType(tdtpType string) string {
-	switch strings.ToUpper(tdtpType) {
-	case "INTEGER", "INT", "BIGINT", "SMALLINT":
+// mapTDTPToSQLiteType maps database type (TDTP/PostgreSQL/MySQL/MSSQL) to SQLite type
+func mapTDTPToSQLiteType(dbType string) string {
+	upperType := strings.ToUpper(dbType)
+
+	// Integer types (all databases)
+	if strings.Contains(upperType, "INT") || // INT, INTEGER, BIGINT, SMALLINT, TINYINT
+		upperType == "SERIAL" || upperType == "BIGSERIAL" { // PostgreSQL auto-increment
 		return "INTEGER"
-	case "DECIMAL", "NUMERIC", "REAL", "DOUBLE", "FLOAT":
-		return "REAL"
-	case "DATE", "DATETIME", "TIMESTAMP":
-		return "TEXT" // SQLite stores dates as TEXT/INTEGER/REAL
-	case "BOOLEAN", "BOOL":
-		return "INTEGER" // SQLite uses 0/1 for boolean
-	case "BLOB", "BINARY":
-		return "BLOB"
-	default:
-		return "TEXT" // Default fallback
 	}
+
+	// Floating point types (all databases)
+	if strings.Contains(upperType, "FLOAT") || strings.Contains(upperType, "DOUBLE") ||
+		strings.Contains(upperType, "REAL") || strings.Contains(upperType, "NUMERIC") ||
+		strings.Contains(upperType, "DECIMAL") || upperType == "MONEY" { // MSSQL MONEY
+		return "REAL"
+	}
+
+	// Date/Time types (all databases)
+	if strings.Contains(upperType, "DATE") || strings.Contains(upperType, "TIME") ||
+		upperType == "TIMESTAMP" || upperType == "TIMESTAMPTZ" { // PostgreSQL
+		return "TEXT" // SQLite stores dates as TEXT/INTEGER/REAL
+	}
+
+	// Boolean types
+	if strings.Contains(upperType, "BOOL") || upperType == "BIT" { // BIT in MSSQL/MySQL
+		return "INTEGER" // SQLite uses 0/1 for boolean
+	}
+
+	// Binary types
+	if strings.Contains(upperType, "BLOB") || strings.Contains(upperType, "BINARY") ||
+		upperType == "BYTEA" || // PostgreSQL binary
+		strings.Contains(upperType, "IMAGE") { // MSSQL IMAGE
+		return "BLOB"
+	}
+
+	// Text types (default fallback)
+	// VARCHAR, CHAR, TEXT, NVARCHAR, NCHAR, etc.
+	return "TEXT"
 }
 
 // createAndFillTable creates SQLite table with proper types from schema and bulk-inserts rows.
