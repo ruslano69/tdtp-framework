@@ -11,6 +11,8 @@ type Flags struct {
 	Import       *string
 	ExportBroker *string
 	ImportBroker *bool
+	ToHTML       *string
+	OpenBrowser  *bool
 	ToXLSX       *string
 	FromXLSX     *string
 	ExportXLSX   *string
@@ -83,6 +85,8 @@ func ParseFlags() *Flags {
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
 	f.ExportBroker = flag.String("export-broker", "", "Export table to message broker (table name)")
 	f.ImportBroker = flag.Bool("import-broker", false, "Import from message broker to database")
+	f.ToHTML = flag.String("to-html", "", "Convert TDTP XML file to HTML for browser viewing (input TDTP file)")
+	f.OpenBrowser = flag.Bool("open", false, "Open generated HTML file in default browser (use with --to-html)")
 	f.ToXLSX = flag.String("to-xlsx", "", "Convert TDTP XML file to XLSX (input TDTP file)")
 	f.FromXLSX = flag.String("from-xlsx", "", "Convert XLSX file to TDTP XML (input XLSX file)")
 	f.ExportXLSX = flag.String("export-xlsx", "", "Export table directly to XLSX (table name)")

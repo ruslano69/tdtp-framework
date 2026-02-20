@@ -105,6 +105,24 @@ func routeCommand(
 			})
 		})
 
+		// HTML viewer command
+	} else if *flags.ToHTML != "" {
+		operation = audit.OpTransform
+		outputHTML := determineOutputFile(*flags.Output, *flags.ToHTML, "html")
+		metadata = map[string]string{
+			"command": "to-html",
+			"input":   *flags.ToHTML,
+			"output":  outputHTML,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-html", func() error {
+			return commands.ConvertTDTPToHTML(commands.HTMLOptions{
+				InputFile:   *flags.ToHTML,
+				OutputFile:  outputHTML,
+				OpenBrowser: *flags.OpenBrowser,
+			})
+		})
+
 		// XLSX commands
 	} else if *flags.ToXLSX != "" {
 		operation = audit.OpTransform
@@ -529,6 +547,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
+		*flags.ToHTML != "" ||
 		*flags.ToXLSX != "" ||
 		*flags.FromXLSX != "" ||
 		*flags.ExportXLSX != "" ||
