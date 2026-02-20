@@ -594,78 +594,103 @@ Target System (готовые данные):
 #### Примеры использования CAST():
 
 **1. Миграция SQL Server → PostgreSQL:**
-```xml
-<!-- Source: SQL Server -->
-<Source name="orders" system="sqlserver">
-  <Field name="order_id" type="int"/>
-  <Field name="order_date" type="datetime"/>    <!-- SQL Server type -->
-  <Field name="amount" type="money"/>           <!-- SQL Server type -->
-  <Field name="description" type="nvarchar"/>
-</Source>
+```yaml
+# etl/sqlserver_to_postgres.yaml
+name: migrate_orders
 
-<!-- ETL Transformation -->
-<Transformation>
-  <Cast field="order_date" from="datetime" to="timestamp" as="order_date_C"/>
-  <Cast field="amount" from="money" to="numeric(10,2)" as="amount_C"/>
-</Transformation>
+source:
+  type: sqlserver
+  connection: source_db
+  query: "SELECT order_id, order_date, amount, description FROM orders"
 
-<!-- Target: PostgreSQL -->
-<Target name="orders_target" system="postgresql">
-  <Field name="order_id" type="int"/>           <!-- без изменений -->
-  <Field name="order_date_C" type="timestamp"/> <!-- cast! -->
-  <Field name="amount_C" type="numeric"/>       <!-- cast! -->
-  <Field name="description" type="text"/>       <!-- автоконверсия -->
-</Target>
+transformation:
+  sql: |
+    SELECT
+      order_id,
+      CAST(order_date AS timestamp) AS order_date_C,  -- datetime → timestamp
+      CAST(amount AS numeric(10,2)) AS amount_C,      -- money → numeric
+      CAST(description AS text) AS description        -- nvarchar → text (auto)
+    FROM source_data
+
+target:
+  type: postgresql
+  connection: target_db
+  table: orders_target
+```
+
+**Результат в Target DB:**
+```sql
+-- PostgreSQL
+CREATE TABLE orders_target (
+  order_id INT,
+  order_date_C TIMESTAMP,  -- cast!
+  amount_C NUMERIC,        -- cast!
+  description TEXT         -- auto
+);
 ```
 
 **2. Миграция Oracle → MySQL:**
-```xml
-<!-- Source: Oracle -->
-<Source name="employees" system="oracle">
-  <Field name="emp_id" type="NUMBER"/>
-  <Field name="salary" type="NUMBER(10,2)"/>
-  <Field name="hire_date" type="DATE"/>
-  <Field name="notes" type="CLOB"/>
-</Source>
+```yaml
+# etl/oracle_to_mysql.yaml
+name: migrate_employees
 
-<!-- ETL Transformation -->
-<Transformation>
-  <Cast field="emp_id" from="NUMBER" to="int" as="emp_id_C"/>
-  <Cast field="salary" from="NUMBER(10,2)" to="decimal(10,2)" as="salary_C"/>
-  <Cast field="notes" from="CLOB" to="text" as="notes_C"/>
-</Transformation>
+source:
+  type: oracle
+  connection: oracle_db
+  query: "SELECT emp_id, salary, hire_date, notes FROM employees"
 
-<!-- Target: MySQL -->
-<Target name="employees_target" system="mysql">
-  <Field name="emp_id_C" type="int"/>
-  <Field name="salary_C" type="decimal(10,2)"/>
-  <Field name="hire_date" type="datetime"/>
-  <Field name="notes_C" type="text"/>
-</Target>
+transformation:
+  sql: |
+    SELECT
+      CAST(emp_id AS int) AS emp_id_C,              -- NUMBER → int
+      CAST(salary AS decimal(10,2)) AS salary_C,    -- NUMBER(10,2) → decimal
+      hire_date,                                     -- DATE остаётся
+      CAST(notes AS text) AS notes_C                -- CLOB → text
+    FROM source_data
+
+target:
+  type: mysql
+  connection: mysql_db
+  table: employees_target
 ```
 
 **3. Упрощение работы с legacy системами:**
-```xml
-<!-- Source: старая система с VARCHAR для всего -->
-<Source name="legacy_data">
-  <Field name="id" type="varchar(10)"/>        <!-- на самом деле число! -->
-  <Field name="amount" type="varchar(20)"/>    <!-- на самом деле decimal! -->
-  <Field name="created_at" type="varchar(30)"/><!-- на самом деле date! -->
-</Source>
+```yaml
+# etl/legacy_normalization.yaml
+name: normalize_legacy_types
 
-<!-- ETL Transformation: исправляем типы -->
-<Transformation>
-  <Cast field="id" from="varchar" to="int" as="id_C"/>
-  <Cast field="amount" from="varchar" to="decimal(10,2)" as="amount_C"/>
-  <Cast field="created_at" from="varchar" to="timestamp" as="created_at_C"/>
-</Transformation>
+source:
+  type: postgresql  # или любая БД
+  connection: legacy_db
+  query: |
+    SELECT
+      id,          -- varchar(10) но хранит числа!
+      amount,      -- varchar(20) но хранит decimals!
+      created_at   -- varchar(30) но хранит даты!
+    FROM legacy_data
 
-<!-- Target: правильные типы -->
-<Target name="normalized_data">
-  <Field name="id_C" type="int"/>               <!-- ✅ можем фильтровать по числу -->
-  <Field name="amount_C" type="decimal"/>       <!-- ✅ можем суммировать -->
-  <Field name="created_at_C" type="timestamp"/> <!-- ✅ можем сортировать по дате -->
-</Target>
+transformation:
+  sql: |
+    SELECT
+      -- Исправляем типы:
+      CAST(id AS int) AS id_C,                      -- varchar → int
+      CAST(amount AS decimal(10,2)) AS amount_C,    -- varchar → decimal
+      CAST(created_at AS timestamp) AS created_at_C -- varchar → timestamp
+    FROM source_data
+
+target:
+  type: postgresql
+  connection: normalized_db
+  table: normalized_data
+```
+
+**Результат в Target DB:**
+```sql
+CREATE TABLE normalized_data (
+  id_C INT,               -- ✅ можем фильтровать по числу
+  amount_C DECIMAL,       -- ✅ можем суммировать
+  created_at_C TIMESTAMP  -- ✅ можем сортировать по дате
+);
 ```
 
 #### Преимущества суффикса `_C`:
@@ -709,96 +734,74 @@ FROM orders_target;
 | **Когда использовать** | Создать SQL view с формулой | Миграция между СУБД |
 | **Риски** | Дублирование логики | Минимальные (просто конверсия типов) |
 
-#### XML Schema расширение для TDTP:
+#### ✅ ПРАВИЛЬНАЯ архитектура: ETL Config (YAML) + SQL Transformation
 
-```xml
-<!-- Новый элемент в TDTP spec для ETL -->
-<Transformation>
-  <Cast
-    field="source_field_name"
-    from="source_type"
-    to="target_type"
-    as="target_field_name"
-    nullable="true|false"
-    default="value"
-  />
-</Transformation>
+**ВАЖНО:** Трансформация живёт в **SQL коде**, который хранится в **YAML конфиге**!
+
+```yaml
+# etl/pipeline_config.yaml
+name: migrate_orders_sqlserver_to_postgres
+
+source:
+  type: sqlserver
+  connection: source_db
+  query: |
+    SELECT
+      order_id,
+      order_date,
+      amount,
+      quantity,
+      notes
+    FROM orders
+
+transformation:
+  # Трансформация — это SQL код!
+  sql: |
+    SELECT
+      order_id,
+      -- SQL Server datetime → PostgreSQL timestamp
+      CAST(order_date AS timestamp) AS order_date_C,
+      -- SQL Server money → PostgreSQL numeric
+      CAST(amount AS numeric(10,2)) AS amount_C,
+      -- SQL Server smallint → PostgreSQL int
+      CAST(quantity AS int) AS quantity_C,
+      -- SQL Server nvarchar → PostgreSQL text
+      CAST(notes AS text) AS notes_C
+    FROM source_data
+
+target:
+  type: postgresql
+  connection: target_db
+  table: orders_target
+  mode: replace  # или append, upsert
 ```
 
-**Параметры:**
-- `field` — имя поля в source
-- `from` — тип в source системе (опционально, для валидации)
-- `to` — целевой тип
-- `as` — имя в target (по умолчанию: `{field}_C`)
-- `nullable` — разрешить NULL (опционально)
-- `default` — значение по умолчанию при ошибке конверсии (опционально)
+**Ключевые моменты:**
+- ✅ **YAML** — конфигурация ETL (где читать, куда писать)
+- ✅ **SQL** — трансформация (CAST и другие операции)
+- ✅ **Суффикс `_C`** — прямо в SQL (AS order_date_C)
+- ✅ Трансформация выполняется **В БД** (эффективно!)
 
-**Примеры валидации:**
-```xml
-<!-- ✅ Корректный CAST -->
-<Cast field="price" from="varchar" to="decimal(10,2)" as="price_C"/>
+**Альтернатива: Python pandas/polars:**
+```yaml
+# etl/pipeline_config.yaml (если используем Python)
+transformation:
+  type: python
+  script: |
+    import pandas as pd
 
-<!-- ⚠️ Потенциальная потеря точности (warning) -->
-<Cast field="precise_value" from="decimal(20,10)" to="decimal(10,2)" as="value_C"/>
-
-<!-- ❌ Невозможная конверсия (error) -->
-<Cast field="text_description" from="text" to="int" as="description_C"/>
-```
-
-#### Реальный пример полного пайплайна:
-
-```xml
-<Pipeline name="migrate_orders_sqlserver_to_postgres">
-  <!-- 1. Source: SQL Server -->
-  <Source name="orders" system="sqlserver" connection="source_db">
-    <Field name="order_id" type="int"/>
-    <Field name="order_date" type="datetime"/>
-    <Field name="amount" type="money"/>
-    <Field name="quantity" type="smallint"/>
-    <Field name="notes" type="nvarchar(max)"/>
-  </Source>
-
-  <!-- 2. Transformation: конвертация типов -->
-  <Transformation>
-    <!-- SQL Server datetime → PostgreSQL timestamp -->
-    <Cast field="order_date" from="datetime" to="timestamp" as="order_date_C"/>
-
-    <!-- SQL Server money → PostgreSQL numeric -->
-    <Cast field="amount" from="money" to="numeric(10,2)" as="amount_C"/>
-
-    <!-- SQL Server smallint → PostgreSQL int (расширение) -->
-    <Cast field="quantity" from="smallint" to="int" as="quantity_C"/>
-
-    <!-- SQL Server nvarchar(max) → PostgreSQL text -->
-    <Cast field="notes" from="nvarchar" to="text" as="notes_C"/>
-  </Transformation>
-
-  <!-- 3. Target: PostgreSQL -->
-  <Target name="orders_normalized" system="postgresql" connection="target_db">
-    <Field name="order_id" type="int"/>
-    <Field name="order_date_C" type="timestamp"/>
-    <Field name="amount_C" type="numeric(10,2)"/>
-    <Field name="quantity_C" type="int"/>
-    <Field name="notes_C" type="text"/>
-  </Target>
-
-  <!-- 4. Маппинг (опционально): убираем суффиксы -->
-  <View name="orders">
-    <Mapping source="order_id" target="order_id"/>
-    <Mapping source="order_date_C" target="order_date"/>
-    <Mapping source="amount_C" target="amount"/>
-    <Mapping source="quantity_C" target="quantity"/>
-    <Mapping source="notes_C" target="notes"/>
-  </View>
-</Pipeline>
+    # Конвертация типов в pandas
+    df['order_date_C'] = pd.to_datetime(df['order_date'])
+    df['amount_C'] = df['amount'].astype('float64')
+    df['quantity_C'] = df['quantity'].astype('int32')
+    df['notes_C'] = df['notes'].astype('str')
 ```
 
 **Результат:**
-- ✅ Автоматическая конвертация типов
+- ✅ Конвертация типов в SQL/Python
 - ✅ Явность через суффикс `_C`
-- ✅ Опциональный маппинг для удобства
-- ✅ Версионность (XML в git)
-- ✅ Документация встроена в XML
+- ✅ Версионность (YAML в git)
+- ✅ Документация встроена в YAML
 
 ---
 
@@ -1392,15 +1395,14 @@ Visual Designer работает с **результатом** ETL pipeline, а 
 ```
 project/
 ├── etl/
-│   └── pipeline_config.xml          ← Конфигурация ETL (с <Transformation>)
-│       <Pipeline>
-│         <Source>...</Source>
-│         <Transformation>...</Transformation>
-│         <Target>...</Target>
-│       </Pipeline>
+│   └── pipeline_config.yaml         ← ETL Config (YAML + SQL)
+│       source: ...
+│       transformation:
+│         sql: "SELECT CAST(...) AS field_C FROM ..."
+│       target: ...
 │
 ├── tdtp/
-│   └── target_schema.xml            ← Схема для Visual Designer (БЕЗ <Transformation>)
+│   └── target_schema.xml            ← TDTP Schema для Visual Designer
 │       <Source name="orders_target">
 │         <Field name="order_date_C" type="timestamp"/>
 │       </Source>
@@ -1410,6 +1412,8 @@ project/
 ```
 
 **Два разных файла, два разных назначения!**
+- **ETL Config (YAML)** — содержит SQL трансформацию
+- **TDTP Schema (XML)** — описывает результат (без SQL!)
 
 ---
 
@@ -1417,28 +1421,31 @@ project/
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Шаг 1: Создаём ETL конфигурацию                   │
+│  Шаг 1: Создаём ETL конфигурацию (YAML + SQL)      │
 ├─────────────────────────────────────────────────────┤
-│  File: etl/pipeline_config.xml                      │
+│  File: etl/pipeline_config.yaml                     │
 │                                                     │
-│  <Pipeline>                                         │
-│    <Source system="sqlserver">...</Source>          │
-│    <Transformation>                                 │
-│      <Cast field="order_date" to="timestamp" as="order_date_C"/> │
-│    </Transformation>                                │
-│    <Target system="postgresql">...</Target>         │
-│  </Pipeline>                                        │
+│  source:                                            │
+│    query: "SELECT order_id, order_date, amount..."  │
+│  transformation:                                    │
+│    sql: |                                           │
+│      SELECT CAST(order_date AS timestamp) AS order_date_C, │
+│             CAST(amount AS numeric) AS amount_C     │
+│      FROM source_data                               │
+│  target:                                            │
+│    table: orders_target                             │
 └─────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────┐
 │  Шаг 2: Запускаем ETL инструмент                   │
 ├─────────────────────────────────────────────────────┤
-│  $ etl-tool run etl/pipeline_config.xml             │
+│  $ etl-tool run etl/pipeline_config.yaml            │
 │                                                     │
 │  Processing...                                      │
+│  ✅ Executing SQL transformation                    │
 │  ✅ Cast order_date → order_date_C (timestamp)      │
 │  ✅ Cast amount → amount_C (numeric)                │
-│  ✅ Migrated 10,000 rows                            │
+│  ✅ Migrated 10,000 rows to PostgreSQL              │
 └─────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────┐
@@ -1492,33 +1499,35 @@ fields.forEach(field => {
 
 ---
 
-#### 2️⃣ Секция `<Transformation>` — только для ETL инструмента
+#### 2️⃣ Трансформация живёт в SQL, который хранится в YAML
 
-| Файл | Назначение | `<Transformation>` |
-|------|------------|-------------------|
-| `etl/pipeline_config.xml` | Конфигурация ETL | ✅ ДА (описывает процесс) |
-| `tdtp/target_schema.xml` | Схема для Visual Designer | ❌ НЕТ (описывает результат) |
+| Файл | Назначение | Содержит SQL? |
+|------|------------|---------------|
+| `etl/pipeline_config.yaml` | ETL Config | ✅ ДА (SQL трансформация) |
+| `tdtp/target_schema.xml` | TDTP Schema | ❌ НЕТ (только результат) |
 
-**Это разные файлы для разных инструментов!**
+**ВАЖНО:** Нет никакого XML элемента `<Transformation>`!
+Трансформация = **SQL код** в **YAML параметре** `transformation.sql`!
 
 ---
 
 #### 3️⃣ TDTP описывает результат, а не процесс
 
 ```
-ETL Config (процесс):          TDTP Schema (результат):
-┌──────────────────────┐       ┌──────────────────────┐
-│ <Transformation>     │       │ <Source>             │
-│   <Cast              │       │   <Field             │
-│     field="date"     │       │     name="date_C"    │
-│     to="timestamp"   │  →→→  │     type="timestamp" │
-│     as="date_C"/>    │       │   />                 │
-│ </Transformation>    │       │ </Source>            │
-└──────────────────────┘       └──────────────────────┘
-  Как трансформировать           Что получилось
+ETL Config (YAML + SQL):         TDTP Schema (результат):
+┌────────────────────────┐       ┌──────────────────────┐
+│ transformation:        │       │ <Source>             │
+│   sql: |               │       │   <Field             │
+│     SELECT CAST(date   │       │     name="date_C"    │
+│       AS timestamp)    │  →→→  │     type="timestamp" │
+│       AS date_C        │       │   />                 │
+│     FROM source_data   │       │ </Source>            │
+└────────────────────────┘       └──────────────────────┘
+  SQL трансформация              Что получилось
+  (в YAML параметре)             (в TDTP XML)
 ```
 
-**TDTP не знает (и не должен знать) о процессе трансформации!**
+**TDTP не знает (и не должен знать) о SQL трансформации!**
 
 ---
 
@@ -1548,14 +1557,15 @@ SELECT order_date_C FROM orders_target;  -- обычное поле!
 - Поля с суффиксом `_C` — обычные поля
 - Не нужно никакой специальной обработки
 
-**Q2: Нужна ли секция `<Transformation>` в TDTP?**
-**A2: НЕТ для Visual Designer! ✅ ДА для ETL config!**
-- **ETL Config** (`pipeline_config.xml`) — содержит `<Transformation>` (описывает процесс)
-- **TDTP Schema** (`target_schema.xml`) — НЕ содержит `<Transformation>` (описывает результат)
+**Q2: Где живёт трансформация (CAST)?**
+**A2: В SQL коде, который хранится в YAML конфиге!**
+- **ETL Config** (`pipeline_config.yaml`) — содержит `transformation.sql`
+- **TDTP Schema** (`target_schema.xml`) — НЕ содержит SQL (только результат)
 
-**Q3: Зачем тащить `<Transformation>` если она выполнена?**
-**A3: НЕ тащим!**
-- После выполнения ETL, TDTP содержит только результирующую схему
-- `<Transformation>` живёт только в ETL config, не в TDTP!
+**Q3: Нужно ли добавлять XML элемент `<Transformation>` в TDTP?**
+**A3: НЕТ! ❌ Такого элемента вообще нет!**
+- Трансформация = **SQL код** в **YAML файле**
+- TDTP XML содержит только **результирующую схему**
+- SQL не попадает в TDTP!
 
 ---
