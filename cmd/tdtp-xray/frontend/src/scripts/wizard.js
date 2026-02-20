@@ -2161,6 +2161,18 @@ function createTableCard(table, index) {
         const keyIcon = isPrimaryKey ? '🔑 ' : '';
         const fieldNameStyle = isPrimaryKey ? 'color: #f59e0b; font-weight: 700;' : '';
 
+        // Build detailed filter tooltip
+        let filterTooltip = '';
+        if (hasFilter && hasSort) {
+            filterTooltip = `${formatFilterTooltip(field.filter, field.name)}\\nSort: ${field.sort}\\nClick to edit filter & sort`;
+        } else if (hasFilter) {
+            filterTooltip = `${formatFilterTooltip(field.filter, field.name)}\\nClick to edit filter`;
+        } else if (hasSort) {
+            filterTooltip = `Sort: ${field.sort}\\nClick to edit sort`;
+        } else {
+            filterTooltip = 'Add filter / sort';
+        }
+
         fieldEl.innerHTML = `
             <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
@@ -2176,7 +2188,7 @@ function createTableCard(table, index) {
             </span>
             <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 16px; font-weight: bold; color: ${filterColor}; user-select: none; text-align: center;"
-                  title="${hasFilter && hasSort ? 'Edit filter & sort' : hasFilter ? 'Edit filter' : hasSort ? 'Edit sort' : 'Add filter / sort'}">
+                  title="${filterTooltip}">
                 ${filterIcon}
             </span>
             <div class="join-connector ${hasConnection ? 'connected' : ''}"
@@ -2473,6 +2485,38 @@ function removeJoin(joinIndex) {
 }
 
 // ========== FILTER BUILDER ==========
+
+/**
+ * Format filter conditions into a human-readable tooltip string
+ * @param {Object} filter - Filter object with operator, value, value2, logic
+ * @param {string} fieldName - Name of the field being filtered
+ * @returns {string} Formatted filter string (e.g., "price >= 100 (AND)" or "status = 'active' (OR)")
+ */
+function formatFilterTooltip(filter, fieldName) {
+    if (!filter) return '';
+
+    const operatorMap = {
+        '=': '=',
+        '<>': '≠',
+        '>=': '≥',
+        '<=': '≤',
+        '>': '>',
+        '<': '<',
+        'BW': 'BETWEEN'
+    };
+
+    const op = operatorMap[filter.operator] || filter.operator;
+    const logic = filter.logic === 'OR' ? '^' : '&';
+
+    let condition = '';
+    if (filter.operator === 'BW' && filter.value2) {
+        condition = `${fieldName} ${op} ${filter.value} AND ${filter.value2}`;
+    } else {
+        condition = `${fieldName} ${op} ${filter.value}`;
+    }
+
+    return `${condition} (${logic})`;
+}
 
 function openFilterBuilder(tableIndex, fieldIndex) {
     const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
