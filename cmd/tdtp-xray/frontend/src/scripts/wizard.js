@@ -1983,7 +1983,10 @@ async function addTableToCanvas(sourceName) {
             alias:      sourceName,   // = Source.Name (used in field references)
             x: x,
             y: y,
-            fields: fields
+            fields: fields,
+            limit: null,     // LIMIT for pagination (null = no limit)
+            offset: null,    // OFFSET for pagination (null = no offset)
+            sortState: null  // Field sort state: null (original) | 'AZ' | 'ZA'
         };
 
         console.log(`➕ Adding table to canvas:`, newTable);
@@ -2093,23 +2096,39 @@ function createTableCard(table, index) {
         gap: 6px;
         font-size: 12px;
     `;
+    const hasLimit = table.limit !== null && table.limit !== undefined;
+    const sortState = table.sortState || null;
+
+    // Cyclic sort button: null → AZ → ZA → null
+    let sortIcon, sortTitle, sortColor;
+    if (sortState === 'AZ') {
+        sortIcon = 'AZ↑';
+        sortTitle = 'Sorted A→Z (click for Z→A)';
+        sortColor = '#0066cc';
+    } else if (sortState === 'ZA') {
+        sortIcon = 'ZA↓';
+        sortTitle = 'Sorted Z→A (click to reset)';
+        sortColor = '#0066cc';
+    } else {
+        sortIcon = '⟲';
+        sortTitle = 'Original order (click to sort A→Z)';
+        sortColor = '#888';
+    }
+
     toolbar.innerHTML = `
         <span onclick="toggleAllVisibility(${index})"
               title="${allVisible ? 'Hide all fields' : 'Show all fields'}"
               style="cursor:pointer; font-size:15px; color:${allVisible ? '#28a745' : '#aaa'}; user-select:none; line-height:1;">👁</span>
         <span style="flex:1; font-size:11px; color:#888;">${table.fields.length} fields</span>
+        <span onclick="openLimitSettings(${index})"
+              title="${hasLimit ? `LIMIT ${table.limit}${table.offset ? ' OFFSET ' + table.offset : ''}` : 'Set LIMIT/OFFSET'}"
+              style="cursor:pointer; font-weight:bold; color:${hasLimit ? '#0066cc' : '#ccc'}; user-select:none; font-size:13px; line-height:1;">📊</span>
         <span onclick="clearAllFilters(${index})"
               title="Clear all filters"
               style="cursor:pointer; font-weight:bold; color:${hasFilters ? '#dc3545' : '#ccc'}; user-select:none; font-size:15px; line-height:1;">✱</span>
-        <span onclick="sortTableFields(${index}, 'AZ')"
-              title="Sort A→Z"
-              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">AZ▲</span>
-        <span onclick="sortTableFields(${index}, 'ZA')"
-              title="Sort Z→A"
-              style="cursor:pointer; font-weight:700; color:#0066cc; user-select:none; font-size:10px;">ZA▼</span>
-        <span onclick="resetFieldSort(${index})"
-              title="Reset to original order"
-              style="cursor:pointer; font-weight:700; color:#888; user-select:none; font-size:13px; line-height:1;">⟲</span>
+        <span onclick="cycleSortState(${index})"
+              title="${sortTitle}"
+              style="cursor:pointer; font-weight:700; color:${sortColor}; user-select:none; font-size:11px; line-height:1;">${sortIcon}</span>
     `;
     card.appendChild(toolbar);
 
@@ -2161,6 +2180,26 @@ function createTableCard(table, index) {
         const keyIcon = isPrimaryKey ? '🔑 ' : '';
         const fieldNameStyle = isPrimaryKey ? 'color: #f59e0b; font-weight: 700;' : '';
 
+        // CAST indicator and display name
+        const hasSelectCast = field.selectCast && field.selectCast !== '';
+        const displayName = hasSelectCast && field.selectAlias ? field.selectAlias : field.name;
+        const castIndicator = hasSelectCast ? '🔧' : '';
+        const castTooltip = hasSelectCast
+            ? `CAST(${field.name} AS ${field.selectCast}) AS ${field.selectAlias || field.name}\nClick to edit CAST`
+            : `Click to add CAST for SELECT`;
+
+        // Build detailed filter tooltip
+        let filterTooltip = '';
+        if (hasFilter && hasSort) {
+            filterTooltip = `${formatFilterTooltip(field.filter, field.name)}\\nSort: ${field.sort}\\nClick to edit filter & sort`;
+        } else if (hasFilter) {
+            filterTooltip = `${formatFilterTooltip(field.filter, field.name)}\\nClick to edit filter`;
+        } else if (hasSort) {
+            filterTooltip = `Sort: ${field.sort}\\nClick to edit sort`;
+        } else {
+            filterTooltip = 'Add filter / sort';
+        }
+
         fieldEl.innerHTML = `
             <span onclick="toggleFieldVisibility(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 14px; color: ${field.visible ? '#28a745' : '#999'}; user-select: none;"
@@ -2168,15 +2207,16 @@ function createTableCard(table, index) {
                 👁
             </span>
             <span class="field-name-wrapper"
+                  onclick="openSelectCastDialog(${index}, ${fieldIndex})"
                   data-type="${field.type}"
-                  style="${field.visible ? '' : 'opacity: 0.4;'}"
-                  title="${keyIcon}${field.name} (${field.type})${isPrimaryKey ? ' - PRIMARY KEY' : ''}">
-                <strong class="field-name" style="${fieldNameStyle}">${keyIcon}${field.name}</strong>
-                <small class="field-type">${field.type}</small>
+                  style="cursor: pointer; ${field.visible ? '' : 'opacity: 0.4;'}"
+                  title="${castTooltip}">
+                <strong class="field-name" style="${fieldNameStyle}">${castIndicator}${keyIcon}${displayName}</strong>
+                <small class="field-type">${field.type}${hasSelectCast ? ' → ' + field.selectCast : ''}</small>
             </span>
             <span onclick="openFilterBuilder(${index}, ${fieldIndex})"
                   style="cursor: pointer; font-size: 16px; font-weight: bold; color: ${filterColor}; user-select: none; text-align: center;"
-                  title="${hasFilter && hasSort ? 'Edit filter & sort' : hasFilter ? 'Edit filter' : hasSort ? 'Edit sort' : 'Add filter / sort'}">
+                  title="${filterTooltip}">
                 ${filterIcon}
             </span>
             <div class="join-connector ${hasConnection ? 'connected' : ''}"
@@ -2474,10 +2514,67 @@ function removeJoin(joinIndex) {
 
 // ========== FILTER BUILDER ==========
 
+/**
+ * Format filter conditions into a human-readable tooltip string
+ * @param {Object} filter - Filter object with operator, value, value2, logic
+ * @param {string} fieldName - Name of the field being filtered
+ * @returns {string} Formatted filter string (e.g., "price >= 100 (AND)" or "status = 'active' (OR)")
+ */
+function formatFilterTooltip(filter, fieldName) {
+    if (!filter) return '';
+
+    const operatorMap = {
+        '=': '=',
+        '<>': '≠',
+        '>=': '≥',
+        '<=': '≤',
+        '>': '>',
+        '<': '<',
+        'BW': 'BETWEEN',
+        'LIKE': 'LIKE',
+        'NOT_LIKE': 'NOT LIKE',
+        'IN': 'IN',
+        'NOT_IN': 'NOT IN',
+        'IS_NULL': 'IS NULL',
+        'IS_NOT_NULL': 'IS NOT NULL',
+        'IS_EMPTY': '= \'\'',
+        'IS_NOT_EMPTY': '<> \'\''
+    };
+
+    const op = operatorMap[filter.operator] || filter.operator;
+    const logic = filter.logic === 'OR' ? '^' : '&';
+
+    let condition = '';
+
+    // Operators without value
+    if (['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'].includes(filter.operator)) {
+        condition = `${fieldName} ${op}`;
+    }
+    // BETWEEN
+    else if (filter.operator === 'BW' && filter.value2) {
+        condition = `${fieldName} ${op} ${filter.value} AND ${filter.value2}`;
+    }
+    // IN / NOT IN
+    else if (['IN', 'NOT_IN'].includes(filter.operator)) {
+        condition = `${fieldName} ${op} (${filter.value})`;
+    }
+    // LIKE / NOT LIKE
+    else if (['LIKE', 'NOT_LIKE'].includes(filter.operator)) {
+        condition = `${fieldName} ${op} '${filter.value}'`;
+    }
+    // Standard operators
+    else {
+        condition = `${fieldName} ${op} ${filter.value}`;
+    }
+
+    return `${condition} (${logic})`;
+}
+
 function openFilterBuilder(tableIndex, fieldIndex) {
     const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
-    const currentFilter = field.filter || { operator: '=', value: '', value2: '', logic: 'AND' };
+    const currentFilter = field.filter || { operator: '=', value: '', value2: '', logic: 'AND', castType: '' };
     const currentSort   = field.sort || '';
+    const currentSortCast = field.sortCast || '';
 
     // Create modal
     const modal = document.createElement('div');
@@ -2515,6 +2612,14 @@ function openFilterBuilder(tableIndex, fieldIndex) {
                         <option value="IS_NULL" ${currentFilter.operator === 'IS_NULL' ? 'selected' : ''}>IS NULL</option>
                         <option value="IS_NOT_NULL" ${currentFilter.operator === 'IS_NOT_NULL' ? 'selected' : ''}>IS NOT NULL</option>
                     </optgroup>
+                    <optgroup label="Pattern Matching">
+                        <option value="LIKE" ${currentFilter.operator === 'LIKE' ? 'selected' : ''}>LIKE (%, _)</option>
+                        <option value="NOT_LIKE" ${currentFilter.operator === 'NOT_LIKE' ? 'selected' : ''}>NOT LIKE (%, _)</option>
+                    </optgroup>
+                    <optgroup label="List Matching">
+                        <option value="IN" ${currentFilter.operator === 'IN' ? 'selected' : ''}>IN (comma-separated)</option>
+                        <option value="NOT_IN" ${currentFilter.operator === 'NOT_IN' ? 'selected' : ''}>NOT IN (comma-separated)</option>
+                    </optgroup>
                     <optgroup label="Empty string checks">
                         <option value="IS_EMPTY" ${currentFilter.operator === 'IS_EMPTY' ? 'selected' : ''}> = '' (Empty string)</option>
                         <option value="IS_NOT_EMPTY" ${currentFilter.operator === 'IS_NOT_EMPTY' ? 'selected' : ''}>&lt;&gt; '' (Not empty string)</option>
@@ -2522,10 +2627,26 @@ function openFilterBuilder(tableIndex, fieldIndex) {
                 </select>
             </div>
 
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">CAST as Type (for WHERE):</label>
+                <select id="filterCastType" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="" ${(currentFilter.castType || '') === '' ? 'selected' : ''}>— No CAST (use original type)</option>
+                    <option value="STRING" ${currentFilter.castType === 'STRING' ? 'selected' : ''}>STRING (text comparison)</option>
+                    <option value="REAL" ${currentFilter.castType === 'REAL' ? 'selected' : ''}>REAL (floating point)</option>
+                    <option value="INTEGER" ${currentFilter.castType === 'INTEGER' ? 'selected' : ''}>INTEGER (whole number)</option>
+                    <option value="NUMERIC" ${currentFilter.castType === 'NUMERIC' ? 'selected' : ''}>NUMERIC (decimal)</option>
+                    <option value="BLOB" ${currentFilter.castType === 'BLOB' ? 'selected' : ''}>BLOB (binary)</option>
+                </select>
+                <small style="color: #666;">Apply type conversion for comparison (useful for SQLite weak typing)</small>
+            </div>
+
             <div id="filterValue1Container" style="margin-bottom: 15px; display: ${['IS_NULL','IS_NOT_NULL','IS_EMPTY','IS_NOT_EMPTY'].includes(currentFilter.operator) ? 'none' : 'block'};">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Value:</label>
                 <input type="text" id="filterValue1" value="${currentFilter.value || ''}"
-                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;"
+                       placeholder="${currentFilter.operator === 'LIKE' || currentFilter.operator === 'NOT_LIKE' ? '%@example.com' : currentFilter.operator === 'IN' || currentFilter.operator === 'NOT_IN' ? 'Moscow,SPb,Kazan' : ''}">
+                <small id="filterValue1Hint" style="color: #666; display: ${['LIKE','NOT_LIKE'].includes(currentFilter.operator) ? 'block' : 'none'};">Use % (any chars) and _ (one char) as wildcards</small>
+                <small id="filterValue1HintList" style="color: #666; display: ${['IN','NOT_IN'].includes(currentFilter.operator) ? 'block' : 'none'};">Comma-separated values (e.g., value1,value2,value3)</small>
             </div>
 
             <div id="filterValue2Container" style="margin-bottom: 15px; display: ${currentFilter.operator === 'BW' ? 'block' : 'none'};">
@@ -2553,9 +2674,22 @@ function openFilterBuilder(tableIndex, fieldIndex) {
                 <small style="color: #666;">Contributes to ORDER BY (priority = field order in table)</small>
             </div>
 
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">CAST as Type (for ORDER BY):</label>
+                <select id="filterSortCast" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="" ${currentSortCast === '' ? 'selected' : ''}>— No CAST (use original type)</option>
+                    <option value="STRING" ${currentSortCast === 'STRING' ? 'selected' : ''}>STRING (text sort)</option>
+                    <option value="REAL" ${currentSortCast === 'REAL' ? 'selected' : ''}>REAL (numeric sort)</option>
+                    <option value="INTEGER" ${currentSortCast === 'INTEGER' ? 'selected' : ''}>INTEGER (integer sort)</option>
+                    <option value="NUMERIC" ${currentSortCast === 'NUMERIC' ? 'selected' : ''}>NUMERIC (decimal sort)</option>
+                    <option value="BLOB" ${currentSortCast === 'BLOB' ? 'selected' : ''}>BLOB (binary sort)</option>
+                </select>
+                <small style="color: #666;">Apply type conversion for sorting (e.g., sort "10" after "2" with INTEGER cast)</small>
+            </div>
+
             <div style="display: flex; gap: 10px; margin-top: 20px;">
                 <button class="btn" onclick="saveFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #28a745; color: white;">Apply</button>
-                <button class="btn" onclick="clearFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #dc3545; color: white;">Clear Filter</button>
+                <button class="btn" onclick="clearFilter(${tableIndex}, ${fieldIndex})" style="flex: 1; background: #dc3545; color: white;">Clear All</button>
                 <button class="btn" onclick="closeFilterBuilder()" style="flex: 1;">Cancel</button>
             </div>
         </div>
@@ -2568,8 +2702,31 @@ function openFilterBuilder(tableIndex, fieldIndex) {
         const noValueOps = ['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'];
         const needsValue = !noValueOps.includes(this.value);
         const isBetween  = this.value === 'BW';
+        const isLike     = ['LIKE', 'NOT_LIKE'].includes(this.value);
+        const isList     = ['IN', 'NOT_IN'].includes(this.value);
+
+        // Show/hide value containers
         document.getElementById('filterValue1Container').style.display = needsValue ? 'block' : 'none';
         document.getElementById('filterValue2Container').style.display = isBetween  ? 'block' : 'none';
+
+        // Update placeholder and hints
+        const input = document.getElementById('filterValue1');
+        const hintLike = document.getElementById('filterValue1Hint');
+        const hintList = document.getElementById('filterValue1HintList');
+
+        if (isLike) {
+            input.placeholder = '%@example.com';
+            hintLike.style.display = 'block';
+            hintList.style.display = 'none';
+        } else if (isList) {
+            input.placeholder = 'Moscow,SPb,Kazan';
+            hintLike.style.display = 'none';
+            hintList.style.display = 'block';
+        } else {
+            input.placeholder = '';
+            hintLike.style.display = 'none';
+            hintList.style.display = 'none';
+        }
     });
 
     // Close on backdrop click
@@ -2594,7 +2751,9 @@ function saveFilter(tableIndex, fieldIndex) {
     const value1 = document.getElementById('filterValue1').value.trim();
     const value2 = document.getElementById('filterValue2').value.trim();
     const logic = document.getElementById('filterLogic').value;
+    const castType = document.getElementById('filterCastType').value;
     const sort  = document.getElementById('filterSort').value;
+    const sortCast = document.getElementById('filterSortCast').value;
 
     const noValueOps = ['IS_NULL', 'IS_NOT_NULL', 'IS_EMPTY', 'IS_NOT_EMPTY'];
     if (!noValueOps.includes(operator) && !value1 && !sort) {
@@ -2610,11 +2769,12 @@ function saveFilter(tableIndex, fieldIndex) {
     // Save filter only if a value (or no-value operator) is present
     const hasFilterValue = noValueOps.includes(operator) || value1;
     canvasDesign.tables[tableIndex].fields[fieldIndex].filter = hasFilterValue
-        ? { operator, value: value1, value2, logic }
+        ? { operator, value: value1, value2, logic, castType }
         : null;
 
-    // Save sort state
+    // Save sort state and sortCast
     canvasDesign.tables[tableIndex].fields[fieldIndex].sort = sort || null;
+    canvasDesign.tables[tableIndex].fields[fieldIndex].sortCast = sortCast || null;
 
     closeFilterBuilder();
     renderCanvas();
@@ -2623,10 +2783,16 @@ function saveFilter(tableIndex, fieldIndex) {
 }
 
 function clearFilter(tableIndex, fieldIndex) {
-    canvasDesign.tables[tableIndex].fields[fieldIndex].filter = null;
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+
+    // Clear filter, sort, and sortCast to fully reset the field
+    field.filter = null;
+    field.sort = null;
+    field.sortCast = null;
+
     closeFilterBuilder();
     renderCanvas();
-    showNotification('Filter cleared', 'info');
+    showNotification('Filter and sort cleared', 'info');
 }
 
 function closeFilterBuilder() {
@@ -2636,7 +2802,279 @@ function closeFilterBuilder() {
     }
 }
 
+// ========== SELECT CAST DIALOG ==========
+
+function openSelectCastDialog(tableIndex, fieldIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const field = table.fields[fieldIndex];
+
+    // Close any existing dialog
+    closeSelectCastDialog();
+
+    const modal = document.createElement('div');
+    modal.id = 'selectCastModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 2000;
+    `;
+
+    const currentCast = field.selectCast || '';
+    const currentAlias = field.selectAlias || `${field.name}_C`;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 8px; min-width: 450px; max-width: 600px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            <h3 style="margin-top: 0; color: #2c3e50;">🔧 SELECT CAST: ${field.name}</h3>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">CAST Type:</label>
+                <select id="selectCastType" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <option value="" ${currentCast === '' ? 'selected' : ''}>No CAST (original type)</option>
+                    <option value="TEXT" ${currentCast === 'TEXT' ? 'selected' : ''}>TEXT (string conversion)</option>
+                    <option value="INTEGER" ${currentCast === 'INTEGER' ? 'selected' : ''}>INTEGER (integer conversion)</option>
+                    <option value="REAL" ${currentCast === 'REAL' ? 'selected' : ''}>REAL (floating point)</option>
+                    <option value="NUMERIC" ${currentCast === 'NUMERIC' ? 'selected' : ''}>NUMERIC (decimal)</option>
+                    <option value="BLOB" ${currentCast === 'BLOB' ? 'selected' : ''}>BLOB (binary)</option>
+                </select>
+                <small style="color: #666; display: block; margin-top: 3px;">Convert field type in SELECT clause</small>
+            </div>
+
+            <div style="margin-bottom: 15px;" id="aliasContainer">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555;">Field Alias:</label>
+                <input type="text" id="selectAlias" value="${currentAlias}"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+                       placeholder="Enter alias (e.g., ${field.name}_C)">
+                <small style="color: #666; display: block; margin-top: 3px;">Name for the CAST field in result set</small>
+            </div>
+
+            <div style="padding: 12px; background: #e8f4fd; border-left: 4px solid #3498db; border-radius: 3px; margin-bottom: 15px; font-size: 13px;">
+                <strong>📝 Example SQL:</strong><br>
+                <code style="font-family: monospace; color: #0066cc; display: block; margin-top: 5px;" id="castPreview">
+                    SELECT ${field.name}
+                </code>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn" onclick="saveSelectCast(${tableIndex}, ${fieldIndex})"
+                        style="flex: 1; background: #28a745; color: white; font-weight: 600;">✓ Apply</button>
+                <button class="btn" onclick="clearSelectCast(${tableIndex}, ${fieldIndex})"
+                        style="flex: 1; background: #dc3545; color: white; font-weight: 600;">✗ Clear CAST</button>
+                <button class="btn" onclick="closeSelectCastDialog()"
+                        style="flex: 1; background: #6c757d; color: white;">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Update preview when user changes values
+    const updatePreview = () => {
+        const castType = document.getElementById('selectCastType').value;
+        const alias = document.getElementById('selectAlias').value || field.name;
+        const preview = document.getElementById('castPreview');
+        const aliasContainer = document.getElementById('aliasContainer');
+
+        if (castType) {
+            preview.textContent = `SELECT CAST(${field.name} AS ${castType}) AS ${alias}`;
+            aliasContainer.style.display = 'block';
+        } else {
+            preview.textContent = `SELECT ${field.name}`;
+            aliasContainer.style.display = 'none';
+        }
+    };
+
+    document.getElementById('selectCastType').addEventListener('change', updatePreview);
+    document.getElementById('selectAlias').addEventListener('input', updatePreview);
+
+    // Initial preview
+    updatePreview();
+}
+
+function saveSelectCast(tableIndex, fieldIndex) {
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+    const castType = document.getElementById('selectCastType').value;
+    const alias = document.getElementById('selectAlias').value.trim();
+
+    if (castType) {
+        field.selectCast = castType;
+        field.selectAlias = alias || `${field.name}_C`;
+        showNotification(`CAST applied: ${field.name} → ${field.selectAlias}`, 'success');
+    } else {
+        field.selectCast = '';
+        field.selectAlias = '';
+        showNotification('CAST removed', 'info');
+    }
+
+    closeSelectCastDialog();
+    renderCanvas();
+}
+
+function clearSelectCast(tableIndex, fieldIndex) {
+    const field = canvasDesign.tables[tableIndex].fields[fieldIndex];
+    field.selectCast = '';
+    field.selectAlias = '';
+
+    closeSelectCastDialog();
+    renderCanvas();
+    showNotification('SELECT CAST cleared', 'info');
+}
+
+function closeSelectCastDialog() {
+    const modal = document.getElementById('selectCastModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
 // ========== TABLE TOOLBAR ACTIONS ==========
+
+function openLimitSettings(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const currentLimit = table.limit || '';
+    const currentOffset = table.offset || '';
+
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'limitSettingsModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 2000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 5px; min-width: 400px; max-width: 500px;">
+            <h3 style="margin-top: 0;">Pagination Settings: ${table.sourceName}</h3>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">LIMIT (max rows):</label>
+                <input type="number" id="limitValue" value="${currentLimit}" min="0" step="1"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;"
+                       placeholder="Leave empty for no limit">
+                <small style="color: #666;">Maximum number of rows to return. Leave empty for no limit.</small>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">OFFSET (skip rows):</label>
+                <input type="number" id="offsetValue" value="${currentOffset}" min="0" step="1"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;"
+                       placeholder="0">
+                <small style="color: #666;">Number of rows to skip. Useful for pagination.</small>
+            </div>
+
+            <div style="padding: 10px; background: #f0f4ff; border-radius: 3px; margin-bottom: 15px;">
+                <strong>💡 Quick Presets:</strong>
+                <div style="display: flex; gap: 5px; margin-top: 8px;">
+                    <button class="btn" onclick="setLimitPreset(10)" style="flex: 1; font-size: 11px;">10 rows</button>
+                    <button class="btn" onclick="setLimitPreset(100)" style="flex: 1; font-size: 11px;">100 rows</button>
+                    <button class="btn" onclick="setLimitPreset(1000)" style="flex: 1; font-size: 11px;">1000 rows</button>
+                    <button class="btn" onclick="clearLimitPreset()" style="flex: 1; font-size: 11px;">No limit</button>
+                </div>
+            </div>
+
+            <div style="padding: 10px; background: #fff9e6; border-radius: 3px; margin-bottom: 15px; font-size: 12px;">
+                <strong>📝 Example SQL:</strong><br>
+                <code style="font-family: monospace; color: #0066cc;">
+                    SELECT * FROM ${table.sourceName}
+                    ${currentLimit ? `LIMIT ${currentLimit}` : ''}
+                    ${currentOffset ? ` OFFSET ${currentOffset}` : ''}
+                </code>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn" onclick="saveLimitSettings(${tableIndex})" style="flex: 1; background: #28a745; color: white;">Apply</button>
+                <button class="btn" onclick="clearLimitSettings(${tableIndex})" style="flex: 1; background: #dc3545; color: white;">Clear</button>
+                <button class="btn" onclick="closeLimitSettings()" style="flex: 1;">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Close on backdrop click
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeLimitSettings();
+        }
+    });
+
+    // Close on Escape key
+    const escapeHandler = function(e) {
+        if (e.key === 'Escape') {
+            closeLimitSettings();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+function setLimitPreset(value) {
+    document.getElementById('limitValue').value = value;
+    document.getElementById('offsetValue').value = 0;
+}
+
+function clearLimitPreset() {
+    document.getElementById('limitValue').value = '';
+    document.getElementById('offsetValue').value = '';
+}
+
+function saveLimitSettings(tableIndex) {
+    const limitVal = document.getElementById('limitValue').value.trim();
+    const offsetVal = document.getElementById('offsetValue').value.trim();
+
+    const limit = limitVal ? parseInt(limitVal, 10) : null;
+    const offset = offsetVal ? parseInt(offsetVal, 10) : null;
+
+    if (limit !== null && limit < 0) {
+        alert('LIMIT cannot be negative');
+        return;
+    }
+
+    if (offset !== null && offset < 0) {
+        alert('OFFSET cannot be negative');
+        return;
+    }
+
+    canvasDesign.tables[tableIndex].limit = limit;
+    canvasDesign.tables[tableIndex].offset = offset;
+
+    closeLimitSettings();
+    renderCanvas();
+
+    const msg = limit !== null
+        ? `LIMIT ${limit}${offset ? ` OFFSET ${offset}` : ''} applied`
+        : 'LIMIT/OFFSET cleared';
+    showNotification(msg, 'success');
+}
+
+function clearLimitSettings(tableIndex) {
+    canvasDesign.tables[tableIndex].limit = null;
+    canvasDesign.tables[tableIndex].offset = null;
+    closeLimitSettings();
+    renderCanvas();
+    showNotification('LIMIT/OFFSET cleared', 'info');
+}
+
+function closeLimitSettings() {
+    const modal = document.getElementById('limitSettingsModal');
+    if (modal) {
+        modal.remove();
+    }
+}
 
 function toggleAllVisibility(tableIndex) {
     const table = canvasDesign.tables[tableIndex];
@@ -2649,21 +3087,71 @@ function clearAllFilters(tableIndex) {
     const table = canvasDesign.tables[tableIndex];
     const hasFilters = table.fields.some(f => f.filter);
     if (!hasFilters) return;
+
+    // ⚠️ Confirm before clearing all filters
+    const filterCount = table.fields.filter(f => f.filter).length;
+    const tableName = table.alias || table.sourceName;
+    const confirmed = confirm(
+        `⚠️ Clear ALL filters?\n\n` +
+        `This will remove ${filterCount} filter${filterCount > 1 ? 's' : ''} from "${tableName}".\n\n` +
+        `This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
     table.fields.forEach(f => f.filter = null);
     renderCanvas();
     showNotification('All filters cleared', 'info');
 }
 
+// Cyclic sort: null → AZ → ZA → null
+async function cycleSortState(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    const currentState = table.sortState || null;
+
+    // Determine next state
+    let nextState;
+    if (currentState === null) {
+        nextState = 'AZ';
+    } else if (currentState === 'AZ') {
+        nextState = 'ZA';
+    } else {
+        nextState = null; // Reset to original
+    }
+
+    table.sortState = nextState;
+
+    // Apply sorting based on new state
+    if (nextState === 'AZ') {
+        table.fields.sort((a, b) => a.name.localeCompare(b.name));
+        renderCanvas();
+    } else if (nextState === 'ZA') {
+        table.fields.sort((a, b) => b.name.localeCompare(a.name));
+        renderCanvas();
+    } else {
+        // Reset to original order
+        await resetFieldSortToOriginal(tableIndex);
+    }
+}
+
+// Legacy functions for compatibility (kept for now, can be removed later)
 function sortTableFields(tableIndex, direction) {
     const table = canvasDesign.tables[tableIndex];
     table.fields.sort((a, b) => {
         const cmp = a.name.localeCompare(b.name);
         return direction === 'ZA' ? -cmp : cmp;
     });
+    table.sortState = direction;
     renderCanvas();
 }
 
 async function resetFieldSort(tableIndex) {
+    const table = canvasDesign.tables[tableIndex];
+    table.sortState = null;
+    await resetFieldSortToOriginal(tableIndex);
+}
+
+async function resetFieldSortToOriginal(tableIndex) {
     const table = canvasDesign.tables[tableIndex];
 
     // Try cache first; if missing (e.g. loaded from DB) fetch from backend

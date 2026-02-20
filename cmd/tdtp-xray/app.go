@@ -29,11 +29,12 @@ type App struct {
 	// Mode: "mock" or "production"
 	mode string
 	// Services
-	connService     *services.ConnectionService
-	metadataService *services.MetadataService
-	sourceService   *services.SourceService
-	previewService  *services.PreviewService
-	tdtpService     *services.TDTPService
+	connService       *services.ConnectionService
+	metadataService   *services.MetadataService
+	sourceService     *services.SourceService
+	previewService    *services.PreviewService
+	tdtpService       *services.TDTPService
+	validationService *services.ValidationService
 	// Local SQLite repository (configs.db next to the binary)
 	repoDB *sql.DB
 }
@@ -41,13 +42,14 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		sources:         make([]Source, 0),
-		mode:            "production", // Default to production mode
-		connService:     services.NewConnectionService(),
-		metadataService: services.NewMetadataService(),
-		sourceService:   services.NewSourceService(),
-		previewService:  services.NewPreviewService(),
-		tdtpService:     services.NewTDTPService(),
+		sources:           make([]Source, 0),
+		mode:              "production", // Default to production mode
+		connService:       services.NewConnectionService(),
+		metadataService:   services.NewMetadataService(),
+		sourceService:     services.NewSourceService(),
+		previewService:    services.NewPreviewService(),
+		tdtpService:       services.NewTDTPService(),
+		validationService: services.NewValidationService(),
 	}
 }
 
@@ -352,6 +354,9 @@ type TableDesign struct {
 	X          int           `json:"x"`
 	Y          int           `json:"y"`
 	Fields     []FieldDesign `json:"fields"`
+	Limit      *int          `json:"limit,omitempty"`  // LIMIT for pagination (nil = no limit)
+	Offset     *int          `json:"offset,omitempty"` // OFFSET for pagination (nil = no offset)
+	SortState  string        `json:"sortState,omitempty"` // Field sort state: "" | "AZ" | "ZA"
 }
 
 // FieldDesign represents a field in a table
@@ -363,6 +368,9 @@ type FieldDesign struct {
 	Filter       *FilterCondition `json:"filter,omitempty"`    // Frontend uses "filter"
 	Condition    *FilterCondition `json:"condition,omitempty"` // Backend compatibility
 	Sort         string           `json:"sort,omitempty"`      // ASC, DESC, or "" (no sort)
+	SortCast     string           `json:"sortCast,omitempty"`  // CAST type for ORDER BY: STRING, REAL, INTEGER, NUMERIC, BLOB
+	SelectCast   string           `json:"selectCast,omitempty"` // CAST type for SELECT: TEXT, INTEGER, REAL, BLOB, etc.
+	SelectAlias  string           `json:"selectAlias,omitempty"` // Alias for CAST field in SELECT
 }
 
 // FilterCondition for field filtering
@@ -371,6 +379,7 @@ type FilterCondition struct {
 	Operator string `json:"operator"` // =, !=, >, <, >=, <=, BETWEEN, LIKE, IN
 	Value    string `json:"value"`
 	Value2   string `json:"value2,omitempty"` // For BETWEEN
+	CastType string `json:"castType,omitempty"` // CAST type for WHERE: STRING, REAL, INTEGER, NUMERIC, BLOB
 }
 
 // JoinDesign represents a JOIN between tables
@@ -467,7 +476,18 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 		for _, field := range table.Fields {
 			if field.Visible {
-				selectFields = append(selectFields, fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name)))
+				fieldExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name))
+
+				// Apply CAST for SELECT if specified
+				if field.SelectCast != "" {
+					alias := field.SelectAlias
+					if alias == "" {
+						alias = field.Name + "_C"
+					}
+					fieldExpr = fmt.Sprintf("CAST(%s AS %s) AS %s", fieldExpr, field.SelectCast, quoteMSSQLIdent(alias))
+				}
+
+				selectFields = append(selectFields, fieldExpr)
 			}
 		}
 	}
@@ -546,6 +566,12 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 
 			// Build condition expression
 			fieldExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name))
+
+			// Apply CAST if CastType is specified
+			if filter.CastType != "" {
+				fieldExpr = fmt.Sprintf("CAST(%s AS %s)", fieldExpr, filter.CastType)
+			}
+
 			var condition string
 
 			switch filter.Operator {
@@ -620,14 +646,31 @@ func (a *App) GenerateSQL(design CanvasDesign) GenerateSQLResult {
 		}
 		for _, field := range table.Fields {
 			if field.Sort == "ASC" || field.Sort == "DESC" {
-				orderByFields = append(orderByFields,
-					fmt.Sprintf("%s.%s %s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name), field.Sort))
+				fieldExpr := fmt.Sprintf("%s.%s", quoteMSSQLIdent(tableAlias), quoteMSSQLIdent(field.Name))
+
+				// Apply CAST if SortCast is specified
+				if field.SortCast != "" {
+					fieldExpr = fmt.Sprintf("CAST(%s AS %s)", fieldExpr, field.SortCast)
+				}
+
+				orderByFields = append(orderByFields, fmt.Sprintf("%s %s", fieldExpr, field.Sort))
 			}
 		}
 	}
 
 	if len(orderByFields) > 0 {
 		sql += fmt.Sprintf("\nORDER BY\n    %s", strings.Join(orderByFields, ",\n    "))
+	}
+
+	// Add LIMIT/OFFSET from first table that has it set
+	for _, table := range design.Tables {
+		if table.Limit != nil && *table.Limit > 0 {
+			sql += fmt.Sprintf("\nLIMIT %d", *table.Limit)
+			if table.Offset != nil && *table.Offset > 0 {
+				sql += fmt.Sprintf(" OFFSET %d", *table.Offset)
+			}
+			break // Apply only first LIMIT found
+		}
 	}
 
 	fmt.Printf("✅ Generated SQL:\n%s\n", sql)
@@ -796,11 +839,11 @@ func (a *App) loadTDTPSourceToMemory(db *sql.DB, source Source) error {
 		return fmt.Errorf("failed to load TDTP data: %s", preview.Message)
 	}
 
-	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.Rows); err != nil {
+	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.ColumnTypes, preview.Rows); err != nil {
 		return err
 	}
 
-	fmt.Printf("Loaded %d rows from TDTP source '%s'\n", len(preview.Rows), source.Name)
+	fmt.Printf("Loaded %d rows from TDTP source '%s' with schema types\n", len(preview.Rows), source.Name)
 	return nil
 }
 
@@ -828,20 +871,63 @@ func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
 		return fmt.Errorf("failed to load database data: %s", preview.Message)
 	}
 
-	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.Rows); err != nil {
+	// Use column types from database schema
+	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.ColumnTypes, preview.Rows); err != nil {
 		return err
 	}
 
-	fmt.Printf("Loaded %d rows from DB source '%s'\n", len(preview.Rows), source.Name)
+	fmt.Printf("Loaded %d rows from DB source '%s' with schema types\n", len(preview.Rows), source.Name)
 	return nil
 }
 
-// createAndFillTable creates a TEXT-typed SQLite table and bulk-inserts rows.
+// mapTDTPToSQLiteType maps database type (TDTP/PostgreSQL/MySQL/MSSQL) to SQLite type
+func mapTDTPToSQLiteType(dbType string) string {
+	upperType := strings.ToUpper(dbType)
+
+	// Integer types (all databases)
+	if strings.Contains(upperType, "INT") || // INT, INTEGER, BIGINT, SMALLINT, TINYINT
+		upperType == "SERIAL" || upperType == "BIGSERIAL" { // PostgreSQL auto-increment
+		return "INTEGER"
+	}
+
+	// Floating point types (all databases)
+	if strings.Contains(upperType, "FLOAT") || strings.Contains(upperType, "DOUBLE") ||
+		strings.Contains(upperType, "REAL") || strings.Contains(upperType, "NUMERIC") ||
+		strings.Contains(upperType, "DECIMAL") || upperType == "MONEY" { // MSSQL MONEY
+		return "REAL"
+	}
+
+	// Date/Time types (all databases)
+	if strings.Contains(upperType, "DATE") || strings.Contains(upperType, "TIME") ||
+		upperType == "TIMESTAMP" || upperType == "TIMESTAMPTZ" { // PostgreSQL
+		return "TEXT" // SQLite stores dates as TEXT/INTEGER/REAL
+	}
+
+	// Boolean types
+	if strings.Contains(upperType, "BOOL") || upperType == "BIT" { // BIT in MSSQL/MySQL
+		return "INTEGER" // SQLite uses 0/1 for boolean
+	}
+
+	// Binary types
+	if strings.Contains(upperType, "BLOB") || strings.Contains(upperType, "BINARY") ||
+		upperType == "BYTEA" || // PostgreSQL binary
+		strings.Contains(upperType, "IMAGE") { // MSSQL IMAGE
+		return "BLOB"
+	}
+
+	// Text types (default fallback)
+	// VARCHAR, CHAR, TEXT, NVARCHAR, NCHAR, etc.
+	return "TEXT"
+}
+
+// createAndFillTable creates SQLite table with proper types from schema and bulk-inserts rows.
 // All identifiers are double-quoted to handle names containing $, spaces, etc.
-func (a *App) createAndFillTable(db *sql.DB, tableName string, columns []string, rows []map[string]any) error {
+func (a *App) createAndFillTable(db *sql.DB, tableName string, columns []string, columnTypes map[string]string, rows []map[string]any) error {
 	colDefs := make([]string, len(columns))
 	for i, col := range columns {
-		colDefs[i] = quoteSQLiteIdent(col) + " TEXT"
+		// Map TDTP type to SQLite type, fallback to TEXT
+		sqliteType := mapTDTPToSQLiteType(columnTypes[col])
+		colDefs[i] = quoteSQLiteIdent(col) + " " + sqliteType
 	}
 	createSQL := fmt.Sprintf("CREATE TABLE %s (%s)", quoteSQLiteIdent(tableName), strings.Join(colDefs, ", "))
 	if _, err := db.Exec(createSQL); err != nil {
@@ -2589,4 +2675,14 @@ func (a *App) DeleteFromRepository(id int64) error {
 	}
 	_, err := a.repoDB.Exec("DELETE FROM pipelines WHERE id = ?", id)
 	return err
+}
+
+// ValidateTransformationSQL validates SQL transformation for column conflicts and CAST syntax
+func (a *App) ValidateTransformationSQL(sql string) services.ValidationResult {
+	return a.validationService.ValidateTransformationSQL(sql)
+}
+
+// GenerateCastStatement generates CAST statement with proper prefix and suffix
+func (a *App) GenerateCastStatement(table, column, targetType string) string {
+	return a.validationService.GenerateCastWithPrefix(table, column, targetType)
 }
