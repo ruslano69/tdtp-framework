@@ -2941,6 +2941,18 @@ function clearAllFilters(tableIndex) {
     const table = canvasDesign.tables[tableIndex];
     const hasFilters = table.fields.some(f => f.filter);
     if (!hasFilters) return;
+
+    // ⚠️ Confirm before clearing all filters
+    const filterCount = table.fields.filter(f => f.filter).length;
+    const tableName = table.alias || table.sourceName;
+    const confirmed = confirm(
+        `⚠️ Clear ALL filters?\n\n` +
+        `This will remove ${filterCount} filter${filterCount > 1 ? 's' : ''} from "${tableName}".\n\n` +
+        `This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
     table.fields.forEach(f => f.filter = null);
     renderCanvas();
     showNotification('All filters cleared', 'info');
