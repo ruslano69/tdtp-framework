@@ -145,27 +145,63 @@ class TestJFilter:
 
 class TestJApplyProcessor:
     def test_field_masker_masks_values(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: needs -tags compress build")
+        # fields param is {field_name: pattern}; "stars" replaces every char with *
+        result = j_client.J_apply_processor(
+            sample_data_j, "field_masker", fields={"Email": "stars"}
+        )
+        email_idx = SAMPLE_FIELD_NAMES.index("Email")
+        assert len(result["data"]) == SAMPLE_TOTAL_ROWS
+        for row in result["data"]:
+            # Original emails contain "@"; masked value must not
+            assert "@" not in row[email_idx], f"email not masked: {row[email_idx]}"
 
     def test_field_normalizer_trims(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: needs -tags compress build")
+        # "uppercase" rule upper-cases all Name values
+        result = j_client.J_apply_processor(
+            sample_data_j, "field_normalizer", fields={"Name": "uppercase"}
+        )
+        name_idx = SAMPLE_FIELD_NAMES.index("Name")
+        assert len(result["data"]) == SAMPLE_TOTAL_ROWS
+        for orig_row, new_row in zip(sample_data_j["data"], result["data"]):
+            assert new_row[name_idx] == orig_row[name_idx].upper()
 
     def test_field_validator_rejects_invalid(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: needs -tags compress build")
+        # All fixture emails match the email regex — validator must pass all rows
+        result = j_client.J_apply_processor(
+            sample_data_j, "field_validator", rules={"Email": ["email"]}
+        )
+        assert len(result["data"]) == SAMPLE_TOTAL_ROWS
 
     def test_compress_decompress_roundtrip(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: needs -tags compress build")
+        compressed = j_client.J_apply_processor(sample_data_j, "compress", level=3)
+        # Compressed form is a single-element data list (one blob)
+        assert len(compressed["data"]) == 1
+        decompressed = j_client.J_apply_processor(compressed, "decompress")
+        assert len(decompressed["data"]) == SAMPLE_TOTAL_ROWS
+        assert decompressed["data"] == sample_data_j["data"]
 
     def test_unknown_processor_raises(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: needs -tags compress build")
+        with pytest.raises(TDTPProcessorError):
+            j_client.J_apply_processor(sample_data_j, "no_such_processor")
 
 
 class TestJApplyChain:
-    def test_mask_then_compress(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: needs -tags compress build")
+    def test_mask_then_normalize(self, j_client, sample_data_j) -> None:
+        chain = [
+            {"type": "field_masker",     "params": {"fields": {"Email": "stars"}}},
+            {"type": "field_normalizer", "params": {"fields": {"Name": "uppercase"}}},
+        ]
+        result = j_client.J_apply_chain(sample_data_j, chain)
+        email_idx = SAMPLE_FIELD_NAMES.index("Email")
+        name_idx  = SAMPLE_FIELD_NAMES.index("Name")
+        assert len(result["data"]) == SAMPLE_TOTAL_ROWS
+        for orig_row, new_row in zip(sample_data_j["data"], result["data"]):
+            assert "@" not in new_row[email_idx]
+            assert new_row[name_idx] == orig_row[name_idx].upper()
 
     def test_empty_chain_passthrough(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: needs -tags compress build")
+        result = j_client.J_apply_chain(sample_data_j, [])
+        assert result["data"] == sample_data_j["data"]
 
 
 # ---------------------------------------------------------------------------
