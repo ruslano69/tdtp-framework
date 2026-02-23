@@ -56,3 +56,6 @@ deployments/docker-compose.yml
 docs/analysis/codebase_map.json
 docs/analysis/dependencies.json
 docs/analysis/.last_update
+
+# Claude Code local files
+.claude/
