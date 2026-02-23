@@ -16,3 +16,6 @@ build/
 .venv/
 venv/
 env/
+
+# CGo-generated build artifacts
+tdtp/libtdtp.h
