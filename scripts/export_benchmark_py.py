@@ -41,6 +41,8 @@ def main():
 
         # Библиотека сама строит schema и header из DataFrame
         data = client.J_from_pandas(df, table_name=TABLE_NAME)
+        # Сжатие zstd + XXH3 контрольная сумма
+        data = client.J_apply_processor(data, "compress", level=3)
 
         out = os.path.join(OUTPUT_DIR, f"{TABLE_NAME}_part_{part_num}_of_{total_parts}.tdtp.xml")
         client.J_write(data, out)

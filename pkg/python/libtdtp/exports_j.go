@@ -20,10 +20,12 @@ import (
 
 // jPacket is the canonical JSON representation for J_* I/O.
 type jPacket struct {
-	Schema packet.Schema `json:"schema"`
-	Header jHeader       `json:"header"`
-	Data   [][]string    `json:"data"`
-	Error  string        `json:"error,omitempty"`
+	Schema      packet.Schema `json:"schema"`
+	Header      jHeader       `json:"header"`
+	Data        [][]string    `json:"data"`
+	Compression string        `json:"compression,omitempty"` // "zstd" when compressed
+	Checksum    string        `json:"checksum,omitempty"`    // XXH3 hex of compressed blob
+	Error       string        `json:"error,omitempty"`
 }
 
 // jHeader is a JSON-friendly mirror of packet.Header (time.Time → string).
@@ -136,6 +138,8 @@ func jPacketToDataPacket(jp jPacket) *packet.DataPacket {
 	pkt.Header.Recipient = jp.Header.Recipient
 	pkt.Schema = jp.Schema
 	pkt.Data = packet.RowsToData(jp.Data)
+	pkt.Data.Compression = jp.Compression
+	pkt.Data.Checksum = jp.Checksum
 	return pkt
 }
 

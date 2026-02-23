@@ -22,6 +22,13 @@ func jDecompressRows(pkt *packet.DataPacket) *C.char {
 		return jOK(packetToJPacket(pkt, [][]string{}))
 	}
 
+	compressed := []byte(pkt.Data.Rows[0].Value)
+	if pkt.Data.Checksum != "" {
+		if err := processors.ValidateChecksum(compressed, pkt.Data.Checksum); err != nil {
+			return jErr(fmt.Sprintf("checksum validation failed: %v", err))
+		}
+	}
+
 	parser := packet.NewParser()
 	lines, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
 	if err != nil {
@@ -138,8 +145,12 @@ func jRunCompress(jp jPacket, params map[string]any) *C.char {
 		return jErr(fmt.Sprintf("compression error: %v", err))
 	}
 
+	checksum := processors.ComputeChecksum(compressed)
+
 	result := jp
 	result.Data = [][]string{{string(compressed)}}
+	result.Compression = "zstd"
+	result.Checksum = checksum
 	return jOK(result)
 }
 
@@ -147,6 +158,12 @@ func jRunCompress(jp jPacket, params map[string]any) *C.char {
 func jRunDecompress(jp jPacket) *C.char {
 	if len(jp.Data) == 0 || len(jp.Data[0]) == 0 {
 		return jErr("no compressed data found")
+	}
+
+	if jp.Checksum != "" {
+		if err := processors.ValidateChecksum([]byte(jp.Data[0][0]), jp.Checksum); err != nil {
+			return jErr(fmt.Sprintf("checksum validation failed: %v", err))
+		}
 	}
 
 	parser := packet.NewParser()
