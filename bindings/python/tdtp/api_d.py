@@ -1,0 +1,236 @@
+"""
+Direct boundary API — TDTPClientDirect.
+
+Data crosses the Python↔Go boundary as C structs via ctypes pointers.
+No JSON serialization overhead; maximum throughput for large datasets.
+
+IMPORTANT — memory management:
+    Every D_* method that returns or fills a D_Packet allocates memory
+    with C.malloc on the Go side. You MUST call pkt.free() (or the
+    context manager) when done; otherwise memory leaks.
+
+Typical usage (explicit free):
+    client = TDTPClientDirect()
+    pkt    = client.D_read("users.tdtp")
+    try:
+        out = client.D_filter(pkt, [{"field": "Balance", "op": "gt", "value": "1000"}])
+        try:
+            client.D_write(out, "filtered.tdtp")
+        finally:
+            out.free()
+    finally:
+        pkt.free()
+
+Typical usage (context manager):
+    with client.D_read_ctx("users.tdtp") as pkt:
+        rows = pkt.get_rows()
+"""
+from __future__ import annotations
+
+import ctypes
+from contextlib import contextmanager
+from typing import Generator
+
+from tdtp._loader import lib
+from tdtp._structs_d import D_FilterSpec, D_MaskConfig, D_Packet
+from tdtp.exceptions import (
+    TDTPFilterError,
+    TDTPParseError,
+    TDTPProcessorError,
+    TDTPWriteError,
+)
+
+
+# ---------------------------------------------------------------------------
+# Packet wrapper with auto-free support
+# ---------------------------------------------------------------------------
+
+class PacketHandle:
+    """Wraps a D_Packet and its ctypes byref, providing free() and context manager.
+
+    Do not instantiate directly; use TDTPClientDirect methods.
+    """
+
+    def __init__(self, pkt: D_Packet) -> None:
+        self._pkt = pkt
+        self._freed = False
+
+    @property
+    def pkt(self) -> D_Packet:
+        if self._freed:
+            raise RuntimeError("D_Packet already freed")
+        return self._pkt
+
+    def free(self) -> None:
+        """Release C.malloc memory owned by this packet."""
+        if not self._freed:
+            # TODO: lib.D_FreePacket(ctypes.byref(self._pkt))
+            self._freed = True
+
+    def get_rows(self) -> list[list[str]]:
+        """Return all data rows as a list of string lists."""
+        return self.pkt.get_rows()
+
+    def get_schema(self) -> list[dict]:
+        """Return schema field descriptors."""
+        return self.pkt.get_schema()
+
+    def __enter__(self) -> "PacketHandle":
+        return self
+
+    def __exit__(self, *_) -> None:
+        self.free()
+
+
+# ---------------------------------------------------------------------------
+# TDTPClientDirect
+# ---------------------------------------------------------------------------
+
+class TDTPClientDirect:
+    """High-level Python client using the Direct boundary API (D_* exports).
+
+    All data passes as C structs — no JSON serialization.
+    The caller is responsible for freeing returned PacketHandle objects.
+    """
+
+    # -----------------------------------------------------------------------
+    # I/O
+    # -----------------------------------------------------------------------
+
+    def D_read(self, path: str) -> PacketHandle:
+        """Parse a .tdtp file and return a PacketHandle wrapping a D_Packet.
+
+        Caller must call handle.free() when done (or use D_read_ctx).
+
+        Raises:
+            TDTPParseError: if the file cannot be parsed.
+        """
+        # TODO: pkt = D_Packet()
+        # TODO: rc = lib.D_ReadFile(path.encode(), ctypes.byref(pkt))
+        # TODO: if rc != 0: raise TDTPParseError(pkt.get_error())
+        # TODO: return PacketHandle(pkt)
+        raise NotImplementedError
+
+    @contextmanager
+    def D_read_ctx(self, path: str) -> Generator[PacketHandle, None, None]:
+        """Context manager version of D_read. Frees the packet on exit."""
+        handle = self.D_read(path)
+        try:
+            yield handle
+        finally:
+            handle.free()
+
+    def D_write(self, handle: PacketHandle, path: str) -> None:
+        """Write a D_Packet to a .tdtp file.
+
+        Raises:
+            TDTPWriteError: if writing fails.
+        """
+        # TODO: rc = lib.D_WriteFile(ctypes.byref(handle.pkt), path.encode())
+        # TODO: if rc != 0: raise TDTPWriteError(handle.pkt.get_error())
+        raise NotImplementedError
+
+    # -----------------------------------------------------------------------
+    # TDTQL filtering
+    # -----------------------------------------------------------------------
+
+    def D_filter(
+        self,
+        handle: PacketHandle,
+        filters: list[dict],
+        limit: int = 0,
+    ) -> PacketHandle:
+        """Filter rows by AND-combined filter specs.
+
+        Args:
+            handle:  source PacketHandle (not freed by this call).
+            filters: list of dicts: [{"field": ..., "op": ..., "value": ..., "value2": ...}]
+                     op values: eq|ne|gt|gte|lt|lte|in|not_in|between|
+                                like|not_like|is_null|is_not_null
+            limit:   max rows in result (0 = unlimited).
+
+        Returns:
+            New PacketHandle; caller must free.
+
+        Raises:
+            TDTPFilterError: if filter evaluation fails.
+        """
+        # TODO: build (D_FilterSpec * len(filters)) array from filters list
+        # TODO: out = D_Packet()
+        # TODO: rc = lib.D_FilterRows(ctypes.byref(handle.pkt), filter_arr,
+        #                              len(filters), limit, ctypes.byref(out))
+        # TODO: if rc != 0: raise TDTPFilterError(out.get_error())
+        # TODO: return PacketHandle(out)
+        raise NotImplementedError
+
+    # -----------------------------------------------------------------------
+    # Processors
+    # -----------------------------------------------------------------------
+
+    def D_apply_mask(
+        self,
+        handle: PacketHandle,
+        fields: list[str],
+        mask_char: str = "*",
+        visible_chars: int = 4,
+    ) -> PacketHandle:
+        """Mask listed fields, returning a new PacketHandle.
+
+        Args:
+            handle:        source PacketHandle (not freed by this call).
+            fields:        field names to mask, e.g. ["email", "phone"].
+            mask_char:     replacement character (default "*").
+            visible_chars: number of trailing chars to leave unmasked.
+
+        Returns:
+            New PacketHandle; caller must free.
+
+        Raises:
+            TDTPProcessorError: if masking fails.
+        """
+        # TODO: cfg = D_MaskConfig.build(fields, mask_char, visible_chars)
+        # TODO: out = D_Packet()
+        # TODO: rc = lib.D_ApplyMask(ctypes.byref(handle.pkt),
+        #                             ctypes.byref(cfg), ctypes.byref(out))
+        # TODO: lib.D_FreeMaskConfig(ctypes.byref(cfg))
+        # TODO: if rc != 0: raise TDTPProcessorError(out.get_error())
+        # TODO: return PacketHandle(out)
+        raise NotImplementedError
+
+    def D_compress(self, handle: PacketHandle, level: int = 3) -> PacketHandle:
+        """Compress data with zstd, returning a new PacketHandle.
+
+        Args:
+            handle: source PacketHandle (not freed by this call).
+            level:  zstd compression level 1–22 (default 3).
+
+        Returns:
+            New PacketHandle with compression="zstd"; caller must free.
+
+        Raises:
+            TDTPProcessorError: if compression fails.
+        """
+        # TODO: out = D_Packet()
+        # TODO: rc = lib.D_ApplyCompress(ctypes.byref(handle.pkt),
+        #                                 ctypes.c_int(level), ctypes.byref(out))
+        # TODO: if rc != 0: raise TDTPProcessorError(out.get_error())
+        # TODO: return PacketHandle(out)
+        raise NotImplementedError
+
+    def D_decompress(self, handle: PacketHandle) -> PacketHandle:
+        """Decompress a zstd-compressed packet, returning a new PacketHandle.
+
+        Args:
+            handle: source PacketHandle with compression="zstd" (not freed).
+
+        Returns:
+            New PacketHandle with plain rows; caller must free.
+
+        Raises:
+            TDTPProcessorError: if decompression fails.
+        """
+        # TODO: out = D_Packet()
+        # TODO: rc = lib.D_ApplyDecompress(ctypes.byref(handle.pkt), ctypes.byref(out))
+        # TODO: if rc != 0: raise TDTPProcessorError(out.get_error())
+        # TODO: return PacketHandle(out)
+        raise NotImplementedError
