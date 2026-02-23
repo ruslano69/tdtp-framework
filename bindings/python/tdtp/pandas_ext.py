@@ -10,6 +10,8 @@ pandas_to_data(df, table_name) pandas.DataFrame → J_read dict (ready for J_wri
 """
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -116,6 +118,28 @@ def _is_na(v) -> bool:
         return False
 
 
+def _serialize(v) -> str:
+    """Convert a single cell value to a TDTP string representation.
+
+    - None / NaN / pd.NA / pd.NaT  → ""
+    - bool / pd.BooleanDtype        → "true" / "false"  (lowercase)
+    - everything else               → str(v)
+    """
+    if _is_na(v):
+        return ""
+    # bool must be checked before int (bool is subclass of int in Python)
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    try:
+        # pd.NA-backed boolean arrays yield numpy.bool_ on iteration
+        import numpy as _np
+        if isinstance(v, _np.bool_):
+            return "true" if v else "false"
+    except ImportError:
+        pass
+    return str(v)
+
+
 def _extract_fields(data: dict) -> list[dict]:
     """Extract schema fields from a J_read dict (handles upper/lowercase keys)."""
     schema = data.get("schema", {})
@@ -190,7 +214,7 @@ def data_to_pandas(data: dict) -> "pd.DataFrame":
     return df
 
 
-def pandas_to_data(df: "pd.DataFrame", table_name: str = "data") -> dict:
+def pandas_to_data(df: "pd.DataFrame", table_name: str = "data", message_id: str = "") -> dict:
     """Convert a pandas DataFrame to a TDTP data dict.
 
     The returned dict has the same structure as ``J_read()`` output and can be
@@ -199,6 +223,8 @@ def pandas_to_data(df: "pd.DataFrame", table_name: str = "data") -> dict:
     Args:
         df:         ``pandas.DataFrame`` to convert.
         table_name: value written into the TDTP header ``table_name`` field.
+        message_id: TDTP ``MessageID`` (required by the parser). If empty,
+                    a UUID4 is generated automatically.
 
     Returns:
         dict with ``"schema"``, ``"header"``, and ``"data"`` keys.
@@ -217,23 +243,27 @@ def pandas_to_data(df: "pd.DataFrame", table_name: str = "data") -> dict:
     """
     _require_pandas()
 
+    if not message_id:
+        message_id = str(uuid.uuid4())
+
     # Build schema fields (uppercase keys — J_* convention)
     fields = [
         {"Name": str(col), "Type": _pandas_tdtp_type(dtype)}
         for col, dtype in df.dtypes.items()
     ]
 
-    # Serialise rows: every value → str; NA/NaN/None → ""
+    # Serialise rows: every value → TDTP string; booleans → "true"/"false"
     rows: list[list[str]] = []
     for tup in df.itertuples(index=False, name=None):
-        rows.append(["" if _is_na(v) else str(v) for v in tup])
+        rows.append([_serialize(v) for v in tup])
 
     return {
         "schema": {"Fields": fields},
         "header": {
-            "type":       "Reference",
+            "type":       "reference",
             "table_name": table_name,
-            "version":    "1.0",
+            "message_id": message_id,
+            "timestamp":  datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         "data": rows,
     }

@@ -257,7 +257,7 @@ class TDTPClientJSON:
         from tdtp.pandas_ext import data_to_pandas
         return data_to_pandas(data)
 
-    def J_from_pandas(self, df, table_name: str = "data") -> dict:
+    def J_from_pandas(self, df, table_name: str = "data", message_id: str = "") -> dict:
         """Convert a pandas DataFrame to a TDTP data dict.
 
         The returned dict can be passed directly to :meth:`J_write`.
@@ -265,6 +265,8 @@ class TDTPClientJSON:
         Args:
             df:         ``pandas.DataFrame`` to convert.
             table_name: table name written into the TDTP header.
+            message_id: TDTP ``MessageID`` (required by the parser). If empty,
+                        a UUID4 is generated automatically.
 
         Returns:
             dict with ``"schema"``, ``"header"``, and ``"data"`` keys.
@@ -281,7 +283,7 @@ class TDTPClientJSON:
             client.J_write(data, "output.tdtp.xml")
         """
         from tdtp.pandas_ext import pandas_to_data
-        return pandas_to_data(df, table_name=table_name)
+        return pandas_to_data(df, table_name=table_name, message_id=message_id)
 
     # -----------------------------------------------------------------------
     # Diff
