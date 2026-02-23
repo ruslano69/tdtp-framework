@@ -136,6 +136,7 @@ func routeCommand(
 				Limit:       *flags.Limit,
 				RowStart:    rowStart,
 				RowEnd:      rowEnd,
+				Query:       query,
 			})
 		})
 
