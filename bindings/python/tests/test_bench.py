@@ -44,6 +44,15 @@ def j_data(j, sample_path):
     return j.J_read(sample_path)
 
 
+# Pre-loaded D_Packet kept alive for the entire module (freed at teardown).
+# Allows filter_only / mask_only benchmarks to skip file I/O.
+@pytest.fixture(scope="module")
+def d_handle(d, sample_path):
+    h = d.D_read(sample_path)
+    yield h
+    h.free()
+
+
 # ---------------------------------------------------------------------------
 # Read benchmark
 # ---------------------------------------------------------------------------
@@ -176,3 +185,80 @@ def test_bench_extract_rows_d(benchmark, d, sample_path):
         benchmark(h.get_rows)
     finally:
         h.free()
+
+
+# ---------------------------------------------------------------------------
+# FAIR: filter_only — both APIs start from already-loaded in-memory data,
+# no file I/O inside the benchmark loop.
+#
+# J_*: j_data is a Python dict already in memory → J_FilterRows
+#        (JSON serialize dict → call Go → JSON deserialize result)
+# D_*: d_handle is a D_Packet already in C memory → D_FilterRows
+#        (pass C pointer → Go filters in-place → return C pointer)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.benchmark(group="filter_only")
+def test_bench_filter_only_j(benchmark, j, j_data):
+    """Filter in-memory J dict, no file I/O  (J_FilterRows)."""
+    benchmark(j.J_filter, j_data, "Balance > 1000")
+
+
+@pytest.mark.benchmark(group="filter_only")
+def test_bench_filter_only_d(benchmark, d, d_handle):
+    """Filter in-memory D_Packet, no file I/O  (D_FilterRows)."""
+    spec = [{"field": "Balance", "op": "gt", "value": "1000"}]
+
+    def _op():
+        with d.D_filter(d_handle, spec) as out:
+            return out.get_rows()
+
+    benchmark(_op)
+
+
+# ---------------------------------------------------------------------------
+# FAIR: mask_only — same idea, no I/O inside loop.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.benchmark(group="mask_only")
+def test_bench_mask_only_j(benchmark, j, j_data):
+    """Mask Email in-memory J dict, no file I/O  (J_ApplyProcessor)."""
+    benchmark(j.J_apply_processor, j_data, "field_masker", fields={"Email": "stars"})
+
+
+@pytest.mark.benchmark(group="mask_only")
+def test_bench_mask_only_d(benchmark, d, d_handle):
+    """Mask Email in-memory D_Packet, no file I/O  (D_ApplyMask)."""
+    def _op():
+        with d.D_apply_mask(d_handle, ["Email"], visible_chars=0) as out:
+            return out.get_rows()
+
+    benchmark(_op)
+
+
+# ---------------------------------------------------------------------------
+# FAIR: pipeline — read → filter → get_rows as one atomic operation.
+# Both APIs do exactly the same work end-to-end.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.benchmark(group="pipeline")
+def test_bench_pipeline_j(benchmark, j, sample_path):
+    """Read + filter + return rows  (J API, end-to-end)."""
+    def _op():
+        data = j.J_read(sample_path)
+        filtered = j.J_filter(data, "Balance > 1000")
+        return filtered["data"]
+
+    benchmark(_op)
+
+
+@pytest.mark.benchmark(group="pipeline")
+def test_bench_pipeline_d(benchmark, d, sample_path):
+    """Read + filter + return rows  (D API, end-to-end)."""
+    spec = [{"field": "Balance", "op": "gt", "value": "1000"}]
+
+    def _op():
+        with d.D_read_ctx(sample_path) as src:
+            with d.D_filter(src, spec) as out:
+                return out.get_rows()
+
+    benchmark(_op)
