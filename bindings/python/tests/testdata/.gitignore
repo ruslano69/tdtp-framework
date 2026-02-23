@@ -1,0 +1,2 @@
+# Test fixture XML files are source, not build artifacts — override root rule.
+!*.tdtp.xml

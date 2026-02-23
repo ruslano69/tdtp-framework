@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>users</TableName>
+    <MessageID>REF-2026-TEST001</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>8</RecordsInPart>
+    <Timestamp>2026-01-01T00:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="ID"        type="INTEGER" key="true"></Field>
+    <Field name="Name"      type="TEXT"></Field>
+    <Field name="Email"     type="TEXT"></Field>
+    <Field name="City"      type="TEXT"></Field>
+    <Field name="Balance"   type="INTEGER"></Field>
+    <Field name="IsActive"  type="INTEGER"></Field>
+    <Field name="CreatedAt" type="TEXT"></Field>
+  </Schema>
+  <Data>
+    <R>1|John Doe|john@example.com|Moscow|1500|1|2025-01-15T10:00:00Z</R>
+    <R>2|Jane Smith|jane@example.com|SPb|2000|1|2025-02-20T11:00:00Z</R>
+    <R>3|Bob Johnson|bob@example.com|Omsk|500|0|2025-03-10T12:00:00Z</R>
+    <R>4|Alice Brown|alice@example.com|Kazan|2500|1|2025-01-05T09:00:00Z</R>
+    <R>5|Charlie Davis|charlie@example.com|SPb|800|1|2025-04-12T13:00:00Z</R>
+    <R>6|Emma Wilson|emma@example.com|Moscow|3000|1|2024-12-20T10:00:00Z</R>
+    <R>7|Frank Miller|frank@example.com|Omsk|100|0|2025-05-05T14:00:00Z</R>
+    <R>8|Grace Lee|grace@example.com|SPb|1800|1|2025-02-28T15:00:00Z</R>
+  </Data>
+</DataPacket>

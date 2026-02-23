@@ -20,6 +20,13 @@ from conftest import (
     SAMPLE_TOTAL_ROWS,
     SAMPLE_BALANCE_GT_1000_COUNT,
     SAMPLE_MOSCOW_COUNT,
+    SAMPLE_BETWEEN_1000_2000_COUNT,
+    SAMPLE_LIKE_JOHN_COUNT,
+    SAMPLE_IN_MOSCOW_OMSK_COUNT,
+    NULLABLE_FIELD_NAMES,
+    NULLABLE_TOTAL_ROWS,
+    NULLABLE_NULL_CITY_COUNT,
+    NULLABLE_NOT_NULL_CITY_COUNT,
 )
 
 
@@ -129,13 +136,38 @@ class TestJFilter:
             j_client.J_filter(sample_data_j, "NoSuchField = 'x'")
 
     def test_between_operator(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: verify BETWEEN syntax with TDTQL translator")
+        bal_idx = SAMPLE_FIELD_NAMES.index("Balance")
+        result = j_client.J_filter(sample_data_j, "Balance BETWEEN 1000 AND 2000")
+        assert len(result["data"]) == SAMPLE_BETWEEN_1000_2000_COUNT
+        for row in result["data"]:
+            assert 1000 <= int(row[bal_idx]) <= 2000
 
     def test_like_operator(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: verify LIKE syntax with TDTQL translator")
+        email_idx = SAMPLE_FIELD_NAMES.index("Email")
+        result = j_client.J_filter(sample_data_j, "Email LIKE 'john%'")
+        assert len(result["data"]) == SAMPLE_LIKE_JOHN_COUNT
+        assert result["data"][0][email_idx].startswith("john")
 
-    def test_is_null_operator(self, j_client, sample_data_j) -> None:
-        pytest.skip("TODO: add fixture with NULL values")
+    def test_in_operator(self, j_client, sample_data_j) -> None:
+        city_idx = SAMPLE_FIELD_NAMES.index("City")
+        result = j_client.J_filter(sample_data_j, "City IN ('Moscow', 'Omsk')")
+        assert len(result["data"]) == SAMPLE_IN_MOSCOW_OMSK_COUNT
+        for row in result["data"]:
+            assert row[city_idx] in ("Moscow", "Omsk")
+
+    def test_is_null_operator(self, j_client, nullable_data_j) -> None:
+        city_idx = NULLABLE_FIELD_NAMES.index("City")
+        result = j_client.J_filter(nullable_data_j, "City IS NULL")
+        assert len(result["data"]) == NULLABLE_NULL_CITY_COUNT
+        for row in result["data"]:
+            assert row[city_idx] == ""
+
+    def test_is_not_null_operator(self, j_client, nullable_data_j) -> None:
+        city_idx = NULLABLE_FIELD_NAMES.index("City")
+        result = j_client.J_filter(nullable_data_j, "City IS NOT NULL")
+        assert len(result["data"]) == NULLABLE_NOT_NULL_CITY_COUNT
+        for row in result["data"]:
+            assert row[city_idx] != ""
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>users_nullable</TableName>
+    <MessageID>REF-2026-NULL001</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>4</RecordsInPart>
+    <Timestamp>2026-01-01T00:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="ID"      type="INTEGER" key="true"></Field>
+    <Field name="Name"    type="TEXT"></Field>
+    <Field name="City"    type="TEXT"></Field>
+    <Field name="Balance" type="INTEGER"></Field>
+  </Schema>
+  <Data>
+    <!-- City is empty (NULL) for rows 1 and 3 -->
+    <R>1|Alice||1500</R>
+    <R>2|Bob|Moscow|2000</R>
+    <R>3|Carol||800</R>
+    <R>4|Dave|SPb|1200</R>
+  </Data>
+</DataPacket>

@@ -15,7 +15,8 @@ from tdtp import TDTPClientDirect, TDTPClientJSON
 
 TESTS_DIR   = Path(__file__).parent
 TESTDATA    = TESTS_DIR / "testdata"
-SAMPLE_FILE = TESTDATA / "users.tdtp.xml"
+SAMPLE_FILE          = TESTDATA / "users.tdtp.xml"
+NULLABLE_SAMPLE_FILE = TESTDATA / "users_nullable.tdtp.xml"
 
 # Known sample data properties (kept in sync with users.tdtp.xml)
 SAMPLE_TOTAL_ROWS    = 8
@@ -25,6 +26,18 @@ SAMPLE_KEY_FIELD     = "ID"
 SAMPLE_BALANCE_GT_1000_COUNT = 5
 # rows where City = 'Moscow'
 SAMPLE_MOSCOW_COUNT  = 2
+# rows with Balance BETWEEN 1000 AND 2000 (inclusive)
+SAMPLE_BETWEEN_1000_2000_COUNT = 3
+# rows where Email LIKE 'john%'
+SAMPLE_LIKE_JOHN_COUNT = 1
+# rows where City IN ('Moscow', 'Omsk')
+SAMPLE_IN_MOSCOW_OMSK_COUNT = 4
+
+# Known nullable fixture properties (kept in sync with users_nullable.tdtp.xml)
+NULLABLE_TOTAL_ROWS       = 4
+NULLABLE_FIELD_NAMES      = ["ID", "Name", "City", "Balance"]
+NULLABLE_NULL_CITY_COUNT  = 2   # rows where City IS NULL (empty string)
+NULLABLE_NOT_NULL_CITY_COUNT = 2
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +72,20 @@ def sample_tdtp_path() -> Path:
 def sample_data_j(j_client: TDTPClientJSON, sample_tdtp_path: Path) -> dict:
     """Pre-parsed sample data via JSON API (parsed once per session)."""
     return j_client.J_read(str(sample_tdtp_path))
+
+
+@pytest.fixture(scope="session")
+def nullable_tdtp_path() -> Path:
+    """Path to the nullable fixture (has rows with empty City = NULL)."""
+    if not NULLABLE_SAMPLE_FILE.exists():
+        pytest.skip(f"Nullable fixture not found: {NULLABLE_SAMPLE_FILE}")
+    return NULLABLE_SAMPLE_FILE
+
+
+@pytest.fixture(scope="session")
+def nullable_data_j(j_client: TDTPClientJSON, nullable_tdtp_path: Path) -> dict:
+    """Pre-parsed nullable fixture via JSON API."""
+    return j_client.J_read(str(nullable_tdtp_path))
 
 
 @pytest.fixture()

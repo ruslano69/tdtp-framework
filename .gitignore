@@ -39,7 +39,7 @@ dist/
 !cmd/tdtp-xray/frontend/dist/
 *.tar.gz
 *.zip
-# Test data files
+# Test data files (generated / large samples)
 *.tdtp.xml
 *.xlsx
 benchmark_*.db
