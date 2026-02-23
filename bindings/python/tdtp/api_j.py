@@ -138,25 +138,48 @@ class TDTPClientJSON:
         data: dict,
         where: str,
         limit: int = 0,
+        offset: int = 0,
     ) -> dict:
-        """Filter data rows using a TDTQL WHERE clause.
+        """Filter data rows using a TDTQL WHERE clause with optional pagination.
+
+        Uses the framework-native ``executor.Execute`` path, so LIMIT and OFFSET
+        are applied inside the Go core rather than via Python-level slicing.
 
         Args:
-            data:  dict in the shape returned by :meth:`J_read`.
-            where: TDTQL expression, e.g. ``"Balance > 1000 AND City = 'Omsk'"``.
-            limit: maximum rows to return (0 = unlimited).
+            data:   dict in the shape returned by :meth:`J_read`.
+            where:  TDTQL expression, e.g. ``"Balance > 1000 AND City = 'Omsk'"``.
+            limit:  maximum rows to return per page (0 = unlimited).
+            offset: number of matched rows to skip before returning results (default 0).
 
         Returns:
-            Same shape as :meth:`J_read` with filtered rows.
+            dict with the same ``"schema"`` / ``"header"`` / ``"data"`` keys as
+            :meth:`J_read`, plus an optional ``"query_context"`` object when
+            ``limit > 0``::
+
+                {
+                    "schema": ...,
+                    "header": ...,
+                    "data":   [...],
+                    "query_context": {
+                        "total_records":    <int>,
+                        "matched_records":  <int>,
+                        "returned_records": <int>,
+                        "more_available":   <bool>,
+                        "next_offset":      <int>,   # only when more_available is True
+                        "limit":            <int>,
+                        "offset":           <int>,
+                    }
+                }
 
         Raises:
             TDTPFilterError: if the WHERE clause is invalid or evaluation fails.
         """
         return _call(
-            lib.J_FilterRows,
+            lib.J_FilterRowsPage,
             json.dumps(data).encode(),
             where.encode(),
             ctypes.c_int(limit),
+            ctypes.c_int(offset),
         )
 
     # -----------------------------------------------------------------------

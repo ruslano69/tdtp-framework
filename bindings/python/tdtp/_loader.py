@@ -112,6 +112,13 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_FilterRows.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
     lib.J_FilterRows.restype = ctypes.c_void_p
 
+    # J_FilterRowsPage(*char, *char, c_int, c_int) → *char
+    # Returns schema/header/data + "query_context" pagination metadata.
+    lib.J_FilterRowsPage.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+    ]
+    lib.J_FilterRowsPage.restype = ctypes.c_void_p
+
     # J_ApplyProcessor(*char, *char, *char) → *char
     lib.J_ApplyProcessor.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
