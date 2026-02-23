@@ -3,9 +3,6 @@ Shared pytest fixtures for J_* and D_* API tests.
 """
 from __future__ import annotations
 
-import json
-import shutil
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -16,8 +13,18 @@ from tdtp import TDTPClientDirect, TDTPClientJSON
 # Paths
 # ---------------------------------------------------------------------------
 
-REPO_ROOT = Path(__file__).parents[3]
-SAMPLE_DIR = REPO_ROOT / "tests" / "testdata"   # existing repo test data
+TESTS_DIR   = Path(__file__).parent
+TESTDATA    = TESTS_DIR / "testdata"
+SAMPLE_FILE = TESTDATA / "users.tdtp.xml"
+
+# Known sample data properties (kept in sync with users.tdtp.xml)
+SAMPLE_TOTAL_ROWS    = 8
+SAMPLE_FIELD_NAMES   = ["ID", "Name", "Email", "City", "Balance", "IsActive", "CreatedAt"]
+SAMPLE_KEY_FIELD     = "ID"
+# rows with Balance > 1000
+SAMPLE_BALANCE_GT_1000_COUNT = 5
+# rows where City = 'Moscow'
+SAMPLE_MOSCOW_COUNT  = 2
 
 
 # ---------------------------------------------------------------------------
@@ -42,15 +49,10 @@ def d_client() -> TDTPClientDirect:
 
 @pytest.fixture(scope="session")
 def sample_tdtp_path() -> Path:
-    """Path to a small sample .tdtp file used by both API tests.
-
-    TODO: generate a minimal .tdtp fixture file in tests/testdata/
-          if one doesn't exist yet (use packet.Generator in a Go helper or
-          copy from examples/).
-    """
-    # TODO: locate or generate a representative sample file
-    # TODO: raise pytest.skip("sample .tdtp not found") if missing
-    raise NotImplementedError
+    """Path to the bundled sample .tdtp fixture."""
+    if not SAMPLE_FILE.exists():
+        pytest.skip(f"Sample fixture not found: {SAMPLE_FILE}")
+    return SAMPLE_FILE
 
 
 @pytest.fixture(scope="session")
@@ -60,6 +62,6 @@ def sample_data_j(j_client: TDTPClientJSON, sample_tdtp_path: Path) -> dict:
 
 
 @pytest.fixture()
-def tmp_dir(tmp_path: Path) -> Path:
-    """Temporary directory cleaned up after each test."""
-    return tmp_path
+def tmp_tdtp(tmp_path: Path) -> Path:
+    """A temporary path for writing .tdtp output files."""
+    return tmp_path / "out.tdtp.xml"

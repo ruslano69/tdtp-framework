@@ -29,7 +29,4 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts   = "-v --tb=short"
-
-[tool.pytest.benchmark]
-# Run with: pytest --benchmark-only
-min_rounds = 5
+markers   = ["benchmark: mark test as a benchmark"]

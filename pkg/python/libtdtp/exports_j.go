@@ -6,26 +6,124 @@ package main
 import "C"
 import (
 	"encoding/json"
+	"fmt"
 	"unsafe"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/diff"
 )
+
+// ---------------------------------------------------------------------------
+// Internal types — canonical JSON shape shared by all J_* functions
+// ---------------------------------------------------------------------------
+
+// jPacket is the canonical JSON representation for J_* I/O.
+type jPacket struct {
+	Schema packet.Schema `json:"schema"`
+	Header jHeader       `json:"header"`
+	Data   [][]string    `json:"data"`
+	Error  string        `json:"error,omitempty"`
+}
+
+// jHeader is a JSON-friendly mirror of packet.Header (time.Time → string).
+type jHeader struct {
+	Type          string `json:"type"`
+	TableName     string `json:"table_name"`
+	MessageID     string `json:"message_id"`
+	InReplyTo     string `json:"in_reply_to,omitempty"`
+	PartNumber    int    `json:"part_number,omitempty"`
+	TotalParts    int    `json:"total_parts,omitempty"`
+	RecordsInPart int    `json:"records_in_part,omitempty"`
+	Timestamp     string `json:"timestamp"`
+	Sender        string `json:"sender,omitempty"`
+	Recipient     string `json:"recipient,omitempty"`
+}
+
+// jDiffResult mirrors diff.DiffResult for JSON output.
+type jDiffResult struct {
+	Added    [][]string     `json:"added"`
+	Removed  [][]string     `json:"removed"`
+	Modified []jModifiedRow `json:"modified"`
+	Stats    jDiffStats     `json:"stats"`
+	Error    string         `json:"error,omitempty"`
+}
+
+type jModifiedRow struct {
+	Key     string               `json:"key"`
+	OldRow  []string             `json:"old_row"`
+	NewRow  []string             `json:"new_row"`
+	Changes map[int]jFieldChange `json:"changes"`
+}
+
+type jFieldChange struct {
+	FieldName string `json:"field_name"`
+	OldValue  string `json:"old_value"`
+	NewValue  string `json:"new_value"`
+}
+
+type jDiffStats struct {
+	TotalInA  int `json:"total_in_a"`
+	TotalInB  int `json:"total_in_b"`
+	Added     int `json:"added"`
+	Removed   int `json:"removed"`
+	Modified  int `json:"modified"`
+	Unchanged int `json:"unchanged"`
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-// jOK serializes v to JSON and returns a *C.char the caller must J_FreeString.
 func jOK(v any) *C.char {
 	b, _ := json.Marshal(v)
 	return C.CString(string(b))
 }
 
-// jErr returns a JSON error envelope: {"error": "..."}.
 func jErr(msg string) *C.char {
 	b, _ := json.Marshal(map[string]string{"error": msg})
 	return C.CString(string(b))
+}
+
+func packetToJPacket(pkt *packet.DataPacket, rows [][]string) jPacket {
+	return jPacket{
+		Schema: pkt.Schema,
+		Header: jHeader{
+			Type:          string(pkt.Header.Type),
+			TableName:     pkt.Header.TableName,
+			MessageID:     pkt.Header.MessageID,
+			InReplyTo:     pkt.Header.InReplyTo,
+			PartNumber:    pkt.Header.PartNumber,
+			TotalParts:    pkt.Header.TotalParts,
+			RecordsInPart: pkt.Header.RecordsInPart,
+			Timestamp:     pkt.Header.Timestamp.UTC().Format("2006-01-02T15:04:05Z"),
+			Sender:        pkt.Header.Sender,
+			Recipient:     pkt.Header.Recipient,
+		},
+		Data: rows,
+	}
+}
+
+func jPacketToDataPacket(jp jPacket) *packet.DataPacket {
+	pkt := packet.NewDataPacket(packet.MessageType(jp.Header.Type), jp.Header.TableName)
+	pkt.Header.MessageID = jp.Header.MessageID
+	pkt.Header.InReplyTo = jp.Header.InReplyTo
+	pkt.Header.PartNumber = jp.Header.PartNumber
+	pkt.Header.TotalParts = jp.Header.TotalParts
+	pkt.Header.RecordsInPart = jp.Header.RecordsInPart
+	pkt.Header.Sender = jp.Header.Sender
+	pkt.Header.Recipient = jp.Header.Recipient
+	pkt.Schema = jp.Schema
+	pkt.Data = packet.RowsToData(jp.Data)
+	return pkt
+}
+
+func unmarshalJPacket(raw *C.char) (jPacket, error) {
+	var jp jPacket
+	if err := json.Unmarshal([]byte(C.GoString(raw)), &jp); err != nil {
+		return jPacket{}, fmt.Errorf("invalid data JSON: %w", err)
+	}
+	return jp, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -33,7 +131,6 @@ func jErr(msg string) *C.char {
 // ---------------------------------------------------------------------------
 
 // J_FreeString releases a *C.char returned by any J_* function.
-// Must be called after every successful J_* call to prevent memory leaks.
 //
 //export J_FreeString
 func J_FreeString(s *C.char) {
@@ -44,7 +141,7 @@ func J_FreeString(s *C.char) {
 // Version
 // ---------------------------------------------------------------------------
 
-// J_GetVersion returns the library version as a plain string.
+// J_GetVersion returns the library version as a plain C string.
 // Caller must free with J_FreeString.
 //
 //export J_GetVersion
@@ -56,34 +153,44 @@ func J_GetVersion() *C.char {
 // I/O
 // ---------------------------------------------------------------------------
 
-// J_ReadFile parses a TDTP file and returns its contents as JSON:
-//
-//	{"schema":{"fields":[...]},"header":{...},"data":[["v1","v2"],...]}
-//
-// On error returns {"error":"..."}.
+// J_ReadFile parses a TDTP file and returns its contents as JSON.
+// Compressed files (zstd) are handled via jDecompressRows (exports_j_compress.go).
 // Caller must free result with J_FreeString.
 //
 //export J_ReadFile
 func J_ReadFile(path *C.char) *C.char {
-	// TODO: call packet.NewParser().ParseFile(C.GoString(path))
-	// TODO: decompress if pkt.Data.Compression == "zstd"
-	// TODO: build jReadResult{Schema, Header, Data} and return jOK(result)
-	_ = packet.NewParser()
-	return jErr("TODO: not implemented")
+	parser := packet.NewParser()
+	pkt, err := parser.ParseFile(C.GoString(path))
+	if err != nil {
+		return jErr(fmt.Sprintf("parse error: %v", err))
+	}
+
+	if pkt.Data.Compression != "" {
+		// Decompression delegated to exports_j_compress.go
+		return jDecompressRows(pkt)
+	}
+
+	return jOK(packetToJPacket(pkt, pkt.GetRows()))
 }
 
 // J_WriteFile generates a TDTP file from JSON data and writes it to path.
-// dataJSON must match the shape returned by J_ReadFile.
 // Returns {"ok":true} or {"error":"..."}.
 // Caller must free result with J_FreeString.
 //
 //export J_WriteFile
 func J_WriteFile(dataJSON *C.char, path *C.char) *C.char {
-	// TODO: json.Unmarshal dataJSON → jReadResult
-	// TODO: build DataPacket from result
-	// TODO: call packet.NewGenerator().WriteFile(pkt, C.GoString(path))
-	_, _ = dataJSON, path
-	return jErr("TODO: not implemented")
+	jp, err := unmarshalJPacket(dataJSON)
+	if err != nil {
+		return jErr(err.Error())
+	}
+
+	pkt := jPacketToDataPacket(jp)
+	gen := packet.NewGenerator()
+	if err := gen.WriteToFile(pkt, C.GoString(path)); err != nil {
+		return jErr(fmt.Sprintf("write error: %v", err))
+	}
+
+	return jOK(map[string]bool{"ok": true})
 }
 
 // ---------------------------------------------------------------------------
@@ -91,104 +198,134 @@ func J_WriteFile(dataJSON *C.char, path *C.char) *C.char {
 // ---------------------------------------------------------------------------
 
 // J_FilterRows applies a TDTQL WHERE clause to data and returns filtered rows.
-//
-// dataJSON — output of J_ReadFile.
 // whereClause — TDTQL expression, e.g. "Balance > 1000 AND City = 'Omsk'".
-// limit — max rows to return (0 = unlimited).
-//
-// Returns same shape as J_ReadFile (schema preserved, only data filtered).
+// limit — max rows (0 = unlimited).
 // Caller must free result with J_FreeString.
 //
 //export J_FilterRows
 func J_FilterRows(dataJSON *C.char, whereClause *C.char, limit C.int) *C.char {
-	// TODO: json.Unmarshal dataJSON → jReadResult
-	// TODO: tdtql.NewParser().Parse(C.GoString(whereClause)) → AST
-	// TODO: tdtql.NewFilterEngine().ApplyFilters(filters, rows, schema, converter)
-	// TODO: apply limit if > 0
-	// TODO: return jOK(filtered result)
-	_, _, _ = dataJSON, whereClause, limit
-	return jErr("TODO: not implemented")
+	jp, err := unmarshalJPacket(dataJSON)
+	if err != nil {
+		return jErr(err.Error())
+	}
+
+	translator := tdtql.NewTranslator()
+	filters, err := translator.TranslateWhere(C.GoString(whereClause))
+	if err != nil {
+		return jErr(fmt.Sprintf("invalid WHERE clause: %v", err))
+	}
+
+	executor := tdtql.NewExecutor()
+	filtered, err := executor.ExecuteWhere(filters, jp.Data, jp.Schema)
+	if err != nil {
+		return jErr(fmt.Sprintf("filter error: %v", err))
+	}
+
+	n := int(limit)
+	if n > 0 && n < len(filtered) {
+		filtered = filtered[:n]
+	}
+
+	result := jp
+	result.Data = filtered
+	return jOK(result)
 }
 
 // ---------------------------------------------------------------------------
-// Processors
+// Processors — delegated to exports_j_processors.go
 // ---------------------------------------------------------------------------
 
 // J_ApplyProcessor runs a single named processor over data.
+// procType: "field_masker" | "field_normalizer" | "field_validator" |
 //
-// dataJSON   — output of J_ReadFile.
-// procType   — one of: "field_masker", "field_normalizer", "field_validator",
+//	"compress" | "decompress"
 //
-//	"checksum", "compress", "decompress".
-//
-// configJSON — processor-specific config, e.g.:
-//
-//	field_masker:     {"fields":["email","phone"],"mask_char":"*","visible_chars":4}
-//	field_normalizer: {"rules":[{"field":"name","trim":true,"upper":false}]}
-//	field_validator:  {"rules":[{"field":"age","min":0,"max":150}]}
-//	compress:         {"algorithm":"zstd","level":3}
-//
-// Returns same shape as J_ReadFile.
+// configJSON: processor-specific JSON config object.
 // Caller must free result with J_FreeString.
 //
 //export J_ApplyProcessor
 func J_ApplyProcessor(dataJSON *C.char, procType *C.char, configJSON *C.char) *C.char {
-	// TODO: json.Unmarshal dataJSON → jReadResult
-	// TODO: processors.NewFactory().Create(C.GoString(procType), config)
-	// TODO: proc.Process(ctx, rows, schema)
-	// TODO: return jOK(result)
-	_ = processors.NewFactory()
-	_, _, _ = dataJSON, procType, configJSON
-	return jErr("TODO: not implemented")
+	return jApplyProcessor(dataJSON, procType, configJSON)
 }
 
-// J_ApplyChain runs an ordered chain of processors over data.
-//
-// dataJSON  — output of J_ReadFile.
-// chainJSON — array of processor configs:
-//
-//	[{"type":"field_masker","params":{...}},{"type":"compress","params":{...}}]
-//
-// Returns same shape as J_ReadFile.
+// J_ApplyChain runs an ordered chain of processors.
+// chainJSON: [{"type":"field_masker","params":{...}}, ...]
 // Caller must free result with J_FreeString.
 //
 //export J_ApplyChain
 func J_ApplyChain(dataJSON *C.char, chainJSON *C.char) *C.char {
-	// TODO: json.Unmarshal chainJSON → []processors.Config
-	// TODO: processors.NewChain(configs...).Process(ctx, rows, schema)
-	// TODO: return jOK(result)
-	_, _ = dataJSON, chainJSON
-	return jErr("TODO: not implemented")
+	return jApplyChain(dataJSON, chainJSON)
 }
 
 // ---------------------------------------------------------------------------
 // Diff
 // ---------------------------------------------------------------------------
 
-// J_Diff computes the difference between two TDTP datasets (add/remove/modify).
-//
-// oldJSON, newJSON — outputs of J_ReadFile.
-// Returns diff result JSON: {"added":[...],"removed":[...],"modified":[...],"stats":{...}}.
+// J_Diff computes the difference between two TDTP datasets.
+// Returns {"added":[...],"removed":[...],"modified":[...],"stats":{...}}.
 // Caller must free result with J_FreeString.
 //
 //export J_Diff
 func J_Diff(oldJSON *C.char, newJSON *C.char) *C.char {
-	// TODO: json.Unmarshal both → jReadResult
-	// TODO: build DataPacket from each
-	// TODO: diff.NewDiffer().Diff(old, new, options)
-	// TODO: return jOK(diffResult)
-	_, _ = oldJSON, newJSON
-	return jErr("TODO: not implemented")
-}
+	jpOld, err := unmarshalJPacket(oldJSON)
+	if err != nil {
+		return jErr(fmt.Sprintf("old data error: %v", err))
+	}
+	jpNew, err := unmarshalJPacket(newJSON)
+	if err != nil {
+		return jErr(fmt.Sprintf("new data error: %v", err))
+	}
 
-// ---------------------------------------------------------------------------
-// Internal types (shared between J_* functions)
-// ---------------------------------------------------------------------------
+	pktOld := jPacketToDataPacket(jpOld)
+	pktNew := jPacketToDataPacket(jpNew)
 
-// jReadResult is the canonical JSON shape for J_ReadFile / J_WriteFile / J_FilterRows.
-type jReadResult struct {
-	Schema packet.Schema  `json:"schema"`
-	Header packet.Header  `json:"header"`
-	Data   [][]string     `json:"data"`
-	Error  string         `json:"error,omitempty"`
+	differ := diff.NewDiffer(diff.DiffOptions{})
+	result, err := differ.Compare(pktOld, pktNew)
+	if err != nil {
+		return jErr(fmt.Sprintf("diff error: %v", err))
+	}
+
+	modified := make([]jModifiedRow, 0, len(result.Modified))
+	for _, m := range result.Modified {
+		changes := make(map[int]jFieldChange, len(m.Changes))
+		for idx, ch := range m.Changes {
+			changes[idx] = jFieldChange{
+				FieldName: ch.FieldName,
+				OldValue:  ch.OldValue,
+				NewValue:  ch.NewValue,
+			}
+		}
+		modified = append(modified, jModifiedRow{
+			Key:     m.Key,
+			OldRow:  m.OldRow,
+			NewRow:  m.NewRow,
+			Changes: changes,
+		})
+	}
+
+	added := result.Added
+	if added == nil {
+		added = [][]string{}
+	}
+	removed := result.Removed
+	if removed == nil {
+		removed = [][]string{}
+	}
+	if modified == nil {
+		modified = []jModifiedRow{}
+	}
+
+	return jOK(jDiffResult{
+		Added:    added,
+		Removed:  removed,
+		Modified: modified,
+		Stats: jDiffStats{
+			TotalInA:  result.Stats.TotalInA,
+			TotalInB:  result.Stats.TotalInB,
+			Added:     result.Stats.AddedCount,
+			Removed:   result.Stats.RemovedCount,
+			Modified:  result.Stats.ModifiedCount,
+			Unchanged: result.Stats.UnchangedCount,
+		},
+	})
 }

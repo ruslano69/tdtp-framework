@@ -22,21 +22,33 @@ else ifeq ($(GOOS),darwin)
     LIB_OUT := $(CURDIR)/tdtp/libtdtp.dylib
 endif
 
-.PHONY: all build-lib install-dev test bench clean help
+.PHONY: all build-lib build-lib-full install-dev test bench clean help
 
 all: build-lib install-dev
 
-## build-lib: compile Go sources → libtdtp.so (+ libtdtp.h)
+## build-lib: compile without zstd/processors (no extra deps needed)
+##            Supports: J_ReadFile (plain), J_WriteFile, J_FilterRows, J_Diff
 build-lib:
-	@echo "→ Building $(LIB_OUT) (GOOS=$(GOOS) GOARCH=$(GOARCH))"
-	cd $(REPO_ROOT) && \
+	@echo "→ Building $(LIB_OUT) basic (GOOS=$(GOOS) GOARCH=$(GOARCH))"
+	cd $(LIB_SRC) && \
 	go build \
 		-buildmode=c-shared \
-		-o $(LIB_OUT) \
-		./pkg/python/libtdtp/
-	@# Header is generated alongside the .so
-	@if [ -f $(REPO_ROOT)/libtdtp.h ]; then mv $(REPO_ROOT)/libtdtp.h $(HEADER_OUT); fi
-	@echo "✓ $(LIB_OUT)"
+		-o $(LIB_OUT) .
+	@if [ -f $(LIB_SRC)/libtdtp.h ]; then mv $(LIB_SRC)/libtdtp.h $(HEADER_OUT); fi
+	@echo "✓ $(LIB_OUT) [basic]"
+
+## build-lib-full: compile with zstd + processors support (-tags compress)
+##                 Requires: go mod download (needs internet on first run)
+##                 Supports all J_* functions including compress/decompress/processors
+build-lib-full:
+	@echo "→ Building $(LIB_OUT) full (GOOS=$(GOOS) GOARCH=$(GOARCH))"
+	cd $(LIB_SRC) && \
+	go build \
+		-tags compress \
+		-buildmode=c-shared \
+		-o $(LIB_OUT) .
+	@if [ -f $(LIB_SRC)/libtdtp.h ]; then mv $(LIB_SRC)/libtdtp.h $(HEADER_OUT); fi
+	@echo "✓ $(LIB_OUT) [full]"
 
 ## install-dev: install package in editable mode (requires build-lib first)
 install-dev:
