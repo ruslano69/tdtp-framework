@@ -75,6 +75,44 @@ class PacketHandle:
         """Return schema field descriptors."""
         return self.pkt.get_schema()
 
+    def to_pandas(self):
+        """Convert this packet to a pandas DataFrame.
+
+        Schema field names and types come from the D_* struct (lowercase keys
+        ``"name"`` / ``"type"``); the conversion is handled by
+        :func:`tdtp.pandas_ext.data_to_pandas`.
+
+        Returns:
+            ``pandas.DataFrame`` with columns named after schema fields and
+            dtypes inferred from TDTP field types.
+
+        Raises:
+            ImportError: if pandas is not installed.
+            RuntimeError: if the packet has already been freed.
+
+        Example::
+
+            client = TDTPClientDirect()
+            with client.D_read_ctx("users.tdtp.xml") as pkt:
+                df = pkt.to_pandas()
+            print(df.describe())
+        """
+        from tdtp.pandas_ext import data_to_pandas
+
+        # Build a J_read-compatible dict from D_* data.
+        # D_Field.as_dict() uses lowercase keys ("name", "type"); wrap them
+        # into uppercase keys so data_to_pandas works with both.
+        raw_fields = self.get_schema()
+        fields = [
+            {"Name": f.get("name", ""), "Type": f.get("type", "TEXT")}
+            for f in raw_fields
+        ]
+        data = {
+            "schema": {"Fields": fields},
+            "data":   self.get_rows(),
+        }
+        return data_to_pandas(data)
+
     def __enter__(self) -> "PacketHandle":
         return self
 

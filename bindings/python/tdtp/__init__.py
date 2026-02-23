@@ -34,6 +34,13 @@ from tdtp.exceptions import (
     TDTPWriteError,
 )
 
+# Optional pandas helpers — imported lazily so pandas is not required
+try:
+    from tdtp.pandas_ext import data_to_pandas, pandas_to_data
+    _PANDAS_AVAILABLE = True
+except ImportError:
+    _PANDAS_AVAILABLE = False
+
 __version__ = "0.1.0"
 __all__ = [
     "TDTPClientJSON",
@@ -45,4 +52,7 @@ __all__ = [
     "TDTPProcessorError",
     "TDTPWriteError",
     "TDTPLibraryError",
+    # pandas helpers (available only when pandas is installed)
+    "data_to_pandas",
+    "pandas_to_data",
 ]

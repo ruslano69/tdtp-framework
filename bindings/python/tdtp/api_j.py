@@ -227,6 +227,66 @@ class TDTPClientJSON:
     # Diff
     # -----------------------------------------------------------------------
 
+    # -----------------------------------------------------------------------
+    # Pandas integration (optional — requires pandas)
+    # -----------------------------------------------------------------------
+
+    def J_to_pandas(self, data: dict):
+        """Convert a J_read result dict to a pandas DataFrame.
+
+        Delegates to :func:`tdtp.pandas_ext.data_to_pandas`.
+
+        Args:
+            data: dict returned by :meth:`J_read` (or :meth:`J_filter`, etc.).
+
+        Returns:
+            ``pandas.DataFrame`` with columns named after schema fields and
+            dtypes inferred from TDTP field types.
+
+        Raises:
+            ImportError: if pandas is not installed.
+
+        Example::
+
+            client = TDTPClientJSON()
+            raw    = client.J_read("users.tdtp.xml")
+            df     = client.J_to_pandas(raw)
+            print(df.describe())
+            df.to_csv("users.csv", index=False)
+        """
+        from tdtp.pandas_ext import data_to_pandas
+        return data_to_pandas(data)
+
+    def J_from_pandas(self, df, table_name: str = "data") -> dict:
+        """Convert a pandas DataFrame to a TDTP data dict.
+
+        The returned dict can be passed directly to :meth:`J_write`.
+
+        Args:
+            df:         ``pandas.DataFrame`` to convert.
+            table_name: table name written into the TDTP header.
+
+        Returns:
+            dict with ``"schema"``, ``"header"``, and ``"data"`` keys.
+
+        Raises:
+            ImportError: if pandas is not installed.
+
+        Example::
+
+            import pandas as pd
+            client = TDTPClientJSON()
+            df     = pd.read_csv("input.csv")
+            data   = client.J_from_pandas(df, table_name="users")
+            client.J_write(data, "output.tdtp.xml")
+        """
+        from tdtp.pandas_ext import pandas_to_data
+        return pandas_to_data(df, table_name=table_name)
+
+    # -----------------------------------------------------------------------
+    # Diff
+    # -----------------------------------------------------------------------
+
     def J_diff(self, old: dict, new: dict) -> dict:
         """Compute the row-level difference between two TDTP datasets.
 
