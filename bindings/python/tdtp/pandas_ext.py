@@ -123,6 +123,8 @@ def _serialize(v) -> str:
 
     - None / NaN / pd.NA / pd.NaT  → ""
     - bool / pd.BooleanDtype        → "true" / "false"  (lowercase)
+    - float with no fractional part → str(int(v))  e.g. 71160.0 → "71160"
+      (matches Go strconv.FormatFloat behavior with -1 precision)
     - everything else               → str(v)
     """
     if _is_na(v):
@@ -135,8 +137,14 @@ def _serialize(v) -> str:
         import numpy as _np
         if isinstance(v, _np.bool_):
             return "true" if v else "false"
+        # numpy float with no fractional part: 71160.0 → "71160" (matches Go)
+        if isinstance(v, _np.floating) and v.is_integer():
+            return str(int(v))
     except ImportError:
         pass
+    # Python native float with no fractional part: 71160.0 → "71160"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
     return str(v)
 
 
