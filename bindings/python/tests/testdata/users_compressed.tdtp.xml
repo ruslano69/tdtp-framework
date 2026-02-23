@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>Users</TableName>
+    <MessageID>REF-2026-c4d49ebd-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>10</RecordsInPart>
+    <Timestamp>2026-02-23T10:41:47.819124576Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="ID" type="INTEGER" key="true"></Field>
+    <Field name="Name" type="TEXT"></Field>
+    <Field name="Email" type="TEXT"></Field>
+    <Field name="Balance" type="DECIMAL" precision="18" scale="2"></Field>
+    <Field name="IsActive" type="INTEGER"></Field>
+    <Field name="City" type="TEXT"></Field>
+    <Field name="CreatedAt" type="TIMESTAMP" timezone="UTC"></Field>
+    <Field name="LastLoginAt" type="TIMESTAMP" timezone="UTC"></Field>
+  </Schema>
+  <Data compression="zstd">
+    <R>KLUv/UQAXAItDACyFkQkEHErADCHBwkkIziADPL3mDr6BirpJxBqQjal7hMBqqoaVMENEf9z7SnnpiyfrSWRPWlUo8QUSBOJQn+VZeZXjzapMzpd6TOBnCZ1xoRm1jLjZam1LKwUHSNDig2sCL049p15W15WubUWE9aJrvF5ZEOymLAetOJYzm1VO4MQFHvS6JEQCUKQQT8ey8uW16q2NB1JCSxIUT4VOgTtXHu7zJiz+4QbcME18oE9M2gdSLGRj0C3r9eW3dUXe/8uQiM9aTQdCkkROtDM7WPOa5e/1HrE4eErTljRDoaEHlKcENLLwZ5b/qrdiP/978tu1V659dUZtIloQ2//bhuiDUB8LiCoEQOmQys60oI0HQrpDTEgoMIJjBxgKsOF4JUOy8jQ1fvbItVObYatttfLw2ojqATyhBq44RYD24s2mBPww4jRwzmHeZRRD7waRuwdZnWCFkQ+7QCELgnn0QnjWV3G1AKotmVatFXbmCSzgCBWy7pbuIzFyYNx1GJZXsC/3XEwUD/WGJU=</R>
+  </Data>
+</DataPacket>
