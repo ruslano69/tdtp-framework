@@ -137,6 +137,14 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_Diff.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_Diff.restype = ctypes.c_void_p
 
+    # J_SerializeValue(*char, *char) → *char
+    # Single source of truth for type serialization in Python adapters.
+    # tdtpType: "BLOB" | "TIMESTAMP" | "DATETIME" | "JSON" | "JSONB" | …
+    # value:    raw value as string (BLOB=hex, TIMESTAMP=ISO, JSON=json string)
+    # Returns:  {"value":"..."} or {"error":"..."}
+    lib.J_SerializeValue.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_SerializeValue.restype = ctypes.c_void_p
+
 
 def _configure_d_symbols(lib: ctypes.CDLL) -> None:
     """Set argtypes and restype for all D_* exported functions."""

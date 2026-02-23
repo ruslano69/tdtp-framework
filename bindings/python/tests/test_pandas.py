@@ -323,11 +323,12 @@ class TestSerialize:
         assert result in ("2025-11-10T15:30:00+00:00", "2025-11-10T15:30:00Z")
 
     def test_aware_datetime_positive_offset(self) -> None:
-        """tz-aware datetime with +03:00 offset → RFC3339 with offset preserved."""
+        """tz-aware datetime with +03:00 offset → normalised to UTC RFC3339.
+        Go calls .UTC().Format(time.RFC3339) — matches all Go adapters."""
         tz3 = timezone(timedelta(hours=3))
         dt  = datetime(2025, 11, 12, 9, 15, 0, tzinfo=tz3)
         result = _serialize(dt)
-        assert result == "2025-11-12T09:15:00+03:00"
+        assert result == "2025-11-12T06:15:00Z"
 
     def test_pandas_timestamp_naive(self) -> None:
         """pd.Timestamp (naive) → same RFC3339 as plain datetime."""
