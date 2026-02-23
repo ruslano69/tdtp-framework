@@ -27,6 +27,8 @@ from conftest import (
     NULLABLE_TOTAL_ROWS,
     NULLABLE_NULL_CITY_COUNT,
     NULLABLE_NOT_NULL_CITY_COUNT,
+    COMPRESSED_TOTAL_ROWS,
+    COMPRESSED_TABLE_NAME,
 )
 
 
@@ -68,8 +70,15 @@ class TestJRead:
         with pytest.raises(TDTPParseError):
             j_client.J_read("/no/such/file.tdtp.xml")
 
-    def test_compressed_file(self, j_client, tmp_path) -> None:
-        pytest.skip("TODO: add compressed fixture (needs -tags compress build)")
+    def test_compressed_file(self, j_client, compressed_tdtp_path) -> None:
+        """J_read transparently decompresses zstd-compressed data blocks."""
+        data = j_client.J_read(str(compressed_tdtp_path))
+        assert data["header"]["table_name"] == COMPRESSED_TABLE_NAME
+        assert len(data["data"]) == COMPRESSED_TOTAL_ROWS
+        # Rows are lists of field values matching schema order; first value is ID.
+        first = data["data"][0]
+        assert len(first) > 0
+        assert first[0] == "1"  # ID of first row from create_test_db.py
 
 
 # ---------------------------------------------------------------------------
