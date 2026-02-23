@@ -62,9 +62,9 @@ class PacketHandle:
         return self._pkt
 
     def free(self) -> None:
-        """Release C.malloc memory owned by this packet."""
+        """Release C.malloc memory owned by this packet (idempotent)."""
         if not self._freed:
-            # TODO: lib.D_FreePacket(ctypes.byref(self._pkt))
+            lib.D_FreePacket(ctypes.byref(self._pkt))
             self._freed = True
 
     def get_rows(self) -> list[list[str]]:
@@ -105,11 +105,11 @@ class TDTPClientDirect:
         Raises:
             TDTPParseError: if the file cannot be parsed.
         """
-        # TODO: pkt = D_Packet()
-        # TODO: rc = lib.D_ReadFile(path.encode(), ctypes.byref(pkt))
-        # TODO: if rc != 0: raise TDTPParseError(pkt.get_error())
-        # TODO: return PacketHandle(pkt)
-        raise NotImplementedError
+        pkt = D_Packet()
+        rc = lib.D_ReadFile(path.encode(), ctypes.byref(pkt))
+        if rc != 0:
+            raise TDTPParseError(pkt.get_error())
+        return PacketHandle(pkt)
 
     @contextmanager
     def D_read_ctx(self, path: str) -> Generator[PacketHandle, None, None]:
@@ -126,9 +126,9 @@ class TDTPClientDirect:
         Raises:
             TDTPWriteError: if writing fails.
         """
-        # TODO: rc = lib.D_WriteFile(ctypes.byref(handle.pkt), path.encode())
-        # TODO: if rc != 0: raise TDTPWriteError(handle.pkt.get_error())
-        raise NotImplementedError
+        rc = lib.D_WriteFile(ctypes.byref(handle.pkt), path.encode())
+        if rc != 0:
+            raise TDTPWriteError(handle.pkt.get_error())
 
     # -----------------------------------------------------------------------
     # TDTQL filtering
@@ -155,13 +155,24 @@ class TDTPClientDirect:
         Raises:
             TDTPFilterError: if filter evaluation fails.
         """
-        # TODO: build (D_FilterSpec * len(filters)) array from filters list
-        # TODO: out = D_Packet()
-        # TODO: rc = lib.D_FilterRows(ctypes.byref(handle.pkt), filter_arr,
-        #                              len(filters), limit, ctypes.byref(out))
-        # TODO: if rc != 0: raise TDTPFilterError(out.get_error())
-        # TODO: return PacketHandle(out)
-        raise NotImplementedError
+        n = len(filters)
+        if n > 0:
+            arr = (D_FilterSpec * n)(*[D_FilterSpec.from_dict(f) for f in filters])
+            filter_ptr = ctypes.cast(arr, ctypes.POINTER(D_FilterSpec))
+        else:
+            filter_ptr = ctypes.cast(None, ctypes.POINTER(D_FilterSpec))
+
+        out = D_Packet()
+        rc = lib.D_FilterRows(
+            ctypes.byref(handle.pkt),
+            filter_ptr,
+            ctypes.c_int(n),
+            ctypes.c_int(limit),
+            ctypes.byref(out),
+        )
+        if rc != 0:
+            raise TDTPFilterError(out.get_error())
+        return PacketHandle(out)
 
     # -----------------------------------------------------------------------
     # Processors
@@ -178,7 +189,7 @@ class TDTPClientDirect:
 
         Args:
             handle:        source PacketHandle (not freed by this call).
-            fields:        field names to mask, e.g. ["email", "phone"].
+            fields:        field names to mask, e.g. ["Email", "Phone"].
             mask_char:     replacement character (default "*").
             visible_chars: number of trailing chars to leave unmasked.
 
@@ -188,14 +199,17 @@ class TDTPClientDirect:
         Raises:
             TDTPProcessorError: if masking fails.
         """
-        # TODO: cfg = D_MaskConfig.build(fields, mask_char, visible_chars)
-        # TODO: out = D_Packet()
-        # TODO: rc = lib.D_ApplyMask(ctypes.byref(handle.pkt),
-        #                             ctypes.byref(cfg), ctypes.byref(out))
-        # TODO: lib.D_FreeMaskConfig(ctypes.byref(cfg))
-        # TODO: if rc != 0: raise TDTPProcessorError(out.get_error())
-        # TODO: return PacketHandle(out)
-        raise NotImplementedError
+        cfg = D_MaskConfig.build(fields, mask_char, visible_chars)
+        out = D_Packet()
+        rc = lib.D_ApplyMask(
+            ctypes.byref(handle.pkt),
+            ctypes.byref(cfg),
+            ctypes.byref(out),
+        )
+        lib.D_FreeMaskConfig(ctypes.byref(cfg))  # no-op; cfg owned by Python
+        if rc != 0:
+            raise TDTPProcessorError(out.get_error())
+        return PacketHandle(out)
 
     def D_compress(self, handle: PacketHandle, level: int = 3) -> PacketHandle:
         """Compress data with zstd, returning a new PacketHandle.
@@ -210,12 +224,15 @@ class TDTPClientDirect:
         Raises:
             TDTPProcessorError: if compression fails.
         """
-        # TODO: out = D_Packet()
-        # TODO: rc = lib.D_ApplyCompress(ctypes.byref(handle.pkt),
-        #                                 ctypes.c_int(level), ctypes.byref(out))
-        # TODO: if rc != 0: raise TDTPProcessorError(out.get_error())
-        # TODO: return PacketHandle(out)
-        raise NotImplementedError
+        out = D_Packet()
+        rc = lib.D_ApplyCompress(
+            ctypes.byref(handle.pkt),
+            ctypes.c_int(level),
+            ctypes.byref(out),
+        )
+        if rc != 0:
+            raise TDTPProcessorError(out.get_error())
+        return PacketHandle(out)
 
     def D_decompress(self, handle: PacketHandle) -> PacketHandle:
         """Decompress a zstd-compressed packet, returning a new PacketHandle.
@@ -229,8 +246,11 @@ class TDTPClientDirect:
         Raises:
             TDTPProcessorError: if decompression fails.
         """
-        # TODO: out = D_Packet()
-        # TODO: rc = lib.D_ApplyDecompress(ctypes.byref(handle.pkt), ctypes.byref(out))
-        # TODO: if rc != 0: raise TDTPProcessorError(out.get_error())
-        # TODO: return PacketHandle(out)
-        raise NotImplementedError
+        out = D_Packet()
+        rc = lib.D_ApplyDecompress(
+            ctypes.byref(handle.pkt),
+            ctypes.byref(out),
+        )
+        if rc != 0:
+            raise TDTPProcessorError(out.get_error())
+        return PacketHandle(out)

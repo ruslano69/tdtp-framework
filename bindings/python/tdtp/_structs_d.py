@@ -5,9 +5,9 @@ These are used by:
   - _loader.py  to configure D_* symbol signatures
   - api_d.py    to build / inspect D_Packet instances
 
-Memory ownership: all pointer fields inside D_Packet / D_MaskConfig are
-allocated by Go (C.malloc). Always release with D_FreePacket / D_FreeMaskConfig
-via the lib handle — never call ctypes.free() directly.
+Memory ownership: all pointer fields inside D_Packet are allocated by Go
+(C.malloc). Always release with D_FreePacket via the lib handle.
+D_MaskConfig.fields is owned by Python ctypes; D_FreeMaskConfig is a no-op.
 """
 from __future__ import annotations
 
@@ -21,18 +21,25 @@ import ctypes
 class D_Field(ctypes.Structure):
     """Single schema field descriptor."""
     _fields_ = [
-        ("name",       ctypes.c_char * 256),
-        ("type_name",  ctypes.c_char * 64),   # maps to packet.Field.Type
-        ("length",     ctypes.c_int),
-        ("precision",  ctypes.c_int),
-        ("scale",      ctypes.c_int),
-        ("is_key",     ctypes.c_int),          # 0 / 1
-        ("is_readonly", ctypes.c_int),         # 0 / 1
+        ("name",        ctypes.c_char * 256),
+        ("type_name",   ctypes.c_char * 64),
+        ("length",      ctypes.c_int),
+        ("precision",   ctypes.c_int),
+        ("scale",       ctypes.c_int),
+        ("is_key",      ctypes.c_int),
+        ("is_readonly", ctypes.c_int),
     ]
 
     def as_dict(self) -> dict:
-        # TODO: return {name, type, length, precision, scale, key, readonly}
-        raise NotImplementedError
+        return {
+            "name":      self.name.decode(errors="replace").rstrip("\x00"),
+            "type":      self.type_name.decode(errors="replace").rstrip("\x00"),
+            "length":    self.length,
+            "precision": self.precision,
+            "scale":     self.scale,
+            "key":       bool(self.is_key),
+            "readonly":  bool(self.is_readonly),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -47,8 +54,10 @@ class D_Schema(ctypes.Structure):
     ]
 
     def as_list(self) -> list[dict]:
-        # TODO: iterate self.fields[:self.field_count] → [field.as_dict(), ...]
-        raise NotImplementedError
+        n = self.field_count
+        if n <= 0 or not self.fields:
+            return []
+        return [self.fields[i].as_dict() for i in range(n)]
 
 
 # ---------------------------------------------------------------------------
@@ -63,8 +72,13 @@ class D_Row(ctypes.Structure):
     ]
 
     def as_list(self) -> list[str]:
-        # TODO: return [self.values[i].decode() for i in range(self.value_count)]
-        raise NotImplementedError
+        n = self.value_count
+        if n <= 0 or not self.values:
+            return []
+        return [
+            (self.values[i] or b"").decode(errors="replace")
+            for i in range(n)
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -97,12 +111,13 @@ class D_Packet(ctypes.Structure):
         return self.error.decode(errors="replace").rstrip("\x00")
 
     def get_rows(self) -> list[list[str]]:
-        # TODO: return [self.rows[i].as_list() for i in range(self.row_count)]
-        raise NotImplementedError
+        n = self.row_count
+        if n <= 0 or not self.rows:
+            return []
+        return [self.rows[i].as_list() for i in range(n)]
 
     def get_schema(self) -> list[dict]:
-        # TODO: return self.schema.as_list()
-        raise NotImplementedError
+        return self.schema.as_list()
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +140,12 @@ class D_FilterSpec(ctypes.Structure):
 
     @classmethod
     def from_dict(cls, d: dict) -> "D_FilterSpec":
-        # TODO: build D_FilterSpec from {"field":..., "op":..., "value":..., "value2":...}
-        raise NotImplementedError
+        spec = cls()
+        spec.field  = d.get("field",  "").encode()[:255]
+        spec.op     = d.get("op",     "eq").encode()[:31]
+        spec.value  = d.get("value",  "").encode()[:1023]
+        spec.value2 = d.get("value2", "").encode()[:1023]
+        return spec
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +153,12 @@ class D_FilterSpec(ctypes.Structure):
 # ---------------------------------------------------------------------------
 
 class D_MaskConfig(ctypes.Structure):
-    """Configuration for D_ApplyMask."""
+    """Configuration for D_ApplyMask.
+
+    Memory: fields array is owned by Python ctypes (not C.malloc).
+    The Go side treats this as read-only; D_FreeMaskConfig is a no-op.
+    Keep the instance alive until D_ApplyMask returns.
+    """
     _fields_ = [
         ("fields",        ctypes.POINTER(ctypes.c_char_p)),
         ("field_count",   ctypes.c_int),
@@ -149,7 +173,13 @@ class D_MaskConfig(ctypes.Structure):
         mask_char: str = "*",
         visible_chars: int = 4,
     ) -> "D_MaskConfig":
-        # TODO: C.malloc fields array, fill with encoded strings
-        # TODO: set mask_char and visible_chars
-        # TODO: caller is responsible for D_FreeMaskConfig
-        raise NotImplementedError
+        cfg = cls()
+        encoded = [f.encode() for f in fields]
+        # Build a ctypes array of c_char_p (Python owns the memory).
+        arr = (ctypes.c_char_p * len(encoded))(*encoded)
+        cfg._arr_ref = arr        # prevent GC while cfg is alive
+        cfg.fields = arr
+        cfg.field_count = len(fields)
+        cfg.mask_char = (mask_char[:1] or "*").encode()
+        cfg.visible_chars = visible_chars
+        return cfg
