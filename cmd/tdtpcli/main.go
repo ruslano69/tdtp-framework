@@ -154,6 +154,7 @@ func routeCommand(
 				InputFile:  *flags.ToXLSX,
 				OutputFile: determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
 				SheetName:  *flags.Sheet,
+				Query:      query,
 			})
 		})
 

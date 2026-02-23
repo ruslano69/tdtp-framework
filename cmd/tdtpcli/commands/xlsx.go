@@ -8,6 +8,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 	"github.com/ruslano69/tdtp-framework/pkg/xlsx"
 )
 
@@ -53,6 +54,17 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 	fmt.Printf("✓ Parsed packet for table '%s'\n", pkt.Header.TableName)
 	fmt.Printf("✓ Schema: %d field(s)\n", len(pkt.Schema.Fields))
 	fmt.Printf("✓ Data: %d row(s)\n", len(pkt.Data.Rows))
+
+	// Apply TDTQL query (--where, --order-by, --limit, --offset)
+	if opts.Query != nil {
+		executor := tdtql.NewExecutor()
+		execResult, err := executor.Execute(opts.Query, pkt.GetRows(), pkt.Schema)
+		if err != nil {
+			return fmt.Errorf("failed to apply query filters: %w", err)
+		}
+		pkt.SetRows(execResult.FilteredRows)
+		fmt.Printf("✓ Filtered: %d row(s) matched\n", len(execResult.FilteredRows))
+	}
 
 	// Convert to XLSX
 	if err := xlsx.ToXLSX(pkt, opts.OutputFile, opts.SheetName); err != nil {
