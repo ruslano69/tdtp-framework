@@ -5,12 +5,16 @@ All tests are skipped automatically if pandas is not installed.
 """
 from __future__ import annotations
 
+import base64
+import json
+from datetime import datetime, timezone, timedelta
+
 import pytest
 
 pd = pytest.importorskip("pandas")
 
 from tdtp import TDTPClientJSON, TDTPClientDirect
-from tdtp.pandas_ext import data_to_pandas, pandas_to_data
+from tdtp.pandas_ext import data_to_pandas, pandas_to_data, _serialize
 
 from conftest import (
     SAMPLE_FIELD_NAMES,
@@ -274,3 +278,169 @@ class TestPacketHandleToPandas:
         with d_client.D_read_ctx(str(sample_tdtp_path)) as pkt:
             df = pkt.to_pandas()
         assert list(df.columns) == SAMPLE_FIELD_NAMES
+
+
+# ---------------------------------------------------------------------------
+# _serialize — unit tests for BLOB / TIMESTAMP / JSON correctness
+# ---------------------------------------------------------------------------
+
+class TestSerialize:
+    """Unit-tests for the _serialize() helper.
+
+    These tests verify that binary, datetime, and JSON values are converted to
+    the correct TDTP wire format — not Python's str() representation.
+    """
+
+    # --- BLOB / bytes ---
+
+    def test_bytes_to_base64(self) -> None:
+        """bytes → Base64 string (TDTP BLOB standard, matches Go base64.StdEncoding)."""
+        raw = b"\x00\xff\xde\xad\xbe\xef"
+        result = _serialize(raw)
+        assert result == base64.b64encode(raw).decode("ascii")
+        # Verify it is valid Base64 (no Python-repr artefacts like b'...')
+        assert base64.b64decode(result) == raw
+
+    def test_bytearray_to_base64(self) -> None:
+        raw = bytearray(b"\x01\x02\x03")
+        assert _serialize(raw) == base64.b64encode(raw).decode("ascii")
+
+    def test_empty_bytes_to_empty_base64(self) -> None:
+        assert _serialize(b"") == ""   # base64 of empty bytes is ""
+
+    # --- TIMESTAMP / datetime ---
+
+    def test_naive_datetime_utc_z(self) -> None:
+        """Naive datetime → UTC suffix Z (TDTP convention)."""
+        dt = datetime(2025, 11, 10, 15, 30, 0)
+        assert _serialize(dt) == "2025-11-10T15:30:00Z"
+
+    def test_aware_datetime_utc(self) -> None:
+        """UTC-aware datetime → RFC3339 with +00:00 offset."""
+        dt = datetime(2025, 11, 10, 15, 30, 0, tzinfo=timezone.utc)
+        result = _serialize(dt)
+        # isoformat() for UTC produces "+00:00"; both "+00:00" and "Z" are RFC3339
+        assert result in ("2025-11-10T15:30:00+00:00", "2025-11-10T15:30:00Z")
+
+    def test_aware_datetime_positive_offset(self) -> None:
+        """tz-aware datetime with +03:00 offset → RFC3339 with offset preserved."""
+        tz3 = timezone(timedelta(hours=3))
+        dt  = datetime(2025, 11, 12, 9, 15, 0, tzinfo=tz3)
+        result = _serialize(dt)
+        assert result == "2025-11-12T09:15:00+03:00"
+
+    def test_pandas_timestamp_naive(self) -> None:
+        """pd.Timestamp (naive) → same RFC3339 as plain datetime."""
+        ts = pd.Timestamp("2025-03-10 12:00:00")
+        assert _serialize(ts) == "2025-03-10T12:00:00Z"
+
+    def test_pandas_timestamp_utc(self) -> None:
+        ts = pd.Timestamp("2025-11-10T15:30:00", tz="UTC")
+        result = _serialize(ts)
+        assert "2025-11-10T15:30:00" in result
+
+    def test_microseconds_stripped(self) -> None:
+        """Sub-second precision is stripped to keep RFC3339 compact (matches Go)."""
+        dt = datetime(2025, 1, 1, 0, 0, 0, 123456, tzinfo=timezone.utc)
+        result = _serialize(dt)
+        assert "123456" not in result
+        assert "." not in result
+
+    # --- JSON / JSONB ---
+
+    def test_dict_to_json_double_quotes(self) -> None:
+        """dict → JSON string with double quotes (not Python repr with single quotes)."""
+        d = {"key": "value", "n": 42}
+        result = _serialize(d)
+        parsed = json.loads(result)   # must be valid JSON
+        assert parsed == d
+        assert "'" not in result      # no Python-style single quotes
+
+    def test_dict_bool_lowercase(self) -> None:
+        """Python True/False in dict → JSON 'true'/'false' (not 'True'/'False')."""
+        d = {"active": True, "deleted": False}
+        result = _serialize(d)
+        assert "true" in result
+        assert "false" in result
+        assert "True" not in result
+        assert "False" not in result
+
+    def test_list_to_json(self) -> None:
+        lst = [1, "two", True, None]
+        result = _serialize(lst)
+        parsed = json.loads(result)
+        assert parsed == lst
+
+    def test_nested_json(self) -> None:
+        d = {"meta": {"tags": ["a", "b"]}, "count": 3}
+        result = _serialize(d)
+        assert json.loads(result) == d
+
+    def test_unicode_preserved_in_json(self) -> None:
+        """Unicode characters must not be escaped as \\uXXXX."""
+        d = {"name": "Привет"}
+        result = _serialize(d)
+        assert "Привет" in result
+        assert "\\u" not in result
+
+
+# ---------------------------------------------------------------------------
+# Round-trip: pandas → J_write → J_read → pandas для новых типов
+# ---------------------------------------------------------------------------
+
+class TestRoundTripNewTypes:
+    def test_roundtrip_blob_column(self, j_client: TDTPClientJSON, tmp_path) -> None:
+        """bytes column survives round-trip as Base64 TEXT."""
+        payloads = [b"\x00\x01\x02", b"\xde\xad\xbe\xef", b"hello"]
+        df_orig = pd.DataFrame({
+            "ID":      pd.array([1, 2, 3], dtype="Int64"),
+            "Payload": payloads,
+        })
+        data = pandas_to_data(df_orig, table_name="blob_test")
+        out  = tmp_path / "blob.tdtp.xml"
+        j_client.J_write(data, str(out))
+        raw  = j_client.J_read(str(out))
+
+        payload_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Payload")
+        for i, raw_bytes in enumerate(payloads):
+            expected_b64 = base64.b64encode(raw_bytes).decode("ascii")
+            assert raw["data"][i][payload_idx] == expected_b64
+
+    def test_roundtrip_datetime_naive(self, j_client: TDTPClientJSON, tmp_path) -> None:
+        """Naive datetime column → RFC3339 string with Z → survives J_write/J_read."""
+        dts = [datetime(2025, 1, 15, 10, 0, 0),
+               datetime(2024, 6, 30, 23, 59, 59)]
+        df_orig = pd.DataFrame({
+            "ID": pd.array([1, 2], dtype="Int64"),
+            "Ts": dts,
+        })
+        data = pandas_to_data(df_orig, table_name="dt_test")
+        out  = tmp_path / "dt.tdtp.xml"
+        j_client.J_write(data, str(out))
+        raw  = j_client.J_read(str(out))
+
+        ts_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Ts")
+        assert raw["data"][0][ts_idx] == "2025-01-15T10:00:00Z"
+        assert raw["data"][1][ts_idx] == "2024-06-30T23:59:59Z"
+
+    def test_roundtrip_json_dict_column(self, j_client: TDTPClientJSON, tmp_path) -> None:
+        """dict column → compact JSON string → survives J_write/J_read."""
+        docs = [{"name": "Alice", "active": True},
+                {"name": "Bob",   "tags": [1, 2, 3]}]
+        df_orig = pd.DataFrame({
+            "ID":   pd.array([1, 2], dtype="Int64"),
+            "Meta": docs,
+        })
+        data = pandas_to_data(df_orig, table_name="json_test")
+        out  = tmp_path / "json.tdtp.xml"
+        j_client.J_write(data, str(out))
+        raw  = j_client.J_read(str(out))
+
+        meta_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Meta")
+        # Values in file must be valid JSON with double quotes
+        parsed_0 = json.loads(raw["data"][0][meta_idx])
+        assert parsed_0["name"] == "Alice"
+        assert parsed_0["active"] is True
+
+        parsed_1 = json.loads(raw["data"][1][meta_idx])
+        assert parsed_1["tags"] == [1, 2, 3]

@@ -10,6 +10,8 @@ pandas_to_data(df, table_name) pandas.DataFrame → J_read dict (ready for J_wri
 """
 from __future__ import annotations
 
+import base64 as _base64
+import json as _json
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -55,6 +57,8 @@ _TDTP_TO_PANDAS: dict[str, str] = {
     "UUID":        "object",
     "JSONB":       "object",
     "JSON":        "object",
+    "BLOB":        "object",   # Base64 strings on read; bytes encoded to Base64 on write
+    "BINARY":      "object",
 }
 
 # pandas dtype name → TDTP canonical type
@@ -121,11 +125,18 @@ def _is_na(v) -> bool:
 def _serialize(v) -> str:
     """Convert a single cell value to a TDTP string representation.
 
-    - None / NaN / pd.NA / pd.NaT  → ""
-    - bool / pd.BooleanDtype        → "true" / "false"  (lowercase)
-    - float with no fractional part → str(int(v))  e.g. 71160.0 → "71160"
+    - None / NaN / pd.NA / pd.NaT      → ""
+    - bool / numpy.bool_               → "true" / "false"  (lowercase)
+    - float with no fractional part    → str(int(v))  e.g. 71160.0 → "71160"
       (matches Go strconv.FormatFloat behavior with -1 precision)
-    - everything else               → str(v)
+    - bytes / bytearray                → Base64  (TDTP BLOB standard,
+                                         matches Go base64.StdEncoding.EncodeToString)
+    - datetime (naive)                 → "YYYY-MM-DDTHH:MM:SSZ"  (treated as UTC)
+    - datetime / pd.Timestamp (aware)  → ISO 8601 with offset, RFC3339-compliant
+                                         (matches Go time.RFC3339)
+    - dict / list                      → compact JSON string with double quotes and
+                                         lowercase true/false (matches Go json.Marshal)
+    - everything else                  → str(v)
     """
     if _is_na(v):
         return ""
@@ -145,6 +156,22 @@ def _serialize(v) -> str:
     # Python native float with no fractional part: 71160.0 → "71160"
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
+    # BLOB: bytes / bytearray → Base64
+    # Matches Go: base64.StdEncoding.EncodeToString(v)
+    if isinstance(v, (bytes, bytearray)):
+        return _base64.b64encode(bytes(v)).decode("ascii")
+    # TIMESTAMP / DATETIME: datetime → RFC3339
+    # pd.Timestamp is a subclass of datetime, so this branch covers both.
+    if isinstance(v, datetime):
+        if v.tzinfo is not None:
+            # tz-aware: isoformat() → "+HH:MM" offset, RFC3339-compliant
+            return v.replace(microsecond=0).isoformat()
+        # naive: treat as UTC, append Z (TDTP convention, matches Go UTC normalisation)
+        return v.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # JSON / JSONB: dict / list → compact JSON string
+    # json.dumps uses double quotes and lowercase true/false — matches Go json.Marshal
+    if isinstance(v, (dict, list)):
+        return _json.dumps(v, ensure_ascii=False, separators=(",", ":"))
     return str(v)
 
 
