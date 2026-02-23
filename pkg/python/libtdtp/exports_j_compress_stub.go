@@ -8,6 +8,7 @@ package main
 import "C"
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
@@ -33,6 +34,11 @@ func jApplyProcessor(dataJSON *C.char, procType *C.char, configJSON *C.char) *C.
 		"error": "processors require libtdtp built with '-tags compress'",
 	})
 	return C.CString(string(b))
+}
+
+// compressAndSign stub — always errors without compress tag.
+func compressAndSign(_ *packet.DataPacket, _ int, _ bool) error {
+	return fmt.Errorf("compression requires libtdtp built with '-tags compress'")
 }
 
 // jApplyChain stub.

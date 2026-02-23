@@ -154,6 +154,31 @@ func jRunCompress(jp jPacket, params map[string]any) *C.char {
 	return jOK(result)
 }
 
+// compressAndSign applies zstd compression and optional XXH3 checksum
+// to a packet's Data section — mirrors compressPacketData() in export.go.
+func compressAndSign(pkt *packet.DataPacket, level int, enableChecksum bool) error {
+	if len(pkt.Data.Rows) == 0 {
+		return nil
+	}
+
+	rows := make([]string, len(pkt.Data.Rows))
+	for i, row := range pkt.Data.Rows {
+		rows[i] = row.Value
+	}
+
+	compressed, _, err := processors.CompressDataForTdtp(rows, level)
+	if err != nil {
+		return err
+	}
+
+	if enableChecksum {
+		pkt.Data.Checksum = processors.ComputeChecksum([]byte(compressed))
+	}
+	pkt.Data.Compression = "zstd"
+	pkt.Data.Rows = []packet.Row{{Value: compressed}}
+	return nil
+}
+
 // jRunDecompress decompresses a single-blob jPacket back to rows.
 func jRunDecompress(jp jPacket) *C.char {
 	if len(jp.Data) == 0 || len(jp.Data[0]) == 0 {

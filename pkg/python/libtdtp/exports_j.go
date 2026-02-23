@@ -7,6 +7,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"unsafe"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -216,6 +217,94 @@ func J_WriteFile(dataJSON *C.char, path *C.char) *C.char {
 	}
 
 	return jOK(map[string]bool{"ok": true})
+}
+
+// J_ExportAll partitions all data into TDTP files using the framework's native
+// byte-size logic (same as tdtpcli), applies optional zstd compression with
+// XXH3 checksums, and writes every part file automatically.
+//
+// dataJSON    — full dataset (schema + header + data rows).
+// basePath    — output path, e.g. "/tmp/out/Users.tdtp.xml".
+//               Parts are written as Users_part_1_of_N.tdtp.xml, etc.
+// optionsJSON — {"compress":true,"level":3,"checksum":true}
+//               All keys are optional; compress defaults to false.
+//
+// Returns {"files":[...],"total_parts":N} or {"error":"..."}.
+// Caller must free result with J_FreeString.
+//
+//export J_ExportAll
+func J_ExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char {
+	return jExportAll(dataJSON, basePath, optionsJSON)
+}
+
+// jExportAll — core implementation delegated from J_ExportAll.
+// compress-specific part (compressAndSign) is in exports_j_compress*.go.
+func jExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char {
+	jp, err := unmarshalJPacket(dataJSON)
+	if err != nil {
+		return jErr(err.Error())
+	}
+
+	var opts map[string]any
+	if s := C.GoString(optionsJSON); s != "" && s != "null" {
+		if err := json.Unmarshal([]byte(s), &opts); err != nil {
+			return jErr(fmt.Sprintf("invalid options JSON: %v", err))
+		}
+	}
+	if opts == nil {
+		opts = map[string]any{}
+	}
+
+	compress := false
+	if v, ok := opts["compress"].(bool); ok {
+		compress = v
+	}
+	level := 3
+	if v, ok := opts["level"].(float64); ok {
+		level = int(v)
+	}
+	withChecksum := true
+	if v, ok := opts["checksum"].(bool); ok {
+		withChecksum = v
+	}
+
+	// Partition by byte size — identical logic to tdtpcli GenerateReference
+	gen := packet.NewGenerator()
+	packets, err := gen.GenerateReference(jp.Header.TableName, jp.Schema, jp.Data)
+	if err != nil {
+		return jErr(fmt.Sprintf("partition error: %v", err))
+	}
+
+	base := C.GoString(basePath)
+	written := make([]string, 0, len(packets))
+
+	for i, pkt := range packets {
+		if compress {
+			if err := compressAndSign(pkt, level, withChecksum); err != nil {
+				return jErr(fmt.Sprintf("compress part %d: %v", i+1, err))
+			}
+		}
+		fname := generateExportFilename(base, i+1, len(packets))
+		if err := gen.WriteToFile(pkt, fname); err != nil {
+			return jErr(fmt.Sprintf("write part %d: %v", i+1, err))
+		}
+		written = append(written, fname)
+	}
+
+	return jOK(map[string]any{
+		"files":       written,
+		"total_parts": len(packets),
+	})
+}
+
+// generateExportFilename mirrors tdtpcli generatePacketFilename.
+func generateExportFilename(base string, n, total int) string {
+	if total == 1 {
+		return base
+	}
+	ext := filepath.Ext(base)
+	stem := base[:len(base)-len(ext)]
+	return fmt.Sprintf("%s_part_%d_of_%d%s", stem, n, total, ext)
 }
 
 // ---------------------------------------------------------------------------

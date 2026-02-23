@@ -129,6 +129,54 @@ class TDTPClientJSON:
         """
         _call(lib.J_WriteFile, json.dumps(data).encode(), path.encode())
 
+    def J_export_all(
+        self,
+        data: dict,
+        base_path: str,
+        compress: bool = False,
+        level: int = 3,
+        checksum: bool = True,
+    ) -> dict:
+        """Partition data and write all parts using the framework's native byte-size logic.
+
+        Mirrors tdtpcli behaviour: data is split into ~3.8 MB parts automatically
+        (same ``generator.GenerateReference`` logic), with optional zstd compression
+        and XXH3 checksums applied to each part before writing.
+
+        Args:
+            data:      Full dataset dict (schema + header + data rows).
+            base_path: Output base path, e.g. ``"/tmp/out/Users.tdtp.xml"``.
+                       Multiple parts are written as ``Users_part_1_of_N.tdtp.xml``.
+            compress:  Apply zstd compression (requires libtdtp built with
+                       ``-tags compress``).
+            level:     zstd compression level 1–19 (default 3).
+            checksum:  Compute XXH3 checksum when compressing (default True).
+
+        Returns:
+            ``{"files": [...], "total_parts": N}``
+
+        Raises:
+            TDTPError: if partitioning, compression, or writing fails.
+
+        Example::
+
+            import pandas as pd
+            df   = pd.read_sql_query("SELECT * FROM Users", conn)
+            data = client.J_from_pandas(df, table_name="Users")
+            result = client.J_export_all(
+                data, "/tmp/export/Users.tdtp.xml",
+                compress=True, checksum=True,
+            )
+            print(result["total_parts"], "files written")
+        """
+        opts = {"compress": compress, "level": level, "checksum": checksum}
+        return _call(
+            lib.J_ExportAll,
+            json.dumps(data).encode(),
+            base_path.encode(),
+            json.dumps(opts).encode(),
+        )
+
     # -----------------------------------------------------------------------
     # TDTQL filtering
     # -----------------------------------------------------------------------

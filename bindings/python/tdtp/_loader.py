@@ -129,6 +129,10 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_ApplyChain.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_ApplyChain.restype = ctypes.c_void_p
 
+    # J_ExportAll(*char, *char, *char) → *char
+    lib.J_ExportAll.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_ExportAll.restype = ctypes.c_void_p
+
     # J_Diff(*char, *char) → *char
     lib.J_Diff.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_Diff.restype = ctypes.c_void_p
