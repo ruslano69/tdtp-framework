@@ -112,6 +112,13 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_FilterRows.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
     lib.J_FilterRows.restype = ctypes.c_void_p
 
+    # J_FilterRowsPage(*char, *char, c_int, c_int) → *char
+    # Returns schema/header/data + "query_context" pagination metadata.
+    lib.J_FilterRowsPage.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+    ]
+    lib.J_FilterRowsPage.restype = ctypes.c_void_p
+
     # J_ApplyProcessor(*char, *char, *char) → *char
     lib.J_ApplyProcessor.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
@@ -122,9 +129,21 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_ApplyChain.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_ApplyChain.restype = ctypes.c_void_p
 
+    # J_ExportAll(*char, *char, *char) → *char
+    lib.J_ExportAll.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_ExportAll.restype = ctypes.c_void_p
+
     # J_Diff(*char, *char) → *char
     lib.J_Diff.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_Diff.restype = ctypes.c_void_p
+
+    # J_SerializeValue(*char, *char) → *char
+    # Single source of truth for type serialization in Python adapters.
+    # tdtpType: "BLOB" | "TIMESTAMP" | "DATETIME" | "JSON" | "JSONB" | …
+    # value:    raw value as string (BLOB=hex, TIMESTAMP=ISO, JSON=json string)
+    # Returns:  {"value":"..."} or {"error":"..."}
+    lib.J_SerializeValue.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_SerializeValue.restype = ctypes.c_void_p
 
 
 def _configure_d_symbols(lib: ctypes.CDLL) -> None:

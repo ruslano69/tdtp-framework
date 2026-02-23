@@ -10,6 +10,8 @@ pandas_to_data(df, table_name) pandas.DataFrame → J_read dict (ready for J_wri
 """
 from __future__ import annotations
 
+import ctypes as _ctypes
+import json as _json
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -55,6 +57,8 @@ _TDTP_TO_PANDAS: dict[str, str] = {
     "UUID":        "object",
     "JSONB":       "object",
     "JSON":        "object",
+    "BLOB":        "object",   # Base64 strings on read; bytes encoded to Base64 on write
+    "BINARY":      "object",
 }
 
 # pandas dtype name → TDTP canonical type
@@ -118,12 +122,48 @@ def _is_na(v) -> bool:
         return False
 
 
+def _go_serialize(tdtp_type: str, value: str) -> str:
+    """Delegate serialization to Go's J_SerializeValue — single source of truth.
+
+    Go owns all type-conversion logic; Python only adapts the value to a
+    plain string before crossing the boundary:
+      - BLOB      → hex-encoded bytes  (Go: hex.Decode → base64.StdEncoding)
+      - TIMESTAMP → isoformat string   (Go: parse → UTC → RFC3339)
+      - JSON      → json.dumps string  (Go: Unmarshal → Marshal compact)
+    """
+    from tdtp._loader import lib, free_string  # lazy import — avoids circular dep
+    raw_ptr = lib.J_SerializeValue(
+        tdtp_type.encode(),
+        value.encode("utf-8"),
+    )
+    if not raw_ptr:
+        raise RuntimeError(f"J_SerializeValue returned NULL (type={tdtp_type!r})")
+    raw_bytes = _ctypes.string_at(raw_ptr)
+    free_string(raw_ptr)
+    result = _json.loads(raw_bytes)
+    if "error" in result:
+        raise ValueError(f"J_SerializeValue error: {result['error']}")
+    return result["value"]
+
+
 def _serialize(v) -> str:
     """Convert a single cell value to a TDTP string representation.
 
-    - None / NaN / pd.NA / pd.NaT  → ""
-    - bool / pd.BooleanDtype        → "true" / "false"  (lowercase)
-    - everything else               → str(v)
+    Scalar / numeric types are handled in Python (stdlib only, no ambiguity).
+    Complex types (BLOB, TIMESTAMP, JSON) are delegated to Go via J_SerializeValue,
+    which is the single source of truth for wire-format decisions.
+
+    - None / NaN / pd.NA / pd.NaT      → ""
+    - bool / numpy.bool_               → "true" / "false"  (lowercase)
+    - float with no fractional part    → str(int(v))  e.g. 71160.0 → "71160"
+      (matches Go strconv.FormatFloat behavior with -1 precision)
+    - bytes / bytearray                → Go J_SerializeValue("BLOB", hex)
+                                         → Base64 (base64.StdEncoding)
+    - datetime / pd.Timestamp          → Go J_SerializeValue("TIMESTAMP", isoformat)
+                                         → UTC RFC3339
+    - dict / list                      → Go J_SerializeValue("JSON", json.dumps)
+                                         → compact JSON (json.Marshal)
+    - everything else                  → str(v)
     """
     if _is_na(v):
         return ""
@@ -135,8 +175,24 @@ def _serialize(v) -> str:
         import numpy as _np
         if isinstance(v, _np.bool_):
             return "true" if v else "false"
+        # numpy float with no fractional part: 71160.0 → "71160" (matches Go)
+        if isinstance(v, _np.floating) and v.is_integer():
+            return str(int(v))
     except ImportError:
         pass
+    # Python native float with no fractional part: 71160.0 → "71160"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    # BLOB: pass hex to Go → Go returns Base64 (base64.StdEncoding)
+    if isinstance(v, (bytes, bytearray)):
+        return _go_serialize("BLOB", bytes(v).hex())
+    # TIMESTAMP / DATETIME: pass isoformat to Go → Go returns UTC RFC3339
+    # pd.Timestamp is a subclass of datetime, so this branch covers both.
+    if isinstance(v, datetime):
+        return _go_serialize("TIMESTAMP", v.replace(microsecond=0).isoformat())
+    # JSON / JSONB: pass json.dumps to Go → Go re-marshals compact
+    if isinstance(v, (dict, list)):
+        return _go_serialize("JSON", _json.dumps(v, ensure_ascii=False))
     return str(v)
 
 

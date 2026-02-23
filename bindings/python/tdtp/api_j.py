@@ -129,6 +129,54 @@ class TDTPClientJSON:
         """
         _call(lib.J_WriteFile, json.dumps(data).encode(), path.encode())
 
+    def J_export_all(
+        self,
+        data: dict,
+        base_path: str,
+        compress: bool = False,
+        level: int = 3,
+        checksum: bool = True,
+    ) -> dict:
+        """Partition data and write all parts using the framework's native byte-size logic.
+
+        Mirrors tdtpcli behaviour: data is split into ~3.8 MB parts automatically
+        (same ``generator.GenerateReference`` logic), with optional zstd compression
+        and XXH3 checksums applied to each part before writing.
+
+        Args:
+            data:      Full dataset dict (schema + header + data rows).
+            base_path: Output base path, e.g. ``"/tmp/out/Users.tdtp.xml"``.
+                       Multiple parts are written as ``Users_part_1_of_N.tdtp.xml``.
+            compress:  Apply zstd compression (requires libtdtp built with
+                       ``-tags compress``).
+            level:     zstd compression level 1–19 (default 3).
+            checksum:  Compute XXH3 checksum when compressing (default True).
+
+        Returns:
+            ``{"files": [...], "total_parts": N}``
+
+        Raises:
+            TDTPError: if partitioning, compression, or writing fails.
+
+        Example::
+
+            import pandas as pd
+            df   = pd.read_sql_query("SELECT * FROM Users", conn)
+            data = client.J_from_pandas(df, table_name="Users")
+            result = client.J_export_all(
+                data, "/tmp/export/Users.tdtp.xml",
+                compress=True, checksum=True,
+            )
+            print(result["total_parts"], "files written")
+        """
+        opts = {"compress": compress, "level": level, "checksum": checksum}
+        return _call(
+            lib.J_ExportAll,
+            json.dumps(data).encode(),
+            base_path.encode(),
+            json.dumps(opts).encode(),
+        )
+
     # -----------------------------------------------------------------------
     # TDTQL filtering
     # -----------------------------------------------------------------------
@@ -138,25 +186,48 @@ class TDTPClientJSON:
         data: dict,
         where: str,
         limit: int = 0,
+        offset: int = 0,
     ) -> dict:
-        """Filter data rows using a TDTQL WHERE clause.
+        """Filter data rows using a TDTQL WHERE clause with optional pagination.
+
+        Uses the framework-native ``executor.Execute`` path, so LIMIT and OFFSET
+        are applied inside the Go core rather than via Python-level slicing.
 
         Args:
-            data:  dict in the shape returned by :meth:`J_read`.
-            where: TDTQL expression, e.g. ``"Balance > 1000 AND City = 'Omsk'"``.
-            limit: maximum rows to return (0 = unlimited).
+            data:   dict in the shape returned by :meth:`J_read`.
+            where:  TDTQL expression, e.g. ``"Balance > 1000 AND City = 'Omsk'"``.
+            limit:  maximum rows to return per page (0 = unlimited).
+            offset: number of matched rows to skip before returning results (default 0).
 
         Returns:
-            Same shape as :meth:`J_read` with filtered rows.
+            dict with the same ``"schema"`` / ``"header"`` / ``"data"`` keys as
+            :meth:`J_read`, plus an optional ``"query_context"`` object when
+            ``limit > 0``::
+
+                {
+                    "schema": ...,
+                    "header": ...,
+                    "data":   [...],
+                    "query_context": {
+                        "total_records":    <int>,
+                        "matched_records":  <int>,
+                        "returned_records": <int>,
+                        "more_available":   <bool>,
+                        "next_offset":      <int>,   # only when more_available is True
+                        "limit":            <int>,
+                        "offset":           <int>,
+                    }
+                }
 
         Raises:
             TDTPFilterError: if the WHERE clause is invalid or evaluation fails.
         """
         return _call(
-            lib.J_FilterRows,
+            lib.J_FilterRowsPage,
             json.dumps(data).encode(),
             where.encode(),
             ctypes.c_int(limit),
+            ctypes.c_int(offset),
         )
 
     # -----------------------------------------------------------------------

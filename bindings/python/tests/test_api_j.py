@@ -180,6 +180,70 @@ class TestJFilter:
 
 
 # ---------------------------------------------------------------------------
+# Pagination — offset + query_context (J_FilterRowsPage under the hood)
+# ---------------------------------------------------------------------------
+
+class TestJFilterPagination:
+    def test_offset_skips_rows(self, j_client, sample_data_j) -> None:
+        all_rows = j_client.J_filter(sample_data_j, "ID > 0")["data"]
+        page     = j_client.J_filter(sample_data_j, "ID > 0", limit=3, offset=2)
+        assert page["data"] == all_rows[2:5]
+
+    def test_query_context_present_with_limit(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "ID > 0", limit=3)
+        assert "query_context" in result
+
+    def test_query_context_total_records(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "ID > 0", limit=3)
+        assert result["query_context"]["total_records"] == SAMPLE_TOTAL_ROWS
+
+    def test_query_context_matched_records(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "Balance > 1000", limit=2)
+        assert result["query_context"]["matched_records"] == SAMPLE_BALANCE_GT_1000_COUNT
+
+    def test_query_context_returned_records(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "ID > 0", limit=3)
+        assert result["query_context"]["returned_records"] == 3
+        assert len(result["data"]) == 3
+
+    def test_more_available_true_on_partial_page(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "ID > 0", limit=3)
+        assert result["query_context"]["more_available"] is True
+
+    def test_more_available_false_on_last_page(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "ID > 0", limit=3, offset=6)
+        assert result["query_context"]["more_available"] is False
+
+    def test_next_offset_points_to_next_page(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "ID > 0", limit=3)
+        assert result["query_context"]["next_offset"] == 3
+
+    def test_walk_all_pages(self, j_client, sample_data_j) -> None:
+        """Paginate through all rows and verify completeness."""
+        page_size = 3
+        collected = []
+        offset    = 0
+        while True:
+            page = j_client.J_filter(sample_data_j, "ID > 0", limit=page_size, offset=offset)
+            collected.extend(page["data"])
+            qc = page["query_context"]
+            if not qc["more_available"]:
+                break
+            offset = qc["next_offset"]
+        all_rows = j_client.J_filter(sample_data_j, "ID > 0")["data"]
+        assert collected == all_rows
+
+    def test_offset_without_limit_returns_tail(self, j_client, sample_data_j) -> None:
+        all_rows = j_client.J_filter(sample_data_j, "ID > 0")["data"]
+        result   = j_client.J_filter(sample_data_j, "ID > 0", offset=5)
+        assert result["data"] == all_rows[5:]
+
+    def test_schema_preserved_with_offset(self, j_client, sample_data_j) -> None:
+        result = j_client.J_filter(sample_data_j, "ID > 0", limit=2, offset=1)
+        assert result["schema"] == sample_data_j["schema"]
+
+
+# ---------------------------------------------------------------------------
 # Processors — J_ApplyProcessor / J_ApplyChain
 # (require libtdtp built with -tags compress)
 # ---------------------------------------------------------------------------
