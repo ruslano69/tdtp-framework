@@ -433,6 +433,12 @@ func main() {
 		return
 	}
 
+	// If no command was specified, show help before attempting to load config
+	if !commandWasSpecified(flags) {
+		PrintHelp()
+		os.Exit(1)
+	}
+
 	// Load configuration
 	config, err := LoadConfig(*flags.Config)
 	if err != nil {
@@ -490,15 +496,6 @@ func main() {
 	// Handle errors
 	if cmdErr != nil {
 		fatal("Command failed: %v", cmdErr)
-	}
-
-	// If no command was specified, show help
-	if !commandWasSpecified(flags) {
-		PrintHelp()
-		if err := prodFeatures.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close production features: %v\n", err)
-		}
-		os.Exit(1)
 	}
 
 	// Close production features before normal exit
