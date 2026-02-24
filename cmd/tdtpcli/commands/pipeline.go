@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ruslano69/tdtp-framework/pkg/etl"
+	"github.com/ruslano69/tdtp-framework/pkg/resultlog"
 	"github.com/ruslano69/tdtp-framework/pkg/security"
 )
 
@@ -68,11 +69,23 @@ func ExecutePipeline(ctx context.Context, configPath string, unsafe bool) error 
 
 	// Execute ETL pipeline
 	fmt.Println("🚀 Starting ETL pipeline execution...")
-	if err := processor.Execute(ctx); err != nil {
-		return fmt.Errorf("pipeline execution failed: %w", err)
+	execErr := processor.Execute(ctx)
+
+	// 7. Publish result to Redis if result_log is configured
+	// Published regardless of success or failure — orchestrator tracks both states
+	if config.ResultLog.Type == "redis" {
+		publisher := resultlog.NewRedisPublisher(config.ResultLog)
+		if pubErr := publisher.Publish(ctx, config.Name, processor.GetStats(), execErr); pubErr != nil {
+			fmt.Printf("⚠️  Result log publish failed: %v\n", pubErr)
+		}
+		publisher.Close()
 	}
 
-	// 7. Display execution statistics
+	if execErr != nil {
+		return fmt.Errorf("pipeline execution failed: %w", execErr)
+	}
+
+	// 8. Display execution statistics
 	stats := processor.GetStats()
 	fmt.Println("\n✅ ETL Pipeline completed successfully!")
 	fmt.Printf("   Duration: %s\n", stats.Duration)
