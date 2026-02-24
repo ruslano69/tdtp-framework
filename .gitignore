@@ -6,7 +6,10 @@
 /bin/
 /cmd/tdtpcli/tdtpcli
 /cmd/tdtpcli/tdtpcli.exe
+/cmd/tdtpserve/tdtpserve
+/cmd/tdtpserve/tdtpserve.exe
 tdtpcli
+tdtpserve
 
 # Test databases
 *.db
