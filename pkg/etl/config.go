@@ -20,6 +20,18 @@ type PipelineConfig struct {
 	Performance   PerformanceConfig   `yaml:"performance"`
 	Audit         AuditConfig         `yaml:"audit"`
 	ErrorHandling ErrorHandlingConfig `yaml:"error_handling"`
+	ResultLog     ResultLogConfig     `yaml:"result_log"`
+}
+
+// ResultLogConfig определяет параметры публикации результата выполнения пайплайна
+// Позволяет оркестратору отслеживать состояния через Redis (GET/SUBSCRIBE)
+type ResultLogConfig struct {
+	Type     string `yaml:"type"`     // Тип: redis (пустое = отключено)
+	Address  string `yaml:"address"`  // Адрес Redis, например "127.0.0.1:6379"
+	Name     string `yaml:"name"`     // Имя результата (ключ/канал), например "MASK_V001"
+	Password string `yaml:"password"` // Пароль Redis (опционально)
+	DB       int    `yaml:"db"`       // Индекс базы данных Redis (по умолчанию 0)
+	TTL      int    `yaml:"ttl"`      // TTL ключа в секундах (по умолчанию 3600)
 }
 
 // SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP)
@@ -163,6 +175,11 @@ func (c *PipelineConfig) Validate() error {
 		return fmt.Errorf("output: %w", err)
 	}
 
+	// Проверка result_log (опционально)
+	if err := c.ResultLog.Validate(); err != nil {
+		return fmt.Errorf("result_log: %w", err)
+	}
+
 	return nil
 }
 
@@ -235,6 +252,23 @@ func (t *TransformConfig) Validate() error {
 func (e *ErrorHandlingConfig) Validate() error {
 	if e.OnSourceError != "" && e.OnSourceError != "fail" && e.OnSourceError != "continue" {
 		return fmt.Errorf("on_source_error must be 'fail' or 'continue'")
+	}
+	return nil
+}
+
+// Validate проверяет корректность ResultLogConfig
+func (r *ResultLogConfig) Validate() error {
+	if r.Type == "" || r.Type == "none" {
+		return nil
+	}
+	if r.Type != "redis" {
+		return fmt.Errorf("unsupported type '%s', must be 'redis'", r.Type)
+	}
+	if r.Address == "" {
+		return fmt.Errorf("address is required when type is 'redis'")
+	}
+	if r.Name == "" {
+		return fmt.Errorf("name is required when type is 'redis'")
 	}
 	return nil
 }
@@ -378,5 +412,10 @@ func (c *PipelineConfig) SetDefaults() {
 	}
 	if c.ErrorHandling.RetryDelaySeconds == 0 {
 		c.ErrorHandling.RetryDelaySeconds = 5
+	}
+
+	// Defaults для result_log
+	if c.ResultLog.Type == "redis" && c.ResultLog.TTL == 0 {
+		c.ResultLog.TTL = 3600 // 1 час по умолчанию
 	}
 }

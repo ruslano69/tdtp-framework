@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import ctypes
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from tdtp._loader import lib, free_string
 from tdtp.exceptions import (
@@ -301,6 +304,63 @@ class TDTPClientJSON:
     # -----------------------------------------------------------------------
     # Pandas integration (optional — requires pandas)
     # -----------------------------------------------------------------------
+
+    def read_pandas(self, path: str, where: str = "", limit: int = 0) -> "pd.DataFrame":
+        """Load a TDTP file directly into a pandas DataFrame.
+
+        One-step convenience for the common ``J_read → J_filter → J_to_pandas``
+        pipeline. When *where* is empty the file is returned as-is.
+
+        Args:
+            path:  path to the ``.tdtp.xml`` file.
+            where: optional TDTQL WHERE clause, e.g. ``"Balance > 1000"``.
+            limit: max rows (0 = all). Ignored when *where* is empty.
+
+        Returns:
+            ``pandas.DataFrame`` with dtypes inferred from the TDTP schema.
+
+        Raises:
+            TDTPParseError:  file cannot be read.
+            TDTPFilterError: invalid WHERE clause.
+            ImportError:     pandas is not installed.
+
+        Example::
+
+            from tdtp import TDTPClientJSON
+            client = TDTPClientJSON()
+
+            df = client.read_pandas("users.tdtp.xml")
+            df = client.read_pandas("users.tdtp.xml", where="Balance > 1000")
+            df = client.read_pandas("users.tdtp.xml", where="City = 'Omsk'", limit=100)
+        """
+        data = self.J_read(path)
+        if where:
+            data = self.J_filter(data, where, limit=limit)
+        return self.J_to_pandas(data)
+
+    def write_pandas(self, df: "pd.DataFrame", path: str, table_name: str = "") -> None:
+        """Write a pandas DataFrame to a TDTP file.
+
+        One-step convenience for the common ``J_from_pandas → J_write`` pipeline.
+
+        Args:
+            df:         DataFrame to write.
+            path:       destination ``.tdtp.xml`` file path.
+            table_name: TDTP table name; defaults to the file stem when empty.
+
+        Raises:
+            TDTPWriteError: writing fails.
+            ImportError:    pandas is not installed.
+
+        Example::
+
+            client.write_pandas(df, "output.tdtp.xml", table_name="users")
+        """
+        if not table_name:
+            from pathlib import Path
+            table_name = Path(path).stem.split(".")[0]
+        data = self.J_from_pandas(df, table_name=table_name)
+        self.J_write(data, path)
 
     def J_to_pandas(self, data: dict):
         """Convert a J_read result dict to a pandas DataFrame.
