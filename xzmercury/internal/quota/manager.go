@@ -23,7 +23,7 @@ import (
 // ARGV[1] = cost (integer, credits to deduct)
 // ARGV[2] = initial_balance (integer, used when the key doesn't exist yet)
 //
-// Returns 1 if approved, 0 if insufficient balance.
+// Returns remaining balance (>= 0) if approved, -1 if insufficient balance.
 const luaQuota = `
 local balance = tonumber(redis.call('GET', KEYS[1]))
 if balance == nil then
@@ -31,10 +31,11 @@ if balance == nil then
 end
 local cost = tonumber(ARGV[1])
 if balance < cost then
-    return 0
+    return -1
 end
-redis.call('SET', KEYS[1], balance - cost, 'EX', 3600)
-return 1
+local remaining = balance - cost
+redis.call('SET', KEYS[1], remaining, 'EX', 3600)
+return remaining
 `
 
 // Manager runs the quota Lua script against Pipeline Redis.
@@ -62,13 +63,16 @@ func (m *Manager) Check(ctx context.Context, group string, cost int) error {
 	key := fmt.Sprintf("quota:%s:%d%02d%02d%02d",
 		group, now.Year(), int(now.Month()), now.Day(), now.Hour())
 
-	result, err := m.script.Run(ctx, m.rdb, []string{key}, cost, m.defaultQuota).Int()
+	remaining, err := m.script.Run(ctx, m.rdb, []string{key}, cost, m.defaultQuota).Int()
 	if err != nil {
 		return fmt.Errorf("quota: lua script: %w", err)
 	}
-	if result == 0 {
+	if remaining < 0 {
+		quotaRejectedTotal.WithLabelValues(group).Inc()
 		return ErrQuotaExceeded
 	}
+	quotaDeductedTotal.WithLabelValues(group).Inc()
+	quotaRemaining.WithLabelValues(group).Set(float64(remaining))
 	return nil
 }
 
