@@ -238,6 +238,29 @@ go run main.go
 
 ---
 
+### [08. ETL Pipeline + xzmercury](./08-pipeline-encrypted/) 🔐
+**Сложность**: ⭐⭐ Средний
+**Время**: 5 минут
+
+Интеграционный пример: embedded xzmercury-mock + `tdtpcli --pipeline` с шифрованием.
+
+**Что демонстрирует**:
+- ✅ ETL pipeline (TDTP → SQLite workspace → transform → output)
+- ✅ Шифрование AES-256-GCM через xzmercury (bind → encrypt → burn-on-read)
+- ✅ Вызов `tdtpcli` как внешнего процесса
+- ✅ Нулевые внешние зависимости (mock-сервер встроен)
+
+**Когда использовать**:
+- Знакомство с интеграцией пайплайна и xzmercury
+- Тестирование pipeline без реального xzmercury
+- Шаблон для production (заменить mock на реальный сервер)
+
+```bash
+go run ./examples/08-pipeline-encrypted/
+```
+
+---
+
 ## Сравнение примеров
 
 | Пример | Сложность | Компоненты | Production-Ready | Use Case |
@@ -249,6 +272,7 @@ go run main.go
 | 04-audit-masking | ⭐⭐ | Audit, Processors | ✅ | Compliance, Data privacy |
 | 05-circuit-breaker | ⭐⭐ | Circuit Breaker | ✅ | API resilience |
 | 06-etl-pipeline | ⭐⭐⭐⭐ | All components | ✅ | Enterprise ETL |
+| 08-pipeline-encrypted | ⭐⭐ | ETL + xzmercury | ✅ | Encrypted pipeline, no external deps |
 
 ## Основные компоненты
 
@@ -288,6 +312,7 @@ go run main.go
 - **GDPR compliance** → [04-audit-masking](./04-audit-masking/)
 - **Защитить API от сбоев** → [05-circuit-breaker](./05-circuit-breaker/)
 - **Полноценный ETL** → [06-etl-pipeline](./06-etl-pipeline/)
+- **ETL + шифрование (без внешних зависимостей)** → [08-pipeline-encrypted](./08-pipeline-encrypted/)
 
 ## Production Checklist
 
