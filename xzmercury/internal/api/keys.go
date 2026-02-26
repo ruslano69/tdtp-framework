@@ -47,30 +47,34 @@ func (h *keysHandler) Bind(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
-	if req.PackageUUID == "" || req.PipelineName == "" || req.Caller == "" {
-		writeError(w, http.StatusBadRequest, "package_uuid, pipeline_name and caller are required")
+	if req.PackageUUID == "" || req.PipelineName == "" {
+		writeError(w, http.StatusBadRequest, "package_uuid and pipeline_name are required")
 		return
 	}
 
 	ctx := r.Context()
 	policy := h.acl.Lookup(req.PipelineName)
 
-	// 1. LDAP membership check (cached in Pipeline Redis)
-	isMember, err := h.ldap.IsMember(ctx, req.Caller, policy.Group)
-	if err != nil {
-		log.Error().Err(err).Str("caller", req.Caller).Msg("ldap check failed")
-		writeError(w, http.StatusInternalServerError, "ldap check failed")
-		return
-	}
-	if !isMember {
-		log.Warn().
-			Str("caller", req.Caller).
-			Str("group", policy.Group).
-			Str("pipeline", req.PipelineName).
-			Msg("bind rejected: not a member")
-		_, _ = h.tracker.Reject(ctx, req.PackageUUID, req.PipelineName, req.Caller)
-		writeError(w, http.StatusForbidden, "caller is not a member of the required group")
-		return
+	// 1. LDAP membership check (cached in Pipeline Redis).
+	// Skipped when caller is empty — useful for service-to-service calls where
+	// the caller identity is not relevant (e.g. internal tooling, dev mode).
+	if req.Caller != "" {
+		isMember, err := h.ldap.IsMember(ctx, req.Caller, policy.Group)
+		if err != nil {
+			log.Error().Err(err).Str("caller", req.Caller).Msg("ldap check failed")
+			writeError(w, http.StatusInternalServerError, "ldap check failed")
+			return
+		}
+		if !isMember {
+			log.Warn().
+				Str("caller", req.Caller).
+				Str("group", policy.Group).
+				Str("pipeline", req.PipelineName).
+				Msg("bind rejected: not a member")
+			_, _ = h.tracker.Reject(ctx, req.PackageUUID, req.PipelineName, req.Caller)
+			writeError(w, http.StatusForbidden, "caller is not a member of the required group")
+			return
+		}
 	}
 
 	// 2. Quota check (atomic Lua deduction)

@@ -42,9 +42,15 @@ func main() {
 	// Pretty console log; switch to JSON in production via log.Logger = zerolog.New(os.Stderr)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 
-	// T3.2: Privilege guard — must not run as root/Administrator
+	// T3.2: Privilege guard — must not run as root/Administrator.
+	// In dev mode we emit a warning instead of aborting; this allows running
+	// inside containers or CI environments where uid=0 is common.
 	if err := guard.Check(); err != nil {
-		log.Fatal().Err(err).Msg("SECURITY: privilege check failed — refusing to start")
+		if *dev {
+			log.Warn().Err(err).Msg("SECURITY: privilege check failed (allowed in --dev mode)")
+		} else {
+			log.Fatal().Err(err).Msg("SECURITY: privilege check failed — refusing to start")
+		}
 	}
 
 	// Load config
