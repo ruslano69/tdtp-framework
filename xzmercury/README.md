@@ -2,24 +2,37 @@
 
 Zero-Knowledge key management microservice for TDTP pipelines.
 
-xzmercury generates, stores and delivers AES-256 keys to `tdtpcli` using a
-**burn-on-read** pattern: each key is retrieved exactly once via `GETDEL` and
-then deleted from Redis. The service never persists plaintext data — only the
-encrypted payload lives downstream.
+xzmercury generates, stores and delivers AES-256 keys using a **burn-on-read**
+pattern: each key is retrieved exactly once via `GETDEL` and then deleted from
+Redis. The service never persists plaintext data — only the encrypted payload
+lives downstream.
+
+Encryption is performed automatically by `FileEncryptor` — a processor in
+`pkg/processors/encryption.go` that runs inside the `tdtpcli` ETL pipeline.
+Only the **data area** of the TDTP package is encrypted; the structural binary
+header (version, algorithm, UUID, nonce) remains in plaintext to allow format
+detection without a key.
 
 ```
-tdtpcli                    xzmercury                  Mercury Redis
-   │                           │                           │
-   │── POST /api/keys/bind ───>│── LDAP check (cached) ──>│
-   │                           │── quota deduct (Lua) ─── │
-   │                           │── SET key TTL=5m ────────>│
-   │<── {key_b64, hmac} ───────│                           │
-   │                           │                           │
-   │  [encrypt package.xml]    │                           │
-   │                           │                           │
-   │── POST /api/keys/retrieve >│── GETDEL ───────────────>│
-   │<── {key_b64} ─────────────│<── val / nil ────────────│
-   │                           │  (key deleted on read)    │
+tdtpcli (ETL pipeline)        xzmercury             Mercury Redis
+   │                               │                     │
+   │  Processor.Execute()          │                     │
+   │  └─ Exporter.exportEncrypted()│                     │
+   │     └─ FileEncryptor.Encrypt()│                     │
+   │                               │                     │
+   │── POST /api/keys/bind ───────>│── LDAP check ──────>│
+   │                               │── quota deduct ─────│
+   │                               │── SET key TTL=5m ──>│
+   │<── {key_b64, hmac, req_id} ───│                     │
+   │                               │                     │
+   │  [AES-256-GCM encrypt         │                     │
+   │   data area, verify HMAC]     │                     │
+   │                               │                     │
+   ▼  write encrypted blob to file │                     │
+                                   │                     │
+recipient ─ POST /api/keys/retrieve>│── GETDEL ──────────>│
+           <─ {key_b64} ───────────│<── val (key deleted)│
+           [AES-256-GCM decrypt]   │                     │
 ```
 
 ## Quick start — dev mode
@@ -38,7 +51,7 @@ curl -s http://localhost:3000/healthz
 # {"status":"ok"}
 ```
 
-## E2E demo (encrypt out.xml)
+## E2E demo
 
 From the repository root (requires `go.work`):
 
@@ -46,7 +59,8 @@ From the repository root (requires `go.work`):
 go run ./xzmercury/test/demo/
 ```
 
-Output shows: bind → encrypt `out.xml` → burn-on-read → decrypt → verify.
+Output shows: bind → AES-256-GCM encrypt (data area) → write blob →
+burn-on-read retrieve → decrypt → verify.
 
 ## Building
 
