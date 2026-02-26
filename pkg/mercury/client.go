@@ -81,6 +81,53 @@ func (c *Client) BindKey(ctx context.Context, packageUUID, pipelineName string) 
 	return &binding, nil
 }
 
+// RetrieveKey забирает ключ по UUID пакета (burn-on-read).
+// POST /api/keys/retrieve → {key_b64}
+// Вызывается получателем зашифрованного пакета — ключ удаляется после первого чтения.
+func (c *Client) RetrieveKey(ctx context.Context, packageUUID string) (string, error) {
+	reqBody := RetrieveKeyRequest{PackageUUID: packageUUID}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal retrieve request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/keys/retrieve", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrMercuryUnavailable, err.Error())
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("key not found or already consumed (uuid=%s): %s", packageUUID, string(body))
+	}
+	if resp.StatusCode >= 500 {
+		return "", fmt.Errorf("%w: HTTP %d", ErrMercuryError, resp.StatusCode)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("%w: HTTP %d: %s", ErrMercuryError, resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		KeyB64 string `json:"key_b64"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode retrieve response: %w", err)
+	}
+	if result.KeyB64 == "" {
+		return "", fmt.Errorf("%w: empty key in retrieve response", ErrMercuryError)
+	}
+	return result.KeyB64, nil
+}
+
 // VerifyHMAC проверяет HMAC-SHA256(packageUUID, serverSecret).
 // serverSecret — значение переменной окружения MERCURY_SERVER_SECRET,
 // которое совпадает с SERVER_SECRET на стороне xZMercury.

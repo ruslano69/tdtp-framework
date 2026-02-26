@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/ruslano69/xzmercury/internal/acl"
 	"github.com/ruslano69/xzmercury/internal/infra"
@@ -20,6 +21,7 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL) http.Hand
 	r := chi.NewRouter()
 
 	r.Use(zerologMiddleware)
+	r.Use(prometheusMiddleware)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(rateLimitMiddleware(cfg.Security.RateLimit))
@@ -34,6 +36,7 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL) http.Hand
 
 	r.Get("/healthz", handleHealthz)
 	r.Get("/readyz", handleReadyz(inf))
+	r.Get("/metrics", promhttp.Handler().ServeHTTP)
 
 	r.Route("/api/keys", func(r chi.Router) {
 		r.Post("/bind", h.Bind)

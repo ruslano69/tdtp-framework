@@ -55,12 +55,15 @@ func loadConfig(path string) (*ServeConfig, error) {
 		if src.DSN == "" {
 			return nil, fmt.Errorf("source %q: dsn is required", src.Name)
 		}
-		validTypes := map[string]bool{"postgres": true, "mssql": true, "mysql": true, "sqlite": true, "tdtp": true}
+		validTypes := map[string]bool{"postgres": true, "mssql": true, "mysql": true, "sqlite": true, "tdtp": true, "tdtp-enc": true}
 		if !validTypes[src.Type] {
-			return nil, fmt.Errorf("source %q: unknown type %q (postgres/mssql/mysql/sqlite/tdtp)", src.Name, src.Type)
+			return nil, fmt.Errorf("source %q: unknown type %q (postgres/mssql/mysql/sqlite/tdtp/tdtp-enc)", src.Name, src.Type)
 		}
-		if src.Type != "tdtp" && src.Query == "" {
+		if src.Type != "tdtp" && src.Type != "tdtp-enc" && src.Query == "" {
 			return nil, fmt.Errorf("source %q: query is required for type %q", src.Name, src.Type)
+		}
+		if src.Type == "tdtp-enc" && src.MercuryURL == "" {
+			return nil, fmt.Errorf("source %q: mercury_url is required for type tdtp-enc", src.Name)
 		}
 	}
 
