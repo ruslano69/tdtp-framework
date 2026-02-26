@@ -9,6 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/klauspost/compress v1.15.9
 	github.com/rabbitmq/amqp091-go v1.10.0
+	github.com/redis/go-redis/v9 v9.18.0
 	github.com/segmentio/kafka-go v0.4.49
 	github.com/xuri/excelize/v2 v2.9.0
 	github.com/zeebo/xxh3 v1.1.0
@@ -34,7 +35,6 @@ require (
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect
-	github.com/redis/go-redis/v9 v9.18.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/richardlehane/mscfb v1.0.4 // indirect
 	github.com/richardlehane/msoleps v1.0.4 // indirect

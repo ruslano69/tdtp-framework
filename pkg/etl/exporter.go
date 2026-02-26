@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"github.com/ruslano69/tdtp-framework/pkg/xlsx"
 )
@@ -21,7 +22,11 @@ type ExportResult struct {
 
 // Exporter отвечает за экспорт результатов ETL
 type Exporter struct {
-	config OutputConfig
+	config         OutputConfig
+	security       SecurityConfig
+	packageUUID    string
+	pipelineName   string
+	mercuryBinder  processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
 }
 
 // NewExporter создает новый экспортер
@@ -29,6 +34,22 @@ func NewExporter(config OutputConfig) *Exporter {
 	return &Exporter{
 		config: config,
 	}
+}
+
+// WithSecurity добавляет конфигурацию шифрования.
+// Вызывается из processor.go когда output.tdtp.encryption: true.
+func (e *Exporter) WithSecurity(sec SecurityConfig, packageUUID, pipelineName string) *Exporter {
+	e.security = sec
+	e.packageUUID = packageUUID
+	e.pipelineName = pipelineName
+	return e
+}
+
+// WithMercuryBinder устанавливает замену Mercury-клиента (dev-режим, тесты).
+// Если не вызван — exportEncrypted создаёт mercury.NewClient() из SecurityConfig.
+func (e *Exporter) WithMercuryBinder(binder processors.MercuryBinder) *Exporter {
+	e.mercuryBinder = binder
+	return e
 }
 
 // Export экспортирует DataPacket в сконфигурированный выход
@@ -71,7 +92,9 @@ func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*
 	}
 }
 
-// exportToTDTP экспортирует в TDTP XML файл
+// exportToTDTP экспортирует в TDTP XML файл.
+// Если output.tdtp.encryption: true — шифрует через xZMercury (UUID-binding флоу).
+// При сбое xZMercury записывает error-пакет вместо незашифрованных данных (exit 0).
 func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.TDTP == nil {
 		return fmt.Errorf("TDTP config is not set")
@@ -98,11 +121,77 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		return fmt.Errorf("failed to generate XML: %w", err)
 	}
 
-	// Записываем в файл
+	// --- Шифрование (если включено) ---
+	if e.config.TDTP.Encryption {
+		return e.exportEncrypted(ctx, generator, xmlData, destination)
+	}
+
+	// Записываем в файл (без шифрования)
 	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
+	return nil
+}
+
+// exportEncrypted выполняет UUID-binding, шифрует xmlData и записывает в destination.
+// При недоступности xZMercury записывает error-пакет и возвращает исходную ошибку Mercury
+// (не nil) — вызывающий код проверяет errors.Is(err, mercury.Err*) и завершает pipeline с exit 0.
+// Незашифрованные данные НЕ записываются никогда.
+func (e *Exporter) exportEncrypted(ctx context.Context, generator *packet.Generator, xmlData []byte, destination string) error {
+	if e.packageUUID == "" {
+		return fmt.Errorf("encryption enabled but packageUUID not set")
+	}
+
+	// Выбираем Mercury-клиент: кастомный (DevClient / тесты) или production-клиент по конфигу
+	var binder processors.MercuryBinder
+	if e.mercuryBinder != nil {
+		binder = e.mercuryBinder
+	} else {
+		binder = mercury.NewClient(e.security.MercuryURL, e.security.MercuryTimeoutMs)
+	}
+
+	serverSecret := os.Getenv("MERCURY_SERVER_SECRET")
+	encryptor := processors.NewFileEncryptor(binder, serverSecret, e.packageUUID, e.pipelineName)
+
+	result, errCode, encErr := encryptor.Encrypt(ctx, xmlData)
+	if encErr != nil {
+		// xZMercury недоступен или HMAC не прошёл — записываем error-пакет
+		if writeErr := e.writeErrorPacket(ctx, generator, destination, errCode, encErr.Error()); writeErr != nil {
+			return fmt.Errorf("write error packet after mercury failure: %w", writeErr)
+		}
+		// Возвращаем исходную Mercury-ошибку: resultlog увидит completed_with_errors,
+		// а pipeline-команда проверит errors.Is и завершится с exit 0.
+		return encErr
+	}
+
+	// Записываем зашифрованный блоб (права 0600 — только владелец)
+	if err := processors.WriteEncrypted(destination, result.Encrypted); err != nil {
+		return fmt.Errorf("write encrypted output: %w", err)
+	}
+
+	return nil
+}
+
+// writeErrorPacket записывает стандартный TDTP error-пакет в destination вместо данных.
+// Незашифрованный результат НЕ записывается. Pipeline завершается с exit 0.
+func (e *Exporter) writeErrorPacket(_ context.Context, generator *packet.Generator, destination, errorCode, errorMessage string) error {
+	gen := packet.NewGenerator()
+	errPacket, err := gen.GenerateError(e.packageUUID, e.pipelineName, errorCode, errorMessage)
+	if err != nil {
+		return fmt.Errorf("generate error packet: %w", err)
+	}
+
+	xmlData, err := generator.ToXML(errPacket, true)
+	if err != nil {
+		return fmt.Errorf("serialize error packet: %w", err)
+	}
+
+	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
+		return fmt.Errorf("write error packet: %w", err)
+	}
+
+	// Возвращаем nil — pipeline завершается штатно (exit 0)
 	return nil
 }
 

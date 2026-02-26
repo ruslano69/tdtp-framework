@@ -300,8 +300,21 @@ func routeCommand(
 			"mode":    modeLabel,
 		}
 
+		// Читаем --enc-dev флаг через flag.Lookup (флаг зарегистрирован только в !production сборках;
+		// в production Lookup вернёт nil → encDev остаётся false).
+		encDev := false
+		if f := flag.Lookup("enc-dev"); f != nil {
+			encDev = f.Value.String() == "true"
+		}
+
+		pipelineOpts := commands.PipelineOptions{
+			Unsafe:  *flags.Unsafe,
+			Encrypt: *flags.Encrypt,
+			EncDev:  encDev,
+		}
+
 		err = prodFeatures.ExecuteWithResilience(ctx, "etl-pipeline", func() error {
-			return commands.ExecutePipeline(ctx, *flags.Pipeline, *flags.Unsafe)
+			return commands.ExecutePipeline(ctx, *flags.Pipeline, pipelineOpts)
 		})
 
 		// Process Request command

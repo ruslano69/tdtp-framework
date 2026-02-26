@@ -21,6 +21,16 @@ type PipelineConfig struct {
 	Audit         AuditConfig         `yaml:"audit"`
 	ErrorHandling ErrorHandlingConfig `yaml:"error_handling"`
 	ResultLog     ResultLogConfig     `yaml:"result_log"`
+	Security      SecurityConfig      `yaml:"security"`
+}
+
+// SecurityConfig определяет параметры интеграции с xZMercury для шифрования результатов.
+// Используется когда output.tdtp.encryption: true.
+type SecurityConfig struct {
+	MercuryURL        string `yaml:"mercury_url"`        // URL xZMercury, например "http://mercury:3000"
+	RecipientResource string `yaml:"recipient_resource"` // Имя ресурса/очереди получателя
+	KeyTTLSeconds     int    `yaml:"key_ttl_seconds"`    // TTL ключа в Mercury Redis (по умолчанию 86400)
+	MercuryTimeoutMs  int    `yaml:"mercury_timeout_ms"` // Таймаут обращения к xZMercury (по умолчанию 5000)
 }
 
 // ResultLogConfig определяет параметры публикации результата выполнения пайплайна
@@ -78,6 +88,7 @@ type TDTPOutputConfig struct {
 	Format      string `yaml:"format"`      // Формат: xml, json (в будущем)
 	Compression bool   `yaml:"compression"` // Использовать zstd сжатие
 	Destination string `yaml:"destination"` // Путь к файлу
+	Encryption  bool   `yaml:"encryption"`  // Шифровать результат через xZMercury (AES-256-GCM)
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ
@@ -417,5 +428,13 @@ func (c *PipelineConfig) SetDefaults() {
 	// Defaults для result_log
 	if c.ResultLog.Type == "redis" && c.ResultLog.TTL == 0 {
 		c.ResultLog.TTL = 3600 // 1 час по умолчанию
+	}
+
+	// Defaults для security
+	if c.Security.KeyTTLSeconds == 0 {
+		c.Security.KeyTTLSeconds = 86400 // 24 часа
+	}
+	if c.Security.MercuryTimeoutMs == 0 {
+		c.Security.MercuryTimeoutMs = 5000
 	}
 }
