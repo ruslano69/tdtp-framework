@@ -44,6 +44,9 @@ type Flags struct {
 	CompressLevel *int
 	Hash          *bool // Add XXH3 checksum for data integrity verification
 
+	// Encryption (xZMercury UUID-binding флоу)
+	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
+
 	// Incremental Sync
 	TrackingField  *string
 	CheckpointFile *string
@@ -119,6 +122,9 @@ func ParseFlags() *Flags {
 	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1 (fastest) - 19 (best)")
 	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
+
+	// Encryption
+	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")
 
 	// Incremental Sync Options
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")

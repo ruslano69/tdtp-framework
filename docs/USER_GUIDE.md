@@ -2,8 +2,8 @@
 
 **tdtpcli** - утилита командной строки для работы с TDTP (Table Data Transfer Protocol).
 
-**Версия:** 1.2
-**Дата:** 16.11.2025
+**Версия:** 1.3
+**Дата:** 26.02.2026
 
 ---
 
@@ -13,10 +13,12 @@
 2. [Быстрый старт](#быстрый-старт)
 3. [Конфигурация](#конфигурация)
 4. [Команды](#команды)
-5. [Фильтрация данных (TDTQL)](#фильтрация-данных-tdtql)
-6. [Работа с Message Brokers](#работа-с-message-brokers)
-7. [Примеры использования](#примеры-использования)
-8. [Устранение неполадок](#устранение-неполадок)
+5. [ETL Pipeline](#etl-pipeline)
+6. [Шифрование AES-256-GCM](#шифрование-aes-256-gcm)
+7. [Фильтрация данных (TDTQL)](#фильтрация-данных-tdtql)
+8. [Работа с Message Brokers](#работа-с-message-brokers)
+9. [Примеры использования](#примеры-использования)
+10. [Устранение неполадок](#устранение-неполадок)
 
 ---
 
@@ -539,6 +541,168 @@ Key 55: used_new
 - Все файлы должны относиться к одной таблице
 - Схема (список полей) должна совпадать
 - Для дедупликации требуются ключевые поля (или primary key в схеме)
+
+---
+
+## ETL Pipeline
+
+### --pipeline
+
+Выполнить ETL pipeline из YAML-конфигурации: загрузить несколько источников, трансформировать в in-memory SQLite workspace, экспортировать результат.
+
+Подробная документация с примерами: [docs/ETL_PIPELINE.md](ETL_PIPELINE.md)
+
+**Синтаксис:**
+```bash
+tdtpcli --pipeline <config.yaml> [--unsafe] [--enc] [--enc-dev]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--pipeline <file>` | Путь к YAML-конфигурации pipeline |
+| `--unsafe` | Разрешить все SQL операции (требует права admin) |
+| `--enc` | Переопределить `output.tdtp.encryption: true` (шифрование через xZMercury) |
+| `--enc-dev` | Dev-режим: локальная генерация ключа без xZMercury (только !production сборки) |
+
+**Режимы безопасности SQL:**
+
+| Режим | SQL операции | Права |
+|-------|-------------|-------|
+| Safe (по умолчанию) | Только SELECT / WITH | Нет |
+| Unsafe (`--unsafe`) | Все операции | Admin |
+
+**Примеры:**
+
+Базовый запуск:
+```bash
+./tdtpcli --pipeline pipeline.yaml
+```
+
+Запуск с шифрованием (override):
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc
+```
+
+Dev-режим шифрования (ключ генерируется локально):
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc-dev
+```
+
+Unsafe mode:
+```bash
+sudo ./tdtpcli --pipeline pipeline.yaml --unsafe
+```
+
+**Вывод при успехе:**
+```
+Pipeline: employee-dept-report
+   Зарплатный отчёт по отделам
+   Version: 1.0
+   Mode: SAFE (READ-ONLY: SELECT/WITH only)
+   Sources: 2
+   Workspace: sqlite (:memory:)
+   Output: tdtp [ENC: xZMercury]
+
+Starting ETL pipeline execution...
+
+ETL Pipeline completed successfully!
+   Duration: 1.23s
+   Sources loaded: 2
+   Rows loaded: 14
+   Rows exported: 4
+   Package UUID: 550e8400-e29b-41d4-a716-446655440000
+```
+
+**Вывод при деградации xZMercury:**
+```
+WARNING: Encryption degraded: bind key: MERCURY_UNAVAILABLE: ...
+   Error packet written to output. Pipeline completed with errors (exit 0).
+```
+
+---
+
+## Шифрование AES-256-GCM
+
+TDTP CLI поддерживает шифрование выходного файла через **xZMercury UUID-binding флоу**:
+
+```
+tdtpcli ──→ POST /api/keys/bind ──→ xZMercury
+                                       │
+                                ┌──────┘
+                                │ {key_b64, hmac}
+                                ▼
+              Verify HMAC (MERCURY_SERVER_SECRET)
+                                │
+                                ▼
+              AES-256-GCM encrypt(XML, key)
+                                │
+                                ▼
+              Write .tdtp.enc (binary header + ciphertext)
+```
+
+### Конфигурация YAML
+
+```yaml
+output:
+  type: tdtp
+  tdtp:
+    destination: "out/report.tdtp.enc"
+    encryption: true          # активирует шифрование
+
+security:
+  mercury_url: "http://mercury:3000"
+  key_ttl_seconds: 86400      # TTL ключа (24 часа)
+  mercury_timeout_ms: 5000    # таймаут обращения к Mercury
+```
+
+### Переменные окружения
+
+```bash
+MERCURY_SERVER_SECRET=<secret>   # для верификации HMAC подписи ключа
+```
+
+### Тестирование с mock-сервером
+
+```bash
+# 1. Запустить mock xZMercury
+go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
+
+# 2. Установить секрет
+export MERCURY_SERVER_SECRET=dev-secret
+
+# 3. Запустить pipeline
+./tdtpcli --pipeline examples/encryption-test/pipeline-enc.yaml
+```
+
+### Dev-режим (без xZMercury)
+
+В dev-сборках (`go build` без тега `production`) доступен `--enc-dev`:
+
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc-dev
+```
+
+- Ключ AES-256 генерируется локально
+- xZMercury НЕ нужен
+- HMAC не верифицируется
+- В production-сборке (`-tags production`) флаг недоступен
+
+### Формат зашифрованного файла
+
+```
+[2 байта: версия] [1 байт: алгоритм] [16 байт: package UUID]
+[12 байт: nonce AES-GCM] [N байт: ciphertext+tag]
+```
+
+### Graceful degradation
+
+При недоступности xZMercury:
+- Незашифрованные данные **не записываются**
+- В destination записывается `error` пакет (TDTP `Type=error`)
+- Pipeline завершается с **exit code 0**
+- ResultLog получает статус `completed_with_errors` с `package_uuid`
 
 ---
 

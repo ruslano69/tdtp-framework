@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// GenerateUUID создает UUID v4 (публичная обёртка для использования вне пакета).
+func GenerateUUID() string {
+	return generateUUID()
+}
+
 // generateUUID создает простой UUID v4
 func generateUUID() string {
 	b := make([]byte, 16)

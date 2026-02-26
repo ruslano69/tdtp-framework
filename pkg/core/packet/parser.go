@@ -89,7 +89,7 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 
 	// Проверка типа сообщения
 	switch packet.Header.Type {
-	case TypeReference, TypeRequest, TypeResponse, TypeAlarm:
+	case TypeReference, TypeRequest, TypeResponse, TypeAlarm, TypeError:
 		// OK
 	default:
 		return fmt.Errorf("invalid message type: %s", packet.Header.Type)

@@ -2,8 +2,8 @@
 
 **Table Data Transfer Protocol** - спецификация формата обмена табличными данными через message brokers.
 
-**Версия:** 1.0 (расширения: v1.2 - compression)
-**Дата:** 08.12.2025
+**Версия:** 1.0 (расширения: v1.2 - compression, v1.3 - encryption)
+**Дата:** 26.02.2026
 **Статус:** Production Ready
 
 ---
@@ -39,6 +39,7 @@ TDTP (Table Data Transfer Protocol) - это протокол для униве�
 - ✅ **Фильтрация** - встроенный язык запросов TDTQL
 - ✅ **Универсальность** - работает с любыми СУБД и message brokers
 - ✅ **Сжатие данных** - опциональное сжатие zstd для больших пакетов (v1.2+)
+- ✅ **Шифрование** - AES-256-GCM с UUID-binding через xZMercury (v1.3+)
 
 ### Формат данных
 
@@ -56,7 +57,7 @@ TDTP (Table Data Transfer Protocol) - это протокол для униве�
 ```
 DataPacket
 ├── Header              (обязательный)
-│   ├── Type            (reference|delta|request|response|alarm)
+│   ├── Type            (reference|delta|request|response|alarm|error)
 │   ├── TableName       (имя таблицы)
 │   ├── MessageID       (UUID)
 │   ├── Timestamp       (ISO 8601)
@@ -90,7 +91,10 @@ DataPacket
 | **delta** | Инкрементальное обновление | Header, Schema, Data, Query |
 | **request** | Запрос данных | Header, Query, Sender, Recipient |
 | **response** | Ответ на запрос | Header, Schema, Data, QueryContext |
-| **alarm** | Уведомление об ошибке | Header, Severity, Code, Message |
+| **alarm** | Уведомление мониторинга | Header, AlarmDetails (Severity, Code, Message) |
+| **error** | Управляемая ошибка ETL pipeline | Header, Schema, Data (запись в `tdtp_errors`) |
+
+> **alarm vs error:** `alarm` использует нестандартный блок `<AlarmDetails>` — предназначен для систем мониторинга (не совместим с ETL pipeline). `error` — стандартный `DataPacket` с `Schema+Data`, пишется в таблицу `tdtp_errors` и совместим с любым downstream-потребителем. Генерируется автоматически при деградации xZMercury.
 
 ---
 
@@ -686,6 +690,47 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
+### Error Packet (Управляемая ошибка ETL, v1.3+) 🆕
+
+Генерируется автоматически ETL pipeline при деградации xZMercury (encryption enabled, Mercury недоступен).
+Пишется в выходной файл вместо незашифрованных данных. Pipeline завершается с exit 0.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>error</Type>
+    <TableName>tdtp_errors</TableName>
+    <MessageID>ERR-2026-a1b2c3d4-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>1</RecordsInPart>
+    <Timestamp>2026-02-26T10:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="package_uuid"  type="TEXT" length="36" key="true"></Field>
+    <Field name="pipeline"      type="TEXT" length="255"></Field>
+    <Field name="error_code"    type="TEXT" length="64"></Field>
+    <Field name="error_message" type="TEXT" length="1000"></Field>
+    <Field name="created_at"    type="TIMESTAMP" timezone="UTC"></Field>
+  </Schema>
+  <Data>
+    <R>550e8400-e29b-41d4-a716-446655440000|employee-dept-report|MERCURY_UNAVAILABLE|connect: connection refused|2026-02-26T10:00:00Z</R>
+  </Data>
+</DataPacket>
+```
+
+**Коды ошибок:**
+
+| Код | Причина |
+|-----|---------|
+| `MERCURY_UNAVAILABLE` | xZMercury недоступен (таймаут, connection refused) |
+| `MERCURY_ERROR` | xZMercury вернул HTTP 5xx |
+| `HMAC_VERIFICATION_FAILED` | Подпись ключа не прошла верификацию |
+| `KEY_BIND_REJECTED` | xZMercury отклонил запрос (HTTP 403/429) |
+
+---
+
 ### Reference Packet со сжатием (v1.2+) 🆕
 
 ```xml
@@ -740,7 +785,23 @@ LIMIT 50 OFFSET 0
 
 **Changelog:**
 
-- **v1.2** (08.12.2025) 🆕
+- **v1.3** (26.02.2026) 🆕
+  - **Тип пакета `error`** — стандартный DataPacket для фиксации ошибок в ETL pipeline
+    - Таблица `tdtp_errors` с полями: `package_uuid`, `pipeline`, `error_code`, `error_message`, `created_at`
+    - Генерируется автоматически при деградации xZMercury
+    - Совместим со всеми downstream-потребителями (в отличие от `alarm`)
+  - **Шифрование AES-256-GCM** через xZMercury (UUID-binding флоу)
+    - Бинарный заголовок: `[2B version][1B algo][16B package_uuid][12B nonce][ciphertext]`
+    - Ключ получается из xZMercury, НЕ передаётся через CLI
+    - HMAC-SHA256 верификация ключа (`MERCURY_SERVER_SECRET`)
+    - При недоступности Mercury → error-пакет вместо данных, exit 0
+  - **pkg/mercury**: HTTP клиент для xZMercury UUID-binding + burn-on-read флоу
+  - **pkg/crypto**: AES-256-GCM шифрование/дешифрование
+  - **cmd/xzmercury-mock**: standalone mock-сервер для E2E тестирования
+  - **ETL CLI**: флаги `--enc` (override encryption) и `--enc-dev` (локальный ключ, !production)
+  - **ResultLog**: статус `completed_with_errors`, поле `package_uuid`
+
+- **v1.2** (08.12.2025)
   - **Поддержка сжатия данных zstd**
     - Атрибут `compression="zstd"` для элемента Data
     - Base64-кодирование сжатых данных
@@ -779,4 +840,4 @@ Copyright (c) 2025 TDTP Framework
 
 ---
 
-*Последнее обновление: 16.11.2025*
+*Последнее обновление: 26.02.2026*

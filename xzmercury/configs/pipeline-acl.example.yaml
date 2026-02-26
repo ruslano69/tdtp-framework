@@ -1,0 +1,28 @@
+# pipeline-acl.yaml — per-pipeline access control and quota costs.
+#
+# Each pipeline entry specifies:
+#   group  — AD group DN the caller must belong to (transitive memberOf search)
+#   cost   — credits deducted from the hourly quota on each bind
+#
+# Pipelines not listed here fall back to default_group / default_cost.
+
+default_group: "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+default_cost: 1
+
+pipelines:
+  salary-report:
+    group: "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+    cost: 10
+
+  finance-export:
+    group: "cn=tdtp-finance,ou=groups,dc=corp,dc=local"
+    cost: 50
+
+  sensitive-hr-data:
+    group: "cn=tdtp-admins,ou=groups,dc=corp,dc=local"
+    cost: 100
+
+  # Dev/test pipelines — cheaper quota
+  test-pipeline:
+    group: "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+    cost: 1

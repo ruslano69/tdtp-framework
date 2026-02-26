@@ -1,0 +1,63 @@
+# ETL сценарий с AES-256-GCM шифрованием через xZMercury (UUID-binding флоу).
+#
+# Для тестирования без реального xZMercury:
+#   1. Запустить mock-сервер:  go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
+#   2. Установить переменную:  export MERCURY_SERVER_SECRET=dev-secret
+#   3. Запустить pipeline:     tdtpcli --pipeline pipeline-enc.yaml
+#
+# Для dev-режима (локальный ключ, без xZMercury):
+#   tdtpcli --pipeline pipeline-enc.yaml --enc-dev
+name: "employee-dept-report-encrypted"
+version: "1.0"
+description: "Зарплатный отчёт — шифрование AES-256-GCM через xZMercury"
+
+sources:
+  - name: employees
+    type: tdtp
+    dsn: "examples/encryption-test/employees.tdtp.xml"
+
+  - name: departments
+    type: tdtp
+    dsn: "examples/encryption-test/departments.tdtp.xml"
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: "dept_salary_report"
+  sql: |
+    SELECT
+      d.department_name,
+      COUNT(e.employee_id)    AS headcount,
+      ROUND(AVG(e.salary), 2) AS avg_salary,
+      SUM(e.salary)           AS total_salary,
+      MIN(e.salary)           AS min_salary,
+      MAX(e.salary)           AS max_salary
+    FROM employees e
+    JOIN departments d ON e.department_id = d.department_id
+    WHERE e.is_active = 1
+    GROUP BY d.department_id, d.department_name
+    ORDER BY total_salary DESC
+
+output:
+  type: tdtp
+  tdtp:
+    destination: "examples/encryption-test/out/dept_salary_report.tdtp.enc"
+    format: "xml"
+    compression: false
+    encryption: true          # Активирует AES-256-GCM через xZMercury
+
+security:
+  mercury_url: "http://localhost:3000"   # URL xZMercury (или mock-сервера)
+  key_ttl_seconds: 86400                 # TTL ключа в Redis (24 часа)
+  mercury_timeout_ms: 5000               # Таймаут обращения к xZMercury
+
+result_log:
+  type: redis
+  address: "127.0.0.1:6379"
+  name: "EMP_DEPT_RPT_V001"
+  ttl: 3600
+
+error_handling:
+  on_source_error: "fail"

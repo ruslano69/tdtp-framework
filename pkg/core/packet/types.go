@@ -10,6 +10,7 @@ const (
 	TypeRequest   MessageType = "request"
 	TypeResponse  MessageType = "response"
 	TypeAlarm     MessageType = "alarm"
+	TypeError     MessageType = "error"
 )
 
 // InReplyToDirectExport - зарезервированное значение для response-пакетов,

@@ -2,8 +2,8 @@
 
 **Руководство разработчика** для TDTP (Table Data Transfer Protocol) Framework.
 
-**Версия:** 1.3
-**Дата:** 2026-02-20
+**Версия:** 1.4
+**Дата:** 2026-02-26
 **Репозиторий:** https://github.com/ruslano69/tdtp-framework
 
 ---
@@ -22,6 +22,8 @@ TDTP Framework — это зрелый проект с готовой архит
 6. **XLSX Import/Export** → Используй `pkg/xlsx.Converter` ✅
 7. **In-memory Workspace** → Используй `pkg/etl.Workspace` ✅
 8. **Data Processing** → Используй `pkg/processors` ✅
+9. **Encryption** → Используй `pkg/processors.FileEncryptor` + `pkg/mercury.Client` ✅
+10. **AES-256-GCM** → Используй `pkg/crypto.Encrypt/Decrypt` ✅
 
 **НЕ пиши свои:**
 - ❌ Type mappers (используй `schema.Converter`)
@@ -53,11 +55,12 @@ TDTP Framework — это зрелый проект с готовой архит
    - [MySQL Adapter](#mysql-adapter)
 7. [Message Brokers](#message-brokers)
 8. [Production Features](#production-features-v12)
-9. [Разработка нового адаптера](#разработка-нового-адаптера)
-10. [Частые Ошибки и Антипаттерны](#-частые-ошибки-и-антипаттерны)
-11. [Архитектурные Принципы](#-архитектурные-принципы)
-12. [Best Practices](#best-practices)
-13. [Testing](#testing)
+9. [Security: Encryption (v1.3)](#security-encryption-v13)
+10. [Разработка нового адаптера](#разработка-нового-адаптера)
+11. [Частые Ошибки и Антипаттерны](#-частые-ошибки-и-антипаттерны)
+12. [Архитектурные Принципы](#-архитектурные-принципы)
+13. [Best Practices](#best-practices)
+14. [Testing](#testing)
 
 ---
 
@@ -90,10 +93,13 @@ tdtp-framework/
 │   ├── resilience/        # Circuit Breaker 🆕 v1.2
 │   ├── retry/             # Retry mechanism 🆕 v1.2
 │   ├── sync/              # Incremental Sync 🆕 v1.1
-│   └── processors/        # Data Processors 🆕 v1.2
+│   ├── processors/        # Data Processors 🆕 v1.2
+│   ├── mercury/           # xZMercury HTTP client (UUID-binding) 🆕 v1.3
+│   └── crypto/            # AES-256-GCM encrypt/decrypt 🆕 v1.3
 │
 ├── cmd/
-│   └── tdtpcli/           # CLI утилита
+│   ├── tdtpcli/           # CLI утилита
+│   └── xzmercury-mock/    # Mock xZMercury HTTP server (dev/testing) 🆕 v1.3
 │
 ├── docs/                  # Документация
 ├── examples/              # Примеры
@@ -120,10 +126,15 @@ tdtp-framework/
 - `resilience` - Circuit Breaker
 - `retry` - Retry with backoff
 - `audit` - Audit logging
-- `processors` - Data masking/validation
+- `processors` - Data masking/validation/encryption
 - `sync` - Incremental synchronization
 
-**Layer 5: Applications**
+**Layer 5: Security (v1.3)**
+- `mercury` - xZMercury HTTP client, UUID-binding, HMAC verification
+- `crypto` - AES-256-GCM encryption with binary header
+- `cmd/xzmercury-mock` - standalone mock server для E2E тестов
+
+**Layer 6: Applications**
 - `tdtpcli` - CLI утилита
 - Custom applications
 
@@ -1410,6 +1421,203 @@ packets, err := adapter.ExportTableWithQuery(ctx, "users", query, "", "")
 // Обновить checkpoint
 newLastValue := extractMaxValue(packets, "updated_at")
 stateMgr.UpdateState("users", newLastValue, len(packets))
+```
+
+---
+
+## Security: Encryption (v1.3)
+
+### Обзор
+
+xZMercury + TDTP Framework реализует Zero-Knowledge Delivery: ключ шифрования никогда не передаётся через CLI или переменные окружения — только через HTTP с HMAC верификацией.
+
+```
+ETL Pipeline ──→ UUID генерируется в начале Execute()
+                     │
+                     ▼
+              POST /api/keys/bind {package_uuid, pipeline_name}
+                     │
+              xZMercury хранит ключ в Redis с TTL
+                     │
+                     ▼
+              {key_b64, hmac} ←── Verify HMAC (MERCURY_SERVER_SECRET)
+                     │
+                     ▼
+              AES-256-GCM encrypt(XML bytes, key)
+                     │
+                     ▼
+              Write binary blob: [ver][algo][uuid][nonce][ciphertext]
+```
+
+### pkg/mercury
+
+**Расположение:** `pkg/mercury/`
+
+#### Типы и ошибки
+
+```go
+import "github.com/ruslano69/tdtp-framework/pkg/mercury"
+
+// Коды ошибок
+mercury.ErrCodeMercuryUnavailable     // "MERCURY_UNAVAILABLE"
+mercury.ErrCodeMercuryError           // "MERCURY_ERROR"
+mercury.ErrCodeHMACVerificationFailed // "HMAC_VERIFICATION_FAILED"
+mercury.ErrCodeKeyBindRejected        // "KEY_BIND_REJECTED"
+
+// Sentinel errors (используй errors.Is для проверки)
+mercury.ErrMercuryUnavailable
+mercury.ErrMercuryError
+mercury.ErrHMACVerificationFailed
+mercury.ErrKeyBindRejected
+```
+
+#### Production Client
+
+```go
+// Создание клиента
+client := mercury.NewClient("http://mercury:3000", 5000) // URL, timeoutMs
+
+// UUID-binding: получить ключ от xZMercury
+binding, err := client.BindKey(ctx, packageUUID, pipelineName)
+if err != nil {
+    // errors.Is(err, mercury.ErrMercuryUnavailable) — timeout/refused
+    // errors.Is(err, mercury.ErrKeyBindRejected)    — HTTP 403/429
+}
+
+// Верификация HMAC
+if !mercury.VerifyHMAC(packageUUID, binding.HMAC, serverSecret) {
+    // ключ не доверен
+}
+
+// Декодирование ключа
+key, err := mercury.DecodeKey(binding.KeyB64) // []byte, 32 байта
+
+// Извлечение кода ошибки для error-пакета
+code := mercury.ErrorCode(err) // "MERCURY_UNAVAILABLE" | ...
+```
+
+#### Dev Client (!production)
+
+```go
+//go:build !production
+
+// DevClient генерирует ключ локально, не обращаясь к xZMercury
+devClient := mercury.NewDevClient()
+binding, err := devClient.BindKey(ctx, packageUUID, pipelineName)
+// binding.HMAC = "dev-mode-no-hmac-verification"
+// binding.KeyB64 = base64(random 32 bytes)
+```
+
+#### MercuryBinder interface
+
+```go
+// Интерфейс для подмены в тестах и dev-режиме
+type MercuryBinder interface {
+    BindKey(ctx context.Context, packageUUID, pipelineName string) (*KeyBinding, error)
+}
+
+// Использование в тесте
+type MockBinder struct{}
+func (m *MockBinder) BindKey(_ context.Context, uuid, _ string) (*mercury.KeyBinding, error) {
+    key := make([]byte, 32)
+    rand.Read(key)
+    return &mercury.KeyBinding{KeyB64: base64.StdEncoding.EncodeToString(key), HMAC: "test"}, nil
+}
+```
+
+### pkg/crypto
+
+**Расположение:** `pkg/crypto/`
+
+```go
+import tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
+
+// Шифрование
+// key — 32 байта (AES-256), packageUUID — используется как Additional Data
+blob, err := tdtpcrypto.Encrypt(key, xmlBytes, packageUUID)
+
+// Дешифрование
+// Извлекает packageUUID из заголовка и расшифровывает
+uuid, plaintext, err := tdtpcrypto.Decrypt(key, blob)
+```
+
+**Формат бинарного блоба:**
+```
+Offset  Size  Описание
+0       2     Версия формата (0x0001)
+2       1     Алгоритм (0x01 = AES-256-GCM)
+3       16    Package UUID (бинарный)
+19      12    Nonce AES-GCM
+31      N     Ciphertext + GCM Auth Tag (16 байт)
+```
+
+### pkg/processors.FileEncryptor
+
+```go
+import "github.com/ruslano69/tdtp-framework/pkg/processors"
+
+// Создание FileEncryptor
+enc := processors.NewFileEncryptor(
+    mercuryClient,   // MercuryBinder (Client или DevClient)
+    serverSecret,    // MERCURY_SERVER_SECRET (env var)
+    packageUUID,     // сгенерирован в Execute()
+    pipelineName,    // config.Name
+)
+
+// Шифрование XML блоба
+result, errCode, err := enc.Encrypt(ctx, xmlData)
+if err != nil {
+    // errCode: mercury.ErrCode* — для записи в error-пакет
+}
+// result.Encrypted — бинарный blob для записи
+
+// Запись зашифрованного файла (права 0600)
+processors.WriteEncrypted("output.tdtp.enc", result.Encrypted)
+```
+
+### Интеграция в ETL Processor
+
+```go
+// Processor автоматически включает шифрование при encryption: true
+processor := etl.NewProcessor(config)
+
+// Опционально: подменить Mercury клиент (dev-режим)
+processor.WithMercuryBinder(mercury.NewDevClient())
+
+processor.Execute(ctx)
+// Внутри:
+// 1. GenerateUUID() → packageUUID
+// 2. initWorkspace() → exporter.WithSecurity() → exporter.WithMercuryBinder()
+// 3. exportEncrypted() → FileEncryptor.Encrypt() → WriteEncrypted()
+```
+
+### Mock xZMercury Server
+
+**Расположение:** `cmd/xzmercury-mock/`
+
+Standalone HTTP server для E2E тестирования UUID-binding флоу:
+
+```bash
+# Запуск
+go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
+
+# Или через env vars
+MOCK_ADDR=:3000 MERCURY_SERVER_SECRET=dev-secret go run ./cmd/xzmercury-mock/
+```
+
+**Endpoints:**
+- `POST /api/keys/bind` — генерирует AES-256 ключ, вычисляет HMAC, хранит в памяти
+- `POST /api/keys/retrieve` — burn-on-read (после чтения ключ удаляется)
+- `GET /healthz` — `{"status":"ok"}`
+
+### Build Tags
+
+```bash
+# Dev сборка (включает --enc-dev, DevClient)
+go build ./cmd/tdtpcli/
+
+# Production сборка (исключает dev-only код)
+go build -tags production ./cmd/tdtpcli/
 ```
 
 ---
