@@ -146,12 +146,30 @@ quota:
 		"--config", cfgPath,
 	)
 	xzmCmd.Dir = root
+	// Pipe вместо os.Stderr: при Kill() pipe закрывается сразу,
+	// иначе Go test framework ждёт WaitDelay и считает прогон неудачным.
+	xzmPipe, _ := xzmCmd.StderrPipe()
 	xzmCmd.Stdout = io.Discard
-	xzmCmd.Stderr = os.Stderr // xzmercury логи в stderr теста
 	if err := xzmCmd.Start(); err != nil {
 		t.Fatalf("start xzmercury: %v", err)
 	}
-	t.Cleanup(func() { _ = xzmCmd.Process.Kill() })
+	// Форвардим логи xzmercury в t.Log асинхронно
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := xzmPipe.Read(buf)
+			if n > 0 {
+				t.Log(strings.TrimRight(string(buf[:n]), "\n"))
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		_ = xzmCmd.Process.Kill()
+		_ = xzmPipe.Close()
+	})
 
 	waitHTTP(t, mercuryURL+"/healthz", 60*time.Second)
 	t.Logf("xzmercury ready at %s", mercuryURL)

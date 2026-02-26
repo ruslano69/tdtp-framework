@@ -148,8 +148,11 @@ func isMercuryDegraded(err error) bool {
 
 // validatePipelineSQL validates all SQL queries in the pipeline configuration
 func validatePipelineSQL(config *etl.PipelineConfig, validator *security.SQLValidator) error {
-	// Validate source queries
+	// Validate source queries (skip file-based sources with no SQL query)
 	for i, source := range config.Sources {
+		if source.Query == "" {
+			continue // TDTP/file sources don't have a SQL query
+		}
 		if err := validator.Validate(source.Query); err != nil {
 			return fmt.Errorf("source[%d] '%s' query validation failed: %w",
 				i, source.Name, err)
