@@ -599,11 +599,22 @@ func (s *Server) renderData(
   .bool-true { color:#34d399; }
   .bool-false{ color:#f87171; }
   .row-num   { color:#475569; text-align:right; user-select:none; font-size:11px; }
+  .enc-notice {
+    background:#1e1a2e; border:1px solid #6d28d9; border-radius:8px;
+    padding:10px 16px; margin-bottom:16px; color:#a78bfa; font-size:13px;
+    display:flex; align-items:center; gap:8px;
+  }
 </style>
 </head>
 <body>
 <div class="container">
 `)
+
+	// Clipboard protection for encrypted sources (must be before any content)
+	if ds.Type == "tdtp-enc" {
+		b.WriteString(`<style>.data-wrapper{user-select:none;-webkit-user-select:none;}</style>`)
+		b.WriteString(`<script>document.addEventListener('copy',function(e){e.preventDefault();});</script>`)
+	}
 
 	writeNavbar(&b, s.cfg.Server.Name, ds.Name)
 
@@ -625,6 +636,11 @@ func (s *Server) renderData(
 	}
 	b.WriteString(`</div>`)
 	b.WriteString(`</div>`) // header-card
+
+	// Encrypted source notice
+	if ds.Type == "tdtp-enc" {
+		b.WriteString(`<div class="enc-notice">&#x1F512; Clipboard disabled — data from encrypted source</div>`)
+	}
 
 	// Filter bar
 	b.WriteString(`<form method="GET" action="/data/` + html.EscapeString(ds.Name) + `" class="filter-bar">`)
