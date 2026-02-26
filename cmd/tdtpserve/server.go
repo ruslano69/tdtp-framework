@@ -494,6 +494,11 @@ func writeSourceCard(b *strings.Builder, d *Dataset) {
 		iconClass = "icon-file"
 		iconChar = "&#x1F4C4;"
 	}
+	if d.Type == "tdtp-enc" {
+		iconClass = "icon-file"
+		iconChar = "&#x1F512;" // 🔒
+		typeLabel = "tdtp-enc"
+	}
 	if d.IsView {
 		iconClass = "icon-view"
 		iconChar = "&#x1F50D;"

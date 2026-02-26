@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
+	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
@@ -119,6 +122,67 @@ func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
 	// имя как имя SQLite-таблицы, и именно это имя используется в transform SQL.
 	merged.Header.TableName = source.Name
 	return merged, nil
+}
+
+// loadEncryptedTDTPFile читает зашифрованный TDTP-файл, получает ключ через xZMercury
+// (burn-on-read) и возвращает расшифрованный пакет.
+//
+// Формат файла: [2B version][1B algo][16B uuid][12B nonce][...ciphertext]
+// UUID извлекается из заголовка и передаётся в POST /api/keys/retrieve.
+func loadEncryptedTDTPFile(ctx context.Context, source SourceConfig) (*packet.DataPacket, error) {
+	if source.DSN == "" {
+		return nil, fmt.Errorf("tdtp-enc source requires 'dsn' to be the file path")
+	}
+	if source.MercuryURL == "" {
+		return nil, fmt.Errorf("tdtp-enc source requires 'mercury_url'")
+	}
+
+	blob, err := os.ReadFile(source.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("read encrypted file: %w", err)
+	}
+
+	// Извлекаем UUID из бинарного заголовка без расшифровки.
+	packageUUID, err := tdtpcrypto.ExtractUUID(blob)
+	if err != nil {
+		return nil, fmt.Errorf("extract uuid from header: %w", err)
+	}
+
+	// Получаем ключ от xZMercury (burn-on-read — после этого вызова ключ удаляется).
+	timeout := source.MercuryTimeoutMs
+	if timeout <= 0 {
+		timeout = 5000
+	}
+	mc := mercury.NewClient(source.MercuryURL, timeout)
+	keyB64, err := mc.RetrieveKey(ctx, packageUUID)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve key (uuid=%s): %w", packageUUID, err)
+	}
+
+	key, err := mercury.DecodeKey(keyB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode key: %w", err)
+	}
+
+	// Расшифровываем AES-256-GCM.
+	_, plaintext, err := tdtpcrypto.Decrypt(key, blob)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt: %w", err)
+	}
+
+	// Парсим расшифрованный TDTP XML.
+	parser := packet.NewParser()
+	pkt, err := parser.ParseBytes(plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("parse decrypted TDTP: %w", err)
+	}
+
+	if err := decompressTDTPPacket(pkt); err != nil {
+		return nil, fmt.Errorf("decompress: %w", err)
+	}
+
+	pkt.Header.TableName = source.Name
+	return pkt, nil
 }
 
 // SourceData представляет загруженные данные из одного источника
@@ -264,6 +328,11 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	// TDTP-файл не требует адаптера — данные уже в TDTP-формате, читаем напрямую.
 	if source.Type == "tdtp" {
 		return loadTDTPFile(source)
+	}
+
+	// Зашифрованный TDTP-файл — получаем ключ от xZMercury и расшифровываем.
+	if source.Type == "tdtp-enc" {
+		return loadEncryptedTDTPFile(timeoutCtx, source)
 	}
 	_ = timeoutCtx // используется далее
 

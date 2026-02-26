@@ -44,14 +44,16 @@ type ResultLogConfig struct {
 	TTL      int    `yaml:"ttl"`      // TTL ключа в секундах (по умолчанию 3600)
 }
 
-// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP)
+// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc)
 type SourceConfig struct {
-	Name      string `yaml:"name"`       // Имя источника (будет использовано как имя таблицы в workspace)
-	Type      string `yaml:"type"`       // Тип: postgres, mssql, mysql, sqlite, tdtp
-	DSN       string `yaml:"dsn"`        // Data Source Name (строка подключения или путь к TDTP-файлу)
-	Query     string `yaml:"query"`      // SQL запрос для извлечения данных (не используется для type: tdtp)
-	Timeout   int    `yaml:"timeout"`    // Таймаут в секундах (0 = без таймаута)
-	MultiPart bool   `yaml:"multi_part"` // Только для type: tdtp — загружать все части набора автоматически
+	Name             string `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
+	Type             string `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc
+	DSN              string `yaml:"dsn"`                // Data Source Name (строка подключения или путь к TDTP-файлу)
+	Query            string `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc)
+	Timeout          int    `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
+	MultiPart        bool   `yaml:"multi_part"`         // Только для type: tdtp — загружать все части набора автоматически
+	MercuryURL       string `yaml:"mercury_url"`        // Только для type: tdtp-enc — URL xZMercury (например "http://mercury:3000")
+	MercuryTimeoutMs int    `yaml:"mercury_timeout_ms"` // Только для type: tdtp-enc — таймаут обращения к xZMercury (по умолчанию 5000)
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -212,20 +214,26 @@ func (s *SourceConfig) Validate() error {
 		"mssql":    true,
 		"mysql":    true,
 		"sqlite":   true,
-		"tdtp":     true, // TDTP XML/JSON file — DSN is the file path, query not required
+		"tdtp":     true,     // TDTP XML/JSON file — DSN is the file path, query not required
+		"tdtp-enc": true,     // Encrypted TDTP file — requires mercury_url for key retrieval
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc", s.Type)
 	}
 
-	// query обязателен для DB-источников, для TDTP-файла не нужен
-	if s.Type != "tdtp" && s.Query == "" {
+	// query обязателен для DB-источников, для TDTP-файлов не нужен
+	if s.Type != "tdtp" && s.Type != "tdtp-enc" && s.Query == "" {
 		return fmt.Errorf("query is required for type '%s'", s.Type)
 	}
 
-	// multi_part имеет смысл только для TDTP
+	// multi_part имеет смысл только для обычного tdtp
 	if s.MultiPart && s.Type != "tdtp" {
 		return fmt.Errorf("multi_part is only supported for type 'tdtp'")
+	}
+
+	// mercury_url обязателен для tdtp-enc
+	if s.Type == "tdtp-enc" && s.MercuryURL == "" {
+		return fmt.Errorf("mercury_url is required for type 'tdtp-enc'")
 	}
 
 	return nil

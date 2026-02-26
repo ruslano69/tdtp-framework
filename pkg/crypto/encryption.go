@@ -133,3 +133,18 @@ func bytesToUUID(b []byte) string {
 	h := hex.EncodeToString(b)
 	return fmt.Sprintf("%s-%s-%s-%s-%s", h[0:8], h[8:12], h[12:16], h[16:20], h[20:32])
 }
+
+// ExtractUUID извлекает UUID пакета из заголовка зашифрованного блоба
+// без расшифровки данных. Используется получателем перед вызовом RetrieveKey.
+func ExtractUUID(blob []byte) (string, error) {
+	if len(blob) < headerSize {
+		return "", fmt.Errorf("blob too short for header: %d bytes", len(blob))
+	}
+	if blob[0] != headerVersion {
+		return "", fmt.Errorf("unsupported version: 0x%02x", blob[0])
+	}
+	if blob[2] != algoAES256GCM {
+		return "", fmt.Errorf("unsupported algorithm: 0x%02x", blob[2])
+	}
+	return bytesToUUID(blob[3 : 3+uuidSize]), nil
+}
