@@ -51,27 +51,27 @@ curl -s http://localhost:3000/healthz
 # {"status":"ok"}
 ```
 
-## E2E demo
+## Key lifecycle demo (bind → burn-on-read)
 
-From the repository root (requires `go.work`):
+Demonstrates xzmercury key issuance and burn-on-read in isolation — no ETL
+pipeline, no data loading, no XML generation.
 
 ```bash
-go run ./xzmercury/test/demo/
+go run ./xzmercury/test/demo/   # run from repository root
 ```
 
-The demo does **not** run a pipeline. It exercises the xzmercury API and crypto
-primitives directly, in a single process:
+Steps (single process, zero external dependencies):
 
 1. Starts xzmercury in-process (miniredis × 2 + mock LDAP)
-2. `POST /api/keys/bind` → receives `key_b64` into a Go variable
-3. Reads `out.xml`, calls `tdtpcrypto.Encrypt(key, plaintext, uuid)` directly
-4. Writes encrypted blob to `/tmp/out.tdtp`
-5. `POST /api/keys/retrieve` → `GETDEL` in Redis — key deleted, returned as Go string
-6. `tdtpcrypto.Decrypt(key, blob)` → verifies content matches original
-7. Second retrieve returns 404 (burn-on-read confirmed)
+2. `POST /api/keys/bind` → key issued, stored in Mercury Redis with TTL
+3. `out.xml` read as raw bytes, encrypted with AES-256-GCM → `/tmp/out.tdtp`
+4. `POST /api/keys/retrieve` → `GETDEL`: key returned **and deleted** from Redis
+5. Decrypt `/tmp/out.tdtp`, verify content matches original
+6. Second retrieve → HTTP 404 (burn-on-read confirmed)
+7. `GET /api/requests/{id}` → state: `consumed`
 
-The key never touches env vars or disk — it lives only as a Go variable on the
-stack between bind → encrypt → retrieve → decrypt, then goes out of scope.
+The key never touches env vars or disk — it lives only as a Go variable between
+bind and decrypt, then goes out of scope.
 
 ## Building
 
