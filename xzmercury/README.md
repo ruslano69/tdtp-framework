@@ -59,8 +59,19 @@ From the repository root (requires `go.work`):
 go run ./xzmercury/test/demo/
 ```
 
-Output shows: bind → AES-256-GCM encrypt (data area) → write blob →
-burn-on-read retrieve → decrypt → verify.
+The demo does **not** run a pipeline. It exercises the xzmercury API and crypto
+primitives directly, in a single process:
+
+1. Starts xzmercury in-process (miniredis × 2 + mock LDAP)
+2. `POST /api/keys/bind` → receives `key_b64` into a Go variable
+3. Reads `out.xml`, calls `tdtpcrypto.Encrypt(key, plaintext, uuid)` directly
+4. Writes encrypted blob to `/tmp/out.tdtp`
+5. `POST /api/keys/retrieve` → `GETDEL` in Redis — key deleted, returned as Go string
+6. `tdtpcrypto.Decrypt(key, blob)` → verifies content matches original
+7. Second retrieve returns 404 (burn-on-read confirmed)
+
+The key never touches env vars or disk — it lives only as a Go variable on the
+stack between bind → encrypt → retrieve → decrypt, then goes out of scope.
 
 ## Building
 
