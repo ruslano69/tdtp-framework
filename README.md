@@ -7,7 +7,7 @@
 - **Универсальность** - работа с любыми таблицами и СУБД
 - **Прозрачность** - самодокументируемые XML сообщения
 - **Надежность** - stateless паттерн, валидация, пагинация
-- **Безопасность** - TLS, аутентификация, audit trail
+- **Безопасность** - Zero Trust шифрование, TLS, аутентификация, audit trail
 - **Удобство** - простое API, понятная структура
 
 ## Что реализовано (v1.6.0)
@@ -245,6 +245,74 @@ output:
 
 **Документация**: [docs/ETL_PIPELINE_GUIDE.md](docs/ETL_PIPELINE_GUIDE.md)
 
+### Шифрование & Zero Trust (pkg/crypto, pkg/mercury)
+
+**Философия:** защищать нечего, если данные исчезают сразу после доставки.
+
+**AES-256-GCM (pkg/crypto):**
+- Аутентифицированное шифрование (AEAD) — данные нельзя подменить незаметно
+- Уникальный nonce из `crypto/rand` для каждого пакета (повторные атаки исключены)
+- Бинарный формат: `[2B version][1B algo][16B UUID][12B nonce][ciphertext + 16B GCM-тег]`
+- UUID пакета встроен в заголовок — получатель запрашивает ключ без расшифровки тела
+
+**Жизненный цикл ключа (pkg/mercury + xZMercury):**
+
+```
+Отправитель           xZMercury (Redis)            Получатель
+───────────           ─────────────────            ──────────
+GenerateUUID ───────► POST /api/keys/bind
+                           ├─ AES-256 ключ в RAM
+                           ├─ Привязка к UUID пакета
+                           └─ HMAC-SHA256 подпись
+Encrypt(key, data) ◄── {key_b64, hmac}
+                                               ExtractUUID(blob)
+                                               POST /api/keys/retrieve
+                           ├─ Проверка credentials
+                           └─ GETDEL → ключ уничтожен ──► key_b64
+                                               Decrypt(key, blob)
+```
+
+**Свойства Zero Trust:**
+- Ключи **никогда не хранятся на диске** — только в оперативной памяти (Redis)
+- **Burn-on-read**: после первого обращения ключ физически уничтожается (Redis `GETDEL`)
+- **Один выстрел** — ключ живёт от вдоха (bind) до выдоха (retrieve), ~300мс типично
+- **HMAC-SHA256** — подпись binding'а предотвращает подмену ключа при передаче
+- **Изоляция UUID** — каждый пакет получает уникальный ключ; компрометация одного не раскрывает остальные
+
+**Изящная деградация при недоступности xZMercury:**
+
+Если сервис ключей не отвечает — данные не утекают незашифрованными. Вместо паники:
+```
+Mercury недоступен → бизнес-данные отброшены →
+error-пакет (MERCURY_UNAVAILABLE) записан в tdtp_errors →
+pipeline завершается штатно (exit 0)
+```
+Ошибка лежит на «организованной свалке косяков» — доступна для аналитики обычным `SELECT`.
+
+**Конфигурация:**
+```yaml
+output:
+  tdtp:
+    encryption: true
+
+security:
+  mercury_url: "http://mercury:3000"
+  recipient_resource: "ETL_RESULTS"
+  key_ttl_seconds: 86400       # TTL ключа в Redis (запасной предохранитель)
+  mercury_timeout_ms: 5000     # Таймаут — после него деградация, не зависание
+```
+
+**Коды ошибок в tdtp_errors:**
+
+| Код | Причина |
+|-----|---------|
+| `MERCURY_UNAVAILABLE` | timeout / connection refused |
+| `MERCURY_ERROR` | HTTP 5xx от xZMercury |
+| `HMAC_VERIFICATION_FAILED` | подпись ключа не совпала (подмена?) |
+| `KEY_BIND_REJECTED` | превышена квота или ACL запретил |
+
+---
+
 ### CLI Utility (tdtpcli)
 
 #### Команды
@@ -408,6 +476,13 @@ tdtp-framework/
 ├─ pkg/security/         Система безопасности
 │  ├─ privileges.go      IsAdmin() для Unix/Windows
 │  └─ validator.go       SQL валидатор (safe/unsafe режимы)
+│
+├─ pkg/crypto/           AES-256-GCM шифрование TDTP-пакетов
+│  └─ encryption.go      Encrypt/Decrypt/ExtractUUID с UUID-binding
+│
+├─ pkg/mercury/          xZMercury клиент (Zero Trust ключи)
+│  ├─ client.go          BindKey / RetrieveKey / VerifyHMAC (burn-on-read)
+│  └─ types.go           KeyBinding, коды ошибок (MERCURY_UNAVAILABLE и др.)
 │
 ├─ pkg/etl/              ETL Pipeline процессор
 │  ├─ config.go          YAML конфигурация с валидацией
@@ -704,6 +779,7 @@ go test -v ./pkg/core/packet/
 - [x] Data Processors в CLI (`--mask`, `--validate`, `--normalize`)
 - [x] Tail mode в limit (`--limit -N`)
 - [x] `--batch`, `--readonly-fields` опции
+- [x] **Zero Trust шифрование**: AES-256-GCM + xZMercury (burn-on-read ключи, изящная деградация)
 
 ### v2.0 (планируется)
 - [ ] Streaming export/import (TotalParts=0, "TCP для таблиц")
