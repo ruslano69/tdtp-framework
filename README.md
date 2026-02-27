@@ -1,106 +1,116 @@
 # TDTP Framework
 
-**Table Data Transfer Protocol** - фреймворк для универсального обмена табличными данными через message brokers.
+**Table Data Transfer Protocol** — a framework for universal tabular data exchange via message brokers.
 
-## Цели проекта
+---
 
-- **Универсальность** - работа с любыми таблицами и СУБД
-- **Прозрачность** - самодокументируемые XML сообщения
-- **Надежность** - stateless паттерн, валидация, пагинация
-- **Безопасность** - Zero Trust шифрование, TLS, аутентификация, audit trail
-- **Удобство** - простое API, понятная структура
+## Project Goals
 
-## Что реализовано (v1.6.0)
+- **Universality** — works with any tables and databases
+- **Transparency** — self-documenting XML messages
+- **Reliability** — stateless pattern, validation, pagination
+- **Security** — Zero Trust encryption, TLS, authentication, audit trail
+- **Simplicity** — clean API, intuitive structure
+
+---
+
+## What's Implemented (v1.6.0)
 
 ### Core Modules
 
-**Packet Module:**
-- XML парсер с валидацией TDTP v1.0
-- Генератор для всех типов сообщений (Reference, Delta, Response, Request)
-- Автоматическое разбиение на части (пагинация до 3.8MB)
-- Поддержка сжатия данных zstd:
-  - CompressionOptions для настройки (enabled, level, minSize, algorithm)
-  - Автоматическое сжатие при генерации пакетов (порог 1KB)
-  - Автоматическая распаковка при парсинге
-  - XML-атрибут `compression="zstd"` для идентификации сжатых данных
-- QueryContext для stateless паттерна
-- Поддержка subtypes (UUID, JSONB, TIMESTAMPTZ)
+#### Packet Module
+- XML parser with TDTP v1.0 validation
+- Generator for all message types (Reference, Delta, Response, Request)
+- Automatic splitting into parts (pagination up to 3.8 MB)
+- zstd compression support:
+  - `CompressionOptions` configuration (enabled, level, minSize, algorithm)
+  - Automatic compression on packet generation (threshold 1 KB)
+  - Automatic decompression on parsing
+  - XML attribute `compression="zstd"` for identifying compressed data
+- `QueryContext` for stateless pattern
+- Subtype support (UUID, JSONB, TIMESTAMPTZ)
 
-**Schema Module:**
-- Валидация всех типов данных TDTP
-- Универсальный Converter для всех адаптеров
-- Проверка соответствия данных схеме
-- Builder API для создания схем
+#### Schema Module
+- Validation of all TDTP data types
+- Universal Converter for all adapters
+- Data-to-schema conformance checking
+- Builder API for schema construction
 
-**TDTQL Module:**
+#### TDTQL Module
 - Translator: SQL → TDTQL (WHERE, ORDER BY, LIMIT, OFFSET)
-- Executor: in-memory фильтрация данных
-- SQL Generator: TDTQL → SQL оптимизация
-- Все операторы (=, !=, <, >, >=, <=, IN, BETWEEN, LIKE, IS NULL)
-- Логические группы (AND/OR) с вложенностью
-- Сортировка (одиночная и множественная)
-- Пагинация с QueryContext статистикой
+- Executor: in-memory data filtering
+- SQL Generator: TDTQL → SQL optimization
+- All operators (`=`, `!=`, `<`, `>`, `>=`, `<=`, `IN`, `BETWEEN`, `LIKE`, `IS NULL`)
+- Logical groups (AND/OR) with nesting
+- Sorting (single and multiple fields)
+- Pagination with `QueryContext` statistics
+
+---
 
 ### Database Adapters
 
-**Universal Interface:**
-- Двухуровневая архитектура (Interface + Implementations)
-- Фабрика адаптеров с автоматической регистрацией
-- Context-aware операции (context.Context)
-- Стратегии импорта: REPLACE, IGNORE, FAIL, COPY
-- ExportTable / ExportTableWithQuery
-- ImportPacket с transaction support
+#### Universal Interface
+- Two-tier architecture (Interface + Implementations)
+- Adapter factory with automatic registration
+- Context-aware operations (`context.Context`)
+- Import strategies: `REPLACE`, `IGNORE`, `FAIL`, `COPY`
+- `ExportTable` / `ExportTableWithQuery`
+- `ImportPacket` with transaction support
 
-**SQLite Adapter:**
-- Подключение через modernc.org/sqlite
-- Export/Import с автоматическим маппингом типов
-- TDTQL → SQL оптимизация на уровне БД
-- Автоматическое создание таблиц
-- Benchmark тесты (10K+ rows/sec)
+#### SQLite Adapter
+- Connection via `modernc.org/sqlite`
+- Export/Import with automatic type mapping
+- TDTQL → SQL optimization at the DB level
+- Automatic table creation
+- Benchmark tests (10K+ rows/sec)
 
-**PostgreSQL Adapter:**
-- Подключение через pgx/v5 connection pool
-- Export с поддержкой schemas (public/custom)
-- Import с COPY для bulk operations
-- Специальные типы: UUID, JSONB, JSON, INET, ARRAY, NUMERIC
-- ON CONFLICT для стратегий импорта
-- TDTQL → SQL оптимизация с безопасной заменой schema
+#### PostgreSQL Adapter
+- Connection via `pgx/v5` connection pool
+- Export with schema support (public/custom)
+- Import with COPY for bulk operations
+- Special types: UUID, JSONB, JSON, INET, ARRAY, NUMERIC
+- `ON CONFLICT` for import strategies
+- TDTQL → SQL optimization with safe schema substitution
 
-**MS SQL Server Adapter:**
-- Подключение через github.com/microsoft/go-mssqldb
-- Export с параметризованными запросами
-- IDENTITY_INSERT для импорта ключевых полей
-- Поддержка NVARCHAR, UNIQUEIDENTIFIER, DATETIME2
-- Совместимость с MS SQL 2012+
+#### MS SQL Server Adapter
+- Connection via `github.com/microsoft/go-mssqldb`
+- Export with parameterized queries
+- `IDENTITY_INSERT` for importing key fields
+- Support for NVARCHAR, UNIQUEIDENTIFIER, DATETIME2
+- Compatible with MS SQL 2012+
 
-**MySQL Adapter:**
-- Подключение через go-sql-driver/mysql
-- Export/Import с маппингом типов MySQL
-- Поддержка специфичных типов MySQL
+#### MySQL Adapter
+- Connection via `go-sql-driver/mysql`
+- Export/Import with MySQL type mapping
+- Support for MySQL-specific types
+
+---
 
 ### Message Brokers
 
-**RabbitMQ:**
-- Publish/Consume TDTP пакетов
-- Manual ACK для надежной доставки
+#### RabbitMQ
+- Publish/Consume TDTP packets
+- Manual ACK for reliable delivery
 - Queue parameters (durable, auto_delete, exclusive)
 - Tested with PostgreSQL adapter
 
-**MSMQ (Windows):**
+#### MSMQ (Windows)
 - Windows Message Queue integration
 - Transactional queues support
 - Tested with MS SQL adapter
 
-**Kafka:**
+#### Kafka
 - High-throughput message streaming
 - Producer/Consumer with manual commit
 - Configurable partitioning and consumer groups
 - Stats and offset management (replay capability)
 - Tested with PostgreSQL adapter
 
+---
+
 ### Resilience & Production Features
 
-**CircuitBreaker (pkg/resilience):**
+#### CircuitBreaker (`pkg/resilience`)
 - Three states: Closed, Half-Open, Open
 - Automatic recovery with configurable timeout
 - Concurrent call limiting
@@ -110,7 +120,7 @@
 - Circuit Breaker groups
 - 13 comprehensive tests
 
-**AuditLogger (pkg/audit):**
+#### AuditLogger (`pkg/audit`)
 - Multiple appenders: File, Database, Console
 - Three logging levels: Minimal, Standard, Full (GDPR compliance)
 - Async/Sync modes with configurable buffering
@@ -122,89 +132,104 @@
 - GDPR/HIPAA/SOX compliance features
 - 17 comprehensive tests
 
-**Retry Mechanism (pkg/retry):**
+#### Retry Mechanism (`pkg/retry`)
 - Three backoff strategies: Constant, Linear, Exponential
 - Jitter support to prevent thundering herd
 - Configurable retryable errors
 - Context-aware cancellation
-- OnRetry callbacks for monitoring
+- `OnRetry` callbacks for monitoring
 - Dead Letter Queue (DLQ) support
 - 20 comprehensive tests
 
-**IncrementalSync (pkg/sync):**
-- StateManager with checkpoint tracking
+#### IncrementalSync (`pkg/sync`)
+- `StateManager` with checkpoint tracking
 - Three tracking strategies: Timestamp, Sequence, Version
 - Batch processing with configurable sizes
 - Resume from last checkpoint
 - 200x faster for large tables
 
-**Data Processors (pkg/processors):**
-- **CompressionProcessor**: Сжатие/распаковка zstd (уровни 1-22, по умолчанию 3)
-  - Автоматическое base64-кодирование для безопасной передачи
-  - Многопоточная обработка (до 4 ядер)
-  - Порог сжатия (по умолчанию 1KB)
-  - Статистика сжатия (коэффициент, время)
-  - Интеграция с packet generator/parser
+---
+
+### Data Processors (`pkg/processors`)
+
+- **CompressionProcessor**: zstd compression/decompression (levels 1–22, default 3)
+  - Automatic base64 encoding for safe transport
+  - Multi-threaded processing (up to 4 cores)
+  - Compression threshold (default 1 KB)
+  - Compression statistics (ratio, time)
+  - Integration with packet generator/parser
 - **FieldMasker**: Email, phone, card masking (GDPR/PII)
 - **FieldValidator**: Regex, range, format validation
 - **FieldNormalizer**: Email, phone, date normalization
-- **Processor chain**: Цепочки процессоров для сложных трансформаций
+- **Processor chain**: Processor chains for complex transformations
 
-**XLSX Converter (pkg/xlsx):**
-- TDTP → XLSX export (Database → Excel для бизнес-анализа)
+---
+
+### XLSX Converter (`pkg/xlsx`)
+
+- TDTP → XLSX export (Database → Excel for business analysis)
 - XLSX → TDTP import (Excel → Database bulk loading)
 - Type preservation (INTEGER, REAL, BOOLEAN, DATE, DATETIME, etc.)
 - Formatted headers with field types and primary keys
 - Auto-formatting (numbers, dates, booleans)
-- Business-friendly interface (без знания SQL)
+- Business-friendly interface (no SQL knowledge required)
 - Round-trip data integrity
 
-**HTML Viewer (pkg/html):**
-- TDTP → HTML конвертация для быстрого просмотра данных в браузере
-- Поддержка диапазонов строк (`--row 100-500`)
-- Tail-mode просмотр (`--limit -50` — последние 50 строк)
-- Комбинирование диапазонов и limit
-- Открытие в браузере одной командой (`--open`)
+---
 
-**Diff & Merge (pkg/diff):**
-- Сравнение двух TDTP файлов (added / modified / deleted)
-- Настраиваемые ключевые поля (`--key-fields`)
-- Игнорирование полей при сравнении (`--ignore-fields`)
-- Регистрозависимое/независимое сравнение
-- Пять стратегий слияния: `union`, `intersection`, `left`, `right`, `append`
-- Детальный отчёт о конфликтах (`--show-conflicts`)
+### HTML Viewer (`pkg/html`)
 
-### ETL Pipeline Processor (pkg/etl)
+- TDTP → HTML conversion for quick browser-based data preview
+- Row range support (`--row 100-500`)
+- Tail-mode preview (`--limit -50` — last 50 rows)
+- Combined range and limit
+- Open in browser with a single command (`--open`)
 
-**Multi-Database ETL с 4-уровневой безопасностью:**
+---
 
-**Ключевые возможности:**
-- Множественные источники: PostgreSQL, MS SQL Server, MySQL, SQLite
-- Параллельная загрузка: все источники загружаются одновременно
-- SQLite :memory: workspace: быстрые JOIN операции без дисковых операций
-- SQL трансформации: полная мощь SQL для обработки данных
-- Множественные выходы: TDTP XML, RabbitMQ, Kafka
-- 4-уровневая безопасность: READ-ONLY по умолчанию, защита от случайного повреждения
-- Детальная статистика: время выполнения, количество строк, ошибки
+### Diff & Merge (`pkg/diff`)
 
-**Компоненты ETL:**
-- **Loader** (pkg/etl/loader.go): параллельная загрузка из источников
-- **Workspace** (pkg/etl/workspace.go): SQLite :memory: управление для JOIN
-- **Executor** (pkg/etl/executor.go): выполнение SQL трансформаций
-- **Exporter** (pkg/etl/exporter.go): экспорт в TDTP/RabbitMQ/Kafka
-- **Processor** (pkg/etl/processor.go): главный оркестратор ETL
+- Compare two TDTP files (added / modified / deleted)
+- Configurable key fields (`--key-fields`)
+- Field exclusion from comparison (`--ignore-fields`)
+- Case-sensitive/insensitive comparison
+- Five merge strategies: union, intersection, left, right, append
+- Detailed conflict report (`--show-conflicts`)
 
-**Безопасность (4 уровня):**
-1. **Code level**: SQLValidator блокирует запрещенные операции (INSERT, UPDATE, DELETE, DROP)
-2. **OS level**: IsAdmin() проверяет права администратора для unsafe режима
-3. **CLI level**: READ-ONLY по умолчанию, --unsafe требует явного указания
-4. **SQL level**: только SELECT/WITH в safe mode, все операции в unsafe
+---
 
-**Режимы работы:**
-- Safe mode (по умолчанию): только SELECT/WITH, без admin прав
-- Unsafe mode (--unsafe): все SQL операции, требует права администратора
+### ETL Pipeline Processor (`pkg/etl`)
 
-**Пример конфигурации:**
+Multi-Database ETL with 4-level security.
+
+**Key capabilities:**
+- Multiple sources: PostgreSQL, MS SQL Server, MySQL, SQLite
+- Parallel loading: all sources loaded simultaneously
+- SQLite `:memory:` workspace: fast JOIN operations without disk I/O
+- SQL transformations: full SQL power for data processing
+- Multiple outputs: TDTP XML, RabbitMQ, Kafka
+- 4-level security: READ-ONLY by default, protection against accidental data modification
+- Detailed statistics: execution time, row counts, errors
+
+**ETL Components:**
+- `Loader` (`pkg/etl/loader.go`): parallel loading from sources
+- `Workspace` (`pkg/etl/workspace.go`): SQLite `:memory:` management for JOINs
+- `Executor` (`pkg/etl/executor.go`): SQL transformation execution
+- `Exporter` (`pkg/etl/exporter.go`): export to TDTP/RabbitMQ/Kafka
+- `Processor` (`pkg/etl/processor.go`): main ETL orchestrator
+
+**Security (4 levels):**
+1. **Code level**: `SQLValidator` blocks forbidden operations (INSERT, UPDATE, DELETE, DROP)
+2. **OS level**: `IsAdmin()` checks administrator privileges for unsafe mode
+3. **CLI level**: READ-ONLY by default, `--unsafe` requires explicit flag
+4. **SQL level**: only SELECT/WITH in safe mode, all operations in unsafe
+
+**Operating modes:**
+- **Safe mode** (default): SELECT/WITH only, no admin rights required
+- **Unsafe mode** (`--unsafe`): all SQL operations, requires administrator privileges
+
+**Configuration example:**
+
 ```yaml
 name: "Multi-DB Report"
 sources:
@@ -243,53 +268,61 @@ output:
     compress: true
 ```
 
-**Документация**: [docs/ETL_PIPELINE_GUIDE.md](docs/ETL_PIPELINE_GUIDE.md)
+Documentation: [`docs/ETL_PIPELINE_GUIDE.md`](docs/ETL_PIPELINE_GUIDE.md)
 
-### Шифрование & Zero Trust (pkg/crypto, pkg/mercury)
+---
 
-**Философия:** защищать нечего, если данные исчезают сразу после доставки.
+### Encryption & Zero Trust (`pkg/crypto`, `pkg/mercury`)
 
-**AES-256-GCM (pkg/crypto):**
-- Аутентифицированное шифрование (AEAD) — данные нельзя подменить незаметно
-- Уникальный nonce из `crypto/rand` для каждого пакета (повторные атаки исключены)
-- Бинарный формат: `[2B version][1B algo][16B UUID][12B nonce][ciphertext + 16B GCM-тег]`
-- UUID пакета встроен в заголовок — получатель запрашивает ключ без расшифровки тела
+**Philosophy:** nothing to protect if data disappears immediately after delivery.
 
-**Жизненный цикл ключа (pkg/mercury + xZMercury):**
+#### AES-256-GCM (`pkg/crypto`)
+- Authenticated encryption (AEAD) — data cannot be tampered with undetected
+- Unique nonce from `crypto/rand` per packet (replay attacks impossible)
+- Binary format: `[2B version][1B algo][16B UUID][12B nonce][ciphertext + 16B GCM tag]`
+- Packet UUID embedded in header — recipient retrieves key without decrypting body
+
+#### Key lifecycle (`pkg/mercury` + xZMercury)
 
 ```
-Отправитель           xZMercury (Redis)            Получатель
-───────────           ─────────────────            ──────────
+Sender                xZMercury (Redis)            Recipient
+──────                ─────────────────            ─────────
 GenerateUUID ───────► POST /api/keys/bind
-                           ├─ AES-256 ключ в RAM
-                           ├─ Привязка к UUID пакета
-                           └─ HMAC-SHA256 подпись
+                           ├─ AES-256 key in RAM
+                           ├─ Bound to packet UUID
+                           └─ HMAC-SHA256 signature
 Encrypt(key, data) ◄── {key_b64, hmac}
+
                                                ExtractUUID(blob)
                                                POST /api/keys/retrieve
-                           ├─ Проверка credentials
-                           └─ GETDEL → ключ уничтожен ──► key_b64
+                           ├─ Credential check
+                           └─ GETDEL → key destroyed ──► key_b64
+
                                                Decrypt(key, blob)
 ```
 
-**Свойства Zero Trust:**
-- Ключи **никогда не хранятся на диске** — только в оперативной памяти (Redis)
-- **Burn-on-read**: после первого обращения ключ физически уничтожается (Redis `GETDEL`)
-- **Один выстрел** — ключ живёт от вдоха (bind) до выдоха (retrieve), ~300мс типично
-- **HMAC-SHA256** — подпись binding'а предотвращает подмену ключа при передаче
-- **Изоляция UUID** — каждый пакет получает уникальный ключ; компрометация одного не раскрывает остальные
+**Zero Trust properties:**
+- Keys are never stored on disk — RAM only (Redis)
+- **Burn-on-read**: key is physically destroyed after first retrieval (Redis `GETDEL`)
+- **One shot** — key lives from inhale (bind) to exhale (retrieve), typically ~300 ms
+- **HMAC-SHA256** — binding signature prevents key substitution in transit
+- **UUID isolation** — each packet gets a unique key; one compromised key reveals nothing else
 
-**Изящная деградация при недоступности xZMercury:**
+**Graceful degradation when xZMercury is unavailable:**
 
-Если сервис ключей не отвечает — данные не утекают незашифрованными. Вместо паники:
+If the key service is unreachable — data does not leak unencrypted. Instead of panic:
+
 ```
-Mercury недоступен → бизнес-данные отброшены →
-error-пакет (MERCURY_UNAVAILABLE) записан в tdtp_errors →
-pipeline завершается штатно (exit 0)
+Mercury unavailable
+  → business data discarded
+  → error packet (MERCURY_UNAVAILABLE) written to tdtp_errors
+  → pipeline completes normally (exit 0)
 ```
-Ошибка лежит на «организованной свалке косяков» — доступна для аналитики обычным `SELECT`.
 
-**Конфигурация:**
+The error sits on the "organized junk yard" — queryable with a plain SELECT.
+
+**Configuration:**
+
 ```yaml
 output:
   tdtp:
@@ -298,238 +331,238 @@ output:
 security:
   mercury_url: "http://mercury:3000"
   recipient_resource: "ETL_RESULTS"
-  key_ttl_seconds: 86400       # TTL ключа в Redis (запасной предохранитель)
-  mercury_timeout_ms: 5000     # Таймаут — после него деградация, не зависание
+  key_ttl_seconds: 86400       # Key TTL in Redis (failsafe expiry)
+  mercury_timeout_ms: 5000     # Timeout — triggers degradation, not hang
 ```
 
-**Коды ошибок в tdtp_errors:**
+**Error codes in `tdtp_errors`:**
 
-| Код | Причина |
-|-----|---------|
+| Code | Cause |
+|------|-------|
 | `MERCURY_UNAVAILABLE` | timeout / connection refused |
-| `MERCURY_ERROR` | HTTP 5xx от xZMercury |
-| `HMAC_VERIFICATION_FAILED` | подпись ключа не совпала (подмена?) |
-| `KEY_BIND_REJECTED` | превышена квота или ACL запретил |
+| `MERCURY_ERROR` | HTTP 5xx from xZMercury |
+| `HMAC_VERIFICATION_FAILED` | key signature mismatch (substitution attempt?) |
+| `KEY_BIND_REJECTED` | quota exceeded or ACL denied |
 
 ---
 
-### CLI Utility (tdtpcli)
+## CLI Utility (`tdtpcli`)
 
-#### Команды
+### Commands
 
 **Database:**
 ```
---list                     Список всех таблиц
---list-views               Список database views (U* updatable, R* read-only)
---export <table>           Экспорт таблицы/view в TDTP XML
---import <file>            Импорт TDTP XML в базу данных
+--list                     List all tables
+--list-views               List database views (U* updatable, R* read-only)
+--export <table>           Export table/view to TDTP XML
+--import <file>            Import TDTP XML into database
 ```
 
 **File:**
 ```
---diff <file-a> <file-b>   Сравнение двух TDTP файлов
---merge <files>            Слияние нескольких TDTP файлов
---to-html <file>           Конвертация TDTP в HTML viewer
+--diff <file-a> <file-b>   Compare two TDTP files
+--merge <files>            Merge multiple TDTP files
+--to-html <file>           Convert TDTP to HTML viewer
 ```
 
 **XLSX:**
 ```
 --to-xlsx <tdtp-file>      TDTP → XLSX
 --from-xlsx <xlsx-file>    XLSX → TDTP
---export-xlsx <table>      Таблица → XLSX (напрямую, без промежуточного XML)
---import-xlsx <xlsx-file>  XLSX → Database (напрямую)
+--export-xlsx <table>      Table → XLSX (directly, no intermediate XML)
+--import-xlsx <xlsx-file>  XLSX → Database (directly)
 ```
 
 **Broker:**
 ```
---export-broker <table>    Экспорт в message broker
---import-broker            Импорт из message broker
+--export-broker <table>    Export to message broker
+--import-broker            Import from message broker
 ```
 
 **ETL:**
 ```
---sync-incremental <table> Инкрементальная синхронизация таблицы
---pipeline <file>          Выполнение ETL pipeline из YAML конфига
+--sync-incremental <table> Incremental table synchronization
+--pipeline <file>          Run ETL pipeline from YAML config
 ```
 
-#### Опции
+### Options
 
 **General:**
 ```
---config <file>            Конфигурационный файл (по умолчанию: config.yaml)
---output <file>            Путь к выходному файлу
---table <name>             Имя целевой таблицы (переопределяет имя из XML при импорте)
---strategy <name>          Стратегия импорта: replace, ignore, fail, copy
---batch <size>             Размер batch для bulk операций (по умолчанию: 1000)
---readonly-fields          Включить read-only поля (timestamp, computed, identity)
+--config <file>            Configuration file (default: config.yaml)
+--output <file>            Output file path
+--table <name>             Target table name (overrides name from XML on import)
+--strategy <name>          Import strategy: replace, ignore, fail, copy
+--batch <size>             Batch size for bulk operations (default: 1000)
+--readonly-fields          Include read-only fields (timestamp, computed, identity)
 ```
 
 **Compression:**
 ```
---compress                 Включить сжатие zstd для экспортируемых данных
---compress-level <n>       Уровень сжатия: 1 (быстрее) — 19 (лучше), по умолчанию: 3
+--compress                 Enable zstd compression for exported data
+--compress-level <n>       Compression level: 1 (faster) — 19 (better), default: 3
 ```
 
 **TDTQL Filters:**
 ```
---where <condition>        WHERE условие (пример: 'age > 18 AND status = active')
---order-by <fields>        ORDER BY (пример: 'name ASC, age DESC')
---limit <n>                Лимит строк: +N = первые N, -N = последние N (как tail)
---offset <n>               Пропуск N строк
+--where <condition>        WHERE condition (e.g. 'age > 18 AND status = active')
+--order-by <fields>        ORDER BY (e.g. 'name ASC, age DESC')
+--limit <n>                Row limit: +N = first N, -N = last N (like tail)
+--offset <n>               Skip N rows
 ```
 
 **HTML Viewer:**
 ```
---open                     Открыть в браузере после конвертации
---row <range>              Диапазон строк (пример: 100-500)
+--open                     Open in browser after conversion
+--row <range>              Row range (e.g. 100-500)
 ```
 
 **XLSX:**
 ```
---sheet <name>             Имя листа Excel (по умолчанию: Sheet1)
+--sheet <name>             Excel sheet name (default: Sheet1)
 ```
 
 **Incremental Sync:**
 ```
---tracking-field <field>   Поле для отслеживания изменений (по умолчанию: updated_at)
---checkpoint-file <file>   Файл checkpoint (по умолчанию: checkpoint.yaml)
---batch-size <size>        Размер batch для синхронизации (по умолчанию: 1000)
+--tracking-field <field>   Field to track changes (default: updated_at)
+--checkpoint-file <file>   Checkpoint file (default: checkpoint.yaml)
+--batch-size <size>        Sync batch size (default: 1000)
 ```
 
 **ETL:**
 ```
---unsafe                   Небезопасный режим (все SQL операции, требует admin)
+--unsafe                   Unsafe mode (all SQL operations, requires admin)
 ```
 
 **Diff:**
 ```
---key-fields <fields>      Ключевые поля для сравнения (через запятую)
---ignore-fields <fields>   Поля, игнорируемые при сравнении (через запятую)
---case-sensitive           Регистрозависимое сравнение (по умолчанию: false)
+--key-fields <fields>      Key fields for comparison (comma-separated)
+--ignore-fields <fields>   Fields to ignore during comparison (comma-separated)
+--case-sensitive           Case-sensitive comparison (default: false)
 ```
 
 **Merge:**
 ```
---merge-strategy <name>    Стратегия: union, intersection, left, right, append
-                           (по умолчанию: union)
---show-conflicts           Показать детальную информацию о конфликтах
+--merge-strategy <name>    Strategy: union, intersection, left, right, append
+                           (default: union)
+--show-conflicts           Show detailed conflict information
 ```
 
 **Data Processors:**
 ```
---mask <fields>            Маскировать чувствительные поля (через запятую)
---validate <file>          Валидация полей (YAML файл правил)
---normalize <file>         Нормализация полей (YAML файл правил)
+--mask <fields>            Mask sensitive fields (comma-separated)
+--validate <file>          Field validation (YAML rules file)
+--normalize <file>         Field normalization (YAML rules file)
 ```
 
 **Configuration:**
 ```
---create-config-pg         Создать шаблон конфига PostgreSQL
---create-config-mssql      Создать шаблон конфига MS SQL
---create-config-sqlite     Создать шаблон конфига SQLite
---create-config-mysql      Создать шаблон конфига MySQL
+--create-config-pg         Create PostgreSQL config template
+--create-config-mssql      Create MS SQL config template
+--create-config-sqlite     Create SQLite config template
+--create-config-mysql      Create MySQL config template
 ```
 
 **Misc:**
 ```
---version                  Показать версию
--h                         Краткая справка
---help                     Полная справка с примерами
+--version                  Show version
+-h                         Brief help
+--help                     Full help with examples
 ```
 
-#### Работа с Views
+### Working with Views
 
-```
-tdtpcli --list-views показывает все views с маркерами:
-  U* = Updatable view (можно импортировать)
-  R* = Read-only view (только экспорт)
-```
+`tdtpcli --list-views` shows all views with markers:
+- `U*` = Updatable view (can be imported)
+- `R*` = Read-only view (export only)
 
-- `--export` поддерживает все database views
-- `--import` работает только с updatable views
+- `--export` supports all database views
+- `--import` works only with updatable views
 
-## Архитектура
+---
+
+## Architecture
 
 ```
 tdtp-framework/
 ├─ pkg/core/
-│  ├─ packet/            Парсинг/генерация TDTP пакетов + компрессия
-│  ├─ schema/            Валидация типов, Converter, Builder
+│  ├─ packet/            TDTP packet parsing/generation + compression
+│  ├─ schema/            Type validation, Converter, Builder
 │  └─ tdtql/             Translator, Executor, SQL Generator
 │
 ├─ pkg/adapters/
-│  ├─ adapter.go         Универсальный интерфейс
-│  ├─ factory.go         Фабрика адаптеров
+│  ├─ adapter.go         Universal interface
+│  ├─ factory.go         Adapter factory
 │  ├─ sqlite/            SQLite adapter (modernc.org/sqlite)
 │  ├─ postgres/          PostgreSQL adapter (pgx/v5)
 │  ├─ mssql/             MS SQL Server adapter (go-mssqldb)
 │  └─ mysql/             MySQL adapter (go-sql-driver/mysql)
 │
-├─ pkg/processors/       Обработка и трансформация данных
-│  ├─ compression.go     Сжатие/распаковка zstd (klauspost/compress)
-│  ├─ field_masker.go    Маскирование PII (email, phone, card)
-│  ├─ field_validator.go Валидация полей (regex, range, format)
-│  ├─ field_normalizer.go Нормализация данных
-│  ├─ chain.go           Цепочки процессоров
-│  └─ factory.go         Фабрика процессоров
+├─ pkg/processors/       Data processing and transformation
+│  ├─ compression.go     zstd compression/decompression (klauspost/compress)
+│  ├─ field_masker.go    PII masking (email, phone, card)
+│  ├─ field_validator.go Field validation (regex, range, format)
+│  ├─ field_normalizer.go Data normalization
+│  ├─ chain.go           Processor chains
+│  └─ factory.go         Processor factory
 │
-├─ pkg/security/         Система безопасности
-│  ├─ privileges.go      IsAdmin() для Unix/Windows
-│  └─ validator.go       SQL валидатор (safe/unsafe режимы)
+├─ pkg/security/         Security system
+│  ├─ privileges.go      IsAdmin() for Unix/Windows
+│  └─ validator.go       SQL validator (safe/unsafe modes)
 │
-├─ pkg/crypto/           AES-256-GCM шифрование TDTP-пакетов
-│  └─ encryption.go      Encrypt/Decrypt/ExtractUUID с UUID-binding
+├─ pkg/crypto/           AES-256-GCM TDTP packet encryption
+│  └─ encryption.go      Encrypt/Decrypt/ExtractUUID with UUID-binding
 │
-├─ pkg/mercury/          xZMercury клиент (Zero Trust ключи)
+├─ pkg/mercury/          xZMercury client (Zero Trust keys)
 │  ├─ client.go          BindKey / RetrieveKey / VerifyHMAC (burn-on-read)
-│  └─ types.go           KeyBinding, коды ошибок (MERCURY_UNAVAILABLE и др.)
+│  └─ types.go           KeyBinding, error codes (MERCURY_UNAVAILABLE etc.)
 │
-├─ pkg/etl/              ETL Pipeline процессор
-│  ├─ config.go          YAML конфигурация с валидацией
+├─ pkg/etl/              ETL Pipeline processor
+│  ├─ config.go          YAML configuration with validation
 │  ├─ workspace.go       SQLite :memory: workspace management
-│  ├─ loader.go          Параллельная загрузка из источников
-│  ├─ executor.go        Выполнение SQL трансформаций
-│  ├─ exporter.go        Экспорт в TDTP/RabbitMQ/Kafka
-│  └─ processor.go       Главный оркестратор ETL
+│  ├─ loader.go          Parallel loading from sources
+│  ├─ executor.go        SQL transformation execution
+│  ├─ exporter.go        Export to TDTP/RabbitMQ/Kafka
+│  └─ processor.go       Main ETL orchestrator
 │
-├─ pkg/resilience/       Circuit Breaker паттерн
-│  └─ circuit_breaker.go Защита от каскадных сбоев
+├─ pkg/resilience/       Circuit Breaker pattern
+│  └─ circuit_breaker.go Protection against cascading failures
 │
 ├─ pkg/audit/            Audit Logger
-│  ├─ logger.go          Система аудита (File, DB, Console)
-│  └─ appenders.go       Appenders для логов
+│  ├─ logger.go          Audit system (File, DB, Console)
+│  └─ appenders.go       Log appenders
 │
-├─ pkg/retry/            Retry механизм
-│  └─ retry.go           Стратегии повтора с backoff
+├─ pkg/retry/            Retry mechanism
+│  └─ retry.go           Backoff strategies
 │
 ├─ pkg/sync/             Incremental Sync
-│  └─ state_manager.go   Инкрементальная синхронизация
+│  └─ state_manager.go   Incremental synchronization
 │
-├─ pkg/xlsx/             Excel интеграция
-│  └─ converter.go       TDTP ↔ XLSX конвертер
+├─ pkg/xlsx/             Excel integration
+│  └─ converter.go       TDTP ↔ XLSX converter
 │
 ├─ pkg/brokers/
-│  ├─ broker.go          Интерфейс брокеров
-│  ├─ rabbitmq.go        RabbitMQ интеграция
-│  ├─ kafka.go           Kafka интеграция
-│  └─ msmq.go            MSMQ интеграция (Windows)
+│  ├─ broker.go          Broker interface
+│  ├─ rabbitmq.go        RabbitMQ integration
+│  ├─ kafka.go           Kafka integration
+│  └─ msmq.go            MSMQ integration (Windows)
 │
-├─ cmd/tdtpcli/          CLI утилита
-│  ├─ main.go            Точка входа
-│  ├─ help.go            Справочная информация
-│  ├─ config.go          YAML конфигурация
-│  ├─ processors.go      Интеграция процессоров
-│  └─ commands/          Обработчики команд
+├─ cmd/tdtpcli/          CLI utility
+│  ├─ main.go            Entry point
+│  ├─ help.go            Help information
+│  ├─ config.go          YAML configuration
+│  ├─ processors.go      Processor integration
+│  └─ commands/          Command handlers
 │
-├─ docs/                 Документация
-│  ├─ SPECIFICATION.md   Спецификация TDTP v1.0
-│  ├─ PACKET_MODULE.md   Документация Packet
-│  ├─ SCHEMA_MODULE.md   Документация Schema
-│  ├─ TDTQL_TRANSLATOR.md Документация TDTQL
-│  ├─ SQLITE_ADAPTER.md  Документация SQLite
-│  └─ ETL_PIPELINE_GUIDE.md ETL руководство
+├─ docs/                 Documentation
+│  ├─ SPECIFICATION.md   TDTP v1.0 specification
+│  ├─ PACKET_MODULE.md   Packet documentation
+│  ├─ SCHEMA_MODULE.md   Schema documentation
+│  ├─ TDTQL_TRANSLATOR.md TDTQL documentation
+│  ├─ SQLITE_ADAPTER.md  SQLite documentation
+│  └─ ETL_PIPELINE_GUIDE.md ETL guide
 │
-├─ examples/             Production-ready примеры
+├─ examples/             Production-ready examples
 │  ├─ 01-basic-export/   PostgreSQL → TDTP XML export
 │  ├─ 02-rabbitmq-mssql/ MSSQL → RabbitMQ (Circuit Breaker + Audit)
 │  ├─ 03-incremental-sync/ PostgreSQL → MySQL incremental sync
@@ -538,15 +571,17 @@ tdtp-framework/
 │  ├─ 05-circuit-breaker/ API resilience patterns
 │  └─ 06-etl-pipeline/   Complete ETL pipeline
 │
-└─ scripts/              Вспомогательные скрипты
+└─ scripts/              Helper scripts
    ├─ create_sqlite_test_db.py
    ├─ create_postgres_test_db.py
    └─ README.md
 ```
 
-## Быстрый старт
+---
 
-### Установка
+## Quick Start
+
+### Installation
 
 ```bash
 git clone https://github.com/ruslano69/tdtp-framework
@@ -554,83 +589,83 @@ cd tdtp-framework
 go mod tidy
 ```
 
-### Сборка CLI
+### Build CLI
 
 ```bash
 go build -o tdtpcli ./cmd/tdtpcli
 ```
 
-### Примеры использования CLI
+### CLI Usage Examples
 
 ```bash
-# Список таблиц
+# List tables
 tdtpcli --list --config pg.yaml
 
-# Экспорт таблицы
+# Export table
 tdtpcli --export users --output users.xml
 
-# Экспорт с фильтрами и сжатием
+# Export with filters and compression
 tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
 
-# Экспорт последних 50 строк (tail mode)
+# Export last 50 rows (tail mode)
 tdtpcli --export logs --order-by 'created_at DESC' --limit -50
 
-# Просмотр данных в браузере
+# View data in browser
 tdtpcli --to-html customers.xml --open
 
-# Просмотр диапазона строк 100-500
+# View rows 100-500
 tdtpcli --to-html data.xml --row 100-500 --open
 
-# Просмотр последних 20 строк из диапазона
+# View last 20 rows from range
 tdtpcli --to-html data.xml --row 100-500 --limit -20 --open
 
-# Экспорт напрямую в Excel
+# Export directly to Excel
 tdtpcli --export-xlsx orders --output orders.xlsx
 
-# Конвертация TDTP в Excel с выбором листа
+# Convert TDTP to Excel with sheet name
 tdtpcli --to-xlsx orders.xml --output orders.xlsx --sheet Orders
 
-# Конвертация Excel в TDTP
+# Convert Excel to TDTP
 tdtpcli --from-xlsx orders.xlsx --output orders.xml
 
-# Импорт Excel в базу данных
+# Import Excel to database
 tdtpcli --import-xlsx orders.xlsx --strategy replace
 
-# Сравнение двух TDTP файлов
+# Compare two TDTP files
 tdtpcli --diff users-old.xml users-new.xml
 
-# Сравнение с указанием ключей и игнорированием полей
+# Compare with key fields and ignore fields
 tdtpcli --diff old.xml new.xml --key-fields user_id --ignore-fields updated_at
 
-# Слияние нескольких файлов (стратегия union)
+# Merge multiple files (union strategy)
 tdtpcli --merge file1.xml,file2.xml,file3.xml --output merged.xml
 
-# Слияние с разрешением конфликтов
+# Merge with conflict resolution
 tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy right --show-conflicts
 
-# Инкрементальная синхронизация
+# Incremental synchronization
 tdtpcli --sync-incremental orders --tracking-field updated_at --checkpoint-file orders.yaml
 
-# Экспорт с маскированием PII
+# Export with PII masking
 tdtpcli --export customers --mask email,phone
 
 # ETL pipeline (safe mode)
 tdtpcli --pipeline pipeline.yaml
 
-# ETL pipeline (unsafe mode, требует admin)
+# ETL pipeline (unsafe mode, requires admin)
 sudo tdtpcli --pipeline pipeline.yaml --unsafe
 
-# Создание конфигурационного файла
+# Create configuration file
 tdtpcli --create-config-pg > config.yaml
 tdtpcli --create-config-mysql > mysql.yaml
 ```
 
-### Использование в коде
+### Using in Code
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/core/packet"
 
-// Создание схемы
+// Create schema
 schema := packet.Schema{
     Fields: []packet.Field{
         {Name: "ID", Type: "INTEGER", Key: true},
@@ -639,19 +674,19 @@ schema := packet.Schema{
     },
 }
 
-// Генерация пакета
+// Generate packet
 generator := packet.NewGenerator()
 packets, err := generator.GenerateReference("Companies", schema, rows)
 
-// Сохранение
+// Save
 generator.WriteToFile(packets[0], "reference.xml")
 
-// Парсинг
+// Parse
 parser := packet.NewParser()
 pkt, err := parser.ParseFile("reference.xml")
 ```
 
-### Использование сжатия
+### Using Compression
 
 ```go
 import (
@@ -662,19 +697,19 @@ import (
 generator := packet.NewGenerator()
 generator.SetCompression(packet.CompressionOptions{
     Enabled:   true,
-    Level:     3,      // 1 (быстро) — 19 (лучшее сжатие)
-    MinSize:   1024,   // Минимальный размер для сжатия (байты)
+    Level:     3,      // 1 (fast) — 19 (best compression)
+    MinSize:   1024,   // Minimum size for compression (bytes)
     Algorithm: "zstd",
 })
 
 packets, err := generator.GenerateReference("LargeTable", schema, rows)
 
-// Прямое использование
+// Direct usage
 compressed, stats, err := processors.Compress([]byte("large data"), 3)
 decompressed, err := processors.Decompress(compressed)
 ```
 
-### Использование адаптеров
+### Using Adapters
 
 ```go
 import (
@@ -692,14 +727,14 @@ adapter, err := adapters.New(ctx, adapters.Config{
 })
 defer adapter.Close(ctx)
 
-// Export: БД → TDTP
+// Export: DB → TDTP
 packets, err := adapter.ExportTable(ctx, "users")
 
-// Import: TDTP → БД
+// Import: TDTP → DB
 err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 ```
 
-### Готовые примеры
+### Ready-to-Run Examples
 
 ```bash
 # Database ↔ Excel converter
@@ -714,99 +749,107 @@ go run main.go
 cd examples/03-incremental-sync
 go run main.go
 
-# Полный ETL pipeline
+# Complete ETL pipeline
 cd examples/06-etl-pipeline
 go run main.go
 ```
 
-**Документация примеров**: [examples/README.md](./examples/README.md)
-
-## Документация
-
-### Руководства
-
-- **[Installation Guide](INSTALLATION_GUIDE.md)** — установка, настройка, quick start
-- **[User Guide](docs/USER_GUIDE.md)** — полное руководство по CLI утилите
-- **[ETL Pipeline Guide](docs/ETL_PIPELINE_GUIDE.md)** — руководство по ETL pipeline
-- **[Documentation Index](docs/README.md)** — полный каталог документации
-
-### Технические спецификации
-
-- [TDTP Specification](docs/SPECIFICATION.md) — спецификация протокола TDTP v1.0
-- [Packet Module](docs/PACKET_MODULE.md) — парсинг и генерация пакетов
-- [Schema Module](docs/SCHEMA_MODULE.md) — валидация типов и схем
-- [TDTQL Translator](docs/TDTQL_TRANSLATOR.md) — язык запросов
-- [SQLite Adapter](docs/SQLITE_ADAPTER.md) — интеграция с SQLite
-
-### Package READMEs
-
-- [Circuit Breaker](pkg/resilience/README.md) — защита от каскадных сбоев
-- [Audit Logger](pkg/audit/README.md) — compliance и security
-- [XLSX Converter](pkg/xlsx/README.md) — Database ↔ Excel
-
-## Тестирование
-
-```bash
-# Запуск всех тестов
-go test ./...
-
-# С покрытием
-go test -cover ./...
-
-# Verbose для конкретного пакета
-go test -v ./pkg/core/packet/
-```
-
-## Roadmap
-
-### v1.0 — v1.3 (завершено)
-- [x] Packet, Schema, TDTQL модули
-- [x] SQLite, PostgreSQL, MS SQL адаптеры
-- [x] RabbitMQ, MSMQ, Kafka брокеры
-- [x] CLI утилита с TDTQL фильтрами
-- [x] CircuitBreaker, AuditLogger, Retry механизм
-- [x] IncrementalSync, Data Processors
-- [x] XLSX Converter (Database ↔ Excel)
-- [x] ETL Pipeline Processor с 4-уровневой безопасностью
-- [x] MySQL адаптер
-- [x] Полная документация
-
-### v1.6.0 (текущая)
-- [x] HTML Viewer (`--to-html`, `--open`, `--row`)
-- [x] Diff & Merge (`--diff`, `--merge`, `--merge-strategy`, `--show-conflicts`)
-- [x] Расширенные XLSX команды (`--from-xlsx`, `--export-xlsx`, `--import-xlsx`)
-- [x] Инкрементальная синхронизация через CLI (`--sync-incremental`)
-- [x] Data Processors в CLI (`--mask`, `--validate`, `--normalize`)
-- [x] Tail mode в limit (`--limit -N`)
-- [x] `--batch`, `--readonly-fields` опции
-- [x] **Zero Trust шифрование**: AES-256-GCM + xZMercury (burn-on-read ключи, изящная деградация)
-
-### v2.0 (планируется)
-- [ ] Streaming export/import (TotalParts=0, "TCP для таблиц")
-- [ ] Parallel import workers
-- [ ] Python bindings (ctypes wrapper)
-- [ ] Docker образ (multi-stage build)
-- [ ] Monitoring & metrics (Prometheus exporter)
-- [ ] Schema migration (ALTER TABLE)
-
-## Вклад в проект
-
-Проект находится в активной разработке. Приветствуются:
-- Баг-репорты
-- Предложения по улучшению
-- Pull requests
-
-## Лицензия
-
-MIT
-
-## Контакты
-
-- GitHub: https://github.com/ruslano69/tdtp-framework
-- Issues: https://github.com/ruslano69/tdtp-framework/issues
-- Email: ruslano69@gmail.com
+Examples documentation: [`examples/README.md`](examples/README.md)
 
 ---
 
-**Версия:** v1.6.0
-**Последнее обновление:** 23.02.2026
+## Documentation
+
+### Guides
+- [Installation Guide](docs/INSTALLATION.md) — installation, configuration, quick start
+- [User Guide](docs/USER_GUIDE.md) — complete CLI utility guide
+- [ETL Pipeline Guide](docs/ETL_PIPELINE_GUIDE.md) — ETL pipeline guide
+- [Documentation Index](docs/INDEX.md) — full documentation catalog
+
+### Technical Specifications
+- [TDTP Specification](docs/SPECIFICATION.md) — TDTP v1.0 protocol specification
+- [Packet Module](docs/PACKET_MODULE.md) — packet parsing and generation
+- [Schema Module](docs/SCHEMA_MODULE.md) — type and schema validation
+- [TDTQL Translator](docs/TDTQL_TRANSLATOR.md) — query language
+- [SQLite Adapter](docs/SQLITE_ADAPTER.md) — SQLite integration
+
+### Package READMEs
+- [Circuit Breaker](pkg/resilience/README.md) — protection against cascading failures
+- [Audit Logger](pkg/audit/README.md) — compliance and security
+- [XLSX Converter](pkg/xlsx/README.md) — Database ↔ Excel
+
+---
+
+## Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# With coverage
+go test -cover ./...
+
+# Verbose for specific package
+go test -v ./pkg/core/packet/
+```
+
+---
+
+## Roadmap
+
+### v1.0 — v1.3 (completed)
+- Packet, Schema, TDTQL modules
+- SQLite, PostgreSQL, MS SQL adapters
+- RabbitMQ, MSMQ, Kafka brokers
+- CLI utility with TDTQL filters
+- CircuitBreaker, AuditLogger, Retry mechanism
+- IncrementalSync, Data Processors
+- XLSX Converter (Database ↔ Excel)
+- ETL Pipeline Processor with 4-level security
+- MySQL adapter
+- Full documentation
+
+### v1.6.0 (current)
+- HTML Viewer (`--to-html`, `--open`, `--row`)
+- Diff & Merge (`--diff`, `--merge`, `--merge-strategy`, `--show-conflicts`)
+- Extended XLSX commands (`--from-xlsx`, `--export-xlsx`, `--import-xlsx`)
+- Incremental sync via CLI (`--sync-incremental`)
+- Data Processors in CLI (`--mask`, `--validate`, `--normalize`)
+- Tail mode in limit (`--limit -N`)
+- `--batch`, `--readonly-fields` options
+- Zero Trust encryption: AES-256-GCM + xZMercury (burn-on-read keys, graceful degradation)
+
+### v2.0 (planned)
+- Streaming export/import (TotalParts=0, "TCP for tables")
+- Parallel import workers
+- Python bindings (ctypes wrapper)
+- Docker image (multi-stage build)
+- Monitoring & metrics (Prometheus exporter)
+- Schema migration (ALTER TABLE)
+
+---
+
+## Contributing
+
+The project is under active development. Welcome:
+- Bug reports
+- Feature suggestions
+- Pull requests
+
+---
+
+## License
+
+MIT
+
+---
+
+## Contacts
+
+- **GitHub**: https://github.com/ruslano69/tdtp-framework
+- **Issues**: https://github.com/ruslano69/tdtp-framework/issues
+- **Email**: ruslano69@gmail.com
+
+---
+
+*Version: v1.6.0 | Last updated: 23.02.2026*
