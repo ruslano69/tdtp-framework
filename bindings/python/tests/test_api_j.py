@@ -29,6 +29,14 @@ from conftest import (
     NULLABLE_NOT_NULL_CITY_COUNT,
     COMPRESSED_TOTAL_ROWS,
     COMPRESSED_TABLE_NAME,
+    COMPACT_TOTAL_ROWS,
+    COMPACT_TABLE_NAME,
+    COMPACT_FIELD_NAMES,
+    COMPACT_SALES_COUNT,
+    COMPACT_IT_COUNT,
+    COMPACT_HR_COUNT,
+    COMPACT_SALARY_GT_60000,
+    COMPACT_SALARY_GE_60000,
 )
 
 
@@ -342,3 +350,134 @@ class TestJDiff:
         new_data["data"] = rows
         diff = j_client.J_diff(sample_data_j, new_data)
         assert diff["stats"]["modified"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Compact v1.3.1 — carry-forward fixed fields must be expanded on read
+# ---------------------------------------------------------------------------
+
+class TestJReadCompact:
+    """J_ReadFile must expand compact carry-forward encoding before returning rows."""
+
+    def test_row_count(self, j_client, compact_data_j) -> None:
+        assert len(compact_data_j["data"]) == COMPACT_TOTAL_ROWS
+
+    def test_table_name(self, j_client, compact_data_j) -> None:
+        assert compact_data_j["header"]["table_name"] == COMPACT_TABLE_NAME
+
+    def test_schema_field_names(self, j_client, compact_data_j) -> None:
+        names = [f["Name"] for f in compact_data_j["schema"]["Fields"]]
+        assert names == COMPACT_FIELD_NAMES
+
+    def test_first_row_fully_populated(self, j_client, compact_data_j) -> None:
+        """First row of the first group must have all fields."""
+        row = compact_data_j["data"][0]
+        assert row[0] == "D1"
+        assert row[1] == "Sales"
+        assert row[2] == "Moscow"
+
+    def test_carry_forward_rows_expanded(self, j_client, compact_data_j) -> None:
+        """Rows 2 and 3 carry over DeptID/DeptName/Location from row 1."""
+        for row in compact_data_j["data"][1:3]:
+            assert row[0] == "D1",    f"expected DeptID='D1', got '{row[0]}'"
+            assert row[1] == "Sales", f"expected DeptName='Sales', got '{row[1]}'"
+            assert row[2] == "Moscow", f"expected Location='Moscow', got '{row[2]}'"
+
+    def test_group_boundary_expanded(self, j_client, compact_data_j) -> None:
+        """Row 4 starts a new group (D2/IT/SPb) and must be fully populated."""
+        row = compact_data_j["data"][3]
+        assert row[0] == "D2"
+        assert row[1] == "IT"
+        assert row[2] == "SPb"
+
+    def test_second_group_carry_forward_expanded(self, j_client, compact_data_j) -> None:
+        """Row 5 carries over D2/IT/SPb from row 4."""
+        row = compact_data_j["data"][4]
+        assert row[0] == "D2"
+        assert row[1] == "IT"
+        assert row[2] == "SPb"
+
+    def test_last_group_single_row(self, j_client, compact_data_j) -> None:
+        """Row 6 is a single-row group (D3/HR/Kazan)."""
+        row = compact_data_j["data"][5]
+        assert row[0] == "D3"
+        assert row[1] == "HR"
+        assert row[2] == "Kazan"
+
+    def test_variable_fields_preserved(self, j_client, compact_data_j) -> None:
+        """Variable fields (EmpID, Name, Salary) must not be affected by expansion."""
+        emp_ids = [r[3] for r in compact_data_j["data"]]
+        assert emp_ids == ["E1", "E2", "E3", "E4", "E5", "E6"]
+
+
+class TestJCompactPagination:
+    """Pagination on compact-read data: every page must have fully populated fixed fields."""
+
+    def test_filter_by_fixed_field_all_rows(self, j_client, compact_data_j) -> None:
+        """Filter on fixed field must match carry-forward rows, not just first row."""
+        result = j_client.J_filter(compact_data_j, "DeptName = 'Sales'")
+        assert len(result["data"]) == COMPACT_SALES_COUNT
+
+    def test_filter_it_dept(self, j_client, compact_data_j) -> None:
+        result = j_client.J_filter(compact_data_j, "DeptName = 'IT'")
+        assert len(result["data"]) == COMPACT_IT_COUNT
+
+    def test_filter_hr_dept(self, j_client, compact_data_j) -> None:
+        result = j_client.J_filter(compact_data_j, "DeptName = 'HR'")
+        assert len(result["data"]) == COMPACT_HR_COUNT
+
+    def test_filter_salary_gt(self, j_client, compact_data_j) -> None:
+        result = j_client.J_filter(compact_data_j, "Salary > 60000")
+        assert len(result["data"]) == COMPACT_SALARY_GT_60000
+
+    def test_filter_salary_gte(self, j_client, compact_data_j) -> None:
+        result = j_client.J_filter(compact_data_j, "Salary >= 60000")
+        assert len(result["data"]) == COMPACT_SALARY_GE_60000
+
+    def test_page1_fixed_fields_populated(self, j_client, compact_data_j) -> None:
+        """Page 1 (rows 0-1): both rows must have DeptID filled."""
+        page = j_client.J_filter(compact_data_j, "EmpID > ''", limit=2, offset=0)
+        dept_idx = COMPACT_FIELD_NAMES.index("DeptID")
+        for row in page["data"]:
+            assert row[dept_idx] != "", f"DeptID empty on page1: {row}"
+
+    def test_page2_fixed_fields_populated(self, j_client, compact_data_j) -> None:
+        """Page 2 (rows 2-3): crosses group boundary — all fixed fields must be non-empty."""
+        page = j_client.J_filter(compact_data_j, "EmpID > ''", limit=2, offset=2)
+        dept_idx  = COMPACT_FIELD_NAMES.index("DeptID")
+        dname_idx = COMPACT_FIELD_NAMES.index("DeptName")
+        for row in page["data"]:
+            assert row[dept_idx]  != "", f"DeptID empty on page2: {row}"
+            assert row[dname_idx] != "", f"DeptName empty on page2: {row}"
+
+    def test_page3_fixed_fields_populated(self, j_client, compact_data_j) -> None:
+        """Page 3 (rows 4-5): second group carry-forward + single-row last group."""
+        page = j_client.J_filter(compact_data_j, "EmpID > ''", limit=2, offset=4)
+        dept_idx = COMPACT_FIELD_NAMES.index("DeptID")
+        for row in page["data"]:
+            assert row[dept_idx] != "", f"DeptID empty on page3: {row}"
+
+    def test_walk_all_pages_fixed_fields_complete(self, j_client, compact_data_j) -> None:
+        """Walk all pages; every collected row must have non-empty DeptID."""
+        dept_idx = COMPACT_FIELD_NAMES.index("DeptID")
+        page_size = 2
+        collected = []
+        offset = 0
+        while True:
+            page = j_client.J_filter(compact_data_j, "EmpID > ''", limit=page_size, offset=offset)
+            collected.extend(page["data"])
+            qc = page["query_context"]
+            if not qc["more_available"]:
+                break
+            offset = qc["next_offset"]
+        assert len(collected) == COMPACT_TOTAL_ROWS
+        for row in collected:
+            assert row[dept_idx] != "", f"DeptID empty in walked row: {row}"
+
+    def test_cross_group_boundary_correct_dept(self, j_client, compact_data_j) -> None:
+        """Page crossing group boundary must have correct (different) dept values."""
+        page = j_client.J_filter(compact_data_j, "EmpID > ''", limit=2, offset=2)
+        dname_idx = COMPACT_FIELD_NAMES.index("DeptName")
+        # row at offset 2 = E3/Carol → Sales; row at offset 3 = E4/Dave → IT
+        assert page["data"][0][dname_idx] == "Sales"
+        assert page["data"][1][dname_idx] == "IT"
