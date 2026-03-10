@@ -5,23 +5,25 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"gopkg.in/yaml.v3"
 )
 
 // PipelineConfig содержит полную конфигурацию ETL pipeline
 type PipelineConfig struct {
-	Name          string              `yaml:"name"`
-	Version       string              `yaml:"version"`
-	Description   string              `yaml:"description"`
-	Sources       []SourceConfig      `yaml:"sources"`
-	Workspace     WorkspaceConfig     `yaml:"workspace"`
-	Transform     TransformConfig     `yaml:"transform"`
-	Output        OutputConfig        `yaml:"output"`
-	Performance   PerformanceConfig   `yaml:"performance"`
-	Audit         AuditConfig         `yaml:"audit"`
-	ErrorHandling ErrorHandlingConfig `yaml:"error_handling"`
-	ResultLog     ResultLogConfig     `yaml:"result_log"`
-	Security      SecurityConfig      `yaml:"security"`
+	Name          string                    `yaml:"name"`
+	Version       string                    `yaml:"version"`
+	Description   string                    `yaml:"description"`
+	Sources       []SourceConfig            `yaml:"sources"`
+	Workspace     WorkspaceConfig           `yaml:"workspace"`
+	Transform     TransformConfig           `yaml:"transform"`
+	Processors    processors.ProcessorConfig `yaml:"processors"`
+	Output        OutputConfig              `yaml:"output"`
+	Performance   PerformanceConfig         `yaml:"performance"`
+	Audit         AuditConfig               `yaml:"audit"`
+	ErrorHandling ErrorHandlingConfig       `yaml:"error_handling"`
+	ResultLog     ResultLogConfig           `yaml:"result_log"`
+	Security      SecurityConfig            `yaml:"security"`
 }
 
 // SecurityConfig определяет параметры интеграции с xZMercury для шифрования результатов.
