@@ -146,13 +146,14 @@ func LoadConfig(path string) (*PipelineConfig, error) {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
+	// Установка значений по умолчанию до валидации —
+	// иначе опциональные поля с defaults (например result_table) ложно фейлят.
+	config.SetDefaults()
+
 	// Валидация конфигурации
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
-
-	// Установка значений по умолчанию
-	config.SetDefaults()
 
 	return &config, nil
 }
@@ -258,7 +259,7 @@ func (w *WorkspaceConfig) Validate() error {
 // Validate проверяет корректность TransformConfig
 func (t *TransformConfig) Validate() error {
 	if t.SQL == "" {
-		return fmt.Errorf("transform SQL is required")
+		return fmt.Errorf("transform sql is required")
 	}
 	if t.ResultTable == "" {
 		return fmt.Errorf("transform result_table is required")
