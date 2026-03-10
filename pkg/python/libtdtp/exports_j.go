@@ -196,14 +196,6 @@ func J_ReadFile(path *C.char) *C.char {
 		return jDecompressRows(pkt)
 	}
 
-	// Expand compact carry-forward encoding before returning rows so callers
-	// (e.g. J_FilterRowsPage) always receive fully-populated rows.
-	if pkt.Data.Compact {
-		if err := packet.ExpandCompactRows(pkt); err != nil {
-			return jErr(fmt.Sprintf("compact expand error: %v", err))
-		}
-	}
-
 	return jOK(packetToJPacket(pkt, pkt.GetRows()))
 }
 

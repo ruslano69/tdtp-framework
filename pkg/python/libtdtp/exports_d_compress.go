@@ -33,12 +33,28 @@ func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 		return 1
 	}
 
-	rows := make([][]string, 0, len(lines))
+	// Rebuild pkt.Data.Rows from decompressed lines so ExpandCompactRows can work.
+	decompRows := make([]packet.Row, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
-		rows = append(rows, parser.GetRowValues(packet.Row{Value: line}))
+		decompRows = append(decompRows, packet.Row{Value: line})
+	}
+	pkt.Data.Rows = decompRows
+	pkt.Data.Compression = ""
+
+	// Expand compact carry-forward encoding so callers always receive fully-populated rows.
+	if pkt.Data.Compact {
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			dSetError(out, "compact expand error: "+err.Error())
+			return 1
+		}
+	}
+
+	rows := make([][]string, 0, len(pkt.Data.Rows))
+	for _, row := range pkt.Data.Rows {
+		rows = append(rows, parser.GetRowValues(row))
 	}
 
 	dFillSchema(out, pkt.Schema)
