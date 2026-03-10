@@ -133,6 +133,16 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		return err
 	}
 
+	// Применяем compact-формат если настроен (до сжатия)
+	if e.config.TDTP.Compact {
+		fixedNames := packet.ResolveFixedFields(dataPacket.Schema, e.config.TDTP.FixedFields)
+		if len(fixedNames) > 0 {
+			if err := packet.ApplyCompact(dataPacket, fixedNames, e.config.TDTP.CompactTail); err != nil {
+				return fmt.Errorf("failed to apply compact format: %w", err)
+			}
+		}
+	}
+
 	// Применяем сжатие если настроено
 	if e.config.TDTP.Compression {
 		if err := e.compressDataPacket(dataPacket); err != nil {
@@ -440,9 +450,11 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket) error {
 		return nil
 	}
 
-	// Обновляем DataPacket сжатыми данными
+	// Обновляем DataPacket сжатыми данными, сохраняя compact/tail атрибуты
 	dataPacket.Data = packet.Data{
 		Compression: "zstd",
+		Compact:     dataPacket.Data.Compact,
+		Tail:        dataPacket.Data.Tail,
 		Rows: []packet.Row{
 			{Value: compressedData},
 		},

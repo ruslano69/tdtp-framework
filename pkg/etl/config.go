@@ -89,10 +89,13 @@ type XLSXOutputConfig struct {
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
 type TDTPOutputConfig struct {
-	Format      string `yaml:"format"`      // Формат: xml, json (в будущем)
-	Compression bool   `yaml:"compression"` // Использовать zstd сжатие
-	Destination string `yaml:"destination"` // Путь к файлу
-	Encryption  bool   `yaml:"encryption"`  // Шифровать результат через xZMercury (AES-256-GCM)
+	Format           string   `yaml:"format"`            // Формат: xml, json (в будущем)
+	Compression      bool     `yaml:"compression"`       // Использовать zstd сжатие
+	Destination      string   `yaml:"destination"`       // Путь к файлу
+	Encryption       bool     `yaml:"encryption"`        // Шифровать результат через xZMercury (AES-256-GCM)
+	Compact          bool     `yaml:"compact"`           // v1.3.1: compact format (fixed поля пишутся один раз на группу)
+	CompactTail      bool     `yaml:"compact_tail"`      // v1.3.1: tail-строка с явными fixed полями для потокового восстановления
+	FixedFields      []string `yaml:"fixed_fields"`      // v1.3.1: явный список fixed полей (пусто = auto-detect по _ prefix)
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ

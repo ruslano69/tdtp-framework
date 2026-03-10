@@ -205,3 +205,55 @@ func RowsToCompactData(rows [][]string, schema Schema, tail bool) Data {
 
 	return data
 }
+
+// AutoFixedFields возвращает имена полей схемы, у которых имя начинается с "_".
+// Используется для auto-detect fixed полей при compact-экспорте.
+func AutoFixedFields(schema Schema) []string {
+	var names []string
+	for _, f := range schema.Fields {
+		if strings.HasPrefix(f.Name, "_") {
+			names = append(names, f.Name)
+		}
+	}
+	return names
+}
+
+// ResolveFixedFields возвращает финальный список fixed полей.
+// Если explicit непустой — возвращает его. Иначе auto-detect по _ prefix.
+func ResolveFixedFields(schema Schema, explicit []string) []string {
+	if len(explicit) > 0 {
+		return explicit
+	}
+	return AutoFixedFields(schema)
+}
+
+// ApplyCompact применяет compact-формат к пакету:
+// помечает поля fixedFieldNames как fixed в схеме, стрипает _ prefix из имён,
+// перекодирует строки в compact-формат, устанавливает версию 1.3.1.
+func ApplyCompact(pkt *DataPacket, fixedFieldNames []string, tail bool) error {
+	fixedSet := make(map[string]bool, len(fixedFieldNames))
+	for _, f := range fixedFieldNames {
+		fixedSet[f] = true
+	}
+
+	for i := range pkt.Schema.Fields {
+		name := pkt.Schema.Fields[i].Name
+		stripped := strings.TrimPrefix(name, "_")
+		if fixedSet[name] || fixedSet[stripped] {
+			pkt.Schema.Fields[i].Fixed = true
+			if strings.HasPrefix(name, "_") {
+				pkt.Schema.Fields[i].Name = stripped
+			}
+		}
+	}
+
+	parser := NewParser()
+	rows := make([][]string, len(pkt.Data.Rows))
+	for i, row := range pkt.Data.Rows {
+		rows[i] = parser.GetRowValues(row)
+	}
+
+	pkt.Data = RowsToCompactData(rows, pkt.Schema, tail)
+	pkt.Version = "1.3.1"
+	return nil
+}
