@@ -22,11 +22,12 @@ type ExportResult struct {
 
 // Exporter отвечает за экспорт результатов ETL
 type Exporter struct {
-	config         OutputConfig
-	security       SecurityConfig
-	packageUUID    string
-	pipelineName   string
-	mercuryBinder  processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
+	config          OutputConfig
+	security        SecurityConfig
+	packageUUID     string
+	pipelineName    string
+	mercuryBinder   processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
+	preExportChain  *processors.Chain        // процессоры маскирования/нормализации/валидации перед экспортом
 }
 
 // NewExporter создает новый экспортер
@@ -50,6 +51,28 @@ func (e *Exporter) WithSecurity(sec SecurityConfig, packageUUID, pipelineName st
 func (e *Exporter) WithMercuryBinder(binder processors.MercuryBinder) *Exporter {
 	e.mercuryBinder = binder
 	return e
+}
+
+// WithPreExportChain устанавливает цепочку процессоров, которая применяется к данным
+// перед каждым экспортом (маскирование, нормализация, валидация).
+func (e *Exporter) WithPreExportChain(chain *processors.Chain) *Exporter {
+	e.preExportChain = chain
+	return e
+}
+
+// applyPreExport применяет preExportChain к строкам пакета in-place.
+// Если цепочка не задана или пуста — no-op.
+func (e *Exporter) applyPreExport(ctx context.Context, pkt *packet.DataPacket) error {
+	if e.preExportChain == nil || e.preExportChain.IsEmpty() {
+		return nil
+	}
+	rows := pkt.GetRows()
+	processed, err := e.preExportChain.Process(ctx, rows, pkt.Schema)
+	if err != nil {
+		return fmt.Errorf("pre-export processor failed: %w", err)
+	}
+	pkt.Data = packet.RowsToData(processed)
+	return nil
 }
 
 // Export экспортирует DataPacket в сконфигурированный выход
@@ -103,6 +126,11 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	destination := e.config.TDTP.Destination
 	if destination == "" {
 		return fmt.Errorf("TDTP destination is not set")
+	}
+
+	// Применяем процессоры маскирования/нормализации/валидации перед экспортом
+	if err := e.applyPreExport(ctx, dataPacket); err != nil {
+		return err
 	}
 
 	// Применяем сжатие если настроено
@@ -550,6 +578,13 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 	for part := range partsChan {
 		if part.Error != nil {
 			result.Errors = append(result.Errors, part.Error)
+			result.ErrorsCount++
+			continue
+		}
+
+		// Применяем процессоры маскирования/нормализации/валидации к каждой части
+		if err := e.applyPreExport(ctx, part.Packet); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("pre-export processor failed for part %d: %w", part.PartNum, err))
 			result.ErrorsCount++
 			continue
 		}

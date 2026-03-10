@@ -22,14 +22,15 @@ type ProcessorStats struct {
 
 // Processor представляет главный ETL процессор
 type Processor struct {
-	config        *PipelineConfig
-	workspace     *Workspace
-	loader        *Loader
-	executor      *Executor
-	exporter      *Exporter
-	stats         ProcessorStats
-	packageUUID   string                   // UUID пакета генерируется в начале Execute, используется для шифрования
-	mercuryBinder processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
+	config          *PipelineConfig
+	workspace       *Workspace
+	loader          *Loader
+	executor        *Executor
+	exporter        *Exporter
+	stats           ProcessorStats
+	packageUUID     string                   // UUID пакета генерируется в начале Execute, используется для шифрования
+	mercuryBinder   processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
+	preExportChain  *processors.Chain        // цепочка pre-export процессоров из config.Processors.PreExport
 }
 
 // NewProcessor создает новый ETL процессор
@@ -127,6 +128,17 @@ func (p *Processor) initWorkspace(ctx context.Context) error {
 		if p.mercuryBinder != nil {
 			p.exporter.WithMercuryBinder(p.mercuryBinder)
 		}
+	}
+
+	// Строим цепочку pre-export процессоров (маскирование, нормализация, валидация).
+	// Применяется ко всем данным перед экспортом — и в batch, и в streaming.
+	if len(p.config.Processors.PreExport) > 0 {
+		chain, err := processors.CreateChainFromConfigs(p.config.Processors.PreExport)
+		if err != nil {
+			return fmt.Errorf("failed to build pre-export processor chain: %w", err)
+		}
+		p.preExportChain = chain
+		p.exporter.WithPreExportChain(chain)
 	}
 
 	return nil
