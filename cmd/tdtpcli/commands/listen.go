@@ -2,10 +2,17 @@ package commands
 
 // BETA: Streaming consumer daemon for Kafka only.
 //
+// Broker tier selection:
+//
+//	MSMQ     — Legacy     (Windows-only, no partition ordering; batch mode only)
+//	RabbitMQ — Stability  (reliable delivery, acknowledgements; batch mode only)
+//	Kafka    — Speed      (ordered partitions, offset commit; batch + streaming)
+//
+// Only Kafka guarantees strict per-partition ordering required to assemble
+// stream sessions from sequentially numbered parts (PartNumber 1…N).
+//
 // Design notes:
 //   - Runs as a long-lived daemon process; terminated by SIGTERM/SIGINT.
-//   - Supports only Kafka. RabbitMQ and MSMQ do NOT guarantee message ordering
-//     within a stream session, which is required for streaming mode correctness.
 //   - Uses "Variant A" import strategy: each received part is imported immediately
 //     into the target table. Suitable for stable, high-availability channels only.
 //   - Recommended for: LAN, dedicated WAN links, 99.99%+ uptime channels.
