@@ -74,6 +74,7 @@ func routeCommand(
 				InputFile:   *flags.ToCompact,
 				OutputFile:  outputCompact,
 				FixedFields: splitCommaSeparated(*flags.FixedFields),
+				Tail:        *flags.CompactTail,
 			})
 		})
 
@@ -104,6 +105,7 @@ func routeCommand(
 				ReadOnlyFields: *flags.ReadOnlyFields,
 				Compact:        *flags.Compact,
 				FixedFields:    splitCommaSeparated(*flags.FixedFields),
+				CompactTail:    *flags.CompactTail,
 			})
 		})
 

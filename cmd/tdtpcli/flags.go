@@ -49,6 +49,7 @@ type Flags struct {
 	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
 	FixedFields *string // Comma-separated fixed field names for compact export
 	ToCompact   *string // Convert existing TDTP file to compact v1.3.1 format
+	CompactTail *bool   // Write tail row with all fixed fields explicit (stream validation / carry handoff)
 
 	// Encryption (xZMercury UUID-binding флоу)
 	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
@@ -134,6 +135,7 @@ func ParseFlags() *Flags {
 	f.Compact = flag.Bool("compact", false, "Enable TDTP v1.3.1 compact format on export (fixed fields written once per group)")
 	f.FixedFields = flag.String("fixed-fields", "", "Fixed fields for compact format: comma-separated names or '_' to auto-detect from _prefix columns")
 	f.ToCompact = flag.String("to-compact", "", "Convert existing TDTP v1.x file to compact v1.3.1 format (input file path)")
+	f.CompactTail = flag.Bool("compact-tail", false, "Write tail row with all fixed fields explicit for stream validation and carry-state handoff")
 
 	// Encryption
 	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")
