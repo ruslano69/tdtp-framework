@@ -35,6 +35,11 @@ func MergeFiles(ctx context.Context, options MergeOptions) error {
 		if err != nil {
 			return fmt.Errorf("failed to parse file %s: %w", file, err)
 		}
+		if pkt.Data.Compact {
+			if err := packet.ExpandCompactRows(pkt); err != nil {
+				return fmt.Errorf("compact expansion failed for %s: %w", file, err)
+			}
+		}
 		packets[i] = pkt
 		fmt.Printf("  ✓ Loaded %s (%d rows)\n", file, len(pkt.Data.Rows))
 	}

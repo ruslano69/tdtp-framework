@@ -26,11 +26,21 @@ func DiffFiles(ctx context.Context, options *DiffOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse file A (%s): %w", options.FileA, err)
 	}
+	if packetA.Data.Compact {
+		if err := packet.ExpandCompactRows(packetA); err != nil {
+			return fmt.Errorf("compact expansion failed for file A: %w", err)
+		}
+	}
 
 	// Парсим второй файл
 	packetB, err := parser.ParseFile(options.FileB)
 	if err != nil {
 		return fmt.Errorf("failed to parse file B (%s): %w", options.FileB, err)
+	}
+	if packetB.Data.Compact {
+		if err := packet.ExpandCompactRows(packetB); err != nil {
+			return fmt.Errorf("compact expansion failed for file B: %w", err)
+		}
 	}
 
 	// Выполняем сравнение
