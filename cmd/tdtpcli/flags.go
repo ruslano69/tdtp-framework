@@ -44,6 +44,11 @@ type Flags struct {
 	CompressLevel *int
 	Hash          *bool // Add XXH3 checksum for data integrity verification
 
+	// Compact format (v1.3.1)
+	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
+	FixedFields *string // Comma-separated fixed field names for compact export
+	ToCompact   *string // Convert existing TDTP file to compact v1.3.1 format
+
 	// Encryption (xZMercury UUID-binding флоу)
 	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
 
@@ -122,6 +127,11 @@ func ParseFlags() *Flags {
 	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1 (fastest) - 19 (best)")
 	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
+
+	// Compact format (v1.3.1)
+	f.Compact = flag.Bool("compact", false, "Enable TDTP v1.3.1 compact format on export (fixed fields written once per group)")
+	f.FixedFields = flag.String("fixed-fields", "", "Fixed fields for compact format: comma-separated names or '_' to auto-detect from _prefix columns")
+	f.ToCompact = flag.String("to-compact", "", "Convert existing TDTP v1.x file to compact v1.3.1 format (input file path)")
 
 	// Encryption
 	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")

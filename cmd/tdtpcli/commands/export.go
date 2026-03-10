@@ -23,6 +23,10 @@ type ExportOptions struct {
 	CompressLevel  int
 	EnableChecksum bool // Add XXH3 checksum for data integrity verification
 	ReadOnlyFields bool // Include read-only fields (timestamp, computed, identity)
+
+	// v1.3.1 compact format
+	Compact     bool     // Enable compact format output
+	FixedFields []string // Explicit fixed field names; nil = auto-detect from _prefix
 }
 
 // ProcessorManager interface for applying data processors
@@ -77,12 +81,28 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		fmt.Printf("✓ Data processors applied\n")
 	}
 
-	// Count total rows before compression
+	// Count total rows before any further processing
 	totalRows := 0
 	for _, pkt := range packets {
 		totalRows += len(pkt.Data.Rows)
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
+
+	// Apply compact format (v1.3.1) if requested
+	if opts.Compact {
+		fixedNames := BuildFixedFieldsForExport(packets[0].Schema, opts.FixedFields)
+		if len(fixedNames) == 0 {
+			fmt.Println("⚠ compact requested but no fixed fields found (use --fixed-fields or add _ prefix to view columns)")
+		} else {
+			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
+			for _, pkt := range packets {
+				if err := applyCompactToPacket(pkt, fixedNames); err != nil {
+					return fmt.Errorf("compact encoding failed: %w", err)
+				}
+			}
+			fmt.Printf("✓ Compact v1.3.1 format applied\n")
+		}
+	}
 
 	// Apply compression if enabled
 	if opts.Compress {

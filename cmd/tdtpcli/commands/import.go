@@ -58,6 +58,14 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
+		// v1.3.1: expand compact format (carry-forward fixed fields) before any further processing
+		if pkt.Data.Compact {
+			fmt.Printf("  Expanding compact format (v1.3.1)...\n")
+			if err := packet.ExpandCompactRows(pkt); err != nil {
+				return fmt.Errorf("failed to expand compact rows: %w", err)
+			}
+		}
+
 		if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
 			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
 				return fmt.Errorf("processor failed: %w", err)

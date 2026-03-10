@@ -124,6 +124,13 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 	return nil
 }
 
+// ExpandCompactRows разворачивает compact-формат в пакете.
+// Это удобная обёртка над одноимённой функцией пакета.
+// Если Data.Compact == false — ничего не делает.
+func (p *Parser) ExpandCompactRows(packet *DataPacket) error {
+	return ExpandCompactRows(packet)
+}
+
 // IsCompressed проверяет, сжаты ли данные в пакете
 func (p *Parser) IsCompressed(packet *DataPacket) bool {
 	return packet.Data.Compression != ""
