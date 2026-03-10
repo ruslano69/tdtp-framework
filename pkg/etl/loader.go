@@ -109,6 +109,11 @@ func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
 		if err := decompressTDTPPacket(pkt); err != nil {
 			return nil, fmt.Errorf("file '%s': %w", fp, err)
 		}
+		if pkt.Data.Compact {
+			if err := packet.ExpandCompactRows(pkt); err != nil {
+				return nil, fmt.Errorf("file '%s': compact expansion failed: %w", fp, err)
+			}
+		}
 		if merged == nil {
 			merged = pkt
 		} else {
@@ -179,6 +184,11 @@ func loadEncryptedTDTPFile(ctx context.Context, source SourceConfig) (*packet.Da
 
 	if err := decompressTDTPPacket(pkt); err != nil {
 		return nil, fmt.Errorf("decompress: %w", err)
+	}
+	if pkt.Data.Compact {
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			return nil, fmt.Errorf("compact expansion failed: %w", err)
+		}
 	}
 
 	pkt.Header.TableName = source.Name
