@@ -62,7 +62,13 @@ func (pm *ProcessorManager) AddMaskProcessor(maskFields string) error { //nolint
 //	  email: email
 //	  age: range:0-150
 //	  status: [required, "enum:active,inactive"]
-//	stop_on_first_error: false   # optional
+//	on_error: fail          # fail (default) | filter | warn
+//	stop_on_first_error: false   # optional, only for on_error: fail
+//
+// on_error strategies:
+//   - fail   — abort on errors, return full error list
+//   - filter — remove invalid rows, pass the rest (count printed to stderr)
+//   - warn   — print warnings to stderr, pass all rows unchanged
 //
 // If the file does not contain a "rules" section, validation is skipped silently.
 func (pm *ProcessorManager) AddValidateProcessor(rulesFile string) error {
