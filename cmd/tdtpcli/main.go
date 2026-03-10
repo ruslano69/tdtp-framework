@@ -56,6 +56,27 @@ func routeCommand(
 			return commands.ListViews(ctx, adapterConfig)
 		})
 
+	} else if *flags.ToCompact != "" {
+		operation = audit.OpTransform
+		outputCompact := determineOutputFile(*flags.Output, *flags.ToCompact, "xml")
+		// Don't rename if output equals input (in-place overwrite)
+		if *flags.Output == "" {
+			outputCompact = *flags.ToCompact
+		}
+		metadata = map[string]string{
+			"command": "to-compact",
+			"input":   *flags.ToCompact,
+			"output":  outputCompact,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "to-compact", func() error {
+			return commands.ConvertToCompact(commands.ConvertCompactOptions{
+				InputFile:   *flags.ToCompact,
+				OutputFile:  outputCompact,
+				FixedFields: splitCommaSeparated(*flags.FixedFields),
+			})
+		})
+
 	} else if *flags.Export != "" {
 		// Merge compression settings: flag takes precedence, then config
 		compress := *flags.Compress || config.Export.Compress
@@ -81,6 +102,8 @@ func routeCommand(
 				CompressLevel:  compressLevel,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
+				Compact:        *flags.Compact,
+				FixedFields:    splitCommaSeparated(*flags.FixedFields),
 			})
 		})
 
@@ -581,6 +604,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
+		*flags.ToCompact != "" ||
 		*flags.ToHTML != "" ||
 		*flags.ToXLSX != "" ||
 		*flags.FromXLSX != "" ||
