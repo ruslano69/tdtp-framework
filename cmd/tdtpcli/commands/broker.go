@@ -153,12 +153,6 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 
 		fmt.Printf("Received message %d for table '%s'\n", messageCount, pkt.Header.TableName)
 
-		if pkt.Data.Compact {
-			if err := packet.ExpandCompactRows(pkt); err != nil {
-				return fmt.Errorf("compact expansion failed (message %d): %w", messageCount, err)
-			}
-		}
-
 		fmt.Printf("  %d row(s) to import\n", len(pkt.Data.Rows))
 
 		// Import to database

@@ -233,16 +233,6 @@ func (pi *ParallelImporter) worker(
 				continue
 			}
 
-			if dataPacket.Data.Compact {
-				if err := packet.ExpandCompactRows(dataPacket); err != nil {
-					resultsChan <- &ImportResult{
-						Error:    fmt.Errorf("worker %d: compact expansion failed: %w", workerID, err),
-						Duration: time.Since(startTime),
-					}
-					continue
-				}
-			}
-
 			// Обрабатываем пакет через handler
 			err = handler(ctx, dataPacket)
 
