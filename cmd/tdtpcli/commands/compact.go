@@ -13,6 +13,7 @@ type ConvertCompactOptions struct {
 	InputFile   string
 	OutputFile  string
 	FixedFields []string // explicit list; nil = auto-detect
+	Tail        bool     // write tail row with all fixed fields explicit (stream validation / carry handoff)
 }
 
 // ConvertToCompact reads a TDTP v1.x file and rewrites it in v1.3.1 compact format.
@@ -61,8 +62,11 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	}
 	fmt.Printf("  Fixed fields: %s\n", strings.Join(fixedNames, ", "))
 
-	if err := applyCompactToPacket(pkt, fixedNames); err != nil {
+	if err := applyCompactToPacket(pkt, fixedNames, opts.Tail); err != nil {
 		return fmt.Errorf("failed to apply compact format: %w", err)
+	}
+	if opts.Tail {
+		fmt.Println("  tail=true: last row will repeat all fixed fields explicitly")
 	}
 
 	// Determine output path
@@ -87,7 +91,7 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 
 // applyCompactToPacket marks the given fields as fixed in the schema, decodes all
 // rows, re-encodes them in compact format, and sets the packet version to 1.3.1.
-func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string) error {
+func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string, tail bool) error {
 	fixedSet := make(map[string]bool, len(fixedFieldNames))
 	for _, f := range fixedFieldNames {
 		fixedSet[f] = true
@@ -115,7 +119,7 @@ func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string) erro
 	}
 
 	// Re-encode as compact
-	pkt.Data = packet.RowsToCompactData(rows, pkt.Schema)
+	pkt.Data = packet.RowsToCompactData(rows, pkt.Schema, tail)
 
 	// Update protocol version to signal v1.3.1 features in use
 	pkt.Version = "1.3.1"

@@ -82,6 +82,8 @@ type Data struct {
 	Compression string `xml:"compression,attr,omitempty"` // Алгоритм сжатия: "zstd" или пусто
 	Checksum    string `xml:"checksum,attr,omitempty"`    // XXH3 хеш сжатых данных (hex)
 	Compact     bool   `xml:"compact,attr,omitempty"`     // v1.3.1: compact format (пропуски для fixed полей)
+	Tail        bool   `xml:"tail,attr,omitempty"`        // v1.3.1: последняя строка явно повторяет все fixed-поля — для потокового восстановления и валидации
+	Carry       string `xml:"carry,attr,omitempty"`       // v1.3.1: начальное carry-состояние чанка (pipe-разделённые значения полей); позволяет декодировать чанки независимо друг от друга
 	Rows        []Row  `xml:"R"`
 }
 

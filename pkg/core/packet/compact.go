@@ -9,9 +9,14 @@ import "strings"
 // строки. При смене значения fixed поля (новая группа) значение снова пишется явно.
 //
 // Алгоритм carry-forward:
+//   - Если Data.Carry непустой — парсится как начальное carry-состояние чанка,
+//     что позволяет декодировать произвольный чанк независимо от предыдущих.
 //   - Для каждого fixed поля хранится последнее явно записанное значение.
 //   - Если в текущей строке позиция fixed поля пустая — подставляется carry-значение.
 //   - Если непустая — обновляет carry и используется как есть.
+//
+// Если Data.Tail == true — последняя строка должна содержать все fixed поля явно
+// (является carry-снэпшотом). Нарушение этого инварианта возвращает ошибку.
 //
 // После вызова Data.Compact устанавливается в false (данные уже развёрнуты).
 // Если Data.Compact == false — функция ничего не делает.
@@ -41,6 +46,35 @@ func ExpandCompactRows(packet *DataPacket) error {
 
 	// carry-forward значения fixed полей
 	carry := make([]string, nFields)
+
+	// Если задан carry-атрибут чанка — инициализируем carry из него.
+	// Это позволяет декодировать чанк независимо, без предыдущих пакетов.
+	if packet.Data.Carry != "" {
+		initValues := parser.GetRowValues(Row{Value: packet.Data.Carry})
+		for i := 0; i < nFields && i < len(initValues); i++ {
+			if fixedPos[i] && initValues[i] != "" {
+				carry[i] = initValues[i]
+			}
+		}
+	}
+
+	lastIdx := len(packet.Data.Rows) - 1
+
+	// Валидация tail-строки: все fixed поля должны быть явно заполнены
+	if packet.Data.Tail {
+		tailValues := parser.GetRowValues(packet.Data.Rows[lastIdx])
+		for i := 0; i < nFields; i++ {
+			if fixedPos[i] {
+				val := ""
+				if i < len(tailValues) {
+					val = tailValues[i]
+				}
+				if val == "" {
+					return &CompactTailError{FieldIndex: i, FieldName: packet.Schema.Fields[i].Name}
+				}
+			}
+		}
+	}
 
 	newRows := make([]Row, len(packet.Data.Rows))
 	for rowIdx, row := range packet.Data.Rows {
@@ -72,7 +106,19 @@ func ExpandCompactRows(packet *DataPacket) error {
 
 	packet.Data.Rows = newRows
 	packet.Data.Compact = false
+	packet.Data.Tail = false
+	packet.Data.Carry = ""
 	return nil
+}
+
+// CompactTailError возникает когда tail-строка содержит пустое fixed поле.
+type CompactTailError struct {
+	FieldIndex int
+	FieldName  string
+}
+
+func (e *CompactTailError) Error() string {
+	return "compact tail row: fixed field " + e.FieldName + " is empty (tail row must repeat all fixed fields explicitly)"
 }
 
 // RowsToCompactData преобразует [][]string в Data с compact-форматом.
@@ -81,8 +127,14 @@ func ExpandCompactRows(packet *DataPacket) error {
 // смене значения (новая группа). В остальных строках группы на этой позиции
 // записывается пустая строка (пропуск).
 //
+// Если tail=true — последняя строка записывается с явными значениями всех fixed
+// полей (carry-снэпшот). Это позволяет:
+//   - читать данные с конца пакета / потока без полного прохода с начала;
+//   - валидировать консистентность carry-forward при декодировании;
+//   - передавать carry-состояние следующему чанку через атрибут carry="...".
+//
 // Если в схеме нет ни одного fixed поля — возвращает обычный Data (compact=false).
-func RowsToCompactData(rows [][]string, schema Schema) Data {
+func RowsToCompactData(rows [][]string, schema Schema, tail bool) Data {
 	if len(rows) == 0 {
 		return Data{Compact: true}
 	}
@@ -114,9 +166,14 @@ func RowsToCompactData(rows [][]string, schema Schema) Data {
 	// lastFixed хранит последнее записанное значение fixed поля (для детектирования смены)
 	lastFixed := make([]string, nFields)
 	firstRow := true
+	lastIdx := len(rows) - 1
 
 	for rowIdx, row := range rows {
 		parts := make([]string, nFields)
+
+		// Tail-строка: все fixed поля пишутся явно, независимо от carry.
+		// Это делает последнюю строку самодостаточной carry-снэпшотом.
+		isTailRow := tail && rowIdx == lastIdx
 
 		for i := 0; i < nFields; i++ {
 			var val string
@@ -125,8 +182,8 @@ func RowsToCompactData(rows [][]string, schema Schema) Data {
 			}
 
 			if i < len(fixedPos) && fixedPos[i] {
-				if firstRow || val != lastFixed[i] {
-					// Первая строка или смена значения — пишем явно
+				if firstRow || val != lastFixed[i] || isTailRow {
+					// Первая строка, смена значения, или tail-строка — пишем явно
 					parts[i] = escapeValue(val)
 					lastFixed[i] = val
 				} else {
@@ -140,6 +197,10 @@ func RowsToCompactData(rows [][]string, schema Schema) Data {
 
 		data.Rows[rowIdx] = Row{Value: strings.Join(parts, "|")}
 		firstRow = false
+	}
+
+	if tail {
+		data.Tail = true
 	}
 
 	return data

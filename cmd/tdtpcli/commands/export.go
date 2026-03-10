@@ -96,7 +96,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		} else {
 			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
 			for _, pkt := range packets {
-				if err := applyCompactToPacket(pkt, fixedNames); err != nil {
+				if err := applyCompactToPacket(pkt, fixedNames, false); err != nil {
 					return fmt.Errorf("compact encoding failed: %w", err)
 				}
 			}
