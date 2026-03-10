@@ -1,9 +1,9 @@
-# TDTP v1.0 Specification
+# TDTP Specification
 
 **Table Data Transfer Protocol** - спецификация формата обмена табличными данными через message brokers.
 
-**Версия:** 1.0 (расширения: v1.2 - compression, v1.3 - encryption)
-**Дата:** 26.02.2026
+**Версия:** 1.3.1 (базовый протокол v1.0; расширения: v1.2 — compression, v1.3 — encryption, v1.3.1 — compact format / fixed fields / special values)
+**Дата:** 10.03.2026
 **Статус:** Production Ready
 
 ---
@@ -15,7 +15,8 @@
 3. [Формат пакетов](#формат-пакетов)
 4. [Типы данных](#типы-данных)
 5. [TDTQL - Query Language](#tdtql---query-language)
-6. [Примеры](#примеры)
+6. [Compact Format v1.3.1](#compact-format-v131)
+7. [Примеры](#примеры)
 
 ---
 
@@ -152,18 +153,67 @@ DataPacket
 </Schema>
 ```
 
+**XML структура (v1.3.1 — с fixed и SpecialValues):** 🆕 v1.3.1
+```xml
+<Schema>
+  <!-- fixed=true: значение не меняется в пределах пакета (compact-оптимизация) -->
+  <Field name="dept_id"   type="INTEGER"           fixed="true"></Field>
+  <Field name="dept_name" type="TEXT" length="100" fixed="true"></Field>
+  <Field name="emp_id"    type="INTEGER"></Field>
+
+  <!-- SpecialValues: маркеры для NULL, Infinity, NaN, NoDate -->
+  <Field name="notes" type="TEXT" length="500">
+    <SpecialValues>
+      <Null marker="[NULL]"/>
+    </SpecialValues>
+  </Field>
+
+  <Field name="sensor_value" type="REAL">
+    <SpecialValues>
+      <Infinity    marker="INF"/>
+      <NegInfinity marker="-INF"/>
+      <NaN         marker="NaN"/>
+    </SpecialValues>
+  </Field>
+
+  <Field name="graduation_date" type="DATE">
+    <SpecialValues>
+      <NoDate marker="1900-01-01"/>
+    </SpecialValues>
+  </Field>
+</Schema>
+```
+
 **Атрибуты Field:**
 
-| Атрибут | Тип | Применимо к | Описание |
-|---------|-----|-------------|----------|
-| name | string | все | Имя поля (обязательное) |
-| type | enum | все | Тип данных TDTP (обязательное) |
-| length | int | TEXT, BLOB | Максимальная длина (-1 = unlimited) |
-| precision | int | DECIMAL | Общее количество цифр |
-| scale | int | DECIMAL | Количество цифр после запятой |
-| timezone | string | TIMESTAMP, TIME | Часовой пояс (UTC, Local, +03:00) |
-| key | bool | любой | Первичный ключ |
-| subtype | string | любой | Подтип (uuid, jsonb, inet, array) |
+| Атрибут | Тип | Применимо к | Default | Описание |
+|---------|-----|-------------|---------|----------|
+| name | string | все | — | Имя поля (обязательное) |
+| type | enum | все | — | Тип данных TDTP (обязательное) |
+| length | int | TEXT, BLOB | — | Максимальная длина (-1 = unlimited) |
+| precision | int | DECIMAL | — | Общее количество цифр |
+| scale | int | DECIMAL | — | Количество цифр после запятой |
+| timezone | string | TIMESTAMP, TIME | UTC | Часовой пояс (UTC, Local, +03:00) |
+| key | bool | любой | false | Первичный ключ |
+| subtype | string | любой | — | Подтип (uuid, jsonb, inet, array) |
+| **fixed** | bool | любой | false | 🆕 v1.3.1: значение не меняется в пределах пакета |
+
+**Дочерний элемент `<SpecialValues>`** 🆕 v1.3.1
+
+Задаёт строковые маркеры для значений, которые нельзя выразить стандартно:
+
+| Элемент | Атрибут | Применимо к | Описание |
+|---------|---------|-------------|----------|
+| `<Null>` | `marker` | TEXT | NULL (отличается от пустой строки `""`) |
+| `<Infinity>` | `marker` | REAL, DECIMAL | Положительная бесконечность |
+| `<NegInfinity>` | `marker` | REAL, DECIMAL | Отрицательная бесконечность |
+| `<NaN>` | `marker` | REAL | Not a Number (0/0, sqrt(-1)) |
+| `<NoDate>` | `marker` | DATE, TIMESTAMP | Отсутствие даты (не то же самое, что NULL) |
+
+**Логика декодера для SpecialValues:**
+- Если значение совпадает с маркером → применить соответствующее специальное значение
+- Для TEXT: пустая строка `||` = `""` (empty string, хранится); маркер `[NULL]` = NULL (не хранится)
+- Для DATE: маркер NoDate = sentinel-значение «нет даты», отличное от NULL
 
 ### Data
 
@@ -188,7 +238,9 @@ DataPacket
 
 | Атрибут | Тип | Значения | Описание |
 |---------|-----|----------|----------|
-| compression | string | "zstd" | Алгоритм сжатия (опционально, v1.2+) |
+| compression | string | `"zstd"` | Алгоритм сжатия (опционально, v1.2+) |
+| checksum | string | hex | XXH3 хеш сжатых данных (v1.2+) |
+| **compact** | bool | `"true"` | 🆕 v1.3.1: compact format — fixed поля пишутся только при смене значения |
 
 **Сжатие данных (v1.2+):**
 
@@ -348,6 +400,144 @@ DataPacket
 <Field name="tags" type="TEXT" length="-1" subtype="array"></Field>
 <R>{tag1,tag2,tag3}</R>
 ```
+
+---
+
+## Compact Format v1.3.1
+
+### Проблема
+
+В 1-to-many JOIN паттернах (view-ы, отчёты) многие столбцы повторяют одно и то же значение в каждой строке. В базовом формате v1.0 дублирование приводит к 50–70% overhead.
+
+**Пример дублирования (v1.0):**
+```xml
+<Data>
+  <R>10|Sales|Moscow|101|Ivan Petrov|45000</R>
+  <R>10|Sales|Moscow|102|Anna Sidorova|52000</R>
+  <R>10|Sales|Moscow|103|Boris Kozlov|48000</R>
+</Data>
+```
+
+Поля `dept_id`, `dept_name`, `location` повторяются в каждой строке.
+
+### Решение
+
+Три дополняющих механизма v1.3.1:
+
+1. **`fixed="true"`** на Field — объявляет, что поле не меняется в пределах группы
+2. **`compact="true"`** на Data — значения fixed полей пишутся только при смене
+3. **`<SpecialValues>`** на Field — маркеры для NULL, Infinity, NaN, NoDate
+
+### Fixed Fields
+
+Атрибут `fixed="true"` на `<Field>` сигнализирует процессору, что значение поля постоянно в пределах группы строк.
+
+```xml
+<Schema>
+  <Field name="dept_id"   type="INTEGER" fixed="true"></Field>   <!-- постоянное -->
+  <Field name="dept_name" type="TEXT"    fixed="true"></Field>   <!-- постоянное -->
+  <Field name="emp_id"    type="INTEGER"></Field>                <!-- переменное -->
+  <Field name="emp_name"  type="TEXT"></Field>                   <!-- переменное -->
+</Schema>
+```
+
+**Соглашение для SQL view (`_prefix`):**
+
+При создании view используйте префикс `_` для обозначения fixed полей. tdtpcli автоматически обнаруживает их, убирает `_` из имени и устанавливает `fixed="true"`:
+
+```sql
+CREATE VIEW dept_employees_report AS
+SELECT
+  d.dept_id   AS _dept_id,     -- будет: name="dept_id" fixed="true"
+  d.dept_name AS _dept_name,   -- будет: name="dept_name" fixed="true"
+  d.location  AS _location,    -- будет: name="location" fixed="true"
+  e.emp_id,                    -- переменное
+  e.full_name
+FROM employees e
+JOIN departments d ON e.dept_id = d.dept_id
+ORDER BY dept_id, emp_id;
+```
+
+### Compact Format
+
+При `compact="true"` на `<Data>` значения fixed полей записываются только:
+- в первой строке (первая строка группы — **header row**)
+- при смене значения fixed поля (начало новой группы)
+
+В остальных строках группы на позициях fixed полей стоят пустые строки (`||`).
+
+**Пример (3 отдела по 5 сотрудников):**
+```xml
+<Data compact="true">
+  <!-- dept 10 — header row: все значения -->
+  <R>10|Sales|Moscow|101|Ivan Petrov|45000</R>
+  <!-- carry-forward: dept_id/dept_name/location из предыдущей строки -->
+  <R>|||102|Anna Sidorova|52000</R>
+  <R>|||103|Boris Kozlov|48000</R>
+  <R>|||104|Elena Novikova|55000</R>
+  <R>|||105|Dmitry Smirnov|49500</R>
+  <!-- dept 20 — новая группа: снова все значения -->
+  <R>20|Engineering|Saint Petersburg|201|Alice Volkov|72000</R>
+  <R>|||202|Charlie Morozov|65000</R>
+  <R>|||203|Diana Popova|69000</R>
+  <R>|||204|Egor Lebedev|61000</R>
+  <R>|||205|Fiona Kuznetsova|78000</R>
+</Data>
+```
+
+**Алгоритм декодера (carry-forward):**
+
+```
+currentFixed = []
+
+для каждой строки:
+  для каждой позиции i:
+    если поле[i].fixed == true:
+      если values[i] != "":
+        currentFixed[i] = values[i]   // новое значение → обновить carry
+      иначе:
+        values[i] = currentFixed[i]   // пропуск → взять из carry
+```
+
+**Важно:** декодер не проверяет корректность `fixed="true"` — ответственность на отправителе.
+
+### Порядок обработки (кодирование)
+
+```
+1. Определить fixed поля из Schema (или по _prefix, или по --fixed-fields)
+2. Для каждой строки:
+   - если значение fixed поля = предыдущему → записать ""
+   - иначе → записать значение явно
+3. Установить compact="true" на <Data>
+4. Установить version="1.3.1" на пакете
+5. Опционально: сжать данные compression="zstd"
+```
+
+**Порядок обработки (декодирование):**
+
+```
+1. Распаковать zstd (если compression="zstd")
+2. Если compact="true": expand carry-forward → нормализованные строки
+3. Обработать <SpecialValues> маркеры
+4. Импортировать как обычный набор строк
+```
+
+### Комбинация с compression
+
+Оба механизма совместимы:
+
+```xml
+<Data compression="zstd" compact="true">
+  <R>KLUv/WBgVKEAAesEA...base64-compressed-compact-data...</R>
+</Data>
+```
+
+### Экономия размера
+
+| Сценарий | v1.0 | v1.3.1 compact | Экономия |
+|----------|------|----------------|----------|
+| 3 fixed поля × 15 строк | 100% | ~30% | ~70% |
+| + zstd compression | 100% | ~10–15% | ~85–90% |
 
 ---
 
@@ -731,6 +921,66 @@ LIMIT 50 OFFSET 0
 
 ---
 
+### Reference Packet в compact-формате (v1.3.1+) 🆕
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.3.1">
+  <Header>
+    <Type>reference</Type>
+    <TableName>dept_employees_report</TableName>
+    <MessageID>REF-2026-compact-001-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>10</RecordsInPart>
+    <Timestamp>2026-03-10T10:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <!-- Три fixed поля (_prefix в SQL view → stripped + fixed=true) -->
+    <Field name="dept_id"   type="INTEGER"            fixed="true"></Field>
+    <Field name="dept_name" type="TEXT" length="100"  fixed="true"></Field>
+    <Field name="location"  type="TEXT" length="100"  fixed="true"></Field>
+    <!-- Переменные поля -->
+    <Field name="emp_id"    type="INTEGER"></Field>
+    <Field name="full_name" type="TEXT" length="100"></Field>
+    <Field name="salary"    type="DECIMAL" precision="10" scale="2"></Field>
+    <!-- SpecialValues: для NULL в TEXT поле -->
+    <Field name="notes" type="TEXT" length="500">
+      <SpecialValues>
+        <Null marker="[NULL]"/>
+      </SpecialValues>
+    </Field>
+  </Schema>
+  <Data compact="true">
+    <!-- dept 10 — header row: все 7 значений -->
+    <R>10|Sales|Moscow|101|Ivan Petrov|45000.00|on probation</R>
+    <!-- carry-forward: dept_id/dept_name/location из строки выше -->
+    <R>|||102|Anna Sidorova|52000.00|[NULL]</R>
+    <R>|||103|Boris Kozlov|48000.00|[NULL]</R>
+    <R>|||104|Elena Novikova|55000.00|team lead</R>
+    <R>|||105|Dmitry Smirnov|49500.00|[NULL]</R>
+    <!-- dept 20 — новая группа: снова все значения -->
+    <R>20|Engineering|Saint Petersburg|201|Alice Volkov|72000.00|[NULL]</R>
+    <R>|||202|Charlie Morozov|65000.00|[NULL]</R>
+    <R>|||203|Diana Popova|69000.00|[NULL]</R>
+    <R>|||204|Egor Lebedev|61000.00|[NULL]</R>
+    <R>|||205|Fiona Kuznetsova|78000.00|[NULL]</R>
+  </Data>
+</DataPacket>
+```
+
+**Декодированный результат:**
+
+| dept_id | dept_name | location | emp_id | full_name | salary | notes |
+|---------|-----------|----------|--------|-----------|--------|-------|
+| 10 | Sales | Moscow | 101 | Ivan Petrov | 45000.00 | on probation |
+| 10 | Sales | Moscow | 102 | Anna Sidorova | 52000.00 | NULL |
+| 10 | Sales | Moscow | 103 | Boris Kozlov | 48000.00 | NULL |
+| ... | ... | ... | ... | ... | ... | ... |
+| 20 | Engineering | Saint Petersburg | 201 | Alice Volkov | 72000.00 | NULL |
+
+---
+
 ### Reference Packet со сжатием (v1.2+) 🆕
 
 ```xml
@@ -781,9 +1031,26 @@ LIMIT 50 OFFSET 0
 
 ## Версионирование
 
-**Текущая версия:** 1.0
+**Текущая версия:** 1.3.1
 
 **Changelog:**
+
+- **v1.3.1** (10.03.2026) 🆕
+  - **Fixed Fields** — атрибут `fixed="true"` на `<Field>`
+    - Поле объявляется постоянным в пределах группы строк
+    - Конвенция `_fieldname` в SQL view для auto-detect (tdtpcli убирает `_`, ставит `fixed=true`)
+  - **Compact Format** — атрибут `compact="true"` на `<Data>`
+    - Значения fixed полей записываются только в первой строке группы (header row)
+    - Остальные строки группы имеют пустые слоты `||` на позициях fixed полей
+    - Смена значения fixed поля инициирует новую группу (carry-forward сбрасывается)
+    - Совместим с `compression="zstd"` (порядок: decode zstd → expand compact)
+    - Экономия: 50–70% на повторяющихся значениях; до 85–90% в комбинации с zstd
+  - **Special Values** — дочерний элемент `<SpecialValues>` на `<Field>`
+    - `<Null marker="..."/>` — для TEXT: различает NULL и `""` (empty string)
+    - `<Infinity marker="..."/>`, `<NegInfinity marker="..."/>`, `<NaN marker="..."/>` — для REAL/DECIMAL
+    - `<NoDate marker="..."/>` — для DATE/TIMESTAMP: sentinel «нет даты», отличный от NULL
+  - **Backward compatibility:** reader v1.0 читает пакеты v1.3.1, игнорируя compact/fixed/SpecialValues
+  - **Forward compatibility:** reader v1.3.1 читает пакеты v1.0 без изменений
 
 - **v1.3** (26.02.2026) 🆕
   - **Тип пакета `error`** — стандартный DataPacket для фиксации ошибок в ETL pipeline
