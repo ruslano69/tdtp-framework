@@ -51,6 +51,14 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		}
 	}
 
+	// Expand compact v1.3.1 format (carry-forward fixed fields) before XLSX conversion
+	if pkt.Data.Compact {
+		fmt.Printf("  Expanding compact format (v1.3.1)...\n")
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			return fmt.Errorf("compact expansion failed: %w", err)
+		}
+	}
+
 	fmt.Printf("✓ Parsed packet for table '%s'\n", pkt.Header.TableName)
 	fmt.Printf("✓ Schema: %d field(s)\n", len(pkt.Schema.Fields))
 	fmt.Printf("✓ Data: %d row(s)\n", len(pkt.Data.Rows))

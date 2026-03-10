@@ -416,6 +416,29 @@ func routeCommand(
 				ShowConflicts: *flags.ShowConflicts,
 			})
 		})
+
+		// [BETA] Streaming consumer daemon — Kafka only
+	} else if *flags.Listen {
+		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
+		if stratErr != nil {
+			return stratErr
+		}
+
+		brokerCfg := buildBrokerConfig(config)
+
+		operation = audit.OpImport
+		metadata = map[string]string{
+			"command":  "listen",
+			"broker":   brokerCfg.Type,
+			"topic":    brokerCfg.Queue,
+			"strategy": *flags.Strategy,
+		}
+
+		// Listen runs until SIGTERM — bypass resilience wrapper (it's an infinite loop)
+		err = commands.ListenKafkaStream(ctx, adapterConfig, commands.ListenConfig{
+			BrokerCfg: &brokerCfg,
+			Strategy:  strategy,
+		})
 	}
 
 	// Log operation result with metadata
@@ -616,7 +639,8 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Pipeline != "" ||
 		*flags.ProcessRequest != "" ||
 		*flags.Diff != "" ||
-		*flags.Merge != ""
+		*flags.Merge != "" ||
+		*flags.Listen
 }
 
 // fatal prints error and exits

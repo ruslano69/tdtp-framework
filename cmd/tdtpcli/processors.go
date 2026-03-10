@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"gopkg.in/yaml.v3"
 )
 
 // ProcessorManager manages data processors for CLI
@@ -51,33 +53,47 @@ func (pm *ProcessorManager) AddMaskProcessor(maskFields string) error { //nolint
 	return nil
 }
 
-// AddValidateProcessor adds field validation processor from YAML file
+// AddValidateProcessor adds field validation processor from YAML file.
 // Format: --validate rules.yaml
+//
+// YAML structure:
+//
+//	rules:
+//	  email: email
+//	  age: range:0-150
+//	  status: [required, "enum:active,inactive"]
+//	on_error: fail          # fail (default) | filter | warn
+//	stop_on_first_error: false   # optional, only for on_error: fail
+//
+// on_error strategies:
+//   - fail   — abort on errors, return full error list
+//   - filter — remove invalid rows, pass the rest (count printed to stderr)
+//   - warn   — print warnings to stderr, pass all rows unchanged
+//
+// If the file does not contain a "rules" section, validation is skipped silently.
 func (pm *ProcessorManager) AddValidateProcessor(rulesFile string) error {
 	if rulesFile == "" {
 		return nil
 	}
 
-	// TODO: Load validation rules from YAML file
-	// For now, create a simple validator with default common rules
-	validationRules := map[string][]processors.FieldValidationRule{
-		"email": {
-			{Type: processors.ValidateEmail, Param: "", ErrMsg: ""},
-		},
-		"customer_email": {
-			{Type: processors.ValidateEmail, Param: "", ErrMsg: ""},
-		},
-		"phone": {
-			{Type: processors.ValidatePhone, Param: "", ErrMsg: ""},
-		},
-		"customer_phone": {
-			{Type: processors.ValidatePhone, Param: "", ErrMsg: ""},
-		},
+	data, err := os.ReadFile(rulesFile)
+	if err != nil {
+		return fmt.Errorf("failed to read validate rules file %q: %w", rulesFile, err)
 	}
 
-	validator, err := processors.NewFieldValidator(validationRules, false)
+	var params map[string]any
+	if err := yaml.Unmarshal(data, &params); err != nil {
+		return fmt.Errorf("failed to parse validate rules file %q: %w", rulesFile, err)
+	}
+
+	if _, ok := params["rules"]; !ok {
+		// No validation section in file — skip silently
+		return nil
+	}
+
+	validator, err := processors.NewFieldValidatorFromConfig(params)
 	if err != nil {
-		return fmt.Errorf("failed to create validator: %w", err)
+		return fmt.Errorf("failed to create validator from %q: %w", rulesFile, err)
 	}
 
 	pm.chain.Add(validator)
@@ -86,23 +102,42 @@ func (pm *ProcessorManager) AddValidateProcessor(rulesFile string) error {
 	return nil
 }
 
-// AddNormalizeProcessor adds field normalization processor from YAML file
+// AddNormalizeProcessor adds field normalization processor from YAML file.
 // Format: --normalize rules.yaml
-func (pm *ProcessorManager) AddNormalizeProcessor(rulesFile string) error { //nolint:unparam // error return kept for API consistency
+//
+// YAML structure:
+//
+//	fields:
+//	  email: email
+//	  phone: phone
+//	  city: uppercase
+//
+// Supported rules: email, phone, whitespace, uppercase, lowercase, date.
+// If the file does not contain a "fields" section, normalization is skipped silently.
+func (pm *ProcessorManager) AddNormalizeProcessor(rulesFile string) error {
 	if rulesFile == "" {
 		return nil
 	}
 
-	// TODO: Load normalization rules from YAML file
-	// For now, create a simple normalizer with default rules
-	normalizationRules := map[string]processors.NormalizeRule{
-		"email":          processors.NormalizeEmail,
-		"customer_email": processors.NormalizeEmail,
-		"phone":          processors.NormalizePhone,
-		"customer_phone": processors.NormalizePhone,
+	data, err := os.ReadFile(rulesFile)
+	if err != nil {
+		return fmt.Errorf("failed to read normalize rules file %q: %w", rulesFile, err)
 	}
 
-	normalizer := processors.NewFieldNormalizer(normalizationRules)
+	var params map[string]any
+	if err := yaml.Unmarshal(data, &params); err != nil {
+		return fmt.Errorf("failed to parse normalize rules file %q: %w", rulesFile, err)
+	}
+
+	if _, ok := params["fields"]; !ok {
+		// No normalization section in file — skip silently
+		return nil
+	}
+
+	normalizer, err := processors.NewFieldNormalizerFromConfig(params)
+	if err != nil {
+		return fmt.Errorf("failed to create normalizer from %q: %w", rulesFile, err)
+	}
 
 	pm.chain.Add(normalizer)
 	fmt.Printf("✓ Added field normalizer from: %s\n", rulesFile)

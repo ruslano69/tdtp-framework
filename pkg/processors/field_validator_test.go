@@ -466,8 +466,8 @@ func TestFieldValidator_MultipleErrors(t *testing.T) {
 
 	// Check that we got multiple errors
 	errStr := err.Error()
-	if !strings.Contains(errStr, "2 errors") {
-		t.Errorf("Expected '2 errors' in error message, got: %v", errStr)
+	if !strings.Contains(errStr, "2 error(s)") {
+		t.Errorf("Expected '2 error(s)' in error message, got: %v", errStr)
 	}
 }
 
@@ -492,5 +492,99 @@ func TestFieldValidator_FromConfig(t *testing.T) {
 
 	if !validator.stopOnFirstError {
 		t.Error("Expected stopOnFirstError to be true")
+	}
+}
+
+func TestFieldValidator_StrategyFilter(t *testing.T) {
+	validator, err := NewFieldValidatorFromConfig(map[string]any{
+		"on_error": "filter",
+		"rules": map[string]any{
+			"age": "range:0-120",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	schema := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "name", Type: "TEXT"},
+			{Name: "age", Type: "INTEGER"},
+		},
+	}
+
+	data := [][]string{
+		{"Alice", "30"},   // valid
+		{"Bob", "999"},    // invalid age
+		{"Carol", "25"},   // valid
+		{"Dave", "-5"},    // invalid age
+		{"Eve", "45"},     // valid
+	}
+
+	result, err := validator.Process(context.Background(), data, schema)
+	if err != nil {
+		t.Fatalf("Expected no error with filter strategy, got: %v", err)
+	}
+	if len(result) != 3 {
+		t.Errorf("Expected 3 valid rows after filter, got %d", len(result))
+	}
+	// Verify correct rows passed through
+	if result[0][0] != "Alice" || result[1][0] != "Carol" || result[2][0] != "Eve" {
+		t.Errorf("Wrong rows passed: %v", result)
+	}
+}
+
+func TestFieldValidator_StrategyWarn(t *testing.T) {
+	validator, err := NewFieldValidatorFromConfig(map[string]any{
+		"on_error": "warn",
+		"rules": map[string]any{
+			"email": "email",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	schema := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "email", Type: "TEXT"},
+		},
+	}
+
+	data := [][]string{
+		{"valid@example.com"},
+		{"not-an-email"},
+		{"also@valid.org"},
+	}
+
+	result, err := validator.Process(context.Background(), data, schema)
+	if err != nil {
+		t.Fatalf("Expected no error with warn strategy, got: %v", err)
+	}
+	// All rows must pass through
+	if len(result) != 3 {
+		t.Errorf("Expected all 3 rows with warn strategy, got %d", len(result))
+	}
+}
+
+func TestFieldValidator_OnErrorInvalidValue(t *testing.T) {
+	_, err := NewFieldValidatorFromConfig(map[string]any{
+		"on_error": "unknown_strategy",
+		"rules":    map[string]any{"email": "email"},
+	})
+	if err == nil {
+		t.Error("Expected error for invalid on_error value, got nil")
+	}
+}
+
+func TestFieldValidator_DefaultStrategyIsFail(t *testing.T) {
+	validator, err := NewFieldValidator(map[string][]FieldValidationRule{
+		"age": {{Type: ValidateRange, Param: "0-100"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if validator.errorStrategy != StrategyFail {
+		t.Errorf("expected default strategy StrategyFail, got %q", validator.errorStrategy)
 	}
 }

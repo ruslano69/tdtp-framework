@@ -152,6 +152,7 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 
 		fmt.Printf("Received message %d for table '%s'\n", messageCount, pkt.Header.TableName)
+
 		fmt.Printf("  %d row(s) to import\n", len(pkt.Data.Rows))
 
 		// Import to database

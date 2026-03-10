@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const version = "1.7.0"
+const version = "1.7.1-beta"
 
 // PrintVersion prints version information
 func PrintVersion() {
@@ -39,9 +39,10 @@ func PrintShortHelp() {
 	fmt.Println("    --export-xlsx <table>      Table → XLSX (direct)")
 	fmt.Println("    --import-xlsx <xlsx-file>  XLSX → Database (direct)")
 	fmt.Println()
-	fmt.Println("  Broker:")
+	fmt.Println("  Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed")
 	fmt.Println("    --export-broker <table>    Export to message broker")
 	fmt.Println("    --import-broker            Import from message broker")
+	fmt.Println("    --listen                   [BETA] Streaming consumer daemon (Kafka only)")
 	fmt.Println()
 	fmt.Println("  ETL:")
 	fmt.Println("    --sync-incremental <table> Incremental sync")
@@ -130,6 +131,14 @@ func PrintHelp() {
 	fmt.Println("  Message Broker Operations:")
 	fmt.Println("    --export-broker <table>    Export table to message broker")
 	fmt.Println("    --import-broker            Import from message broker")
+	fmt.Println("    --listen                   [BETA] Streaming consumer daemon (Kafka only)")
+	fmt.Println("                               Listens to Kafka topic and imports data as stream parts arrive.")
+	fmt.Println("                               Requires stable channel (99.99%+ uptime). NOT for RabbitMQ/MSMQ.")
+	fmt.Println()
+	fmt.Println("    Broker tiers:")
+	fmt.Println("      MSMQ     — Legacy     (Windows-only, no ordering guarantees, batch mode only)")
+	fmt.Println("      RabbitMQ — Stability  (reliable delivery, batch mode)")
+	fmt.Println("      Kafka    — Speed      (ordered partitions, batch + --listen streaming [BETA])")
 	fmt.Println()
 
 	fmt.Println("  Incremental Sync:")
@@ -278,6 +287,12 @@ func PrintHelp() {
 	fmt.Println("  # Import from RabbitMQ")
 	fmt.Println("  tdtpcli --import-broker --config rabbitmq.yaml")
 	fmt.Println()
+	fmt.Println("  # [BETA] Streaming consumer daemon — Kafka only")
+	fmt.Println("  #   Listens indefinitely; terminated by Ctrl+C / SIGTERM")
+	fmt.Println("  #   Recommended for stable channels (LAN, dedicated WAN, 99.99%+ uptime)")
+	fmt.Println("  #   NOT recommended for unreliable links — use --import-broker (batch) instead")
+	fmt.Println("  tdtpcli --listen --config kafka.yaml --strategy replace")
+	fmt.Println()
 
 	fmt.Println("  # Incremental sync")
 	fmt.Println("  tdtpcli --sync-incremental orders --tracking-field updated_at")
@@ -378,7 +393,11 @@ func PrintHelp() {
 	fmt.Println("FEATURES:")
 	fmt.Println()
 	fmt.Println("  ✅ Database Adapters: PostgreSQL, MS SQL, SQLite, MySQL")
-	fmt.Println("  ✅ Message Brokers: RabbitMQ, MSMQ, Kafka")
+	fmt.Println("  ✅ Message Brokers:")
+	fmt.Println("       MSMQ     — Legacy     (Windows-only, batch mode)")
+	fmt.Println("       RabbitMQ — Stability  (reliable delivery, batch mode)")
+	fmt.Println("       Kafka    — Speed      (ordered partitions, batch + streaming [BETA])")
+	fmt.Println("  🔶 Streaming Consumer: --listen (Kafka only, BETA) — stable channels only")
 	fmt.Println("  ✅ File Operations: Diff & Merge with conflict resolution")
 	fmt.Println("  ✅ XLSX Converter: Database ↔ Excel bidirectional 🍒")
 	fmt.Println("  ✅ Circuit Breaker: Protection from cascading failures")
