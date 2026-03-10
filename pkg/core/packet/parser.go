@@ -42,6 +42,16 @@ func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
+	// Auto-expand compact v1.3.1 format (carry-forward fixed fields).
+	// Only when data is NOT compressed — compressed packets still have rows packed
+	// into a single blob; expansion must happen after decompression instead
+	// (see ParseWithDecompression / ParseBytesWithDecompression).
+	if packet.Data.Compact && packet.Data.Compression == "" {
+		if err := ExpandCompactRows(&packet); err != nil {
+			return nil, fmt.Errorf("compact expansion failed: %w", err)
+		}
+	}
+
 	return &packet, nil
 }
 
@@ -189,6 +199,13 @@ func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx conte
 		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
 			return nil, err
 		}
+		// After decompression, expand compact if flagged (Parse() skips this
+		// when Compression != "" because rows are still a packed blob at that point).
+		if packet.Data.Compact {
+			if err := ExpandCompactRows(packet); err != nil {
+				return nil, fmt.Errorf("compact expansion failed: %w", err)
+			}
+		}
 	}
 
 	return packet, nil
@@ -205,6 +222,13 @@ func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx 
 	if p.IsCompressed(packet) && decompressor != nil {
 		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
 			return nil, err
+		}
+		// After decompression, expand compact if flagged (ParseBytes() skips this
+		// when Compression != "" because rows are still a packed blob at that point).
+		if packet.Data.Compact {
+			if err := ExpandCompactRows(packet); err != nil {
+				return nil, fmt.Errorf("compact expansion failed: %w", err)
+			}
 		}
 	}
 
