@@ -27,6 +27,11 @@
   - Automatic compression on packet generation (threshold 1 KB)
   - Automatic decompression on parsing
   - XML attribute `compression="zstd"` for identifying compressed data
+- **Compact format (v1.3.1)**:
+  - Fixed fields written once per packet header, omitted from each row (`fixed="true"` in schema)
+  - `RowsToCompactData` / `ExpandCompactRows` for encode/decode
+  - Auto-detection of fixed fields: explicit list → `_`-prefix convention → data analysis (all-same values)
+  - CLI: `--compact` on export, `--to-compact` for post-hoc conversion of existing files
 - `QueryContext` for stateless pattern
 - Subtype support (UUID, JSONB, TIMESTAMPTZ)
 
@@ -363,6 +368,7 @@ security:
 --diff <file-a> <file-b>   Compare two TDTP files
 --merge <files>            Merge multiple TDTP files
 --to-html <file>           Convert TDTP to HTML viewer
+--to-compact <file>        Convert existing TDTP v1.x file to compact v1.3.1 format
 ```
 
 **XLSX:**
@@ -401,6 +407,16 @@ security:
 ```
 --compress                 Enable zstd compression for exported data
 --compress-level <n>       Compression level: 1 (faster) — 19 (better), default: 3
+```
+
+**Compact format (v1.3.1):**
+```
+--compact                  Enable TDTP v1.3.1 compact format on export
+                           (fixed fields written once per packet, omitted per row)
+--fixed-fields <fields>    Fixed fields for compact format: comma-separated names
+                           or '_' prefix convention (e.g. '_city,_region')
+--to-compact <file>        Convert existing TDTP v1.x file to compact v1.3.1 format
+                           (auto-detects fixed fields; use --fixed-fields to override)
 ```
 
 **TDTQL Filters:**
@@ -631,6 +647,19 @@ tdtpcli --from-xlsx orders.xlsx --output orders.xml
 # Import Excel to database
 tdtpcli --import-xlsx orders.xlsx --strategy replace
 
+# Export in compact format (fixed fields written once, not repeated per row)
+tdtpcli --export orders --compact --fixed-fields city,region --output orders_compact.xml
+
+# Export compact with auto-detection via _prefix convention
+tdtpcli --export orders --compact --output orders_compact.xml
+# (columns named _city, _region in DB view are auto-detected as fixed)
+
+# Convert existing TDTP file to compact v1.3.1 in-place
+tdtpcli --to-compact orders.xml
+
+# Convert with explicit fixed fields and separate output
+tdtpcli --to-compact orders.xml --fixed-fields city,region --output orders_compact.xml
+
 # Compare two TDTP files
 tdtpcli --diff users-old.xml users-new.xml
 
@@ -809,6 +838,14 @@ go test -v ./pkg/core/packet/
 - MySQL adapter
 - Full documentation
 
+### v1.3.1 (completed)
+- **Compact format**: fixed fields written once per packet, omitted from each data row
+  - `RowsToCompactData` / `ExpandCompactRows` in the packet core
+  - `--compact` flag on export (works with `--fixed-fields` or `_`-prefix convention)
+  - `--to-compact` CLI command for post-hoc conversion of existing TDTP files
+  - Auto-detection of fixed fields: explicit list → `_` prefix → data analysis
+  - Automatic expand on `--import` and all parser paths (transparent backwards compatibility)
+
 ### v1.6.0 (current)
 - HTML Viewer (`--to-html`, `--open`, `--row`)
 - Diff & Merge (`--diff`, `--merge`, `--merge-strategy`, `--show-conflicts`)
@@ -822,7 +859,6 @@ go test -v ./pkg/core/packet/
 ### v2.0 (planned)
 - Streaming export/import (TotalParts=0, "TCP for tables")
 - Parallel import workers
-- Python bindings (ctypes wrapper)
 - Docker image (multi-stage build)
 - Monitoring & metrics (Prometheus exporter)
 - Schema migration (ALTER TABLE)
@@ -852,4 +888,4 @@ MIT
 
 ---
 
-*Version: v1.6.0 | Last updated: 23.02.2026*
+*Version: v1.6.0 | Last updated: 10.03.2026*
