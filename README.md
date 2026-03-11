@@ -911,6 +911,47 @@ go test -v ./pkg/core/packet/
 
 ---
 
+## TDTP as a Data Cognition Tool for Agentic Systems
+
+`tdtpcli` is a natural fit as a **data discovery and extraction primitive for AI agents**.
+
+An agent needs to understand an unfamiliar database. With TDTP:
+
+```
+Agent calls: tdtpcli --list
+→ receives 3 804 table names
+→ reads names, infers domain (portal, users, orders, logs, ...)
+→ selects relevant tables by name semantics
+→ calls: tdtpcli --export <table> --limit 100
+→ receives self-describing XML: schema + data + types in one file
+→ understands structure without any additional metadata queries
+→ calls: tdtpcli --to-html <file> --open   ← human-in-the-loop review
+→ builds export plan, runs full extracts
+```
+
+**Why this works for agents:**
+
+| Property | Benefit for agent |
+|----------|------------------|
+| `--list` returns plain names | LLM understands domain from naming without extra context |
+| XML is self-describing | schema + data in one artifact — no separate DDL lookup |
+| Zero setup | agent needs only DSN — no schema mapping code to generate |
+| `--where`, `--limit`, `--order-by` | agent can sample, filter, paginate in natural language → CLI flags |
+| `--to-html` | instant human-readable preview for human-in-the-loop verification |
+| TDTQL in XML | query context travels with data — agent can reproduce any extract |
+| Stateless packets | agent can parallelize exports across tables without coordination |
+
+**Contrast with the alternative:** the agent would need to write SQL `SHOW TABLES`, then
+`DESCRIBE <table>` for each, then `SELECT *`, then handle type mapping, pagination, encoding —
+all as generated code that can fail silently. With TDTP: three CLI calls, structured output,
+no generated SQL, no silent data corruption.
+
+**The packet is the agent's memory of a table** — schema, data, query context, compression
+settings, encryption metadata — everything needed to reproduce, share, or import the extract,
+all in one file that the agent can reason about directly.
+
+---
+
 ## Special Values — Cross-Adapter Data Integrity (v1.3.1)
 
 Moving data between a strict relational database and a "shapeless" target like Excel or pandas
