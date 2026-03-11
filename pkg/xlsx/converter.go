@@ -201,8 +201,8 @@ func FromXLSX(filePath string, sheetName string) (*packet.DataPacket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read rows: %w", err)
 	}
-	if len(rows) < 2 {
-		return nil, fmt.Errorf("file must have header and at least one data row")
+	if len(rows) < 1 {
+		return nil, fmt.Errorf("file has no rows (not even a header)")
 	}
 
 	// Parse header to create schema
