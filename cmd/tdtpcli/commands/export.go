@@ -27,6 +27,7 @@ type ExportOptions struct {
 	// v1.3.1 compact format
 	Compact     bool     // Enable compact format output
 	FixedFields []string // Explicit fixed field names; nil = auto-detect from _prefix
+	CompactTail bool     // Write tail row with all fixed fields explicit
 }
 
 // ProcessorManager interface for applying data processors
@@ -96,7 +97,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		} else {
 			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
 			for _, pkt := range packets {
-				if err := applyCompactToPacket(pkt, fixedNames); err != nil {
+				if err := applyCompactToPacket(pkt, fixedNames, opts.CompactTail); err != nil {
 					return fmt.Errorf("compact encoding failed: %w", err)
 				}
 			}

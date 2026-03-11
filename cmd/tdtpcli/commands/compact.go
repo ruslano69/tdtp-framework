@@ -13,6 +13,7 @@ type ConvertCompactOptions struct {
 	InputFile   string
 	OutputFile  string
 	FixedFields []string // explicit list; nil = auto-detect
+	Tail        bool     // write tail row with all fixed fields explicit (stream validation / carry handoff)
 }
 
 // ConvertToCompact reads a TDTP v1.x file and rewrites it in v1.3.1 compact format.
@@ -61,8 +62,11 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	}
 	fmt.Printf("  Fixed fields: %s\n", strings.Join(fixedNames, ", "))
 
-	if err := applyCompactToPacket(pkt, fixedNames); err != nil {
+	if err := applyCompactToPacket(pkt, fixedNames, opts.Tail); err != nil {
 		return fmt.Errorf("failed to apply compact format: %w", err)
+	}
+	if opts.Tail {
+		fmt.Println("  tail=true: last row will repeat all fixed fields explicitly")
 	}
 
 	// Determine output path
@@ -85,42 +89,9 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	return nil
 }
 
-// applyCompactToPacket marks the given fields as fixed in the schema, decodes all
-// rows, re-encodes them in compact format, and sets the packet version to 1.3.1.
-func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string) error {
-	fixedSet := make(map[string]bool, len(fixedFieldNames))
-	for _, f := range fixedFieldNames {
-		fixedSet[f] = true
-	}
-
-	// Update schema: mark fixed fields, strip _ prefix from names if present
-	for i := range pkt.Schema.Fields {
-		name := pkt.Schema.Fields[i].Name
-		stripped := strings.TrimPrefix(name, "_")
-
-		if fixedSet[name] || fixedSet[stripped] {
-			pkt.Schema.Fields[i].Fixed = true
-			// Strip _ prefix from the exported field name
-			if strings.HasPrefix(name, "_") {
-				pkt.Schema.Fields[i].Name = stripped
-			}
-		}
-	}
-
-	// Decode rows
-	parser := packet.NewParser()
-	rows := make([][]string, len(pkt.Data.Rows))
-	for i, row := range pkt.Data.Rows {
-		rows[i] = parser.GetRowValues(row)
-	}
-
-	// Re-encode as compact
-	pkt.Data = packet.RowsToCompactData(rows, pkt.Schema)
-
-	// Update protocol version to signal v1.3.1 features in use
-	pkt.Version = "1.3.1"
-
-	return nil
+// applyCompactToPacket delegates to packet.ApplyCompact.
+func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string, tail bool) error {
+	return packet.ApplyCompact(pkt, fixedFieldNames, tail)
 }
 
 // resolveFixedFields determines which field names should be marked as fixed.
@@ -191,21 +162,8 @@ func detectFixedFieldsByData(pkt *packet.DataPacket) []string {
 	return fixed
 }
 
-// BuildFixedFieldsForExport prepares fixed field names for export compact mode.
-// If fixedFields is non-empty — use it directly.
-// Otherwise auto-detect from schema field names using _prefix convention.
+// BuildFixedFieldsForExport delegates to packet.ResolveFixedFields.
 // Data-analysis fallback is not performed here (no rows yet at schema build time).
 func BuildFixedFieldsForExport(schema packet.Schema, fixedFields []string) []string {
-	if len(fixedFields) > 0 {
-		return fixedFields
-	}
-
-	// Auto-detect from _ prefix
-	var names []string
-	for _, f := range schema.Fields {
-		if strings.HasPrefix(f.Name, "_") {
-			names = append(names, f.Name)
-		}
-	}
-	return names
+	return packet.ResolveFixedFields(schema, fixedFields)
 }

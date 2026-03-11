@@ -179,6 +179,14 @@
 - Auto-formatting (numbers, dates, booleans)
 - Business-friendly interface (no SQL knowledge required)
 - Round-trip data integrity
+- **Excel data-integrity traps handled automatically (v1.3.1+):**
+  - BIGINT > 15 digits → string cell (IEEE-754 float64 precision loss prevention)
+  - NaN / ±Inf → blank cell (Excel has no numeric NaN/Inf; text breaks `=SUM()`)
+  - Dates < 1900-01-01 → ISO text string (Excel serial starts at Jan 1, 1900)
+  - 1900 leap-year bug compensation on import (phantom serial 60 = Feb 29, 1900)
+  - Formula injection prevention via `SetCellStr` (`=`, `+`, `-`, `@` stored as literal text)
+  - Error cells (`#N/A`, `#DIV/0!`, `#NUM!`, etc.) → canonical NULL on import
+  - All imported strings trimmed (Excel trailing-space formatting artifact)
 
 ---
 
@@ -845,6 +853,13 @@ go test -v ./pkg/core/packet/
   - `--to-compact` CLI command for post-hoc conversion of existing TDTP files
   - Auto-detection of fixed fields: explicit list → `_` prefix → data analysis
   - Automatic expand on `--import` and all parser paths (transparent backwards compatibility)
+- **SpecialValues**: protocol-level markers for values that cannot be expressed standardly
+  - `[NULL]` — TEXT NULL vs empty string `""` (distinct semantics preserved across adapters)
+  - `NaN`, `INF`, `-INF` — IEEE-754 special floats (PostgreSQL stores natively; others → NULL)
+  - `0000-00-00` — NoDate sentinel for DATE fields (MySQL zero-date, historical databases)
+  - Auto-detection on export from all adapters (PostgreSQL `NaN`/`Inf`, MSSQL zero-dates)
+  - Python/pandas binding: markers applied before `astype()` to prevent `ValueError` crashes
+  - XLSX adapter: full trap matrix for all 5 markers (see XLSX Converter section)
 
 ### v1.6.0 (current)
 - HTML Viewer (`--to-html`, `--open`, `--row`)
@@ -862,6 +877,81 @@ go test -v ./pkg/core/packet/
 - Docker image (multi-stage build)
 - Monitoring & metrics (Prometheus exporter)
 - Schema migration (ALTER TABLE)
+
+---
+
+## Special Values — Cross-Adapter Data Integrity (v1.3.1)
+
+Moving data between a strict relational database and a "shapeless" target like Excel or pandas
+is like packing Swiss watch parts into a plastic bag. TDTP v1.3.1 solves this at the protocol
+level with **SpecialValues markers** — strings embedded in the packet schema that describe values
+that cannot be expressed standardly.
+
+### Markers
+
+| Marker | Element | Applies to | Semantics |
+|--------|---------|------------|-----------|
+| `[NULL]` | `<Null>` | TEXT | NULL — distinct from empty string `""` |
+| `NaN` | `<NaN>` | REAL, DECIMAL | Not a Number (`0/0`, `sqrt(-1)`) |
+| `INF` | `<Infinity>` | REAL, DECIMAL | Positive infinity |
+| `-INF` | `<NegInfinity>` | REAL, DECIMAL | Negative infinity |
+| `0000-00-00` | `<NoDate>` | DATE, TIMESTAMP | Absent date (not NULL — a distinct sentinel) |
+
+Markers are declared in the packet schema `<SpecialValues>` element — any reader knows the
+semantics without external configuration.
+
+### Adapter Behaviour Matrix
+
+| Situation | PostgreSQL | MS SQL | MySQL | SQLite | XLSX | pandas |
+|-----------|-----------|--------|-------|--------|------|--------|
+| `NaN` in REAL | native `'NaN'::numeric` | `NULL` | `NULL` | `NULL` | blank cell | `float('nan')` |
+| `INF` in REAL | native `'infinity'::numeric` | `NULL` | `NULL` | `NULL` | blank cell | `float('inf')` |
+| `[NULL]` in TEXT | `NULL` | `NULL` | `NULL` | `NULL` | blank cell | `None` |
+| `0000-00-00` in DATE | `NULL` | `NULL` | `'0000-00-00'`* | text as-is | blank cell | `NaT` |
+| BIGINT > 15 digits | stored correctly | stored correctly | stored correctly | stored correctly | **string cell** | no change |
+| Date < 1900-01-01 | stored correctly | stored correctly | stored correctly | text as-is | **ISO text string** | no change |
+
+\* MySQL strict mode (`NO_ZERO_DATE`) maps `0000-00-00` → `NULL`.
+
+### Why blank cell and not `"NaN"` text in Excel?
+
+A text string `"NaN"` in a numeric column breaks Excel's `=SUM()` formula — it returns `#VALUE!`.
+A blank cell is the canonical Excel NULL: it is ignored by aggregate functions, just like SQL `NULL`.
+
+### Why BIGINT → string in Excel?
+
+Excel stores all numbers as IEEE-754 `float64`. Maximum precision: **15 significant digits**.
+`1234567890123456789` (19 digits) becomes `1234567890123456800` silently — data corruption without
+any error. Writing as a string cell preserves all digits exactly.
+
+### 1900 Leap-Year Bug
+
+Excel incorrectly treats 1900 as a leap year (inherited from Lotus 1-2-3 for compatibility).
+Serial number 60 = Feb 29, 1900, which does not exist. All dates after Feb 28, 1900 are offset
+by 1 from the real day count. TDTP compensates on import:
+
+```
+serial ≥ 61  →  date = Jan 1, 1900 + (serial − 2) days  ✓
+serial = 60  →  Feb 28, 1900  (phantom day mapped to real last day of Feb)
+serial ≤ 59  →  date = Jan 1, 1900 + (serial − 1) days  ✓
+```
+
+### Comparison with Other Frameworks
+
+| Framework | NULL vs `""` | NaN/Inf | BIGINT Excel | Pre-1900 date | Formula injection | Markers in file |
+|-----------|-------------|---------|-------------|---------------|------------------|----------------|
+| **TDTP** | ✅ `[NULL]` | ✅ blank | ✅ string | ✅ ISO text | ✅ `SetCellStr` | ✅ in XML schema |
+| Apache Spark | ✅ | ✅ in-memory | ✗ | ✗ | ✗ | ✗ |
+| pandas | ⚠️ | ✅ in-memory | ✗ | ✗ | ✗ | ✗ |
+| Airbyte | ⚠️ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Talend | ✅ | ⚠️ configurable | ✗ | ✗ | ✗ | ✗ |
+| dbt | ✅ SQL only | out of scope | out of scope | out of scope | out of scope | ✗ |
+
+**Key difference**: other frameworks solve these issues per-pipeline, manually, in each project.
+TDTP handles them at the adapter level, systematically — the ETL developer does not need to
+think about IEEE-754 edge cases or Excel quirks.
+
+Full adapter-specific details: [`docs/SPECIFICATION.md` — SpecialValues section](docs/SPECIFICATION.md).
 
 ---
 

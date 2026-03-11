@@ -173,7 +173,7 @@ func TestRowsToCompactData_Basic(t *testing.T) {
 		{"10", "Sales", "103", "Bob"},
 	}
 
-	data := RowsToCompactData(rows, schema)
+	data := RowsToCompactData(rows, schema, false)
 
 	if !data.Compact {
 		t.Error("Expected Compact=true")
@@ -220,7 +220,7 @@ func TestRowsToCompactData_GroupChange(t *testing.T) {
 		{"20", "202"},
 	}
 
-	data := RowsToCompactData(rows, schema)
+	data := RowsToCompactData(rows, schema, false)
 
 	parser := NewParser()
 
@@ -263,7 +263,7 @@ func TestRowsToCompactData_NoFixedFields(t *testing.T) {
 		{"2", "Bob"},
 	}
 
-	data := RowsToCompactData(rows, schema)
+	data := RowsToCompactData(rows, schema, false)
 
 	if data.Compact {
 		t.Error("Expected Compact=false when no fixed fields")
@@ -290,7 +290,7 @@ func TestCompactRoundTrip(t *testing.T) {
 	}
 
 	// Encode
-	compactData := RowsToCompactData(original, schema)
+	compactData := RowsToCompactData(original, schema, false)
 
 	// Build packet and expand
 	packet := &DataPacket{
@@ -386,6 +386,239 @@ func TestSpecialValues_XMLRoundTrip(t *testing.T) {
 	// Data compact attribute
 	if !packet.Data.Compact {
 		t.Error("Expected Data.Compact=true")
+	}
+}
+
+// ---- Tail: последняя строка как carry-снэпшот ----
+
+func TestRowsToCompactData_Tail_LastRowExplicit(t *testing.T) {
+	schema := Schema{
+		Fields: []Field{
+			{Name: "dept_id", Type: "INTEGER", Fixed: true},
+			{Name: "dept_name", Type: "TEXT", Fixed: true},
+			{Name: "emp_id", Type: "INTEGER"},
+		},
+	}
+	rows := [][]string{
+		{"10", "Sales", "101"},
+		{"10", "Sales", "102"},
+		{"10", "Sales", "103"},
+	}
+
+	data := RowsToCompactData(rows, schema, true)
+
+	if !data.Tail {
+		t.Error("Expected Tail=true")
+	}
+
+	parser := NewParser()
+
+	// Первая строка: fixed явно
+	row0 := parser.GetRowValues(data.Rows[0])
+	if row0[0] != "10" || row0[1] != "Sales" {
+		t.Errorf("Row 0 fixed fields wrong: %v", row0)
+	}
+
+	// Средняя строка: fixed пропущены
+	row1 := parser.GetRowValues(data.Rows[1])
+	if row1[0] != "" || row1[1] != "" {
+		t.Errorf("Row 1 fixed fields should be empty (carry), got %v", row1)
+	}
+
+	// Последняя строка: fixed явно (tail-снэпшот)
+	lastRow := parser.GetRowValues(data.Rows[2])
+	if lastRow[0] != "10" {
+		t.Errorf("Tail row field 0: expected '10', got %q", lastRow[0])
+	}
+	if lastRow[1] != "Sales" {
+		t.Errorf("Tail row field 1: expected 'Sales', got %q", lastRow[1])
+	}
+}
+
+func TestRowsToCompactData_Tail_GroupChangeInLastRow(t *testing.T) {
+	// Последняя строка — смена группы. Tail должен отработать корректно.
+	schema := Schema{
+		Fields: []Field{
+			{Name: "dept_id", Type: "INTEGER", Fixed: true},
+			{Name: "emp_id", Type: "INTEGER"},
+		},
+	}
+	rows := [][]string{
+		{"10", "101"},
+		{"10", "102"},
+		{"20", "201"}, // смена группы = последняя строка
+	}
+
+	data := RowsToCompactData(rows, schema, true)
+
+	parser := NewParser()
+	lastRow := parser.GetRowValues(data.Rows[2])
+	// Смена группы — значение и так писалось бы явно, tail не меняет результат
+	if lastRow[0] != "20" {
+		t.Errorf("Tail row (group change) field 0: expected '20', got %q", lastRow[0])
+	}
+}
+
+func TestExpandCompactRows_Tail_RoundTrip(t *testing.T) {
+	schema := Schema{
+		Fields: []Field{
+			{Name: "dept_id", Type: "INTEGER", Fixed: true},
+			{Name: "dept_name", Type: "TEXT", Fixed: true},
+			{Name: "emp_id", Type: "INTEGER"},
+			{Name: "emp_name", Type: "TEXT"},
+		},
+	}
+	original := [][]string{
+		{"10", "Sales", "101", "Ivan"},
+		{"10", "Sales", "102", "Anna"},
+		{"10", "Sales", "103", "Boris"},
+	}
+
+	compactData := RowsToCompactData(original, schema, true)
+	pkt := &DataPacket{Schema: schema, Data: compactData}
+
+	if err := ExpandCompactRows(pkt); err != nil {
+		t.Fatalf("ExpandCompactRows failed: %v", err)
+	}
+
+	if pkt.Data.Tail {
+		t.Error("Expected Tail=false after expand")
+	}
+
+	parser := NewParser()
+	for i, row := range pkt.Data.Rows {
+		got := parser.GetRowValues(row)
+		for j, v := range got {
+			if j < len(original[i]) && v != original[i][j] {
+				t.Errorf("row %d field %d: expected %q, got %q", i, j, original[i][j], v)
+			}
+		}
+	}
+}
+
+func TestExpandCompactRows_Tail_MissingFixedInTailRow(t *testing.T) {
+	// tail=true, но последняя строка не содержит fixed поле — ошибка
+	pkt := &DataPacket{
+		Schema: Schema{
+			Fields: []Field{
+				{Name: "dept_id", Type: "INTEGER", Fixed: true},
+				{Name: "emp_id", Type: "INTEGER"},
+			},
+		},
+		Data: Data{
+			Compact: true,
+			Tail:    true,
+			Rows: []Row{
+				{Value: "10|101"},
+				{Value: "|102"}, // last row: fixed пусто — нарушение инварианта
+			},
+		},
+	}
+
+	err := ExpandCompactRows(pkt)
+	if err == nil {
+		t.Fatal("Expected error for tail row with empty fixed field, got nil")
+	}
+	tailErr, ok := err.(*CompactTailError)
+	if !ok {
+		t.Fatalf("Expected *CompactTailError, got %T: %v", err, err)
+	}
+	if tailErr.FieldName != "dept_id" {
+		t.Errorf("Expected FieldName='dept_id', got %q", tailErr.FieldName)
+	}
+}
+
+// ---- Carry: независимое декодирование чанков ----
+
+func TestExpandCompactRows_Carry_InitializesState(t *testing.T) {
+	// Чанк 2: carry инициализирован из предыдущего пакета — первая строка не содержит fixed
+	pkt := &DataPacket{
+		Schema: Schema{
+			Fields: []Field{
+				{Name: "dept_id", Type: "INTEGER", Fixed: true},
+				{Name: "dept_name", Type: "TEXT", Fixed: true},
+				{Name: "emp_id", Type: "INTEGER"},
+			},
+		},
+		Data: Data{
+			Compact: true,
+			Carry:   "10|Sales|",
+			Rows: []Row{
+				{Value: "||104"},
+				{Value: "||105"},
+			},
+		},
+	}
+
+	if err := ExpandCompactRows(pkt); err != nil {
+		t.Fatalf("ExpandCompactRows failed: %v", err)
+	}
+
+	parser := NewParser()
+	for i, row := range pkt.Data.Rows {
+		vals := parser.GetRowValues(row)
+		if vals[0] != "10" {
+			t.Errorf("row %d: dept_id should be '10' (from carry), got %q", i, vals[0])
+		}
+		if vals[1] != "Sales" {
+			t.Errorf("row %d: dept_name should be 'Sales' (from carry), got %q", i, vals[1])
+		}
+	}
+
+	// Атрибут carry должен быть сброшен после expand
+	if pkt.Data.Carry != "" {
+		t.Error("Expected Carry='' after expand")
+	}
+}
+
+func TestExpandCompactRows_Carry_ChunkHandoff(t *testing.T) {
+	// Симуляция потокового стриминга: пакет 1 + пакет 2 независимы друг от друга.
+	// tail пакета 1 содержит carry-out, который передаётся в carry пакета 2.
+	schema := Schema{
+		Fields: []Field{
+			{Name: "region", Type: "TEXT", Fixed: true},
+			{Name: "id", Type: "INTEGER"},
+			{Name: "value", Type: "TEXT"},
+		},
+	}
+
+	// Пакет 1
+	rows1 := [][]string{
+		{"EU", "1", "alpha"},
+		{"EU", "2", "beta"},
+		{"EU", "3", "gamma"},
+	}
+	data1 := RowsToCompactData(rows1, schema, true)
+	pkt1 := &DataPacket{Schema: schema, Data: data1}
+
+	if err := ExpandCompactRows(pkt1); err != nil {
+		t.Fatalf("pkt1 expand failed: %v", err)
+	}
+
+	// Пакет 2: carry инициализирован tail-строкой пакета 1 (EU||)
+	// Симулируем что отправитель взял tail-строку и передал как carry
+	pkt2 := &DataPacket{
+		Schema: schema,
+		Data: Data{
+			Compact: true,
+			Carry:   "EU||",
+			Rows: []Row{
+				{Value: "||4|delta"}, // fixed пропущен — должен взяться из carry
+				{Value: "||5|epsilon"},
+			},
+		},
+	}
+
+	if err := ExpandCompactRows(pkt2); err != nil {
+		t.Fatalf("pkt2 expand failed: %v", err)
+	}
+
+	parser := NewParser()
+	for i, row := range pkt2.Data.Rows {
+		vals := parser.GetRowValues(row)
+		if vals[0] != "EU" {
+			t.Errorf("pkt2 row %d: region should be 'EU' from carry, got %q", i, vals[0])
+		}
 	}
 }
 

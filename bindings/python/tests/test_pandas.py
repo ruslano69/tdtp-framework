@@ -20,6 +20,7 @@ from conftest import (
     SAMPLE_FIELD_NAMES,
     SAMPLE_TOTAL_ROWS,
     SAMPLE_BALANCE_GT_1000_COUNT,
+    TESTDATA,
 )
 
 
@@ -445,3 +446,108 @@ class TestRoundTripNewTypes:
 
         parsed_1 = json.loads(raw["data"][1][meta_idx])
         assert parsed_1["tags"] == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# SpecialValues v1.3.1 — markers decoded correctly in data_to_pandas
+# ---------------------------------------------------------------------------
+
+class TestSpecialValues:
+    """data_to_pandas must handle v1.3.1 SpecialValues markers without crashing.
+
+    Test fixture: testdata/specials.tdtp.xml
+    Rows (id | label    | score | event_date):
+      1  | hello    | 3.14  | 2024-01-15
+      2  | [NULL]   | [NULL]| 2024-06-01
+      3  | world    | NaN   | 0000-00-00
+      4  | test     | INF   | 2025-12-31
+      5  | end      | -INF  | 0000-00-00
+    """
+
+    @pytest.fixture(scope="class")
+    def specials_path(self):
+        p = TESTDATA / "specials.tdtp.xml"
+        if not p.exists():
+            pytest.skip(f"Specials fixture not found: {p}")
+        return p
+
+    @pytest.fixture(scope="class")
+    def specials_data(self, j_client, specials_path):
+        return j_client.J_read(str(specials_path))
+
+    @pytest.fixture(scope="class")
+    def specials_df(self, specials_data):
+        return data_to_pandas(specials_data)
+
+    # --- schema inspection ---
+
+    def test_special_values_present_in_schema(self, specials_data):
+        """J_read exposes SpecialValues in the schema dict."""
+        fields = specials_data["schema"]["Fields"]
+        score_field = next(f for f in fields if f["Name"] == "score")
+        sv = score_field.get("SpecialValues")
+        assert sv is not None, "score field should have SpecialValues"
+        assert sv["Null"]["Marker"] == "[NULL]"
+        assert sv["NaN"]["Marker"] == "NaN"
+        assert sv["Infinity"]["Marker"] == "INF"
+        assert sv["NegInfinity"]["Marker"] == "-INF"
+
+    # --- no crash ---
+
+    def test_data_to_pandas_does_not_crash(self, specials_data):
+        """data_to_pandas must not raise on a file with all SpecialValues markers."""
+        df = data_to_pandas(specials_data)  # must not raise
+        assert len(df) == 5
+
+    # --- TEXT [NULL] ---
+
+    def test_null_marker_in_text_becomes_none(self, specials_df):
+        """[NULL] marker in TEXT column → NA (None or NaN, not the literal string "[NULL]")."""
+        val = specials_df.loc[specials_df["id"] == 2, "label"].values[0]
+        assert pd.isna(val), f"expected NA, got {val!r}"
+
+    def test_regular_text_unchanged(self, specials_df):
+        """Regular TEXT values are untouched."""
+        val = specials_df.loc[specials_df["id"] == 1, "label"].values[0]
+        assert val == "hello"
+
+    # --- REAL [NULL] / NaN ---
+
+    def test_null_marker_in_float_becomes_nan(self, specials_df):
+        """[NULL] in REAL column → NaN (not a literal string "[NULL]")."""
+        import math
+        val = specials_df.loc[specials_df["id"] == 2, "score"].values[0]
+        assert math.isnan(float(val)), f"expected NaN, got {val!r}"
+
+    def test_nan_marker_in_float_becomes_nan(self, specials_df):
+        """NaN marker in REAL column → float NaN."""
+        import math
+        val = specials_df.loc[specials_df["id"] == 3, "score"].values[0]
+        assert math.isnan(float(val)), f"expected NaN, got {val!r}"
+
+    # --- REAL INF / -INF ---
+
+    def test_inf_marker_in_float_becomes_inf(self, specials_df):
+        """INF marker in REAL column → float +inf (no ValueError crash)."""
+        import math
+        val = specials_df.loc[specials_df["id"] == 4, "score"].values[0]
+        assert math.isinf(float(val)) and float(val) > 0, f"expected +inf, got {val!r}"
+
+    def test_neg_inf_marker_in_float_becomes_neg_inf(self, specials_df):
+        """-INF marker in REAL column → float -inf."""
+        import math
+        val = specials_df.loc[specials_df["id"] == 5, "score"].values[0]
+        assert math.isinf(float(val)) and float(val) < 0, f"expected -inf, got {val!r}"
+
+    # --- DATE NoDate ---
+
+    def test_nodate_marker_in_date_becomes_none(self, specials_df):
+        """0000-00-00 marker in DATE column → NA (no crash, not literal "0000-00-00")."""
+        val = specials_df.loc[specials_df["id"] == 3, "event_date"].values[0]
+        assert pd.isna(val), f"expected NA, got {val!r}"
+
+    def test_regular_date_unchanged(self, specials_df):
+        """Regular date values are kept as strings (DATE dtype → object)."""
+        val = specials_df.loc[specials_df["id"] == 1, "event_date"].values[0]
+        assert val == "2024-01-15"
+

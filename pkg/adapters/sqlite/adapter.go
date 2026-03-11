@@ -58,7 +58,7 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	}
 
 	// Инициализируем base helpers
-	a.initHelpers()
+	a.initHelpers(cfg.NoDateSentinels)
 
 	return nil
 }
@@ -118,9 +118,12 @@ func (a *Adapter) DB() *sql.DB {
 }
 
 // initHelpers инициализирует базовые хелперы для устранения дублирования кода
-func (a *Adapter) initHelpers() {
+func (a *Adapter) initHelpers(noDateSentinels []string) {
 	// Создаем универсальный конвертер типов
 	a.converter = base.NewUniversalTypeConverter()
+	if len(noDateSentinels) > 0 {
+		a.converter.SetNoDateSentinels(noDateSentinels)
+	}
 
 	// Создаем export helper
 	// self реализует SchemaReader и DataReader интерфейсы

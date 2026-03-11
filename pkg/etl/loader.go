@@ -348,8 +348,9 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 
 	// Создаем адаптер для источника
 	adapter, err := adapters.New(timeoutCtx, adapters.Config{
-		Type: source.Type,
-		DSN:  source.DSN,
+		Type:            source.Type,
+		DSN:             source.DSN,
+		NoDateSentinels: source.NoDateSentinels,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)

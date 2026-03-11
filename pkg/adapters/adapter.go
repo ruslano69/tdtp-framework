@@ -53,6 +53,11 @@ type Config struct {
 	// Показывает предупреждения когда используются функции недоступные
 	// в текущем compatibility mode
 	WarnOnIncompatible bool
+
+	// NoDateSentinels — список дат-заглушек для "нет даты" (DB-specific conventions).
+	// При экспорте: если дата в поле совпадает с sentinel → кодируется как "0000-00-00" в TDTP.
+	// Пример для MSSQL: ["1900-01-01", "1753-01-01"]
+	NoDateSentinels []string
 }
 
 // SSLConfig - настройки SSL/TLS подключения
