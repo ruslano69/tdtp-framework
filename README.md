@@ -11,6 +11,7 @@
 - **Reliability** — stateless pattern, validation, pagination
 - **Security** — Zero Trust encryption, TLS, authentication, audit trail
 - **Simplicity** — clean API, intuitive structure
+- **Zero setup** — only a table name and connection credentials; no schema mapping, no code, no configuration files
 
 ---
 
@@ -616,6 +617,7 @@ tdtp-framework/
 
 **Real-world case:** 27 000 rows × 140 columns, enterprise database → **~1.4 sec**
 (3 780 000 fields, zstd compression on, same VPS hardware).
+No schema mapping. No code. No config files. Just a table name and connection credentials.
 
 **"XML is slow"** — the common objection evaporates when you look at the actual hot path.
 Each `<Row>` is a single line of key-value pairs. The entire data block is one zstd-compressed
