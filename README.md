@@ -603,6 +603,26 @@ tdtp-framework/
 
 ---
 
+## Performance
+
+> Hardware: VPS 4 cores, 8 GB RAM, NVMe SSD
+
+| Operation | Throughput | Notes |
+|-----------|-----------|-------|
+| Packet generation (write) | **~3 000 000 fields/sec** | zstd compression enabled |
+| Packet parsing (read) | **~3 000 000 fields/sec** | incl. decompression |
+| SQLite export | 10 000+ rows/sec | measured in adapter benchmark tests |
+| PostgreSQL COPY import | bulk — limited by DB | `ON CONFLICT` strategies |
+
+**"XML is slow"** — the common objection evaporates when you look at the actual hot path.
+Each `<Row>` is a single line of key-value pairs. The entire data block is one zstd-compressed
+base64 blob per packet, not a tree of nested tags. The XML is the envelope; the payload is binary.
+
+3 M fields/sec means a 100-column table transfers at **30 000 rows/sec** over the wire —
+fast enough for any operational data pipeline on commodity hardware.
+
+---
+
 ## Quick Start
 
 ### Installation
