@@ -174,6 +174,61 @@ func dGetSchema(pkt *C.D_Packet) packet.Schema {
 	return packet.Schema{Fields: fields}
 }
 
+// dDecodeSpecialValues translates v1.3.1 SpecialValues markers back to their
+// pre-1.3.1 raw forms before the data is copied into C structs.
+//
+// D_* callers receive opaque char* arrays and have no access to the SpecialValues
+// schema metadata, so markers must be resolved here:
+//   - Null.Marker      (e.g. "[NULL]")    → "" (D_* null convention: empty string)
+//   - Infinity.Marker  (e.g. "INF")       → "Infinity"
+//   - NegInf.Marker    (e.g. "-INF")      → "-Infinity"
+//   - NaN.Marker       (e.g. "NaN")       → "NaN"   (already canonical, kept for clarity)
+//   - NoDate.Marker    (e.g. "0000-00-00") → ""      (zero-date → null for D_* layer)
+//
+// If no field carries SpecialValues the original slice is returned unchanged.
+func dDecodeSpecialValues(rows [][]string, sch packet.Schema) [][]string {
+	// Fast path: skip if no field has SpecialValues
+	hasSV := false
+	for _, f := range sch.Fields {
+		if f.SpecialValues != nil {
+			hasSV = true
+			break
+		}
+	}
+	if !hasSV {
+		return rows
+	}
+
+	out := make([][]string, len(rows))
+	for i, row := range rows {
+		r := make([]string, len(row))
+		copy(r, row)
+		for j, v := range row {
+			if j >= len(sch.Fields) {
+				break
+			}
+			sv := sch.Fields[j].SpecialValues
+			if sv == nil {
+				continue
+			}
+			switch {
+			case sv.Null != nil && v == sv.Null.Marker:
+				r[j] = ""
+			case sv.Infinity != nil && v == sv.Infinity.Marker:
+				r[j] = "Infinity"
+			case sv.NegInfinity != nil && v == sv.NegInfinity.Marker:
+				r[j] = "-Infinity"
+			case sv.NaN != nil && v == sv.NaN.Marker:
+				r[j] = "NaN"
+			case sv.NoDate != nil && v == sv.NoDate.Marker:
+				r[j] = ""
+			}
+		}
+		out[i] = r
+	}
+	return out
+}
+
 // dFillHeader copies header metadata into an output D_Packet.
 func dFillHeader(out *C.D_Packet, pkt *packet.DataPacket) {
 	dWriteStr((*C.char)(unsafe.Pointer(&out.msg_type[0])), string(pkt.Header.Type), 32)
@@ -203,6 +258,7 @@ func D_ReadFile(path *C.char, out *C.D_Packet) C.int {
 	}
 
 	rows := pkt.GetRows()
+	rows = dDecodeSpecialValues(rows, pkt.Schema) // v1.3.1: translate markers to raw forms
 	dFillSchema(out, pkt.Schema)
 	dFillRows(out, rows)
 	dFillHeader(out, pkt)

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>specials</TableName>
+    <MessageID>REF-SPECIALS-001</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>5</RecordsInPart>
+    <Timestamp>2026-01-01T00:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="id" type="INTEGER" key="true"/>
+    <Field name="label" type="TEXT">
+      <SpecialValues><Null marker="[NULL]"/></SpecialValues>
+    </Field>
+    <Field name="score" type="REAL">
+      <SpecialValues>
+        <Null marker="[NULL]"/>
+        <NaN marker="NaN"/>
+        <Infinity marker="INF"/>
+        <NegInfinity marker="-INF"/>
+      </SpecialValues>
+    </Field>
+    <Field name="event_date" type="DATE">
+      <SpecialValues><NoDate marker="0000-00-00"/></SpecialValues>
+    </Field>
+  </Schema>
+  <Data>
+    <R>1|hello|3.14|2024-01-15</R>
+    <R>2|[NULL]|[NULL]|2024-06-01</R>
+    <R>3|world|NaN|0000-00-00</R>
+    <R>4|test|INF|2025-12-31</R>
+    <R>5|end|-INF|0000-00-00</R>
+  </Data>
+</DataPacket>

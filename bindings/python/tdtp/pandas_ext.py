@@ -211,6 +211,57 @@ def _field_type(f: dict) -> str:
     return f.get("Type", f.get("type", "TEXT"))
 
 
+def _field_special_values(f: dict) -> dict | None:
+    """Return SpecialValues dict from a schema field, or None.
+
+    Go JSON encodes struct field names in PascalCase (no json tags),
+    so the key is "SpecialValues".  Fallback to camelCase for safety.
+    """
+    return f.get("SpecialValues") or f.get("specialValues") or None
+
+
+def _apply_special_values(series: "_pd.Series", sv: dict) -> "_pd.Series":
+    """Replace v1.3.1 spec markers with Python-native values before dtype conversion.
+
+    Without this step, astype("float64") crashes on "INF"/"-INF"/"[NULL]",
+    and date columns crash on "0000-00-00".
+
+    Go serialises SpecialValues fields in PascalCase without json tags:
+    {"Null": {"Marker": "[NULL]"}, "Infinity": {"Marker": "INF"}, ...}
+    Both PascalCase and camelCase keys are tried for forward-compatibility.
+    """
+    def _marker(pascal_key: str) -> str | None:
+        node = sv.get(pascal_key) or sv.get(pascal_key[0].lower() + pascal_key[1:])
+        if not node:
+            return None
+        return node.get("Marker") or node.get("marker") or None
+
+    null_m = _marker("Null")
+    if null_m:
+        series = series.replace(null_m, None)
+
+    nan_m = _marker("NaN")
+    if nan_m:
+        # Leave as "NaN" string — pandas astype("float64") recognises it natively
+        pass  # already canonical
+
+    inf_m = _marker("Infinity")
+    if inf_m:
+        # pandas astype("float64") recognises "inf" but NOT "INF" (spec marker)
+        series = series.replace(inf_m, "inf")
+
+    neg_inf_m = _marker("NegInfinity")
+    if neg_inf_m:
+        series = series.replace(neg_inf_m, "-inf")
+
+    no_date_m = _marker("NoDate")
+    if no_date_m:
+        # Zero-date has no standard Python equivalent → None
+        series = series.replace(no_date_m, None)
+
+    return series
+
+
 # ---------------------------------------------------------------------------
 # Core public functions
 # ---------------------------------------------------------------------------
@@ -253,6 +304,13 @@ def data_to_pandas(data: dict) -> "pd.DataFrame":
     for field in fields:
         col   = _field_name(field)
         dtype = _tdtp_dtype(_field_type(field))
+
+        # v1.3.1: decode SpecialValues markers before dtype conversion.
+        # Prevents astype() crashes when FLOAT columns contain "INF"/"-INF"/"[NULL]"
+        # or DATE columns contain "0000-00-00".
+        sv = _field_special_values(field)
+        if sv:
+            df[col] = _apply_special_values(df[col], sv)
 
         if dtype == "object":
             # Replace empty strings with None for nullable text columns
