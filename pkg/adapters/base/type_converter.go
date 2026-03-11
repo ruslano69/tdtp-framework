@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -13,6 +14,11 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
+
+// NullSentinel — внутренний маркер DB NULL, сохраняющий информацию через pipeline конвертации.
+// Заменяется на SpecialValues.Null.Marker (или "") в DetectAndApply перед записью в TDTP.
+// Не попадает в финальный TDTP файл.
+const NullSentinel = "\x00"
 
 // UniversalTypeConverter - универсальный конвертер типов для всех адаптеров
 // Устраняет дублирование кода конвертации между адаптерами
@@ -30,6 +36,11 @@ func NewUniversalTypeConverter() *UniversalTypeConverter {
 // ConvertValueToTDTP конвертирует значение из БД в TDTP формат
 // Общая реализация (вместо 4 копий в адаптерах)
 func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value string) string {
+	// NullSentinel проходит без изменений — будет обработан DetectAndApply в генераторе
+	if value == NullSentinel {
+		return NullSentinel
+	}
+
 	// Создаем FieldDef для использования converter
 	fieldDef := schema.FieldDef{
 		Name:      field.Name,
@@ -78,7 +89,7 @@ func (c *UniversalTypeConverter) DBValueToString(value any, field packet.Field, 
 // PostgreSQL-специфичные типы: UUID, JSONB, INET, ARRAY, NUMERIC
 func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) string {
 	if val == nil {
-		return ""
+		return NullSentinel
 	}
 
 	switch v := val.(type) {
@@ -199,7 +210,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 // MS SQL-специфичные типы: UNIQUEIDENTIFIER, TIMESTAMP/ROWVERSION, NVARCHAR
 func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field) string {
 	if val == nil {
-		return ""
+		return NullSentinel
 	}
 
 	switch v := val.(type) {
@@ -271,7 +282,7 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 // Для SQLite, MySQL и других простых типов
 func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Field) string {
 	if val == nil {
-		return ""
+		return NullSentinel
 	}
 
 	switch v := val.(type) {
@@ -356,7 +367,16 @@ func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType st
 
 	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
 		if tv.FloatValue != nil {
-			return *tv.FloatValue
+			f := *tv.FloatValue
+			if math.IsInf(f, 0) || math.IsNaN(f) {
+				// PostgreSQL: pgx driver принимает IEEE 754 specials нативно
+				if dbType == "postgres" {
+					return f
+				}
+				// MSSQL/MySQL/SQLite: не поддерживают NaN/Infinity — заменяем на NULL
+				return nil
+			}
+			return f
 		}
 
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:

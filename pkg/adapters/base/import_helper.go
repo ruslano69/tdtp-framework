@@ -287,6 +287,24 @@ func ConvertRowToSQLValues(
 	for i, value := range rowValues {
 		field := pkgSchema.Fields[i]
 
+		// Декодируем маркеры SpecialValues (v1.3.1) перед разбором типа.
+		// Это гарантирует что SQL NULL восстанавливается корректно для всех типов,
+		// включая TEXT где "" — валидная пустая строка, а не NULL.
+		if sv := field.SpecialValues; sv != nil {
+			if sv.Null != nil && value == sv.Null.Marker {
+				args[i] = nil // принудительный SQL NULL
+				continue
+			}
+			// Числовые specials: приводим к strconv-совместимым значениям
+			if sv.Infinity != nil && value == sv.Infinity.Marker {
+				value = "+Inf"
+			} else if sv.NegInfinity != nil && value == sv.NegInfinity.Marker {
+				value = "-Inf"
+			} else if sv.NaN != nil && value == sv.NaN.Marker {
+				value = "NaN"
+			}
+		}
+
 		// Для ключевых полей (PRIMARY KEY) NULL не допускается
 		nullable := true
 		if field.Key {

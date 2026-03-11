@@ -77,6 +77,9 @@ func (g *Generator) SetCompressionLevel(level int) {
 func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]string) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
 
+	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
+	rows, schema = DetectAndApply(rows, schema)
+
 	// Разбиваем на части если нужно
 	partitions := g.partitionRows(rows, schema)
 
@@ -125,6 +128,10 @@ func (g *Generator) GenerateResponse(
 	sender, recipient string,
 ) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
+
+	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
+	rows, schema = DetectAndApply(rows, schema)
+
 	partitions := g.partitionRows(rows, schema)
 
 	messageIDBase := g.generateMessageID(TypeResponse)
