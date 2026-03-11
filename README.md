@@ -609,17 +609,20 @@ tdtp-framework/
 
 | Operation | Throughput | Notes |
 |-----------|-----------|-------|
-| Packet generation (write) | **~3 000 000 fields/sec** | zstd compression enabled |
-| Packet parsing (read) | **~3 000 000 fields/sec** | incl. decompression |
+| Packet generation (write) | **~2.7–3.0 M fields/sec** | zstd compression enabled |
+| Packet parsing (read) | **~2.7–3.0 M fields/sec** | incl. decompression |
 | SQLite export | 10 000+ rows/sec | measured in adapter benchmark tests |
 | PostgreSQL COPY import | bulk — limited by DB | `ON CONFLICT` strategies |
+
+**Real-world case:** 27 000 rows × 140 columns, enterprise database → **~1.4 sec**
+(3 780 000 fields, zstd compression on, same VPS hardware).
 
 **"XML is slow"** — the common objection evaporates when you look at the actual hot path.
 Each `<Row>` is a single line of key-value pairs. The entire data block is one zstd-compressed
 base64 blob per packet, not a tree of nested tags. The XML is the envelope; the payload is binary.
 
-3 M fields/sec means a 100-column table transfers at **30 000 rows/sec** over the wire —
-fast enough for any operational data pipeline on commodity hardware.
+2.7 M fields/sec on a 140-column table = **19 000+ rows/sec** on commodity hardware —
+fast enough for any operational data pipeline.
 
 ---
 
