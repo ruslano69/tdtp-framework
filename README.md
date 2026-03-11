@@ -922,12 +922,22 @@ Agent calls: tdtpcli --list
 → receives 3 804 table names
 → reads names, infers domain (portal, users, orders, logs, ...)
 → selects relevant tables by name semantics
+
 → calls: tdtpcli --export <table> --limit 100
 → receives self-describing XML: schema + data + types in one file
 → understands structure without any additional metadata queries
+
+→ calls: tdtpcli --export <table> --limit -100
+→ receives last 100 rows — the current pulse of the system
+→ infers: what events are happening now, what fields are active,
+  what values are realistic, whether the table is alive or archived
+
 → calls: tdtpcli --to-html <file> --open   ← human-in-the-loop review
 → builds export plan, runs full extracts
 ```
+
+`--limit -N` (tail mode) is the agent's stethoscope: the last N rows reveal current activity,
+recent transaction patterns, and live field distributions — without loading the full table.
 
 **Why this works for agents:**
 
