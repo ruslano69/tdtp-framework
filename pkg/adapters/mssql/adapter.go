@@ -97,6 +97,9 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 func (a *Adapter) initHelpers() {
 	// Initialize type converter
 	a.converter = base.NewUniversalTypeConverter()
+	if len(a.config.NoDateSentinels) > 0 {
+		a.converter.SetNoDateSentinels(a.config.NoDateSentinels)
+	}
 
 	// Initialize SQL adapter for MSSQL dialect
 	// Default schema is "dbo" for MS SQL Server

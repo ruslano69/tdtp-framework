@@ -58,6 +58,9 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 // initHelpers - единственное место где мы настраиваем поведение
 func (a *Adapter) initHelpers() {
 	a.converter = base.NewUniversalTypeConverter()
+	if len(a.config.NoDateSentinels) > 0 {
+		a.converter.SetNoDateSentinels(a.config.NoDateSentinels)
+	}
 
 	// ExportHelper делает всю работу экспорта
 	a.exportHelper = base.NewExportHelper(

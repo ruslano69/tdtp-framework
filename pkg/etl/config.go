@@ -48,14 +48,17 @@ type ResultLogConfig struct {
 
 // SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc)
 type SourceConfig struct {
-	Name             string `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
-	Type             string `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc
-	DSN              string `yaml:"dsn"`                // Data Source Name (строка подключения или путь к TDTP-файлу)
-	Query            string `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc)
-	Timeout          int    `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
-	MultiPart        bool   `yaml:"multi_part"`         // Только для type: tdtp — загружать все части набора автоматически
-	MercuryURL       string `yaml:"mercury_url"`        // Только для type: tdtp-enc — URL xZMercury (например "http://mercury:3000")
-	MercuryTimeoutMs int    `yaml:"mercury_timeout_ms"` // Только для type: tdtp-enc — таймаут обращения к xZMercury (по умолчанию 5000)
+	Name             string   `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
+	Type             string   `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc
+	DSN              string   `yaml:"dsn"`                // Data Source Name (строка подключения или путь к TDTP-файлу)
+	Query            string   `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc)
+	Timeout          int      `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
+	MultiPart        bool     `yaml:"multi_part"`         // Только для type: tdtp — загружать все части набора автоматически
+	MercuryURL       string   `yaml:"mercury_url"`        // Только для type: tdtp-enc — URL xZMercury (например "http://mercury:3000")
+	MercuryTimeoutMs int      `yaml:"mercury_timeout_ms"` // Только для type: tdtp-enc — таймаут обращения к xZMercury (по умолчанию 5000)
+	// NoDateSentinels — список дат-заглушек для "нет даты" (DB-specific conventions).
+	// Пример для MSSQL: ["1900-01-01", "1753-01-01"]
+	NoDateSentinels  []string `yaml:"no_date_sentinels"`
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных

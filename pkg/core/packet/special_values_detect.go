@@ -9,6 +9,7 @@ const (
 	SpecNaNMarker    = "NaN"
 	SpecInfMarker    = "INF"
 	SpecNegInfMarker = "-INF"
+	SpecNoDateMarker = "0000-00-00" // canonical "no date" / zero-date marker
 )
 
 // nullSentinel matches base.NullSentinel — both must stay "\x00".
@@ -36,15 +37,30 @@ func isFloatField(fieldType string) bool {
 	return false
 }
 
+// isDateField reports whether a field type can carry NoDate or date-Infinity.
+func isDateField(fieldType string) bool {
+	switch strings.ToUpper(fieldType) {
+	case "DATE", "DATETIME", "TIMESTAMP", "DATETIME2", "DATETIMEOFFSET", "SMALLDATETIME":
+		return true
+	}
+	return false
+}
+
 // DetectAndApply scans all rows, detects which SpecialValues actually appear per
 // field, updates Schema.Fields accordingly (only for fields where specials were found),
 // and re-encodes the affected cell values using canonical markers.
 //
-// Rules:
-//   - nullSentinel (DB NULL) in any column → SpecialValues.Null = "[NULL]"
-//   - "NaN" in float/decimal column         → SpecialValues.NaN = "NaN"
-//   - "Inf"/"+Inf"/"Infinity" in float col  → SpecialValues.Infinity = "INF"
-//   - "-Inf"/"-Infinity" in float col       → SpecialValues.NegInfinity = "-INF"
+// Rules for float/decimal columns:
+//   - nullSentinel (DB NULL)          → SpecialValues.Null    = "[NULL]"
+//   - "NaN"                           → SpecialValues.NaN     = "NaN"
+//   - "Inf"/"+Inf"/"Infinity"         → SpecialValues.Infinity = "INF"
+//   - "-Inf"/"-Infinity"              → SpecialValues.NegInfinity = "-INF"
+//
+// Rules for date/datetime/timestamp columns:
+//   - nullSentinel                    → SpecialValues.Null    = "[NULL]"
+//   - "0000-00-00"                    → SpecialValues.NoDate  = "0000-00-00"
+//   - "Infinity"/"+Inf" etc           → SpecialValues.Infinity = "INF"  (PostgreSQL date infinity)
+//   - "-Infinity"/"-Inf" etc         → SpecialValues.NegInfinity = "-INF"
 //
 // The returned rows and schema are safe to use for packet generation.
 // If no specials are found the function returns the inputs unchanged.
@@ -57,10 +73,11 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 
 	// Phase 1: detect which specials appear in each column.
 	type detected struct {
-		hasNull    bool
-		hasNaN     bool
-		hasInf     bool
-		hasNegInf  bool
+		hasNull   bool
+		hasNaN    bool
+		hasInf    bool
+		hasNegInf bool
+		hasNoDate bool
 	}
 	det := make([]detected, cols)
 
@@ -71,11 +88,20 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 				det[i].hasNull = true
 				continue
 			}
-			if isFloatField(sch.Fields[i].Type) {
+			fieldType := sch.Fields[i].Type
+			if isFloatField(fieldType) {
 				if v == "NaN" {
 					det[i].hasNaN = true
 				} else if rawInfinityForms[v] {
 					det[i].hasInf = true
+				} else if rawNegInfinityForms[v] {
+					det[i].hasNegInf = true
+				}
+			} else if isDateField(fieldType) {
+				if v == SpecNoDateMarker {
+					det[i].hasNoDate = true
+				} else if rawInfinityForms[v] {
+					det[i].hasInf = true // PostgreSQL date infinity
 				} else if rawNegInfinityForms[v] {
 					det[i].hasNegInf = true
 				}
@@ -86,7 +112,7 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 	// Check if anything was detected at all (fast path: nothing to do).
 	anyDetected := false
 	for _, d := range det {
-		if d.hasNull || d.hasNaN || d.hasInf || d.hasNegInf {
+		if d.hasNull || d.hasNaN || d.hasInf || d.hasNegInf || d.hasNoDate {
 			anyDetected = true
 			break
 		}
@@ -99,7 +125,7 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 	updatedFields := make([]Field, cols)
 	copy(updatedFields, sch.Fields)
 	for i, d := range det {
-		if !d.hasNull && !d.hasNaN && !d.hasInf && !d.hasNegInf {
+		if !d.hasNull && !d.hasNaN && !d.hasInf && !d.hasNegInf && !d.hasNoDate {
 			continue
 		}
 		sv := &SpecialValues{}
@@ -114,6 +140,9 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 		}
 		if d.hasNegInf {
 			sv.NegInfinity = &MarkerValue{Marker: SpecNegInfMarker}
+		}
+		if d.hasNoDate {
+			sv.NoDate = &MarkerValue{Marker: SpecNoDateMarker}
 		}
 		updatedFields[i].SpecialValues = sv
 	}
@@ -138,7 +167,7 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 				updatedRow[i] = SpecInfMarker
 			case d.hasNegInf && rawNegInfinityForms[v]:
 				updatedRow[i] = SpecNegInfMarker
-			// "NaN" is already the canonical marker — no rename needed
+			// "NaN" and "0000-00-00" are already canonical markers — no rename needed
 			}
 		}
 		updatedRows[j] = updatedRow

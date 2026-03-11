@@ -3,12 +3,23 @@ package base
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
+
+// isDateFieldType reports whether a TDTP field type can carry NoDate or date-Infinity.
+// Mirrors packet.isDateField — redeclared here to avoid a circular import.
+func isDateFieldType(t string) bool {
+	switch strings.ToUpper(t) {
+	case "DATE", "DATETIME", "TIMESTAMP", "DATETIME2", "DATETIMEOFFSET", "SMALLDATETIME":
+		return true
+	}
+	return false
+}
 
 // TableManager предоставляет методы для управления таблицами
 type TableManager interface {
@@ -294,6 +305,30 @@ func ConvertRowToSQLValues(
 			if sv.Null != nil && value == sv.Null.Marker {
 				args[i] = nil // принудительный SQL NULL
 				continue
+			}
+			// NoDate: "0000-00-00" → NULL (universal for all DBs)
+			if sv.NoDate != nil && value == sv.NoDate.Marker {
+				args[i] = nil
+				continue
+			}
+			// Date infinity (PostgreSQL uses string literals "infinity"/"-infinity")
+			if isDateFieldType(field.Type) {
+				if sv.Infinity != nil && value == sv.Infinity.Marker {
+					if dbType == "postgres" {
+						args[i] = "infinity" // pgx accepts string "infinity" for DATE/TIMESTAMP
+					} else {
+						args[i] = nil // other DBs don't support date infinity — use NULL
+					}
+					continue
+				}
+				if sv.NegInfinity != nil && value == sv.NegInfinity.Marker {
+					if dbType == "postgres" {
+						args[i] = "-infinity"
+					} else {
+						args[i] = nil
+					}
+					continue
+				}
 			}
 			// Числовые specials: приводим к strconv-совместимым значениям
 			if sv.Infinity != nil && value == sv.Infinity.Marker {
