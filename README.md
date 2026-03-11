@@ -615,9 +615,15 @@ tdtp-framework/
 | SQLite export | 10 000+ rows/sec | measured in adapter benchmark tests |
 | PostgreSQL COPY import | bulk — limited by DB | `ON CONFLICT` strategies |
 
-**Real-world case:** 27 000 rows × 140 columns, enterprise database → **~1.4 sec**
-(3 780 000 fields, zstd compression on, same VPS hardware).
-No schema mapping. No code. No config files. Just a table name and connection credentials.
+**Real-world cases (enterprise portal database, same VPS):**
+
+| Step | Command | Result |
+|------|---------|--------|
+| Discover | `tdtpcli --list` | **3 804 table names** — full catalog, instantly |
+| Plan | pick names from the list | no DBA, no schema docs needed |
+| Export | `tdtpcli --export <name>` | 27 000 rows × 140 cols → file in **~1.4 sec** |
+
+No schema mapping. No code. No config files. Just a connection string and a table name.
 
 **"XML is slow"** — the common objection evaporates when you look at the actual hot path.
 Each `<Row>` is a single line of key-value pairs. The entire data block is one zstd-compressed
