@@ -2,10 +2,32 @@ package main
 
 import "flag"
 
+// ListFlag is a custom flag that behaves like a bool when used without a value
+// (--list lists all tables) but also accepts an optional glob pattern
+// (--list "user*" filters tables by name).
+type ListFlag struct {
+	Pattern string // glob pattern; empty = show all
+	IsSet   bool
+}
+
+func (f *ListFlag) String() string { return f.Pattern }
+func (f *ListFlag) Set(s string) error {
+	f.IsSet = true
+	if s == "true" { // --list without value
+		f.Pattern = ""
+	} else {
+		f.Pattern = s
+	}
+	return nil
+}
+
+// IsBoolFlag makes the flag behave like a bool: --list works without a value.
+func (f *ListFlag) IsBoolFlag() bool { return true }
+
 // Flags holds all command-line flags
 type Flags struct {
 	// Commands
-	List         *bool
+	List         *ListFlag
 	ListViews    *bool
 	Export       *string
 	Import       *string
@@ -81,7 +103,9 @@ func ParseFlags() *Flags {
 	f := &Flags{}
 
 	// Commands
-	f.List = flag.Bool("list", false, "List all tables in database")
+	f.List = &ListFlag{}
+	flag.Var(f.List, "list", `List tables in database, optionally filtered by glob pattern (e.g. --list "user*", --list "order?")`)
+
 	f.ListViews = flag.Bool("list-views", false, "List all database views with updatable status")
 	f.Export = flag.String("export", "", "Export table to TDTP XML file (table name)")
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
