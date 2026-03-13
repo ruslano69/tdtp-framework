@@ -40,12 +40,12 @@ func routeCommand(
 
 	// Database commands
 	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
-	if *flags.List {
+	if flags.List.IsSet {
 		operation = audit.OpQuery
-		metadata = map[string]string{"command": "list"}
+		metadata = map[string]string{"command": "list", "pattern": flags.List.Pattern}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-tables", func() error {
-			return commands.ListTables(ctx, adapterConfig)
+			return commands.ListTables(ctx, adapterConfig, flags.List.Pattern)
 		})
 
 	} else if *flags.ListViews {
@@ -625,7 +625,7 @@ func splitCommaSeparated(s string) []string {
 
 // commandWasSpecified checks if any command was specified
 func commandWasSpecified(flags *Flags) bool {
-	return *flags.List ||
+	return flags.List.IsSet ||
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
