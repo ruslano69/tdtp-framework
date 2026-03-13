@@ -23,7 +23,7 @@ func PrintShortHelp() {
 	fmt.Println("COMMANDS:")
 	fmt.Println()
 	fmt.Println("  Database:")
-	fmt.Println("    --list [pattern]           List tables (optional glob, e.g. \"user*\", \"order?\")")
+	fmt.Println("    --list[=pattern]           List tables; filter by glob (e.g. --list=user*, --list=order?)")
 	fmt.Println("    --list-views               List all database views")
 	fmt.Println("    --export <table>           Export table to TDTP XML")
 	fmt.Println("    --import <file>            Import TDTP XML to database")
@@ -110,7 +110,7 @@ func PrintHelp() {
 	fmt.Println()
 
 	fmt.Println("  Database Operations:")
-	fmt.Println("    --list [pattern]           List tables, optionally filtered by glob (e.g. \"user*\")")
+	fmt.Println("    --list[=pattern]           List tables; filter by glob (e.g. --list=user*, --list=order?)")
 	fmt.Println("    --export <table>           Export table to TDTP XML file")
 	fmt.Println("    --import <file>            Import TDTP XML file to database")
 	fmt.Println()
@@ -223,9 +223,10 @@ func PrintHelp() {
 	fmt.Println("  # List all tables")
 	fmt.Println("  tdtpcli --list --config pg.yaml")
 	fmt.Println()
-	fmt.Println("  # List tables matching a pattern")
-	fmt.Println("  tdtpcli --list \"user*\" --config pg.yaml")
-	fmt.Println("  tdtpcli --list \"order?\" --config pg.yaml")
+	fmt.Println("  # List tables matching a pattern (use = to pass the pattern)")
+	fmt.Println("  tdtpcli --list=user* --config pg.yaml")
+	fmt.Println("  tdtpcli --list=order? --config pg.yaml")
+	fmt.Println("  tdtpcli --list=%log% --config pg.yaml")   // SQL-style % wildcard
 	fmt.Println()
 
 	fmt.Println("  # Export table to TDTP XML")
