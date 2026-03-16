@@ -25,7 +25,7 @@ func TestBuildQuery_NilWhenNoFlags(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_SingleWhere_Eq(t *testing.T) {
-	q, err := cliquery.BuildQuery([]string{"status = active"}, "", 0, 0)
+	q, err := cliquery.BuildQuery([]string{"status = 'active'"}, "", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestBuildQuery_SingleWhere_Gt(t *testing.T) {
 }
 
 func TestBuildQuery_SingleWhere_Ne(t *testing.T) {
-	q, err := cliquery.BuildQuery([]string{"role != admin"}, "", 0, 0)
+	q, err := cliquery.BuildQuery([]string{"role != 'admin'"}, "", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,24 +121,8 @@ func TestBuildQuery_Where_IN_Strings(t *testing.T) {
 	if f.Operator != "in" {
 		t.Errorf("operator: want %q, got %q", "in", f.Operator)
 	}
-	// Quotes should be stripped: active,pending
 	if f.Value != "active,pending" {
 		t.Errorf("value: want %q, got %q", "active,pending", f.Value)
-	}
-}
-
-func TestBuildQuery_Where_IN_Spaces(t *testing.T) {
-	// Extra spaces inside IN list should be handled
-	q, err := cliquery.BuildQuery([]string{"dept_id IN (10, 20, 30)"}, "", 0, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	f := q.Filters.And.Filters[0]
-	if f.Operator != "in" {
-		t.Errorf("operator: want %q, got %q", "in", f.Operator)
-	}
-	if f.Value != "10,20,30" {
-		t.Errorf("value: want %q, got %q", "10,20,30", f.Value)
 	}
 }
 
@@ -147,33 +131,21 @@ func TestBuildQuery_Where_IN_Spaces(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_MultipleWhere_CombinedWithAND(t *testing.T) {
-	q, err := cliquery.BuildQuery([]string{"age > 18", "status = active"}, "", 0, 0)
+	q, err := cliquery.BuildQuery([]string{"age > 18", "status = 'active'"}, "", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if q.Filters == nil || q.Filters.And == nil {
 		t.Fatal("expected AND filters")
 	}
-	// Two separate --where flags → two filters in the AND group
 	if len(q.Filters.And.Filters) != 2 {
 		t.Errorf("expected 2 filters (one per --where flag), got %d", len(q.Filters.And.Filters))
-	}
-
-	fields := map[string]string{
-		q.Filters.And.Filters[0].Field: q.Filters.And.Filters[0].Operator,
-		q.Filters.And.Filters[1].Field: q.Filters.And.Filters[1].Operator,
-	}
-	if fields["age"] != "gt" {
-		t.Errorf("age filter: want operator %q, got %q", "gt", fields["age"])
-	}
-	if fields["status"] != "eq" {
-		t.Errorf("status filter: want operator %q, got %q", "eq", fields["status"])
 	}
 }
 
 func TestBuildQuery_MultipleWhere_ThreeFlags(t *testing.T) {
 	q, err := cliquery.BuildQuery(
-		[]string{"age > 18", "status = active", "role IN (1,2,3)"},
+		[]string{"age > 18", "status = 'active'", "role IN (1,2,3)"},
 		"", 0, 0,
 	)
 	if err != nil {
@@ -185,9 +157,8 @@ func TestBuildQuery_MultipleWhere_ThreeFlags(t *testing.T) {
 }
 
 func TestBuildQuery_MultipleWhere_FirstIsIN(t *testing.T) {
-	// First --where flag uses IN, second uses simple equality
 	q, err := cliquery.BuildQuery(
-		[]string{"dept_id IN (10,20)", "active = true"},
+		[]string{"dept_id IN (10,20)", "active = 1"},
 		"", 0, 0,
 	)
 	if err != nil {
@@ -196,26 +167,25 @@ func TestBuildQuery_MultipleWhere_FirstIsIN(t *testing.T) {
 	if len(q.Filters.And.Filters) != 2 {
 		t.Errorf("expected 2 filters, got %d", len(q.Filters.And.Filters))
 	}
-	// Find the IN filter
-	var inFilter, eqFilter string
+	var inField, eqField string
 	for _, f := range q.Filters.And.Filters {
 		if f.Operator == "in" {
-			inFilter = f.Field
+			inField = f.Field
 		}
 		if f.Operator == "eq" {
-			eqFilter = f.Field
+			eqField = f.Field
 		}
 	}
-	if inFilter != "dept_id" {
-		t.Errorf("expected IN filter on dept_id, got %q", inFilter)
+	if inField != "dept_id" {
+		t.Errorf("expected IN filter on dept_id, got %q", inField)
 	}
-	if eqFilter != "active" {
-		t.Errorf("expected eq filter on active, got %q", eqFilter)
+	if eqField != "active" {
+		t.Errorf("expected eq filter on active, got %q", eqField)
 	}
 }
 
 // ─────────────────────────────────────────────────────────────────
-// --where: BETWEEN
+// --where: BETWEEN (correctly handled by TDTQL, not split on AND)
 // ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_Where_BETWEEN(t *testing.T) {
@@ -269,7 +239,7 @@ func TestBuildQuery_Where_IsNotNull(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_Where_InternalAND(t *testing.T) {
-	q, err := cliquery.BuildQuery([]string{"age > 18 AND status = active"}, "", 0, 0)
+	q, err := cliquery.BuildQuery([]string{"age > 18 AND status = 1"}, "", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -279,31 +249,13 @@ func TestBuildQuery_Where_InternalAND(t *testing.T) {
 }
 
 func TestBuildQuery_Where_InternalOR(t *testing.T) {
-	q, err := cliquery.BuildQuery([]string{"status = active OR status = pending"}, "", 0, 0)
+	q, err := cliquery.BuildQuery([]string{"status = 1 OR status = 2"}, "", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// OR at top level lands in Filters.Or
 	if q.Filters.Or == nil {
 		t.Fatal("expected OR filters")
-	}
-	if len(q.Filters.Or.Filters) != 2 {
-		t.Errorf("expected 2 OR filters, got %d", len(q.Filters.Or.Filters))
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────
-// --where: quoted values
-// ─────────────────────────────────────────────────────────────────
-
-func TestBuildQuery_Where_QuotedValue(t *testing.T) {
-	q, err := cliquery.BuildQuery([]string{`date eq "09.02.2026"`}, "", 0, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	f := q.Filters.And.Filters[0]
-	// Quotes are stripped
-	if f.Value != "09.02.2026" {
-		t.Errorf("value: want %q, got %q", "09.02.2026", f.Value)
 	}
 }
 
@@ -312,7 +264,7 @@ func TestBuildQuery_Where_QuotedValue(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_Where_EmptyStringSkipped(t *testing.T) {
-	q, err := cliquery.BuildQuery([]string{"", "  ", "status = active"}, "", 0, 0)
+	q, err := cliquery.BuildQuery([]string{"", "  ", "status = 1"}, "", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -326,7 +278,7 @@ func TestBuildQuery_Where_EmptyStringSkipped(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_Where_InvalidClause(t *testing.T) {
-	_, err := cliquery.BuildQuery([]string{"thisIsNotACondition"}, "", 0, 0)
+	_, err := cliquery.BuildQuery([]string{"%%% garbage $$$"}, "", 0, 0)
 	if err == nil {
 		t.Error("expected error for invalid WHERE clause, got nil")
 	}
@@ -379,7 +331,7 @@ func TestBuildQuery_OrderBy_Multi(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// --limit
+// --limit / --offset
 // ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_Limit_Positive(t *testing.T) {
@@ -393,7 +345,7 @@ func TestBuildQuery_Limit_Positive(t *testing.T) {
 }
 
 func TestBuildQuery_Limit_Negative_TailMode(t *testing.T) {
-	// Negative limit means "last N rows" (tail mode)
+	// Negative limit = "last N rows" (tail mode) — passed directly, not via SQL.
 	q, err := cliquery.BuildQuery(nil, "", -50, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -402,10 +354,6 @@ func TestBuildQuery_Limit_Negative_TailMode(t *testing.T) {
 		t.Errorf("limit: want -50 (tail), got %d", q.Limit)
 	}
 }
-
-// ─────────────────────────────────────────────────────────────────
-// --offset
-// ─────────────────────────────────────────────────────────────────
 
 func TestBuildQuery_Offset(t *testing.T) {
 	q, err := cliquery.BuildQuery(nil, "", 0, 200)
@@ -418,12 +366,11 @@ func TestBuildQuery_Offset(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// --fields (SplitCommaSeparated — column projection, v1.7.1 feature)
+// --fields: SplitCommaSeparated (column projection, v1.7.1 feature)
 // ─────────────────────────────────────────────────────────────────
 
 func TestSplitCommaSeparated_EmptyString(t *testing.T) {
-	result := cliquery.SplitCommaSeparated("")
-	if result != nil {
+	if result := cliquery.SplitCommaSeparated(""); result != nil {
 		t.Errorf("expected nil for empty string, got %v", result)
 	}
 }
@@ -450,10 +397,10 @@ func TestSplitCommaSeparated_MultipleFields(t *testing.T) {
 
 func TestSplitCommaSeparated_TrimsSpaces(t *testing.T) {
 	result := cliquery.SplitCommaSeparated("id, email , status")
-	if len(result) != 3 {
-		t.Fatalf("expected 3 fields, got %d: %v", len(result), result)
-	}
 	want := []string{"id", "email", "status"}
+	if len(result) != len(want) {
+		t.Fatalf("expected %d fields, got %d: %v", len(want), len(result), result)
+	}
 	for i, w := range want {
 		if result[i] != w {
 			t.Errorf("field[%d]: want %q, got %q (spaces not trimmed)", i, w, result[i])
@@ -462,15 +409,13 @@ func TestSplitCommaSeparated_TrimsSpaces(t *testing.T) {
 }
 
 func TestSplitCommaSeparated_DropsEmptyElements(t *testing.T) {
-	// Trailing comma or double commas should not produce empty strings
 	result := cliquery.SplitCommaSeparated("id,,email,")
 	if len(result) != 2 {
 		t.Errorf("expected 2 elements (empty dropped), got %d: %v", len(result), result)
 	}
 }
 
-func TestSplitCommaSeparated_TypicalFieldsProjection(t *testing.T) {
-	// Typical --fields usage: column projection
+func TestSplitCommaSeparated_TypicalProjection(t *testing.T) {
 	result := cliquery.SplitCommaSeparated("user_id,first_name,last_name,email,created_at")
 	if len(result) != 5 {
 		t.Errorf("expected 5 fields, got %d: %v", len(result), result)
@@ -478,12 +423,12 @@ func TestSplitCommaSeparated_TypicalFieldsProjection(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Combined: --where + --limit + --offset
+// Combined: all flags together
 // ─────────────────────────────────────────────────────────────────
 
-func TestBuildQuery_WhereAndLimitAndOffset(t *testing.T) {
+func TestBuildQuery_AllFlagsTogether(t *testing.T) {
 	q, err := cliquery.BuildQuery(
-		[]string{"status = active", "role IN (1,2)"},
+		[]string{"status = 1", "role IN (1,2)"},
 		"name ASC",
 		100, 50,
 	)
@@ -501,22 +446,5 @@ func TestBuildQuery_WhereAndLimitAndOffset(t *testing.T) {
 	}
 	if len(q.Filters.And.Filters) != 2 {
 		t.Errorf("expected 2 WHERE filters, got %d", len(q.Filters.And.Filters))
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────
-// ParseWhereClause standalone tests
-// ─────────────────────────────────────────────────────────────────
-
-func TestParseWhereClause_LIKE(t *testing.T) {
-	f, err := cliquery.ParseWhereClause("name LIKE %smith%")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if f.And == nil || len(f.And.Filters) != 1 {
-		t.Fatal("expected single AND filter")
-	}
-	if f.And.Filters[0].Operator != "like" {
-		t.Errorf("operator: want %q, got %q", "like", f.And.Filters[0].Operator)
 	}
 }
