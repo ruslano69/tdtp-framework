@@ -14,7 +14,7 @@
 
 ---
 
-## What's Implemented (v1.6.0)
+## What's Implemented (v1.7.1-beta)
 
 ### Core Modules
 
@@ -889,7 +889,11 @@ go test -v ./pkg/core/packet/
   - Python/pandas binding: markers applied before `astype()` to prevent `ValueError` crashes
   - XLSX adapter: full trap matrix for all 5 markers (see XLSX Converter section)
 
-### v1.6.0 (current)
+### v1.7.1-beta (current)
+- `--where` conditions for SQL filtering on export (repeatable flag, `IN (...)` support)
+- RDP/RDPTCLI protocol improvements and stability fixes
+
+### v1.6.0
 - HTML Viewer (`--to-html`, `--open`, `--row`)
 - Diff & Merge (`--diff`, `--merge`, `--merge-strategy`, `--show-conflicts`)
 - Extended XLSX commands (`--from-xlsx`, `--export-xlsx`, `--import-xlsx`)
@@ -1006,4 +1010,4 @@ MIT
 
 ---
 
-*Version: v1.6.0 | Last updated: 10.03.2026*
+*Version: v1.7.1-beta | Last updated: 16.03.2026*
