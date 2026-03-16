@@ -45,6 +45,7 @@ type Flags struct {
 	ProcessRequest *string // Process incoming TDTP request file and generate response
 	Diff           *string // First file for diff (second as positional arg)
 	Merge          *string // Comma-separated list of files to merge
+	Inspect        *string // Print YAML metadata summary of a TDTP file
 	Listen         *bool   // [BETA] Stream consumer daemon mode (Kafka only)
 
 	// TDTQL Filters
@@ -133,6 +134,7 @@ func ParseFlags() *Flags {
 	f.ProcessRequest = flag.String("process-request", "", "Process TDTP request file and generate response (file path)")
 	f.Diff = flag.String("diff", "", "Compare two TDTP files: --diff file1.xml file2.xml")
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
+	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
 	f.Listen = flag.Bool("listen", false, "[BETA] Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
 
 	// TDTQL Filters

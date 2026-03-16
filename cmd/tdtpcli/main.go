@@ -419,6 +419,9 @@ func routeCommand(
 			})
 		})
 
+	// Inspect command — no DB connection required, runs directly
+	} else if *flags.Inspect != "" {
+		return commands.InspectFile(*flags.Inspect)
 		// [BETA] Streaming consumer daemon — Kafka only
 	} else if *flags.Listen {
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
@@ -642,6 +645,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ProcessRequest != "" ||
 		*flags.Diff != "" ||
 		*flags.Merge != "" ||
+		*flags.Inspect != ""
 		*flags.Listen
 }
 
