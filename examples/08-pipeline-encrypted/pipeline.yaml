@@ -1,0 +1,61 @@
+# ETL pipeline: TDTP → SQLite workspace → AES-256-GCM → TDTP
+#
+# Демо интеграции ETL-пайплайна с xzmercury.
+# mercury_url проставляется main.go динамически (embedded mock-сервер).
+#
+# Запуск:
+#   go run ./examples/08-pipeline-encrypted/   (из корня репозитория)
+
+name: "dept-salary-encrypted"
+version: "1.0"
+description: "Зарплатный отчёт по отделам — шифрование AES-256-GCM через xzmercury"
+
+# Источники — TDTP-файлы из examples/encryption-test (без внешних БД)
+sources:
+  - name: employees
+    type: tdtp
+    dsn: "examples/encryption-test/employees.tdtp.xml"
+
+  - name: departments
+    type: tdtp
+    dsn: "examples/encryption-test/departments.tdtp.xml"
+
+# SQLite in-memory workspace
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+# Трансформация: JOIN + агрегация по отделам
+transform:
+  result_table: "dept_report"
+  sql: |
+    SELECT
+      d.department_name,
+      COUNT(e.employee_id)    AS headcount,
+      ROUND(AVG(e.salary), 2) AS avg_salary,
+      SUM(e.salary)           AS total_salary,
+      MIN(e.salary)           AS min_salary,
+      MAX(e.salary)           AS max_salary
+    FROM employees e
+    JOIN departments d ON e.department_id = d.department_id
+    WHERE e.is_active = 1
+    GROUP BY d.department_id, d.department_name
+    ORDER BY total_salary DESC
+
+# Зашифрованный TDTP-файл
+output:
+  type: tdtp
+  tdtp:
+    destination: "/tmp/dept_report_encrypted.tdtp"
+    format: "xml"
+    compression: false
+    encryption: true   # AES-256-GCM через xzmercury
+
+# URL подставляется main.go перед запуском tdtpcli
+security:
+  mercury_url: "__MERCURY_URL__"
+  key_ttl_seconds: 3600
+  mercury_timeout_ms: 5000
+
+error_handling:
+  on_source_error: "fail"

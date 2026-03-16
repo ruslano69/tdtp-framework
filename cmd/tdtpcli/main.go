@@ -56,6 +56,28 @@ func routeCommand(
 			return commands.ListViews(ctx, adapterConfig)
 		})
 
+	} else if *flags.ToCompact != "" {
+		operation = audit.OpTransform
+		outputCompact := determineOutputFile(*flags.Output, *flags.ToCompact, "xml")
+		// Don't rename if output equals input (in-place overwrite)
+		if *flags.Output == "" {
+			outputCompact = *flags.ToCompact
+		}
+		metadata = map[string]string{
+			"command": "to-compact",
+			"input":   *flags.ToCompact,
+			"output":  outputCompact,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "to-compact", func() error {
+			return commands.ConvertToCompact(commands.ConvertCompactOptions{
+				InputFile:   *flags.ToCompact,
+				OutputFile:  outputCompact,
+				FixedFields: splitCommaSeparated(*flags.FixedFields),
+				Tail:        *flags.CompactTail,
+			})
+		})
+
 	} else if *flags.Export != "" {
 		// Merge compression settings: flag takes precedence, then config
 		compress := *flags.Compress || config.Export.Compress
@@ -81,6 +103,9 @@ func routeCommand(
 				CompressLevel:  compressLevel,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
+				Compact:        *flags.Compact,
+				FixedFields:    splitCommaSeparated(*flags.FixedFields),
+				CompactTail:    *flags.CompactTail,
 			})
 		})
 
@@ -300,8 +325,21 @@ func routeCommand(
 			"mode":    modeLabel,
 		}
 
+		// Читаем --enc-dev флаг через flag.Lookup (флаг зарегистрирован только в !production сборках;
+		// в production Lookup вернёт nil → encDev остаётся false).
+		encDev := false
+		if f := flag.Lookup("enc-dev"); f != nil {
+			encDev = f.Value.String() == "true"
+		}
+
+		pipelineOpts := commands.PipelineOptions{
+			Unsafe:  *flags.Unsafe,
+			Encrypt: *flags.Encrypt,
+			EncDev:  encDev,
+		}
+
 		err = prodFeatures.ExecuteWithResilience(ctx, "etl-pipeline", func() error {
-			return commands.ExecutePipeline(ctx, *flags.Pipeline, *flags.Unsafe)
+			return commands.ExecutePipeline(ctx, *flags.Pipeline, pipelineOpts)
 		})
 
 		// Process Request command
@@ -384,6 +422,28 @@ func routeCommand(
 	// Inspect command — no DB connection required, runs directly
 	} else if *flags.Inspect != "" {
 		return commands.InspectFile(*flags.Inspect)
+		// [BETA] Streaming consumer daemon — Kafka only
+	} else if *flags.Listen {
+		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
+		if stratErr != nil {
+			return stratErr
+		}
+
+		brokerCfg := buildBrokerConfig(config)
+
+		operation = audit.OpImport
+		metadata = map[string]string{
+			"command":  "listen",
+			"broker":   brokerCfg.Type,
+			"topic":    brokerCfg.Queue,
+			"strategy": *flags.Strategy,
+		}
+
+		// Listen runs until SIGTERM — bypass resilience wrapper (it's an infinite loop)
+		err = commands.ListenKafkaStream(ctx, adapterConfig, commands.ListenConfig{
+			BrokerCfg: &brokerCfg,
+			Strategy:  strategy,
+		})
 	}
 
 	// Log operation result with metadata
@@ -435,6 +495,12 @@ func main() {
 	if *flags.CreateConfigMySQL {
 		createConfigTemplate("mysql")
 		return
+	}
+
+	// If no command was specified, show help before attempting to load config
+	if !commandWasSpecified(flags) {
+		PrintHelp()
+		os.Exit(1)
 	}
 
 	// Load configuration
@@ -494,15 +560,6 @@ func main() {
 	// Handle errors
 	if cmdErr != nil {
 		fatal("Command failed: %v", cmdErr)
-	}
-
-	// If no command was specified, show help
-	if !commandWasSpecified(flags) {
-		PrintHelp()
-		if err := prodFeatures.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close production features: %v\n", err)
-		}
-		os.Exit(1)
 	}
 
 	// Close production features before normal exit
@@ -575,6 +632,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
+		*flags.ToCompact != "" ||
 		*flags.ToHTML != "" ||
 		*flags.ToXLSX != "" ||
 		*flags.FromXLSX != "" ||
@@ -588,6 +646,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Diff != "" ||
 		*flags.Merge != "" ||
 		*flags.Inspect != ""
+		*flags.Listen
 }
 
 // fatal prints error and exits

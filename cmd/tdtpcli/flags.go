@@ -46,6 +46,7 @@ type Flags struct {
 	Diff           *string // First file for diff (second as positional arg)
 	Merge          *string // Comma-separated list of files to merge
 	Inspect        *string // Print YAML metadata summary of a TDTP file
+	Listen         *bool   // [BETA] Stream consumer daemon mode (Kafka only)
 
 	// TDTQL Filters
 	Where   *string
@@ -66,6 +67,15 @@ type Flags struct {
 	Compress      *bool
 	CompressLevel *int
 	Hash          *bool // Add XXH3 checksum for data integrity verification
+
+	// Compact format (v1.3.1)
+	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
+	FixedFields *string // Comma-separated fixed field names for compact export
+	ToCompact   *string // Convert existing TDTP file to compact v1.3.1 format
+	CompactTail *bool   // Write tail row with all fixed fields explicit (stream validation / carry handoff)
+
+	// Encryption (xZMercury UUID-binding флоу)
+	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
 
 	// Incremental Sync
 	TrackingField  *string
@@ -125,6 +135,7 @@ func ParseFlags() *Flags {
 	f.Diff = flag.String("diff", "", "Compare two TDTP files: --diff file1.xml file2.xml")
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
 	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
+	f.Listen = flag.Bool("listen", false, "[BETA] Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
 
 	// TDTQL Filters
 	f.Where = flag.String("where", "", "TDTQL WHERE clause (e.g., 'age > 18 AND status = active')")
@@ -145,6 +156,15 @@ func ParseFlags() *Flags {
 	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1 (fastest) - 19 (best)")
 	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
+
+	// Compact format (v1.3.1)
+	f.Compact = flag.Bool("compact", false, "Enable TDTP v1.3.1 compact format on export (fixed fields written once per group)")
+	f.FixedFields = flag.String("fixed-fields", "", "Fixed fields for compact format: comma-separated names or '_' to auto-detect from _prefix columns")
+	f.ToCompact = flag.String("to-compact", "", "Convert existing TDTP v1.x file to compact v1.3.1 format (input file path)")
+	f.CompactTail = flag.Bool("compact-tail", false, "Write tail row with all fixed fields explicit for stream validation and carry-state handoff")
+
+	// Encryption
+	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")
 
 	// Incremental Sync Options
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")

@@ -2,8 +2,8 @@
 
 **tdtpcli** - утилита командной строки для работы с TDTP (Table Data Transfer Protocol).
 
-**Версия:** 1.2
-**Дата:** 16.11.2025
+**Версия:** 1.7.0
+**Дата:** 10.03.2026
 
 ---
 
@@ -13,10 +13,13 @@
 2. [Быстрый старт](#быстрый-старт)
 3. [Конфигурация](#конфигурация)
 4. [Команды](#команды)
-5. [Фильтрация данных (TDTQL)](#фильтрация-данных-tdtql)
-6. [Работа с Message Brokers](#работа-с-message-brokers)
-7. [Примеры использования](#примеры-использования)
-8. [Устранение неполадок](#устранение-неполадок)
+5. [Compact Format (v1.3.1)](#compact-format-v131)
+6. [ETL Pipeline](#etl-pipeline)
+7. [Шифрование AES-256-GCM](#шифрование-aes-256-gcm)
+8. [Фильтрация данных (TDTQL)](#фильтрация-данных-tdtql)
+9. [Работа с Message Brokers](#работа-с-message-brokers)
+10. [Примеры использования](#примеры-использования)
+11. [Устранение неполадок](#устранение-неполадок)
 
 ---
 
@@ -241,11 +244,14 @@ tdtpcli -config <config.yaml> --list
 **Синтаксис:**
 ```bash
 tdtpcli -config <config.yaml> --export <table> [--output <file>]
+         [--compact [--fixed-fields <поля>]]
 ```
 
 **Параметры:**
-- `<table>` - имя таблицы (обязательно)
+- `<table>` - имя таблицы или VIEW (обязательно)
 - `--output <file>` - выходной файл (опционально, по умолчанию stdout)
+- `--compact` - включить compact-формат TDTP v1.3.1 (carry-forward для fixed-полей)
+- `--fixed-fields <поля>` - список fixed-полей через запятую (используется совместно с `--compact`); если не задан, fixed-поля определяются автоматически по `_prefix` или данным
 
 **Примеры:**
 
@@ -265,6 +271,18 @@ tdtpcli -config <config.yaml> --export <table> [--output <file>]
 # Создаст файл: users.tdtp.xml
 ```
 
+Compact-экспорт VIEW с `_prefix`-колонками (auto-detect):
+```bash
+./tdtpcli -config config.yaml --export dept_employees_report \
+  --compact --output report_compact.tdtp.xml
+```
+
+Compact-экспорт с явным указанием fixed-полей:
+```bash
+./tdtpcli -config config.yaml --export employees \
+  --compact --fixed-fields dept_id --output emp_compact.tdtp.xml
+```
+
 ---
 
 ### --import
@@ -273,11 +291,13 @@ tdtpcli -config <config.yaml> --export <table> [--output <file>]
 
 **Синтаксис:**
 ```bash
-tdtpcli -config <config.yaml> --import <file>
+tdtpcli -config <config.yaml> --import <file> [--table <name>] [--strategy <strategy>]
 ```
 
 **Параметры:**
 - `<file>` - путь к TDTP файлу (обязательно)
+- `--table <name>` - имя целевой таблицы (опционально, по умолчанию из пакета)
+- `--strategy <strategy>` - стратегия импорта: `replace` | `copy` (опционально)
 
 **Пример:**
 ```bash
@@ -294,14 +314,21 @@ tdtpcli -config <config.yaml> --import <file>
 ✅ Imported 100 rows into table 'users'
 ```
 
+**Compact-формат (v1.3.1):**
+
+При импорте файла с атрибутом `compact="true"` carry-forward раскрывается **автоматически** — все строки восстанавливаются до полных значений до записи в БД. Дополнительных флагов не требуется.
+
+```bash
+# Compact-файл импортируется так же, как обычный
+./tdtpcli -config config.yaml --import dept_report_compact.tdtp.xml --table dept_emp_imported --strategy replace
+```
+
 **Стратегии импорта:**
 
 По умолчанию используется стратегия на основе типа пакета:
 - **reference** → REPLACE (полная замена через temp table)
 - **delta** → COPY (вставка новых записей)
 - **response** → REPLACE
-
-Поведение можно изменить в коде, модифицировав `cmd/tdtpcli/main.go`.
 
 ---
 
@@ -539,6 +566,270 @@ Key 55: used_new
 - Все файлы должны относиться к одной таблице
 - Схема (список полей) должна совпадать
 - Для дедупликации требуются ключевые поля (или primary key в схеме)
+
+---
+
+### --to-compact
+
+Конвертировать существующий TDTP v1.x файл в compact-формат v1.3.1.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-compact <input-file> [--output <output-file>] --fixed-fields <поля> [-config <config.yaml>]
+```
+
+**Параметры:**
+- `<input-file>` - исходный TDTP файл (v1.0 или v1.3.x, обязательно)
+- `--output <file>` - выходной файл (опционально; если не задан — файл перезаписывается на месте)
+- `--fixed-fields <поля>` - список fixed-полей через запятую (если не задан — auto-detect по `_prefix` или данным)
+- `-config <config.yaml>` - конфигурационный файл (опционально, нужен только при подключении к БД)
+
+**Приоритет определения fixed-полей:**
+1. Явный `--fixed-fields f1,f2` — используются указанные поля
+2. `_prefix` — поля с именем, начинающимся на `_`, становятся fixed (имя `_dept_id` → `dept_id`)
+3. Анализ данных — поля с одинаковым значением по всем строкам помечаются как fixed
+
+**Примеры:**
+
+Конвертация с явным указанием fixed-полей:
+```bash
+./tdtpcli --to-compact employees_plain.tdtp.xml \
+  --output employees_compact.tdtp.xml \
+  --fixed-fields dept_id
+```
+
+Auto-detect по данным (VIEW с `_prefix`):
+```bash
+./tdtpcli --to-compact dept_report.tdtp.xml --output dept_report_compact.tdtp.xml
+```
+
+Конвертация на месте (overwrite):
+```bash
+./tdtpcli --to-compact report.tdtp.xml --fixed-fields dept_id,region
+```
+
+**Примечания:**
+- Версия пакета устанавливается в `1.3.1`, добавляется атрибут `compact="true"` в `<Data>`
+- Fixed-поля в `<Schema>` получают атрибут `fixed="true"`
+- Строки кодируются carry-forward: в каждой группе только первая строка содержит значения fixed-полей, остальные — пустые (`||`)
+- Совместим с `--compress`: можно скомбинировать compact + zstd-сжатие
+
+---
+
+## Compact Format (v1.3.1)
+
+TDTP v1.3.1 вводит **compact-формат** для эффективного хранения данных с повторяющимися значениями в группах строк.
+
+### Принцип работы
+
+Поля, помеченные как `fixed="true"` в схеме, записываются только один раз на группу строк (при первом появлении). Остальные строки группы содержат пустые значения на месте fixed-полей — это **carry-forward** (перенос значения вперёд).
+
+**Пример compact-файла:**
+```xml
+<DataPacket version="1.3.1" ...>
+  <Schema>
+    <Field name="dept_id"   type="INTEGER" fixed="true"/>
+    <Field name="dept_name" type="TEXT"    fixed="true"/>
+    <Field name="emp_id"    type="INTEGER"/>
+    <Field name="full_name" type="TEXT"/>
+  </Schema>
+  <Data compact="true">
+    <R>10|Sales|101|Ivan Petrov</R>     <!-- dept 10: header row -->
+    <R>|||102|Anna Sidorova</R>          <!-- dept 10: carry-forward -->
+    <R>|||103|Boris Kozlov</R>           <!-- dept 10: carry-forward -->
+    <R>20|Engineering|201|Alice Volkov</R> <!-- dept 20: новая группа -->
+    <R>|||202|Charlie Morozov</R>        <!-- dept 20: carry-forward -->
+  </Data>
+</DataPacket>
+```
+
+### Соглашение `_prefix`
+
+При экспорте VIEW, где колонки с групповыми данными имеют имя с `_` в начале, `--compact` автоматически:
+- Определяет эти поля как fixed
+- Удаляет `_` из имени в Schema (`_dept_id` → `dept_id`)
+
+```sql
+CREATE VIEW dept_employees_report AS
+SELECT
+    d.dept_id   AS _dept_id,    -- станет fixed="true", имя dept_id
+    d.dept_name AS _dept_name,  -- станет fixed="true", имя dept_name
+    e.emp_id,
+    e.full_name
+FROM employees e JOIN departments d ON e.dept_id = d.dept_id
+ORDER BY d.dept_id, e.emp_id;
+```
+
+### Экономия размера
+
+| Таблица | Обычный | Compact | Экономия |
+|---------|---------|---------|----------|
+| 15 строк, 3 группы × 5 emp, 3 fixed поля | 100% | ~60% | ~40% |
+| 1000 строк, 10 групп × 100 emp, 5 fixed полей | 100% | ~30% | ~70% |
+
+Эффективность растёт с количеством строк в группе и количеством fixed-полей.
+
+---
+
+## ETL Pipeline
+
+### --pipeline
+
+Выполнить ETL pipeline из YAML-конфигурации: загрузить несколько источников, трансформировать в in-memory SQLite workspace, экспортировать результат.
+
+Подробная документация с примерами: [docs/ETL_PIPELINE.md](ETL_PIPELINE.md)
+
+**Синтаксис:**
+```bash
+tdtpcli --pipeline <config.yaml> [--unsafe] [--enc] [--enc-dev]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--pipeline <file>` | Путь к YAML-конфигурации pipeline |
+| `--unsafe` | Разрешить все SQL операции (требует права admin) |
+| `--enc` | Переопределить `output.tdtp.encryption: true` (шифрование через xZMercury) |
+| `--enc-dev` | Dev-режим: локальная генерация ключа без xZMercury (только !production сборки) |
+
+**Режимы безопасности SQL:**
+
+| Режим | SQL операции | Права |
+|-------|-------------|-------|
+| Safe (по умолчанию) | Только SELECT / WITH | Нет |
+| Unsafe (`--unsafe`) | Все операции | Admin |
+
+**Примеры:**
+
+Базовый запуск:
+```bash
+./tdtpcli --pipeline pipeline.yaml
+```
+
+Запуск с шифрованием (override):
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc
+```
+
+Dev-режим шифрования (ключ генерируется локально):
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc-dev
+```
+
+Unsafe mode:
+```bash
+sudo ./tdtpcli --pipeline pipeline.yaml --unsafe
+```
+
+**Вывод при успехе:**
+```
+Pipeline: employee-dept-report
+   Зарплатный отчёт по отделам
+   Version: 1.0
+   Mode: SAFE (READ-ONLY: SELECT/WITH only)
+   Sources: 2
+   Workspace: sqlite (:memory:)
+   Output: tdtp [ENC: xZMercury]
+
+Starting ETL pipeline execution...
+
+ETL Pipeline completed successfully!
+   Duration: 1.23s
+   Sources loaded: 2
+   Rows loaded: 14
+   Rows exported: 4
+   Package UUID: 550e8400-e29b-41d4-a716-446655440000
+```
+
+**Вывод при деградации xZMercury:**
+```
+WARNING: Encryption degraded: bind key: MERCURY_UNAVAILABLE: ...
+   Error packet written to output. Pipeline completed with errors (exit 0).
+```
+
+---
+
+## Шифрование AES-256-GCM
+
+TDTP CLI поддерживает шифрование выходного файла через **xZMercury UUID-binding флоу**:
+
+```
+tdtpcli ──→ POST /api/keys/bind ──→ xZMercury
+                                       │
+                                ┌──────┘
+                                │ {key_b64, hmac}
+                                ▼
+              Verify HMAC (MERCURY_SERVER_SECRET)
+                                │
+                                ▼
+              AES-256-GCM encrypt(XML, key)
+                                │
+                                ▼
+              Write .tdtp.enc (binary header + ciphertext)
+```
+
+### Конфигурация YAML
+
+```yaml
+output:
+  type: tdtp
+  tdtp:
+    destination: "out/report.tdtp.enc"
+    encryption: true          # активирует шифрование
+
+security:
+  mercury_url: "http://mercury:3000"
+  key_ttl_seconds: 86400      # TTL ключа (24 часа)
+  mercury_timeout_ms: 5000    # таймаут обращения к Mercury
+```
+
+### Переменные окружения
+
+```bash
+MERCURY_SERVER_SECRET=<secret>   # для верификации HMAC подписи ключа
+```
+
+### Тестирование с mock-сервером
+
+```bash
+# 1. Запустить mock xZMercury
+go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
+
+# 2. Установить секрет
+export MERCURY_SERVER_SECRET=dev-secret
+
+# 3. Запустить pipeline
+./tdtpcli --pipeline examples/encryption-test/pipeline-enc.yaml
+```
+
+### Dev-режим (без xZMercury)
+
+В dev-сборках (`go build` без тега `production`) доступен `--enc-dev`:
+
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc-dev
+```
+
+- Ключ AES-256 генерируется локально
+- xZMercury НЕ нужен
+- HMAC не верифицируется
+- В production-сборке (`-tags production`) флаг недоступен
+
+### Формат зашифрованного файла
+
+```
+[2 байта: версия] [1 байт: алгоритм] [16 байт: package UUID]
+[12 байт: nonce AES-GCM] [N байт: ciphertext+tag]
+```
+
+### Graceful degradation
+
+При недоступности xZMercury:
+- Незашифрованные данные **не записываются**
+- В destination записывается `error` пакет (TDTP `Type=error`)
+- Pipeline завершается с **exit code 0**
+- ResultLog получает статус `completed_with_errors` с `package_uuid`
 
 ---
 
@@ -902,7 +1193,7 @@ tdtpcli.exe -config config.mssql.yaml --export-broker users
 
 ## Дополнительные ресурсы
 
-- **[SPECIFICATION.md](SPECIFICATION.md)** - полная спецификация TDTP v1.0
+- **[SPECIFICATION.md](SPECIFICATION.md)** - полная спецификация TDTP v1.3.1 (включая Compact Format и Special Values)
 - **[MODULES.md](MODULES.md)** - описание модулей фреймворка
 - **[PACKET_MODULE.md](PACKET_MODULE.md)** - API для работы с пакетами
 - **[SCHEMA_MODULE.md](SCHEMA_MODULE.md)** - валидация и типы данных
@@ -919,4 +1210,4 @@ tdtpcli.exe -config config.mssql.yaml --export-broker users
 
 ---
 
-*Последнее обновление: 16.11.2025*
+*Последнее обновление: 10.03.2026*

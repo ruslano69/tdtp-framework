@@ -29,21 +29,31 @@ func jDecompressRows(pkt *packet.DataPacket) *C.char {
 		}
 	}
 
-	parser := packet.NewParser()
 	lines, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
 	if err != nil {
 		return jErr(fmt.Sprintf("decompress error: %v", err))
 	}
 
-	var rows [][]string
+	// Rebuild pkt.Data.Rows from decompressed lines so ExpandCompactRows can work.
+	decompRows := make([]packet.Row, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
-		rows = append(rows, parser.GetRowValues(packet.Row{Value: line}))
+		decompRows = append(decompRows, packet.Row{Value: line})
+	}
+	pkt.Data.Rows = decompRows
+	pkt.Data.Compression = ""
+	pkt.Data.Checksum = ""
+
+	// Expand compact carry-forward encoding so callers always receive fully-populated rows.
+	if pkt.Data.Compact {
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			return jErr(fmt.Sprintf("compact expand error: %v", err))
+		}
 	}
 
-	return jOK(packetToJPacket(pkt, rows))
+	return jOK(packetToJPacket(pkt, pkt.GetRows()))
 }
 
 // jApplyProcessor runs a single named processor.

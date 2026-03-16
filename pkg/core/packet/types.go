@@ -10,6 +10,7 @@ const (
 	TypeRequest   MessageType = "request"
 	TypeResponse  MessageType = "response"
 	TypeAlarm     MessageType = "alarm"
+	TypeError     MessageType = "error"
 )
 
 // InReplyToDirectExport - зарезервированное значение для response-пакетов,
@@ -49,21 +50,40 @@ type Schema struct {
 
 // Field описывает одно поле таблицы
 type Field struct {
-	Name      string `xml:"name,attr"`
-	Type      string `xml:"type,attr"`
-	Length    int    `xml:"length,attr,omitempty"`
-	Precision int    `xml:"precision,attr,omitempty"`
-	Scale     int    `xml:"scale,attr,omitempty"`
-	Key       bool   `xml:"key,attr,omitempty"`
-	Timezone  string `xml:"timezone,attr,omitempty"`
-	Subtype   string `xml:"subtype,attr,omitempty"`
-	ReadOnly  bool   `xml:"readonly,attr,omitempty"` // Read-only поля (timestamp, computed)
+	Name          string         `xml:"name,attr"`
+	Type          string         `xml:"type,attr"`
+	Length        int            `xml:"length,attr,omitempty"`
+	Precision     int            `xml:"precision,attr,omitempty"`
+	Scale         int            `xml:"scale,attr,omitempty"`
+	Key           bool           `xml:"key,attr,omitempty"`
+	Timezone      string         `xml:"timezone,attr,omitempty"`
+	Subtype       string         `xml:"subtype,attr,omitempty"`
+	ReadOnly      bool           `xml:"readonly,attr,omitempty"`  // Read-only поля (timestamp, computed)
+	Fixed         bool           `xml:"fixed,attr,omitempty"`     // v1.3.1: значение не меняется в пределах пакета
+	SpecialValues *SpecialValues `xml:"SpecialValues,omitempty"`  // v1.3.1: маркеры специальных значений
+}
+
+// SpecialValues содержит маркеры специальных значений для поля (v1.3.1)
+type SpecialValues struct {
+	Null        *MarkerValue `xml:"Null,omitempty"`
+	Infinity    *MarkerValue `xml:"Infinity,omitempty"`
+	NegInfinity *MarkerValue `xml:"NegInfinity,omitempty"`
+	NaN         *MarkerValue `xml:"NaN,omitempty"`
+	NoDate      *MarkerValue `xml:"NoDate,omitempty"`
+}
+
+// MarkerValue содержит строковый маркер специального значения
+type MarkerValue struct {
+	Marker string `xml:"marker,attr"`
 }
 
 // Data содержит табличные данные
 type Data struct {
 	Compression string `xml:"compression,attr,omitempty"` // Алгоритм сжатия: "zstd" или пусто
 	Checksum    string `xml:"checksum,attr,omitempty"`    // XXH3 хеш сжатых данных (hex)
+	Compact     bool   `xml:"compact,attr,omitempty"`     // v1.3.1: compact format (пропуски для fixed полей)
+	Tail        bool   `xml:"tail,attr,omitempty"`        // v1.3.1: последняя строка явно повторяет все fixed-поля — для потокового восстановления и валидации
+	Carry       string `xml:"carry,attr,omitempty"`       // v1.3.1: начальное carry-состояние чанка (pipe-разделённые значения полей); позволяет декодировать чанки независимо друг от друга
 	Rows        []Row  `xml:"R"`
 }
 

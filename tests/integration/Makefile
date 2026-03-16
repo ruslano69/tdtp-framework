@@ -68,6 +68,11 @@ test-e2e:
 	@echo "🧪 Running end-to-end tests..."
 	cd ../.. && go test -v -timeout 60s ./tests/integration -run "TestEndToEndExportImport"
 
+# Run xzmercury + pipeline integration test (no Docker required)
+test-xzmercury:
+	@echo "🔐 Running xzmercury pipeline integration test..."
+	cd ../.. && go test -v -timeout 120s ./tests/integration -run "TestXzmercuryPipeline"
+
 # Open RabbitMQ UI
 ui:
 	@echo "🌐 Opening RabbitMQ Management UI..."

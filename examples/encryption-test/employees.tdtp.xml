@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>employees</TableName>
+    <MessageID>REF-2026-EMP001-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>10</RecordsInPart>
+    <Timestamp>2026-02-26T10:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="employee_id"  type="INTEGER" key="true"></Field>
+    <Field name="full_name"    type="TEXT"    length="255"></Field>
+    <Field name="department_id" type="INTEGER"></Field>
+    <Field name="position"     type="TEXT"    length="100"></Field>
+    <Field name="salary"       type="DECIMAL"></Field>
+    <Field name="hired_at"     type="TIMESTAMP" timezone="UTC"></Field>
+    <Field name="is_active"    type="INTEGER"></Field>
+  </Schema>
+  <Data>
+    <R>1|Ivan Petrov|1|Software Engineer|95000|2023-03-15T09:00:00Z|1</R>
+    <R>2|Maria Sidorova|2|HR Manager|75000|2022-07-01T09:00:00Z|1</R>
+    <R>3|Alexei Volkov|1|Senior Engineer|120000|2021-11-20T09:00:00Z|1</R>
+    <R>4|Elena Kozlova|3|Financial Analyst|88000|2023-09-10T09:00:00Z|1</R>
+    <R>5|Dmitry Novikov|1|DevOps Engineer|105000|2022-04-05T09:00:00Z|1</R>
+    <R>6|Svetlana Morozova|2|Recruiter|65000|2024-01-15T09:00:00Z|1</R>
+    <R>7|Andrei Lebedev|3|Accountant|72000|2021-06-30T09:00:00Z|0</R>
+    <R>8|Natalia Popova|4|Product Manager|110000|2022-12-01T09:00:00Z|1</R>
+    <R>9|Sergei Sokolov|1|Junior Engineer|70000|2024-06-01T09:00:00Z|1</R>
+    <R>10|Olga Mikhailova|4|Business Analyst|92000|2023-05-20T09:00:00Z|1</R>
+  </Data>
+</DataPacket>

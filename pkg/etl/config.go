@@ -5,22 +5,34 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"gopkg.in/yaml.v3"
 )
 
 // PipelineConfig содержит полную конфигурацию ETL pipeline
 type PipelineConfig struct {
-	Name          string              `yaml:"name"`
-	Version       string              `yaml:"version"`
-	Description   string              `yaml:"description"`
-	Sources       []SourceConfig      `yaml:"sources"`
-	Workspace     WorkspaceConfig     `yaml:"workspace"`
-	Transform     TransformConfig     `yaml:"transform"`
-	Output        OutputConfig        `yaml:"output"`
-	Performance   PerformanceConfig   `yaml:"performance"`
-	Audit         AuditConfig         `yaml:"audit"`
-	ErrorHandling ErrorHandlingConfig `yaml:"error_handling"`
-	ResultLog     ResultLogConfig     `yaml:"result_log"`
+	Name          string                    `yaml:"name"`
+	Version       string                    `yaml:"version"`
+	Description   string                    `yaml:"description"`
+	Sources       []SourceConfig            `yaml:"sources"`
+	Workspace     WorkspaceConfig           `yaml:"workspace"`
+	Transform     TransformConfig           `yaml:"transform"`
+	Processors    processors.ProcessorConfig `yaml:"processors"`
+	Output        OutputConfig              `yaml:"output"`
+	Performance   PerformanceConfig         `yaml:"performance"`
+	Audit         AuditConfig               `yaml:"audit"`
+	ErrorHandling ErrorHandlingConfig       `yaml:"error_handling"`
+	ResultLog     ResultLogConfig           `yaml:"result_log"`
+	Security      SecurityConfig            `yaml:"security"`
+}
+
+// SecurityConfig определяет параметры интеграции с xZMercury для шифрования результатов.
+// Используется когда output.tdtp.encryption: true.
+type SecurityConfig struct {
+	MercuryURL        string `yaml:"mercury_url"`        // URL xZMercury, например "http://mercury:3000"
+	RecipientResource string `yaml:"recipient_resource"` // Имя ресурса/очереди получателя
+	KeyTTLSeconds     int    `yaml:"key_ttl_seconds"`    // TTL ключа в Mercury Redis (по умолчанию 86400)
+	MercuryTimeoutMs  int    `yaml:"mercury_timeout_ms"` // Таймаут обращения к xZMercury (по умолчанию 5000)
 }
 
 // ResultLogConfig определяет параметры публикации результата выполнения пайплайна
@@ -34,14 +46,19 @@ type ResultLogConfig struct {
 	TTL      int    `yaml:"ttl"`      // TTL ключа в секундах (по умолчанию 3600)
 }
 
-// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP)
+// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc)
 type SourceConfig struct {
-	Name      string `yaml:"name"`       // Имя источника (будет использовано как имя таблицы в workspace)
-	Type      string `yaml:"type"`       // Тип: postgres, mssql, mysql, sqlite, tdtp
-	DSN       string `yaml:"dsn"`        // Data Source Name (строка подключения или путь к TDTP-файлу)
-	Query     string `yaml:"query"`      // SQL запрос для извлечения данных (не используется для type: tdtp)
-	Timeout   int    `yaml:"timeout"`    // Таймаут в секундах (0 = без таймаута)
-	MultiPart bool   `yaml:"multi_part"` // Только для type: tdtp — загружать все части набора автоматически
+	Name             string   `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
+	Type             string   `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc
+	DSN              string   `yaml:"dsn"`                // Data Source Name (строка подключения или путь к TDTP-файлу)
+	Query            string   `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc)
+	Timeout          int      `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
+	MultiPart        bool     `yaml:"multi_part"`         // Только для type: tdtp — загружать все части набора автоматически
+	MercuryURL       string   `yaml:"mercury_url"`        // Только для type: tdtp-enc — URL xZMercury (например "http://mercury:3000")
+	MercuryTimeoutMs int      `yaml:"mercury_timeout_ms"` // Только для type: tdtp-enc — таймаут обращения к xZMercury (по умолчанию 5000)
+	// NoDateSentinels — список дат-заглушек для "нет даты" (DB-specific conventions).
+	// Пример для MSSQL: ["1900-01-01", "1753-01-01"]
+	NoDateSentinels  []string `yaml:"no_date_sentinels"`
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -75,9 +92,13 @@ type XLSXOutputConfig struct {
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
 type TDTPOutputConfig struct {
-	Format      string `yaml:"format"`      // Формат: xml, json (в будущем)
-	Compression bool   `yaml:"compression"` // Использовать zstd сжатие
-	Destination string `yaml:"destination"` // Путь к файлу
+	Format           string   `yaml:"format"`            // Формат: xml, json (в будущем)
+	Compression      bool     `yaml:"compression"`       // Использовать zstd сжатие
+	Destination      string   `yaml:"destination"`       // Путь к файлу
+	Encryption       bool     `yaml:"encryption"`        // Шифровать результат через xZMercury (AES-256-GCM)
+	Compact          bool     `yaml:"compact"`           // v1.3.1: compact format (fixed поля пишутся один раз на группу)
+	CompactTail      bool     `yaml:"compact_tail"`      // v1.3.1: tail-строка с явными fixed полями для потокового восстановления
+	FixedFields      []string `yaml:"fixed_fields"`      // v1.3.1: явный список fixed полей (пусто = auto-detect по _ prefix)
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ
@@ -131,13 +152,14 @@ func LoadConfig(path string) (*PipelineConfig, error) {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
+	// Установка значений по умолчанию до валидации —
+	// иначе опциональные поля с defaults (например result_table) ложно фейлят.
+	config.SetDefaults()
+
 	// Валидация конфигурации
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
-
-	// Установка значений по умолчанию
-	config.SetDefaults()
 
 	return &config, nil
 }
@@ -201,20 +223,26 @@ func (s *SourceConfig) Validate() error {
 		"mssql":    true,
 		"mysql":    true,
 		"sqlite":   true,
-		"tdtp":     true, // TDTP XML/JSON file — DSN is the file path, query not required
+		"tdtp":     true,     // TDTP XML/JSON file — DSN is the file path, query not required
+		"tdtp-enc": true,     // Encrypted TDTP file — requires mercury_url for key retrieval
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc", s.Type)
 	}
 
-	// query обязателен для DB-источников, для TDTP-файла не нужен
-	if s.Type != "tdtp" && s.Query == "" {
+	// query обязателен для DB-источников, для TDTP-файлов не нужен
+	if s.Type != "tdtp" && s.Type != "tdtp-enc" && s.Query == "" {
 		return fmt.Errorf("query is required for type '%s'", s.Type)
 	}
 
-	// multi_part имеет смысл только для TDTP
+	// multi_part имеет смысл только для обычного tdtp
 	if s.MultiPart && s.Type != "tdtp" {
 		return fmt.Errorf("multi_part is only supported for type 'tdtp'")
+	}
+
+	// mercury_url обязателен для tdtp-enc
+	if s.Type == "tdtp-enc" && s.MercuryURL == "" {
+		return fmt.Errorf("mercury_url is required for type 'tdtp-enc'")
 	}
 
 	return nil
@@ -237,7 +265,7 @@ func (w *WorkspaceConfig) Validate() error {
 // Validate проверяет корректность TransformConfig
 func (t *TransformConfig) Validate() error {
 	if t.SQL == "" {
-		return fmt.Errorf("transform SQL is required")
+		return fmt.Errorf("transform sql is required")
 	}
 	if t.ResultTable == "" {
 		return fmt.Errorf("transform result_table is required")
@@ -417,5 +445,13 @@ func (c *PipelineConfig) SetDefaults() {
 	// Defaults для result_log
 	if c.ResultLog.Type == "redis" && c.ResultLog.TTL == 0 {
 		c.ResultLog.TTL = 3600 // 1 час по умолчанию
+	}
+
+	// Defaults для security
+	if c.Security.KeyTTLSeconds == 0 {
+		c.Security.KeyTTLSeconds = 86400 // 24 часа
+	}
+	if c.Security.MercuryTimeoutMs == 0 {
+		c.Security.MercuryTimeoutMs = 5000
 	}
 }

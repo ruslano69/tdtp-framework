@@ -77,6 +77,9 @@ func (g *Generator) SetCompressionLevel(level int) {
 func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]string) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
 
+	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
+	rows, schema = DetectAndApply(rows, schema)
+
 	// Разбиваем на части если нужно
 	partitions := g.partitionRows(rows, schema)
 
@@ -125,6 +128,10 @@ func (g *Generator) GenerateResponse(
 	sender, recipient string,
 ) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
+
+	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
+	rows, schema = DetectAndApply(rows, schema)
+
 	partitions := g.partitionRows(rows, schema)
 
 	messageIDBase := g.generateMessageID(TypeResponse)
@@ -151,6 +158,34 @@ func (g *Generator) GenerateResponse(
 	}
 
 	return packets, nil
+}
+
+// GenerateError создает error пакет для записи в таблицу tdtp_errors.
+// Используется когда pipeline не может завершиться штатно (например, xZMercury недоступен).
+// В отличие от alarm, error — стандартный DataPacket с Schema+Data, совместимый с любым consumer.
+func (g *Generator) GenerateError(packageUUID, pipeline, errorCode, errorMessage string) (*DataPacket, error) {
+	packet := NewDataPacket(TypeError, "tdtp_errors")
+	packet.Header.MessageID = fmt.Sprintf("ERR-%d-%s-P1", time.Now().UTC().Year(), generateUUID()[:8])
+	packet.Header.PartNumber = 1
+	packet.Header.TotalParts = 1
+	packet.Header.RecordsInPart = 1
+
+	packet.Schema = Schema{
+		Fields: []Field{
+			{Name: "package_uuid", Type: "TEXT", Length: 36, Key: true},
+			{Name: "pipeline", Type: "TEXT", Length: 255},
+			{Name: "error_code", Type: "TEXT", Length: 64},
+			{Name: "error_message", Type: "TEXT", Length: 1000},
+			{Name: "created_at", Type: "TIMESTAMP", Timezone: "UTC"},
+		},
+	}
+
+	createdAt := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	packet.Data = RowsToData([][]string{
+		{packageUUID, pipeline, errorCode, errorMessage, createdAt},
+	})
+
+	return packet, nil
 }
 
 // GenerateAlarm создает alarm пакет
@@ -362,6 +397,8 @@ func (g *Generator) generateMessageID(msgType MessageType) string {
 		prefix = "RESP"
 	case TypeAlarm:
 		prefix = "ALARM"
+	case TypeError:
+		prefix = "ERR"
 	}
 
 	year := time.Now().UTC().Year()

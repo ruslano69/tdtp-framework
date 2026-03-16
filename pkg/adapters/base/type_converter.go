@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -14,10 +15,16 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
+// NullSentinel — внутренний маркер DB NULL, сохраняющий информацию через pipeline конвертации.
+// Заменяется на SpecialValues.Null.Marker (или "") в DetectAndApply перед записью в TDTP.
+// Не попадает в финальный TDTP файл.
+const NullSentinel = "\x00"
+
 // UniversalTypeConverter - универсальный конвертер типов для всех адаптеров
 // Устраняет дублирование кода конвертации между адаптерами
 type UniversalTypeConverter struct {
-	converter *schema.Converter
+	converter       *schema.Converter
+	noDateSentinels map[string]bool // "1900-01-01", "1753-01-01" etc — MSSQL configured sentinels
 }
 
 // NewUniversalTypeConverter создает новый UniversalTypeConverter
@@ -27,9 +34,24 @@ func NewUniversalTypeConverter() *UniversalTypeConverter {
 	}
 }
 
+// SetNoDateSentinels configures date strings that should be treated as "no date" / zero-date.
+// Used for MSSQL conventions like "1900-01-01" or "1753-01-01".
+// At export time: if the date matches a sentinel → encoded as SpecNoDateMarker ("0000-00-00").
+func (c *UniversalTypeConverter) SetNoDateSentinels(dates []string) {
+	c.noDateSentinels = make(map[string]bool, len(dates))
+	for _, d := range dates {
+		c.noDateSentinels[d] = true
+	}
+}
+
 // ConvertValueToTDTP конвертирует значение из БД в TDTP формат
 // Общая реализация (вместо 4 копий в адаптерах)
 func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value string) string {
+	// NullSentinel проходит без изменений — будет обработан DetectAndApply в генераторе
+	if value == NullSentinel {
+		return NullSentinel
+	}
+
 	// Создаем FieldDef для использования converter
 	fieldDef := schema.FieldDef{
 		Name:      field.Name,
@@ -78,7 +100,7 @@ func (c *UniversalTypeConverter) DBValueToString(value any, field packet.Field, 
 // PostgreSQL-специфичные типы: UUID, JSONB, INET, ARRAY, NUMERIC
 func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) string {
 	if val == nil {
-		return ""
+		return NullSentinel
 	}
 
 	switch v := val.(type) {
@@ -162,10 +184,46 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		// Нормализуем в UTC для consistency
 		return v.UTC().Format(time.RFC3339)
 
+	case pgtype.Date:
+		if !v.Valid {
+			return NullSentinel
+		}
+		switch v.InfinityModifier {
+		case pgtype.Infinity:
+			return "Infinity" // PostgreSQL date infinity → SpecInfMarker via DetectAndApply
+		case pgtype.NegativeInfinity:
+			return "-Infinity"
+		}
+		return v.Time.Format("2006-01-02")
+
+	case pgtype.Timestamp:
+		if !v.Valid {
+			return NullSentinel
+		}
+		switch v.InfinityModifier {
+		case pgtype.Infinity:
+			return "Infinity"
+		case pgtype.NegativeInfinity:
+			return "-Infinity"
+		}
+		return v.Time.UTC().Format(time.RFC3339)
+
+	case pgtype.Timestamptz:
+		if !v.Valid {
+			return NullSentinel
+		}
+		switch v.InfinityModifier {
+		case pgtype.Infinity:
+			return "Infinity"
+		case pgtype.NegativeInfinity:
+			return "-Infinity"
+		}
+		return v.Time.UTC().Format(time.RFC3339)
+
 	case pgtype.Numeric:
 		// PostgreSQL NUMERIC/DECIMAL - конвертируем через Float64
 		if !v.Valid {
-			return ""
+			return NullSentinel
 		}
 		if v.NaN {
 			return "NaN"
@@ -199,7 +257,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 // MS SQL-специфичные типы: UNIQUEIDENTIFIER, TIMESTAMP/ROWVERSION, NVARCHAR
 func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field) string {
 	if val == nil {
-		return ""
+		return NullSentinel
 	}
 
 	switch v := val.(type) {
@@ -258,6 +316,11 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 		return "0"
 
 	case time.Time:
+		// MSSQL configured no-date sentinels (e.g. 1900-01-01, 1753-01-01)
+		dateOnly := v.Format("2006-01-02")
+		if c.noDateSentinels[dateOnly] {
+			return packet.SpecNoDateMarker
+		}
 		// DATETIME, DATETIME2, DATETIMEOFFSET - конвертируем в RFC3339 для TDTP
 		// ВАЖНО: нормализуем в UTC для консистентности
 		return v.UTC().Format(time.RFC3339)
@@ -271,7 +334,7 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 // Для SQLite, MySQL и других простых типов
 func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Field) string {
 	if val == nil {
-		return ""
+		return NullSentinel
 	}
 
 	switch v := val.(type) {
@@ -305,6 +368,10 @@ func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Fiel
 		return "0"
 
 	case time.Time:
+		// MySQL 0000-00-00 → Go driver returns time.Time{} (zero time) → canonical NoDate marker
+		if v.IsZero() {
+			return packet.SpecNoDateMarker
+		}
 		// Конвертируем в RFC3339 для TDTP (консистентность с MSSQL и PostgreSQL)
 		return v.UTC().Format(time.RFC3339)
 
@@ -356,7 +423,16 @@ func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType st
 
 	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
 		if tv.FloatValue != nil {
-			return *tv.FloatValue
+			f := *tv.FloatValue
+			if math.IsInf(f, 0) || math.IsNaN(f) {
+				// PostgreSQL: pgx driver принимает IEEE 754 specials нативно
+				if dbType == "postgres" {
+					return f
+				}
+				// MSSQL/MySQL/SQLite: не поддерживают NaN/Infinity — заменяем на NULL
+				return nil
+			}
+			return f
 		}
 
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:

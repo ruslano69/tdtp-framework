@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -158,7 +159,8 @@ func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, er
 				// Используем универсальный конвертер из base
 				row[i] = a.converter.ConvertValueToTDTP(schema.Fields[i], v.String)
 			} else {
-				row[i] = "" // NULL представляется пустой строкой
+				// NULL → NullSentinel; будет заменён маркером [NULL] в DetectAndApply (generator)
+				row[i] = base.NullSentinel
 			}
 		}
 

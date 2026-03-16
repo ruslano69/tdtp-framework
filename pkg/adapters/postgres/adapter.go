@@ -75,16 +75,19 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	}
 
 	// Initialize base helpers (added in refactoring)
-	a.initHelpers()
+	a.initHelpers(cfg.NoDateSentinels)
 
 	return nil
 }
 
 // initHelpers initializes base package helpers for common operations
 // Added during refactoring to eliminate code duplication
-func (a *Adapter) initHelpers() {
+func (a *Adapter) initHelpers(noDateSentinels []string) {
 	// Initialize type converter
 	a.converter = base.NewUniversalTypeConverter()
+	if len(noDateSentinels) > 0 {
+		a.converter.SetNoDateSentinels(noDateSentinels)
+	}
 
 	// Initialize export helper with PostgreSQL-specific components
 	// Note: PostgreSQL doesn't use SQLAdapter (uses native pgx types)

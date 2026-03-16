@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
 // ProcessorStats представляет статистику выполнения ETL
@@ -19,12 +22,15 @@ type ProcessorStats struct {
 
 // Processor представляет главный ETL процессор
 type Processor struct {
-	config    *PipelineConfig
-	workspace *Workspace
-	loader    *Loader
-	executor  *Executor
-	exporter  *Exporter
-	stats     ProcessorStats
+	config          *PipelineConfig
+	workspace       *Workspace
+	loader          *Loader
+	executor        *Executor
+	exporter        *Exporter
+	stats           ProcessorStats
+	packageUUID     string                   // UUID пакета генерируется в начале Execute, используется для шифрования
+	mercuryBinder   processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
+	preExportChain  *processors.Chain        // цепочка pre-export процессоров из config.Processors.PreExport
 }
 
 // NewProcessor создает новый ETL процессор
@@ -36,8 +42,25 @@ func NewProcessor(config *PipelineConfig) *Processor {
 	}
 }
 
+// GetPackageUUID возвращает UUID пакета, сгенерированный в начале Execute.
+// Используется resultlog для публикации идентификатора зашифрованного результата.
+func (p *Processor) GetPackageUUID() string {
+	return p.packageUUID
+}
+
+// WithMercuryBinder устанавливает замену Mercury-клиента (dev-режим, тесты).
+// Должен быть вызван до Execute(). Propagates в Exporter через initWorkspace().
+func (p *Processor) WithMercuryBinder(binder processors.MercuryBinder) *Processor {
+	p.mercuryBinder = binder
+	return p
+}
+
 // Execute выполняет весь ETL процесс
 func (p *Processor) Execute(ctx context.Context) error {
+	// Генерируем UUID пакета в самом начале — он станет публичным идентификатором
+	// результата и binding-якорем для ключа шифрования xZMercury (UUID-binding флоу).
+	p.packageUUID = packet.GenerateUUID()
+
 	p.stats.StartTime = time.Now()
 	defer func() {
 		p.stats.EndTime = time.Now()
@@ -95,6 +118,28 @@ func (p *Processor) initWorkspace(ctx context.Context) error {
 	p.workspace = workspace
 	p.executor = NewExecutor(workspace)
 	p.exporter = NewExporter(p.config.Output)
+
+	// Если шифрование включено — передаём security-контекст в exporter
+	if p.config.Output.Type == "tdtp" &&
+		p.config.Output.TDTP != nil &&
+		p.config.Output.TDTP.Encryption {
+		p.exporter.WithSecurity(p.config.Security, p.packageUUID, p.config.Name)
+		// Пробрасываем кастомный binder (DevClient / тестовый), если был установлен
+		if p.mercuryBinder != nil {
+			p.exporter.WithMercuryBinder(p.mercuryBinder)
+		}
+	}
+
+	// Строим цепочку pre-export процессоров (маскирование, нормализация, валидация).
+	// Применяется ко всем данным перед экспортом — и в batch, и в streaming.
+	if len(p.config.Processors.PreExport) > 0 {
+		chain, err := processors.CreateChainFromConfigs(p.config.Processors.PreExport)
+		if err != nil {
+			return fmt.Errorf("failed to build pre-export processor chain: %w", err)
+		}
+		p.preExportChain = chain
+		p.exporter.WithPreExportChain(chain)
+	}
 
 	return nil
 }

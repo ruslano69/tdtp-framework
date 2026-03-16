@@ -42,6 +42,16 @@ func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
+	// Auto-expand compact v1.3.1 format (carry-forward fixed fields).
+	// Only when data is NOT compressed — compressed packets still have rows packed
+	// into a single blob; expansion must happen after decompression instead
+	// (see ParseWithDecompression / ParseBytesWithDecompression).
+	if packet.Data.Compact && packet.Data.Compression == "" {
+		if err := ExpandCompactRows(&packet); err != nil {
+			return nil, fmt.Errorf("compact expansion failed: %w", err)
+		}
+	}
+
 	return &packet, nil
 }
 
@@ -89,7 +99,7 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 
 	// Проверка типа сообщения
 	switch packet.Header.Type {
-	case TypeReference, TypeRequest, TypeResponse, TypeAlarm:
+	case TypeReference, TypeRequest, TypeResponse, TypeAlarm, TypeError:
 		// OK
 	default:
 		return fmt.Errorf("invalid message type: %s", packet.Header.Type)
@@ -122,6 +132,13 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 	}
 
 	return nil
+}
+
+// ExpandCompactRows разворачивает compact-формат в пакете.
+// Это удобная обёртка над одноимённой функцией пакета.
+// Если Data.Compact == false — ничего не делает.
+func (p *Parser) ExpandCompactRows(packet *DataPacket) error {
+	return ExpandCompactRows(packet)
 }
 
 // IsCompressed проверяет, сжаты ли данные в пакете
@@ -182,6 +199,13 @@ func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx conte
 		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
 			return nil, err
 		}
+		// After decompression, expand compact if flagged (Parse() skips this
+		// when Compression != "" because rows are still a packed blob at that point).
+		if packet.Data.Compact {
+			if err := ExpandCompactRows(packet); err != nil {
+				return nil, fmt.Errorf("compact expansion failed: %w", err)
+			}
+		}
 	}
 
 	return packet, nil
@@ -198,6 +222,13 @@ func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx 
 	if p.IsCompressed(packet) && decompressor != nil {
 		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
 			return nil, err
+		}
+		// After decompression, expand compact if flagged (ParseBytes() skips this
+		// when Compression != "" because rows are still a packed blob at that point).
+		if packet.Data.Compact {
+			if err := ExpandCompactRows(packet); err != nil {
+				return nil, fmt.Errorf("compact expansion failed: %w", err)
+			}
 		}
 	}
 
