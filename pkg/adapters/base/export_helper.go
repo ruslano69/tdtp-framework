@@ -39,6 +39,15 @@ type SQLAdapter interface {
 	AdaptSQL(standardSQL string, tableName string, schema packet.Schema, query *packet.Query) string
 }
 
+// RowPostProcessor — опциональный интерфейс для постобработки строк после чтения.
+// Адаптеры реализуют его когда нужна специфичная фильтрация столбцов
+// (например, MSSQL фильтрует read-only поля: identity, computed, timestamp).
+// ExportHelper проверяет DataReader на реализацию этого интерфейса
+// и вызывает PostProcessRows перед сборкой пакетов.
+type RowPostProcessor interface {
+	PostProcessRows(ctx context.Context, schema packet.Schema, rows [][]string) (packet.Schema, [][]string)
+}
+
 // ExportHelper содержит общую логику экспорта для всех адаптеров
 // Устраняет дублирование кода между SQLite, PostgreSQL, MS SQL Server, MySQL
 type ExportHelper struct {
@@ -78,7 +87,12 @@ func (h *ExportHelper) ExportTable(ctx context.Context, tableName string) ([]*pa
 		return nil, err
 	}
 
-	// 3. Генерируем reference пакеты
+	// 3. Постобработка (опционально): адаптер может отфильтровать столбцы (например, MSSQL read-only)
+	if pp, ok := h.dataReader.(RowPostProcessor); ok {
+		schema, rows = pp.PostProcessRows(ctx, schema, rows)
+	}
+
+	// 4. Генерируем reference пакеты
 	generator := packet.NewGenerator()
 	return generator.GenerateReference(tableName, schema, rows)
 }
@@ -91,6 +105,11 @@ func (h *ExportHelper) ExportTableWithQuery(
 	query *packet.Query,
 	sender, recipient string,
 ) ([]*packet.DataPacket, error) {
+	// query == nil означает полный экспорт без фильтрации — делегируем в ExportTable
+	if query == nil {
+		return h.ExportTable(ctx, tableName)
+	}
+
 	// 1. Получаем полную схему таблицы
 	fullSchema, err := h.schemaReader.GetTableSchema(ctx, tableName)
 	if err != nil {
@@ -130,6 +149,11 @@ func (h *ExportHelper) ExportTableWithQuery(
 			// Выполняем SQL запрос с filtered schema (количество колонок совпадает)
 			rows, err := h.dataReader.ReadRowsWithSQL(ctx, adaptedSQL, pkgSchema)
 			if err == nil {
+				// Постобработка (опционально): фильтрация read-only полей и т.п.
+				if pp, ok := h.dataReader.(RowPostProcessor); ok {
+					pkgSchema, rows = pp.PostProcessRows(ctx, pkgSchema, rows)
+				}
+
 				queryContext := h.createQueryContextForSQL(ctx, query, rows, tableName)
 
 				generator := packet.NewGenerator()
@@ -161,8 +185,15 @@ func (h *ExportHelper) ExportTableWithQuery(
 
 	// Применяем проекцию колонок если задана (после фильтрации)
 	filteredRows := result.FilteredRows
+	filteredSchema := fullSchema
 	if len(fieldIndices) > 0 {
 		filteredRows = projectRows(filteredRows, fieldIndices)
+		filteredSchema = pkgSchema
+	}
+
+	// Постобработка (опционально): фильтрация read-only полей и т.п.
+	if pp, ok := h.dataReader.(RowPostProcessor); ok {
+		filteredSchema, filteredRows = pp.PostProcessRows(ctx, filteredSchema, filteredRows)
 	}
 
 	// Генерируем Response пакеты с QueryContext
@@ -170,7 +201,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 	return generator.GenerateResponse(
 		tableName,
 		packet.InReplyToDirectExport,
-		pkgSchema,
+		filteredSchema,
 		filteredRows,
 		result.QueryContext,
 		sender,

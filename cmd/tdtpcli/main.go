@@ -17,10 +17,11 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 
 	// Database adapters - blank imports for init() registration
+	// SQLite is in a separate file (drivers_sqlite.go) with a build tag
+	// so it can be excluded in environments where modernc.org/sqlite is unavailable.
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
-	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 )
 
 // routeCommand routes the command to the appropriate handler with production features

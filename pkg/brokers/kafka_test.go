@@ -1,3 +1,5 @@
+//go:build !nokafka
+
 package brokers
 
 import (

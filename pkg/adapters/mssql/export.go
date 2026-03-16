@@ -7,9 +7,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // Context key для передачи флага includeReadOnly через контекст
@@ -228,148 +226,31 @@ func filterReadOnlyFields(schema packet.Schema, rows [][]string, includeReadOnly
 
 // ========== Export Operations ==========
 
-// ExportTable экспортирует всю таблицу в TDTP пакеты
-// Автоматически разбивает на пакеты по max packet size (~3.8MB)
+// PostProcessRows реализует base.RowPostProcessor.
+// Вызывается base.ExportHelper после чтения строк для фильтрации read-only полей.
+// Read-only поля MSSQL: identity (auto-increment), computed columns, timestamp/rowversion.
+// Поведение управляется флагом --readonly-fields через контекст.
+func (a *Adapter) PostProcessRows(ctx context.Context, schema packet.Schema, rows [][]string) (packet.Schema, [][]string) {
+	includeReadOnly := getIncludeReadOnlyFromContext(ctx)
+	return filterReadOnlyFields(schema, rows, includeReadOnly)
+}
+
+// ExportTable экспортирует всю таблицу в TDTP reference пакеты
+// Делегирует в base.ExportHelper для устранения дублирования кода
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
-	return a.ExportTableWithQuery(ctx, tableName, nil, "", "")
+	return a.exportHelper.ExportTable(ctx, tableName)
 }
 
 // ExportTableWithQuery экспортирует таблицу с фильтрацией через TDTQL
-// Реализует интерфейс adapters.Adapter
+// Делегирует в base.ExportHelper для устранения дублирования кода
+// Постобработка (read-only фильтрация) выполняется через PostProcessRows hook
 func (a *Adapter) ExportTableWithQuery(
 	ctx context.Context,
 	tableName string,
 	query *packet.Query,
 	sender, recipient string,
 ) ([]*packet.DataPacket, error) {
-	// Получаем полную схему
-	fullSchema, err := a.GetTableSchema(ctx, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Проверяем флаг includeReadOnly из контекста
-	includeReadOnly := getIncludeReadOnlyFromContext(ctx)
-
-	// Если query == nil, это полный экспорт (reference)
-	if query == nil {
-		rows, err := a.readAllRows(ctx, tableName, fullSchema)
-		if err != nil {
-			return nil, err
-		}
-
-		// Фильтруем read-only поля если нужно
-		filteredSchema, filteredRows := filterReadOnlyFields(fullSchema, rows, includeReadOnly)
-
-		// Генерируем reference пакеты
-		generator := packet.NewGenerator()
-		return generator.GenerateReference(tableName, filteredSchema, filteredRows)
-	}
-
-	// Применяем проекцию колонок если задана (--fields)
-	// pkgSchema — схема для чтения строк (только запрошенные поля)
-	// fullSchema — полная схема (нужна для валидации WHERE/ORDER BY и bracketing SQL имён)
-	pkgSchema := fullSchema
-	var fieldIndices []int
-	if len(query.Fields) > 0 {
-		pkgSchema, fieldIndices, err = base.FilterSchemaByFields(fullSchema, query.Fields)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Валидация и нормализация полей запроса (по полной схеме — WHERE/ORDER BY могут использовать любые поля)
-	executor := tdtql.NewExecutor()
-	if err := executor.ValidateQuery(query, fullSchema); err != nil {
-		return nil, err
-	}
-	executor.NormalizeQueryFields(query, fullSchema)
-
-	// Пробуем транслировать TDTQL → SQL для оптимизации
-	sqlGenerator := tdtql.NewSQLGenerator()
-	if sqlGenerator.CanTranslateToSQL(query) {
-		// Оптимизированный путь: фильтрация на уровне SQL
-		// buildSelectQuery использует fullSchema для bracketing имён в WHERE/ORDER BY,
-		// SELECT поля берутся из query.Fields через GenerateSQL
-		sqlQuery, _, err := a.buildSelectQuery(tableName, fullSchema, query)
-		if err == nil {
-			// Выполняем SQL запрос с pkgSchema (только запрошенные колонки)
-			rows, err := a.readRowsWithSQL(ctx, sqlQuery, pkgSchema)
-			if err == nil {
-				// Фильтруем read-only поля если нужно
-				filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, rows, includeReadOnly)
-
-				// Генерируем Response пакеты
-				totalCount, _ := a.GetRowCount(ctx, tableName) //nolint:errcheck // totalCount is optional metadata
-				moreDataAvailable := false
-				nextOffset := 0
-				if query != nil && query.Limit > 0 {
-					currentPosition := query.Offset + len(filteredRows)
-					if currentPosition < int(totalCount) {
-						moreDataAvailable = true
-						nextOffset = query.Offset + len(filteredRows)
-					}
-				}
-				queryContext := &packet.QueryContext{
-					OriginalQuery: *query,
-					ExecutionResults: packet.ExecutionResults{
-						TotalRecordsInTable: int(totalCount),
-						RecordsAfterFilters: len(filteredRows),
-						RecordsReturned:     len(filteredRows),
-						MoreDataAvailable:   moreDataAvailable,
-						NextOffset:          nextOffset,
-					},
-				}
-
-				generator := packet.NewGenerator()
-				return generator.GenerateResponse(
-					tableName,
-					packet.InReplyToDirectExport,
-					filteredSchema,
-					filteredRows,
-					queryContext,
-					sender,
-					recipient,
-				)
-			}
-			// Если SQL запрос не удался, fallback на in-memory
-		}
-	}
-
-	// Fallback: in-memory фильтрация (по полной схеме)
-	rows, err := a.readAllRows(ctx, tableName, fullSchema)
-	if err != nil {
-		return nil, err
-	}
-
-	// Применяем TDTQL фильтрацию в памяти (executor уже создан выше)
-	result, err := executor.Execute(query, rows, fullSchema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
-	}
-
-	// Применяем проекцию колонок если задана (после фильтрации)
-	projectedRows := result.FilteredRows
-	projectedSchema := fullSchema
-	if len(fieldIndices) > 0 {
-		projectedRows = base.ProjectRows(result.FilteredRows, fieldIndices)
-		projectedSchema = pkgSchema
-	}
-
-	// Фильтруем read-only поля если нужно
-	filteredSchema, filteredRows := filterReadOnlyFields(projectedSchema, projectedRows, includeReadOnly)
-
-	// Генерируем Response пакеты с QueryContext
-	generator := packet.NewGenerator()
-	return generator.GenerateResponse(
-		tableName,
-		packet.InReplyToDirectExport,
-		filteredSchema,
-		filteredRows,
-		result.QueryContext,
-		sender,
-		recipient,
-	)
+	return a.exportHelper.ExportTableWithQuery(ctx, tableName, query, sender, recipient)
 }
 
 // ========== Internal Helpers ==========
@@ -391,86 +272,6 @@ func (a *Adapter) parseTableName(fullName string) (schema, table string) {
 		return a.config.Schema, fullName
 	}
 	return "dbo", fullName
-}
-
-// buildSelectQuery строит SQL запрос для экспорта используя tdtql.SQLGenerator
-// Адаптирует стандартный SQL под SQL Server синтаксис (OFFSET/FETCH вместо LIMIT)
-func (a *Adapter) buildSelectQuery(
-	tableName string,
-	tableSchema packet.Schema,
-	query *packet.Query,
-) (string, []any, error) {
-	// Используем генератор SQL из ядра (не дублируем код!)
-	sqlGenerator := tdtql.NewSQLGenerator()
-
-	// Генерируем стандартный SQL (с LIMIT/OFFSET)
-	standardSQL, err := sqlGenerator.GenerateSQL(tableName, query)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to generate SQL: %w", err)
-	}
-
-	// Адаптируем под SQL Server синтаксис
-	sqlServerSQL := a.adaptToSQLServerSyntax(standardSQL, tableName, tableSchema, query)
-
-	return sqlServerSQL, nil, nil
-}
-
-// adaptToSQLServerSyntax адаптирует стандартный SQL под SQL Server
-// Основные изменения:
-// 1. LIMIT N → FETCH NEXT N ROWS ONLY
-// 2. OFFSET N → OFFSET N ROWS
-// 3. Добавляет ORDER BY если нужен для OFFSET/FETCH
-func (a *Adapter) adaptToSQLServerSyntax(
-	standardSQL string,
-	tableName string,
-	tableSchema packet.Schema,
-	query *packet.Query,
-) string {
-	schemaName, table := a.parseTableName(tableName)
-	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
-
-	// Заменяем имя таблицы на квалифицированное с квадратными скобками
-	sql := strings.Replace(standardSQL, tableName, fullTableName, 1)
-
-	// Квалифицируем имена полей квадратными скобками
-	for _, field := range tableSchema.Fields {
-		// Заменяем field на [field] в WHERE и ORDER BY
-		sql = strings.ReplaceAll(sql, " "+field.Name+" ", " ["+field.Name+"] ")
-		sql = strings.ReplaceAll(sql, "("+field.Name+")", "(["+field.Name+"])")
-		sql = strings.ReplaceAll(sql, ","+field.Name+" ", ",["+field.Name+"] ")
-	}
-
-	// Заменяем LIMIT/OFFSET на SQL Server синтаксис
-	if query != nil && (query.Limit > 0 || query.Offset > 0) {
-		// Убираем LIMIT N и OFFSET N из стандартного SQL
-		limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
-		offsetPattern := fmt.Sprintf(" OFFSET %d", query.Offset)
-		sql = strings.Replace(sql, limitPattern, "", 1)
-		sql = strings.Replace(sql, offsetPattern, "", 1)
-
-		// SQL Server требует ORDER BY для OFFSET/FETCH
-		// Проверяем есть ли ORDER BY в запросе
-		hasOrderBy := strings.Contains(sql, "ORDER BY")
-		if !hasOrderBy && len(tableSchema.Fields) > 0 {
-			// Добавляем ORDER BY по первому полю (обязательно для OFFSET/FETCH)
-			sql += fmt.Sprintf(" ORDER BY [%s]", tableSchema.Fields[0].Name)
-		}
-
-		// Добавляем OFFSET ... ROWS
-		if query.Offset > 0 {
-			sql += fmt.Sprintf(" OFFSET %d ROWS", query.Offset)
-		} else {
-			// OFFSET 0 ROWS обязателен если есть FETCH
-			sql += " OFFSET 0 ROWS"
-		}
-
-		// Добавляем FETCH NEXT ... ROWS ONLY
-		if query.Limit > 0 {
-			sql += fmt.Sprintf(" FETCH NEXT %d ROWS ONLY", query.Limit)
-		}
-	}
-
-	return sql
 }
 
 // ReadAllRows implements base.DataReader interface
