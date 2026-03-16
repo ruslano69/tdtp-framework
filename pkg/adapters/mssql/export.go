@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
@@ -241,8 +242,8 @@ func (a *Adapter) ExportTableWithQuery(
 	query *packet.Query,
 	sender, recipient string,
 ) ([]*packet.DataPacket, error) {
-	// Получаем схему
-	pkgSchema, err := a.GetTableSchema(ctx, tableName)
+	// Получаем полную схему
+	fullSchema, err := a.GetTableSchema(ctx, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -252,45 +253,57 @@ func (a *Adapter) ExportTableWithQuery(
 
 	// Если query == nil, это полный экспорт (reference)
 	if query == nil {
-		rows, err := a.readAllRows(ctx, tableName, pkgSchema)
+		rows, err := a.readAllRows(ctx, tableName, fullSchema)
 		if err != nil {
 			return nil, err
 		}
 
 		// Фильтруем read-only поля если нужно
-		filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, rows, includeReadOnly)
+		filteredSchema, filteredRows := filterReadOnlyFields(fullSchema, rows, includeReadOnly)
 
 		// Генерируем reference пакеты
 		generator := packet.NewGenerator()
 		return generator.GenerateReference(tableName, filteredSchema, filteredRows)
 	}
 
-	// Валидация и нормализация полей запроса
+	// Применяем проекцию колонок если задана (--fields)
+	// pkgSchema — схема для чтения строк (только запрошенные поля)
+	// fullSchema — полная схема (нужна для валидации WHERE/ORDER BY и bracketing SQL имён)
+	pkgSchema := fullSchema
+	var fieldIndices []int
+	if len(query.Fields) > 0 {
+		pkgSchema, fieldIndices, err = base.FilterSchemaByFields(fullSchema, query.Fields)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Валидация и нормализация полей запроса (по полной схеме — WHERE/ORDER BY могут использовать любые поля)
 	executor := tdtql.NewExecutor()
-	if err := executor.ValidateQuery(query, pkgSchema); err != nil {
+	if err := executor.ValidateQuery(query, fullSchema); err != nil {
 		return nil, err
 	}
-	executor.NormalizeQueryFields(query, pkgSchema)
+	executor.NormalizeQueryFields(query, fullSchema)
 
 	// Пробуем транслировать TDTQL → SQL для оптимизации
 	sqlGenerator := tdtql.NewSQLGenerator()
 	if sqlGenerator.CanTranslateToSQL(query) {
 		// Оптимизированный путь: фильтрация на уровне SQL
-		sqlQuery, _, err := a.buildSelectQuery(tableName, pkgSchema, query)
+		// buildSelectQuery использует fullSchema для bracketing имён в WHERE/ORDER BY,
+		// SELECT поля берутся из query.Fields через GenerateSQL
+		sqlQuery, _, err := a.buildSelectQuery(tableName, fullSchema, query)
 		if err == nil {
-			// Выполняем SQL запрос напрямую
+			// Выполняем SQL запрос с pkgSchema (только запрошенные колонки)
 			rows, err := a.readRowsWithSQL(ctx, sqlQuery, pkgSchema)
 			if err == nil {
 				// Фильтруем read-only поля если нужно
 				filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, rows, includeReadOnly)
 
 				// Генерируем Response пакеты
-				// QueryContext создаем с исправленной pagination logic
 				totalCount, _ := a.GetRowCount(ctx, tableName) //nolint:errcheck // totalCount is optional metadata
 				moreDataAvailable := false
 				nextOffset := 0
 				if query != nil && query.Limit > 0 {
-					// Fixed pagination logic: check currentPosition < total
 					currentPosition := query.Offset + len(filteredRows)
 					if currentPosition < int(totalCount) {
 						moreDataAvailable = true
@@ -323,20 +336,28 @@ func (a *Adapter) ExportTableWithQuery(
 		}
 	}
 
-	// Fallback: in-memory фильтрация
-	rows, err := a.readAllRows(ctx, tableName, pkgSchema)
+	// Fallback: in-memory фильтрация (по полной схеме)
+	rows, err := a.readAllRows(ctx, tableName, fullSchema)
 	if err != nil {
 		return nil, err
 	}
 
 	// Применяем TDTQL фильтрацию в памяти (executor уже создан выше)
-	result, err := executor.Execute(query, rows, pkgSchema)
+	result, err := executor.Execute(query, rows, fullSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
+	// Применяем проекцию колонок если задана (после фильтрации)
+	projectedRows := result.FilteredRows
+	projectedSchema := fullSchema
+	if len(fieldIndices) > 0 {
+		projectedRows = base.ProjectRows(result.FilteredRows, fieldIndices)
+		projectedSchema = pkgSchema
+	}
+
 	// Фильтруем read-only поля если нужно
-	filteredSchema, filteredRows := filterReadOnlyFields(pkgSchema, result.FilteredRows, includeReadOnly)
+	filteredSchema, filteredRows := filterReadOnlyFields(projectedSchema, projectedRows, includeReadOnly)
 
 	// Генерируем Response пакеты с QueryContext
 	generator := packet.NewGenerator()
