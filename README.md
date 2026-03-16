@@ -889,13 +889,6 @@ go test -v ./pkg/core/packet/
   - Python/pandas binding: markers applied before `astype()` to prevent `ValueError` crashes
   - XLSX adapter: full trap matrix for all 5 markers (see XLSX Converter section)
 
-### v1.7.1-beta (current)
-- `--where` conditions for SQL filtering on export (repeatable flag, `IN (...)` support)
-- `--fields` column projection: export only specified columns
-- `--inspect` command: display TDTP file structure and metadata without full parse
-- `--compact` format support: carry-forward encoding for repeated field values
-- TDTP XML v1.3.1 spec: special values `[NULL]`, `[+INF]`, `[-INF]`, `[NaN]` with full cross-adapter support
-
 ### v1.6.0
 - HTML Viewer (`--to-html`, `--open`, `--row`)
 - Diff & Merge (`--diff`, `--merge`, `--merge-strategy`, `--show-conflicts`)
@@ -905,6 +898,13 @@ go test -v ./pkg/core/packet/
 - Tail mode in limit (`--limit -N`)
 - `--batch`, `--readonly-fields` options
 - Zero Trust encryption: AES-256-GCM + xZMercury (burn-on-read keys, graceful degradation)
+
+### v1.7.1-beta (current)
+- `--where` conditions for SQL filtering on export (repeatable flag, `IN (...)` support)
+- `--fields` column projection: export only specified columns
+- `--inspect` command: display TDTP file structure and metadata without full parse
+- `--compact` format support: carry-forward encoding for repeated field values
+- TDTP XML v1.3.1 spec: special values `[NULL]`, `[+INF]`, `[-INF]`, `[NaN]` with full cross-adapter support
 
 ### v2.0 (planned)
 - Streaming export/import (TotalParts=0, "TCP for tables")
