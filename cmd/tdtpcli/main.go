@@ -380,6 +380,10 @@ func routeCommand(
 				ShowConflicts: *flags.ShowConflicts,
 			})
 		})
+
+	// Inspect command — no DB connection required, runs directly
+	} else if *flags.Inspect != "" {
+		return commands.InspectFile(*flags.Inspect)
 	}
 
 	// Log operation result with metadata
@@ -582,7 +586,8 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Pipeline != "" ||
 		*flags.ProcessRequest != "" ||
 		*flags.Diff != "" ||
-		*flags.Merge != ""
+		*flags.Merge != "" ||
+		*flags.Inspect != ""
 }
 
 // fatal prints error and exits

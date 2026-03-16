@@ -29,6 +29,7 @@ func PrintShortHelp() {
 	fmt.Println("    --import <file>            Import TDTP XML to database")
 	fmt.Println()
 	fmt.Println("  File:")
+	fmt.Println("    --inspect <file>           Print YAML metadata summary (no config needed)")
 	fmt.Println("    --diff <file-a> <file-b>   Compare two TDTP files")
 	fmt.Println("    --merge <files>            Merge multiple TDTP files")
 	fmt.Println("    --to-html <file>           Convert TDTP to HTML viewer")
@@ -115,6 +116,7 @@ func PrintHelp() {
 	fmt.Println()
 
 	fmt.Println("  File Operations:")
+	fmt.Println("    --inspect <tdtp-file>      Print YAML metadata summary (no config needed)")
 	fmt.Println("    --diff <file-a> <file-b>   Compare two TDTP files and show differences")
 	fmt.Println("    --merge <files>            Merge multiple TDTP files into one")
 	fmt.Println("    --to-html <tdtp-file>      Convert TDTP to HTML viewer (fast preview)")
@@ -294,6 +296,10 @@ func PrintHelp() {
 
 	fmt.Println("  # Execute pipeline in unsafe mode (allows custom SQL)")
 	fmt.Println("  tdtpcli --pipeline etl-config.yaml --unsafe")
+	fmt.Println()
+
+	fmt.Println("  # Inspect TDTP file metadata (no config needed)")
+	fmt.Println("  tdtpcli --inspect orders.tdtp.xml")
 	fmt.Println()
 
 	fmt.Println("  # Import to different table name")
