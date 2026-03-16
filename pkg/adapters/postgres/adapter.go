@@ -89,13 +89,17 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 		a.converter.SetNoDateSentinels(noDateSentinels)
 	}
 
-	// Initialize export helper with PostgreSQL-specific components
-	// Note: PostgreSQL doesn't use SQLAdapter (uses native pgx types)
+	// Initialize export helper with PostgreSQL-specific components.
+	// For non-public schemas, SQLAdapter qualifies table names: "schema"."table".
+	var sqlAdapter base.SQLAdapter
+	if a.schema != "public" && a.schema != "" {
+		sqlAdapter = base.NewPostgreSQLSchemaAdapter(a.schema)
+	}
 	a.exportHelper = base.NewExportHelper(
-		a,           // SchemaReader
-		a,           // DataReader
+		a,          // SchemaReader
+		a,          // DataReader
 		a.converter, // ValueConverter
-		nil,         // SQLAdapter (not needed for PostgreSQL)
+		sqlAdapter,  // nil for public schema, PostgreSQLSchemaAdapter otherwise
 	)
 
 	// Initialize import helper with temporary tables for atomic replace
