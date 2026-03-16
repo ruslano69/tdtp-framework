@@ -1,6 +1,20 @@
 package main
 
-import "flag"
+import (
+	"flag"
+	"strings"
+)
+
+// MultiStringFlag is a flag that can be specified multiple times.
+// Each occurrence appends to the slice.
+// Example: --where "A > 1" --where "B IN (1,2)" → ["A > 1", "B IN (1,2)"]
+type MultiStringFlag []string
+
+func (f *MultiStringFlag) String() string { return strings.Join(*f, "; ") }
+func (f *MultiStringFlag) Set(s string) error {
+	*f = append(*f, s)
+	return nil
+}
 
 // ListFlag is a custom flag that behaves like a bool when used without a value
 // (--list lists all tables) but also accepts an optional glob pattern
@@ -49,7 +63,7 @@ type Flags struct {
 	Listen         *bool   // [BETA] Stream consumer daemon mode (Kafka only)
 
 	// TDTQL Filters
-	Where   *string
+	Where   MultiStringFlag // repeatable: --where "A>1" --where "B IN (1,2)"
 	OrderBy *string
 	Limit   *int
 	Offset  *int
@@ -139,7 +153,7 @@ func ParseFlags() *Flags {
 	f.Listen = flag.Bool("listen", false, "[BETA] Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
 
 	// TDTQL Filters
-	f.Where = flag.String("where", "", "TDTQL WHERE clause (e.g., 'age > 18 AND status = active')")
+	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
 	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")

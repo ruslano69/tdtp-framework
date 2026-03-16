@@ -839,7 +839,7 @@ export MERCURY_SERVER_SECRET=dev-secret
 
 | Параметр | Описание | Пример |
 |----------|----------|--------|
-| `--where` | Условие фильтрации | `--where "age > 25"` |
+| `--where` | Условие фильтрации; **повторяемый** — несколько флагов объединяются через AND | `--where "age > 25"` |
 | `--order-by` | Сортировка | `--order-by "balance DESC"` |
 | `--limit` | Лимит записей | `--limit 100` |
 | `--offset` | Пропустить записей | `--offset 50` |
@@ -874,6 +874,39 @@ export MERCURY_SERVER_SECRET=dev-secret
 
 > **Важно:** Для проверки NULL всегда используй `IS NULL` / `IS NOT NULL`.
 > Конструкция `field = NULL` в SQL некорректна — всегда возвращает false.
+
+**Список значений (IN / NOT IN):**
+```bash
+--where "status IN (active,pending,review)"
+--where "dept_id IN (10,11,12)"
+--where "role NOT IN (guest,banned)"
+```
+
+Работает как с числами, так и со строками. Скобки обязательны.
+
+**Диапазон (BETWEEN):**
+```bash
+--where "age BETWEEN 18 AND 65"
+--where "salary BETWEEN 50000 AND 150000"
+```
+
+**Поиск по шаблону (LIKE):**
+```bash
+--where "email LIKE '%@gmail.com'"
+--where "name LIKE 'Иван%'"
+```
+
+**Несколько `--where` флагов (AND):**
+
+Каждый `--where` добавляет отдельное условие; все условия объединяются через AND:
+```bash
+./tdtpcli --export staff \
+  --where "dept_id IN (10,11,12)" \
+  --where "employment_type IN (1,2)" \
+  --where "salary > 30000"
+```
+
+Эквивалентно: `WHERE dept_id IN (10,11,12) AND employment_type IN (1,2) AND salary > 30000`
 
 ### Сортировка
 

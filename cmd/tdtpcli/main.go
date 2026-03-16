@@ -552,7 +552,7 @@ func main() {
 	}
 
 	// Build TDTQL query from flags
-	query, err := BuildTDTQLQuery(*flags.Where, *flags.OrderBy, *flags.Limit, *flags.Offset)
+	query, err := BuildTDTQLQuery([]string(flags.Where), *flags.OrderBy, *flags.Limit, *flags.Offset)
 	if err != nil {
 		fatal("Failed to build query: %v", err)
 	}
