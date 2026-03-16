@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
@@ -184,23 +185,36 @@ func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.
 // ExportTableWithQuery экспортирует таблицу с фильтрацией через TDTQL
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, query *packet.Query, sender, recipient string) ([]*packet.DataPacket, error) {
-	// Получаем схему
-	pkgSchema, err := a.GetTableSchema(ctx, tableName)
+	// Получаем полную схему
+	fullSchema, err := a.GetTableSchema(ctx, tableName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Валидация и нормализация полей запроса (критично для quoted identifiers)
+	// Применяем проекцию колонок если задана (--fields)
+	// pkgSchema — схема для чтения строк (только запрошенные поля)
+	// fullSchema — полная схема (нужна для валидации WHERE/ORDER BY)
+	pkgSchema := fullSchema
+	var fieldIndices []int
+	if query != nil && len(query.Fields) > 0 {
+		pkgSchema, fieldIndices, err = base.FilterSchemaByFields(fullSchema, query.Fields)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Валидация и нормализация полей запроса (по полной схеме — WHERE/ORDER BY могут использовать любые поля)
 	executor := tdtql.NewExecutor()
-	if err := executor.ValidateQuery(query, pkgSchema); err != nil {
+	if err := executor.ValidateQuery(query, fullSchema); err != nil {
 		return nil, err
 	}
-	executor.NormalizeQueryFields(query, pkgSchema)
+	executor.NormalizeQueryFields(query, fullSchema)
 
 	// Пробуем транслировать TDTQL → SQL для оптимизации
 	sqlGenerator := tdtql.NewSQLGenerator()
 	if sqlGenerator.CanTranslateToSQL(query) {
 		// Оптимизированный путь: фильтрация на уровне SQL
+		// GenerateSQL использует query.Fields для SELECT колонок
 		sql, err := sqlGenerator.GenerateSQL(tableName, query)
 		if err == nil {
 			// Добавляем schema если не public
@@ -211,7 +225,7 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 				sql = strings.Replace(sql, " FROM "+tableName+" ", " FROM "+quotedTable+" ", 1)
 			}
 
-			// Выполняем SQL запрос напрямую
+			// Выполняем SQL запрос с pkgSchema (только запрошенные колонки)
 			rows, err := a.readRowsWithSQL(ctx, sql, pkgSchema)
 			if err == nil {
 				// Создаем QueryContext с исправленной pagination logic
@@ -266,15 +280,23 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string, qu
 		}
 	}
 
-	// Фильтруем in-memory (executor уже создан выше)
-	result, err := executor.Execute(query, allRows, pkgSchema)
+	// Фильтруем in-memory по полной схеме (executor уже создан выше)
+	result, err := executor.Execute(query, allRows, fullSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
+	// Применяем проекцию колонок если задана (после фильтрации)
+	projectedRows := result.FilteredRows
+	projectedSchema := fullSchema
+	if len(fieldIndices) > 0 {
+		projectedRows = base.ProjectRows(result.FilteredRows, fieldIndices)
+		projectedSchema = pkgSchema
+	}
+
 	// Генерируем Response пакеты
 	generator := packet.NewGenerator()
-	return generator.GenerateResponse(tableName, packet.InReplyToDirectExport, pkgSchema, result.FilteredRows, result.QueryContext, sender, recipient)
+	return generator.GenerateResponse(tableName, packet.InReplyToDirectExport, projectedSchema, projectedRows, result.QueryContext, sender, recipient)
 }
 
 // readRowsWithSQL выполняет SQL запрос и возвращает строки
