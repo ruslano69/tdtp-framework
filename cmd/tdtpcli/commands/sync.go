@@ -18,6 +18,7 @@ type SyncOptions struct {
 	TrackingField  string
 	CheckpointFile string
 	BatchSize      int
+	Fields         []string // Column projection; tracking field is always included automatically
 	ProcessorMgr   ProcessorManager
 }
 
@@ -47,6 +48,25 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 
 	// Build TDTQL query for incremental sync
 	query := buildIncrementalQuery(opts.TrackingField, lastSyncValue, opts.BatchSize)
+
+	// Apply column projection if requested, auto-including the tracking field
+	if len(opts.Fields) > 0 {
+		fields := opts.Fields
+		hasTracking := false
+		for _, f := range fields {
+			if strings.EqualFold(f, opts.TrackingField) {
+				hasTracking = true
+				break
+			}
+		}
+		if !hasTracking {
+			fields = append(fields, opts.TrackingField)
+		}
+		if query == nil {
+			query = packet.NewQuery()
+		}
+		query.Fields = fields
+	}
 
 	// Create adapter
 	adapter, err := adapters.New(ctx, *config)

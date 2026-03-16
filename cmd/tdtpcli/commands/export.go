@@ -18,6 +18,7 @@ type ExportOptions struct {
 	TableName      string
 	OutputFile     string
 	Query          *packet.Query
+	Fields         []string // Column projection: nil/empty = all columns
 	ProcessorMgr   ProcessorManager
 	Compress       bool
 	CompressLevel  int
@@ -50,6 +51,15 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	// Add includeReadOnly flag to context for MS SQL adapter
 	// (other adapters will ignore it)
 	ctx = mssql.WithIncludeReadOnlyFields(ctx, opts.ReadOnlyFields)
+
+	// If fields projection is requested, ensure we go through ExportTableWithQuery
+	// (even if no other query params are set) so the adapter can build SELECT f1,f2,...
+	if len(opts.Fields) > 0 {
+		if opts.Query == nil {
+			opts.Query = packet.NewQuery()
+		}
+		opts.Query.Fields = opts.Fields
+	}
 
 	// Export with or without query
 	var packets []*packet.DataPacket

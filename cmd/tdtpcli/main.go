@@ -98,6 +98,7 @@ func routeCommand(
 				TableName:      *flags.Export,
 				OutputFile:     determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
 				Query:          query,
+				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
 				Compress:       compress,
 				CompressLevel:  compressLevel,
@@ -126,6 +127,7 @@ func routeCommand(
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
 				FilePath:     *flags.Import,
 				TargetTable:  *flags.Table,
+				Fields:       splitCommaSeparated(*flags.Fields),
 				Strategy:     strategy,
 				ProcessorMgr: procMgr,
 			})
@@ -308,6 +310,7 @@ func routeCommand(
 				TrackingField:  *flags.TrackingField,
 				CheckpointFile: *flags.CheckpointFile,
 				BatchSize:      *flags.BatchSize,
+				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
 			})
 		})
@@ -552,6 +555,17 @@ func main() {
 	query, err := BuildTDTQLQuery(*flags.Where, *flags.OrderBy, *flags.Limit, *flags.Offset)
 	if err != nil {
 		fatal("Failed to build query: %v", err)
+	}
+
+	// Inject column projection into query when --fields is specified.
+	// This covers export-broker, export-xlsx and any other path that
+	// receives *packet.Query directly. For --export and --import the
+	// fields are also propagated via ExportOptions/ImportOptions.
+	if *flags.Fields != "" {
+		if query == nil {
+			query = packet.NewQuery()
+		}
+		query.Fields = splitCommaSeparated(*flags.Fields)
 	}
 
 	// Route commands with production features and processors

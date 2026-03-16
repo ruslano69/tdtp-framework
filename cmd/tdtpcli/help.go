@@ -69,6 +69,7 @@ func PrintShortHelp() {
 	fmt.Println("    --order-by <fields>        ORDER BY clause")
 	fmt.Println("    --limit <n>                Rows: +N = first N, -N = last N (tail)")
 	fmt.Println("    --offset <n>               Skip N rows")
+	fmt.Println("    --fields <col1,col2>       Column projection: export/import only listed columns")
 	fmt.Println()
 	fmt.Println("  HTML Viewer:")
 	fmt.Println("    --open                     Open in browser")
@@ -173,6 +174,9 @@ func PrintHelp() {
 	fmt.Println("    --order-by <fields>        ORDER BY clause (e.g., 'name ASC, age DESC')")
 	fmt.Println("    --limit <n>                LIMIT rows: positive = first N, negative = last N (like tail -n)")
 	fmt.Println("    --offset <n>               OFFSET number of rows to skip")
+	fmt.Println("    --fields <col1,col2,...>   Column projection: export only listed columns (e.g. 'id,email,status')")
+	fmt.Println("                               For --import: whitelist — only these columns are written to DB")
+	fmt.Println("                               For --sync-incremental: tracking field is always included automatically")
 	fmt.Println()
 
 	fmt.Println("  XLSX Options:")
@@ -237,6 +241,14 @@ func PrintHelp() {
 
 	fmt.Println("  # Export with filters")
 	fmt.Println("  tdtpcli --export orders --where 'status = active' --limit 100")
+	fmt.Println()
+
+	fmt.Println("  # Export only specific columns (column projection)")
+	fmt.Println("  tdtpcli --export clients --fields id,email,status --output clients_slim.tdtp.xml")
+	fmt.Println()
+
+	fmt.Println("  # Import only specific columns from a wide TDTP file")
+	fmt.Println("  tdtpcli --import clients_full.tdtp.xml --fields id,email,status --table clients_slim")
 	fmt.Println()
 
 	fmt.Println("  # Export with compression")
