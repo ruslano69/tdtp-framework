@@ -186,12 +186,12 @@ func filterSchemaByFields(full packet.Schema, fields []string) (packet.Schema, [
 		nameToIdx[strings.ToLower(f.Name)] = i
 	}
 
-	filtered := packet.Schema{TableName: full.TableName}
+	var filtered packet.Schema
 	indices := make([]int, 0, len(fields))
 	for _, name := range fields {
 		idx, ok := nameToIdx[strings.ToLower(name)]
 		if !ok {
-			return packet.Schema{}, nil, fmt.Errorf("field '%s' not found in table '%s'", name, full.TableName)
+			return packet.Schema{}, nil, fmt.Errorf("field '%s' not found in schema", name)
 		}
 		filtered.Fields = append(filtered.Fields, full.Fields[idx])
 		indices = append(indices, idx)
