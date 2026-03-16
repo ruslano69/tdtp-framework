@@ -8,21 +8,33 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
-// BuildTDTQLQuery constructs a packet.Query from command-line flags
-func BuildTDTQLQuery(where, orderBy string, limit, offset int) (*packet.Query, error) {
-	if where == "" && orderBy == "" && limit == 0 && offset == 0 {
+// BuildTDTQLQuery constructs a packet.Query from command-line flags.
+// wheres is a slice of WHERE clauses collected from repeated --where flags;
+// they are combined with AND at the top level.
+func BuildTDTQLQuery(wheres []string, orderBy string, limit, offset int) (*packet.Query, error) {
+	if len(wheres) == 0 && orderBy == "" && limit == 0 && offset == 0 {
 		return nil, nil
 	}
 
 	query := packet.NewQuery()
 
-	// Parse WHERE clause
-	if where != "" {
-		filters, err := parseWhereClause(where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse WHERE clause: %w", err)
+	// Parse and combine WHERE clauses
+	if len(wheres) > 0 {
+		parsed := make([]*packet.Filters, 0, len(wheres))
+		for _, w := range wheres {
+			w = strings.TrimSpace(w)
+			if w == "" {
+				continue
+			}
+			f, err := parseWhereClause(w)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse WHERE clause %q: %w", w, err)
+			}
+			parsed = append(parsed, f)
 		}
-		query.Filters = filters
+		if len(parsed) > 0 {
+			query.Filters = combineFiltersWithAND(parsed)
+		}
 	}
 
 	// Parse ORDER BY clause
@@ -43,6 +55,28 @@ func BuildTDTQLQuery(where, orderBy string, limit, offset int) (*packet.Query, e
 	}
 
 	return query, nil
+}
+
+// combineFiltersWithAND merges multiple parsed filter clauses into a single
+// top-level AND group. Each clause from a separate --where flag is an operand.
+func combineFiltersWithAND(parsed []*packet.Filters) *packet.Filters {
+	if len(parsed) == 1 {
+		return parsed[0]
+	}
+
+	top := &packet.LogicalGroup{}
+	for _, f := range parsed {
+		if f.And != nil {
+			// Merge direct filters and nested groups into the top AND
+			top.Filters = append(top.Filters, f.And.Filters...)
+			top.And = append(top.And, f.And.And...)
+			top.Or = append(top.Or, f.And.Or...)
+		} else if f.Or != nil {
+			// OR clause becomes a nested sub-group inside the top AND
+			top.Or = append(top.Or, *f.Or)
+		}
+	}
+	return &packet.Filters{And: top}
 }
 
 // parseWhereClause parses a simple WHERE clause into packet.Filters
@@ -139,6 +173,19 @@ func parseSimpleFilter(condition string) (packet.Filter, error) {
 			}
 			value = strings.Trim(strings.TrimSpace(andParts[0]), "'\"")
 			value2 = strings.Trim(strings.TrimSpace(andParts[1]), "'\"")
+		} else if strings.TrimSpace(op) == "IN" || strings.TrimSpace(op) == "NOT IN" {
+			// Strip outer parens: IN (10,11,12) → "10,11,12"
+			// Also handle quoted strings: IN ('a','b') → "a,b"
+			inner := strings.TrimSpace(valuePart)
+			inner = strings.TrimPrefix(inner, "(")
+			inner = strings.TrimSuffix(inner, ")")
+			// Strip quotes from each element
+			parts := strings.Split(inner, ",")
+			cleaned := make([]string, len(parts))
+			for i, p := range parts {
+				cleaned[i] = strings.Trim(strings.TrimSpace(p), "'\"")
+			}
+			value = strings.Join(cleaned, ",")
 		} else {
 			// Remove quotes if present
 			value = strings.Trim(valuePart, "'\"")
