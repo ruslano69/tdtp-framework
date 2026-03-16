@@ -895,7 +895,6 @@ go test -v ./pkg/core/packet/
 - `--inspect` command: display TDTP file structure and metadata without full parse
 - `--compact` format support: carry-forward encoding for repeated field values
 - TDTP XML v1.3.1 spec: special values `[NULL]`, `[+INF]`, `[-INF]`, `[NaN]` with full cross-adapter support
-- RDP/RDPTCLI protocol improvements and stability fixes
 
 ### v1.6.0
 - HTML Viewer (`--to-html`, `--open`, `--row`)
