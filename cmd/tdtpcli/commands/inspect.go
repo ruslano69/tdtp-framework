@@ -142,35 +142,39 @@ func formatInspectFilter(pkt *packet.DataPacket) string {
 	return "none"
 }
 
-// detectSpecialValues scans the first 5 rows for masked/redacted patterns.
+// detectSpecialValues reads SpecialValues markers from the schema (v1.3.1).
+// Schema is in the XML header and always available — even for compressed packets.
 func detectSpecialValues(pkt *packet.DataPacket) string {
-	if pkt.Data.Compression != "" {
-		// Data is compressed — can't scan without decompressing; skip
-		return "unknown (compressed)"
-	}
-
-	rows := pkt.Data.Rows
-	if len(rows) > 5 {
-		rows = rows[:5]
-	}
-
-	combined := ""
-	for _, r := range rows {
-		combined += r.Value + "|"
-	}
-
 	var found []string
-	if strings.Contains(combined, "***") {
-		found = append(found, "masked(***)")
+	seen := make(map[string]bool)
+
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			found = append(found, s)
+		}
 	}
-	if strings.Contains(combined, "XXX") {
-		found = append(found, "masked(XXX)")
-	}
-	if strings.Contains(combined, "[MASKED]") || strings.Contains(combined, "[REDACTED]") {
-		found = append(found, "redacted")
-	}
-	if strings.Contains(combined, "NULL") || strings.Contains(combined, "||") {
-		found = append(found, "nulls")
+
+	for _, f := range pkt.Schema.Fields {
+		sv := f.SpecialValues
+		if sv == nil {
+			continue
+		}
+		if sv.Null != nil {
+			add("nulls")
+		}
+		if sv.Infinity != nil {
+			add("+inf")
+		}
+		if sv.NegInfinity != nil {
+			add("-inf")
+		}
+		if sv.NaN != nil {
+			add("nan")
+		}
+		if sv.NoDate != nil {
+			add("no_date")
+		}
 	}
 
 	if len(found) == 0 {
