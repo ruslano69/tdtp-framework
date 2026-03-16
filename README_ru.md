@@ -327,6 +327,7 @@ security:
 
 **File:**
 ```
+--inspect <file>           Вывод YAML-метаданных TDTP файла (без конфига и БД)
 --diff <file-a> <file-b>   Сравнение двух TDTP файлов
 --merge <files>            Слияние нескольких TDTP файлов
 --to-html <file>           Конвертация TDTP в HTML viewer
@@ -376,6 +377,10 @@ security:
 --order-by <fields>        ORDER BY (пример: 'name ASC, age DESC')
 --limit <n>                Лимит строк: +N = первые N, -N = последние N (как tail)
 --offset <n>               Пропуск N строк
+--fields <col1,col2,...>   Проекция колонок: экспорт/импорт только указанных полей
+                           При --export/--export-broker/--export-xlsx: SELECT col1,col2 FROM ...
+                           При --import: whitelist — в БД записываются только эти колонки
+                           При --sync-incremental: tracking field добавляется автоматически
 ```
 
 **HTML Viewer:**
@@ -568,6 +573,18 @@ tdtpcli --list --config pg.yaml
 
 # Экспорт таблицы
 tdtpcli --export users --output users.xml
+
+# Просмотр метаданных TDTP файла (без подключения к БД)
+tdtpcli --inspect users.xml
+
+# Экспорт только нужных колонок (проекция)
+tdtpcli --export clients --fields id,email,status --output clients_slim.xml
+
+# Экспорт с проекцией + фильтр + сжатие
+tdtpcli --export orders --fields order_id,amount,status --where 'status = active' --compress
+
+# Импорт только части колонок из широкого TDTP файла
+tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
 
 # Экспорт с фильтрами и сжатием
 tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress

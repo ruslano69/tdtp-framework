@@ -373,6 +373,7 @@ security:
 
 **File:**
 ```
+--inspect <file>           Print YAML metadata summary of a TDTP file (no config needed)
 --diff <file-a> <file-b>   Compare two TDTP files
 --merge <files>            Merge multiple TDTP files
 --to-html <file>           Convert TDTP to HTML viewer
@@ -433,6 +434,10 @@ security:
 --order-by <fields>        ORDER BY (e.g. 'name ASC, age DESC')
 --limit <n>                Row limit: +N = first N, -N = last N (like tail)
 --offset <n>               Skip N rows
+--fields <col1,col2,...>   Column projection: export/import only listed columns
+                           On --export/--export-broker/--export-xlsx: SELECT col1,col2 FROM ...
+                           On --import: whitelist — only these columns written to DB
+                           On --sync-incremental: tracking field auto-included
 ```
 
 **HTML Viewer:**
@@ -627,6 +632,18 @@ tdtpcli --list --config pg.yaml
 
 # Export table
 tdtpcli --export users --output users.xml
+
+# Inspect TDTP file metadata (no database connection needed)
+tdtpcli --inspect users.xml
+
+# Export only specific columns (column projection)
+tdtpcli --export clients --fields id,email,status --output clients_slim.xml
+
+# Export with column projection + filter + compression
+tdtpcli --export orders --fields order_id,amount,status --where 'status = active' --compress
+
+# Import only specific columns from a wide TDTP file
+tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
 
 # Export with filters and compression
 tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
