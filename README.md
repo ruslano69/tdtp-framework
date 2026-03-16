@@ -891,6 +891,8 @@ go test -v ./pkg/core/packet/
 
 ### v1.7.1-beta (current)
 - `--where` conditions for SQL filtering on export (repeatable flag, `IN (...)` support)
+- `--fields` column projection: export only specified columns
+- `--inspect` command: display TDTP file structure and metadata without full parse
 - `--compact` format support: carry-forward encoding for repeated field values
 - TDTP XML v1.3.1 spec: special values `[NULL]`, `[+INF]`, `[-INF]`, `[NaN]` with full cross-adapter support
 - RDP/RDPTCLI protocol improvements and stability fixes
