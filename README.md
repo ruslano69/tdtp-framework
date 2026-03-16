@@ -430,7 +430,12 @@ security:
 
 **TDTQL Filters:**
 ```
---where <condition>        WHERE condition (e.g. 'age > 18 AND status = active')
+--where <condition>        WHERE condition; repeatable — each flag is combined with AND
+                           Operators: = != < > >= <= IN NOT IN BETWEEN LIKE IS NULL IS NOT NULL
+                           Single:    --where 'age > 18'
+                           IN list:   --where 'status IN (active,pending)'
+                                      --where 'dept_id IN (10,11,12)'
+                           Multiple:  --where 'dept_id IN (10,11)' --where 'salary > 50000'
 --order-by <fields>        ORDER BY (e.g. 'name ASC, age DESC')
 --limit <n>                Row limit: +N = first N, -N = last N (like tail)
 --offset <n>               Skip N rows
@@ -647,6 +652,12 @@ tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
 
 # Export with filters and compression
 tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
+
+# Filter by list of values (IN operator)
+tdtpcli --export staff --where 'dept_id IN (10,11,12)'
+
+# Multiple --where flags combined with AND
+tdtpcli --export staff --where 'dept_id IN (10,11,12)' --where 'employment_type IN (1,2)'
 
 # Export last 50 rows (tail mode)
 tdtpcli --export logs --order-by 'created_at DESC' --limit -50

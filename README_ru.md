@@ -373,7 +373,12 @@ security:
 
 **TDTQL Filters:**
 ```
---where <condition>        WHERE условие (пример: 'age > 18 AND status = active')
+--where <condition>        WHERE условие; повторяемый — несколько флагов объединяются через AND
+                           Операторы: = != < > >= <= IN NOT IN BETWEEN LIKE IS NULL IS NOT NULL
+                           Одиночный: --where 'age > 18'
+                           Список IN: --where 'status IN (active,pending)'
+                                      --where 'dept_id IN (10,11,12)'
+                           Несколько: --where 'dept_id IN (10,11)' --where 'salary > 50000'
 --order-by <fields>        ORDER BY (пример: 'name ASC, age DESC')
 --limit <n>                Лимит строк: +N = первые N, -N = последние N (как tail)
 --offset <n>               Пропуск N строк
@@ -588,6 +593,12 @@ tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
 
 # Экспорт с фильтрами и сжатием
 tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
+
+# Фильтрация по списку значений (оператор IN)
+tdtpcli --export staff --where 'dept_id IN (10,11,12)'
+
+# Несколько --where флагов объединяются через AND
+tdtpcli --export staff --where 'dept_id IN (10,11,12)' --where 'employment_type IN (1,2)'
 
 # Экспорт последних 50 строк (tail mode)
 tdtpcli --export logs --order-by 'created_at DESC' --limit -50
