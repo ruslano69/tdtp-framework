@@ -178,6 +178,13 @@ func (h *ExportHelper) ExportTableWithQuery(
 	)
 }
 
+// FilterSchemaByFields возвращает схему только с запрошенными полями и их индексы
+// в исходной полной схеме. Возвращает ошибку если поле не найдено.
+// Экспортируется для использования в адаптерах (например, mssql).
+func FilterSchemaByFields(full packet.Schema, fields []string) (packet.Schema, []int, error) {
+	return filterSchemaByFields(full, fields)
+}
+
 // filterSchemaByFields возвращает схему только с запрошенными полями и их индексы
 // в исходной полной схеме. Возвращает ошибку если поле не найдено.
 func filterSchemaByFields(full packet.Schema, fields []string) (packet.Schema, []int, error) {
@@ -197,6 +204,12 @@ func filterSchemaByFields(full packet.Schema, fields []string) (packet.Schema, [
 		indices = append(indices, idx)
 	}
 	return filtered, indices, nil
+}
+
+// ProjectRows возвращает только колонки по указанным индексам из каждой строки.
+// Экспортируется для использования в адаптерах (например, mssql).
+func ProjectRows(rows [][]string, indices []int) [][]string {
+	return projectRows(rows, indices)
 }
 
 // projectRows возвращает только колонки по указанным индексам из каждой строки.
