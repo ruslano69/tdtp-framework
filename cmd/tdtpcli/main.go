@@ -645,7 +645,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.ProcessRequest != "" ||
 		*flags.Diff != "" ||
 		*flags.Merge != "" ||
-		*flags.Inspect != ""
+		*flags.Inspect != "" ||
 		*flags.Listen
 }
 
