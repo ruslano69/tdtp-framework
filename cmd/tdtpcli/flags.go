@@ -53,6 +53,7 @@ type Flags struct {
 	OrderBy *string
 	Limit   *int
 	Offset  *int
+	Fields  *string // Column projection: comma-separated list (e.g. "id,email,status")
 
 	// Options
 	Config         *string
@@ -142,6 +143,7 @@ func ParseFlags() *Flags {
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
 	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")
+	f.Fields = flag.String("fields", "", "Column projection: comma-separated list of columns to select/import (e.g. 'id,email,status')")
 
 	// Options
 	f.Config = flag.String("config", "config.yaml", "Configuration file path")

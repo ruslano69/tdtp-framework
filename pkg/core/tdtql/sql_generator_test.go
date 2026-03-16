@@ -372,3 +372,130 @@ func TestSQLGenerator_IS_NOT_NULL(t *testing.T) {
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
+
+// --- Fields projection tests ---
+
+func TestSQLGenerator_Fields_SingleColumn(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{
+		Fields: []string{"email"},
+	}
+
+	result, err := generator.GenerateSQL("users", query)
+	if err != nil {
+		t.Fatalf("GenerateSQL failed: %v", err)
+	}
+
+	expected := "SELECT email FROM users"
+	if result != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, result)
+	}
+}
+
+func TestSQLGenerator_Fields_MultipleColumns(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{
+		Fields: []string{"id", "email", "status"},
+	}
+
+	result, err := generator.GenerateSQL("clients", query)
+	if err != nil {
+		t.Fatalf("GenerateSQL failed: %v", err)
+	}
+
+	expected := "SELECT id, email, status FROM clients"
+	if result != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, result)
+	}
+}
+
+func TestSQLGenerator_Fields_WithWhereClause(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{
+		Fields: []string{"id", "name"},
+		Filters: &packet.Filters{
+			And: &packet.LogicalGroup{
+				Filters: []packet.Filter{
+					{Field: "status", Operator: "eq", Value: "active"},
+				},
+			},
+		},
+	}
+
+	result, err := generator.GenerateSQL("users", query)
+	if err != nil {
+		t.Fatalf("GenerateSQL failed: %v", err)
+	}
+
+	if !contains(result, "SELECT id, name FROM users") {
+		t.Errorf("Expected 'SELECT id, name FROM users', got: %s", result)
+	}
+	if !contains(result, "WHERE status = 'active'") {
+		t.Errorf("Expected WHERE clause, got: %s", result)
+	}
+	if contains(result, "SELECT *") {
+		t.Errorf("Should not emit SELECT *, got: %s", result)
+	}
+}
+
+func TestSQLGenerator_Fields_WithOrderByAndLimit(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{
+		Fields: []string{"id", "balance"},
+		OrderBy: &packet.OrderBy{
+			Field:     "balance",
+			Direction: "DESC",
+		},
+		Limit: 10,
+	}
+
+	result, err := generator.GenerateSQL("accounts", query)
+	if err != nil {
+		t.Fatalf("GenerateSQL failed: %v", err)
+	}
+
+	if !contains(result, "SELECT id, balance FROM accounts") {
+		t.Errorf("Missing projection: %s", result)
+	}
+	if !contains(result, "ORDER BY balance DESC") {
+		t.Errorf("Missing ORDER BY: %s", result)
+	}
+	if !contains(result, "LIMIT 10") {
+		t.Errorf("Missing LIMIT: %s", result)
+	}
+}
+
+func TestSQLGenerator_Fields_EmptySliceFallsBackToStar(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{
+		Fields: []string{}, // empty → SELECT *
+	}
+
+	result, err := generator.GenerateSQL("users", query)
+	if err != nil {
+		t.Fatalf("GenerateSQL failed: %v", err)
+	}
+
+	if !contains(result, "SELECT * FROM users") {
+		t.Errorf("Empty Fields should produce SELECT *, got: %s", result)
+	}
+}
+
+func TestSQLGenerator_Fields_NilQueryFallsBackToStar(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	result, err := generator.GenerateSQL("users", nil)
+	if err != nil {
+		t.Fatalf("GenerateSQL failed: %v", err)
+	}
+
+	expected := "SELECT * FROM users"
+	if result != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s", expected, result)
+	}
+}

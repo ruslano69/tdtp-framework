@@ -22,7 +22,11 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 	}
 
 	var parts []string
-	parts = append(parts, fmt.Sprintf("SELECT * FROM %s", tableName))
+	if len(query.Fields) > 0 {
+		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(query.Fields, ", "), tableName))
+	} else {
+		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", tableName))
+	}
 
 	// WHERE clause
 	if query.Filters != nil {

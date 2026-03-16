@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -18,7 +19,8 @@ var multiPartPattern = regexp.MustCompile(`^(.+)_part_(\d+)_of_(\d+)(\..+)$`)
 // ImportOptions holds options for import operations
 type ImportOptions struct {
 	FilePath     string
-	TargetTable  string // Переопределяет имя таблицы из XML (опционально)
+	TargetTable  string   // Переопределяет имя таблицы из XML (опционально)
+	Fields       []string // Column whitelist: only import these columns (nil/empty = all)
 	Strategy     adapters.ImportStrategy
 	ProcessorMgr ProcessorManager
 }
@@ -69,6 +71,13 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
 			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
 				return fmt.Errorf("processor failed: %w", err)
+			}
+		}
+
+		// Apply field whitelist: keep only requested columns
+		if len(opts.Fields) > 0 {
+			if err := filterPacketFields(pkt, opts.Fields); err != nil {
+				return fmt.Errorf("field filter failed: %w", err)
 			}
 		}
 
@@ -299,4 +308,44 @@ func extractBatchID(messageID string) string {
 
 	// No "-P" found, return full MessageID (single-part export)
 	return messageID
+}
+
+// filterPacketFields modifies a packet in-place to keep only the specified columns.
+// Returns error if any requested field is not found in the packet schema.
+func filterPacketFields(pkt *packet.DataPacket, fields []string) error {
+	// Build case-insensitive index: field name → position in schema
+	nameToIdx := make(map[string]int, len(pkt.Schema.Fields))
+	for i, f := range pkt.Schema.Fields {
+		nameToIdx[strings.ToLower(f.Name)] = i
+	}
+
+	// Resolve indices and build filtered schema
+	indices := make([]int, 0, len(fields))
+	filteredFields := make([]packet.Field, 0, len(fields))
+	for _, name := range fields {
+		idx, ok := nameToIdx[strings.ToLower(name)]
+		if !ok {
+			return fmt.Errorf("field '%s' not found in packet schema (table '%s')", name, pkt.Header.TableName)
+		}
+		indices = append(indices, idx)
+		filteredFields = append(filteredFields, pkt.Schema.Fields[idx])
+	}
+
+	// Project each row: parse pipe-delimited values, keep only requested columns
+	parser := packet.NewParser()
+	projected := make([][]string, len(pkt.Data.Rows))
+	for i, row := range pkt.Data.Rows {
+		values := parser.GetRowValues(row)
+		proj := make([]string, len(indices))
+		for j, idx := range indices {
+			if idx < len(values) {
+				proj[j] = values[idx]
+			}
+		}
+		projected[i] = proj
+	}
+
+	pkt.Schema.Fields = filteredFields
+	pkt.Data = packet.RowsToData(projected)
+	return nil
 }
