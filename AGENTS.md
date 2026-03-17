@@ -27,17 +27,24 @@
 ```bash
 # Что есть в БД
 tdtpcli --list
-tdtpcli --list=order*          # фильтр по паттерну
+tdtpcli --list=order*          # glob фильтр
+tdtpcli --list=%log%           # SQL-стиль фильтр
+
+# Views (U* = updatable, R* = read-only)
+tdtpcli --list-views
+# U* orders_view   → можно импортировать
+# R* orders_summary → только экспорт
 
 # Структура таблицы (типы, ключи, subtypes)
 tdtpcli --inspect orders
 tdtpcli --inspect orders.tdtp.xml   # или TDTP файл
 
 # Посмотреть данные
-tdtpcli --export orders --limit 10             # первые 10
-tdtpcli --export orders --limit -1             # последняя 1 (tail mode)
-tdtpcli --export orders --limit -10            # последние 10
-tdtpcli --export orders --order-by "id ASC" --limit -1   # последняя по id
+tdtpcli --export orders --limit 10                          # первые 10
+tdtpcli --export orders --limit -1                          # последняя 1 (tail mode)
+tdtpcli --export orders --limit -10                         # последние 10
+tdtpcli --export orders --order-by "id ASC" --limit -1      # последняя по id
+tdtpcli --export orders --offset 100 --limit 50             # пагинация
 
 # Фильтрация
 tdtpcli --export orders --where 'status = active'
@@ -46,8 +53,27 @@ tdtpcli --export orders --where 'amount > 1000' --limit 5
 # Только нужные колонки
 tdtpcli --export orders --fields id,status,total_amount
 
+# Включить read-only поля (timestamp, computed, identity)
+tdtpcli --export orders --readonly-fields
+
+# Маскировка PII перед экспортом
+tdtpcli --export customers --mask email,phone --output safe.tdtp.xml
+
+# Сжатие для больших таблиц
+tdtpcli --export logs --compress --output logs.tdtp.xml          # zstd level 3
+tdtpcli --export logs --compress --compress-level 19 --output logs.tdtp.xml  # архив
+
 # Сохранить в файл
 tdtpcli --export orders --limit 100 --output sample.tdtp.xml
+```
+
+### Создать конфиг с нуля
+
+```bash
+tdtpcli --create-config-pg     > pg.yaml
+tdtpcli --create-config-sqlite > sqlite.yaml
+tdtpcli --create-config-mysql  > mysql.yaml
+tdtpcli --create-config-mssql  > mssql.yaml
 ```
 
 ### Сравнение и слияние
@@ -56,7 +82,9 @@ tdtpcli --export orders --limit 100 --output sample.tdtp.xml
 tdtpcli --diff before.tdtp.xml after.tdtp.xml
 tdtpcli --diff a.xml b.xml --key-fields order_id --ignore-fields updated_at
 
-tdtpcli --merge file1.xml,file2.xml --output merged.xml
+# Стратегии слияния: union (default) | intersection | left | right | append
+tdtpcli --merge file1.xml,file2.xml,file3.xml --output merged.xml
+tdtpcli --merge old.xml,new.xml --merge-strategy right --show-conflicts
 ```
 
 ### ETL пайплайн (трансформация)
@@ -69,8 +97,21 @@ tdtpcli --pipeline etl.yaml --unsafe # полный SQL (только при н�
 ### Импорт результата
 
 ```bash
+# Стратегии: replace | ignore | fail | copy
 tdtpcli --import result.tdtp.xml --strategy replace
+tdtpcli --import result.tdtp.xml --strategy ignore   # не перезаписывать существующие
 tdtpcli --import result.tdtp.xml --table new_table_name
+
+# Импорт только нужных колонок (whitelist)
+tdtpcli --import wide.tdtp.xml --fields id,email,status --table slim_table
+```
+
+### Инкрементальная синхронизация
+
+```bash
+# Синхронизирует только новые/изменённые строки по tracking field
+tdtpcli --sync-incremental orders --tracking-field updated_at
+tdtpcli --sync-incremental orders --tracking-field updated_at --checkpoint-file orders.checkpoint.yaml
 ```
 
 ---
