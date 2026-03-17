@@ -509,7 +509,18 @@ func routeCommand(
 
 	// Inspect command — no DB connection required, runs directly
 	} else if *flags.Inspect != "" {
-		return commands.InspectFile(*flags.Inspect)
+		var inspectStorageCfg *storage.Config
+		if storage.IsRemote(*flags.Inspect) {
+			var uriBucket string
+			_, uriBucket, _, _ = storage.ParseURI(*flags.Inspect)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			inspectStorageCfg = &sc
+		}
+		return commands.InspectFile(ctx, *flags.Inspect, inspectStorageCfg)
 		// [BETA] Streaming consumer daemon — Kafka only
 	} else if *flags.Listen {
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
