@@ -29,12 +29,10 @@ sources:
         o.order_date,
         u.username,
         u.email,
-        -- Синтетический регион на основе первой буквы username
-        -- Замените на реальное поле region в вашей таблице
-        CASE LEFT(u.username, 1)
-          WHEN 'a' THEN 'NORTH'  WHEN 'b' THEN 'NORTH'  WHEN 'c' THEN 'NORTH'
-          WHEN 'd' THEN 'SOUTH'  WHEN 'e' THEN 'SOUTH'  WHEN 'f' THEN 'SOUTH'
-          WHEN 'g' THEN 'EAST'   WHEN 'h' THEN 'EAST'   WHEN 'i' THEN 'EAST'
+        CASE (REPLACE(u.username, 'user_', '')::int % 4)::text
+          WHEN '0' THEN 'NORTH'
+          WHEN '1' THEN 'SOUTH'
+          WHEN '2' THEN 'EAST'
           ELSE 'WEST'
         END AS region
       FROM orders o
@@ -79,11 +77,11 @@ output:
     compression: true          # zstd level 3 — ~3x меньше трафика
     destination: "s3://my-bucket/pipeline/orders_full.tdtp.xml"
     s3:
-      endpoint: "http://localhost:8333"    # SeaweedFS; для AWS оставь пустым
+      endpoint: "http://127.0.0.1:8333"    # SeaweedFS; для AWS оставь пустым
       region: "us-east-1"
       bucket: "my-bucket"
-      access_key: "my_access_key"
-      secret_key: "my_secret_key"
+      access_key: "anykey"
+      secret_key: "anysecret"
       disable_ssl: true                   # только для локального HTTP
 
 # ----------------------------------------------------------------------------

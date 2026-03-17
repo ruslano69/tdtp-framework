@@ -25,11 +25,11 @@ sources:
     dsn: "s3://my-bucket/pipeline/orders_full.tdtp.xml"
     multi_part: true           # на случай если pipeline 1 разбил на части
     s3:
-      endpoint: "http://localhost:8333"
+      endpoint: "http://127.0.0.1:8333"
       region: "us-east-1"
       bucket: "my-bucket"
-      access_key: "my_access_key"
-      secret_key: "my_secret_key"
+      access_key: "anykey"
+      secret_key: "anysecret"
       disable_ssl: true
 
 # ----------------------------------------------------------------------------
@@ -71,11 +71,11 @@ output:
     compression: true
     destination: "s3://my-bucket/pipeline/by_region/__REGION__/orders.tdtp.xml"
     s3:
-      endpoint: "http://localhost:8333"
+      endpoint: "http://127.0.0.1:8333"
       region: "us-east-1"
       bucket: "my-bucket"
-      access_key: "my_access_key"
-      secret_key: "my_secret_key"
+      access_key: "anykey"
+      secret_key: "anysecret"
       disable_ssl: true
 
 # ----------------------------------------------------------------------------
