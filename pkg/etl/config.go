@@ -87,6 +87,20 @@ type OutputConfig struct {
 	RabbitMQ *RabbitMQOutputConfig `yaml:"rabbitmq,omitempty"` // Конфигурация для RabbitMQ
 	Kafka    *KafkaOutputConfig    `yaml:"kafka,omitempty"`    // Конфигурация для Kafka
 	XLSX     *XLSXOutputConfig     `yaml:"xlsx,omitempty"`     // Конфигурация для XLSX
+
+	// Fallback — резервный канал доставки.
+	// Если primary-канал (Type) недоступен, tdtpcli автоматически переключается на fallback.
+	// Пример: primary=kafka, fallback=tdtp(s3://bucket/...) — данные не теряются при сбое брокера.
+	Fallback    *OutputConfig      `yaml:"fallback,omitempty"`
+	// Resilience — настройки circuit breaker для primary-канала.
+	// По умолчанию: max_failures=3, timeout_sec=60.
+	Resilience  *OutputResilienceConfig `yaml:"resilience,omitempty"`
+}
+
+// OutputResilienceConfig настраивает circuit breaker для primary-канала доставки.
+type OutputResilienceConfig struct {
+	MaxFailures int `yaml:"max_failures"` // Число последовательных сбоев до переключения (default: 3)
+	TimeoutSec  int `yaml:"timeout_sec"`  // Время в Open-состоянии до следующей probe (default: 60)
 }
 
 // XLSXOutputConfig определяет параметры экспорта в Excel формат
@@ -386,6 +400,16 @@ func (o *OutputConfig) Validate() error {
 		return fmt.Errorf("unsupported output type '%s', must be one of: tdtp, rabbitmq, kafka, xlsx", o.Type)
 	}
 
+	// Валидация резервного канала (рекурсивно, но без вложенного fallback)
+	if o.Fallback != nil {
+		if o.Fallback.Fallback != nil {
+			return fmt.Errorf("nested fallback is not supported (only one level allowed)")
+		}
+		if err := o.Fallback.Validate(); err != nil {
+			return fmt.Errorf("fallback: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -420,6 +444,21 @@ func (c *PipelineConfig) SetDefaults() {
 	if c.Output.Type == "tdtp" && c.Output.TDTP != nil {
 		if c.Output.TDTP.Format == "" {
 			c.Output.TDTP.Format = "xml"
+		}
+	}
+	if c.Output.Type == "tdtp" && c.Output.Fallback != nil && c.Output.Fallback.TDTP != nil {
+		if c.Output.Fallback.TDTP.Format == "" {
+			c.Output.Fallback.TDTP.Format = "xml"
+		}
+	}
+
+	// Defaults для resilience
+	if c.Output.Resilience != nil {
+		if c.Output.Resilience.MaxFailures == 0 {
+			c.Output.Resilience.MaxFailures = 3
+		}
+		if c.Output.Resilience.TimeoutSec == 0 {
+			c.Output.Resilience.TimeoutSec = 60
 		}
 	}
 

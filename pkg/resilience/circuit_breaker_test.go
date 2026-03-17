@@ -486,3 +486,89 @@ func TestCircuitBreakerGroup(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 }
+
+func TestCircuitBreaker_ExecuteWithImmediateFallback(t *testing.T) {
+	config := DefaultConfig("test-imm")
+	config.MaxFailures = 3
+	config.Timeout = 100 * time.Millisecond
+
+	cb, _ := New(config)
+	ctx := context.Background()
+	primaryErr := errors.New("primary down")
+
+	t.Run("fallback called on primary error", func(t *testing.T) {
+		fallbackCalled := false
+		var gotReason string
+
+		err := cb.ExecuteWithImmediateFallback(ctx,
+			func(ctx context.Context) error { return primaryErr },
+			func(ctx context.Context) error { fallbackCalled = true; return nil },
+			func(reason string) { gotReason = reason },
+		)
+
+		if err != nil {
+			t.Errorf("expected nil (fallback succeeded), got %v", err)
+		}
+		if !fallbackCalled {
+			t.Error("fallback was not called")
+		}
+		if gotReason == "" {
+			t.Error("onFallback reason was empty")
+		}
+	})
+
+	t.Run("no fallback when primary succeeds", func(t *testing.T) {
+		fallbackCalled := false
+		err := cb.ExecuteWithImmediateFallback(ctx,
+			func(ctx context.Context) error { return nil },
+			func(ctx context.Context) error { fallbackCalled = true; return nil },
+			nil,
+		)
+		if err != nil {
+			t.Errorf("expected nil, got %v", err)
+		}
+		if fallbackCalled {
+			t.Error("fallback should not be called when primary succeeds")
+		}
+	})
+
+	t.Run("circuit open skips primary entirely", func(t *testing.T) {
+		cb2, _ := New(config)
+		// Открываем circuit
+		for i := 0; i < int(config.MaxFailures); i++ {
+			_ = cb2.Execute(ctx, func(ctx context.Context) error { return errors.New("fail") })
+		}
+		if !cb2.IsOpen() {
+			t.Fatal("circuit should be open")
+		}
+
+		primaryCalled := false
+		fallbackCalled := false
+		err := cb2.ExecuteWithImmediateFallback(ctx,
+			func(ctx context.Context) error { primaryCalled = true; return nil },
+			func(ctx context.Context) error { fallbackCalled = true; return nil },
+			nil,
+		)
+		if err != nil {
+			t.Errorf("expected nil (fallback succeeded), got %v", err)
+		}
+		if primaryCalled {
+			t.Error("primary should not be called when circuit is open")
+		}
+		if !fallbackCalled {
+			t.Error("fallback should be called when circuit is open")
+		}
+	})
+
+	t.Run("error returned when no fallback provided", func(t *testing.T) {
+		cb3, _ := New(config)
+		err := cb3.ExecuteWithImmediateFallback(ctx,
+			func(ctx context.Context) error { return primaryErr },
+			nil,
+			nil,
+		)
+		if err == nil {
+			t.Error("expected error when no fallback and primary fails")
+		}
+	})
+}

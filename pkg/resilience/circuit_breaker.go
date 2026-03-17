@@ -92,6 +92,46 @@ func (cb *CircuitBreaker) ExecuteWithFallback(
 	return err
 }
 
+// ExecuteWithImmediateFallback - выполнить с fallback при любой ошибке основной функции.
+// В отличие от ExecuteWithFallback, переключается на fallback не только когда circuit уже открыт,
+// но и при первой же ошибке primary — правильное поведение для ETL-доставки:
+//
+//	попытка 1: primary → ошибка → fallback (CB: failures=1)
+//	попытка N: circuit OPEN → сразу fallback, primary не трогаем
+//
+// onFallback вызывается (если != nil) при каждом переключении с описанием причины.
+func (cb *CircuitBreaker) ExecuteWithImmediateFallback(
+	ctx context.Context,
+	fn ExecuteFunc,
+	fallback ExecuteFunc,
+	onFallback func(reason string),
+) error {
+	// Если circuit уже открыт — сразу на fallback, не трогая primary
+	if cb.IsOpen() {
+		if onFallback != nil {
+			onFallback("circuit open, skipping primary")
+		}
+		if fallback != nil {
+			return fallback(ctx)
+		}
+		return ErrCircuitOpen
+	}
+
+	err := cb.Execute(ctx, fn)
+	if err == nil {
+		return nil
+	}
+
+	// Любая ошибка primary → fallback
+	if fallback != nil {
+		if onFallback != nil {
+			onFallback(err.Error())
+		}
+		return fallback(ctx)
+	}
+	return err
+}
+
 // Call - альтернативное имя для Execute (более короткое)
 func (cb *CircuitBreaker) Call(ctx context.Context, fn ExecuteFunc) error {
 	return cb.Execute(ctx, fn)
