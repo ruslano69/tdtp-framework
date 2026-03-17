@@ -10,7 +10,7 @@
 - **Безопасность** - Zero Trust шифрование, TLS, аутентификация, audit trail
 - **Удобство** - простое API, понятная структура
 
-## Что реализовано (v1.7.1-beta)
+## Что реализовано (v1.8.0-beta)
 
 ### Core Modules
 
@@ -245,6 +245,70 @@ output:
 
 **Документация**: [docs/ETL_PIPELINE_GUIDE.md](docs/ETL_PIPELINE_GUIDE.md)
 
+---
+
+### Object Storage (pkg/storage)
+
+Поддержка S3-совместимых объектных хранилищ (AWS S3, SeaweedFS, MinIO, Ceph).
+
+**Поддерживаемые операции для всех CLI команд:**
+
+| Команда | S3 вход | S3 выход |
+|---------|---------|---------|
+| `--export` | — | `--output s3://bucket/key.xml` |
+| `--import` | `--import s3://bucket/key.xml` | — |
+| `--inspect` | `--inspect s3://bucket/key.xml` | — |
+| `--to-xlsx` | `--to-xlsx s3://bucket/in.xml` | `--output s3://bucket/out.xlsx` |
+| `--export-xlsx` | — | `--output s3://bucket/out.xlsx` |
+| ETL источник `tdtp-s3` | DSN `s3://bucket/key.xml` | — |
+
+**Многочастные наборы**: при импорте `s3://bucket/table.tdtp.xml` все части
+`table.tdtp_part_1_of_N.xml … table.tdtp_part_N_of_N.xml` обнаруживаются
+автоматически через листинг по префиксу — аналогично локальным файлам.
+
+**Все флаги экспорта прозрачно работают с S3:**
+- `--compress`, `--compress-level`, `--hash` — zstd + контрольная сумма XXH3
+- `--where`, `--fields`, `--limit`, `--order-by` — фильтрация до загрузки
+- `--compact` — формат v1.3.1
+
+**Конфигурация (`config.yaml`):**
+
+```yaml
+storage:
+  type: s3
+  s3:
+    endpoint: ""           # пусто = AWS S3; для SeaweedFS/MinIO/Ceph укажи адрес
+    region: us-east-1
+    bucket: my-bucket
+    access_key: AKIAIOSFODNN7EXAMPLE
+    secret_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    disable_ssl: false     # true для локальных HTTP-эндпоинтов
+```
+
+URI вида `s3://bucket/key` в `--output` / `--import` переопределяет поле `bucket` из конфига —
+один конфиг может адресовать несколько бакетов.
+
+**ETL-источник `tdtp-s3`:**
+
+```yaml
+sources:
+  - name: users_archive
+    type: tdtp-s3
+    dsn: "s3://my-bucket/exports/users.tdtp.xml"
+    multi_part: true       # автоматически загрузить все части _part_N_of_M
+    s3:
+      endpoint: "http://seaweedfs:8333"
+      region: us-east-1
+      access_key: my_key
+      secret_key: my_secret
+      disable_ssl: true
+```
+
+**Build tag:** S3-драйвер включён по умолчанию; отключить через `-tags nos3`
+для минимальных сборок без зависимости `aws-sdk-go-v2`.
+
+---
+
 ### Шифрование & Zero Trust (pkg/crypto, pkg/mercury)
 
 **Философия:** защищать нечего, если данные исчезают сразу после доставки.
@@ -328,9 +392,19 @@ security:
 **File:**
 ```
 --inspect <file>           Вывод YAML-метаданных TDTP файла (без конфига и БД)
+                           Принимает s3:// URI при наличии конфига storage
 --diff <file-a> <file-b>   Сравнение двух TDTP файлов
 --merge <files>            Слияние нескольких TDTP файлов
 --to-html <file>           Конвертация TDTP в HTML viewer
+```
+
+**Object Storage (S3):**
+```
+--export <table> --output s3://bucket/key.xml   Экспорт в S3 (многочастный автоматически)
+--import s3://bucket/key.xml                    Импорт из S3 (части _part_N_of_M найдутся сами)
+--inspect s3://bucket/key.xml                   Просмотр метаданных пакета из S3
+--to-xlsx s3://bucket/in.xml --output s3://...  TDTP из S3 → XLSX в S3
+--export-xlsx <table> --output s3://bucket/k    Таблица → XLSX напрямую в S3
 ```
 
 **XLSX:**
@@ -809,12 +883,24 @@ go test -v ./pkg/core/packet/
 - [x] `--batch`, `--readonly-fields` опции
 - [x] **Zero Trust шифрование**: AES-256-GCM + xZMercury (burn-on-read ключи, изящная деградация)
 
-### v1.7.1-beta (текущая)
+### v1.7.1-beta (завершено)
 - [x] `--where` условия для SQL-фильтрации при экспорте (повторяемый флаг, поддержка `IN (...)`)
 - [x] `--fields` проекция колонок: экспорт только указанных столбцов
 - [x] `--inspect` команда: отображение структуры и метаданных TDTP-файла без полного парсинга
 - [x] Поддержка формата `--compact`: carry-forward кодирование повторяющихся значений полей
 - [x] Спецификация TDTP XML v1.3.1: специальные значения `[NULL]`, `[+INF]`, `[-INF]`, `[NaN]` с полной кросс-адаптерной поддержкой
+
+### v1.8.0-beta (текущая)
+- [x] **Object Storage (S3)** — пакет `pkg/storage` с реестром драйверов и `aws-sdk-go-v2`
+  - `--export … --output s3://bucket/key` — выгрузка многочастного TDTP в S3
+  - `--import s3://bucket/key` — загрузка из S3 с автоматическим обнаружением всех `_part_N_of_M`
+  - `--inspect s3://bucket/key` — просмотр метаданных пакета из S3 (в памяти, без temp-файла)
+  - `--to-xlsx / --export-xlsx … --output s3://` — XLSX напрямую в S3 (temp-файл удаляется автоматически)
+  - `--to-xlsx s3://… --output s3://…` — TDTP из S3 → XLSX в S3
+  - ETL-источник `tdtp-s3`: загрузка сжатых многочастных TDTP-наборов из S3 в workspace
+  - Все существующие флаги прозрачны: `--compress`, `--hash`, `--where`, `--fields`, `--compact`
+  - Совместимо с SeaweedFS, MinIO, Ceph RGW, AWS S3 (path-style и virtual-hosted)
+  - Build tag `nos3` для исключения драйвера и зависимости `aws-sdk-go-v2`
 
 ### v2.0 (планируется)
 - [ ] Streaming export/import (TotalParts=0, "TCP для таблиц")

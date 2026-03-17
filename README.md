@@ -14,7 +14,7 @@
 
 ---
 
-## What's Implemented (v1.7.1-beta)
+## What's Implemented (v1.8.0-beta)
 
 ### Core Modules
 
@@ -285,6 +285,68 @@ Documentation: [`docs/ETL_PIPELINE_GUIDE.md`](docs/ETL_PIPELINE_GUIDE.md)
 
 ---
 
+### Object Storage (`pkg/storage`)
+
+S3-compatible object storage support (AWS S3, SeaweedFS, MinIO, Ceph).
+
+**Supported operations for all CLI commands:**
+
+| Command | S3 input | S3 output |
+|---------|----------|-----------|
+| `--export` | — | `--output s3://bucket/key.xml` |
+| `--import` | `--import s3://bucket/key.xml` | — |
+| `--inspect` | `--inspect s3://bucket/key.xml` | — |
+| `--to-xlsx` | `--to-xlsx s3://bucket/in.xml` | `--output s3://bucket/out.xlsx` |
+| `--export-xlsx` | — | `--output s3://bucket/out.xlsx` |
+| ETL `tdtp-s3` source | DSN `s3://bucket/key.xml` | — |
+
+**Multi-part sets**: when importing `s3://bucket/table.tdtp.xml`, all parts
+`table.tdtp_part_1_of_N.xml … table.tdtp_part_N_of_N.xml` are discovered
+automatically via prefix listing — same as local file discovery.
+
+**All export flags work transparently with S3:**
+- `--compress`, `--compress-level`, `--hash` — zstd + XXH3 checksum
+- `--where`, `--fields`, `--limit`, `--order-by` — filtering before upload
+- `--compact` — v1.3.1 compact format
+
+**Configuration (`config.yaml`):**
+
+```yaml
+storage:
+  type: s3
+  s3:
+    endpoint: ""           # empty = AWS S3; set for SeaweedFS/MinIO/Ceph
+    region: us-east-1
+    bucket: my-bucket
+    access_key: AKIAIOSFODNN7EXAMPLE
+    secret_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    disable_ssl: false     # set true for local HTTP endpoints
+```
+
+The `s3://bucket/key` URI in `--output` / `--import` overrides the `bucket` field in config,
+so one config can address multiple buckets.
+
+**ETL pipeline source `tdtp-s3`:**
+
+```yaml
+sources:
+  - name: users_archive
+    type: tdtp-s3
+    dsn: "s3://my-bucket/exports/users.tdtp.xml"
+    multi_part: true       # auto-discover all _part_N_of_M files
+    s3:
+      endpoint: "http://seaweedfs:8333"
+      region: us-east-1
+      access_key: my_key
+      secret_key: my_secret
+      disable_ssl: true
+```
+
+**Build tags:** the S3 driver is included by default; exclude with `-tags nos3` to
+drop the `aws-sdk-go-v2` dependency for minimal builds.
+
+---
+
 ### Encryption & Zero Trust (`pkg/crypto`, `pkg/mercury`)
 
 **Philosophy:** nothing to protect if data disappears immediately after delivery.
@@ -374,10 +436,20 @@ security:
 **File:**
 ```
 --inspect <file>           Print YAML metadata summary of a TDTP file (no config needed)
+                           Accepts s3:// URI when storage is configured
 --diff <file-a> <file-b>   Compare two TDTP files
 --merge <files>            Merge multiple TDTP files
 --to-html <file>           Convert TDTP to HTML viewer
 --to-compact <file>        Convert existing TDTP v1.x file to compact v1.3.1 format
+```
+
+**Object Storage (S3):**
+```
+--export <table> --output s3://bucket/key.xml   Export to S3 (multi-part automatic)
+--import s3://bucket/key.xml                    Import from S3 (multi-part auto-discovered)
+--inspect s3://bucket/key.xml                   Inspect packet from S3
+--to-xlsx s3://bucket/in.xml --output s3://...  Convert S3 TDTP → S3 XLSX
+--export-xlsx <table> --output s3://bucket/k    Export table → XLSX directly to S3
 ```
 
 **XLSX:**
@@ -581,6 +653,12 @@ tdtp-framework/
 │  ├─ kafka.go           Kafka integration
 │  └─ msmq.go            MSMQ integration (Windows)
 │
+├─ pkg/storage/          Object storage abstraction
+│  ├─ storage.go         ObjectStorage interface (Put/Get/List/Stat/Delete)
+│  ├─ factory.go         Driver registry + ParseURI / IsRemote helpers
+│  └─ s3/                S3 driver (aws-sdk-go-v2, UsePathStyle)
+│                        Compatible: AWS S3, SeaweedFS, MinIO, Ceph RGW
+│
 ├─ cmd/tdtpcli/          CLI utility
 │  ├─ main.go            Entry point
 │  ├─ help.go            Help information
@@ -723,6 +801,41 @@ sudo tdtpcli --pipeline pipeline.yaml --unsafe
 # Create configuration file
 tdtpcli --create-config-pg > config.yaml
 tdtpcli --create-config-mysql > mysql.yaml
+
+# --- Object Storage (S3 / SeaweedFS / MinIO) ---
+
+# Export table to S3 (multi-part automatic)
+tdtpcli --export users --output s3://my-bucket/exports/users.tdtp.xml
+
+# Export with compression + filter → S3
+tdtpcli --export orders \
+  --where "status = active" --where "amount > 1000" \
+  --compress --compress-level 3 \
+  --output s3://my-bucket/exports/orders_active.tdtp.xml
+
+# Export with checksum integrity
+tdtpcli --export users --compress --hash \
+  --output s3://my-bucket/exports/users.tdtp.xml
+
+# Import from S3 (all _part_N_of_M files discovered automatically)
+tdtpcli --import s3://my-bucket/exports/users.tdtp.xml --strategy replace
+
+# Import only selected columns from S3
+tdtpcli --import s3://my-bucket/exports/users.tdtp.xml \
+  --fields "id,email,balance" --table users_slim
+
+# Inspect a packet in S3 without downloading full data
+tdtpcli --inspect s3://my-bucket/exports/users.tdtp_part_1_of_6.xml
+
+# Export table directly to XLSX in S3
+tdtpcli --export-xlsx users --output s3://my-bucket/reports/users.xlsx
+
+# Convert local TDTP to XLSX and upload to S3
+tdtpcli --to-xlsx users.tdtp.xml --output s3://my-bucket/reports/users.xlsx
+
+# S3 → S3: convert compressed TDTP in S3 to XLSX in S3
+tdtpcli --to-xlsx s3://my-bucket/exports/users.tdtp_part_1_of_6.xml \
+  --output s3://my-bucket/reports/users_part1.xlsx
 ```
 
 ### Using in Code
@@ -899,12 +1012,24 @@ go test -v ./pkg/core/packet/
 - `--batch`, `--readonly-fields` options
 - Zero Trust encryption: AES-256-GCM + xZMercury (burn-on-read keys, graceful degradation)
 
-### v1.7.1-beta (current)
+### v1.7.1-beta (completed)
 - `--where` conditions for SQL filtering on export (repeatable flag, `IN (...)` support)
 - `--fields` column projection: export only specified columns
 - `--inspect` command: display TDTP file structure and metadata without full parse
 - `--compact` format support: carry-forward encoding for repeated field values
 - TDTP XML v1.3.1 spec: special values `[NULL]`, `[+INF]`, `[-INF]`, `[NaN]` with full cross-adapter support
+
+### v1.8.0 (current)
+- **Object Storage (S3)** — `pkg/storage` with driver registry and `aws-sdk-go-v2`
+  - `--export … --output s3://bucket/key` — upload multi-part TDTP to S3
+  - `--import s3://bucket/key` — download + auto-discover all `_part_N_of_M` files
+  - `--inspect s3://bucket/key` — inspect packet metadata from S3 (in-memory, no temp file)
+  - `--to-xlsx / --export-xlsx … --output s3://` — XLSX output directly to S3 (temp file auto-deleted)
+  - `--to-xlsx s3://… --output s3://…` — S3 TDTP → S3 XLSX (temp download + upload)
+  - ETL pipeline source type `tdtp-s3`: load compressed multi-part TDTP sets from S3 into workspace
+  - All existing flags transparent: `--compress`, `--hash`, `--where`, `--fields`, `--compact`
+  - Compatible with SeaweedFS, MinIO, Ceph RGW, AWS S3 (path-style and virtual-hosted)
+  - Build tag `nos3` to exclude driver and drop `aws-sdk-go-v2` dependency
 
 ### v2.0 (planned)
 - Streaming export/import (TotalParts=0, "TCP for tables")
@@ -1013,4 +1138,4 @@ MIT
 
 ---
 
-*Version: v1.7.1-beta | Last updated: 16.03.2026*
+*Version: v1.8.0-beta | Last updated: 17.03.2026*
