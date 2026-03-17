@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"gopkg.in/yaml.v3"
 )
 
@@ -92,13 +93,14 @@ type XLSXOutputConfig struct {
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
 type TDTPOutputConfig struct {
-	Format           string   `yaml:"format"`            // Формат: xml, json (в будущем)
-	Compression      bool     `yaml:"compression"`       // Использовать zstd сжатие
-	Destination      string   `yaml:"destination"`       // Путь к файлу
-	Encryption       bool     `yaml:"encryption"`        // Шифровать результат через xZMercury (AES-256-GCM)
-	Compact          bool     `yaml:"compact"`           // v1.3.1: compact format (fixed поля пишутся один раз на группу)
-	CompactTail      bool     `yaml:"compact_tail"`      // v1.3.1: tail-строка с явными fixed полями для потокового восстановления
-	FixedFields      []string `yaml:"fixed_fields"`      // v1.3.1: явный список fixed полей (пусто = auto-detect по _ prefix)
+	Format      string           `yaml:"format"`            // Формат: xml, json (в будущем)
+	Compression bool             `yaml:"compression"`       // Использовать zstd сжатие
+	Destination string           `yaml:"destination"`       // Путь к файлу или s3://bucket/key
+	Encryption  bool             `yaml:"encryption"`        // Шифровать результат через xZMercury (AES-256-GCM)
+	Compact     bool             `yaml:"compact"`           // v1.3.1: compact format
+	CompactTail bool             `yaml:"compact_tail"`      // v1.3.1: tail-строка
+	FixedFields []string         `yaml:"fixed_fields"`      // v1.3.1: явный список fixed полей
+	S3          *storage.S3Config `yaml:"s3,omitempty"`     // S3-совместимое хранилище (SeaweedFS, MinIO и т.п.)
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ
@@ -323,6 +325,15 @@ func (o *OutputConfig) Validate() error {
 		}
 		if o.TDTP.Format != "xml" && o.TDTP.Format != "json" {
 			return fmt.Errorf("tdtp.format must be 'xml' or 'json'")
+		}
+		// Если destination — remote URI, требуем S3-конфиг
+		if storage.IsRemote(o.TDTP.Destination) {
+			if o.TDTP.S3 == nil {
+				return fmt.Errorf("tdtp.s3 configuration is required when tdtp.destination is a remote URI (%s)", o.TDTP.Destination)
+			}
+			if o.TDTP.S3.AccessKey == "" || o.TDTP.S3.SecretKey == "" {
+				return fmt.Errorf("tdtp.s3.access_key and tdtp.s3.secret_key are required")
+			}
 		}
 
 	case "rabbitmq":

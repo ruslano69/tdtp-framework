@@ -15,6 +15,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 
 	// Database adapters - blank imports for init() registration
 	// SQLite is in a separate file (drivers_sqlite.go) with a build tag
@@ -87,6 +88,23 @@ func routeCommand(
 			compressLevel = config.Export.CompressLevel
 		}
 
+		outputFile := determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml")
+
+		// Resolve storage target: s3:// URI → object storage; otherwise local file.
+		var exportStorageCfg *storage.Config
+		exportStorageKey := ""
+		if IsRemoteURI(outputFile) {
+			var uriBucket string
+			_, uriBucket, exportStorageKey, _ = ParseStorageURI(outputFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			exportStorageCfg = &sc
+			outputFile = "" // not writing to local file
+		}
+
 		operation = audit.OpExport
 		metadata = map[string]string{
 			"command": "export",
@@ -97,7 +115,7 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
 			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
 				TableName:      *flags.Export,
-				OutputFile:     determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
+				OutputFile:     outputFile,
 				Query:          query,
 				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
@@ -108,6 +126,8 @@ func routeCommand(
 				Compact:        *flags.Compact,
 				FixedFields:    splitCommaSeparated(*flags.FixedFields),
 				CompactTail:    *flags.CompactTail,
+				StorageCfg:     exportStorageCfg,
+				StorageKey:     exportStorageKey,
 			})
 		})
 
@@ -115,6 +135,23 @@ func routeCommand(
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
 		if stratErr != nil {
 			return stratErr
+		}
+
+		importFile := *flags.Import
+
+		// Resolve storage source: s3:// URI → object storage; otherwise local file.
+		var importStorageCfg *storage.Config
+		importStorageKey := ""
+		if IsRemoteURI(importFile) {
+			var uriBucket string
+			_, uriBucket, importStorageKey, _ = ParseStorageURI(importFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			importStorageCfg = &sc
+			importFile = "" // not reading from local file
 		}
 
 		operation = audit.OpImport
@@ -126,11 +163,13 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
-				FilePath:     *flags.Import,
+				FilePath:     importFile,
 				TargetTable:  *flags.Table,
 				Fields:       splitCommaSeparated(*flags.Fields),
 				Strategy:     strategy,
 				ProcessorMgr: procMgr,
+				StorageCfg:   importStorageCfg,
+				StorageKey:   importStorageKey,
 			})
 		})
 
