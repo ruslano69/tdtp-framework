@@ -42,10 +42,10 @@ log "=== STEP 2: Fetching distinct regions from DB ==="
 if command -v psql >/dev/null 2>&1; then
     REGIONS=$(psql "$PG_DSN?sslmode=disable" -t -A -c "
         SELECT DISTINCT
-          CASE LEFT(u.username, 1)
-            WHEN 'a' THEN 'NORTH' WHEN 'b' THEN 'NORTH' WHEN 'c' THEN 'NORTH'
-            WHEN 'd' THEN 'SOUTH' WHEN 'e' THEN 'SOUTH' WHEN 'f' THEN 'SOUTH'
-            WHEN 'g' THEN 'EAST'  WHEN 'h' THEN 'EAST'  WHEN 'i' THEN 'EAST'
+          CASE (REPLACE(u.username, 'user_', '')::int % 4)::text
+            WHEN '0' THEN 'NORTH'
+            WHEN '1' THEN 'SOUTH'
+            WHEN '2' THEN 'EAST'
             ELSE 'WEST'
           END AS region
         FROM orders o JOIN users u ON o.user_id = u.id
