@@ -1,16 +1,20 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // ExportOptions holds options for export operations
@@ -29,6 +33,10 @@ type ExportOptions struct {
 	Compact     bool     // Enable compact format output
 	FixedFields []string // Explicit fixed field names; nil = auto-detect from _prefix
 	CompactTail bool     // Write tail row with all fixed fields explicit
+
+	// Object storage (S3/SeaweedFS). Non-nil → stream to object storage instead of local file.
+	StorageCfg *storage.Config // storage driver config with bucket
+	StorageKey string          // object key within the bucket
 }
 
 // ProcessorManager interface for applying data processors
@@ -129,8 +137,32 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		}
 	}
 
-	// Write to file or stdout
-	if opts.OutputFile == "" || opts.OutputFile == "-" {
+	// Write to S3, stdout, or local file
+	if opts.StorageCfg != nil {
+		// Stream to object storage (S3 / SeaweedFS)
+		store, err := storage.New(*opts.StorageCfg)
+		if err != nil {
+			return fmt.Errorf("failed to open storage: %w", err)
+		}
+		defer store.Close()
+
+		if len(packets) == 1 {
+			key := opts.StorageKey
+			if err := uploadPacketToStorage(ctx, store, packets[0], key); err != nil {
+				return err
+			}
+			fmt.Printf("✓ Uploaded to: s3://%s/%s\n", opts.StorageCfg.S3.Bucket, key)
+		} else {
+			for i, pkt := range packets {
+				key := generatePacketFilename(opts.StorageKey, i+1, len(packets))
+				if err := uploadPacketToStorage(ctx, store, pkt, key); err != nil {
+					return err
+				}
+				fmt.Printf("✓ Uploaded packet %d/%d to: s3://%s/%s\n",
+					i+1, len(packets), opts.StorageCfg.S3.Bucket, key)
+			}
+		}
+	} else if opts.OutputFile == "" || opts.OutputFile == "-" {
 		// Write to stdout
 		generator := packet.NewGenerator()
 		for _, pkt := range packets {
@@ -141,15 +173,13 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			fmt.Println(string(xml))
 		}
 	} else {
-		// Write to file(s)
+		// Write to local file(s)
 		if len(packets) == 1 {
-			// Single file
 			if err := writePacketToFile(packets[0], opts.OutputFile); err != nil {
 				return err
 			}
 			fmt.Printf("✓ Written to: %s\n", opts.OutputFile)
 		} else {
-			// Multiple files (packets)
 			for i, pkt := range packets {
 				filename := generatePacketFilename(opts.OutputFile, i+1, len(packets))
 				if err := writePacketToFile(pkt, filename); err != nil {
@@ -160,6 +190,44 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		}
 	}
 
+	return nil
+}
+
+// uploadPacketToStorage serialises pkt to XML and streams it to store via io.Pipe.
+// Metadata includes table name, row count, and checksum (if present).
+func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt *packet.DataPacket, key string) error {
+	generator := packet.NewGenerator()
+	xmlBytes, err := generator.ToXML(pkt, true)
+	if err != nil {
+		return fmt.Errorf("failed to marshal packet: %w", err)
+	}
+
+	meta := map[string]string{
+		"table":    pkt.Header.TableName,
+		"protocol": "TDTP 1.0",
+		"rows":     strconv.Itoa(len(pkt.Data.Rows)),
+	}
+	if pkt.Data.Checksum != "" {
+		meta["checksum"] = pkt.Data.Checksum
+	}
+
+	// io.Pipe: uploader reads from pr while we write to pw concurrently.
+	pr, pw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.Put(ctx, key, pr, meta)
+	}()
+
+	if _, err := io.Copy(pw, bytes.NewReader(xmlBytes)); err != nil {
+		pw.CloseWithError(err)
+		<-errCh
+		return fmt.Errorf("failed to write to storage pipe: %w", err)
+	}
+	pw.Close()
+
+	if err := <-errCh; err != nil {
+		return fmt.Errorf("storage Put failed: %w", err)
+	}
 	return nil
 }
 

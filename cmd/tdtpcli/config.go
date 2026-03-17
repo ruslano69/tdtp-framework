@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents the main configuration structure
 type Config struct {
 	Database   DatabaseConfig   `yaml:"database"`
+	Storage    storage.Config   `yaml:"storage,omitempty"`
 	Export     ExportConfig     `yaml:"export,omitempty"`
 	Tables     []string         `yaml:"tables,omitempty"`
 	Broker     BrokerConfig     `yaml:"broker,omitempty"`

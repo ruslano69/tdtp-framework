@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // multiPartPattern matches filenames produced by export: {base}_part_{N}_of_{total}{ext}
@@ -23,6 +25,10 @@ type ImportOptions struct {
 	Fields       []string // Column whitelist: only import these columns (nil/empty = all)
 	Strategy     adapters.ImportStrategy
 	ProcessorMgr ProcessorManager
+
+	// Object storage (S3/SeaweedFS). Non-nil → download from object storage instead of local file.
+	StorageCfg *storage.Config // storage driver config with bucket
+	StorageKey string          // object key within the bucket
 }
 
 // ImportFile imports a TDTP XML file (or multi-part set) to database.
@@ -31,19 +37,68 @@ type ImportOptions struct {
 // passed to adapter.ImportPackets — the framework handles temp table creation,
 // sequential insert of all packets, and atomic swap in one transaction.
 func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions) error {
-	// Detect multi-part set; fall back to single file
-	filePaths := discoverMultiPartFiles(opts.FilePath)
-	if filePaths == nil {
-		filePaths = []string{opts.FilePath}
+	// Collect raw data sources: either S3 objects or local files.
+	type dataSource struct {
+		label string
+		data  []byte
+	}
+
+	var sources []dataSource
+
+	if opts.StorageCfg != nil {
+		// Download from object storage
+		store, err := storage.New(*opts.StorageCfg)
+		if err != nil {
+			return fmt.Errorf("failed to open storage: %w", err)
+		}
+		defer store.Close()
+
+		keys := []string{opts.StorageKey}
+		// Check if this is a multi-part base key by listing the bucket with prefix
+		// (simple heuristic: try _part_1_of_* pattern)
+		if !strings.Contains(opts.StorageKey, "_part_") {
+			objs, err := store.List(ctx, opts.StorageKey+"_part_")
+			if err == nil && len(objs) > 0 {
+				keys = make([]string, len(objs))
+				for i, o := range objs {
+					keys[i] = o.Key
+				}
+			}
+		}
+
+		for _, key := range keys {
+			fmt.Printf("Downloading '%s' from s3://%s...\n", key, opts.StorageCfg.S3.Bucket)
+			rc, err := store.Get(ctx, key)
+			if err != nil {
+				return fmt.Errorf("failed to get object %s: %w", key, err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				return fmt.Errorf("failed to read object %s: %w", key, err)
+			}
+			sources = append(sources, dataSource{label: "s3://" + opts.StorageCfg.S3.Bucket + "/" + key, data: data})
+		}
+	} else {
+		// Detect multi-part set; fall back to single file
+		filePaths := discoverMultiPartFiles(opts.FilePath)
+		if filePaths == nil {
+			filePaths = []string{opts.FilePath}
+		}
+		for _, fp := range filePaths {
+			data, err := os.ReadFile(fp)
+			if err != nil {
+				return fmt.Errorf("failed to read file: %w", err)
+			}
+			sources = append(sources, dataSource{label: fp, data: data})
+		}
 	}
 
 	// Read and parse all packets
-	packets := make([]*packet.DataPacket, 0, len(filePaths))
-	for _, fp := range filePaths {
-		data, err := os.ReadFile(fp)
-		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
-		}
+	packets := make([]*packet.DataPacket, 0, len(sources))
+	for _, src := range sources {
+		data := src.data
+		fp := src.label
 
 		fmt.Printf("Reading '%s'...\n", fp)
 
