@@ -1,19 +1,47 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
-// InspectFile reads a TDTP XML file and prints a clean YAML summary
-// suitable for LLM/agent consumption.
-func InspectFile(inputFile string) error {
-	data, err := os.ReadFile(inputFile)
-	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+// InspectFile reads a TDTP XML file (local or s3://) and prints a clean YAML summary
+// suitable for LLM/agent consumption. storageCfg may be nil for local files.
+func InspectFile(ctx context.Context, inputFile string, storageCfg *storage.Config) error {
+	var data []byte
+	var err error
+
+	if storage.IsRemote(inputFile) && storageCfg != nil {
+		_, uriBucket, key, _ := storage.ParseURI(inputFile)
+		cfg := *storageCfg
+		if uriBucket != "" {
+			cfg.S3.Bucket = uriBucket
+		}
+		store, openErr := storage.New(cfg)
+		if openErr != nil {
+			return fmt.Errorf("failed to open storage: %w", openErr)
+		}
+		defer store.Close()
+		rc, getErr := store.Get(ctx, key)
+		if getErr != nil {
+			return fmt.Errorf("failed to get s3 object %s: %w", key, getErr)
+		}
+		defer rc.Close()
+		data, err = io.ReadAll(rc)
+		if err != nil {
+			return fmt.Errorf("failed to read s3 object: %w", err)
+		}
+	} else {
+		data, err = os.ReadFile(inputFile)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
 	}
 
 	parser := packet.NewParser()

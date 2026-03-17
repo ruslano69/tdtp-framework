@@ -87,10 +87,19 @@ func (e *Executor) Execute(query *packet.Query, rows [][]string, schemaObj packe
 	}
 
 	// Применяем LIMIT
-	if limit > 0 && limit < len(filteredRows) {
-		filteredRows = filteredRows[:limit]
-		result.MoreAvailable = true
-		result.NextOffset = offset + limit
+	// Positive = first N; negative = last N (tail mode, like tail -n).
+	if limit > 0 {
+		if limit < len(filteredRows) {
+			filteredRows = filteredRows[:limit]
+			result.MoreAvailable = true
+			result.NextOffset = offset + limit
+		}
+	} else if limit < 0 {
+		n := -limit
+		if n < len(filteredRows) {
+			filteredRows = filteredRows[len(filteredRows)-n:]
+		}
+		result.MoreAvailable = false
 	} else {
 		result.MoreAvailable = false
 	}

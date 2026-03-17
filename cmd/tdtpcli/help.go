@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const version = "1.7.1-beta"
+const version = "1.8.0-beta"
 
 // PrintVersion prints version information
 func PrintVersion() {

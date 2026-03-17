@@ -47,19 +47,23 @@ type ResultLogConfig struct {
 	TTL      int    `yaml:"ttl"`      // TTL ключа в секундах (по умолчанию 3600)
 }
 
-// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc)
+// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc, TDTP-S3)
 type SourceConfig struct {
-	Name             string   `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
-	Type             string   `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc
-	DSN              string   `yaml:"dsn"`                // Data Source Name (строка подключения или путь к TDTP-файлу)
-	Query            string   `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc)
-	Timeout          int      `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
-	MultiPart        bool     `yaml:"multi_part"`         // Только для type: tdtp — загружать все части набора автоматически
-	MercuryURL       string   `yaml:"mercury_url"`        // Только для type: tdtp-enc — URL xZMercury (например "http://mercury:3000")
-	MercuryTimeoutMs int      `yaml:"mercury_timeout_ms"` // Только для type: tdtp-enc — таймаут обращения к xZMercury (по умолчанию 5000)
+	Name             string            `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
+	Type             string            `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3
+	DSN              string            `yaml:"dsn"`                // Data Source Name: строка подключения, путь к файлу или s3://bucket/key
+	Query            string            `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc/tdtp-s3)
+	Timeout          int               `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
+	MultiPart        bool              `yaml:"multi_part"`         // Для type: tdtp/tdtp-s3 — загружать все части набора автоматически
+	MercuryURL       string            `yaml:"mercury_url"`        // Только для type: tdtp-enc — URL xZMercury (например "http://mercury:3000")
+	MercuryTimeoutMs int               `yaml:"mercury_timeout_ms"` // Только для type: tdtp-enc — таймаут обращения к xZMercury (по умолчанию 5000)
 	// NoDateSentinels — список дат-заглушек для "нет даты" (DB-specific conventions).
 	// Пример для MSSQL: ["1900-01-01", "1753-01-01"]
-	NoDateSentinels  []string `yaml:"no_date_sentinels"`
+	NoDateSentinels  []string          `yaml:"no_date_sentinels"`
+	// S3 — конфигурация S3-совместимого хранилища (SeaweedFS, MinIO и т.п.).
+	// Используется только для type: tdtp-s3. DSN может быть s3://bucket/key (bucket перекрывает S3.Bucket)
+	// или просто ключом (путём к объекту) при заданном S3.Bucket.
+	S3               *storage.S3Config `yaml:"s3,omitempty"`
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -225,26 +229,38 @@ func (s *SourceConfig) Validate() error {
 		"mssql":    true,
 		"mysql":    true,
 		"sqlite":   true,
-		"tdtp":     true,     // TDTP XML/JSON file — DSN is the file path, query not required
-		"tdtp-enc": true,     // Encrypted TDTP file — requires mercury_url for key retrieval
+		"tdtp":     true,    // TDTP XML/JSON file — DSN is the file path, query not required
+		"tdtp-enc": true,    // Encrypted TDTP file — requires mercury_url for key retrieval
+		"tdtp-s3":  true,    // TDTP file in S3-compatible storage — DSN is s3://bucket/key or just key
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3", s.Type)
 	}
 
 	// query обязателен для DB-источников, для TDTP-файлов не нужен
-	if s.Type != "tdtp" && s.Type != "tdtp-enc" && s.Query == "" {
+	if s.Type != "tdtp" && s.Type != "tdtp-enc" && s.Type != "tdtp-s3" && s.Query == "" {
 		return fmt.Errorf("query is required for type '%s'", s.Type)
 	}
 
-	// multi_part имеет смысл только для обычного tdtp
-	if s.MultiPart && s.Type != "tdtp" {
-		return fmt.Errorf("multi_part is only supported for type 'tdtp'")
+	// multi_part имеет смысл только для tdtp и tdtp-s3
+	if s.MultiPart && s.Type != "tdtp" && s.Type != "tdtp-s3" {
+		return fmt.Errorf("multi_part is only supported for type 'tdtp' or 'tdtp-s3'")
 	}
 
 	// mercury_url обязателен для tdtp-enc
 	if s.Type == "tdtp-enc" && s.MercuryURL == "" {
 		return fmt.Errorf("mercury_url is required for type 'tdtp-enc'")
+	}
+
+	// Валидация tdtp-s3: нужны credentials (либо в dsn s3://bucket/key, либо в s3.*)
+	if s.Type == "tdtp-s3" {
+		// DSN должен быть либо s3://bucket/key, либо ключом при заданном s3.bucket
+		if !storage.IsRemote(s.DSN) && (s.S3 == nil || s.S3.Bucket == "") {
+			return fmt.Errorf("tdtp-s3: dsn must be s3://bucket/key URI or set s3.bucket")
+		}
+		if s.S3 == nil || s.S3.AccessKey == "" || s.S3.SecretKey == "" {
+			return fmt.Errorf("tdtp-s3: s3.access_key and s3.secret_key are required")
+		}
 	}
 
 	return nil

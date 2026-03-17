@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // multiPartRe matches filenames like: base_part_N_of_Total.ext
@@ -195,6 +199,115 @@ func loadEncryptedTDTPFile(ctx context.Context, source SourceConfig) (*packet.Da
 	return pkt, nil
 }
 
+// loadTDTPFromS3 скачивает TDTP-файл (или multi-part набор) из S3-совместимого
+// хранилища и возвращает распакованный DataPacket.
+//
+// DSN может быть:
+//   - полным URI: s3://bucket/path/to/file.tdtp.xml  (bucket берётся из URI)
+//   - ключом объекта: path/to/file.tdtp.xml          (bucket из source.S3.Bucket)
+//
+// Логика multi-part аналогична loadTDTPFile: если multi_part=true, функция
+// находит все части по суффиксу _part_N через store.List и объединяет их.
+func loadTDTPFromS3(ctx context.Context, source SourceConfig) (*packet.DataPacket, error) {
+	// Разбираем DSN: либо s3://bucket/key, либо просто ключ.
+	var bucket, key string
+	if storage.IsRemote(source.DSN) {
+		_, bucket, key, _ = storage.ParseURI(source.DSN)
+	} else {
+		key = source.DSN
+	}
+
+	// S3Config гарантированно не nil — валидатор это проверяет.
+	s3cfg := *source.S3
+	if bucket != "" {
+		// URI-bucket перекрывает значение из конфига (аналогично output).
+		s3cfg.Bucket = bucket
+	} else {
+		bucket = s3cfg.Bucket
+	}
+
+	if key == "" {
+		return nil, fmt.Errorf("tdtp-s3: object key is empty (check dsn)")
+	}
+
+	store, err := storage.New(storage.Config{Type: "s3", S3: s3cfg})
+	if err != nil {
+		return nil, fmt.Errorf("tdtp-s3: create storage driver: %w", err)
+	}
+	defer store.Close()
+
+	// Собираем список ключей для загрузки.
+	keys := []string{key}
+	if source.MultiPart && !containsPartSuffix(key) {
+		// Parts are named {base}_part_{N}_of_{total}{ext} — strip extension before "_part_".
+		keyExt := filepath.Ext(key)
+		keyBase := strings.TrimSuffix(key, keyExt)
+		objs, listErr := store.List(ctx, keyBase+"_part_")
+		if listErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: list parts for %q: %w", key, listErr)
+		}
+		if len(objs) > 0 {
+			sort.Slice(objs, func(i, j int) bool { return objs[i].Key < objs[j].Key })
+			keys = make([]string, len(objs))
+			for i, obj := range objs {
+				keys[i] = obj.Key
+			}
+		}
+	}
+
+	// Скачиваем и парсим каждую часть — аналогично loadTDTPFile.
+	parser := packet.NewParser()
+	var merged *packet.DataPacket
+
+	for _, k := range keys {
+		rc, getErr := store.Get(ctx, k)
+		if getErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: download s3://%s/%s: %w", bucket, k, getErr)
+		}
+		data, readErr := io.ReadAll(rc)
+		rc.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: read s3://%s/%s: %w", bucket, k, readErr)
+		}
+
+		pkt, parseErr := parser.ParseBytes(data)
+		if parseErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: parse s3://%s/%s: %w", bucket, k, parseErr)
+		}
+		if err := decompressTDTPPacket(pkt); err != nil {
+			return nil, fmt.Errorf("tdtp-s3: decompress s3://%s/%s: %w", bucket, k, err)
+		}
+		if pkt.Data.Compact {
+			if err := packet.ExpandCompactRows(pkt); err != nil {
+				return nil, fmt.Errorf("tdtp-s3: compact expand s3://%s/%s: %w", bucket, k, err)
+			}
+		}
+
+		if merged == nil {
+			merged = pkt
+		} else {
+			merged.Data.Rows = append(merged.Data.Rows, pkt.Data.Rows...)
+			merged.Header.RecordsInPart += pkt.Header.RecordsInPart
+		}
+	}
+
+	merged.Header.TableName = source.Name
+	return merged, nil
+}
+
+// containsPartSuffix проверяет, содержит ли ключ суффикс _part_ (уже является частью набора).
+func containsPartSuffix(key string) bool {
+	for i := len(key) - 1; i >= 0; i-- {
+		if key[i] == '/' {
+			break
+		}
+		if i+6 < len(key) && key[i:i+6] == "_part_" {
+			return true
+		}
+	}
+	return false
+}
+
 // SourceData представляет загруженные данные из одного источника
 type SourceData struct {
 	SourceName string
@@ -343,6 +456,11 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	// Зашифрованный TDTP-файл — получаем ключ от xZMercury и расшифровываем.
 	if source.Type == "tdtp-enc" {
 		return loadEncryptedTDTPFile(timeoutCtx, source)
+	}
+
+	// TDTP-файл в S3-совместимом хранилище (SeaweedFS, MinIO, AWS S3 и т.п.).
+	if source.Type == "tdtp-s3" {
+		return loadTDTPFromS3(timeoutCtx, source)
 	}
 	_ = timeoutCtx // используется далее
 
