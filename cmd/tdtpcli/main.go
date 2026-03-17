@@ -93,9 +93,9 @@ func routeCommand(
 		// Resolve storage target: s3:// URI → object storage; otherwise local file.
 		var exportStorageCfg *storage.Config
 		exportStorageKey := ""
-		if IsRemoteURI(outputFile) {
+		if storage.IsRemote(outputFile) {
 			var uriBucket string
-			_, uriBucket, exportStorageKey, _ = ParseStorageURI(outputFile)
+			_, uriBucket, exportStorageKey, _ = storage.ParseURI(outputFile)
 			s3cfg := config.Storage.S3
 			if uriBucket != "" {
 				s3cfg.Bucket = uriBucket
@@ -142,9 +142,9 @@ func routeCommand(
 		// Resolve storage source: s3:// URI → object storage; otherwise local file.
 		var importStorageCfg *storage.Config
 		importStorageKey := ""
-		if IsRemoteURI(importFile) {
+		if storage.IsRemote(importFile) {
 			var uriBucket string
-			_, uriBucket, importStorageKey, _ = ParseStorageURI(importFile)
+			_, uriBucket, importStorageKey, _ = storage.ParseURI(importFile)
 			s3cfg := config.Storage.S3
 			if uriBucket != "" {
 				s3cfg.Bucket = uriBucket
