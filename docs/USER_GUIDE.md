@@ -13,6 +13,14 @@
 2. [Быстрый старт](#быстрый-старт)
 3. [Конфигурация](#конфигурация)
 4. [Команды](#команды)
+   - [--list](#--list) · [--list-views](#--list-views) · [--inspect](#--inspect)
+   - [--export](#--export) · [--import](#--import)
+   - [--export-xlsx](#--export-xlsx) · [--import-xlsx](#--import-xlsx) · [--to-xlsx](#--to-xlsx) · [--from-xlsx](#--from-xlsx)
+   - [--export-broker](#--export-broker) · [--import-broker](#--import-broker) · [--listen](#--listen-beta)
+   - [--sync-incremental](#--sync-incremental)
+   - [--diff](#--diff) · [--merge](#--merge)
+   - [--to-compact](#--to-compact) · [--to-html](#--to-html)
+   - [--pipeline](#--pipeline) · [--process-request](#--process-request)
 5. [Compact Format (v1.3.1)](#compact-format-v131)
 6. [ETL Pipeline](#etl-pipeline)
 7. [Шифрование AES-256-GCM](#шифрование-aes-256-gcm)
@@ -67,6 +75,11 @@ go build -o tdtpcli ./cmd/tdtpcli
 **MS SQL Server:**
 ```bash
 ./tdtpcli --create-config-mssql
+```
+
+**MySQL:**
+```bash
+./tdtpcli --create-config-mysql
 ```
 
 Будет создан файл `config.{dbtype}.yaml` с шаблоном настроек.
@@ -204,6 +217,44 @@ database:
   trustServerCertificate: false
 ```
 
+**MySQL:**
+```yaml
+database:
+  type: mysql
+  host: localhost
+  port: 3306
+  user: root
+  password: secret
+  dbname: mydb
+```
+
+### S3 / Object Storage
+
+`--export` и `--import` поддерживают `s3://`-URI вместо локального пути. Конфиг хранилища задаётся в `storage:` секции.
+
+```yaml
+storage:
+  type: s3
+  s3:
+    bucket: my-tdtp-bucket
+    region: us-east-1
+    access_key: AKIAIOSFODNN7EXAMPLE
+    secret_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    endpoint: ""       # оставить пустым для AWS; задать для MinIO/etc.
+```
+
+**Использование:**
+```bash
+# Экспорт в S3
+./tdtpcli -config config.yaml --export users --output s3://my-bucket/exports/users.tdtp.xml
+
+# Импорт из S3
+./tdtpcli -config config.yaml --import s3://my-bucket/exports/users.tdtp.xml
+
+# Inspect из S3 (без --config)
+./tdtpcli --inspect s3://my-bucket/exports/users.tdtp.xml
+```
+
 ---
 
 ## Команды
@@ -237,6 +288,127 @@ tdtpcli -config <config.yaml> --list
 
 ---
 
+### --list-views
+
+Показать список VIEW в базе данных с их статусом (updatable / read-only).
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --list-views
+```
+
+**Пример вывода:**
+```
+Views in database (2):
+  dept_employees_report  [read-only]
+  active_users_vw        [updatable]
+```
+
+---
+
+### --inspect
+
+Вывести YAML-сводку метаданных TDTP-файла без подключения к БД. Поддерживает локальные файлы и `s3://`-пути.
+
+**Синтаксис:**
+```bash
+tdtpcli --inspect <file>
+```
+
+**Пример:**
+```bash
+./tdtpcli --inspect report.tdtp.xml
+```
+
+**Вывод:**
+```yaml
+file: report.tdtp.xml
+version: "1.3.1"
+packet_type: reference
+table: users
+uuid: 550e8400-e29b-41d4-a716-446655440000
+compressed: false
+compact: false
+schema:
+  fields: 4
+  names: [id, name, email, age]
+data:
+  rows: 10000
+```
+
+---
+
+### --to-html
+
+Конвертировать TDTP-файл в HTML для просмотра в браузере.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-html <input> [--output <file>] [--open] [--row <n1-n2>] [--limit N] [--where ...]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--to-html <file>` | Входной TDTP-файл |
+| `--output <file>` | Выходной HTML-файл (по умолчанию — автогенерация имени) |
+| `--open` | Открыть файл в браузере сразу после генерации |
+| `--row <n1-n2>` | Диапазон строк для отображения, 1-indexed (напр. `100-150`) |
+| `--limit N` | Ограничить число строк |
+| `--where` | Фильтрация строк (TDTQL, повторяемый) |
+
+**Примеры:**
+```bash
+# Конвертация и открытие в браузере
+./tdtpcli --to-html users.tdtp.xml --open
+
+# Просмотр строк 500–600
+./tdtpcli --to-html large_report.tdtp.xml --row 500-600 --open
+
+# Фильтрация перед просмотром
+./tdtpcli --to-html orders.tdtp.xml --where "status = active" --open
+```
+
+---
+
+### --process-request
+
+Обработать входящий TDTP request-файл и сгенерировать response. Конфиги БД ищутся в той же директории, что и файл запроса.
+
+**Синтаксис:**
+```bash
+tdtpcli --process-request <request-file> [--output <response-file>] [-config <config.yaml>]
+```
+
+**Пример:**
+```bash
+./tdtpcli --process-request ./requests/users_request.tdtp.xml \
+          --output ./responses/users_response.tdtp.xml
+```
+
+---
+
+### --listen `[BETA]`
+
+Потоковый consumer-демон для Kafka: слушает топик и импортирует данные по мере поступления. Работает до SIGTERM.
+
+> Только Kafka. Для RabbitMQ используйте `--import-broker`.
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --listen [--strategy <strategy>]
+```
+
+**Пример:**
+```bash
+./tdtpcli -config config.kafka.yaml --listen --strategy replace
+```
+
+**Остановка:** `Ctrl+C` (graceful shutdown).
+
+---
+
 ### --export
 
 Экспортировать таблицу в файл или stdout.
@@ -250,8 +422,14 @@ tdtpcli -config <config.yaml> --export <table> [--output <file>]
 **Параметры:**
 - `<table>` - имя таблицы или VIEW (обязательно)
 - `--output <file>` - выходной файл (опционально, по умолчанию stdout)
+- `--fields <cols>` - выбрать только нужные колонки, через запятую (например, `id,email,status`)
+- `--compress` - сжать вывод zstd (level 3 по умолчанию)
+- `--compress-level <1-19>` - уровень сжатия (1 = быстрее, 19 = компактнее)
+- `--hash` - добавить XXH3-чексумму для проверки целостности (требует `--compress`)
+- `--readonly-fields` - включить в экспорт read-only поля (timestamp, computed, identity)
 - `--compact` - включить compact-формат TDTP v1.3.1 (carry-forward для fixed-полей)
-- `--fixed-fields <поля>` - список fixed-полей через запятую (используется совместно с `--compact`); если не задан, fixed-поля определяются автоматически по `_prefix` или данным
+- `--fixed-fields <поля>` - список fixed-полей через запятую (используется совместно с `--compact`); если не задан, определяются автоматически по `_prefix` или данным
+- `--compact-tail` - дописать tail-строку со всеми fixed-полями явно (для stream-валидации и передачи состояния)
 
 **Примеры:**
 
@@ -298,6 +476,7 @@ tdtpcli -config <config.yaml> --import <file> [--table <name>] [--strategy <stra
 - `<file>` - путь к TDTP файлу (обязательно)
 - `--table <name>` - имя целевой таблицы (опционально, по умолчанию из пакета)
 - `--strategy <strategy>` - стратегия импорта: `replace` | `copy` (опционально)
+- `--fields <cols>` - импортировать только указанные колонки (через запятую)
 
 **Пример:**
 ```bash
@@ -1047,7 +1226,7 @@ tdtpcli.exe -config config.mssql.yaml --export-broker users
   --output active_users.tdtp.xml
 ```
 
-**Примечание:** Текущая версия CLI поддерживает один `--where` параметр. Для сложных запросов используйте SQL-like синтаксис или модифицируйте код CLI.
+**Примечание:** `--where` — повторяемый флаг; несколько условий автоматически объединяются через AND.
 
 ### Пример 3: Репликация через RabbitMQ
 
@@ -1243,4 +1422,4 @@ tdtpcli.exe -config config.mssql.yaml --export-broker users
 
 ---
 
-*Последнее обновление: 10.03.2026*
+*Последнее обновление: 17.03.2026*
