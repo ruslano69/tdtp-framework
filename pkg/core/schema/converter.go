@@ -125,8 +125,12 @@ func (c *Converter) parseDecimal(tv *TypedValue, field FieldDef) (*TypedValue, e
 		scale = GetDefaultScale()
 	}
 
+	// Нормализуем scientific notation (4.867895e+08 → "486789500")
+	// strconv.FormatFloat с 'f' всегда даёт обычную запись без экспоненты.
+	normalized := strconv.FormatFloat(val, 'f', scale, 64)
+
 	// Проверка количества цифр
-	parts := strings.Split(tv.RawValue, ".")
+	parts := strings.Split(normalized, ".")
 	totalDigits := len(strings.ReplaceAll(parts[0], "-", ""))
 	if len(parts) > 1 {
 		totalDigits += len(parts[1])
