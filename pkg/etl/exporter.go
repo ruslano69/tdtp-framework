@@ -1,14 +1,18 @@
 package etl
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
 
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"github.com/ruslano69/tdtp-framework/pkg/xlsx"
 )
 
@@ -164,11 +168,60 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		return e.exportEncrypted(ctx, generator, xmlData, destination)
 	}
 
-	// Записываем в файл (без шифрования)
+	// Записываем: в S3 или локальный файл
+	if storage.IsRemote(destination) {
+		return e.uploadToStorage(ctx, xmlData, destination, dataPacket)
+	}
 	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
+	return nil
+}
 
+// uploadToStorage стримит xmlData в S3-совместимое хранилище через io.Pipe.
+// Метаданные пакета (таблица, строки) сохраняются как x-amz-meta-tdtp-* заголовки.
+func (e *Exporter) uploadToStorage(ctx context.Context, data []byte, destination string, pkt *packet.DataPacket) error {
+	tdtpCfg := e.config.TDTP
+	if tdtpCfg == nil || tdtpCfg.S3 == nil {
+		return fmt.Errorf("etl: S3 config is required for remote destination %s", destination)
+	}
+
+	_, uriBucket, key, _ := storage.ParseURI(destination)
+	s3cfg := *tdtpCfg.S3
+	if uriBucket != "" {
+		s3cfg.Bucket = uriBucket
+	}
+
+	store, err := storage.New(storage.Config{Type: "s3", S3: s3cfg})
+	if err != nil {
+		return fmt.Errorf("etl: failed to open storage: %w", err)
+	}
+	defer store.Close()
+
+	meta := map[string]string{
+		"protocol": "TDTP 1.0",
+		"pipeline": e.pipelineName,
+	}
+	if pkt != nil {
+		meta["table"] = pkt.Header.TableName
+		meta["rows"] = strconv.Itoa(len(pkt.Data.Rows))
+	}
+
+	pr, pw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() { errCh <- store.Put(ctx, key, pr, meta) }()
+
+	if _, err := io.Copy(pw, bytes.NewReader(data)); err != nil {
+		pw.CloseWithError(err)
+		<-errCh
+		return fmt.Errorf("etl: upload pipe write failed: %w", err)
+	}
+	pw.Close()
+
+	if err := <-errCh; err != nil {
+		return fmt.Errorf("etl: storage Put failed: %w", err)
+	}
+	fmt.Printf("  → Uploaded to: %s\n", destination)
 	return nil
 }
 
@@ -203,17 +256,19 @@ func (e *Exporter) exportEncrypted(ctx context.Context, generator *packet.Genera
 		return encErr
 	}
 
-	// Записываем зашифрованный блоб (права 0600 — только владелец)
+	// Записываем зашифрованный блоб
+	if storage.IsRemote(destination) {
+		return e.uploadToStorage(ctx, result.Encrypted, destination, nil)
+	}
 	if err := processors.WriteEncrypted(destination, result.Encrypted); err != nil {
 		return fmt.Errorf("write encrypted output: %w", err)
 	}
-
 	return nil
 }
 
 // writeErrorPacket записывает стандартный TDTP error-пакет в destination вместо данных.
 // Незашифрованный результат НЕ записывается. Pipeline завершается с exit 0.
-func (e *Exporter) writeErrorPacket(_ context.Context, generator *packet.Generator, destination, errorCode, errorMessage string) error {
+func (e *Exporter) writeErrorPacket(ctx context.Context, generator *packet.Generator, destination, errorCode, errorMessage string) error {
 	gen := packet.NewGenerator()
 	errPacket, err := gen.GenerateError(e.packageUUID, e.pipelineName, errorCode, errorMessage)
 	if err != nil {
@@ -225,10 +280,12 @@ func (e *Exporter) writeErrorPacket(_ context.Context, generator *packet.Generat
 		return fmt.Errorf("serialize error packet: %w", err)
 	}
 
+	if storage.IsRemote(destination) {
+		return e.uploadToStorage(ctx, xmlData, destination, nil)
+	}
 	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
 		return fmt.Errorf("write error packet: %w", err)
 	}
-
 	// Возвращаем nil — pipeline завершается штатно (exit 0)
 	return nil
 }

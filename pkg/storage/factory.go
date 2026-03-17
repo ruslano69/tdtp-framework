@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -35,6 +36,29 @@ func Register(storageType string, fn StorageConstructor) {
 	mu.Lock()
 	defer mu.Unlock()
 	registry[storageType] = fn
+}
+
+// ParseURI parses a remote storage URI like "s3://bucket/path/to/key".
+// Returns (scheme, bucket, key, true) for known remote schemes;
+// ("", "", "", false) for local paths.
+func ParseURI(uri string) (scheme, bucket, key string, remote bool) {
+	for _, pfx := range []string{"s3://"} {
+		if strings.HasPrefix(uri, pfx) {
+			scheme = pfx[:len(pfx)-3]
+			rest := uri[len(pfx):]
+			if idx := strings.Index(rest, "/"); idx >= 0 {
+				return scheme, rest[:idx], rest[idx+1:], true
+			}
+			return scheme, rest, "", true
+		}
+	}
+	return "", "", "", false
+}
+
+// IsRemote returns true if the path is a supported remote storage URI (e.g. s3://).
+func IsRemote(path string) bool {
+	_, _, _, ok := ParseURI(path)
+	return ok
 }
 
 // New creates an ObjectStorage instance for the given Config.
