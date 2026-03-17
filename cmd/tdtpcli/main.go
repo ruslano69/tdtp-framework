@@ -209,6 +209,32 @@ func routeCommand(
 
 		// XLSX commands
 	} else if *flags.ToXLSX != "" {
+		xlsxOutputFile := determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx")
+		var xlsxStorageCfg *storage.Config
+		xlsxStorageKey := ""
+		if storage.IsRemote(xlsxOutputFile) {
+			var uriBucket string
+			_, uriBucket, xlsxStorageKey, _ = storage.ParseURI(xlsxOutputFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			xlsxStorageCfg = &sc
+			xlsxOutputFile = ""
+		}
+		// Also set StorageCfg for S3 input (--to-xlsx s3://...)
+		if storage.IsRemote(*flags.ToXLSX) && xlsxStorageCfg == nil {
+			var uriBucket string
+			_, uriBucket, _, _ = storage.ParseURI(*flags.ToXLSX)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			xlsxStorageCfg = &sc
+		}
+
 		operation = audit.OpTransform
 		metadata = map[string]string{
 			"command": "to-xlsx",
@@ -219,9 +245,11 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-xlsx", func() error {
 			return commands.ConvertTDTPToXLSX(ctx, commands.XLSXOptions{
 				InputFile:  *flags.ToXLSX,
-				OutputFile: determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
+				OutputFile: xlsxOutputFile,
 				SheetName:  *flags.Sheet,
 				Query:      query,
+				StorageCfg: xlsxStorageCfg,
+				StorageKey: xlsxStorageKey,
 			})
 		})
 
@@ -242,6 +270,21 @@ func routeCommand(
 		})
 
 	} else if *flags.ExportXLSX != "" {
+		exXlsxOutputFile := determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx")
+		var exXlsxStorageCfg *storage.Config
+		exXlsxStorageKey := ""
+		if storage.IsRemote(exXlsxOutputFile) {
+			var uriBucket string
+			_, uriBucket, exXlsxStorageKey, _ = storage.ParseURI(exXlsxOutputFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			exXlsxStorageCfg = &sc
+			exXlsxOutputFile = ""
+		}
+
 		operation = audit.OpExport
 		metadata = map[string]string{
 			"command": "export-xlsx",
@@ -252,10 +295,12 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table-to-xlsx", func() error {
 			return commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
 				TableName:    *flags.ExportXLSX,
-				OutputFile:   determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
+				OutputFile:   exXlsxOutputFile,
 				SheetName:    *flags.Sheet,
 				Query:        query,
 				ProcessorMgr: procMgr,
+				StorageCfg:   exXlsxStorageCfg,
+				StorageKey:   exXlsxStorageKey,
 			})
 		})
 
