@@ -1,0 +1,101 @@
+# =============================================================================
+# PIPELINE 1 — Извлечение данных из PostgreSQL и выгрузка в S3
+# =============================================================================
+# Читает таблицы orders + users, делает JOIN, добавляет поле region и
+# сохраняет полный набор в S3 как один TDTP-файл.
+#
+# Запуск:
+#   tdtpcli --pipeline pipeline_1_extract.yaml
+# =============================================================================
+
+name: "01-extract-orders-to-s3"
+version: "1.0"
+description: "Экспорт заказов с информацией о пользователях из PostgreSQL в S3"
+
+# ----------------------------------------------------------------------------
+# ИСТОЧНИКИ
+# ----------------------------------------------------------------------------
+
+sources:
+  - name: orders
+    type: postgres
+    dsn: "postgres://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test?sslmode=disable"
+    query: |
+      SELECT
+        o.order_id,
+        o.order_number,
+        o.total_amount,
+        o.status,
+        o.order_date,
+        u.username,
+        u.email,
+        -- Синтетический регион на основе первой буквы username
+        -- Замените на реальное поле region в вашей таблице
+        CASE LEFT(u.username, 1)
+          WHEN 'a' THEN 'NORTH'  WHEN 'b' THEN 'NORTH'  WHEN 'c' THEN 'NORTH'
+          WHEN 'd' THEN 'SOUTH'  WHEN 'e' THEN 'SOUTH'  WHEN 'f' THEN 'SOUTH'
+          WHEN 'g' THEN 'EAST'   WHEN 'h' THEN 'EAST'   WHEN 'i' THEN 'EAST'
+          ELSE 'WEST'
+        END AS region
+      FROM orders o
+      JOIN users u ON o.user_id = u.id
+      ORDER BY o.order_date DESC
+
+# ----------------------------------------------------------------------------
+# WORKSPACE
+# ----------------------------------------------------------------------------
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+# ----------------------------------------------------------------------------
+# ТРАНСФОРМАЦИЯ — пересчитываем итог, убираем технические поля
+# ----------------------------------------------------------------------------
+
+transform:
+  result_table: "orders_full"
+  sql: |
+    SELECT
+      order_id,
+      order_number,
+      total_amount,
+      status,
+      DATE(order_date) AS order_date,
+      username,
+      email,
+      region
+    FROM orders
+    ORDER BY region, order_date
+
+# ----------------------------------------------------------------------------
+# ВЫВОД → S3
+# ----------------------------------------------------------------------------
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compression: true          # zstd level 3 — ~3x меньше трафика
+    destination: "s3://my-bucket/pipeline/orders_full.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"    # SeaweedFS; для AWS оставь пустым
+      region: "us-east-1"
+      bucket: "my-bucket"
+      access_key: "my_access_key"
+      secret_key: "my_secret_key"
+      disable_ssl: true                   # только для локального HTTP
+
+# ----------------------------------------------------------------------------
+# ПРОИЗВОДИТЕЛЬНОСТЬ И ОШИБКИ
+# ----------------------------------------------------------------------------
+
+performance:
+  parallel_sources: true
+  batch_size: 5000
+  max_memory_mb: 1024
+
+error_handling:
+  on_source_error: "fail"
+  on_transform_error: "fail"
+  on_output_error: "fail"

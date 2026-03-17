@@ -1,0 +1,88 @@
+# =============================================================================
+# PIPELINE 2 — Разделение данных по региону (шаблон)
+# =============================================================================
+# Читает полный набор заказов из S3 (результат pipeline 1),
+# фильтрует строки одного региона и сохраняет отдельный файл в S3.
+#
+# Шаблон: перед запуском скрипт заменяет __REGION__ на реальное значение:
+#   sed 's/__REGION__/NORTH/g' pipeline_2_split_template.yaml > /tmp/p2_NORTH.yaml
+#   tdtpcli --pipeline /tmp/p2_NORTH.yaml
+#
+# Не запускать вручную — используй run_chain.sh
+# =============================================================================
+
+name: "02-split-region-__REGION__"
+version: "1.0"
+description: "Выборка заказов по региону __REGION__ из S3"
+
+# ----------------------------------------------------------------------------
+# ИСТОЧНИК — полный файл из pipeline 1
+# ----------------------------------------------------------------------------
+
+sources:
+  - name: orders_full
+    type: tdtp-s3
+    dsn: "s3://my-bucket/pipeline/orders_full.tdtp.xml"
+    multi_part: true           # на случай если pipeline 1 разбил на части
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "my-bucket"
+      access_key: "my_access_key"
+      secret_key: "my_secret_key"
+      disable_ssl: true
+
+# ----------------------------------------------------------------------------
+# WORKSPACE
+# ----------------------------------------------------------------------------
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+# ----------------------------------------------------------------------------
+# ТРАНСФОРМАЦИЯ — фильтр по конкретному региону
+# ----------------------------------------------------------------------------
+
+transform:
+  result_table: "orders___REGION__"
+  sql: |
+    SELECT
+      order_id,
+      order_number,
+      total_amount,
+      status,
+      order_date,
+      username,
+      email,
+      region
+    FROM orders_full
+    WHERE region = '__REGION__'
+    ORDER BY order_date DESC
+
+# ----------------------------------------------------------------------------
+# ВЫВОД → S3 в папку региона
+# ----------------------------------------------------------------------------
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compression: true
+    destination: "s3://my-bucket/pipeline/by_region/__REGION__/orders.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "my-bucket"
+      access_key: "my_access_key"
+      secret_key: "my_secret_key"
+      disable_ssl: true
+
+# ----------------------------------------------------------------------------
+# ОШИБКИ
+# ----------------------------------------------------------------------------
+
+error_handling:
+  on_source_error: "fail"
+  on_transform_error: "fail"
+  on_output_error: "fail"
