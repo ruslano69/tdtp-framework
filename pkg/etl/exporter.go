@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/resilience"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"github.com/ruslano69/tdtp-framework/pkg/xlsx"
 )
@@ -32,13 +34,30 @@ type Exporter struct {
 	pipelineName    string
 	mercuryBinder   processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
 	preExportChain  *processors.Chain        // процессоры маскирования/нормализации/валидации перед экспортом
+	cb              *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
 }
 
 // NewExporter создает новый экспортер
 func NewExporter(config OutputConfig) *Exporter {
-	return &Exporter{
-		config: config,
+	e := &Exporter{config: config}
+
+	// Инициализируем circuit breaker если задан fallback-канал
+	if config.Fallback != nil {
+		cbCfg := resilience.DefaultConfig("output-primary")
+		if config.Resilience != nil {
+			if config.Resilience.MaxFailures > 0 {
+				cbCfg.MaxFailures = uint32(config.Resilience.MaxFailures)
+			}
+			if config.Resilience.TimeoutSec > 0 {
+				cbCfg.Timeout = time.Duration(config.Resilience.TimeoutSec) * time.Second
+			}
+		}
+		if cb, err := resilience.New(cbCfg); err == nil {
+			e.cb = cb
+		}
 	}
+
+	return e
 }
 
 // WithSecurity добавляет конфигурацию шифрования.
@@ -79,19 +98,83 @@ func (e *Exporter) applyPreExport(ctx context.Context, pkt *packet.DataPacket) e
 	return nil
 }
 
-// Export экспортирует DataPacket в сконфигурированный выход
+// Export экспортирует DataPacket в сконфигурированный выход.
+// Если настроен fallback-канал, при любой ошибке primary автоматически
+// переключается на резервный канал (Smart Failover через circuit breaker).
 func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*ExportResult, error) {
 	if dataPacket == nil {
 		return nil, fmt.Errorf("data packet is nil")
 	}
 
+	// Если fallback не настроен — обычный экспорт без CB
+	if e.config.Fallback == nil || e.cb == nil {
+		return e.exportDirect(ctx, dataPacket, e.config)
+	}
+
+	// Smart Failover: primary через circuit breaker, при ошибке — fallback
 	result := &ExportResult{
 		OutputType:   e.config.Type,
 		Destination:  e.getDestination(),
 		RowsExported: len(dataPacket.Data.Rows),
 	}
 
-	switch e.config.Type {
+	var primaryErr error
+	cbErr := e.cb.ExecuteWithImmediateFallback(
+		ctx,
+		func(ctx context.Context) error {
+			_, err := e.exportDirect(ctx, dataPacket, e.config)
+			return err
+		},
+		func(ctx context.Context) error {
+			fbExporter := &Exporter{
+				config:         *e.config.Fallback,
+				security:       e.security,
+				packageUUID:    e.packageUUID,
+				pipelineName:   e.pipelineName,
+				mercuryBinder:  e.mercuryBinder,
+				preExportChain: e.preExportChain,
+			}
+			fbResult, err := fbExporter.exportDirect(ctx, dataPacket, *e.config.Fallback)
+			if err == nil && fbResult != nil {
+				// Сообщаем куда реально ушли данные
+				result.OutputType = fbResult.OutputType + "(fallback)"
+				result.Destination = fbResult.Destination
+			}
+			return err
+		},
+		func(reason string) {
+			primaryErr = fmt.Errorf("primary output failed: %s", reason)
+			fmt.Printf("  ⚠ Smart Failover: switching to fallback (%s → %s). Reason: %s\n",
+				e.config.Type, e.config.Fallback.Type, reason)
+		},
+	)
+
+	if cbErr != nil {
+		result.Error = cbErr
+		return result, cbErr
+	}
+
+	// Если было переключение на fallback, логируем но не фейлим pipeline
+	if primaryErr != nil {
+		fmt.Printf("  ✓ Delivered via fallback channel (%s). CB state: %s\n",
+			e.config.Fallback.Type, e.cb.State())
+	}
+
+	return result, nil
+}
+
+// exportDirect выполняет экспорт напрямую без CB/fallback логики
+func (e *Exporter) exportDirect(ctx context.Context, dataPacket *packet.DataPacket, cfg OutputConfig) (*ExportResult, error) {
+	result := &ExportResult{
+		OutputType:   cfg.Type,
+		RowsExported: len(dataPacket.Data.Rows),
+	}
+
+	// Вычисляем destination для результата
+	tmpExporter := &Exporter{config: cfg}
+	result.Destination = tmpExporter.getDestination()
+
+	switch cfg.Type {
 	case "tdtp":
 		err := e.exportToTDTP(ctx, dataPacket)
 		result.Error = err
@@ -113,7 +196,7 @@ func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*
 		return result, err
 
 	default:
-		err := fmt.Errorf("unsupported output type: %s", e.config.Type)
+		err := fmt.Errorf("unsupported output type: %s", cfg.Type)
 		result.Error = err
 		return result, err
 	}
