@@ -54,10 +54,13 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		defer store.Close()
 
 		keys := []string{opts.StorageKey}
-		// Check if this is a multi-part base key by listing the bucket with prefix
-		// (simple heuristic: try _part_1_of_* pattern)
+		// Check if this is a multi-part base key by listing the bucket with prefix.
+		// Parts are named {base}_part_{N}_of_{total}{ext} — same scheme as local files,
+		// so strip the extension before appending "_part_" (mirrors discoverMultiPartFiles).
 		if !strings.Contains(opts.StorageKey, "_part_") {
-			objs, err := store.List(ctx, opts.StorageKey+"_part_")
+			keyExt := filepath.Ext(opts.StorageKey)
+			keyBase := strings.TrimSuffix(opts.StorageKey, keyExt)
+			objs, err := store.List(ctx, keyBase+"_part_")
 			if err == nil && len(objs) > 0 {
 				keys = make([]string, len(objs))
 				for i, o := range objs {

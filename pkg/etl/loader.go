@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -238,7 +239,10 @@ func loadTDTPFromS3(ctx context.Context, source SourceConfig) (*packet.DataPacke
 	// Собираем список ключей для загрузки.
 	keys := []string{key}
 	if source.MultiPart && !containsPartSuffix(key) {
-		objs, listErr := store.List(ctx, key+"_part_")
+		// Parts are named {base}_part_{N}_of_{total}{ext} — strip extension before "_part_".
+		keyExt := filepath.Ext(key)
+		keyBase := strings.TrimSuffix(key, keyExt)
+		objs, listErr := store.List(ctx, keyBase+"_part_")
 		if listErr != nil {
 			return nil, fmt.Errorf("tdtp-s3: list parts for %q: %w", key, listErr)
 		}
