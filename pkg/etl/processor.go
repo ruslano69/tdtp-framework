@@ -88,7 +88,14 @@ func (p *Processor) Execute(ctx context.Context) error {
 	// Стратегия зависит от типа output:
 	// - Streaming (RabbitMQ/Kafka): SQL выполняется потоком через ExecuteSQLStream (не загружает в память)
 	// - Batch (TDTP): SQL выполняется полностью через ExecuteSQL (нужно знать TotalParts для XML)
-	if p.config.Output.Type == "rabbitmq" || p.config.Output.Type == "kafka" {
+	//
+	// Исключение: если задан fallback-канал, всегда используем batch-режим.
+	// Streaming-канал (RowsChan) можно прочитать только один раз — при ошибке primary
+	// данные уже потеряны и re-execute невозможен. Batch загружает данные в память,
+	// что даёт возможность повторно отправить их через fallback.
+	isBrokerStreaming := (p.config.Output.Type == "rabbitmq" || p.config.Output.Type == "kafka") &&
+		p.config.Output.Fallback == nil
+	if isBrokerStreaming {
 		// Streaming: SQL выполняется один раз внутри exportResultsStreaming
 		if err := p.exportResultsStreaming(ctx); err != nil {
 			return fmt.Errorf("failed to export results (streaming): %w", err)
