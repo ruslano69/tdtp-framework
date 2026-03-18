@@ -546,10 +546,10 @@ func (e *Exporter) ValidateConfig() error {
 			return fmt.Errorf("kafka config is required for kafka output")
 		}
 		if len(e.config.Kafka.Brokers) == 0 {
-			return fmt.Errorf("kafka brokers is required")
+			return fmt.Errorf("Kafka brokers is required")
 		}
 		if e.config.Kafka.Topic == "" {
-			return fmt.Errorf("kafka topic is required")
+			return fmt.Errorf("Kafka topic is required")
 		}
 
 	default:

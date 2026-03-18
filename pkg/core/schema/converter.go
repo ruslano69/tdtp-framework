@@ -125,22 +125,26 @@ func (c *Converter) parseDecimal(tv *TypedValue, field FieldDef) (*TypedValue, e
 		scale = GetDefaultScale()
 	}
 
+	// Проверяем scale по исходному значению (до нормализации),
+	// чтобы "123.456" с scale=2 давало ошибку.
+	rawParts := strings.Split(strings.TrimRight(strings.TrimRight(tv.RawValue, "0"), "."), ".")
+	if len(rawParts) > 1 && len(rawParts[1]) > scale {
+		return nil, &ValidationError{
+			Field:   field.Name,
+			Message: fmt.Sprintf("decimal scale exceeds %d", scale),
+			Value:   tv.RawValue,
+		}
+	}
+
 	// Нормализуем scientific notation (4.867895e+08 → "486789500")
 	// strconv.FormatFloat с 'f' всегда даёт обычную запись без экспоненты.
 	normalized := strconv.FormatFloat(val, 'f', scale, 64)
 
-	// Проверка количества цифр
+	// Проверка количества цифр для precision
 	parts := strings.Split(normalized, ".")
 	totalDigits := len(strings.ReplaceAll(parts[0], "-", ""))
 	if len(parts) > 1 {
 		totalDigits += len(parts[1])
-		if len(parts[1]) > scale {
-			return nil, &ValidationError{
-				Field:   field.Name,
-				Message: fmt.Sprintf("decimal scale exceeds %d", scale),
-				Value:   tv.RawValue,
-			}
-		}
 	}
 
 	if totalDigits > precision {
