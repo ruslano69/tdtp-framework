@@ -52,10 +52,7 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	a.db = db
 
 	// Применяем PRAGMA оптимизации для быстрого импорта
-	if err := a.applyPragmaOptimizations(ctx); err != nil {
-		db.Close()
-		return fmt.Errorf("failed to apply PRAGMA optimizations: %w", err)
-	}
+	a.applyPragmaOptimizations(ctx)
 
 	// Инициализируем base helpers
 	a.initHelpers(cfg.NoDateSentinels)
@@ -138,7 +135,7 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 
 // applyPragmaOptimizations применяет PRAGMA оптимизации для быстрого импорта/экспорта
 // Эти настройки критичны для производительности SQLite при массовых операциях
-func (a *Adapter) applyPragmaOptimizations(ctx context.Context) error {
+func (a *Adapter) applyPragmaOptimizations(ctx context.Context) {
 	pragmas := []string{
 		// WAL mode: Write-Ahead Logging - до 10x быстрее записи, безопасно
 		"PRAGMA journal_mode = WAL",
@@ -169,7 +166,6 @@ func (a *Adapter) applyPragmaOptimizations(ctx context.Context) error {
 		}
 	}
 
-	return nil
 }
 
 // TableExists проверяет существование таблицы

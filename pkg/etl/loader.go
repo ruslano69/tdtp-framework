@@ -372,7 +372,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 	}()
 
 	// Собираем результаты
-	var allResults []SourceData
+	allResults := make([]SourceData, 0, len(l.sources))
 	var sourceErrors []error
 
 	for result := range results {

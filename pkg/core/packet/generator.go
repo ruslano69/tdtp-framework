@@ -254,7 +254,7 @@ func (g *Generator) WriteToWriter(packet *DataPacket, w io.Writer) error {
 }
 
 // partitionRows разбивает строки на части по размеру
-func (g *Generator) partitionRows(rows [][]string, schema Schema) [][][]string {
+func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
 	if len(rows) == 0 {
 		return [][][]string{{}}
 	}

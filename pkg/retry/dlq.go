@@ -14,7 +14,7 @@ type DLQEntry struct {
 	Timestamp   time.Time `json:"timestamp"`
 	Attempts    int       `json:"attempts"`
 	LastError   string    `json:"last_error"`
-	FailureType string    `json:"failure_type"` // max_attempts_exceeded, context_cancelled, etc.
+	FailureType string    `json:"failure_type"` // max_attempts_exceeded, context_canceled, etc.
 	Data        any       `json:"data,omitempty"`
 }
 

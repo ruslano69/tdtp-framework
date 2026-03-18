@@ -93,7 +93,7 @@ func (r *Retryer) doInternal(ctx context.Context, fn RetryableFunc, data any, ad
 
 		// Проверяем context
 		if ctx.Err() != nil {
-			return fmt.Errorf("context cancelled: %w", ctx.Err())
+			return fmt.Errorf("context canceled: %w", ctx.Err())
 		}
 
 		// Вычисляем задержку
@@ -109,7 +109,7 @@ func (r *Retryer) doInternal(ctx context.Context, fn RetryableFunc, data any, ad
 		case <-time.After(delay):
 			// Продолжаем
 		case <-ctx.Done():
-			return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			return fmt.Errorf("context canceled during retry: %w", ctx.Err())
 		}
 	}
 }

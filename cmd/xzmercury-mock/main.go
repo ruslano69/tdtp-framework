@@ -61,7 +61,7 @@ func main() {
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, `{"status":"ok"}`)
+	_, _ = fmt.Fprintln(w, `{"status":"ok"}`)
 }
 
 func makeBindHandler(secret string) http.HandlerFunc {
@@ -109,7 +109,7 @@ func makeBindHandler(secret string) http.HandlerFunc {
 		log.Printf("[bind] uuid=%s pipeline=%s", req.PackageUUID, req.PipelineName)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"key_b64": keyB64,
 			"hmac":    hmacHex,
 		})
@@ -148,7 +148,7 @@ func makeRetrieveHandler() http.HandlerFunc {
 		log.Printf("[retrieve] uuid=%s BURNED (pipeline=%s bound_at=%s)", req.PackageUUID, entry.Pipeline, entry.BoundAt.Format(time.RFC3339))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"key_b64": entry.KeyB64,
 		})
 	}

@@ -200,8 +200,8 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	whereExpr := q.Get("where")
 	orderBy := q.Get("order_by")
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, _ := strconv.Atoi(q.Get("limit"))   //nolint:errcheck // invalid values are silently treated as 0
+	offset, _ := strconv.Atoi(q.Get("offset")) //nolint:errcheck // invalid values are silently treated as 0
 
 	// Apply TDTQL filtering
 	allRows := extractRows(ds.Packet)
@@ -475,7 +475,7 @@ func (s *Server) renderIndex(w http.ResponseWriter) {
 		`</div>`)
 	b.WriteString(`</div></body></html>`)
 
-	fmt.Fprint(w, b.String())
+	_, _ = fmt.Fprint(w, b.String())
 }
 
 func writeSourceCard(b *strings.Builder, d *Dataset) {
@@ -761,7 +761,7 @@ func (s *Server) renderData(
 	b.WriteString(`<div class="footer"><a href="/">← back</a></div>`)
 	b.WriteString(`</div></body></html>`)
 
-	fmt.Fprint(w, b.String())
+	_, _ = fmt.Fprint(w, b.String())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

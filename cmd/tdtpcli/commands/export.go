@@ -52,7 +52,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting table '%s'...\n", opts.TableName)
 
@@ -144,7 +144,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		if err != nil {
 			return fmt.Errorf("failed to open storage: %w", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		if len(packets) == 1 {
 			key := opts.StorageKey
@@ -193,7 +193,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	return nil
 }
 
-// uploadPacketToStorage serialises pkt to XML and streams it to store via io.Pipe.
+// uploadPacketToStorage serializes pkt to XML and streams it to store via io.Pipe.
 // Metadata includes table name, row count, and checksum (if present).
 func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt *packet.DataPacket, key string) error {
 	generator := packet.NewGenerator()
@@ -223,7 +223,7 @@ func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt
 		<-errCh
 		return fmt.Errorf("failed to write to storage pipe: %w", err)
 	}
-	pw.Close()
+	_ = pw.Close()
 
 	if err := <-errCh; err != nil {
 		return fmt.Errorf("storage Put failed: %w", err)

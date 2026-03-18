@@ -780,7 +780,7 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 	} else {
 		// summaryChan закрыт без отправки summary (ошибка или отмена контекста)
 		// TotalParts и TotalRows остаются 0 или частично заполненными
-		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context cancelled or generator error)"))
+		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context canceled or generator error)"))
 		result.ErrorsCount++
 	}
 

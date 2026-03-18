@@ -89,7 +89,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 // ReadAllRows читает все строки из таблицы
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, pkgSchema packet.Schema) ([][]string, error) {
 	// Формируем список колонок с backtick quoting
-	var columns []string
+	columns := make([]string, 0, len(pkgSchema.Fields))
 	for _, field := range pkgSchema.Fields {
 		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
 	}

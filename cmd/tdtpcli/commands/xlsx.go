@@ -51,7 +51,7 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		if err != nil {
 			return fmt.Errorf("failed to open storage: %w", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		fmt.Printf("  Downloading from s3://%s/%s...\n", cfg.S3.Bucket, inputKey)
 		rc, err := store.Get(ctx, inputKey)
 		if err != nil {
@@ -59,17 +59,17 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		}
 		tmp, err := os.CreateTemp("", "tdtpcli-input-*.tdtp.xml")
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
-		defer os.Remove(tmp.Name())
+		defer func() { _ = os.Remove(tmp.Name()) }()
 		if _, err := io.Copy(tmp, rc); err != nil {
-			rc.Close()
-			tmp.Close()
+			_ = rc.Close()
+			_ = tmp.Close()
 			return fmt.Errorf("failed to download s3 object: %w", err)
 		}
-		rc.Close()
-		tmp.Close()
+		_ = rc.Close()
+		_ = tmp.Close()
 		inputFile = tmp.Name()
 	}
 
@@ -124,8 +124,8 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
-		tmp.Close()
-		defer os.Remove(tmp.Name())
+		_ = tmp.Close()
+		defer func() { _ = os.Remove(tmp.Name()) }()
 		localOutput = tmp.Name()
 	}
 
@@ -204,7 +204,7 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting table '%s' to XLSX...\n", opts.TableName)
 
@@ -256,8 +256,8 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
-		tmp.Close()
-		defer os.Remove(tmp.Name())
+		_ = tmp.Close()
+		defer func() { _ = os.Remove(tmp.Name()) }()
 		outputFile = tmp.Name()
 	} else if outputFile == "" {
 		outputFile = fmt.Sprintf("%s.xlsx", opts.TableName)
@@ -316,7 +316,7 @@ func ImportXLSXToTable(ctx context.Context, config *adapters.Config, opts XLSXOp
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// Import packet
 	if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
@@ -335,13 +335,13 @@ func uploadXLSXToS3(ctx context.Context, cfg *storage.Config, key, localPath str
 	if err != nil {
 		return fmt.Errorf("failed to open storage: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	f, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to open temp file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fmt.Printf("  Uploading to s3://%s/%s...\n", cfg.S3.Bucket, key)
 	if err := store.Put(ctx, key, f, nil); err != nil {

@@ -10,9 +10,7 @@ import (
 )
 
 // MSMQ заглушка для не-Windows платформ
-type MSMQ struct {
-	config Config
-}
+type MSMQ struct{}
 
 // NewMSMQ создает новый MSMQ брокер (заглушка для не-Windows)
 // Валидирует конфигурацию даже на не-Windows платформах
@@ -23,7 +21,7 @@ func NewMSMQ(cfg Config) (*MSMQ, error) {
 	}
 
 	// Проверяем, что пытаются запустить на правильной ОС
-	return nil, fmt.Errorf("MSMQ is only supported on Windows (current OS: %s). Please use RabbitMQ or Kafka on Unix systems", runtime.GOOS)
+	return nil, fmt.Errorf("MSMQ is only supported on Windows (current OS: %s). Please use RabbitMQ or Kafka on Unix systems", runtime.GOOS) //nolint:goerr113
 }
 
 // Connect заглушка

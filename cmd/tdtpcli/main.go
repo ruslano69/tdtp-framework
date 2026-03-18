@@ -188,10 +188,10 @@ func routeCommand(
 		if *flags.Row != "" {
 			parts := strings.SplitN(*flags.Row, "-", 2)
 			if len(parts) == 2 {
-				rowStart, _ = strconv.Atoi(parts[0])
-				rowEnd, _ = strconv.Atoi(parts[1])
+				rowStart, _ = strconv.Atoi(parts[0]) //nolint:errcheck // invalid values are silently treated as 0
+				rowEnd, _ = strconv.Atoi(parts[1])   //nolint:errcheck // invalid values are silently treated as 0
 			} else if len(parts) == 1 {
-				rowStart, _ = strconv.Atoi(parts[0])
+				rowStart, _ = strconv.Atoi(parts[0]) //nolint:errcheck // invalid values are silently treated as 0
 			}
 		}
 

@@ -313,7 +313,7 @@ func (w *Workspace) Close(ctx context.Context) error {
 
 // generateCreateTableDDL генерирует DDL для создания таблицы
 func (w *Workspace) generateCreateTableDDL(tableName string, fields []packet.Field) string {
-	var columns []string
+	columns := make([]string, 0, len(fields))
 
 	for _, field := range fields {
 		sqliteType := w.mapTDTPTypeToSQLite(schema.DataType(field.Type))

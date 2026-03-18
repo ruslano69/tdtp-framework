@@ -8,7 +8,6 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
 // ========== Делегирование в ImportHelper ==========
@@ -30,7 +29,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 // CreateTable создает таблицу по TDTP схеме
 // Реализует base.TableManager интерфейс
 func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
-	var columns []string
+	columns := make([]string, 0, len(schema.Fields))
 	var pkColumns []string
 
 	for _, field := range schema.Fields {
@@ -175,11 +174,3 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 	return nil
 }
 
-// ========== Вспомогательные функции (сохранены для обратной совместимости) ==========
-
-// typedValueToSQL конвертирует TypedValue в значение для SQL
-// DEPRECATED: Используйте base.UniversalTypeConverter.TypedValueToSQL()
-// Оставлено для обратной совместимости с существующим кодом
-func (a *Adapter) typedValueToSQL(tv schema.TypedValue) any {
-	return a.converter.TypedValueToSQL(tv, "sqlite")
-}

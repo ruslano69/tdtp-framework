@@ -42,11 +42,7 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 	// ORDER BY clause
 	var orderByClause string
 	if query.OrderBy != nil {
-		var err error
-		orderByClause, err = g.generateOrderByClause(query.OrderBy)
-		if err != nil {
-			return "", fmt.Errorf("failed to generate ORDER BY clause: %w", err)
-		}
+		orderByClause = g.generateOrderByClause(query.OrderBy)
 		if orderByClause != "" {
 			parts = append(parts, "ORDER BY "+orderByClause)
 		}
@@ -61,17 +57,14 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 		if orderByClause != "" {
 			// Tail mode with ORDER BY: wrap inner query with reversed sort so DB
 			// delivers the last N rows, then restore the original order in outer query.
-			reversedClause, err := g.generateReversedOrderByClause(query.OrderBy)
-			if err != nil {
-				return "", fmt.Errorf("failed to reverse ORDER BY for tail mode: %w", err)
-			}
+			reversedClause := g.generateReversedOrderByClause(query.OrderBy)
 			// Build inner SELECT: everything up to (not including) the ORDER BY part.
 			innerParts := parts[:len(parts)-1] // drop "ORDER BY ..." added above
 			innerSQL := strings.Join(innerParts, " ") +
 				fmt.Sprintf(" ORDER BY %s LIMIT %d", reversedClause, n)
 			return fmt.Sprintf("SELECT * FROM (%s) AS _tail ORDER BY %s", innerSQL, orderByClause), nil
 		}
-		// No ORDER BY: order is undefined; still honour the row count.
+		// No ORDER BY: order is undefined; still honor the row count.
 		parts = append(parts, fmt.Sprintf("LIMIT %d", n))
 	}
 
@@ -104,7 +97,7 @@ func (g *SQLGenerator) generateWhereClause(filters *packet.Filters) (string, err
 
 // generateLogicalGroup конвертирует LogicalGroup в SQL
 func (g *SQLGenerator) generateLogicalGroup(group *packet.LogicalGroup, operator string) (string, error) {
-	var conditions []string
+	conditions := make([]string, 0, len(group.Filters)+len(group.And)+len(group.Or))
 
 	// Обрабатываем фильтры
 	for _, filter := range group.Filters {
@@ -276,12 +269,12 @@ func reverseDirection(dir string) string {
 
 // generateReversedOrderByClause builds an ORDER BY clause with every direction flipped.
 // Used for tail-mode subqueries so that LIMIT N selects the last N rows.
-func (g *SQLGenerator) generateReversedOrderByClause(orderBy *packet.OrderBy) (string, error) {
+func (g *SQLGenerator) generateReversedOrderByClause(orderBy *packet.OrderBy) string {
 	if orderBy == nil {
-		return "", nil
+		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, 1+len(orderBy.Fields))
 
 	if orderBy.Field != "" {
 		parts = append(parts, fmt.Sprintf("%s %s", orderBy.Field, reverseDirection(orderBy.Direction)))
@@ -291,20 +284,16 @@ func (g *SQLGenerator) generateReversedOrderByClause(orderBy *packet.OrderBy) (s
 		parts = append(parts, fmt.Sprintf("%s %s", field.Name, reverseDirection(field.Direction)))
 	}
 
-	if len(parts) == 0 {
-		return "", nil
-	}
-
-	return strings.Join(parts, ", "), nil
+	return strings.Join(parts, ", ")
 }
 
 // generateOrderByClause конвертирует OrderBy в SQL ORDER BY
-func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) (string, error) {
+func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 	if orderBy == nil {
-		return "", nil
+		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, 1+len(orderBy.Fields))
 
 	// Одиночная сортировка
 	if orderBy.Field != "" {
@@ -324,11 +313,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) (string, e
 		parts = append(parts, fmt.Sprintf("%s %s", field.Name, direction))
 	}
 
-	if len(parts) == 0 {
-		return "", nil
-	}
-
-	return strings.Join(parts, ", "), nil
+	return strings.Join(parts, ", ")
 }
 
 // CanTranslateToSQL проверяет можно ли запрос транслировать в SQL

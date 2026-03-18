@@ -220,7 +220,7 @@ func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, s
 	}
 
 	// Строим CREATE TABLE запрос
-	var columns []string
+	columns := make([]string, 0, len(schema.Fields))
 	var pkColumns []string
 
 	for _, field := range schema.Fields {
@@ -270,7 +270,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 	}
 
 	// Строим список колонок
-	var columns []string
+	columns := make([]string, 0, len(pkt.Schema.Fields))
 	for _, field := range pkt.Schema.Fields {
 		columns = append(columns, QuoteIdentifier(field.Name))
 	}
@@ -373,25 +373,14 @@ func (a *Adapter) importWithCopy(ctx context.Context, pkt *packet.DataPacket) er
 		return nil
 	}
 
-	quotedTable := QuoteIdentifier(pkt.Header.TableName)
-	if a.schema != "public" {
-		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
-	}
-
-	// Строим список колонок
-	var columns []string
-	for _, field := range pkt.Schema.Fields {
-		columns = append(columns, QuoteIdentifier(field.Name))
-	}
-
 	// Используем CopyFrom для bulk insert
-	var columnNames []string
+	columnNames := make([]string, 0, len(pkt.Schema.Fields))
 	for _, field := range pkt.Schema.Fields {
 		columnNames = append(columnNames, field.Name)
 	}
 
 	// Подготавливаем данные для COPY
-	var rows [][]any
+	rows := make([][]any, 0, len(pkt.Data.Rows))
 	for _, row := range pkt.Data.Rows {
 		values := parseRow(row.Value)
 		rowData := make([]any, len(values))

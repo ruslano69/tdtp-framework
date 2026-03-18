@@ -31,7 +31,7 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting table '%s' to broker...\n", tableName)
 
@@ -73,7 +73,7 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Connect to broker
 	if err := broker.Connect(ctx); err != nil {
@@ -109,14 +109,14 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// Create broker
 	broker, err := createBroker(brokerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Connect to broker
 	if err := broker.Connect(ctx); err != nil {

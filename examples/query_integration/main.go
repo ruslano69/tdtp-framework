@@ -20,6 +20,7 @@ func main() {
 	// go get modernc.org/sqlite
 
 	demonstrateQueryIntegration()
+	demonstrateWithRealData()
 }
 
 func demonstrateQueryIntegration() {

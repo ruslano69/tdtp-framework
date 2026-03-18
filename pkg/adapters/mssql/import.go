@@ -209,8 +209,8 @@ func (a *Adapter) buildMergeSQL(tableName string, schema packet.Schema, pkFields
 	// WHEN MATCHED THEN UPDATE
 	// WHEN NOT MATCHED THEN INSERT
 
+	sourceColumns := make([]string, 0, len(schema.Fields))
 	var (
-		sourceColumns []string
 		pkConditions  []string
 		updateSets    []string
 		insertColumns []string

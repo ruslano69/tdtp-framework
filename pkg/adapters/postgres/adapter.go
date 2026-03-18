@@ -374,7 +374,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 		tdtpType, length := convertPostgresTypeToTDTP(fd.DataTypeOID)
 
 		schema.Fields[i] = packet.Field{
-			Name:   string(fd.Name),
+			Name:   fd.Name,
 			Type:   tdtpType,
 			Length: length,
 		}
