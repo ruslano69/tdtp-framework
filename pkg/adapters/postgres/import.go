@@ -12,55 +12,54 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
-// ImportPacket импортирует один TDTP пакет в PostgreSQL через временную таблицу
+// ImportPacket импортирует один TDTP пакет в PostgreSQL.
+// StrategyCopy: атомарная замена таблицы через временную (temp → rename).
+// StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу.
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	tableName := pkt.Header.TableName
 
-	// Генерируем имя временной таблицы
-	tempTableName := generateTempTableName(tableName)
-
-	fmt.Printf("📋 Import to temporary table: %s\n", tempTableName)
-
-	// 1. Создаем временную таблицу
-	err := a.createTableFromSchema(ctx, tempTableName, pkt.Schema)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary table: %w", err)
-	}
-
-	// 2. Импортируем данные во временную таблицу
-	tempPacket := *pkt
-	tempPacket.Header.TableName = tempTableName
-
 	switch strategy {
 	case adapters.StrategyCopy:
-		err = a.importWithCopy(ctx, &tempPacket)
+		// Атомарная замена через временную таблицу
+		tempTableName := generateTempTableName(tableName)
+
+		fmt.Printf("📋 Import to temporary table: %s\n", tempTableName)
+
+		err := a.createTableFromSchema(ctx, tempTableName, pkt.Schema)
+		if err != nil {
+			return fmt.Errorf("failed to create temporary table: %w", err)
+		}
+
+		tempPacket := *pkt
+		tempPacket.Header.TableName = tempTableName
+
+		if err = a.importWithCopy(ctx, &tempPacket); err != nil {
+			_ = a.dropTable(ctx, tempTableName)
+			return fmt.Errorf("failed to import to temporary table: %w", err)
+		}
+
+		fmt.Printf("✅ Data loaded to temporary table\n")
+		fmt.Printf("🔄 Replacing production table: %s\n", tableName)
+
+		if err = a.replaceTables(ctx, tableName, tempTableName); err != nil {
+			_ = a.dropTable(ctx, tempTableName)
+			return fmt.Errorf("failed to replace tables: %w", err)
+		}
+
+		fmt.Printf("✅ Production table replaced successfully\n")
+		return nil
+
 	case adapters.StrategyReplace, adapters.StrategyIgnore, adapters.StrategyFail:
-		err = a.importWithInsert(ctx, &tempPacket, strategy)
+		// Убеждаемся что таблица существует, затем INSERT с ON CONFLICT
+		if err := a.createTableFromSchema(ctx, tableName, pkt.Schema); err != nil {
+			return fmt.Errorf("failed to create table: %w", err)
+		}
+		return a.importWithInsert(ctx, pkt, strategy)
+
 	default:
-		err = fmt.Errorf("unknown import strategy: %s", strategy)
+		return fmt.Errorf("unknown import strategy: %s", strategy)
 	}
-
-	if err != nil {
-		// Откатываем - удаляем временную таблицу
-		_ = a.dropTable(ctx, tempTableName)
-		return fmt.Errorf("failed to import to temporary table: %w", err)
-	}
-
-	fmt.Printf("✅ Data loaded to temporary table\n")
-	fmt.Printf("🔄 Replacing production table: %s\n", tableName)
-
-	// 3. Заменяем продакшен таблицу временной (атомарная операция)
-	err = a.replaceTables(ctx, tableName, tempTableName)
-	if err != nil {
-		// Откатываем - удаляем временную таблицу
-		_ = a.dropTable(ctx, tempTableName)
-		return fmt.Errorf("failed to replace tables: %w", err)
-	}
-
-	fmt.Printf("✅ Production table replaced successfully\n")
-
-	return nil
 }
 
 // ImportPackets импортирует множество пакетов атомарно через временную таблицу
