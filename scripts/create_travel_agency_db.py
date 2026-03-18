@@ -213,11 +213,69 @@ def drop_and_create_tables(conn):
                             DEFAULT 'confirmed',
             booked_at       TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             paid_at         TIMESTAMP WITH TIME ZONE,
+            gds_pnr_code    VARCHAR(6),              -- PNR в системе GDS авиаперевозчика
             notes           TEXT
         );
     """)
 
-    # ── полезные VIEW ──────────────────────────────────────────────────────────
+    print('📋 Creating payments...')
+    cur.execute("""
+        CREATE TABLE payments (
+            payment_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            booking_id      UUID NOT NULL REFERENCES bookings(booking_id),
+            branch_id       INTEGER NOT NULL REFERENCES branches(branch_id),
+            amount_rub      NUMERIC(14,2) NOT NULL,
+            method          VARCHAR(20) NOT NULL,    -- card / cash / transfer / online / invoice
+            payment_type    VARCHAR(20) NOT NULL,    -- deposit / balance / full
+            status          VARCHAR(20) NOT NULL     -- completed / pending / failed / reversed
+                            DEFAULT 'completed',
+            paid_at         TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            transaction_ref VARCHAR(50),             -- номер транзакции банка
+            terminal_id     VARCHAR(20),             -- id терминала / кассы
+            notes           TEXT
+        );
+    """)
+
+    print('📋 Creating refunds...')
+    cur.execute("""
+        CREATE TABLE refunds (
+            refund_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            booking_id      UUID NOT NULL REFERENCES bookings(booking_id),
+            payment_id      UUID REFERENCES payments(payment_id),
+            branch_id       INTEGER NOT NULL REFERENCES branches(branch_id),
+            amount_rub      NUMERIC(14,2) NOT NULL,
+            penalty_rub     NUMERIC(14,2) NOT NULL DEFAULT 0,   -- штраф за отмену
+            reason          VARCHAR(50) NOT NULL,               -- client_request / flight_cancelled / no_visa / force_majeure / other
+            status          VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending / completed / rejected
+            requested_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            processed_at    TIMESTAMP WITH TIME ZONE,
+            processed_by    VARCHAR(100)
+        );
+    """)
+
+    print('📋 Creating operations_log...')
+    cur.execute("""
+        CREATE TABLE operations_log (
+            op_id           BIGSERIAL PRIMARY KEY,
+            branch_id       INTEGER NOT NULL REFERENCES branches(branch_id),
+            branch_code     CHAR(3) NOT NULL,
+            op_type         VARCHAR(30) NOT NULL,    -- booking / payment / cancellation / refund / package_open / package_close / tour_update
+            entity_type     VARCHAR(30),             -- booking / payment / refund / package / tour
+            entity_id       VARCHAR(50),
+            op_date         DATE NOT NULL,
+            op_time         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+            operator        VARCHAR(100),
+            amount_rub      NUMERIC(14,2),
+            status          VARCHAR(20) DEFAULT 'ok',
+            details         JSONB,
+            synced_at       TIMESTAMP WITH TIME ZONE  -- время, когда запись была выгружена через pipeline
+        );
+        CREATE INDEX ops_log_branch_date_idx ON operations_log (branch_id, op_date);
+        CREATE INDEX ops_log_type_idx        ON operations_log (op_type);
+        CREATE INDEX ops_log_entity_idx      ON operations_log (entity_type, entity_id);
+    """)
+
+    # ── полезные VIEW ─────────────────────────────────────────────────────────
     print('👁  Creating views...')
 
     # Календарный график свободных мест
@@ -279,6 +337,68 @@ def drop_and_create_tables(conn):
         LEFT JOIN bookings bk ON bk.branch_id = b.branch_id
         GROUP BY b.branch_id, b.city, b.code
         ORDER BY revenue_rub DESC NULLS LAST;
+    """)
+
+    # Финансовый итог по филиалу за день
+    cur.execute("""
+        CREATE OR REPLACE VIEW v_financial_summary AS
+        SELECT
+            b.city                                                      AS branch_city,
+            b.code                                                      AS branch_code,
+            DATE(p.paid_at AT TIME ZONE 'Europe/Moscow')                AS op_date,
+            COUNT(DISTINCT p.payment_id)                                AS payments_count,
+            SUM(p.amount_rub) FILTER (WHERE p.status = 'completed')     AS received_rub,
+            SUM(p.amount_rub) FILTER (WHERE p.status = 'reversed')      AS reversed_rub,
+            COUNT(DISTINCT r.refund_id)                                 AS refunds_count,
+            COALESCE(SUM(r.amount_rub) FILTER (WHERE r.status = 'completed'), 0) AS refunded_rub
+        FROM branches b
+        LEFT JOIN payments p ON p.branch_id = b.branch_id
+        LEFT JOIN refunds  r ON r.branch_id = b.branch_id
+          AND DATE(r.processed_at AT TIME ZONE 'Europe/Moscow') =
+              DATE(p.paid_at AT TIME ZONE 'Europe/Moscow')
+        GROUP BY b.branch_id, b.city, b.code, DATE(p.paid_at AT TIME ZONE 'Europe/Moscow')
+        ORDER BY op_date DESC, received_rub DESC NULLS LAST;
+    """)
+
+    # Журнал операций — последние 500 записей
+    cur.execute("""
+        CREATE OR REPLACE VIEW v_ops_journal AS
+        SELECT
+            ol.op_id,
+            ol.op_date,
+            ol.op_time,
+            b.city                                  AS branch_city,
+            ol.branch_code,
+            ol.op_type,
+            ol.entity_type,
+            ol.entity_id,
+            ol.operator,
+            ol.amount_rub,
+            ol.status,
+            ol.details
+        FROM operations_log ol
+        JOIN branches b ON b.branch_id = ol.branch_id
+        ORDER BY ol.op_time DESC;
+    """)
+
+    # Сводка операционного дня по филиалам
+    cur.execute("""
+        CREATE OR REPLACE VIEW v_daily_branch_report AS
+        SELECT
+            ol.op_date,
+            b.city                                              AS branch_city,
+            ol.branch_code,
+            COUNT(*) FILTER (WHERE ol.op_type = 'booking')     AS new_bookings,
+            COUNT(*) FILTER (WHERE ol.op_type = 'payment')     AS payments,
+            COUNT(*) FILTER (WHERE ol.op_type = 'cancellation') AS cancellations,
+            COUNT(*) FILTER (WHERE ol.op_type = 'refund')      AS refunds,
+            COUNT(*) FILTER (WHERE ol.op_type = 'package_open') AS new_packages,
+            COALESCE(SUM(ol.amount_rub) FILTER (WHERE ol.op_type = 'payment'), 0) AS day_revenue_rub,
+            COALESCE(SUM(ol.amount_rub) FILTER (WHERE ol.op_type = 'refund'), 0)  AS day_refunds_rub
+        FROM operations_log ol
+        JOIN branches b ON b.branch_id = ol.branch_id
+        GROUP BY ol.op_date, b.branch_id, b.city, ol.branch_code
+        ORDER BY ol.op_date DESC, day_revenue_rub DESC;
     """)
 
     conn.commit()
@@ -467,6 +587,7 @@ def insert_packages_and_flights(conn, tour_ids, branch_ids):
 
 def insert_clients_and_bookings(conn, package_ids, branch_ids):
     cur = conn.cursor()
+    booking_records = []   # собираем для insert_payments_and_refunds
 
     # Клиенты
     print('\n👥 Inserting clients...')
@@ -546,11 +667,28 @@ def insert_clients_and_bookings(conn, package_ids, branch_ids):
                                          datetime.min.time()) + timedelta(hours=random.randint(8,20))
             paid_at = booked_at + timedelta(hours=random.randint(1, 48)) if status == 'confirmed' else None
 
+            # PNR только для confirmed бронирований с авиаперелётом
+            gds_pnr = None
+            if status == 'confirmed':
+                gds_pnr = _gen_pnr()
+
             cur.execute("""
                 INSERT INTO bookings
-                  (package_id, branch_id, client_id, persons, total_rub, status, booked_at, paid_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (pkg_id, branch_id, client_id, persons, total_rub, status, booked_at, paid_at))
+                  (package_id, branch_id, client_id, persons, total_rub,
+                   status, booked_at, paid_at, gds_pnr_code)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING booking_id
+            """, (pkg_id, branch_id, client_id, persons, total_rub,
+                  status, booked_at, paid_at, gds_pnr))
+            booking_id = cur.fetchone()[0]
+            booking_records.append({
+                'booking_id': str(booking_id),
+                'branch_id':  branch_id,
+                'total_rub':  total_rub,
+                'status':     status,
+                'booked_at':  booked_at,
+                'paid_at':    paid_at,
+            })
 
             booked_so_far += persons
             booked += 1
@@ -558,6 +696,230 @@ def insert_clients_and_bookings(conn, package_ids, branch_ids):
     conn.commit()
     cur.close()
     print(f'   Clients: {len(client_ids)}, Bookings: {booked}')
+    return booking_records
+
+
+def _gen_pnr():
+    """Генерирует 6-символьный PNR-код (A-Z0-9)."""
+    import string
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+
+def insert_payments_and_refunds(conn, booking_records):
+    """
+    Для каждого бронирования создаёт оплаты.
+    confirmed  → 1 или 2 платежа (депозит + остаток)
+    pending    → 1 платёж со статусом pending
+    cancelled  → попытка платежа, затем возврат
+    refunded   → завершённый возврат
+    """
+    cur = conn.cursor()
+    print('\n💳 Inserting payments & refunds...')
+
+    methods  = ['card', 'card', 'card', 'cash', 'online', 'transfer', 'invoice']
+    p_total  = 0
+    r_total  = 0
+
+    cancel_reasons = [
+        'client_request', 'client_request', 'no_visa',
+        'flight_cancelled', 'force_majeure', 'other',
+    ]
+
+    for bk in booking_records:
+        bid      = bk['booking_id']
+        br_id    = bk['branch_id']
+        total    = float(bk['total_rub'])
+        status   = bk['status']
+        booked   = bk['booked_at']
+
+        if status == 'confirmed':
+            # 40% — сразу полная оплата, 60% — депозит + остаток
+            if random.random() < 0.40:
+                # Полная оплата
+                paid_at = booked + timedelta(minutes=random.randint(10, 120))
+                cur.execute("""
+                    INSERT INTO payments
+                      (booking_id, branch_id, amount_rub, method,
+                       payment_type, status, paid_at, transaction_ref)
+                    VALUES (%s,%s,%s,%s,'full','completed',%s,%s)
+                """, (bid, br_id, total, random.choice(methods),
+                      paid_at, f'TXN{random.randint(10**9, 10**10-1)}'))
+            else:
+                # Депозит 30–50%
+                deposit_pct = random.uniform(0.30, 0.50)
+                deposit     = round(total * deposit_pct, 2)
+                balance     = round(total - deposit, 2)
+                dep_at  = booked + timedelta(minutes=random.randint(10, 60))
+                bal_at  = dep_at  + timedelta(days=random.randint(3, 30))
+                for amt, ptype, ts in [(deposit, 'deposit', dep_at), (balance, 'balance', bal_at)]:
+                    cur.execute("""
+                        INSERT INTO payments
+                          (booking_id, branch_id, amount_rub, method,
+                           payment_type, status, paid_at, transaction_ref)
+                        VALUES (%s,%s,%s,%s,%s,'completed',%s,%s)
+                    """, (bid, br_id, amt, random.choice(methods),
+                          ptype, ts, f'TXN{random.randint(10**9, 10**10-1)}'))
+            p_total += 1
+
+        elif status == 'pending':
+            # Ожидает оплаты — deposit pending
+            dep_at = booked + timedelta(hours=random.randint(1, 4))
+            cur.execute("""
+                INSERT INTO payments
+                  (booking_id, branch_id, amount_rub, method,
+                   payment_type, status, paid_at)
+                VALUES (%s,%s,%s,%s,'deposit','pending',%s)
+            """, (bid, br_id, round(total * 0.3, 2), random.choice(methods), dep_at))
+            p_total += 1
+
+        elif status in ('cancelled', 'refunded'):
+            # Был платёж, потом отмена
+            paid_at = booked + timedelta(minutes=random.randint(15, 180))
+            cur.execute("""
+                INSERT INTO payments
+                  (booking_id, branch_id, amount_rub, method,
+                   payment_type, status, paid_at, transaction_ref)
+                VALUES (%s,%s,%s,%s,'full','reversed',%s,%s)
+                RETURNING payment_id
+            """, (bid, br_id, total, random.choice(methods),
+                  paid_at, f'TXN{random.randint(10**9, 10**10-1)}'))
+            payment_id = cur.fetchone()[0]
+            p_total += 1
+
+            # Штраф 0–30% от суммы (зависит от срочности)
+            penalty_pct = random.choice([0, 0, 0.10, 0.15, 0.20, 0.30])
+            penalty     = round(total * penalty_pct, 2)
+            refund_amt  = round(total - penalty, 2)
+            reason      = random.choice(cancel_reasons)
+            req_at      = paid_at + timedelta(hours=random.randint(1, 72))
+            proc_at     = req_at  + timedelta(hours=random.randint(4, 96)) if status == 'refunded' else None
+            rf_status   = 'completed' if status == 'refunded' else 'pending'
+
+            cur.execute("""
+                INSERT INTO refunds
+                  (booking_id, payment_id, branch_id, amount_rub,
+                   penalty_rub, reason, status, requested_at, processed_at, processed_by)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (bid, payment_id, br_id, refund_amt, penalty,
+                  reason, rf_status, req_at, proc_at,
+                  f'manager_{random.randint(1,10)}' if proc_at else None))
+            r_total += 1
+
+    conn.commit()
+    cur.close()
+    print(f'   Payments: {p_total}, Refunds: {r_total}')
+
+
+def build_operations_log(conn):
+    """
+    Заполняет operations_log на основе уже существующих данных.
+    Каждая операция (бронирование, оплата, отмена, возврат) получает запись в лог.
+    """
+    cur = conn.cursor()
+    print('\n📋 Building operations_log...')
+
+    # Бронирования
+    cur.execute("""
+        SELECT bk.booking_id, bk.branch_id, br.code, bk.status,
+               bk.booked_at, bk.total_rub, bk.persons
+        FROM bookings bk
+        JOIN branches br ON br.branch_id = bk.branch_id
+    """)
+    bookings = cur.fetchall()
+
+    ops = []
+    for booking_id, branch_id, branch_code, status, booked_at, total_rub, persons in bookings:
+        ops.append((
+            branch_id, branch_code, 'booking',
+            'booking', str(booking_id),
+            booked_at.date(), booked_at,
+            f'agent_{random.randint(1,8)}',
+            float(total_rub) if status not in ('cancelled',) else None,
+            status if status != 'confirmed' else 'ok',
+            json.dumps({'persons': persons, 'booking_status': status}),
+        ))
+
+    # Оплаты
+    cur.execute("""
+        SELECT p.payment_id, p.branch_id, br.code,
+               p.amount_rub, p.payment_type, p.method, p.status, p.paid_at
+        FROM payments p
+        JOIN branches br ON br.branch_id = p.branch_id
+        WHERE p.paid_at IS NOT NULL
+    """)
+    for pid, branch_id, branch_code, amount, ptype, method, status, paid_at in cur.fetchall():
+        ops.append((
+            branch_id, branch_code, 'payment',
+            'payment', str(pid),
+            paid_at.date(), paid_at,
+            f'cashier_{random.randint(1,4)}',
+            float(amount),
+            status,
+            json.dumps({'payment_type': ptype, 'method': method}),
+        ))
+
+    # Отмены и возвраты
+    cur.execute("""
+        SELECT r.refund_id, r.branch_id, br.code, r.amount_rub,
+               r.penalty_rub, r.reason, r.status,
+               r.requested_at, r.processed_at
+        FROM refunds r
+        JOIN branches br ON br.branch_id = r.branch_id
+    """)
+    for rid, branch_id, branch_code, amount, penalty, reason, status, req_at, proc_at in cur.fetchall():
+        # Запись об отмене
+        ops.append((
+            branch_id, branch_code, 'cancellation',
+            'refund', str(rid),
+            req_at.date(), req_at,
+            f'agent_{random.randint(1,8)}',
+            None,
+            'ok',
+            json.dumps({'reason': reason}),
+        ))
+        # Запись о возврате (если обработан)
+        if proc_at:
+            ops.append((
+                branch_id, branch_code, 'refund',
+                'refund', str(rid),
+                proc_at.date(), proc_at,
+                f'manager_{random.randint(1,10)}',
+                float(amount),
+                status,
+                json.dumps({'penalty_rub': float(penalty), 'reason': reason}),
+            ))
+
+    # Пакеты туров — открытие/закрытие
+    cur.execute("""
+        SELECT tp.package_id, tp.branch_id, br.code,
+               tp.status, tp.created_at, tp.price_rub
+        FROM tour_packages tp
+        JOIN branches br ON br.branch_id = tp.branch_id
+    """)
+    for pkg_id, branch_id, branch_code, status, created_at, price in cur.fetchall():
+        op_type = 'package_open' if status == 'active' else 'package_close'
+        ops.append((
+            branch_id, branch_code, op_type,
+            'package', str(pkg_id),
+            created_at.date() if hasattr(created_at, 'date') else created_at,
+            created_at,
+            'system',
+            float(price),
+            'ok',
+            json.dumps({'package_status': status}),
+        ))
+
+    # Пакетная вставка
+    cur.executemany("""
+        INSERT INTO operations_log
+          (branch_id, branch_code, op_type, entity_type, entity_id,
+           op_date, op_time, operator, amount_rub, status, details)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, ops)
+
+    conn.commit()
+    cur.close()
+    print(f'   Operations logged: {len(ops)}')
 
 
 def print_stats(conn):
@@ -566,7 +928,8 @@ def print_stats(conn):
     print('📊  DATABASE STATISTICS')
     print('='*65)
 
-    tables = ['branches','destinations','tours','tour_packages','flights','clients','bookings']
+    tables = ['branches','destinations','tours','tour_packages','flights',
+              'clients','bookings','payments','refunds','operations_log']
     for t in tables:
         cur.execute(f'SELECT COUNT(*) FROM {t}')
         n = cur.fetchone()[0]
@@ -600,6 +963,42 @@ def print_stats(conn):
         rev = f"{int(r[4]):,}" if r[4] else '0'
         print(f"  {r[0]:<22} [{r[1]}]  брон: {r[2]:>4}  чел: {r[3]:>5}  выручка: {rev:>14} руб  отмен: {r[5]:>3}")
 
+    print('\n💳  PAYMENTS & REFUNDS:')
+    print('-'*65)
+    cur.execute("""
+        SELECT
+            COUNT(*) FILTER (WHERE status='completed')   AS paid,
+            SUM(amount_rub) FILTER (WHERE status='completed') AS total_received,
+            COUNT(*) FILTER (WHERE status='pending')     AS pending,
+            COUNT(*) FILTER (WHERE status='reversed')    AS reversed
+        FROM payments
+    """)
+    r = cur.fetchone()
+    print(f'  Оплачено: {r[0]}  Сумма: {int(r[1] or 0):,} руб  Ожидают: {r[2]}  Возвращено: {r[3]}')
+
+    cur.execute("""
+        SELECT
+            COUNT(*) FILTER (WHERE status='completed') AS done,
+            COUNT(*) FILTER (WHERE status='pending')   AS pend,
+            SUM(amount_rub)   FILTER (WHERE status='completed') AS refunded,
+            SUM(penalty_rub)  AS total_penalty
+        FROM refunds
+    """)
+    r = cur.fetchone()
+    print(f'  Возвратов: {r[0]} завершено, {r[1]} в обработке  '
+          f'Возвращено: {int(r[2] or 0):,} руб  Штрафы: {int(r[3] or 0):,} руб')
+
+    print('\n📋  OPERATIONS LOG (top types):')
+    print('-'*65)
+    cur.execute("""
+        SELECT op_type, COUNT(*) AS cnt, SUM(amount_rub) AS total
+        FROM operations_log
+        GROUP BY op_type ORDER BY cnt DESC
+    """)
+    for op_type, cnt, total in cur.fetchall():
+        total_str = f'{int(total):,} руб' if total else '—'
+        print(f'  {op_type:<20} {cnt:>6} записей  {total_str}')
+
     print('\n🌍  ACTIVE TOURS with free seats (next 60 days):')
     print('-'*65)
     cur.execute("""
@@ -630,7 +1029,9 @@ def main():
         branch_ids, dest_ids = insert_reference_data(conn)
         tour_ids = insert_tours(conn, dest_ids)
         package_ids = insert_packages_and_flights(conn, tour_ids, branch_ids)
-        insert_clients_and_bookings(conn, package_ids, branch_ids)
+        booking_records = insert_clients_and_bookings(conn, package_ids, branch_ids)
+        insert_payments_and_refunds(conn, booking_records)
+        build_operations_log(conn)
         print_stats(conn)
 
         print('\n' + '='*65)
