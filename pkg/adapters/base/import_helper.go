@@ -73,6 +73,8 @@ func NewImportHelper(
 }
 
 // ImportPacket импортирует один TDTP пакет в БД
+// StrategyCopy (и useTemporaryTables=true): атомарная замена через temp-таблицу.
+// StrategyReplace/Ignore/Fail: прямой UPSERT в существующую таблицу.
 // Общая реализация для всех адаптеров
 func (h *ImportHelper) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	// Проверяем тип пакета
@@ -82,12 +84,12 @@ func (h *ImportHelper) ImportPacket(ctx context.Context, pkt *packet.DataPacket,
 
 	tableName := pkt.Header.TableName
 
-	// Если включен режим временных таблиц - используем атомарную замену
-	if h.useTemporaryTables {
+	// Временные таблицы используем только для StrategyCopy
+	if h.useTemporaryTables && strategy == adapters.StrategyCopy {
 		return h.importWithTemporaryTable(ctx, pkt, strategy)
 	}
 
-	// Иначе - прямая вставка в таблицу
+	// Для всех остальных стратегий — прямая вставка (UPSERT/INSERT/etc.)
 	return h.importDirect(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy)
 }
 
@@ -99,6 +101,7 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 	}
 
 	tableName := packets[0].Header.TableName
+	canonicalSchema := packets[0].Schema
 
 	// Начинаем транзакцию
 	tx, err := h.transactionManager.BeginTx(ctx)
@@ -112,18 +115,16 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 		}
 	}()
 
-	// Если включен режим временных таблиц - используем один раз
-	if h.useTemporaryTables {
+	// StrategyCopy (и useTemporaryTables=true): атомарная замена через temp-таблицу.
+	// Остальные стратегии: прямой UPSERT — сохраняем строки которых нет в пакете.
+	if h.useTemporaryTables && strategy == adapters.StrategyCopy {
 		tempTableName := GenerateTempTableName(tableName)
 		fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
 
-		// 1. Создаем временную таблицу (используем схему из первого пакета)
-		if err := h.tableManager.CreateTable(ctx, tempTableName, packets[0].Schema); err != nil {
+		if err = h.tableManager.CreateTable(ctx, tempTableName, canonicalSchema); err != nil {
 			return fmt.Errorf("failed to create temporary table: %w", err)
 		}
 
-		// 2. Импортируем каждый пакет во временную таблицу
-		canonicalSchema := packets[0].Schema
 		for i, pkt := range packets {
 			if !packet.SchemaEquals(canonicalSchema, pkt.Schema) {
 				fmt.Printf("  ⚠️  Skipping packet %d/%d: schema mismatch (expected %d fields, got %d)\n",
@@ -133,8 +134,8 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
 
-			if err := h.dataInserter.InsertRows(ctx, tempTableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
-				_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
+			if err = h.dataInserter.InsertRows(ctx, tempTableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
+				_ = h.tableManager.DropTable(ctx, tempTableName)
 				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
 			}
 		}
@@ -142,15 +143,12 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 		fmt.Printf("✅ All packets loaded to temporary table\n")
 		fmt.Printf("🔄 Replacing production table: %s\n", tableName)
 
-		// 3. Заменяем продакшен таблицу временной
-		if err := h.replaceTables(ctx, tableName, tempTableName); err != nil {
-			_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
+		if err = h.replaceTables(ctx, tableName, tempTableName); err != nil {
+			_ = h.tableManager.DropTable(ctx, tempTableName)
 			return fmt.Errorf("failed to replace tables: %w", err)
 		}
-
 	} else {
-		// Прямая вставка без временных таблиц
-		canonicalSchema := packets[0].Schema
+		// Прямая вставка: UPSERT/INSERT в целевую таблицу
 		for i, pkt := range packets {
 			if !packet.SchemaEquals(canonicalSchema, pkt.Schema) {
 				fmt.Printf("  ⚠️  Skipping packet %d/%d: schema mismatch (expected %d fields, got %d)\n",
@@ -160,14 +158,14 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
 
-			if err := h.importDirect(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
+			if err = h.importDirect(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
 				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
 			}
 		}
 	}
 
 	// Коммитим транзакцию
-	if err := tx.Commit(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

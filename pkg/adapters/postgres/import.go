@@ -63,6 +63,10 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 }
 
 // ImportPackets импортирует множество пакетов атомарно через временную таблицу
+// ImportPackets импортирует множество пакетов атомарно.
+// StrategyCopy: атомарная замена таблицы через временную (temp → rename).
+// StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу,
+// что позволяет накапливать данные из нескольких источников/файлов без затирания.
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
 	if len(packets) == 0 {
@@ -70,55 +74,81 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	}
 
 	tableName := packets[0].Header.TableName
-	tempTableName := generateTempTableName(tableName)
 
-	fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
+	switch strategy {
+	case adapters.StrategyCopy:
+		// Атомарная замена через временную таблицу
+		tempTableName := generateTempTableName(tableName)
 
-	// Начинаем транзакцию
-	tx, err := a.BeginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+		fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
 
-	// 1. Создаем временную таблицу (используем схему из первого пакета)
-	err = a.createTableFromSchema(ctx, tempTableName, packets[0].Schema)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary table: %w", err)
-	}
-
-	// 2. Импортируем каждый пакет во временную таблицу
-	for i, pkt := range packets {
-		fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
-
-		tempPacket := *pkt
-		tempPacket.Header.TableName = tempTableName
-
-		err := a.importPacketData(ctx, &tempPacket, strategy)
+		tx, err := a.BeginTx(ctx)
 		if err != nil {
-			_ = a.dropTable(ctx, tempTableName)
-			return fmt.Errorf("failed to import packet %d: %w", i+1, err)
+			return fmt.Errorf("failed to begin transaction: %w", err)
 		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		if err = a.createTableFromSchema(ctx, tempTableName, packets[0].Schema); err != nil {
+			return fmt.Errorf("failed to create temporary table: %w", err)
+		}
+
+		for i, pkt := range packets {
+			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
+
+			tempPacket := *pkt
+			tempPacket.Header.TableName = tempTableName
+
+			if err = a.importWithCopy(ctx, &tempPacket); err != nil {
+				_ = a.dropTable(ctx, tempTableName)
+				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
+			}
+		}
+
+		fmt.Printf("✅ All packets loaded to temporary table\n")
+		fmt.Printf("🔄 Replacing production table: %s\n", tableName)
+
+		if err = a.replaceTables(ctx, tableName, tempTableName); err != nil {
+			_ = a.dropTable(ctx, tempTableName)
+			return fmt.Errorf("failed to replace tables: %w", err)
+		}
+
+		if err = tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		fmt.Printf("✅ Production table replaced successfully\n")
+		return nil
+
+	case adapters.StrategyReplace, adapters.StrategyIgnore, adapters.StrategyFail:
+		// Убеждаемся что таблица существует, затем INSERT с ON CONFLICT для каждого пакета
+		if err := a.createTableFromSchema(ctx, tableName, packets[0].Schema); err != nil {
+			return fmt.Errorf("failed to create table: %w", err)
+		}
+
+		tx, err := a.BeginTx(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		for i, pkt := range packets {
+			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
+
+			if err := a.importWithInsert(ctx, pkt, strategy); err != nil {
+				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
+			}
+		}
+
+		if err = tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		fmt.Printf("✅ All %d packets imported successfully\n", len(packets))
+		return nil
+
+	default:
+		return fmt.Errorf("unknown import strategy: %s", strategy)
 	}
-
-	fmt.Printf("✅ All packets loaded to temporary table\n")
-	fmt.Printf("🔄 Replacing production table: %s\n", tableName)
-
-	// 3. Заменяем продакшен таблицу временной
-	err = a.replaceTables(ctx, tableName, tempTableName)
-	if err != nil {
-		_ = a.dropTable(ctx, tempTableName)
-		return fmt.Errorf("failed to replace tables: %w", err)
-	}
-
-	// Коммитим транзакцию
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	fmt.Printf("✅ Production table replaced successfully\n")
-
-	return nil
 }
 
 // importPacketData импортирует данные одного пакета (вспомогательная функция)
