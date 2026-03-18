@@ -1,3 +1,4 @@
+// Package resilience provides functionality for the TDTP framework.
 package resilience
 
 import (

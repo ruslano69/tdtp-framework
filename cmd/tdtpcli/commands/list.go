@@ -32,7 +32,7 @@ func ListTables(ctx context.Context, config *adapters.Config, pattern string) er
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// Get full table list from the database
 	tables, err := adapter.GetTableNames(ctx)
@@ -77,7 +77,7 @@ func ListViews(ctx context.Context, config *adapters.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// Get view list
 	views, err := adapter.GetViewNames(ctx)

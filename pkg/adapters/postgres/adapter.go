@@ -1,8 +1,10 @@
+// Package postgres provides functionality for the TDTP framework.
 package postgres
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -44,14 +46,14 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	}
 
 	// Настраиваем pool из конфига
-	if cfg.MaxConns > 0 {
-		config.MaxConns = int32(cfg.MaxConns)
+	if cfg.MaxConns > 0 && cfg.MaxConns <= math.MaxInt32 {
+		config.MaxConns = int32(cfg.MaxConns) //nolint:gosec
 	} else {
 		config.MaxConns = 10 // default
 	}
 
-	if cfg.MinConns > 0 {
-		config.MinConns = int32(cfg.MinConns)
+	if cfg.MinConns > 0 && cfg.MinConns <= math.MaxInt32 {
+		config.MinConns = int32(cfg.MinConns) //nolint:gosec
 	} else {
 		config.MinConns = 2 // default
 	}
@@ -96,8 +98,8 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 		sqlAdapter = base.NewPostgreSQLSchemaAdapter(a.schema)
 	}
 	a.exportHelper = base.NewExportHelper(
-		a,          // SchemaReader
-		a,          // DataReader
+		a,           // SchemaReader
+		a,           // DataReader
 		a.converter, // ValueConverter
 		sqlAdapter,  // nil for public schema, PostgreSQLSchemaAdapter otherwise
 	)
@@ -112,13 +114,15 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 }
 
 // NewAdapter создает новый адаптер для PostgreSQL (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapter(connString string) (*Adapter, error) {
 	return NewAdapterWithSchema(connString, "public")
 }
 
 // NewAdapterWithSchema создает адаптер с указанной схемой (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapterWithSchema(connString, schema string) (*Adapter, error) {
 	adapter := &Adapter{}
 	err := adapter.Connect(context.Background(), adapters.Config{
@@ -374,7 +378,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 		tdtpType, length := convertPostgresTypeToTDTP(fd.DataTypeOID)
 
 		schema.Fields[i] = packet.Field{
-			Name:   string(fd.Name),
+			Name:   fd.Name,
 			Type:   tdtpType,
 			Length: length,
 		}

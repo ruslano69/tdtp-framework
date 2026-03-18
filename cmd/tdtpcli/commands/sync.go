@@ -73,7 +73,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting incremental changes...\n")
 

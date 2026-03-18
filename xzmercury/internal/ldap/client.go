@@ -14,13 +14,13 @@ import (
 // Config holds LDAP connection parameters.
 // Used by NewRealClient; MockUsersFile is used by NewMockClient.
 type Config struct {
-	Addr         string        `yaml:"addr"`          // host:port, e.g. "dc.corp.local:389"
-	BindDN       string        `yaml:"bind_dn"`       // e.g. "cn=svc_xzmercury,ou=service,dc=corp,dc=local"
-	BindPassword string        `yaml:"bind_password"` // read from env in production
-	BaseDN       string        `yaml:"base_dn"`       // e.g. "dc=corp,dc=local"
-	CacheTTL     time.Duration `yaml:"cache_ttl"`     // default 120s
-	MockUsersFile string       `yaml:"mock_users_file"` // path to JSON file for dev mode
-	ACLFile      string        `yaml:"acl_file"`      // path to pipeline-acl.yaml
+	Addr          string        `yaml:"addr"`            // host:port, e.g. "dc.corp.local:389"
+	BindDN        string        `yaml:"bind_dn"`         // e.g. "cn=svc_xzmercury,ou=service,dc=corp,dc=local"
+	BindPassword  string        `yaml:"bind_password"`   // read from env in production
+	BaseDN        string        `yaml:"base_dn"`         // e.g. "dc=corp,dc=local"
+	CacheTTL      time.Duration `yaml:"cache_ttl"`       // default 120s
+	MockUsersFile string        `yaml:"mock_users_file"` // path to JSON file for dev mode
+	ACLFile       string        `yaml:"acl_file"`        // path to pipeline-acl.yaml
 }
 
 // Client abstracts real and mock LDAP implementations.

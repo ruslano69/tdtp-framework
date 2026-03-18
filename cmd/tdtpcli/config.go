@@ -1,3 +1,4 @@
+// Package main provides functionality for the TDTP framework.
 package main
 
 import (

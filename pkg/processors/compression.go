@@ -59,7 +59,7 @@ func (p *CompressionProcessor) ProcessBlock(_ context.Context, input []byte) ([]
 // Close освобождает ресурсы, связанные с энкодером.
 func (p *CompressionProcessor) Close() {
 	if p.encoder != nil {
-		p.encoder.Close()
+		_ = p.encoder.Close()
 	}
 }
 
@@ -164,7 +164,7 @@ func GetCompressionStats(original, compressed []byte, compressTime time.Duration
 
 // ShouldCompress определяет, стоит ли сжимать данные.
 // Возвращает true, если данные достаточно большие для выгоды от сжатия.
-func ShouldCompress(dataSize int, minSize int) bool {
+func ShouldCompress(dataSize, minSize int) bool {
 	if minSize <= 0 {
 		minSize = 1024 // По умолчанию сжимаем данные > 1KB
 	}

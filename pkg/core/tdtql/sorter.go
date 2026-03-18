@@ -37,7 +37,8 @@ func (s *Sorter) Sort(
 	// Определяем поля для сортировки
 	var sortFields []sortField
 
-	if orderBy.Field != "" {
+	switch {
+	case orderBy.Field != "":
 		// Простая сортировка по одному полю
 		field, index, err := s.getFieldInfo(orderBy.Field, schemaObj)
 		if err != nil {
@@ -52,7 +53,7 @@ func (s *Sorter) Sort(
 				field:     field,
 			},
 		}
-	} else if len(orderBy.Fields) > 0 {
+	case len(orderBy.Fields) > 0:
 		// Множественная сортировка
 		for _, f := range orderBy.Fields {
 			field, index, err := s.getFieldInfo(f.Name, schemaObj)
@@ -67,7 +68,7 @@ func (s *Sorter) Sort(
 				field:     field,
 			})
 		}
-	} else {
+	default:
 		return result, nil
 	}
 

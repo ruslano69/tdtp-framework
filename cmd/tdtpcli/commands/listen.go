@@ -82,14 +82,14 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// Create and connect Kafka broker
 	broker, err := createBroker(cfg.BrokerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Kafka: %w", err)
@@ -119,7 +119,7 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 	sessions := make(map[string]*streamSession)
 
 	for {
-		// Receive next message; blocks until available or context cancelled
+		// Receive next message; blocks until available or context canceled
 		xmlData, err := broker.Receive(listenCtx)
 		if err != nil {
 			if listenCtx.Err() != nil {

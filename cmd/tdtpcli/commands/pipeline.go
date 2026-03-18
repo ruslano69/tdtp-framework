@@ -109,7 +109,7 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 		if pubErr := publisher.Publish(ctx, config.Name, processor.GetStats(), execErr, pubOpts); pubErr != nil {
 			fmt.Printf("WARNING: Result log publish failed: %v\n", pubErr)
 		}
-		publisher.Close()
+		_ = publisher.Close()
 	}
 
 	// 8. Handle mercury degradation: error-пакет записан, pipeline завершается штатно (exit 0)

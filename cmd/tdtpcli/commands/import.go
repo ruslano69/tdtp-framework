@@ -51,7 +51,7 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		if err != nil {
 			return fmt.Errorf("failed to open storage: %w", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		keys := []string{opts.StorageKey}
 		// Check if this is a multi-part base key by listing the bucket with prefix.
@@ -76,7 +76,7 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 				return fmt.Errorf("failed to get object %s: %w", key, err)
 			}
 			data, err := io.ReadAll(rc)
-			rc.Close()
+			_ = rc.Close()
 			if err != nil {
 				return fmt.Errorf("failed to read object %s: %w", key, err)
 			}
@@ -163,7 +163,7 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	tableName := packets[0].Header.TableName
 	canonicalSchema := packets[0].Schema

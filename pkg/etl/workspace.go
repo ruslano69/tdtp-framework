@@ -34,7 +34,7 @@ func NewWorkspace(ctx context.Context) (*Workspace, error) {
 	// Используем type assertion для получения DB()
 	sqliteAdapter, ok := adapter.(interface{ DB() *sql.DB })
 	if !ok {
-		adapter.Close(ctx)
+		_ = adapter.Close(ctx)
 		return nil, fmt.Errorf("adapter does not support DB() method")
 	}
 
@@ -100,7 +100,7 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	if err != nil {
 		return fmt.Errorf("failed to prepare insert statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	// Начинаем транзакцию для производительности
 	tx, err := w.db.BeginTx(ctx, nil)
@@ -141,13 +141,13 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 }
 
 // ExecuteSQL выполняет SQL запрос в workspace и возвращает результат как DataPacket
-func (w *Workspace) ExecuteSQL(ctx context.Context, sql string, resultTableName string) (*packet.DataPacket, error) {
+func (w *Workspace) ExecuteSQL(ctx context.Context, sqlQuery, resultTableName string) (*packet.DataPacket, error) {
 	// Выполняем SELECT запрос
-	rows, err := w.db.QueryContext(ctx, sql)
+	rows, err := w.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute SQL: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Получаем информацию о колонках
 	columns, err := rows.Columns()
@@ -214,9 +214,9 @@ type StreamingResult struct {
 
 // ExecuteSQLStream выполняет SQL запрос и возвращает данные через channel (streaming)
 // Используется для экспорта больших объемов данных в RabbitMQ/Kafka без загрузки всего в память
-func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTableName string) (*StreamingResult, error) {
+func (w *Workspace) ExecuteSQLStream(ctx context.Context, sqlQuery, resultTableName string) (*StreamingResult, error) {
 	// Выполняем SELECT запрос
-	rows, err := w.db.QueryContext(ctx, sql)
+	rows, err := w.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute SQL: %w", err)
 	}
@@ -224,22 +224,22 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTabl
 	// Получаем информацию о колонках
 	columns, err := rows.Columns()
 	if err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
 	columnTypes, err := rows.ColumnTypes()
 	if err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get column types: %w", err)
 	}
 
 	// Создаем схему
-	schema := packet.Schema{
+	pktSchema := packet.Schema{
 		Fields: make([]packet.Field, len(columns)),
 	}
 	for i, col := range columns {
-		schema.Fields[i] = packet.Field{
+		pktSchema.Fields[i] = packet.Field{
 			Name: col,
 			Type: w.mapSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName()),
 		}
@@ -253,7 +253,7 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTabl
 	go func() {
 		defer close(rowsChan)
 		defer close(errorChan)
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))
@@ -297,7 +297,7 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTabl
 	}()
 
 	return &StreamingResult{
-		Schema:    schema,
+		Schema:    pktSchema,
 		RowsChan:  rowsChan,
 		ErrorChan: errorChan,
 	}, nil
@@ -313,7 +313,7 @@ func (w *Workspace) Close(ctx context.Context) error {
 
 // generateCreateTableDDL генерирует DDL для создания таблицы
 func (w *Workspace) generateCreateTableDDL(tableName string, fields []packet.Field) string {
-	var columns []string
+	columns := make([]string, 0, len(fields))
 
 	for _, field := range fields {
 		sqliteType := w.mapTDTPTypeToSQLite(schema.DataType(field.Type))
@@ -358,7 +358,7 @@ func (w *Workspace) mapSQLiteTypeToTDTP(sqliteType string) string {
 }
 
 // convertValue конвертирует строковое значение в правильный тип для SQLite
-func (w *Workspace) convertValue(value string, fieldType string) any {
+func (w *Workspace) convertValue(value, fieldType string) any {
 	// NULL значения
 	if value == "" || value == "NULL" {
 		return nil

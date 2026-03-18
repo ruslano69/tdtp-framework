@@ -186,7 +186,7 @@ func TestIsExcelError(t *testing.T) {
 	errors := []string{"#N/A", "#DIV/0!", "#NUM!", "#VALUE!", "#REF!", "#NAME?", "#NULL!"}
 	for _, e := range errors {
 		if !isExcelError(e) {
-			t.Errorf("expected %q to be recognised as Excel error", e)
+			t.Errorf("expected %q to be recognized as Excel error", e)
 		}
 	}
 	for _, ok := range []string{"", "hello", "42", "2023-01-01"} {

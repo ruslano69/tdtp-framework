@@ -108,7 +108,7 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 				if !ok {
 					// Канал закрыт, генерируем последнюю часть если есть данные
 					if len(currentPartRows) > 0 {
-						packet, err := sg.createPart(
+						packet := sg.createPart(
 							messageIDBase,
 							partNum,
 							0, // TotalParts unknown
@@ -122,7 +122,6 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 							Packet:    packet,
 							PartNum:   partNum,
 							RowsCount: len(currentPartRows),
-							Error:     err,
 						}
 
 						totalRows += len(currentPartRows)
@@ -142,7 +141,7 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 				// Проверяем нужно ли начать новую часть
 				if currentSize+rowSize+overheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
 					// Генерируем текущую часть
-					packet, err := sg.createPart(
+					packet := sg.createPart(
 						messageIDBase,
 						partNum,
 						0, // TotalParts unknown в streaming режиме
@@ -156,17 +155,6 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 						Packet:    packet,
 						PartNum:   partNum,
 						RowsCount: len(currentPartRows),
-						Error:     err,
-					}
-
-					if err != nil {
-						// При ошибке отправляем summary и завершаем
-						summaryChan <- &StreamingSummary{
-							MessageIDBase: messageIDBase,
-							TotalParts:    partNum, // Части до ошибки
-							TotalRows:     totalRows,
-						}
-						return
 					}
 
 					totalRows += len(currentPartRows)
@@ -194,7 +182,7 @@ func (sg *StreamingGenerator) createPart(
 	msgType MessageType,
 	schema Schema,
 	rows [][]string,
-) (*DataPacket, error) {
+) *DataPacket {
 	packet := NewDataPacket(msgType, tableName)
 	packet.Header.MessageID = fmt.Sprintf("%s-P%d", messageIDBase, partNum)
 	packet.Header.PartNumber = partNum
@@ -207,7 +195,7 @@ func (sg *StreamingGenerator) createPart(
 	// Преобразуем строки в Data
 	packet.Data = RowsToData(rows)
 
-	return packet, nil
+	return packet
 }
 
 // GeneratePartsStreamWithSender генерирует части с указанием sender/recipient
@@ -255,7 +243,7 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 				if !ok {
 					// Канал закрыт, генерируем последнюю часть
 					if len(currentPartRows) > 0 {
-						packet, err := sg.createPartWithSender(
+						packet := sg.createPartWithSender(
 							messageIDBase,
 							partNum,
 							0,
@@ -272,7 +260,6 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 							Packet:    packet,
 							PartNum:   partNum,
 							RowsCount: len(currentPartRows),
-							Error:     err,
 						}
 
 						totalRows += len(currentPartRows)
@@ -289,7 +276,7 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 				rowSize := estimateRowSize(row)
 
 				if currentSize+rowSize+overheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
-					packet, err := sg.createPartWithSender(
+					packet := sg.createPartWithSender(
 						messageIDBase,
 						partNum,
 						0,
@@ -306,17 +293,6 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 						Packet:    packet,
 						PartNum:   partNum,
 						RowsCount: len(currentPartRows),
-						Error:     err,
-					}
-
-					if err != nil {
-						// При ошибке отправляем summary и завершаем
-						summaryChan <- &StreamingSummary{
-							MessageIDBase: messageIDBase,
-							TotalParts:    partNum, // Части до ошибки
-							TotalRows:     totalRows,
-						}
-						return
 					}
 
 					totalRows += len(currentPartRows)
@@ -346,17 +322,12 @@ func (sg *StreamingGenerator) createPartWithSender(
 	recipient string,
 	schema Schema,
 	rows [][]string,
-) (*DataPacket, error) {
-	packet, err := sg.createPart(messageIDBase, partNum, totalParts, tableName, msgType, schema, rows)
-	if err != nil {
-		return nil, err
-	}
-
+) *DataPacket {
+	packet := sg.createPart(messageIDBase, partNum, totalParts, tableName, msgType, schema, rows)
 	packet.Header.InReplyTo = inReplyTo
 	packet.Header.Sender = sender
 	packet.Header.Recipient = recipient
-
-	return packet, nil
+	return packet
 }
 
 // UpdatePartTotalParts обновляет TotalParts во всех частях (для batch post-processing)

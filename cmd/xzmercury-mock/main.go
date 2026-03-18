@@ -1,16 +1,19 @@
 // xzmercury-mock — минимальный mock-сервер xZMercury для E2E тестирования.
 //
 // Реализует:
-//   POST /api/keys/bind     — генерирует AES-256 ключ, сохраняет в памяти, возвращает {key_b64, hmac}
-//   POST /api/keys/retrieve — возвращает ключ по UUID и удаляет (burn-on-read)
-//   GET  /healthz           — liveness probe
+//
+//	POST /api/keys/bind     — генерирует AES-256 ключ, сохраняет в памяти, возвращает {key_b64, hmac}
+//	POST /api/keys/retrieve — возвращает ключ по UUID и удаляет (burn-on-read)
+//	GET  /healthz           — liveness probe
 //
 // Запуск:
-//   go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
+//
+//	go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
 //
 // Переменные окружения (альтернатива флагам):
-//   MOCK_ADDR          — адрес (по умолчанию :3000)
-//   MERCURY_SERVER_SECRET — HMAC-секрет (по умолчанию "dev-secret")
+//
+//	MOCK_ADDR          — адрес (по умолчанию :3000)
+//	MERCURY_SERVER_SECRET — HMAC-секрет (по умолчанию "dev-secret")
 package main
 
 import (
@@ -30,13 +33,13 @@ import (
 )
 
 type keyEntry struct {
-	KeyB64    string
-	Pipeline  string
-	BoundAt   time.Time
+	KeyB64   string
+	Pipeline string
+	BoundAt  time.Time
 }
 
 var (
-	mu      sync.Mutex
+	mu       sync.Mutex
 	keyStore = make(map[string]keyEntry) // uuid → entry
 )
 
@@ -51,14 +54,14 @@ func main() {
 	mux.HandleFunc("/api/keys/retrieve", makeRetrieveHandler())
 
 	log.Printf("[xzmercury-mock] listening on %s  secret=%q", *addr, *secret)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	if err := http.ListenAndServe(*addr, mux); err != nil { //nolint:gosec // G114: mock server, no timeout needed
 		log.Fatalf("server error: %v", err)
 	}
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, `{"status":"ok"}`)
+	_, _ = fmt.Fprintln(w, `{"status":"ok"}`)
 }
 
 func makeBindHandler(secret string) http.HandlerFunc {
@@ -106,7 +109,7 @@ func makeBindHandler(secret string) http.HandlerFunc {
 		log.Printf("[bind] uuid=%s pipeline=%s", req.PackageUUID, req.PipelineName)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"key_b64": keyB64,
 			"hmac":    hmacHex,
 		})
@@ -145,7 +148,7 @@ func makeRetrieveHandler() http.HandlerFunc {
 		log.Printf("[retrieve] uuid=%s BURNED (pipeline=%s bound_at=%s)", req.PackageUUID, entry.Pipeline, entry.BoundAt.Format(time.RFC3339))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"key_b64": entry.KeyB64,
 		})
 	}

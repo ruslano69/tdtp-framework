@@ -82,7 +82,7 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 
 	r.channel, err = r.conn.Channel()
 	if err != nil {
-		r.conn.Close()
+		_ = r.conn.Close()
 		return fmt.Errorf("failed to open channel: %w", err)
 	}
 
@@ -98,8 +98,8 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		nil,                 // arguments
 	)
 	if err != nil {
-		r.channel.Close()
-		r.conn.Close()
+		_ = r.channel.Close()
+		_ = r.conn.Close()
 		return fmt.Errorf("failed to declare queue: %w", err)
 	}
 
@@ -114,8 +114,8 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		nil,            // args
 	)
 	if err != nil {
-		r.channel.Close()
-		r.conn.Close()
+		_ = r.channel.Close()
+		_ = r.conn.Close()
 		return fmt.Errorf("failed to start consuming: %w", err)
 	}
 

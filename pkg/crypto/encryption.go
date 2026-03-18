@@ -34,7 +34,7 @@ const (
 // Encrypt шифрует plaintext алгоритмом AES-256-GCM.
 // key — 32 байта (AES-256), packageUUID — UUID пакета в стандартном формате "xxxxxxxx-xxxx-...".
 // Возвращает бинарный блоб: заголовок + ciphertext.
-func Encrypt(key []byte, plaintext []byte, packageUUID string) ([]byte, error) {
+func Encrypt(key, plaintext []byte, packageUUID string) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("encrypt: key must be 32 bytes, got %d", len(key))
 	}
@@ -63,8 +63,7 @@ func Encrypt(key []byte, plaintext []byte, packageUUID string) ([]byte, error) {
 
 	// Собираем: [2B version][1B algo][16B uuid][12B nonce][ciphertext]
 	out := make([]byte, 0, headerSize+len(ciphertext))
-	out = append(out, headerVersion, headerVersionLo)
-	out = append(out, algoAES256GCM)
+	out = append(out, headerVersion, headerVersionLo, algoAES256GCM)
 	out = append(out, uuidBytes...)
 	out = append(out, nonce...)
 	out = append(out, ciphertext...)
@@ -74,7 +73,7 @@ func Encrypt(key []byte, plaintext []byte, packageUUID string) ([]byte, error) {
 
 // Decrypt расшифровывает блоб, созданный Encrypt.
 // Возвращает UUID пакета из заголовка и plaintext.
-func Decrypt(key []byte, blob []byte) (packageUUID string, plaintext []byte, err error) {
+func Decrypt(key, blob []byte) (packageUUID string, plaintext []byte, err error) {
 	if len(key) != 32 {
 		return "", nil, fmt.Errorf("decrypt: key must be 32 bytes, got %d", len(key))
 	}

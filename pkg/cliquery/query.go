@@ -34,7 +34,7 @@ func BuildQuery(wheres []string, orderBy string, limit, offset int) (*packet.Que
 	// --- WHERE ---
 	// Each --where flag is parsed independently by the TDTQL translator and
 	// then combined into a single top-level AND group.
-	var parsed []*packet.Filters
+	parsed := make([]*packet.Filters, 0, len(wheres))
 	for _, w := range wheres {
 		w = strings.TrimSpace(w)
 		if w == "" {

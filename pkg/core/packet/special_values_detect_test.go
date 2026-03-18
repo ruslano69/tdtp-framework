@@ -34,7 +34,7 @@ func TestDetectAndApply_NullInText(t *testing.T) {
 	rows := [][]string{
 		{"1", nullSentinel}, // TEXT NULL
 		{"2", "hello"},
-		{"3", ""},          // TEXT empty string — должен остаться ""
+		{"3", ""}, // TEXT empty string — должен остаться ""
 	}
 	outRows, outSchema := DetectAndApply(rows, schema)
 

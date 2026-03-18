@@ -27,12 +27,12 @@ func InspectFile(ctx context.Context, inputFile string, storageCfg *storage.Conf
 		if openErr != nil {
 			return fmt.Errorf("failed to open storage: %w", openErr)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		rc, getErr := store.Get(ctx, key)
 		if getErr != nil {
 			return fmt.Errorf("failed to get s3 object %s: %w", key, getErr)
 		}
-		defer rc.Close()
+		defer func() { _ = rc.Close() }()
 		data, err = io.ReadAll(rc)
 		if err != nil {
 			return fmt.Errorf("failed to read s3 object: %w", err)
@@ -128,7 +128,7 @@ func buildFieldAttrs(f packet.Field) string {
 	return "  # " + strings.Join(parts, ", ")
 }
 
-// formatInspectFilter summarises the embedded TDTQL query if present.
+// formatInspectFilter summarizes the embedded TDTQL query if present.
 func formatInspectFilter(pkt *packet.DataPacket) string {
 	// Check QueryContext first (response packets with execution results)
 	if pkt.QueryContext != nil {

@@ -19,8 +19,8 @@ type Policy struct {
 
 // ACL is the loaded pipeline access control list.
 type ACL struct {
-	DefaultGroup string             `yaml:"default_group"` // fallback group for unlisted pipelines
-	DefaultCost  int                `yaml:"default_cost"`  // fallback cost
+	DefaultGroup string              `yaml:"default_group"` // fallback group for unlisted pipelines
+	DefaultCost  int                 `yaml:"default_cost"`  // fallback cost
 	Pipelines    map[string]aclEntry `yaml:"pipelines"`
 }
 

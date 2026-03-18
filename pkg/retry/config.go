@@ -1,3 +1,4 @@
+// Package retry provides functionality for the TDTP framework.
 package retry
 
 import (

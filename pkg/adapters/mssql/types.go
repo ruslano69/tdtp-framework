@@ -350,7 +350,7 @@ func ParseMSSQLType(sqlType string) (baseType string, length, precision, scale i
 		paramsStr := strings.TrimSuffix(sqlType[idx+1:], ")")
 
 		// Check for MAX
-		if strings.ToUpper(paramsStr) == "MAX" {
+		if strings.EqualFold(paramsStr, "MAX") {
 			length = -1 // Indicate MAX
 			return
 		}
@@ -359,12 +359,18 @@ func ParseMSSQLType(sqlType string) (baseType string, length, precision, scale i
 		if strings.Contains(paramsStr, ",") {
 			parts := strings.Split(paramsStr, ",")
 			if len(parts) == 2 {
-				precision, _ = strconv.Atoi(strings.TrimSpace(parts[0]))
-				scale, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+				if v, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+					precision = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+					scale = v
+				}
 			}
 		} else {
 			// Single parameter (length)
-			length, _ = strconv.Atoi(strings.TrimSpace(paramsStr))
+			if v, err := strconv.Atoi(strings.TrimSpace(paramsStr)); err == nil {
+				length = v
+			}
 		}
 	}
 
@@ -390,24 +396,28 @@ func BuildFieldFromColumn(columnName, dataType string, length, precision, scale 
 
 	// Build type string with parameters
 	var fullType string
-	if length > 0 {
+	switch {
+	case length > 0:
 		if length == -1 {
 			fullType = fmt.Sprintf("%s(MAX)", dataType)
 		} else {
 			fullType = fmt.Sprintf("%s(%d)", dataType, length)
 		}
-	} else if precision > 0 {
+	case precision > 0:
 		if scale > 0 {
 			fullType = fmt.Sprintf("%s(%d,%d)", dataType, precision, scale)
 		} else {
 			fullType = fmt.Sprintf("%s(%d)", dataType, precision)
 		}
-	} else {
+	default:
 		fullType = dataType
 	}
 
 	// Convert to TDTP
-	tdtpField, _ := MSSQLToTDTP(fullType, false)
+	tdtpField, err := MSSQLToTDTP(fullType, false)
+	if err != nil {
+		return field
+	}
 	field.Type = tdtpField.Type
 	field.Length = tdtpField.Length
 	field.Precision = tdtpField.Precision

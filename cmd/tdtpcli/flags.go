@@ -11,6 +11,8 @@ import (
 type MultiStringFlag []string
 
 func (f *MultiStringFlag) String() string { return strings.Join(*f, "; ") }
+
+// Set implements flag.Value by appending the value to the slice.
 func (f *MultiStringFlag) Set(s string) error {
 	*f = append(*f, s)
 	return nil
@@ -25,6 +27,8 @@ type ListFlag struct {
 }
 
 func (f *ListFlag) String() string { return f.Pattern }
+
+// Set implements flag.Value; accepts an optional glob pattern or "true" (bare --list).
 func (f *ListFlag) Set(s string) error {
 	f.IsSet = true
 	if s == "true" { // --list without value
@@ -41,20 +45,20 @@ func (f *ListFlag) IsBoolFlag() bool { return true }
 // Flags holds all command-line flags
 type Flags struct {
 	// Commands
-	List         *ListFlag
-	ListViews    *bool
-	Export       *string
-	Import       *string
-	ExportBroker *string
-	ImportBroker *bool
-	ToHTML       *string
-	OpenBrowser  *bool
-	Row          *string // Row range for HTML viewer (e.g., "100-150")
-	ToXLSX       *string
-	FromXLSX     *string
-	ExportXLSX   *string
-	ImportXLSX   *string
-	SyncIncr     *string
+	List           *ListFlag
+	ListViews      *bool
+	Export         *string
+	Import         *string
+	ExportBroker   *string
+	ImportBroker   *bool
+	ToHTML         *string
+	OpenBrowser    *bool
+	Row            *string // Row range for HTML viewer (e.g., "100-150")
+	ToXLSX         *string
+	FromXLSX       *string
+	ExportXLSX     *string
+	ImportXLSX     *string
+	SyncIncr       *string
 	Pipeline       *string
 	ProcessRequest *string // Process incoming TDTP request file and generate response
 	Diff           *string // First file for diff (second as positional arg)
@@ -119,8 +123,8 @@ type Flags struct {
 	ShowConflicts *bool
 
 	// Misc
-	Version *bool
-	Help    *bool
+	Version   *bool
+	Help      *bool
 	ShortHelp *bool
 }
 

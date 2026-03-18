@@ -1,3 +1,4 @@
+// Package storage provides functionality for the TDTP framework.
 package storage
 
 import (

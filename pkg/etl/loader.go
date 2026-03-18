@@ -34,14 +34,18 @@ func tdtpMultiPartFiles(filePath string) []string {
 	if m := multiPartRe.FindStringSubmatch(filePath); m != nil {
 		base = m[1]
 		ext = m[4]
-		total, _ = strconv.Atoi(m[3])
+		if v, err := strconv.Atoi(m[3]); err == nil {
+			total = v
+		}
 	} else {
 		ext = filepath.Ext(filePath)
 		base = filePath[:len(filePath)-len(ext)]
 		matches, err := filepath.Glob(fmt.Sprintf("%s_part_1_of_*%s", base, ext))
 		if err == nil && len(matches) == 1 {
 			if m := multiPartRe.FindStringSubmatch(matches[0]); m != nil {
-				total, _ = strconv.Atoi(m[3])
+				if v, err := strconv.Atoi(m[3]); err == nil {
+					total = v
+				}
 			}
 		}
 	}
@@ -234,7 +238,7 @@ func loadTDTPFromS3(ctx context.Context, source SourceConfig) (*packet.DataPacke
 	if err != nil {
 		return nil, fmt.Errorf("tdtp-s3: create storage driver: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Собираем список ключей для загрузки.
 	keys := []string{key}
@@ -265,7 +269,7 @@ func loadTDTPFromS3(ctx context.Context, source SourceConfig) (*packet.DataPacke
 			return nil, fmt.Errorf("tdtp-s3: download s3://%s/%s: %w", bucket, k, getErr)
 		}
 		data, readErr := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if readErr != nil {
 			return nil, fmt.Errorf("tdtp-s3: read s3://%s/%s: %w", bucket, k, readErr)
 		}
@@ -354,11 +358,11 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 			}
 
 			// Загружаем данные из источника
-			packet, err := l.loadFromSource(ctx, src)
+			pkt, err := l.loadFromSource(ctx, src)
 			if err != nil {
 				result.Error = err
 			} else {
-				result.Packet = packet
+				result.Packet = pkt
 			}
 
 			results <- result
@@ -372,7 +376,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 	}()
 
 	// Собираем результаты
-	var allResults []SourceData
+	allResults := make([]SourceData, 0, len(l.sources))
 	var sourceErrors []error
 
 	for result := range results {
@@ -419,7 +423,7 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 	}
 
 	// Загружаем данные
-	packet, err := l.loadFromSource(ctx, *source)
+	pkt, err := l.loadFromSource(ctx, *source)
 	if err != nil {
 		return &SourceData{
 			SourceName: source.Name,
@@ -431,7 +435,7 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 	return &SourceData{
 		SourceName: source.Name,
 		TableName:  source.Name,
-		Packet:     packet,
+		Packet:     pkt,
 	}, nil
 }
 
@@ -473,7 +477,7 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(timeoutCtx)
+	defer func() { _ = adapter.Close(timeoutCtx) }()
 
 	// Проверяем соединение
 	if err := adapter.Ping(timeoutCtx); err != nil {
@@ -482,15 +486,15 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 
 	// Выполняем SQL запрос источника с учетом timeout
 	// Используем ExecuteRawSQL для выполнения произвольного SELECT
-	packet, err := l.executeSourceQuery(timeoutCtx, adapter, source)
+	pkt, err := l.executeSourceQuery(timeoutCtx, adapter, source)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
 	// Обновляем имя таблицы в пакете на alias
-	packet.Header.TableName = source.Name
+	pkt.Header.TableName = source.Name
 
-	return packet, nil
+	return pkt, nil
 }
 
 // executeSourceQuery выполняет SQL запрос источника и возвращает DataPacket

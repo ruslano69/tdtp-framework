@@ -23,7 +23,7 @@ func (p *Parser) ParseFile(filename string) (*DataPacket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	return p.Parse(file)
 }
@@ -251,15 +251,16 @@ func (p *Parser) GetRowValues(row Row) []string {
 	for i := 0; i < n; i++ {
 		char := s[i]
 
-		if escaped {
+		switch {
+		case escaped:
 			buf.WriteByte(char)
 			escaped = false
-		} else if char == '\\' {
+		case char == '\\':
 			escaped = true
-		} else if char == '|' {
+		case char == '|':
 			values = append(values, buf.String())
 			buf.Reset()
-		} else {
+		default:
 			buf.WriteByte(char)
 		}
 	}

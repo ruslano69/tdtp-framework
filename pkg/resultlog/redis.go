@@ -1,3 +1,4 @@
+// Package resultlog provides functionality for the TDTP framework.
 package resultlog
 
 import (
@@ -22,7 +23,7 @@ import (
 type PipelineResult struct {
 	PipelineName string    `json:"pipeline_name"`
 	ResultName   string    `json:"result_name"`
-	Status       string    `json:"status"`        // "success" | "failed" | "completed_with_errors"
+	Status       string    `json:"status"`                 // "success" | "failed" | "completed_with_errors"
 	PackageUUID  string    `json:"package_uuid,omitempty"` // UUID зашифрованного пакета (если encryption: true)
 	StartedAt    time.Time `json:"started_at"`
 	FinishedAt   time.Time `json:"finished_at"`
@@ -136,7 +137,7 @@ func isCompletedWithErrors(err error) bool {
 }
 
 func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))
+	return len(s) >= len(substr) && (s == substr || s != "" && stringContains(s, substr))
 }
 
 func stringContains(s, substr string) bool {

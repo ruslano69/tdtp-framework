@@ -39,6 +39,16 @@ func NewExecutor() *Executor {
 
 // Execute выполняет Query на данных
 func (e *Executor) Execute(query *packet.Query, rows [][]string, schemaObj packet.Schema) (*ExecutionResult, error) {
+	if query == nil {
+		return &ExecutionResult{
+			TotalRows:    len(rows),
+			MatchedRows:  len(rows),
+			FilteredRows: rows,
+			ReturnedRows: len(rows),
+			FilterStats:  make(map[string]int),
+		}, nil
+	}
+
 	result := &ExecutionResult{
 		TotalRows:   len(rows),
 		FilterStats: make(map[string]int),
@@ -88,19 +98,20 @@ func (e *Executor) Execute(query *packet.Query, rows [][]string, schemaObj packe
 
 	// Применяем LIMIT
 	// Positive = first N; negative = last N (tail mode, like tail -n).
-	if limit > 0 {
+	switch {
+	case limit > 0:
 		if limit < len(filteredRows) {
 			filteredRows = filteredRows[:limit]
 			result.MoreAvailable = true
 			result.NextOffset = offset + limit
 		}
-	} else if limit < 0 {
+	case limit < 0:
 		n := -limit
 		if n < len(filteredRows) {
 			filteredRows = filteredRows[len(filteredRows)-n:]
 		}
 		result.MoreAvailable = false
-	} else {
+	default:
 		result.MoreAvailable = false
 	}
 
@@ -108,9 +119,7 @@ func (e *Executor) Execute(query *packet.Query, rows [][]string, schemaObj packe
 	result.ReturnedRows = len(filteredRows)
 
 	// 4. Создаем QueryContext для stateless
-	if query != nil {
-		result.QueryContext = e.buildQueryContext(query, result)
-	}
+	result.QueryContext = e.buildQueryContext(query, result)
 
 	return result, nil
 }

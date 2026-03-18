@@ -72,7 +72,7 @@ func ConvertTDTPToHTML(opts HTMLOptions) error {
 	}
 
 	// Write output
-	if err := os.WriteFile(outputFile, []byte(htmlContent), 0o644); err != nil {
+	if err := os.WriteFile(outputFile, []byte(htmlContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write HTML file: %w", err)
 	}
 
@@ -488,11 +488,11 @@ func openInBrowser(filePath string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
+		cmd = exec.Command("cmd", "/c", "start", url) //nolint:gosec // G204: intentional browser opener
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.Command("open", url) //nolint:gosec // G204: intentional browser opener
 	default:
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.Command("xdg-open", url) //nolint:gosec // G204: intentional browser opener
 	}
 
 	if err := cmd.Start(); err != nil {

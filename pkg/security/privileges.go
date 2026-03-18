@@ -1,3 +1,4 @@
+// Package security provides functionality for the TDTP framework.
 package security
 
 import (
@@ -38,7 +39,7 @@ func isWindowsAdmin() bool {
 		// Не удалось открыть - нет прав администратора
 		return false
 	}
-	file.Close()
+	_ = file.Close()
 	return true
 }
 

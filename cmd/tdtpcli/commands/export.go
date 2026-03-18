@@ -52,7 +52,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting table '%s'...\n", opts.TableName)
 
@@ -138,13 +138,14 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	}
 
 	// Write to S3, stdout, or local file
-	if opts.StorageCfg != nil {
+	switch {
+	case opts.StorageCfg != nil:
 		// Stream to object storage (S3 / SeaweedFS)
 		store, err := storage.New(*opts.StorageCfg)
 		if err != nil {
 			return fmt.Errorf("failed to open storage: %w", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		if len(packets) == 1 {
 			key := opts.StorageKey
@@ -162,7 +163,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 					i+1, len(packets), opts.StorageCfg.S3.Bucket, key)
 			}
 		}
-	} else if opts.OutputFile == "" || opts.OutputFile == "-" {
+	case opts.OutputFile == "" || opts.OutputFile == "-":
 		// Write to stdout
 		generator := packet.NewGenerator()
 		for _, pkt := range packets {
@@ -172,7 +173,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			}
 			fmt.Println(string(xml))
 		}
-	} else {
+	default:
 		// Write to local file(s)
 		if len(packets) == 1 {
 			if err := writePacketToFile(packets[0], opts.OutputFile); err != nil {
@@ -193,7 +194,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	return nil
 }
 
-// uploadPacketToStorage serialises pkt to XML and streams it to store via io.Pipe.
+// uploadPacketToStorage serializes pkt to XML and streams it to store via io.Pipe.
 // Metadata includes table name, row count, and checksum (if present).
 func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt *packet.DataPacket, key string) error {
 	generator := packet.NewGenerator()
@@ -223,7 +224,7 @@ func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt
 		<-errCh
 		return fmt.Errorf("failed to write to storage pipe: %w", err)
 	}
-	pw.Close()
+	_ = pw.Close()
 
 	if err := <-errCh; err != nil {
 		return fmt.Errorf("storage Put failed: %w", err)
@@ -236,7 +237,7 @@ func writePacketToFile(pkt *packet.DataPacket, filename string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(filename)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 	}

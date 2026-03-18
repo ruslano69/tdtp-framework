@@ -13,10 +13,10 @@ type SourceService struct {
 
 // MockSource represents a JSON-based mock data source
 type MockSource struct {
-	Name   string                   `json:"name"`
-	Type   string                   `json:"type"` // "mock"
-	Schema []MockColumnSchema       `json:"schema"`
-	Data   []map[string]any `json:"data"`
+	Name   string             `json:"name"`
+	Type   string             `json:"type"` // "mock"
+	Schema []MockColumnSchema `json:"schema"`
+	Data   []map[string]any   `json:"data"`
 }
 
 // MockColumnSchema represents mock column definition

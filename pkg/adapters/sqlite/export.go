@@ -42,7 +42,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	if err != nil {
 		return packet.Schema{}, fmt.Errorf("failed to get table info: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var fields []packet.Field
 
@@ -91,7 +91,7 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 		fieldNames[i] = field.Name
 	}
 
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("SELECT %s FROM %s",
 		strings.Join(fieldNames, ", "),
 		quotedTable)
@@ -100,7 +100,7 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 	if err != nil {
 		return nil, fmt.Errorf("failed to query table: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return a.scanRows(rows, schema)
 }
@@ -112,7 +112,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 	if err != nil {
 		return nil, fmt.Errorf("failed to query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return a.scanRows(rows, schema)
 }
@@ -120,7 +120,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 // GetRowCount возвращает количество строк в таблице
 // Реализует base.DataReader интерфейс
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
 
 	var count int64

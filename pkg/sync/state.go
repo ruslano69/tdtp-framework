@@ -65,7 +65,7 @@ func (sm *StateManager) GetState(tableName string) *SyncState {
 }
 
 // UpdateState обновляет состояние синхронизации
-func (sm *StateManager) UpdateState(tableName string, lastSyncValue string, recordsExported int64) error {
+func (sm *StateManager) UpdateState(tableName, lastSyncValue string, recordsExported int64) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -151,7 +151,7 @@ func (sm *StateManager) saveUnsafe() error {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
 
-	if err := os.WriteFile(sm.stateFile, data, 0644); err != nil {
+	if err := os.WriteFile(sm.stateFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write state file: %w", err)
 	}
 

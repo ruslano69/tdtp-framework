@@ -89,20 +89,23 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 				continue
 			}
 			fieldType := sch.Fields[i].Type
-			if isFloatField(fieldType) {
-				if v == "NaN" {
+			switch {
+			case isFloatField(fieldType):
+				switch {
+				case v == "NaN":
 					det[i].hasNaN = true
-				} else if rawInfinityForms[v] {
+				case rawInfinityForms[v]:
 					det[i].hasInf = true
-				} else if rawNegInfinityForms[v] {
+				case rawNegInfinityForms[v]:
 					det[i].hasNegInf = true
 				}
-			} else if isDateField(fieldType) {
-				if v == SpecNoDateMarker {
+			case isDateField(fieldType):
+				switch {
+				case v == SpecNoDateMarker:
 					det[i].hasNoDate = true
-				} else if rawInfinityForms[v] {
+				case rawInfinityForms[v]:
 					det[i].hasInf = true // PostgreSQL date infinity
-				} else if rawNegInfinityForms[v] {
+				case rawNegInfinityForms[v]:
 					det[i].hasNegInf = true
 				}
 			}
@@ -167,7 +170,7 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 				updatedRow[i] = SpecInfMarker
 			case d.hasNegInf && rawNegInfinityForms[v]:
 				updatedRow[i] = SpecNegInfMarker
-			// "NaN" and "0000-00-00" are already canonical markers — no rename needed
+				// "NaN" and "0000-00-00" are already canonical markers — no rename needed
 			}
 		}
 		updatedRows[j] = updatedRow

@@ -188,10 +188,10 @@ func routeCommand(
 		if *flags.Row != "" {
 			parts := strings.SplitN(*flags.Row, "-", 2)
 			if len(parts) == 2 {
-				rowStart, _ = strconv.Atoi(parts[0])
-				rowEnd, _ = strconv.Atoi(parts[1])
+				rowStart, _ = strconv.Atoi(parts[0]) //nolint:errcheck // invalid values are silently treated as 0
+				rowEnd, _ = strconv.Atoi(parts[1])   //nolint:errcheck // invalid values are silently treated as 0
 			} else if len(parts) == 1 {
-				rowStart, _ = strconv.Atoi(parts[0])
+				rowStart, _ = strconv.Atoi(parts[0]) //nolint:errcheck // invalid values are silently treated as 0
 			}
 		}
 
@@ -507,7 +507,7 @@ func routeCommand(
 			})
 		})
 
-	// Inspect command — no DB connection required, runs directly
+		// Inspect command — no DB connection required, runs directly
 	} else if *flags.Inspect != "" {
 		var inspectStorageCfg *storage.Config
 		if storage.IsRemote(*flags.Inspect) {

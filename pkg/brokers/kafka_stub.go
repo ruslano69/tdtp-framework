@@ -21,8 +21,8 @@ func NewKafka(cfg Config) (*Kafka, error) {
 	return nil, fmt.Errorf("Kafka support not compiled in this build (nokafka tag)")
 }
 
-func (k *Kafka) Connect(_ context.Context) error  { return fmt.Errorf("kafka not available") }
-func (k *Kafka) Close() error                     { return nil }
+func (k *Kafka) Connect(_ context.Context) error { return fmt.Errorf("kafka not available") }
+func (k *Kafka) Close() error                    { return nil }
 func (k *Kafka) Send(_ context.Context, _ []byte) error {
 	return fmt.Errorf("kafka not available")
 }

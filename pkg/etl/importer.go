@@ -104,7 +104,7 @@ func (pi *ParallelImporter) Import(
 	if err := broker.Connect(ctx); err != nil {
 		return stats, fmt.Errorf("failed to connect to broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Создаем каналы для координации воркеров
 	partsChan := make(chan []byte, pi.config.Workers*2)
@@ -269,7 +269,7 @@ func (pi *ParallelImporter) createRabbitMQBroker() (brokers.MessageBroker, error
 // createKafkaBroker создает Kafka брокер для чтения
 func (pi *ParallelImporter) createKafkaBroker() (brokers.MessageBroker, error) {
 	if pi.config.Kafka == nil {
-		return nil, fmt.Errorf("Kafka config is not set")
+		return nil, fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := pi.config.Kafka

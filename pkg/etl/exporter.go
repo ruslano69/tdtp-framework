@@ -28,13 +28,13 @@ type ExportResult struct {
 
 // Exporter отвечает за экспорт результатов ETL
 type Exporter struct {
-	config          OutputConfig
-	security        SecurityConfig
-	packageUUID     string
-	pipelineName    string
-	mercuryBinder   processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
-	preExportChain  *processors.Chain        // процессоры маскирования/нормализации/валидации перед экспортом
-	cb              *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
+	config         OutputConfig
+	security       SecurityConfig
+	packageUUID    string
+	pipelineName   string
+	mercuryBinder  processors.MercuryBinder   // опциональная замена mercury.Client (dev-режим, тесты)
+	preExportChain *processors.Chain          // процессоры маскирования/нормализации/валидации перед экспортом
+	cb             *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
 }
 
 // NewExporter создает новый экспортер
@@ -46,7 +46,7 @@ func NewExporter(config OutputConfig) *Exporter {
 		cbCfg := resilience.DefaultConfig("output-primary")
 		if config.Resilience != nil {
 			if config.Resilience.MaxFailures > 0 {
-				cbCfg.MaxFailures = uint32(config.Resilience.MaxFailures)
+				cbCfg.MaxFailures = uint32(config.Resilience.MaxFailures) //nolint:gosec
 			}
 			if config.Resilience.TimeoutSec > 0 {
 				cbCfg.Timeout = time.Duration(config.Resilience.TimeoutSec) * time.Second
@@ -255,7 +255,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	if storage.IsRemote(destination) {
 		return e.uploadToStorage(ctx, xmlData, destination, dataPacket)
 	}
-	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
+	if err := os.WriteFile(destination, xmlData, 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 	return nil
@@ -279,7 +279,7 @@ func (e *Exporter) uploadToStorage(ctx context.Context, data []byte, destination
 	if err != nil {
 		return fmt.Errorf("etl: failed to open storage: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	meta := map[string]string{
 		"protocol": "TDTP 1.0",
@@ -299,7 +299,7 @@ func (e *Exporter) uploadToStorage(ctx context.Context, data []byte, destination
 		<-errCh
 		return fmt.Errorf("etl: upload pipe write failed: %w", err)
 	}
-	pw.Close()
+	_ = pw.Close()
 
 	if err := <-errCh; err != nil {
 		return fmt.Errorf("etl: storage Put failed: %w", err)
@@ -366,7 +366,7 @@ func (e *Exporter) writeErrorPacket(ctx context.Context, generator *packet.Gener
 	if storage.IsRemote(destination) {
 		return e.uploadToStorage(ctx, xmlData, destination, nil)
 	}
-	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
+	if err := os.WriteFile(destination, xmlData, 0o600); err != nil {
 		return fmt.Errorf("write error packet: %w", err)
 	}
 	// Возвращаем nil — pipeline завершается штатно (exit 0)
@@ -399,7 +399,7 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
@@ -419,7 +419,7 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 // exportToKafka экспортирует в Kafka
 func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.Kafka == nil {
-		return fmt.Errorf("Kafka config is not set")
+		return fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := e.config.Kafka
@@ -438,7 +438,7 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Kafka: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
@@ -469,7 +469,7 @@ func (e *Exporter) exportToXLSX(dataPacket *packet.DataPacket) error {
 	// Создаём директорию если не существует
 	dir := destination[:max(0, lastSep(destination))]
 	if dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create output directory: %w", err)
 		}
 	}
@@ -543,13 +543,13 @@ func (e *Exporter) ValidateConfig() error {
 
 	case "kafka":
 		if e.config.Kafka == nil {
-			return fmt.Errorf("Kafka config is required for Kafka output")
+			return fmt.Errorf("kafka config is required for kafka output")
 		}
 		if len(e.config.Kafka.Brokers) == 0 {
-			return fmt.Errorf("Kafka brokers is required")
+			return fmt.Errorf("kafka brokers is required")
 		}
 		if e.config.Kafka.Topic == "" {
-			return fmt.Errorf("Kafka topic is required")
+			return fmt.Errorf("kafka topic is required")
 		}
 
 	default:
@@ -680,7 +680,7 @@ func (e *Exporter) exportStreamToRabbitMQ(ctx context.Context, streamResult *Str
 // exportStreamToKafka выполняет потоковый экспорт в Kafka
 func (e *Exporter) exportStreamToKafka(ctx context.Context, streamResult *StreamingResult, tableName string) (*StreamingExportResult, error) {
 	if e.config.Kafka == nil {
-		return nil, fmt.Errorf("Kafka config is not set")
+		return nil, fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := e.config.Kafka
@@ -712,7 +712,7 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 		result.Errors = append(result.Errors, err)
 		return result, fmt.Errorf("failed to connect to broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Создаем streaming generator
 	streamGen := packet.NewStreamingGenerator()
@@ -780,7 +780,7 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 	} else {
 		// summaryChan закрыт без отправки summary (ошибка или отмена контекста)
 		// TotalParts и TotalRows остаются 0 или частично заполненными
-		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context cancelled or generator error)"))
+		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context canceled or generator error)"))
 		result.ErrorsCount++
 	}
 

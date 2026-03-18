@@ -81,7 +81,7 @@ func NewFieldValidator(fieldsToValidate map[string][]FieldValidationRule, stopOn
 		stopOnFirstError: stopOnFirstError,
 		errorStrategy:    StrategyFail,
 		emailRegex:       regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`),
-		phoneRegex:       regexp.MustCompile(`^\+?[0-9]{7,15}$`),
+		phoneRegex:       regexp.MustCompile(`^\+?\d{7,15}$`),
 		urlRegex:         regexp.MustCompile(`^https?://[a-zA-Z0-9.-]+(\.[a-zA-Z]{2,})?(/.*)?$`),
 		dateRegex:        regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`),
 		customRegexes:    make(map[string]*regexp.Regexp),
@@ -143,18 +143,21 @@ func (v *FieldValidator) Process(ctx context.Context, data [][]string, schema pa
 			fieldName := schema.Fields[colIdx].Name
 
 			for _, rule := range rules {
-				if err := v.validateValue(value, rule); err != nil {
-					errMsg := fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, err.Error())
-					if rule.ErrMsg != "" {
-						errMsg = fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, rule.ErrMsg)
-					}
+				err := v.validateValue(value, rule)
+				if err == nil {
+					continue
+				}
 
-					validationErrors = append(validationErrors, errMsg)
-					invalidRows[rowIdx] = true
+				errMsg := fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, err.Error())
+				if rule.ErrMsg != "" {
+					errMsg = fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, rule.ErrMsg)
+				}
 
-					if v.stopOnFirstError && v.errorStrategy == StrategyFail {
-						return nil, fmt.Errorf("validation failed: %s", errMsg)
-					}
+				validationErrors = append(validationErrors, errMsg)
+				invalidRows[rowIdx] = true
+
+				if v.stopOnFirstError && v.errorStrategy == StrategyFail {
+					return nil, fmt.Errorf("validation failed: %s", errMsg)
 				}
 			}
 		}
@@ -241,12 +244,12 @@ func (v *FieldValidator) validateRange(value, param string) error {
 		return fmt.Errorf("invalid range format '%s', expected 'min-max'", param)
 	}
 
-	min, err := strconv.ParseFloat(parts[0], 64)
+	minVal, err := strconv.ParseFloat(parts[0], 64)
 	if err != nil {
 		return fmt.Errorf("invalid min value in range '%s'", param)
 	}
 
-	max, err := strconv.ParseFloat(parts[1], 64)
+	maxVal, err := strconv.ParseFloat(parts[1], 64)
 	if err != nil {
 		return fmt.Errorf("invalid max value in range '%s'", param)
 	}
@@ -256,8 +259,8 @@ func (v *FieldValidator) validateRange(value, param string) error {
 		return fmt.Errorf("value '%s' is not a valid number", value)
 	}
 
-	if val < min || val > max {
-		return fmt.Errorf("value %g is out of range [%g, %g]", val, min, max)
+	if val < minVal || val > maxVal {
+		return fmt.Errorf("value %g is out of range [%g, %g]", val, minVal, maxVal)
 	}
 
 	return nil
@@ -292,19 +295,19 @@ func (v *FieldValidator) validateLength(value, param string) error {
 		return fmt.Errorf("invalid length format '%s', expected 'min-max'", param)
 	}
 
-	min, err := strconv.Atoi(parts[0])
+	minLen, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return fmt.Errorf("invalid min length in '%s'", param)
 	}
 
-	max, err := strconv.Atoi(parts[1])
+	maxLen, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return fmt.Errorf("invalid max length in '%s'", param)
 	}
 
 	length := len(value)
-	if length < min || length > max {
-		return fmt.Errorf("length %d is out of range [%d, %d]", length, min, max)
+	if length < minLen || length > maxLen {
+		return fmt.Errorf("length %d is out of range [%d, %d]", length, minLen, maxLen)
 	}
 
 	return nil
@@ -350,9 +353,12 @@ func (v *FieldValidator) validateDate(value string) error {
 
 	// Дополнительная проверка валидности даты
 	parts := strings.Split(value, "-")
-	year, _ := strconv.Atoi(parts[0])
-	month, _ := strconv.Atoi(parts[1])
-	day, _ := strconv.Atoi(parts[2])
+	year, errYear := strconv.Atoi(parts[0])
+	_ = errYear
+	month, errMonth := strconv.Atoi(parts[1])
+	_ = errMonth
+	day, errDay := strconv.Atoi(parts[2])
+	_ = errDay
 
 	if month < 1 || month > 12 {
 		return fmt.Errorf("invalid month: %d", month)

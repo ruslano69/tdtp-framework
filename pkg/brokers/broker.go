@@ -1,3 +1,4 @@
+// Package brokers provides functionality for the TDTP framework.
 package brokers
 
 import (

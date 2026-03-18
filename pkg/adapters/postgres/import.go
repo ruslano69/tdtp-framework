@@ -43,7 +43,7 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 
 	if err != nil {
 		// Откатываем - удаляем временную таблицу
-		a.dropTable(ctx, tempTableName)
+		_ = a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to import to temporary table: %w", err)
 	}
 
@@ -54,7 +54,7 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 	err = a.replaceTables(ctx, tableName, tempTableName)
 	if err != nil {
 		// Откатываем - удаляем временную таблицу
-		a.dropTable(ctx, tempTableName)
+		_ = a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to replace tables: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// 1. Создаем временную таблицу (используем схему из первого пакета)
 	err = a.createTableFromSchema(ctx, tempTableName, packets[0].Schema)
@@ -97,7 +97,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 		err := a.importPacketData(ctx, &tempPacket, strategy)
 		if err != nil {
-			a.dropTable(ctx, tempTableName)
+			_ = a.dropTable(ctx, tempTableName)
 			return fmt.Errorf("failed to import packet %d: %w", i+1, err)
 		}
 	}
@@ -108,7 +108,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	// 3. Заменяем продакшен таблицу временной
 	err = a.replaceTables(ctx, tableName, tempTableName)
 	if err != nil {
-		a.dropTable(ctx, tempTableName)
+		_ = a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to replace tables: %w", err)
 	}
 
@@ -171,7 +171,7 @@ func (a *Adapter) replaceTables(ctx context.Context, targetTable, tempTable stri
 		if err := a.Exec(ctx, sql); err != nil {
 			// Откатываем - возвращаем старое имя
 			rollbackSQL := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedTarget)
-			a.Exec(ctx, rollbackSQL)
+			_ = a.Exec(ctx, rollbackSQL)
 			return fmt.Errorf("failed to rename temp table: %w", err)
 		}
 
@@ -203,7 +203,7 @@ func (a *Adapter) dropTable(ctx context.Context, tableName string) error {
 }
 
 // createTableFromSchema создает таблицу на основе TDTP схемы
-func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, schema packet.Schema) error {
+func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, pktSchema packet.Schema) error {
 	quotedTable := QuoteIdentifier(tableName)
 	if a.schema != "public" {
 		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
@@ -220,10 +220,10 @@ func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, s
 	}
 
 	// Строим CREATE TABLE запрос
-	var columns []string
+	columns := make([]string, 0, len(pktSchema.Fields))
 	var pkColumns []string
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		colDef := a.buildColumnDefinition(field)
 		columns = append(columns, colDef)
 
@@ -270,7 +270,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 	}
 
 	// Строим список колонок
-	var columns []string
+	columns := make([]string, 0, len(pkt.Schema.Fields))
 	for _, field := range pkt.Schema.Fields {
 		columns = append(columns, QuoteIdentifier(field.Name))
 	}
@@ -324,7 +324,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 }
 
 // buildOnConflictClause строит ON CONFLICT клаузу
-func (a *Adapter) buildOnConflictClause(schema packet.Schema, strategy adapters.ImportStrategy) string {
+func (a *Adapter) buildOnConflictClause(pktSchema packet.Schema, strategy adapters.ImportStrategy) string {
 	if strategy == adapters.StrategyFail {
 		return ""
 	}
@@ -333,7 +333,7 @@ func (a *Adapter) buildOnConflictClause(schema packet.Schema, strategy adapters.
 	var pkColumns []string
 	var updateColumns []string
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		if field.Key {
 			pkColumns = append(pkColumns, QuoteIdentifier(field.Name))
 		} else {
@@ -373,25 +373,14 @@ func (a *Adapter) importWithCopy(ctx context.Context, pkt *packet.DataPacket) er
 		return nil
 	}
 
-	quotedTable := QuoteIdentifier(pkt.Header.TableName)
-	if a.schema != "public" {
-		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
-	}
-
-	// Строим список колонок
-	var columns []string
-	for _, field := range pkt.Schema.Fields {
-		columns = append(columns, QuoteIdentifier(field.Name))
-	}
-
 	// Используем CopyFrom для bulk insert
-	var columnNames []string
+	columnNames := make([]string, 0, len(pkt.Schema.Fields))
 	for _, field := range pkt.Schema.Fields {
 		columnNames = append(columnNames, field.Name)
 	}
 
 	// Подготавливаем данные для COPY
-	var rows [][]any
+	rows := make([][]any, 0, len(pkt.Data.Rows))
 	for _, row := range pkt.Data.Rows {
 		values := parseRow(row.Value)
 		rowData := make([]any, len(values))
@@ -507,8 +496,8 @@ func (a *Adapter) convertValue(value string, field packet.Field) any {
 // ========== base.TableManager interface methods ==========
 
 // CreateTable implements base.TableManager interface
-func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
-	return a.createTableFromSchema(ctx, tableName, schema)
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, pktSchema packet.Schema) error {
+	return a.createTableFromSchema(ctx, tableName, pktSchema)
 }
 
 // DropTable implements base.TableManager interface
@@ -531,14 +520,14 @@ func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) erro
 
 // InsertRows implements base.DataInserter interface
 // Uses COPY for bulk insert (PostgreSQL-specific fast path)
-func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
+func (a *Adapter) InsertRows(ctx context.Context, tableName string, pktSchema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
 	// PostgreSQL adapter использует COPY command для bulk insert
 	// Это быстрее чем INSERT statements
 	pkt := &packet.DataPacket{
 		Header: packet.Header{
 			TableName: tableName,
 		},
-		Schema: schema,
+		Schema: pktSchema,
 	}
 	pkt.Data.Rows = rows
 

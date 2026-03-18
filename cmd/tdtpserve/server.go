@@ -29,9 +29,9 @@ type Dataset struct {
 
 // Server — HTTP сервер tdtpserve
 type Server struct {
-	cfg      *ServeConfig
-	datasets map[string]*Dataset
-	order    []string // порядок для отображения в UI
+	cfg       *ServeConfig
+	datasets  map[string]*Dataset
+	order     []string // порядок для отображения в UI
 	startedAt time.Time
 }
 
@@ -147,7 +147,7 @@ func runServer(cfg *ServeConfig) error {
 	fmt.Printf("\ntdtpserve ready → http://localhost%s\n", addr)
 	fmt.Printf("  %d source(s), %d view(s)\n", srv.sourceCount(), srv.viewCount())
 
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, mux) //nolint:gosec // G114: timeout configured via server middleware
 }
 
 func (s *Server) sourceCount() int {
@@ -200,8 +200,8 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	whereExpr := q.Get("where")
 	orderBy := q.Get("order_by")
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, _ := strconv.Atoi(q.Get("limit"))   //nolint:errcheck // invalid values are silently treated as 0
+	offset, _ := strconv.Atoi(q.Get("offset")) //nolint:errcheck // invalid values are silently treated as 0
 
 	// Apply TDTQL filtering
 	allRows := extractRows(ds.Packet)
@@ -356,7 +356,7 @@ func parseOrderBy(orderBy string) (*packet.OrderBy, error) {
 			return nil, fmt.Errorf("empty ORDER BY")
 		}
 		dir := "ASC"
-		if len(tokens) > 1 && strings.ToUpper(tokens[1]) == "DESC" {
+		if len(tokens) > 1 && strings.EqualFold(tokens[1], "DESC") {
 			dir = "DESC"
 		}
 		return &packet.OrderBy{Field: tokens[0], Direction: dir}, nil
@@ -368,7 +368,7 @@ func parseOrderBy(orderBy string) (*packet.OrderBy, error) {
 			continue
 		}
 		dir := "ASC"
-		if len(tokens) > 1 && strings.ToUpper(tokens[1]) == "DESC" {
+		if len(tokens) > 1 && strings.EqualFold(tokens[1], "DESC") {
 			dir = "DESC"
 		}
 		fields = append(fields, packet.OrderField{Name: tokens[0], Direction: dir})
@@ -475,7 +475,7 @@ func (s *Server) renderIndex(w http.ResponseWriter) {
 		`</div>`)
 	b.WriteString(`</div></body></html>`)
 
-	fmt.Fprint(w, b.String())
+	_, _ = fmt.Fprint(w, b.String())
 }
 
 func writeSourceCard(b *strings.Builder, d *Dataset) {
@@ -761,7 +761,7 @@ func (s *Server) renderData(
 	b.WriteString(`<div class="footer"><a href="/">← back</a></div>`)
 	b.WriteString(`</div></body></html>`)
 
-	fmt.Fprint(w, b.String())
+	_, _ = fmt.Fprint(w, b.String())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

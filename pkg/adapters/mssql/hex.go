@@ -42,7 +42,7 @@ func bytesToHexWithoutLeadingZerosSQL(data []byte) string {
 	for value > 0 {
 		pos--
 		result[pos] = hexChars[value&0x0F] // Take lower 4 bits
-		value >>= 4                         // Shift right by 4 bits
+		value >>= 4                        // Shift right by 4 bits
 	}
 
 	return string(result[pos:]) // Return only significant characters

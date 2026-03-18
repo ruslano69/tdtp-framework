@@ -10,12 +10,12 @@ import (
 
 // DLQEntry представляет запись в Dead Letter Queue
 type DLQEntry struct {
-	ID          string      `json:"id"`
-	Timestamp   time.Time   `json:"timestamp"`
-	Attempts    int         `json:"attempts"`
-	LastError   string      `json:"last_error"`
-	FailureType string      `json:"failure_type"` // max_attempts_exceeded, context_cancelled, etc.
-	Data        any `json:"data,omitempty"`
+	ID          string    `json:"id"`
+	Timestamp   time.Time `json:"timestamp"`
+	Attempts    int       `json:"attempts"`
+	LastError   string    `json:"last_error"`
+	FailureType string    `json:"failure_type"` // max_attempts_exceeded, context_canceled, etc.
+	Data        any       `json:"data,omitempty"`
 }
 
 // DLQ - Dead Letter Queue для хранения проблемных сообщений
@@ -61,7 +61,7 @@ func (d *DLQ) Add(entry DLQEntry) {
 	}
 
 	// Автосохранение
-	d.saveUnsafe()
+	_ = d.saveUnsafe()
 }
 
 // Get возвращает все записи из DLQ
@@ -98,7 +98,7 @@ func (d *DLQ) Remove(id string) bool {
 	for i, entry := range d.entries {
 		if entry.ID == id {
 			d.entries = append(d.entries[:i], d.entries[i+1:]...)
-			d.saveUnsafe()
+			_ = d.saveUnsafe()
 			return true
 		}
 	}
@@ -138,7 +138,7 @@ func (d *DLQ) CleanupOld() int {
 
 	if removed > 0 {
 		d.entries = newEntries
-		d.saveUnsafe()
+		_ = d.saveUnsafe()
 	}
 
 	return removed
@@ -165,7 +165,7 @@ func (d *DLQ) saveUnsafe() error {
 		return fmt.Errorf("failed to marshal DLQ: %w", err)
 	}
 
-	if err := os.WriteFile(d.config.FilePath, data, 0644); err != nil {
+	if err := os.WriteFile(d.config.FilePath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write DLQ file: %w", err)
 	}
 

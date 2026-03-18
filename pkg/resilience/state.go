@@ -70,37 +70,6 @@ func (sm *stateManager) getState() State {
 	return sm.state
 }
 
-// setState - установить новое состояние
-func (sm *stateManager) setState(newState State, reset bool) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if sm.state == newState {
-		return
-	}
-
-	oldState := sm.state
-	sm.state = newState
-	sm.generation++
-	sm.lastStateChange = time.Now()
-	sm.stateChanges[newState]++
-
-	if reset {
-		sm.counts = Counts{}
-	}
-
-	// Устанавливаем expiry для Open состояния
-	if newState == StateOpen {
-		sm.expiry = time.Now().Add(sm.config.Timeout)
-	}
-
-	// Callback при изменении состояния
-	if sm.config.OnStateChange != nil {
-		// Вызываем callback без удержания lock
-		go sm.config.OnStateChange(sm.config.Name, oldState, newState)
-	}
-}
-
 // beforeRequest - вызывается перед выполнением запроса
 func (sm *stateManager) beforeRequest() (uint64, error) {
 	sm.mu.Lock()

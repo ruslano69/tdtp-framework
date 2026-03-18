@@ -1,3 +1,4 @@
+// Package sqlite provides functionality for the TDTP framework.
 package sqlite
 
 import (
@@ -9,7 +10,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register sqlite driver
 )
 
 const driverSqlite = "sqlite"
@@ -45,17 +46,14 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 
 	// Проверяем подключение
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	a.db = db
 
 	// Применяем PRAGMA оптимизации для быстрого импорта
-	if err := a.applyPragmaOptimizations(ctx); err != nil {
-		db.Close()
-		return fmt.Errorf("failed to apply PRAGMA optimizations: %w", err)
-	}
+	a.applyPragmaOptimizations(ctx)
 
 	// Инициализируем base helpers
 	a.initHelpers(cfg.NoDateSentinels)
@@ -64,7 +62,8 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 }
 
 // NewAdapter создает новый адаптер для SQLite (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapter(filePath string) (*Adapter, error) {
 	adapter := &Adapter{}
 	err := adapter.Connect(context.Background(), adapters.Config{
@@ -138,7 +137,7 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 
 // applyPragmaOptimizations применяет PRAGMA оптимизации для быстрого импорта/экспорта
 // Эти настройки критичны для производительности SQLite при массовых операциях
-func (a *Adapter) applyPragmaOptimizations(ctx context.Context) error {
+func (a *Adapter) applyPragmaOptimizations(ctx context.Context) {
 	pragmas := []string{
 		// WAL mode: Write-Ahead Logging - до 10x быстрее записи, безопасно
 		"PRAGMA journal_mode = WAL",
@@ -169,7 +168,6 @@ func (a *Adapter) applyPragmaOptimizations(ctx context.Context) error {
 		}
 	}
 
-	return nil
 }
 
 // TableExists проверяет существование таблицы
@@ -204,7 +202,7 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get table names: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []string
 	for rows.Next() {
@@ -235,7 +233,7 @@ func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get view names: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var views []adapters.ViewInfo
 	for rows.Next() {
@@ -314,7 +312,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Получаем информацию о колонках
 	columns, err := rows.Columns()

@@ -14,9 +14,9 @@ import (
 
 // ProcessRequestOptions holds options for process-request operation
 type ProcessRequestOptions struct {
-	RequestFile  string           // Путь к входящему request.tdtp
-	OutputFile   string           // Куда писать response (опционально, иначе авто)
-	ConfigsDir   string           // Директория с конфигами вида {Recipient}.yaml
+	RequestFile   string           // Путь к входящему request.tdtp
+	OutputFile    string           // Куда писать response (опционально, иначе авто)
+	ConfigsDir    string           // Директория с конфигами вида {Recipient}.yaml
 	DefaultConfig *adapters.Config // Fallback если {Recipient}.yaml не найден
 }
 
@@ -150,7 +150,7 @@ func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// 4. Выполняем запрос
 	fmt.Printf("  Executing query on table '%s'...\n", tableName)

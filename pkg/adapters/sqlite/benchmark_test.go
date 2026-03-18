@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -290,6 +291,9 @@ func parseRow(rowValue string) []string {
 
 // TestBenchmarkSetup проверяет что БД доступна перед запуском бенчмарков
 func TestBenchmarkSetup(t *testing.T) {
+	if fi, err := os.Stat(benchmarkDB); os.IsNotExist(err) || (err == nil && fi.Size() < 8192) {
+		t.Skip("benchmark DB not found or empty, run: python scripts/create_benchmark_db.py")
+	}
 	ctx := context.Background()
 	adapter, err := NewAdapter(benchmarkDB)
 	if err != nil {
