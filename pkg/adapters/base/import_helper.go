@@ -331,11 +331,12 @@ func ConvertRowToSQLValues(
 				}
 			}
 			// Числовые specials: приводим к strconv-совместимым значениям
-			if sv.Infinity != nil && value == sv.Infinity.Marker {
+			switch {
+			case sv.Infinity != nil && value == sv.Infinity.Marker:
 				value = "+Inf"
-			} else if sv.NegInfinity != nil && value == sv.NegInfinity.Marker {
+			case sv.NegInfinity != nil && value == sv.NegInfinity.Marker:
 				value = "-Inf"
-			} else if sv.NaN != nil && value == sv.NaN.Marker {
+			case sv.NaN != nil && value == sv.NaN.Marker:
 				value = "NaN"
 			}
 		}

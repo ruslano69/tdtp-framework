@@ -81,7 +81,7 @@ func (b *Builder) AddDate(name string) *Builder {
 }
 
 // AddDatetime добавляет DATETIME поле
-func (b *Builder) AddDatetime(name string, timezone string) *Builder {
+func (b *Builder) AddDatetime(name, timezone string) *Builder {
 	if timezone == "" {
 		timezone = GetDefaultTimezone()
 	}

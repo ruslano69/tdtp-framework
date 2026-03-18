@@ -148,14 +148,15 @@ func (p *Parser) parseExpression(precedence int) (Expression, error) {
 	var err error
 
 	// Префиксные операторы
-	if p.curToken.Type == TokenNot {
+	switch p.curToken.Type {
+	case TokenNot:
 		p.nextToken()
 		expr, err := p.parseExpression(3) // NOT имеет высший приоритет
 		if err != nil {
 			return nil, err
 		}
 		left = &NotExpression{Expression: expr}
-	} else if p.curToken.Type == TokenLParen {
+	case TokenLParen:
 		p.nextToken()
 		expr, err := p.parseExpression(0)
 		if err != nil {
@@ -165,7 +166,7 @@ func (p *Parser) parseExpression(precedence int) (Expression, error) {
 			return nil, fmt.Errorf("expected )")
 		}
 		left = &ParenExpression{Expression: expr}
-	} else {
+	default:
 		left, err = p.parseCondition()
 		if err != nil {
 			return nil, err
@@ -177,13 +178,17 @@ func (p *Parser) parseExpression(precedence int) (Expression, error) {
 		var opPrecedence int
 		var operator string
 
-		if p.curToken.Type == TokenAnd {
+		switch p.curToken.Type {
+		case TokenAnd:
 			opPrecedence = 2
 			operator = "AND"
-		} else if p.curToken.Type == TokenOr {
+		case TokenOr:
 			opPrecedence = 1
 			operator = "OR"
-		} else {
+		default:
+			// not AND or OR: exit the for loop
+		}
+		if operator == "" {
 			break
 		}
 
@@ -284,13 +289,10 @@ func (p *Parser) parseCondition() (Expression, error) {
 
 	// Value
 	var value any
-	if p.curToken.Type == TokenString {
+	switch p.curToken.Type {
+	case TokenString, TokenNumber, TokenIdent:
 		value = p.curToken.Literal
-	} else if p.curToken.Type == TokenNumber {
-		value = p.curToken.Literal
-	} else if p.curToken.Type == TokenIdent {
-		value = p.curToken.Literal
-	} else {
+	default:
 		return nil, fmt.Errorf("expected value")
 	}
 	p.nextToken()
@@ -381,10 +383,11 @@ func (p *Parser) parseOrderBy() ([]*OrderByClause, error) {
 		p.nextToken()
 
 		// ASC/DESC
-		if p.curToken.Type == TokenAsc {
+		switch p.curToken.Type {
+		case TokenAsc:
 			clause.Direction = "ASC"
 			p.nextToken()
-		} else if p.curToken.Type == TokenDesc {
+		case TokenDesc:
 			clause.Direction = "DESC"
 			p.nextToken()
 		}

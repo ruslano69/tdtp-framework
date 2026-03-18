@@ -350,7 +350,7 @@ func ParseMSSQLType(sqlType string) (baseType string, length, precision, scale i
 		paramsStr := strings.TrimSuffix(sqlType[idx+1:], ")")
 
 		// Check for MAX
-		if strings.ToUpper(paramsStr) == "MAX" {
+		if strings.EqualFold(paramsStr, "MAX") {
 			length = -1 // Indicate MAX
 			return
 		}
@@ -396,19 +396,20 @@ func BuildFieldFromColumn(columnName, dataType string, length, precision, scale 
 
 	// Build type string with parameters
 	var fullType string
-	if length > 0 {
+	switch {
+	case length > 0:
 		if length == -1 {
 			fullType = fmt.Sprintf("%s(MAX)", dataType)
 		} else {
 			fullType = fmt.Sprintf("%s(%d)", dataType, length)
 		}
-	} else if precision > 0 {
+	case precision > 0:
 		if scale > 0 {
 			fullType = fmt.Sprintf("%s(%d,%d)", dataType, precision, scale)
 		} else {
 			fullType = fmt.Sprintf("%s(%d)", dataType, precision)
 		}
-	} else {
+	default:
 		fullType = dataType
 	}
 

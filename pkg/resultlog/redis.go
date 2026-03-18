@@ -137,7 +137,7 @@ func isCompletedWithErrors(err error) bool {
 }
 
 func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))
+	return len(s) >= len(substr) && (s == substr || s != "" && stringContains(s, substr))
 }
 
 func stringContains(s, substr string) bool {

@@ -45,6 +45,8 @@ linters:
         - name: error-strings
         - name: error-naming
         - name: exported
+          arguments:
+            - disableStutteringCheck
         - name: if-return
         - name: increment-decrement
         - name: var-naming
@@ -66,6 +68,7 @@ linters:
       excludes:
         - G104  # Audit errors not checked - handled by errcheck
         - G304  # File path provided as taint input - needed for file operations
+        - G201  # SQL string formatting - table names in DDL cannot use parameterized queries
 
     gocritic:
       enabled-tags:
@@ -76,9 +79,8 @@ linters:
         - commentFormatting
         - whyNoLint
         - unnamedResult
-      settings:
-        hugeParam:
-          sizeThreshold: 160  # Warn for structs > 160 bytes (2 cache lines)
+        - hugeParam      # Requires API-breaking changes to fix
+        - rangeValCopy   # Requires API-breaking changes to fix
 
   exclusions:
     rules:
@@ -91,6 +93,18 @@ linters:
       - path: ".*\\.pb\\.go"
         linters:
           - all
+
+      - path: "^examples/"
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+          - gocritic
+          - revive
+
+      - path: integration_test\.go
+        linters:
+          - revive
 
 issues:
   max-issues-per-linter: 0

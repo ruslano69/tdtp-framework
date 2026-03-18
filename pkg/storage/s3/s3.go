@@ -1,5 +1,6 @@
 //go:build !nos3
 
+// Package s3 provides S3-compatible object storage for the TDTP framework.
 package s3
 
 import (
@@ -23,7 +24,7 @@ func init() {
 // Driver implements storage.ObjectStorage over an S3-compatible API.
 type Driver struct {
 	client   *s3.Client
-	uploader *manager.Uploader
+	uploader *manager.Uploader //nolint:staticcheck // transfermanager is not yet stable
 	bucket   string
 }
 
@@ -53,7 +54,7 @@ func NewDriver(cfg storage.Config) (storage.ObjectStorage, error) {
 
 	// PartSize=5MB: packets are ≤3.8MB, so the uploader sends a single PutObject
 	// (below multipart threshold). No temp files needed.
-	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
+	uploader := manager.NewUploader(client, func(u *manager.Uploader) { //nolint:staticcheck // transfermanager is not yet stable
 		u.PartSize = 5 * 1024 * 1024 // 5 MB
 		u.Concurrency = 1            // parallelism at the worker level, not within a packet
 	})
@@ -71,7 +72,7 @@ func (d *Driver) Put(ctx context.Context, key string, reader io.Reader, meta map
 	for k, v := range meta {
 		s3meta["tdtp-"+k] = v
 	}
-	_, err := d.uploader.Upload(ctx, &s3.PutObjectInput{
+	_, err := d.uploader.Upload(ctx, &s3.PutObjectInput{ //nolint:staticcheck // transfermanager is not yet stable
 		Bucket:   aws.String(d.bucket),
 		Key:      aws.String(key),
 		Body:     reader,

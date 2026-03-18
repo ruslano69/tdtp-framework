@@ -253,15 +253,15 @@ func (g *SQLGenerator) isNumeric(s string) bool {
 	}
 	// Строка только из "-" или "." не является числом
 	stripped := s
-	if len(stripped) > 0 && stripped[0] == '-' {
+	if stripped != "" && stripped[0] == '-' {
 		stripped = stripped[1:]
 	}
-	return len(stripped) > 0 && stripped != "."
+	return stripped != "" && stripped != "."
 }
 
 // reverseDirection returns the opposite SQL sort direction.
 func reverseDirection(dir string) string {
-	if strings.ToUpper(dir) == "DESC" {
+	if strings.EqualFold(dir, "DESC") {
 		return "ASC"
 	}
 	return "DESC"

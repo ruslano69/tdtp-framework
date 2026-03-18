@@ -117,19 +117,20 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 
 	case "DECIMAL", "NUMERIC":
 		field.Type = "DECIMAL"
-		if len(params) >= 2 {
+		switch {
+		case len(params) >= 2:
 			if v, err := strconv.Atoi(params[0]); err == nil {
 				field.Precision = v
 			}
 			if v, err := strconv.Atoi(params[1]); err == nil {
 				field.Scale = v
 			}
-		} else if len(params) == 1 {
+		case len(params) == 1:
 			if v, err := strconv.Atoi(params[0]); err == nil {
 				field.Precision = v
 			}
 			field.Scale = 0
-		} else {
+		default:
 			field.Precision = 18
 			field.Scale = 2
 		}

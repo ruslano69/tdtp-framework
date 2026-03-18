@@ -65,7 +65,7 @@ func (sm *StateManager) GetState(tableName string) *SyncState {
 }
 
 // UpdateState обновляет состояние синхронизации
-func (sm *StateManager) UpdateState(tableName string, lastSyncValue string, recordsExported int64) error {
+func (sm *StateManager) UpdateState(tableName, lastSyncValue string, recordsExported int64) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 

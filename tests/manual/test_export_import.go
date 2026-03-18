@@ -39,7 +39,7 @@ func main() {
 		)
 	`)
 	if err != nil {
-		log.Fatalf("Failed to create table: %v", err)
+		log.Fatalf("Failed to create table: %v", err) //nolint:gocritic // exitAfterDefer: intentional in test main
 	}
 
 	// Вставляем тестовые данные

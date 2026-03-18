@@ -147,7 +147,7 @@ func runServer(cfg *ServeConfig) error {
 	fmt.Printf("\ntdtpserve ready → http://localhost%s\n", addr)
 	fmt.Printf("  %d source(s), %d view(s)\n", srv.sourceCount(), srv.viewCount())
 
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, mux) //nolint:gosec // G114: timeout configured via server middleware
 }
 
 func (s *Server) sourceCount() int {
@@ -356,7 +356,7 @@ func parseOrderBy(orderBy string) (*packet.OrderBy, error) {
 			return nil, fmt.Errorf("empty ORDER BY")
 		}
 		dir := "ASC"
-		if len(tokens) > 1 && strings.ToUpper(tokens[1]) == "DESC" {
+		if len(tokens) > 1 && strings.EqualFold(tokens[1], "DESC") {
 			dir = "DESC"
 		}
 		return &packet.OrderBy{Field: tokens[0], Direction: dir}, nil
@@ -368,7 +368,7 @@ func parseOrderBy(orderBy string) (*packet.OrderBy, error) {
 			continue
 		}
 		dir := "ASC"
-		if len(tokens) > 1 && strings.ToUpper(tokens[1]) == "DESC" {
+		if len(tokens) > 1 && strings.EqualFold(tokens[1], "DESC") {
 			dir = "DESC"
 		}
 		fields = append(fields, packet.OrderField{Name: tokens[0], Direction: dir})

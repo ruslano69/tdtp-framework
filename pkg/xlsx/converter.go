@@ -41,7 +41,7 @@ const maxExcelInt int64 = 999_999_999_999_999
 // Example:
 //
 //	err := xlsx.ToXLSX(packet, "output.xlsx", "Orders")
-func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
+func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 	// Create new Excel file
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -181,7 +181,7 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 // Example:
 //
 //	packet, err := xlsx.FromXLSX("input.xlsx", "Orders")
-func FromXLSX(filePath string, sheetName string) (*packet.DataPacket, error) {
+func FromXLSX(filePath, sheetName string) (*packet.DataPacket, error) {
 	f, err := excelize.OpenFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)

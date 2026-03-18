@@ -59,7 +59,7 @@ func NewPostgreSQLSchemaAdapter(schema string) *PostgreSQLSchemaAdapter {
 
 // AdaptSQL квалифицирует имя таблицы в FROM clause добавляя schema prefix с quoted identifiers.
 func (a *PostgreSQLSchemaAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Schema, query *packet.Query) string {
-	quotedTable := fmt.Sprintf(`"%s"."%s"`, a.schema, tableName)
+	quotedTable := fmt.Sprintf(`"%s"."%s"`, a.schema, tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	return strings.Replace(standardSQL, " FROM "+tableName+" ", " FROM "+quotedTable+" ", 1)
 }
 

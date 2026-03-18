@@ -81,7 +81,7 @@ func NewFieldValidator(fieldsToValidate map[string][]FieldValidationRule, stopOn
 		stopOnFirstError: stopOnFirstError,
 		errorStrategy:    StrategyFail,
 		emailRegex:       regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`),
-		phoneRegex:       regexp.MustCompile(`^\+?[0-9]{7,15}$`),
+		phoneRegex:       regexp.MustCompile(`^\+?\d{7,15}$`),
 		urlRegex:         regexp.MustCompile(`^https?://[a-zA-Z0-9.-]+(\.[a-zA-Z]{2,})?(/.*)?$`),
 		dateRegex:        regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`),
 		customRegexes:    make(map[string]*regexp.Regexp),
@@ -143,18 +143,21 @@ func (v *FieldValidator) Process(ctx context.Context, data [][]string, schema pa
 			fieldName := schema.Fields[colIdx].Name
 
 			for _, rule := range rules {
-				if err := v.validateValue(value, rule); err != nil {
-					errMsg := fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, err.Error())
-					if rule.ErrMsg != "" {
-						errMsg = fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, rule.ErrMsg)
-					}
+				err := v.validateValue(value, rule)
+				if err == nil {
+					continue
+				}
 
-					validationErrors = append(validationErrors, errMsg)
-					invalidRows[rowIdx] = true
+				errMsg := fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, err.Error())
+				if rule.ErrMsg != "" {
+					errMsg = fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, rule.ErrMsg)
+				}
 
-					if v.stopOnFirstError && v.errorStrategy == StrategyFail {
-						return nil, fmt.Errorf("validation failed: %s", errMsg)
-					}
+				validationErrors = append(validationErrors, errMsg)
+				invalidRows[rowIdx] = true
+
+				if v.stopOnFirstError && v.errorStrategy == StrategyFail {
+					return nil, fmt.Errorf("validation failed: %s", errMsg)
 				}
 			}
 		}

@@ -251,15 +251,16 @@ func (p *Parser) GetRowValues(row Row) []string {
 	for i := 0; i < n; i++ {
 		char := s[i]
 
-		if escaped {
+		switch {
+		case escaped:
 			buf.WriteByte(char)
 			escaped = false
-		} else if char == '\\' {
+		case char == '\\':
 			escaped = true
-		} else if char == '|' {
+		case char == '|':
 			values = append(values, buf.String())
 			buf.Reset()
-		} else {
+		default:
 			buf.WriteByte(char)
 		}
 	}

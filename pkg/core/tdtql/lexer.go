@@ -102,17 +102,18 @@ func (l *Lexer) NextToken() Token {
 			tok.Literal = string(l.ch)
 		}
 	case '<':
-		if l.peekChar() == '=' {
+		switch l.peekChar() {
+		case '=':
 			ch := l.ch
 			l.readChar()
 			tok.Type = TokenLte
 			tok.Literal = string(ch) + string(l.ch)
-		} else if l.peekChar() == '>' {
+		case '>':
 			ch := l.ch
 			l.readChar()
 			tok.Type = TokenNotEq
 			tok.Literal = string(ch) + string(l.ch)
-		} else {
+		default:
 			tok.Type = TokenLt
 			tok.Literal = string(l.ch)
 		}
@@ -153,15 +154,16 @@ func (l *Lexer) NextToken() Token {
 		tok.Literal = l.readString(l.ch)
 		return tok // не вызываем l.readChar() так как readString уже продвинулся
 	default:
-		if isLetter(l.ch) {
+		switch {
+		case isLetter(l.ch):
 			tok.Literal = l.readIdentifier()
 			tok.Type = lookupKeyword(tok.Literal)
 			return tok
-		} else if isDigit(l.ch) {
+		case isDigit(l.ch):
 			tok.Type = TokenNumber
 			tok.Literal = l.readNumber()
 			return tok
-		} else {
+		default:
 			tok.Type = TokenIllegal
 			tok.Literal = string(l.ch)
 		}

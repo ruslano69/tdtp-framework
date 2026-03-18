@@ -206,7 +206,7 @@ func ParsePostgreSQLType(pgType string) (baseType string, length, precision, sca
 }
 
 // BuildFieldFromPGColumn создает TDTP Field из информации о столбце PostgreSQL
-func BuildFieldFromPGColumn(name, dataType string, isNullable bool, isPK bool, defaultValue string) (packet.Field, error) {
+func BuildFieldFromPGColumn(name, dataType string, isNullable, isPK bool, defaultValue string) (packet.Field, error) {
 	tdtpType, subtype, err := PostgreSQLToTDTP(dataType)
 	if err != nil {
 		return packet.Field{}, err
@@ -262,7 +262,7 @@ func IsPostgreSQLReservedWord(word string) bool {
 func QuoteIdentifier(identifier string) string {
 	// Если содержит uppercase или зарезервированное слово - кавычки обязательны
 	if identifier != strings.ToLower(identifier) || IsPostgreSQLReservedWord(identifier) {
-		return fmt.Sprintf(`"%s"`, identifier)
+		return fmt.Sprintf(`"%s"`, identifier) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	}
 	return identifier
 }

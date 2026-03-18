@@ -50,7 +50,7 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 	}
 
 	// Экранируем tableName для защиты от SQL injection
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
 		quotedTable,
 		strings.Join(columns, ",\n  "))
@@ -66,7 +66,7 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 // DropTable удаляет таблицу
 // Реализует base.TableManager интерфейс
 func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("DROP TABLE IF EXISTS %s", quotedTable)
 	_, err := a.db.ExecContext(ctx, query)
 	return err
@@ -75,8 +75,8 @@ func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 // RenameTable переименовывает таблицу
 // Реализует base.TableManager интерфейс
 func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
-	quotedOld := fmt.Sprintf("\"%s\"", oldName)
-	quotedNew := fmt.Sprintf("\"%s\"", newName)
+	quotedOld := fmt.Sprintf("\"%s\"", oldName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
+	quotedNew := fmt.Sprintf("\"%s\"", newName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedNew)
 	_, err := a.db.ExecContext(ctx, query)
 	return err

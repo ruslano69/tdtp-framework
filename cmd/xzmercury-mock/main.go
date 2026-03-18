@@ -54,7 +54,7 @@ func main() {
 	mux.HandleFunc("/api/keys/retrieve", makeRetrieveHandler())
 
 	log.Printf("[xzmercury-mock] listening on %s  secret=%q", *addr, *secret)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	if err := http.ListenAndServe(*addr, mux); err != nil { //nolint:gosec // G114: mock server, no timeout needed
 		log.Fatalf("server error: %v", err)
 	}
 }

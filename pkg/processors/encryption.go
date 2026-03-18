@@ -89,7 +89,7 @@ func (f *FileEncryptor) Encrypt(ctx context.Context, plaintext []byte) (*Encrypt
 // WriteEncrypted записывает зашифрованный блоб в файл.
 // Расширение .tdtp.enc помогает downstream-компонентам отличить зашифрованные файлы.
 func WriteEncrypted(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write encrypted file: %w", err)
 	}
 	return nil

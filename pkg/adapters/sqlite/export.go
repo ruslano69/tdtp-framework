@@ -91,7 +91,7 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 		fieldNames[i] = field.Name
 	}
 
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("SELECT %s FROM %s",
 		strings.Join(fieldNames, ", "),
 		quotedTable)
@@ -120,7 +120,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 // GetRowCount возвращает количество строк в таблице
 // Реализует base.DataReader интерфейс
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
 
 	var count int64

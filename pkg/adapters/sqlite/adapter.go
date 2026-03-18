@@ -62,7 +62,8 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 }
 
 // NewAdapter создает новый адаптер для SQLite (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapter(filePath string) (*Adapter, error) {
 	adapter := &Adapter{}
 	err := adapter.Connect(context.Background(), adapters.Config{

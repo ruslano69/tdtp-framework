@@ -114,13 +114,15 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 }
 
 // NewAdapter создает новый адаптер для PostgreSQL (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapter(connString string) (*Adapter, error) {
 	return NewAdapterWithSchema(connString, "public")
 }
 
 // NewAdapterWithSchema создает адаптер с указанной схемой (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapterWithSchema(connString, schema string) (*Adapter, error) {
 	adapter := &Adapter{}
 	err := adapter.Connect(context.Background(), adapters.Config{

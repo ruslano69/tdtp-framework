@@ -30,7 +30,7 @@ func NewExecutor(workspace *Workspace) *Executor {
 }
 
 // Execute выполняет SQL трансформацию и возвращает результат
-func (e *Executor) Execute(ctx context.Context, sql string, resultTableName string) (*ExecutionResult, error) {
+func (e *Executor) Execute(ctx context.Context, sql, resultTableName string) (*ExecutionResult, error) {
 	if e.workspace == nil {
 		return nil, fmt.Errorf("workspace is not initialized")
 	}
@@ -43,7 +43,7 @@ func (e *Executor) Execute(ctx context.Context, sql string, resultTableName stri
 	startTime := time.Now()
 
 	// Выполняем SQL в workspace
-	packet, err := e.workspace.ExecuteSQL(ctx, sql, resultTableName)
+	pkt, err := e.workspace.ExecuteSQL(ctx, sql, resultTableName)
 
 	// Вычисляем длительность
 	duration := time.Since(startTime)
@@ -57,13 +57,13 @@ func (e *Executor) Execute(ctx context.Context, sql string, resultTableName stri
 	}
 
 	// Подсчитываем количество строк
-	rowsAffected := len(packet.Data.Rows)
+	rowsAffected := len(pkt.Data.Rows)
 
 	return &ExecutionResult{
 		SQL:          sql,
 		RowsAffected: rowsAffected,
 		Duration:     duration,
-		Packet:       packet,
+		Packet:       pkt,
 	}, nil
 }
 

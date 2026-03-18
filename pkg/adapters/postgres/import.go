@@ -203,7 +203,7 @@ func (a *Adapter) dropTable(ctx context.Context, tableName string) error {
 }
 
 // createTableFromSchema создает таблицу на основе TDTP схемы
-func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, schema packet.Schema) error {
+func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, pktSchema packet.Schema) error {
 	quotedTable := QuoteIdentifier(tableName)
 	if a.schema != "public" {
 		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
@@ -220,10 +220,10 @@ func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, s
 	}
 
 	// Строим CREATE TABLE запрос
-	columns := make([]string, 0, len(schema.Fields))
+	columns := make([]string, 0, len(pktSchema.Fields))
 	var pkColumns []string
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		colDef := a.buildColumnDefinition(field)
 		columns = append(columns, colDef)
 
@@ -324,7 +324,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 }
 
 // buildOnConflictClause строит ON CONFLICT клаузу
-func (a *Adapter) buildOnConflictClause(schema packet.Schema, strategy adapters.ImportStrategy) string {
+func (a *Adapter) buildOnConflictClause(pktSchema packet.Schema, strategy adapters.ImportStrategy) string {
 	if strategy == adapters.StrategyFail {
 		return ""
 	}
@@ -333,7 +333,7 @@ func (a *Adapter) buildOnConflictClause(schema packet.Schema, strategy adapters.
 	var pkColumns []string
 	var updateColumns []string
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		if field.Key {
 			pkColumns = append(pkColumns, QuoteIdentifier(field.Name))
 		} else {
@@ -496,8 +496,8 @@ func (a *Adapter) convertValue(value string, field packet.Field) any {
 // ========== base.TableManager interface methods ==========
 
 // CreateTable implements base.TableManager interface
-func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
-	return a.createTableFromSchema(ctx, tableName, schema)
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, pktSchema packet.Schema) error {
+	return a.createTableFromSchema(ctx, tableName, pktSchema)
 }
 
 // DropTable implements base.TableManager interface
@@ -520,14 +520,14 @@ func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) erro
 
 // InsertRows implements base.DataInserter interface
 // Uses COPY for bulk insert (PostgreSQL-specific fast path)
-func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
+func (a *Adapter) InsertRows(ctx context.Context, tableName string, pktSchema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
 	// PostgreSQL adapter использует COPY command для bulk insert
 	// Это быстрее чем INSERT statements
 	pkt := &packet.DataPacket{
 		Header: packet.Header{
 			TableName: tableName,
 		},
-		Schema: schema,
+		Schema: pktSchema,
 	}
 	pkt.Data.Rows = rows
 

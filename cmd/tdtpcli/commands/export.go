@@ -138,7 +138,8 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	}
 
 	// Write to S3, stdout, or local file
-	if opts.StorageCfg != nil {
+	switch {
+	case opts.StorageCfg != nil:
 		// Stream to object storage (S3 / SeaweedFS)
 		store, err := storage.New(*opts.StorageCfg)
 		if err != nil {
@@ -162,7 +163,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 					i+1, len(packets), opts.StorageCfg.S3.Bucket, key)
 			}
 		}
-	} else if opts.OutputFile == "" || opts.OutputFile == "-" {
+	case opts.OutputFile == "" || opts.OutputFile == "-":
 		// Write to stdout
 		generator := packet.NewGenerator()
 		for _, pkt := range packets {
@@ -172,7 +173,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			}
 			fmt.Println(string(xml))
 		}
-	} else {
+	default:
 		// Write to local file(s)
 		if len(packets) == 1 {
 			if err := writePacketToFile(packets[0], opts.OutputFile); err != nil {
