@@ -4,10 +4,10 @@ import "errors"
 
 // Коды ошибок шифрования — используются в error-пакете (поле error_code).
 const (
-	ErrCodeMercuryUnavailable    = "MERCURY_UNAVAILABLE"     // xZMercury не отвечает (timeout / connection refused)
-	ErrCodeMercuryError          = "MERCURY_ERROR"           // xZMercury вернул HTTP 5xx
+	ErrCodeMercuryUnavailable     = "MERCURY_UNAVAILABLE"      // xZMercury не отвечает (timeout / connection refused)
+	ErrCodeMercuryError           = "MERCURY_ERROR"            // xZMercury вернул HTTP 5xx
 	ErrCodeHMACVerificationFailed = "HMAC_VERIFICATION_FAILED" // HMAC ключа не прошёл верификацию
-	ErrCodeKeyBindRejected       = "KEY_BIND_REJECTED"       // xZMercury отклонил binding (квота, ACL, невалидный pipeline)
+	ErrCodeKeyBindRejected        = "KEY_BIND_REJECTED"        // xZMercury отклонил binding (квота, ACL, невалидный pipeline)
 )
 
 // Sentinel errors — используются для определения типа отказа в EncryptionProcessor.
@@ -41,7 +41,7 @@ type RetrieveKeyRequest struct {
 type PipelineStatus string
 
 const (
-	StatusSuccess           PipelineStatus = "success"
-	StatusFailed            PipelineStatus = "failed"
+	StatusSuccess             PipelineStatus = "success"
+	StatusFailed              PipelineStatus = "failed"
 	StatusCompletedWithErrors PipelineStatus = "completed_with_errors"
 )

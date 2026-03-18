@@ -507,7 +507,7 @@ func routeCommand(
 			})
 		})
 
-	// Inspect command — no DB connection required, runs directly
+		// Inspect command — no DB connection required, runs directly
 	} else if *flags.Inspect != "" {
 		var inspectStorageCfg *storage.Config
 		if storage.IsRemote(*flags.Inspect) {

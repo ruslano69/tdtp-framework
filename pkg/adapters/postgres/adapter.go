@@ -96,8 +96,8 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 		sqlAdapter = base.NewPostgreSQLSchemaAdapter(a.schema)
 	}
 	a.exportHelper = base.NewExportHelper(
-		a,          // SchemaReader
-		a,          // DataReader
+		a,           // SchemaReader
+		a,           // DataReader
 		a.converter, // ValueConverter
 		sqlAdapter,  // nil for public schema, PostgreSQLSchemaAdapter otherwise
 	)

@@ -167,7 +167,7 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 				updatedRow[i] = SpecInfMarker
 			case d.hasNegInf && rawNegInfinityForms[v]:
 				updatedRow[i] = SpecNegInfMarker
-			// "NaN" and "0000-00-00" are already canonical markers — no rename needed
+				// "NaN" and "0000-00-00" are already canonical markers — no rename needed
 			}
 		}
 		updatedRows[j] = updatedRow

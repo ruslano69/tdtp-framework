@@ -222,7 +222,7 @@ func TestRetrieve_SecondCall_Returns404(t *testing.T) {
 
 	_, _ = h.store.Bind(ctx, uuid, "pipeline")
 
-	postJSON(h.Retrieve, map[string]string{"package_uuid": uuid}) // первый — успех
+	postJSON(h.Retrieve, map[string]string{"package_uuid": uuid})       // первый — успех
 	rw := postJSON(h.Retrieve, map[string]string{"package_uuid": uuid}) // второй — 404
 
 	if rw.Code != http.StatusNotFound {

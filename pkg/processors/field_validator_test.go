@@ -514,11 +514,11 @@ func TestFieldValidator_StrategyFilter(t *testing.T) {
 	}
 
 	data := [][]string{
-		{"Alice", "30"},   // valid
-		{"Bob", "999"},    // invalid age
-		{"Carol", "25"},   // valid
-		{"Dave", "-5"},    // invalid age
-		{"Eve", "45"},     // valid
+		{"Alice", "30"}, // valid
+		{"Bob", "999"},  // invalid age
+		{"Carol", "25"}, // valid
+		{"Dave", "-5"},  // invalid age
+		{"Eve", "45"},   // valid
 	}
 
 	result, err := validator.Process(context.Background(), data, schema)

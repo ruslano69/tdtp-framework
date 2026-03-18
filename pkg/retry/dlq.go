@@ -10,12 +10,12 @@ import (
 
 // DLQEntry представляет запись в Dead Letter Queue
 type DLQEntry struct {
-	ID          string      `json:"id"`
-	Timestamp   time.Time   `json:"timestamp"`
-	Attempts    int         `json:"attempts"`
-	LastError   string      `json:"last_error"`
-	FailureType string      `json:"failure_type"` // max_attempts_exceeded, context_cancelled, etc.
-	Data        any `json:"data,omitempty"`
+	ID          string    `json:"id"`
+	Timestamp   time.Time `json:"timestamp"`
+	Attempts    int       `json:"attempts"`
+	LastError   string    `json:"last_error"`
+	FailureType string    `json:"failure_type"` // max_attempts_exceeded, context_cancelled, etc.
+	Data        any       `json:"data,omitempty"`
 }
 
 // DLQ - Dead Letter Queue для хранения проблемных сообщений

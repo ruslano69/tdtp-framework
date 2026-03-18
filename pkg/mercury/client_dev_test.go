@@ -46,7 +46,7 @@ func TestDevClient_BindKey_UniqueKeysPerCall(t *testing.T) {
 func TestVerifyHMACDev_AlwaysTrue(t *testing.T) {
 	// В dev-режиме HMAC-верификация всегда проходит (ключ не покидает процесс)
 	tests := []struct {
-		name           string
+		name               string
 		uuid, hmac, secret string
 	}{
 		{"valid looking", "uuid-1", "deadbeef", "secret"},

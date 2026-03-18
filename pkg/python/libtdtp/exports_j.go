@@ -225,9 +225,12 @@ func J_WriteFile(dataJSON *C.char, path *C.char) *C.char {
 //
 // dataJSON    — full dataset (schema + header + data rows).
 // basePath    — output path, e.g. "/tmp/out/Users.tdtp.xml".
-//               Parts are written as Users_part_1_of_N.tdtp.xml, etc.
+//
+//	Parts are written as Users_part_1_of_N.tdtp.xml, etc.
+//
 // optionsJSON — {"compress":true,"level":3,"checksum":true}
-//               All keys are optional; compress defaults to false.
+//
+//	All keys are optional; compress defaults to false.
 //
 // Returns {"files":[...],"total_parts":N} or {"error":"..."}.
 // Caller must free result with J_FreeString.

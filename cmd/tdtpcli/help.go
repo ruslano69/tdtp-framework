@@ -232,7 +232,7 @@ func PrintHelp() {
 	fmt.Println("  # List tables matching a pattern (use = to pass the pattern)")
 	fmt.Println("  tdtpcli --list=user* --config pg.yaml")
 	fmt.Println("  tdtpcli --list=order? --config pg.yaml")
-	fmt.Println("  tdtpcli --list=%log% --config pg.yaml")   // SQL-style % wildcard
+	fmt.Println("  tdtpcli --list=%log% --config pg.yaml") // SQL-style % wildcard
 	fmt.Println()
 
 	fmt.Println("  # Export table to TDTP XML")

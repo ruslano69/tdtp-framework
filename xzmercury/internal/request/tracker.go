@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	keyPrefix    = "request:"
+	keyPrefix     = "request:"
 	pubsubChannel = "xzmercury:events"
-	defaultTTL   = 24 * time.Hour
+	defaultTTL    = 24 * time.Hour
 )
 
 // State represents the lifecycle state of a request.

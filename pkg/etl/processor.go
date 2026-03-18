@@ -22,15 +22,15 @@ type ProcessorStats struct {
 
 // Processor представляет главный ETL процессор
 type Processor struct {
-	config          *PipelineConfig
-	workspace       *Workspace
-	loader          *Loader
-	executor        *Executor
-	exporter        *Exporter
-	stats           ProcessorStats
-	packageUUID     string                   // UUID пакета генерируется в начале Execute, используется для шифрования
-	mercuryBinder   processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
-	preExportChain  *processors.Chain        // цепочка pre-export процессоров из config.Processors.PreExport
+	config         *PipelineConfig
+	workspace      *Workspace
+	loader         *Loader
+	executor       *Executor
+	exporter       *Exporter
+	stats          ProcessorStats
+	packageUUID    string                   // UUID пакета генерируется в начале Execute, используется для шифрования
+	mercuryBinder  processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
+	preExportChain *processors.Chain        // цепочка pre-export процессоров из config.Processors.PreExport
 }
 
 // NewProcessor создает новый ETL процессор

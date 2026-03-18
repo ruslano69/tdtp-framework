@@ -58,9 +58,9 @@ type Field struct {
 	Key           bool           `xml:"key,attr,omitempty"`
 	Timezone      string         `xml:"timezone,attr,omitempty"`
 	Subtype       string         `xml:"subtype,attr,omitempty"`
-	ReadOnly      bool           `xml:"readonly,attr,omitempty"`  // Read-only поля (timestamp, computed)
-	Fixed         bool           `xml:"fixed,attr,omitempty"`     // v1.3.1: значение не меняется в пределах пакета
-	SpecialValues *SpecialValues `xml:"SpecialValues,omitempty"`  // v1.3.1: маркеры специальных значений
+	ReadOnly      bool           `xml:"readonly,attr,omitempty"` // Read-only поля (timestamp, computed)
+	Fixed         bool           `xml:"fixed,attr,omitempty"`    // v1.3.1: значение не меняется в пределах пакета
+	SpecialValues *SpecialValues `xml:"SpecialValues,omitempty"` // v1.3.1: маркеры специальных значений
 }
 
 // SpecialValues содержит маркеры специальных значений для поля (v1.3.1)

@@ -1,16 +1,19 @@
 // xzmercury-mock — минимальный mock-сервер xZMercury для E2E тестирования.
 //
 // Реализует:
-//   POST /api/keys/bind     — генерирует AES-256 ключ, сохраняет в памяти, возвращает {key_b64, hmac}
-//   POST /api/keys/retrieve — возвращает ключ по UUID и удаляет (burn-on-read)
-//   GET  /healthz           — liveness probe
+//
+//	POST /api/keys/bind     — генерирует AES-256 ключ, сохраняет в памяти, возвращает {key_b64, hmac}
+//	POST /api/keys/retrieve — возвращает ключ по UUID и удаляет (burn-on-read)
+//	GET  /healthz           — liveness probe
 //
 // Запуск:
-//   go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
+//
+//	go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
 //
 // Переменные окружения (альтернатива флагам):
-//   MOCK_ADDR          — адрес (по умолчанию :3000)
-//   MERCURY_SERVER_SECRET — HMAC-секрет (по умолчанию "dev-secret")
+//
+//	MOCK_ADDR          — адрес (по умолчанию :3000)
+//	MERCURY_SERVER_SECRET — HMAC-секрет (по умолчанию "dev-secret")
 package main
 
 import (
@@ -30,13 +33,13 @@ import (
 )
 
 type keyEntry struct {
-	KeyB64    string
-	Pipeline  string
-	BoundAt   time.Time
+	KeyB64   string
+	Pipeline string
+	BoundAt  time.Time
 }
 
 var (
-	mu      sync.Mutex
+	mu       sync.Mutex
 	keyStore = make(map[string]keyEntry) // uuid → entry
 )
 

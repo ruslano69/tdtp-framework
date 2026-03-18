@@ -16,13 +16,13 @@ type PreviewService struct{}
 
 // PreviewResult represents preview data result
 type PreviewResult struct {
-	Success      bool                 `json:"success"`
-	Message      string               `json:"message,omitempty"`
-	Columns      []string             `json:"columns"`
-	ColumnTypes  map[string]string    `json:"columnTypes,omitempty"` // Column name -> TDTP type
-	Rows         []map[string]any     `json:"rows"`
-	RowCount     int                  `json:"rowCount"`
-	TotalRowsEst int64                `json:"totalRowsEst,omitempty"` // Estimated total rows
+	Success      bool              `json:"success"`
+	Message      string            `json:"message,omitempty"`
+	Columns      []string          `json:"columns"`
+	ColumnTypes  map[string]string `json:"columnTypes,omitempty"` // Column name -> TDTP type
+	Rows         []map[string]any  `json:"rows"`
+	RowCount     int               `json:"rowCount"`
+	TotalRowsEst int64             `json:"totalRowsEst,omitempty"` // Estimated total rows
 }
 
 // NewPreviewService creates a new preview service

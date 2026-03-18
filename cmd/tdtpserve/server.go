@@ -29,9 +29,9 @@ type Dataset struct {
 
 // Server — HTTP сервер tdtpserve
 type Server struct {
-	cfg      *ServeConfig
-	datasets map[string]*Dataset
-	order    []string // порядок для отображения в UI
+	cfg       *ServeConfig
+	datasets  map[string]*Dataset
+	order     []string // порядок для отображения в UI
 	startedAt time.Time
 }
 

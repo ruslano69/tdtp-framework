@@ -28,13 +28,13 @@ type ExportResult struct {
 
 // Exporter отвечает за экспорт результатов ETL
 type Exporter struct {
-	config          OutputConfig
-	security        SecurityConfig
-	packageUUID     string
-	pipelineName    string
-	mercuryBinder   processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
-	preExportChain  *processors.Chain        // процессоры маскирования/нормализации/валидации перед экспортом
-	cb              *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
+	config         OutputConfig
+	security       SecurityConfig
+	packageUUID    string
+	pipelineName   string
+	mercuryBinder  processors.MercuryBinder   // опциональная замена mercury.Client (dev-режим, тесты)
+	preExportChain *processors.Chain          // процессоры маскирования/нормализации/валидации перед экспортом
+	cb             *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
 }
 
 // NewExporter создает новый экспортер

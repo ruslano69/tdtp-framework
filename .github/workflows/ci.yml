@@ -12,8 +12,10 @@ jobs:
     name: Test (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false  # show all failures, not just the first
       matrix:
-        go-version: ['1.22', '1.23', '1.24']
+        # go.mod requires go 1.24.0; older versions fail with GOTOOLCHAIN=local
+        go-version: ['1.24', 'stable']
 
     steps:
     - name: Checkout code

@@ -348,14 +348,14 @@ type CanvasDesign struct {
 
 // TableDesign represents a table on canvas
 type TableDesign struct {
-	SourceName string        `json:"sourceName"` // = Source.Name (user alias); used for schema lookup
+	SourceName string        `json:"sourceName"`         // = Source.Name (user alias); used for schema lookup
 	TableRef   string        `json:"tableRef,omitempty"` // actual DB table name when different from SourceName
 	Alias      string        `json:"alias"`
 	X          int           `json:"x"`
 	Y          int           `json:"y"`
 	Fields     []FieldDesign `json:"fields"`
-	Limit      *int          `json:"limit,omitempty"`  // LIMIT for pagination (nil = no limit)
-	Offset     *int          `json:"offset,omitempty"` // OFFSET for pagination (nil = no offset)
+	Limit      *int          `json:"limit,omitempty"`     // LIMIT for pagination (nil = no limit)
+	Offset     *int          `json:"offset,omitempty"`    // OFFSET for pagination (nil = no offset)
 	SortState  string        `json:"sortState,omitempty"` // Field sort state: "" | "AZ" | "ZA"
 }
 
@@ -365,11 +365,11 @@ type FieldDesign struct {
 	Type         string           `json:"type"`
 	IsPrimaryKey bool             `json:"isPrimaryKey,omitempty"`
 	Visible      bool             `json:"visible"`
-	Filter       *FilterCondition `json:"filter,omitempty"`    // Frontend uses "filter"
-	Condition    *FilterCondition `json:"condition,omitempty"` // Backend compatibility
-	Sort         string           `json:"sort,omitempty"`      // ASC, DESC, or "" (no sort)
-	SortCast     string           `json:"sortCast,omitempty"`  // CAST type for ORDER BY: STRING, REAL, INTEGER, NUMERIC, BLOB
-	SelectCast   string           `json:"selectCast,omitempty"` // CAST type for SELECT: TEXT, INTEGER, REAL, BLOB, etc.
+	Filter       *FilterCondition `json:"filter,omitempty"`      // Frontend uses "filter"
+	Condition    *FilterCondition `json:"condition,omitempty"`   // Backend compatibility
+	Sort         string           `json:"sort,omitempty"`        // ASC, DESC, or "" (no sort)
+	SortCast     string           `json:"sortCast,omitempty"`    // CAST type for ORDER BY: STRING, REAL, INTEGER, NUMERIC, BLOB
+	SelectCast   string           `json:"selectCast,omitempty"`  // CAST type for SELECT: TEXT, INTEGER, REAL, BLOB, etc.
 	SelectAlias  string           `json:"selectAlias,omitempty"` // Alias for CAST field in SELECT
 }
 
@@ -378,7 +378,7 @@ type FilterCondition struct {
 	Logic    string `json:"logic"`    // AND, OR
 	Operator string `json:"operator"` // =, !=, >, <, >=, <=, BETWEEN, LIKE, IN
 	Value    string `json:"value"`
-	Value2   string `json:"value2,omitempty"` // For BETWEEN
+	Value2   string `json:"value2,omitempty"`   // For BETWEEN
 	CastType string `json:"castType,omitempty"` // CAST type for WHERE: STRING, REAL, INTEGER, NUMERIC, BLOB
 }
 
@@ -1771,11 +1771,11 @@ type AuditConfig struct {
 
 // ErrorHandlingConfig for error handling strategy
 type ErrorHandlingConfig struct {
-	OnSourceError    string `yaml:"on_source_error,omitempty" json:"on_source_error,omitempty"`       // continue | fail
-	OnTransformError string `yaml:"on_transform_error,omitempty" json:"on_transform_error,omitempty"` // continue | fail
-	OnOutputError    string `yaml:"on_output_error,omitempty" json:"on_output_error,omitempty"`       // continue | fail
-	RetryAttempts    int    `yaml:"retry_attempts,omitempty" json:"retry_attempts,omitempty"`
-	RetryDelaySeconds int   `yaml:"retry_delay_seconds,omitempty" json:"retry_delay_seconds,omitempty"`
+	OnSourceError     string `yaml:"on_source_error,omitempty" json:"on_source_error,omitempty"`       // continue | fail
+	OnTransformError  string `yaml:"on_transform_error,omitempty" json:"on_transform_error,omitempty"` // continue | fail
+	OnOutputError     string `yaml:"on_output_error,omitempty" json:"on_output_error,omitempty"`       // continue | fail
+	RetryAttempts     int    `yaml:"retry_attempts,omitempty" json:"retry_attempts,omitempty"`
+	RetryDelaySeconds int    `yaml:"retry_delay_seconds,omitempty" json:"retry_delay_seconds,omitempty"`
 }
 
 // SecurityConfig for security settings
@@ -1969,9 +1969,9 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 
 	// tableAlias → ordered list of FieldDesign (preserving SELECT order)
 	type tableEntry struct {
-		sourceName string // = user alias (Source.Name), used for schema lookup
-		alias      string // = user alias for field references
-		tableRef   string // actual DB table (may differ from alias), used in FROM
+		sourceName string                  // = user alias (Source.Name), used for schema lookup
+		alias      string                  // = user alias for field references
+		tableRef   string                  // actual DB table (may differ from alias), used in FROM
 		fields     []*FieldDesign          // ordered
 		fieldIndex map[string]*FieldDesign // name → ptr
 	}
@@ -2044,7 +2044,7 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 	joinRe := regexp.MustCompile(`(?i)(INNER|LEFT|RIGHT)\s+JOIN\s+(` + ident + `)(?:\s+AS\s+(` + ident + `))?\s+ON\s+(` + ident + `)\.(` + ident + `)\s*=\s*(` + ident + `)\.(` + ident + `)`)
 	for _, jm := range joinRe.FindAllStringSubmatch(sql, -1) {
 		joinType := strings.ToLower(jm[1])
-		rightDb := unquote(jm[2])    // actual DB table
+		rightDb := unquote(jm[2]) // actual DB table
 		rightAlias := rightDb
 		if jm[3] != "" {
 			rightAlias = unquote(jm[3]) // user alias
@@ -2082,8 +2082,8 @@ func parseSQLToCanvasDesign(sql string) *CanvasDesign {
 		entryRe := regexp.MustCompile(`(?i)(` + ident + `)\.(` + ident + `)(?:\s+(ASC|DESC))?`)
 		for _, em := range entryRe.FindAllStringSubmatch(om[1], -1) {
 			tAlias := unquote(em[1])
-			fName  := unquote(em[2])
-			dir    := "ASC"
+			fName := unquote(em[2])
+			dir := "ASC"
 			if len(em) >= 4 && strings.ToUpper(em[3]) == "DESC" {
 				dir = "DESC"
 			}

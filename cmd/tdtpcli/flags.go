@@ -41,20 +41,20 @@ func (f *ListFlag) IsBoolFlag() bool { return true }
 // Flags holds all command-line flags
 type Flags struct {
 	// Commands
-	List         *ListFlag
-	ListViews    *bool
-	Export       *string
-	Import       *string
-	ExportBroker *string
-	ImportBroker *bool
-	ToHTML       *string
-	OpenBrowser  *bool
-	Row          *string // Row range for HTML viewer (e.g., "100-150")
-	ToXLSX       *string
-	FromXLSX     *string
-	ExportXLSX   *string
-	ImportXLSX   *string
-	SyncIncr     *string
+	List           *ListFlag
+	ListViews      *bool
+	Export         *string
+	Import         *string
+	ExportBroker   *string
+	ImportBroker   *bool
+	ToHTML         *string
+	OpenBrowser    *bool
+	Row            *string // Row range for HTML viewer (e.g., "100-150")
+	ToXLSX         *string
+	FromXLSX       *string
+	ExportXLSX     *string
+	ImportXLSX     *string
+	SyncIncr       *string
 	Pipeline       *string
 	ProcessRequest *string // Process incoming TDTP request file and generate response
 	Diff           *string // First file for diff (second as positional arg)
@@ -119,8 +119,8 @@ type Flags struct {
 	ShowConflicts *bool
 
 	// Misc
-	Version *bool
-	Help    *bool
+	Version   *bool
+	Help      *bool
 	ShortHelp *bool
 }
 
