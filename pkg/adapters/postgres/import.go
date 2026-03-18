@@ -151,18 +151,6 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	}
 }
 
-// importPacketData импортирует данные одного пакета (вспомогательная функция)
-func (a *Adapter) importPacketData(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-	switch strategy {
-	case adapters.StrategyCopy:
-		return a.importWithCopy(ctx, pkt)
-	case adapters.StrategyReplace, adapters.StrategyIgnore, adapters.StrategyFail:
-		return a.importWithInsert(ctx, pkt, strategy)
-	default:
-		return fmt.Errorf("unknown import strategy: %s", strategy)
-	}
-}
-
 // generateTempTableName генерирует имя временной таблицы
 func generateTempTableName(baseName string) string {
 	timestamp := time.Now().Format("20060102_150405")
