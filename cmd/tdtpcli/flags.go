@@ -11,6 +11,8 @@ import (
 type MultiStringFlag []string
 
 func (f *MultiStringFlag) String() string { return strings.Join(*f, "; ") }
+
+// Set implements flag.Value by appending the value to the slice.
 func (f *MultiStringFlag) Set(s string) error {
 	*f = append(*f, s)
 	return nil
@@ -25,6 +27,8 @@ type ListFlag struct {
 }
 
 func (f *ListFlag) String() string { return f.Pattern }
+
+// Set implements flag.Value; accepts an optional glob pattern or "true" (bare --list).
 func (f *ListFlag) Set(s string) error {
 	f.IsSet = true
 	if s == "true" { // --list without value
