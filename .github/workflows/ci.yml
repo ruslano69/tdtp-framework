@@ -28,6 +28,7 @@ jobs:
     - name: Verify dependencies
       env:
         GOTOOLCHAIN: local  # use the matrix Go, never auto-download toolchain
+        GOWORK: off         # go.work requires go1.24; disable for matrix < 1.24
       run: |
         go mod verify
         go mod download
@@ -35,6 +36,7 @@ jobs:
     - name: Build
       env:
         GOTOOLCHAIN: local
+        GOWORK: off
       run: go build -tags nokafka -v ./...
 
     - name: Run unit tests
@@ -44,6 +46,7 @@ jobs:
       # -short: additional signal for any test that checks testing.Short()
       env:
         GOTOOLCHAIN: local
+        GOWORK: off
       run: go test -tags nokafka -short -race -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
