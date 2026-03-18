@@ -2,7 +2,8 @@ module github.com/ruslano69/tdtp-framework
 
 go 1.24.0
 
-toolchain go1.24.7
+// go1.25.8+ fixes stdlib vulns GO-2026-4601 (net/url) and GO-2026-4602 (os).
+toolchain go1.25.8
 
 require (
 	github.com/denisenkom/go-mssqldb v0.12.3
