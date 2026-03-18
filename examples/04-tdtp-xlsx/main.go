@@ -158,4 +158,3 @@ func importToDatabase(pkt *packet.DataPacket) error {
 
 	return nil
 }
-

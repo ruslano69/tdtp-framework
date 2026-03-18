@@ -173,4 +173,3 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 
 	return nil
 }
-
