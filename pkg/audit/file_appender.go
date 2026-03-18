@@ -46,7 +46,7 @@ func NewFileAppender(config FileAppenderConfig) (*FileAppender, error) {
 	// Получаем размер файла
 	fileInfo, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 

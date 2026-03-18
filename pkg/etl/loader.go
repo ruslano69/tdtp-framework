@@ -34,14 +34,18 @@ func tdtpMultiPartFiles(filePath string) []string {
 	if m := multiPartRe.FindStringSubmatch(filePath); m != nil {
 		base = m[1]
 		ext = m[4]
-		total, _ = strconv.Atoi(m[3])
+		if v, err := strconv.Atoi(m[3]); err == nil {
+			total = v
+		}
 	} else {
 		ext = filepath.Ext(filePath)
 		base = filePath[:len(filePath)-len(ext)]
 		matches, err := filepath.Glob(fmt.Sprintf("%s_part_1_of_*%s", base, ext))
 		if err == nil && len(matches) == 1 {
 			if m := multiPartRe.FindStringSubmatch(matches[0]); m != nil {
-				total, _ = strconv.Atoi(m[3])
+				if v, err := strconv.Atoi(m[3]); err == nil {
+					total = v
+				}
 			}
 		}
 	}
@@ -234,7 +238,7 @@ func loadTDTPFromS3(ctx context.Context, source SourceConfig) (*packet.DataPacke
 	if err != nil {
 		return nil, fmt.Errorf("tdtp-s3: create storage driver: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Собираем список ключей для загрузки.
 	keys := []string{key}
@@ -265,7 +269,7 @@ func loadTDTPFromS3(ctx context.Context, source SourceConfig) (*packet.DataPacke
 			return nil, fmt.Errorf("tdtp-s3: download s3://%s/%s: %w", bucket, k, getErr)
 		}
 		data, readErr := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if readErr != nil {
 			return nil, fmt.Errorf("tdtp-s3: read s3://%s/%s: %w", bucket, k, readErr)
 		}
@@ -473,7 +477,7 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(timeoutCtx)
+	defer func() { _ = adapter.Close(timeoutCtx) }()
 
 	// Проверяем соединение
 	if err := adapter.Ping(timeoutCtx); err != nil {

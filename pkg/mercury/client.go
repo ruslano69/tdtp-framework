@@ -59,17 +59,19 @@ func (c *Client) BindKey(ctx context.Context, packageUUID, pipelineName string) 
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrMercuryUnavailable, err.Error())
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 500 {
 		return nil, fmt.Errorf("%w: HTTP %d", ErrMercuryError, resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		_ = readErr
 		return nil, fmt.Errorf("%w: HTTP %d: %s", ErrKeyBindRejected, resp.StatusCode, string(body))
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		_ = readErr
 		return nil, fmt.Errorf("%w: HTTP %d: %s", ErrMercuryError, resp.StatusCode, string(body))
 	}
 
@@ -102,17 +104,19 @@ func (c *Client) RetrieveKey(ctx context.Context, packageUUID string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", ErrMercuryUnavailable, err.Error())
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		_ = readErr
 		return "", fmt.Errorf("key not found or already consumed (uuid=%s): %s", packageUUID, string(body))
 	}
 	if resp.StatusCode >= 500 {
 		return "", fmt.Errorf("%w: HTTP %d", ErrMercuryError, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		_ = readErr
 		return "", fmt.Errorf("%w: HTTP %d: %s", ErrMercuryError, resp.StatusCode, string(body))
 	}
 

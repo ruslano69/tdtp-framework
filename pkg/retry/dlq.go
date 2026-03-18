@@ -61,7 +61,7 @@ func (d *DLQ) Add(entry DLQEntry) {
 	}
 
 	// Автосохранение
-	d.saveUnsafe()
+	_ = d.saveUnsafe()
 }
 
 // Get возвращает все записи из DLQ
@@ -98,7 +98,7 @@ func (d *DLQ) Remove(id string) bool {
 	for i, entry := range d.entries {
 		if entry.ID == id {
 			d.entries = append(d.entries[:i], d.entries[i+1:]...)
-			d.saveUnsafe()
+			_ = d.saveUnsafe()
 			return true
 		}
 	}
@@ -138,7 +138,7 @@ func (d *DLQ) CleanupOld() int {
 
 	if removed > 0 {
 		d.entries = newEntries
-		d.saveUnsafe()
+		_ = d.saveUnsafe()
 	}
 
 	return removed

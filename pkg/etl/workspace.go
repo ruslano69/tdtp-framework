@@ -34,7 +34,7 @@ func NewWorkspace(ctx context.Context) (*Workspace, error) {
 	// Используем type assertion для получения DB()
 	sqliteAdapter, ok := adapter.(interface{ DB() *sql.DB })
 	if !ok {
-		adapter.Close(ctx)
+		_ = adapter.Close(ctx)
 		return nil, fmt.Errorf("adapter does not support DB() method")
 	}
 
@@ -100,7 +100,7 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	if err != nil {
 		return fmt.Errorf("failed to prepare insert statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	// Начинаем транзакцию для производительности
 	tx, err := w.db.BeginTx(ctx, nil)
@@ -147,7 +147,7 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sql string, resultTableName 
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute SQL: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Получаем информацию о колонках
 	columns, err := rows.Columns()
@@ -224,13 +224,13 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTabl
 	// Получаем информацию о колонках
 	columns, err := rows.Columns()
 	if err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
 	columnTypes, err := rows.ColumnTypes()
 	if err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get column types: %w", err)
 	}
 
@@ -253,7 +253,7 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sql string, resultTabl
 	go func() {
 		defer close(rowsChan)
 		defer close(errorChan)
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))

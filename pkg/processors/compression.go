@@ -59,7 +59,7 @@ func (p *CompressionProcessor) ProcessBlock(_ context.Context, input []byte) ([]
 // Close освобождает ресурсы, связанные с энкодером.
 func (p *CompressionProcessor) Close() {
 	if p.encoder != nil {
-		p.encoder.Close()
+		_ = p.encoder.Close()
 	}
 }
 

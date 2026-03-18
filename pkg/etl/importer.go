@@ -104,7 +104,7 @@ func (pi *ParallelImporter) Import(
 	if err := broker.Connect(ctx); err != nil {
 		return stats, fmt.Errorf("failed to connect to broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Создаем каналы для координации воркеров
 	partsChan := make(chan []byte, pi.config.Workers*2)

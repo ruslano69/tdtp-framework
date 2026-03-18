@@ -350,9 +350,12 @@ func (v *FieldValidator) validateDate(value string) error {
 
 	// Дополнительная проверка валидности даты
 	parts := strings.Split(value, "-")
-	year, _ := strconv.Atoi(parts[0])
-	month, _ := strconv.Atoi(parts[1])
-	day, _ := strconv.Atoi(parts[2])
+	year, errYear := strconv.Atoi(parts[0])
+	_ = errYear
+	month, errMonth := strconv.Atoi(parts[1])
+	_ = errMonth
+	day, errDay := strconv.Atoi(parts[2])
+	_ = errDay
 
 	if month < 1 || month > 12 {
 		return fmt.Errorf("invalid month: %d", month)

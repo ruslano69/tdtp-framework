@@ -116,7 +116,8 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 		if p.curToken.Type != TokenNumber {
 			return nil, fmt.Errorf("expected number after LIMIT")
 		}
-		limit, _ := strconv.Atoi(p.curToken.Literal)
+		limit, err := strconv.Atoi(p.curToken.Literal)
+		_ = err
 		stmt.Limit = &limit
 		p.nextToken()
 	}
@@ -127,7 +128,8 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 		if p.curToken.Type != TokenNumber {
 			return nil, fmt.Errorf("expected number after OFFSET")
 		}
-		offset, _ := strconv.Atoi(p.curToken.Literal)
+		offset, err := strconv.Atoi(p.curToken.Literal)
+		_ = err
 		stmt.Offset = &offset
 		p.nextToken()
 	}

@@ -43,7 +43,7 @@ const maxExcelInt int64 = 999_999_999_999_999
 func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 	// Create new Excel file
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Check if data is compressed and decompress if needed
 	if pkt.Data.Compression != "" {
@@ -80,15 +80,16 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 	}
 	f.SetActiveSheet(index)
 	if sheetName != "Sheet1" {
-		f.DeleteSheet("Sheet1")
+		_ = f.DeleteSheet("Sheet1")
 	}
 
 	// Create header style
-	headerStyle, _ := f.NewStyle(&excelize.Style{
+	headerStyle, errStyle := f.NewStyle(&excelize.Style{
 		Font:      &excelize.Font{Bold: true, Size: 11, Color: "#FFFFFF"},
 		Fill:      excelize.Fill{Type: "pattern", Color: []string{"#4472C4"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
+	_ = errStyle
 
 	// Write headers
 	for col, field := range pkt.Schema.Fields {
@@ -97,8 +98,8 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 		if field.Key {
 			header += " *"
 		}
-		f.SetCellValue(sheetName, cell, header)
-		f.SetCellStyle(sheetName, cell, cell, headerStyle)
+		_ = f.SetCellValue(sheetName, cell, header)
+		_ = f.SetCellStyle(sheetName, cell, cell, headerStyle)
 	}
 
 	// Pre-build schema.FieldDef slice for the core converter (reuse across rows)
@@ -144,11 +145,11 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 				// Use SetCellStr to guarantee the value is stored as text.
 				// This prevents Excel from interpreting strings starting with
 				// =, +, -, @ as formulas (formula injection trap).
-				f.SetCellStr(sheetName, cell, cellVal.(string))
+				_ = f.SetCellStr(sheetName, cell, cellVal.(string))
 				// Do NOT apply a numeric/date style to text-forced cells
 				// (e.g. pre-1900 date strings, big-integer strings).
 			} else {
-				f.SetCellValue(sheetName, cell, cellVal)
+				_ = f.SetCellValue(sheetName, cell, cellVal)
 				applyCellFormat(f, sheetName, cell, fieldType)
 			}
 		}
@@ -157,7 +158,7 @@ func ToXLSX(pkt *packet.DataPacket, filePath string, sheetName string) error {
 	// Auto-fit columns
 	for col := range pkt.Schema.Fields {
 		colName := columnName(col + 1)
-		f.SetColWidth(sheetName, colName, colName, 15)
+		_ = f.SetColWidth(sheetName, colName, colName, 15)
 	}
 
 	// Save file
@@ -184,7 +185,7 @@ func FromXLSX(filePath string, sheetName string) (*packet.DataPacket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Get sheet name
 	if sheetName == "" {
@@ -447,15 +448,15 @@ func excelSerialToTime(serial float64) time.Time {
 func applyCellFormat(f *excelize.File, sheet, cell string, fieldType schema.DataType) {
 	switch fieldType {
 	case schema.TypeInteger, schema.TypeInt:
-		f.SetCellStyle(sheet, cell, cell, 1)
+		_ = f.SetCellStyle(sheet, cell, cell, 1)
 	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
-		f.SetCellStyle(sheet, cell, cell, 2)
+		_ = f.SetCellStyle(sheet, cell, cell, 2)
 	case schema.TypeDate:
-		f.SetCellStyle(sheet, cell, cell, 14)
+		_ = f.SetCellStyle(sheet, cell, cell, 14)
 	case schema.TypeDatetime, schema.TypeTimestamp:
-		f.SetCellStyle(sheet, cell, cell, 22)
+		_ = f.SetCellStyle(sheet, cell, cell, 22)
 	default:
-		f.SetCellStyle(sheet, cell, cell, 49)
+		_ = f.SetCellStyle(sheet, cell, cell, 49)
 	}
 }
 

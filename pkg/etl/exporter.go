@@ -279,7 +279,7 @@ func (e *Exporter) uploadToStorage(ctx context.Context, data []byte, destination
 	if err != nil {
 		return fmt.Errorf("etl: failed to open storage: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	meta := map[string]string{
 		"protocol": "TDTP 1.0",
@@ -299,7 +299,7 @@ func (e *Exporter) uploadToStorage(ctx context.Context, data []byte, destination
 		<-errCh
 		return fmt.Errorf("etl: upload pipe write failed: %w", err)
 	}
-	pw.Close()
+	_ = pw.Close()
 
 	if err := <-errCh; err != nil {
 		return fmt.Errorf("etl: storage Put failed: %w", err)
@@ -399,7 +399,7 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
@@ -438,7 +438,7 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Kafka: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
@@ -712,7 +712,7 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 		result.Errors = append(result.Errors, err)
 		return result, fmt.Errorf("failed to connect to broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Создаем streaming generator
 	streamGen := packet.NewStreamingGenerator()

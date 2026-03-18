@@ -155,7 +155,7 @@ func (k *Kafka) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to dial Kafka broker: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Проверяем, что можем получить метаданные
 	_, err = conn.ReadPartitions(k.config.Topic)
