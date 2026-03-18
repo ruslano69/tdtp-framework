@@ -7,8 +7,9 @@ on:
     branches: [ main, master, develop ]
 
 jobs:
+  # ── Unit tests (no external services required) ──────────────────────────────
   test:
-    name: Test
+    name: Test (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -30,10 +31,14 @@ jobs:
         go mod download
 
     - name: Build
-      run: go build -v ./...
+      run: go build -tags nokafka -v ./...
 
-    - name: Run tests
-      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+    - name: Run unit tests
+      # -tags nokafka: exclude kafka (no broker in CI)
+      # -tags integration is NOT set: skip all tests/integration/ and other
+      #   integration_test.go files that require external services
+      # -short: additional signal for any test that checks testing.Short()
+      run: go test -tags nokafka -short -race -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
       if: matrix.go-version == '1.24'
@@ -42,6 +47,7 @@ jobs:
         file: ./coverage.txt
         fail_ci_if_error: false
 
+  # ── Build CLI binary ─────────────────────────────────────────────────────────
   build:
     name: Build CLI
     runs-on: ubuntu-latest
@@ -56,12 +62,56 @@ jobs:
         go-version: '1.24.13'
         cache: true
 
-    - name: Build tdtpcli
-      run: |
-        cd cmd/tdtpcli
-        go build -v -o tdtpcli .
+    - name: Build tdtpcli (nokafka)
+      run: go build -tags nokafka -v -o /tmp/tdtpcli ./cmd/tdtpcli/
 
     - name: Test tdtpcli binary
-      run: |
-        cd cmd/tdtpcli
-        ./tdtpcli --help || echo "CLI help command executed"
+      run: /tmp/tdtpcli --help || echo "CLI help command executed"
+
+  # ── Integration tests (PostgreSQL + RabbitMQ) ────────────────────────────────
+  # Runs only on push/PR to main/master so feature branches don't spam emails.
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tdtp_user
+          POSTGRES_PASSWORD: tdtp_dev_pass_2025
+          POSTGRES_DB: tdtp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      rabbitmq:
+        image: rabbitmq:3-management
+        env:
+          RABBITMQ_DEFAULT_USER: tdtp_test
+          RABBITMQ_DEFAULT_PASS: tdtp_test_password
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.13'
+        cache: true
+
+    - name: Run integration tests
+      run: go test -tags "integration nokafka" -v -timeout 120s ./tests/integration/ ./pkg/adapters/postgres/...
