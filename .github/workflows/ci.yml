@@ -26,11 +26,15 @@ jobs:
         cache: true
 
     - name: Verify dependencies
+      env:
+        GOTOOLCHAIN: local  # use the matrix Go, never auto-download toolchain
       run: |
         go mod verify
         go mod download
 
     - name: Build
+      env:
+        GOTOOLCHAIN: local
       run: go build -tags nokafka -v ./...
 
     - name: Run unit tests
@@ -38,6 +42,8 @@ jobs:
       # -tags integration is NOT set: skip all tests/integration/ and other
       #   integration_test.go files that require external services
       # -short: additional signal for any test that checks testing.Short()
+      env:
+        GOTOOLCHAIN: local
       run: go test -tags nokafka -short -race -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
