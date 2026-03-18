@@ -1,3 +1,4 @@
+// Package mercury provides functionality for the TDTP framework.
 package mercury
 
 import (

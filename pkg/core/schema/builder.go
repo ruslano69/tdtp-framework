@@ -1,3 +1,4 @@
+// Package schema provides functionality for the TDTP framework.
 package schema
 
 import "github.com/ruslano69/tdtp-framework/pkg/core/packet"

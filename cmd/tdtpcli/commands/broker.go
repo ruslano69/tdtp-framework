@@ -1,3 +1,4 @@
+// Package commands provides functionality for the TDTP framework.
 package commands
 
 import (

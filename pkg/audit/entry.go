@@ -37,6 +37,7 @@ func (l Level) String() string {
 // Operation - тип операции
 type Operation string
 
+// Audit operation types.
 const (
 	OpExport       Operation = "export"
 	OpImport       Operation = "import"
@@ -57,6 +58,7 @@ const (
 // Status - статус выполнения операции
 type Status string
 
+// Audit status values.
 const (
 	StatusSuccess Status = "success"
 	StatusFailure Status = "failure"

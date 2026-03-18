@@ -241,12 +241,12 @@ func (v *FieldValidator) validateRange(value, param string) error {
 		return fmt.Errorf("invalid range format '%s', expected 'min-max'", param)
 	}
 
-	min, err := strconv.ParseFloat(parts[0], 64)
+	minVal, err := strconv.ParseFloat(parts[0], 64)
 	if err != nil {
 		return fmt.Errorf("invalid min value in range '%s'", param)
 	}
 
-	max, err := strconv.ParseFloat(parts[1], 64)
+	maxVal, err := strconv.ParseFloat(parts[1], 64)
 	if err != nil {
 		return fmt.Errorf("invalid max value in range '%s'", param)
 	}
@@ -256,8 +256,8 @@ func (v *FieldValidator) validateRange(value, param string) error {
 		return fmt.Errorf("value '%s' is not a valid number", value)
 	}
 
-	if val < min || val > max {
-		return fmt.Errorf("value %g is out of range [%g, %g]", val, min, max)
+	if val < minVal || val > maxVal {
+		return fmt.Errorf("value %g is out of range [%g, %g]", val, minVal, maxVal)
 	}
 
 	return nil
@@ -292,19 +292,19 @@ func (v *FieldValidator) validateLength(value, param string) error {
 		return fmt.Errorf("invalid length format '%s', expected 'min-max'", param)
 	}
 
-	min, err := strconv.Atoi(parts[0])
+	minLen, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return fmt.Errorf("invalid min length in '%s'", param)
 	}
 
-	max, err := strconv.Atoi(parts[1])
+	maxLen, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return fmt.Errorf("invalid max length in '%s'", param)
 	}
 
 	length := len(value)
-	if length < min || length > max {
-		return fmt.Errorf("length %d is out of range [%d, %d]", length, min, max)
+	if length < minLen || length > maxLen {
+		return fmt.Errorf("length %d is out of range [%d, %d]", length, minLen, maxLen)
 	}
 
 	return nil

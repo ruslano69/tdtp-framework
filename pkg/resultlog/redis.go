@@ -1,3 +1,4 @@
+// Package resultlog provides functionality for the TDTP framework.
 package resultlog
 
 import (

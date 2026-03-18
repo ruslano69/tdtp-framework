@@ -1,3 +1,4 @@
+// Package sync provides functionality for the TDTP framework.
 package sync
 
 import "fmt"

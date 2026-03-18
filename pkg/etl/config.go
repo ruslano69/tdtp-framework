@@ -1,3 +1,4 @@
+// Package etl provides functionality for the TDTP framework.
 package etl
 
 import (

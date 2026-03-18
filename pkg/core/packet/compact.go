@@ -1,3 +1,4 @@
+// Package packet provides functionality for the TDTP framework.
 package packet
 
 import "strings"

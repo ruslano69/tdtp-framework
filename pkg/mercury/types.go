@@ -40,6 +40,7 @@ type RetrieveKeyRequest struct {
 // PipelineStatus — статус pipeline, публикуемый в resultlog.
 type PipelineStatus string
 
+// Pipeline status constants.
 const (
 	StatusSuccess             PipelineStatus = "success"
 	StatusFailed              PipelineStatus = "failed"

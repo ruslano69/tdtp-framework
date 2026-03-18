@@ -1,3 +1,4 @@
+// Package audit provides functionality for the TDTP framework.
 package audit
 
 import (

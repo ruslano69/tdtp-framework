@@ -8,7 +8,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/sync"
 )
 
-// Type aliases для удобства
+// IncrementalConfig is an alias for sync.IncrementalConfig.
 type IncrementalConfig = sync.IncrementalConfig
 
 // Config - универсальная конфигурация подключения к БД

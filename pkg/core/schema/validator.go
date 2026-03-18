@@ -26,7 +26,6 @@ func (v *Validator) ValidateSchema(schema packet.Schema) error {
 	}
 
 	fieldNames := make(map[string]bool)
-	hasKey := false
 
 	for i, field := range schema.Fields {
 		// Проверка имени поля
@@ -75,20 +74,9 @@ func (v *Validator) ValidateSchema(schema packet.Schema) error {
 			}
 
 		case TypeDatetime:
-			if field.Timezone == "" {
-				// OK, будет использован UTC
-			}
+			// empty timezone is OK — UTC will be used
 		}
 
-		// Проверка первичного ключа
-		if field.Key {
-			hasKey = true
-		}
-	}
-
-	// Предупреждение если нет первичного ключа (не критично)
-	if !hasKey {
-		// В будущем можно добавить warning logging
 	}
 
 	return nil

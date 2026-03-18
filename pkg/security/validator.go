@@ -63,11 +63,7 @@ func (v *SQLValidator) Validate(sql string) error {
 	}
 
 	// 4. Запрет комментариев (могут скрывать вредоносный код)
-	if err := v.checkComments(sql); err != nil {
-		return err
-	}
-
-	return nil
+	return v.checkComments(sql)
 }
 
 // checkForbiddenKeywords проверяет наличие запрещенных SQL ключевых слов

@@ -1,3 +1,4 @@
+// Package security provides functionality for the TDTP framework.
 package security
 
 import (

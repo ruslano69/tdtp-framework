@@ -1,3 +1,4 @@
+// Package tdtql provides functionality for the TDTP framework.
 package tdtql
 
 // Node базовый интерфейс для всех узлов AST

@@ -1,3 +1,4 @@
+// Package postgres provides functionality for the TDTP framework.
 package postgres
 
 import (

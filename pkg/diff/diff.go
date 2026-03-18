@@ -1,3 +1,4 @@
+// Package diff provides functionality for the TDTP framework.
 package diff
 
 import (

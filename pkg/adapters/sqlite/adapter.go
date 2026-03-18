@@ -1,3 +1,4 @@
+// Package sqlite provides functionality for the TDTP framework.
 package sqlite
 
 import (
@@ -9,7 +10,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register sqlite driver
 )
 
 const driverSqlite = "sqlite"

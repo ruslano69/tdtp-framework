@@ -1,3 +1,4 @@
+// Package xlsx provides functionality for the TDTP framework.
 package xlsx
 
 import (

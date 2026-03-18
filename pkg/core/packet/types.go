@@ -5,6 +5,7 @@ import "time"
 // MessageType определяет тип TDTP сообщения
 type MessageType string
 
+// TDTP message type constants.
 const (
 	TypeReference MessageType = "reference"
 	TypeRequest   MessageType = "request"

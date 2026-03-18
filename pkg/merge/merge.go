@@ -1,3 +1,4 @@
+// Package merge provides functionality for the TDTP framework.
 package merge
 
 import (

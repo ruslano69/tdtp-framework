@@ -8,17 +8,21 @@ import (
 // TokenType тип токена
 type TokenType int
 
+// Token type constants for TDTQL lexer.
 const (
-	// Специальные токены
+	// TokenEOF marks end of input.
 	TokenEOF TokenType = iota
+	// TokenIllegal represents an unrecognized token.
 	TokenIllegal
 
 	// Идентификаторы и литералы
+	// TokenIdent represents field names.
 	TokenIdent  // имена полей
 	TokenString // 'строка'
 	TokenNumber // 123, 123.45
 
 	// Ключевые слова
+	// TokenSelect represents the SELECT keyword.
 	TokenSelect
 	TokenFrom
 	TokenWhere
@@ -37,6 +41,7 @@ const (
 	TokenOffset
 
 	// Операторы
+	// TokenEq represents the = operator.
 	TokenEq     // =
 	TokenNotEq  // != или <>
 	TokenLt     // <
