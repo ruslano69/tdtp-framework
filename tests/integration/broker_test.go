@@ -1,3 +1,5 @@
+//go:build integration
+
 package integration
 
 import (
@@ -35,7 +37,7 @@ func TestRabbitMQBasicConnection(t *testing.T) {
 
 	ctx := context.Background()
 	if err := broker.Connect(ctx); err != nil {
-		t.Fatalf("Failed to connect to RabbitMQ: %v", err)
+		t.Skipf("RabbitMQ not available: %v", err)
 	}
 	defer broker.Close()
 
@@ -70,7 +72,7 @@ func TestRabbitMQSendReceive(t *testing.T) {
 
 	ctx := context.Background()
 	if err := sender.Connect(ctx); err != nil {
-		t.Fatalf("Failed to connect sender: %v", err)
+		t.Skipf("RabbitMQ not available: %v", err)
 	}
 	defer sender.Close()
 

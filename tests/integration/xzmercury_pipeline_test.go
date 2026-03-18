@@ -1,3 +1,5 @@
+//go:build integration
+
 package integration
 
 // TestXzmercuryPipeline — интеграционный тест всей системы:
