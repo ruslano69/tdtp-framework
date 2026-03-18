@@ -46,7 +46,7 @@ func NewExporter(config OutputConfig) *Exporter {
 		cbCfg := resilience.DefaultConfig("output-primary")
 		if config.Resilience != nil {
 			if config.Resilience.MaxFailures > 0 {
-				cbCfg.MaxFailures = uint32(config.Resilience.MaxFailures)
+				cbCfg.MaxFailures = uint32(config.Resilience.MaxFailures) //nolint:gosec
 			}
 			if config.Resilience.TimeoutSec > 0 {
 				cbCfg.Timeout = time.Duration(config.Resilience.TimeoutSec) * time.Second
@@ -255,7 +255,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	if storage.IsRemote(destination) {
 		return e.uploadToStorage(ctx, xmlData, destination, dataPacket)
 	}
-	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
+	if err := os.WriteFile(destination, xmlData, 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 	return nil
@@ -366,7 +366,7 @@ func (e *Exporter) writeErrorPacket(ctx context.Context, generator *packet.Gener
 	if storage.IsRemote(destination) {
 		return e.uploadToStorage(ctx, xmlData, destination, nil)
 	}
-	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
+	if err := os.WriteFile(destination, xmlData, 0o600); err != nil {
 		return fmt.Errorf("write error packet: %w", err)
 	}
 	// Возвращаем nil — pipeline завершается штатно (exit 0)
@@ -419,7 +419,7 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 // exportToKafka экспортирует в Kafka
 func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.Kafka == nil {
-		return fmt.Errorf("Kafka config is not set")
+		return fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := e.config.Kafka
@@ -469,7 +469,7 @@ func (e *Exporter) exportToXLSX(dataPacket *packet.DataPacket) error {
 	// Создаём директорию если не существует
 	dir := destination[:max(0, lastSep(destination))]
 	if dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create output directory: %w", err)
 		}
 	}
@@ -543,13 +543,13 @@ func (e *Exporter) ValidateConfig() error {
 
 	case "kafka":
 		if e.config.Kafka == nil {
-			return fmt.Errorf("Kafka config is required for Kafka output")
+			return fmt.Errorf("kafka config is required for kafka output")
 		}
 		if len(e.config.Kafka.Brokers) == 0 {
-			return fmt.Errorf("Kafka brokers is required")
+			return fmt.Errorf("kafka brokers is required")
 		}
 		if e.config.Kafka.Topic == "" {
-			return fmt.Errorf("Kafka topic is required")
+			return fmt.Errorf("kafka topic is required")
 		}
 
 	default:
@@ -680,7 +680,7 @@ func (e *Exporter) exportStreamToRabbitMQ(ctx context.Context, streamResult *Str
 // exportStreamToKafka выполняет потоковый экспорт в Kafka
 func (e *Exporter) exportStreamToKafka(ctx context.Context, streamResult *StreamingResult, tableName string) (*StreamingExportResult, error) {
 	if e.config.Kafka == nil {
-		return nil, fmt.Errorf("Kafka config is not set")
+		return nil, fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := e.config.Kafka

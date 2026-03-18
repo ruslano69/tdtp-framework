@@ -359,12 +359,18 @@ func ParseMSSQLType(sqlType string) (baseType string, length, precision, scale i
 		if strings.Contains(paramsStr, ",") {
 			parts := strings.Split(paramsStr, ",")
 			if len(parts) == 2 {
-				precision, _ = strconv.Atoi(strings.TrimSpace(parts[0]))
-				scale, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+				if v, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+					precision = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+					scale = v
+				}
 			}
 		} else {
 			// Single parameter (length)
-			length, _ = strconv.Atoi(strings.TrimSpace(paramsStr))
+			if v, err := strconv.Atoi(strings.TrimSpace(paramsStr)); err == nil {
+				length = v
+			}
 		}
 	}
 
@@ -407,7 +413,10 @@ func BuildFieldFromColumn(columnName, dataType string, length, precision, scale 
 	}
 
 	// Convert to TDTP
-	tdtpField, _ := MSSQLToTDTP(fullType, false)
+	tdtpField, err := MSSQLToTDTP(fullType, false)
+	if err != nil {
+		return field
+	}
 	field.Type = tdtpField.Type
 	field.Length = tdtpField.Length
 	field.Precision = tdtpField.Precision

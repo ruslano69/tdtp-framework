@@ -43,7 +43,7 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 
 	if err != nil {
 		// Откатываем - удаляем временную таблицу
-		a.dropTable(ctx, tempTableName)
+		_ = a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to import to temporary table: %w", err)
 	}
 
@@ -54,7 +54,7 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 	err = a.replaceTables(ctx, tableName, tempTableName)
 	if err != nil {
 		// Откатываем - удаляем временную таблицу
-		a.dropTable(ctx, tempTableName)
+		_ = a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to replace tables: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// 1. Создаем временную таблицу (используем схему из первого пакета)
 	err = a.createTableFromSchema(ctx, tempTableName, packets[0].Schema)
@@ -97,7 +97,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 		err := a.importPacketData(ctx, &tempPacket, strategy)
 		if err != nil {
-			a.dropTable(ctx, tempTableName)
+			_ = a.dropTable(ctx, tempTableName)
 			return fmt.Errorf("failed to import packet %d: %w", i+1, err)
 		}
 	}
@@ -108,7 +108,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	// 3. Заменяем продакшен таблицу временной
 	err = a.replaceTables(ctx, tableName, tempTableName)
 	if err != nil {
-		a.dropTable(ctx, tempTableName)
+		_ = a.dropTable(ctx, tempTableName)
 		return fmt.Errorf("failed to replace tables: %w", err)
 	}
 
@@ -171,7 +171,7 @@ func (a *Adapter) replaceTables(ctx context.Context, targetTable, tempTable stri
 		if err := a.Exec(ctx, sql); err != nil {
 			// Откатываем - возвращаем старое имя
 			rollbackSQL := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedTarget)
-			a.Exec(ctx, rollbackSQL)
+			_ = a.Exec(ctx, rollbackSQL)
 			return fmt.Errorf("failed to rename temp table: %w", err)
 		}
 

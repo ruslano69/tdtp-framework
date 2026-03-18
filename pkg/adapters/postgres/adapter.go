@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -44,14 +45,14 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	}
 
 	// Настраиваем pool из конфига
-	if cfg.MaxConns > 0 {
-		config.MaxConns = int32(cfg.MaxConns)
+	if cfg.MaxConns > 0 && cfg.MaxConns <= math.MaxInt32 {
+		config.MaxConns = int32(cfg.MaxConns) //nolint:gosec
 	} else {
 		config.MaxConns = 10 // default
 	}
 
-	if cfg.MinConns > 0 {
-		config.MinConns = int32(cfg.MinConns)
+	if cfg.MinConns > 0 && cfg.MinConns <= math.MaxInt32 {
+		config.MinConns = int32(cfg.MinConns) //nolint:gosec
 	} else {
 		config.MinConns = 2 // default
 	}

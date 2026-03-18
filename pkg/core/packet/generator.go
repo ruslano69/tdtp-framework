@@ -239,7 +239,7 @@ func (g *Generator) WriteToFile(packet *DataPacket, filename string) error {
 		return err
 	}
 
-	return os.WriteFile(filename, data, 0644)
+	return os.WriteFile(filename, data, 0o600)
 }
 
 // WriteToWriter записывает пакет в writer

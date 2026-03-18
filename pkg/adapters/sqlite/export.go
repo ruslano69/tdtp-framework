@@ -42,7 +42,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	if err != nil {
 		return packet.Schema{}, fmt.Errorf("failed to get table info: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var fields []packet.Field
 
@@ -100,7 +100,7 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 	if err != nil {
 		return nil, fmt.Errorf("failed to query table: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return a.scanRows(rows, schema)
 }
@@ -112,7 +112,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 	if err != nil {
 		return nil, fmt.Errorf("failed to query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return a.scanRows(rows, schema)
 }

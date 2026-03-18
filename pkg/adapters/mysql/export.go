@@ -49,7 +49,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	if err != nil {
 		return packet.Schema{}, fmt.Errorf("failed to query table schema: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var fields []packet.Field
 	for rows.Next() {
@@ -104,7 +104,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchem
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute SQL: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result [][]string
 	columnCount := len(pkgSchema.Fields)

@@ -373,7 +373,7 @@ func (m *Merger) buildKey(row []string, keyIndices []int) string {
 func (r *MergeResult) FormatText() string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("=== Merge Statistics ===\n"))
+	sb.WriteString("=== Merge Statistics ===\n")
 	sb.WriteString(fmt.Sprintf("Packets merged: %d\n", r.Stats.TotalPackets))
 	sb.WriteString(fmt.Sprintf("Total rows in:  %d\n", r.Stats.TotalRowsIn))
 	sb.WriteString(fmt.Sprintf("Total rows out: %d\n", r.Stats.TotalRowsOut))

@@ -33,12 +33,12 @@ type FileAppenderConfig struct {
 func NewFileAppender(config FileAppenderConfig) (*FileAppender, error) {
 	// Создаем директорию если не существует
 	dir := filepath.Dir(config.FilePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Открываем файл
-	file, err := os.OpenFile(config.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(config.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open audit file: %w", err)
 	}
@@ -140,7 +140,7 @@ func (fa *FileAppender) rotate() error {
 	}
 
 	// Создаем новый файл
-	file, err := os.OpenFile(fa.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(fa.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

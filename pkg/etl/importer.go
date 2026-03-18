@@ -269,7 +269,7 @@ func (pi *ParallelImporter) createRabbitMQBroker() (brokers.MessageBroker, error
 // createKafkaBroker создает Kafka брокер для чтения
 func (pi *ParallelImporter) createKafkaBroker() (brokers.MessageBroker, error) {
 	if pi.config.Kafka == nil {
-		return nil, fmt.Errorf("Kafka config is not set")
+		return nil, fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := pi.config.Kafka

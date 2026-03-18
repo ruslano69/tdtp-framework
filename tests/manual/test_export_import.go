@@ -118,7 +118,7 @@ func main() {
 		log.Fatalf("Generate XML failed: %v", err)
 	}
 
-	err = os.WriteFile(exportFile, xmlData, 0644)
+	err = os.WriteFile(exportFile, xmlData, 0o600)
 	if err != nil {
 		log.Fatalf("Write file failed: %v", err)
 	}

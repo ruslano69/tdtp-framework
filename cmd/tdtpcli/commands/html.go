@@ -72,7 +72,7 @@ func ConvertTDTPToHTML(opts HTMLOptions) error {
 	}
 
 	// Write output
-	if err := os.WriteFile(outputFile, []byte(htmlContent), 0o644); err != nil {
+	if err := os.WriteFile(outputFile, []byte(htmlContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write HTML file: %w", err)
 	}
 

@@ -65,7 +65,7 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 
 	// Test connection
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -76,13 +76,13 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 
 	// Detect server version and compatibility level
 	if err := a.detectCompatibility(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to detect compatibility: %w", err)
 	}
 
 	// Apply explicit compatibility mode from config
 	if err := a.applyCompatibilityMode(cfg.CompatibilityMode); err != nil {
-		db.Close()
+		_ = db.Close()
 		return err
 	}
 
@@ -322,7 +322,7 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tables: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []string
 	for rows.Next() {
@@ -358,7 +358,7 @@ func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query views: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var views []adapters.ViewInfo
 	for rows.Next() {
@@ -442,7 +442,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Получаем информацию о колонках
 	columns, err := rows.Columns()

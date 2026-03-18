@@ -165,7 +165,7 @@ func (d *DLQ) saveUnsafe() error {
 		return fmt.Errorf("failed to marshal DLQ: %w", err)
 	}
 
-	if err := os.WriteFile(d.config.FilePath, data, 0644); err != nil {
+	if err := os.WriteFile(d.config.FilePath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write DLQ file: %w", err)
 	}
 
