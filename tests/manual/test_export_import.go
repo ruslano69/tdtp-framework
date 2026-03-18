@@ -17,13 +17,13 @@ func main() {
 
 	// 1. Создаем тестовую БД с таблицей Users
 	dbFile := "test_users.db"
-	os.Remove(dbFile) // Удаляем если существует
+	_ = os.Remove(dbFile) // Удаляем если существует
 
 	db, err := sql.Open("sqlite", dbFile)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Создаем таблицу Users
 	_, err = db.Exec(`
@@ -68,7 +68,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// 3. Экспортируем с фильтром: только Moscow, только активные
 	log.Println("\n📤 Exporting Users from Moscow where IsActive=1...")
@@ -165,14 +165,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to query: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	log.Println("\nImported data:")
 	for rows.Next() {
 		var id int
 		var name, city string
 		var balance float64
-		rows.Scan(&id, &name, &city, &balance)
+		_ = rows.Scan(&id, &name, &city, &balance)
 		log.Printf("  ID=%d Name=%s City=%s Balance=%.2f", id, name, city, balance)
 	}
 
