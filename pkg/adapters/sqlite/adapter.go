@@ -300,87 +300,45 @@ func (t *sqliteTx) Rollback(ctx context.Context) error {
 	return t.tx.Rollback()
 }
 
-// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket
-// Используется для ETL pipeline для загрузки данных из источников
+// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket.
+// Используется ETL pipeline для загрузки данных из источников.
+// Использует тот же путь что и ExportTable: ReadRowsWithSQL → scanRows → RowsToData.
 func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.DataPacket, error) {
 	if a.db == nil {
 		return nil, fmt.Errorf("adapter not connected")
 	}
 
-	// Выполняем SELECT запрос
+	// Получаем схему через метаданные запроса.
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-
-	// Получаем информацию о колонках
 	columns, err := rows.Columns()
 	if err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
-
 	columnTypes, err := rows.ColumnTypes()
 	if err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get column types: %w", err)
 	}
-
-	// Создаем схему на основе колонок результата
-	schema := packet.Schema{
-		Fields: make([]packet.Field, len(columns)),
-	}
-
+	schema := packet.Schema{Fields: make([]packet.Field, len(columns))}
 	for i, col := range columns {
-		// Получаем тип SQLite
-		sqliteType := columnTypes[i].DatabaseTypeName()
+		tdtpType, length := convertSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName())
+		schema.Fields[i] = packet.Field{Name: col, Type: tdtpType, Length: length}
+	}
+	_ = rows.Close()
 
-		// Конвертируем в TDTP тип
-		tdtpType, length := convertSQLiteTypeToTDTP(sqliteType)
-
-		schema.Fields[i] = packet.Field{
-			Name:   col,
-			Type:   tdtpType,
-			Length: length,
-		}
+	// Используем ReadRowsWithSQL — единственный путь конвертации типов в этом адаптере.
+	scannedRows, err := a.ReadRowsWithSQL(ctx, query, schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
 	}
 
-	// Читаем данные
-	var rowsData []packet.Row
-	scanArgs := make([]any, len(columns))
-	for i := range scanArgs {
-		var v sql.NullString
-		scanArgs[i] = &v
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Конвертируем значения в строку с разделителем |
-		rowValues := make([]string, len(columns))
-		for i, arg := range scanArgs {
-			v := arg.(*sql.NullString)
-			if v.Valid {
-				rowValues[i] = v.String
-			} else {
-				rowValues[i] = "" // NULL представляется пустой строкой
-			}
-		}
-
-		rowsData = append(rowsData, packet.Row{
-			Value: strings.Join(rowValues, "|"),
-		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error reading rows: %w", err)
-	}
-
-	// Создаем DataPacket
 	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
 	dataPacket.Schema = schema
-	dataPacket.Data.Rows = rowsData
+	dataPacket.Data = packet.RowsToData(scannedRows)
 
 	return dataPacket, nil
 }

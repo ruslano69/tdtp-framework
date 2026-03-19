@@ -90,7 +90,7 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	}
 
 	insertSQL := fmt.Sprintf(
-		"INSERT INTO %s VALUES (%s)",
+		"INSERT INTO %q VALUES (%s)",
 		tableName,
 		strings.Join(placeholders, ", "),
 	)
@@ -179,28 +179,25 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sqlQuery, resultTableName st
 		valuePtrs[i] = &values[i]
 	}
 
-	var resultRows []packet.Row
+	var allRows [][]string
 	for rows.Next() {
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		// Конвертируем значения в строку с разделителем |
 		rowValues := make([]string, len(values))
 		for i, val := range values {
 			rowValues[i] = w.formatValue(val)
 		}
 
-		resultRows = append(resultRows, packet.Row{
-			Value: strings.Join(rowValues, "|"),
-		})
+		allRows = append(allRows, rowValues)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error reading rows: %w", err)
 	}
 
-	result.Data.Rows = resultRows
+	result.Data = packet.RowsToData(allRows)
 
 	return result, nil
 }
@@ -275,13 +272,11 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sqlQuery, resultTableN
 				return
 			}
 
-			// Конвертируем значения в строки
 			rowValues := make([]string, len(values))
 			for i, val := range values {
 				rowValues[i] = w.formatValue(val)
 			}
 
-			// Отправляем строку в канал
 			select {
 			case rowsChan <- rowValues:
 			case <-ctx.Done():
@@ -317,11 +312,11 @@ func (w *Workspace) generateCreateTableDDL(tableName string, fields []packet.Fie
 
 	for _, field := range fields {
 		sqliteType := w.mapTDTPTypeToSQLite(schema.DataType(field.Type))
-		column := fmt.Sprintf("%s %s", field.Name, sqliteType)
+		column := fmt.Sprintf("%q %s", field.Name, sqliteType)
 		columns = append(columns, column)
 	}
 
-	return fmt.Sprintf("CREATE TABLE %s (%s)", tableName, strings.Join(columns, ", "))
+	return fmt.Sprintf("CREATE TABLE %q (%s)", tableName, strings.Join(columns, ", "))
 }
 
 // mapTDTPTypeToSQLite конвертирует TDTP тип в SQLite тип
