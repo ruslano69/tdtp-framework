@@ -49,9 +49,14 @@ type BrokerConfig struct {
 	Password   string `yaml:"password,omitempty"`    // Password
 	Queue      string `yaml:"queue,omitempty"`       // Queue/topic name
 	VHost      string `yaml:"vhost,omitempty"`       // RabbitMQ vhost
-	UseTLS     bool   `yaml:"use_tls,omitempty"`     // Use TLS/SSL (amqps) for RabbitMQ
-	Exchange   string `yaml:"exchange,omitempty"`    // RabbitMQ exchange (default = "")
-	RoutingKey string `yaml:"routing_key,omitempty"` // RabbitMQ routing key (default = queue name)
+	UseTLS         bool   `yaml:"use_tls,omitempty"`         // Use TLS/SSL (amqps) for RabbitMQ
+	TLSSkipVerify  bool   `yaml:"tls_skip_verify,omitempty"` // Skip TLS certificate verification (self-signed certs)
+	Exchange       string `yaml:"exchange,omitempty"`        // RabbitMQ exchange (default = "")
+	RoutingKey     string `yaml:"routing_key,omitempty"`     // RabbitMQ routing key (default = queue name)
+	Durable        bool   `yaml:"durable,omitempty"`         // Queue survives broker restart
+	AutoDelete     bool   `yaml:"auto_delete,omitempty"`     // Queue deleted when no consumers
+	Exclusive      bool   `yaml:"exclusive,omitempty"`       // Queue accessible by one connection only
+	PassiveDeclare bool   `yaml:"passive_declare,omitempty"` // Don't create queue, just check it exists (avoids 406 PRECONDITION_FAILED)
 }
 
 // ResilienceConfig contains circuit breaker and retry settings

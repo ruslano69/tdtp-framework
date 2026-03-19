@@ -39,14 +39,16 @@ type Config struct {
 	Password   string // Пароль (для RabbitMQ)
 	Queue      string // Имя очереди (для RabbitMQ, MSMQ)
 	VHost      string // Virtual host (для RabbitMQ, по умолчанию "/")
-	UseTLS     bool   // Использовать TLS/SSL (amqps://) для RabbitMQ
-	Exchange   string // RabbitMQ exchange (пустая строка = default exchange)
-	RoutingKey string // RabbitMQ routing key (если пустой, используется имя очереди)
+	UseTLS        bool   // Использовать TLS/SSL (amqps://) для RabbitMQ
+	TLSSkipVerify bool   // Пропустить проверку TLS-сертификата (для self-signed certs)
+	Exchange      string // RabbitMQ exchange (пустая строка = default exchange)
+	RoutingKey    string // RabbitMQ routing key (если пустой, используется имя очереди)
 
 	// RabbitMQ параметры очереди (ВАЖНО: должны совпадать с существующей очередью!)
-	Durable    bool // Очередь переживает перезапуск RabbitMQ
-	AutoDelete bool // Очередь удаляется когда нет consumer'ов
-	Exclusive  bool // Очередь доступна только одному соединению
+	Durable        bool // Очередь переживает перезапуск RabbitMQ
+	AutoDelete     bool // Очередь удаляется когда нет consumer'ов
+	Exclusive      bool // Очередь доступна только одному соединению
+	PassiveDeclare bool // Не создавать очередь — только проверить что она существует
 
 	// MSMQ специфичные параметры (Windows only)
 	QueuePath string // Путь к очереди MSMQ (например: ".\\private$\\tdtp_export")
