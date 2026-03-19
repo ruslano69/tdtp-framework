@@ -459,7 +459,11 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 	for i, col := range columns {
 		sqlType := columnTypes[i].DatabaseTypeName()
 		tdtpType, length := convertMSSQLTypeToTDTP(sqlType)
-		isTS := strings.EqualFold(sqlType, "timestamp")
+		// SQL Server rowversion: driver may return "VARBINARY" not "timestamp".
+		// A binary column named "timestamp" is always the rowversion pseudo-column.
+		isTS := strings.EqualFold(sqlType, "timestamp") ||
+			strings.EqualFold(sqlType, "rowversion") ||
+			(strings.EqualFold(col, "timestamp") && tdtpType == "BLOB")
 		schema.Fields[i] = packet.Field{
 			Name:     col,
 			Type:     tdtpType,
@@ -495,10 +499,13 @@ func convertMSSQLTypeToTDTP(sqlType string) (string, int) {
 		return "REAL", 0
 	case strings.Contains(sqlType, "BIT"):
 		return "BOOLEAN", 0
+	// DATETIME/SMALLDATETIME must be checked BEFORE DATE: "DATETIME" contains "DATE"
+	case strings.Contains(sqlType, "DATETIME"), strings.Contains(sqlType, "SMALLDATETIME"):
+		return "DATETIME", 0
+	case strings.Contains(sqlType, "TIMESTAMP"):
+		return "DATETIME", 0
 	case strings.Contains(sqlType, "DATE"):
 		return "DATE", 0
-	case strings.Contains(sqlType, "DATETIME"), strings.Contains(sqlType, "TIMESTAMP"):
-		return "DATETIME", 0
 	case strings.Contains(sqlType, "BINARY"), strings.Contains(sqlType, "IMAGE"):
 		return "BLOB", 0
 	case strings.Contains(sqlType, "VARCHAR"), strings.Contains(sqlType, "CHAR"), strings.Contains(sqlType, "TEXT"), strings.Contains(sqlType, "NVARCHAR"), strings.Contains(sqlType, "NCHAR"):
