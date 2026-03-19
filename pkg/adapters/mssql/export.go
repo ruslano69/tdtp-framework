@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -321,44 +322,7 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchem
 
 // scanRows сканирует sql.Rows в [][]string
 func (a *Adapter) scanRows(rows *sql.Rows, pkgSchema packet.Schema) ([][]string, error) {
-	var result [][]string
-
-	// Подготавливаем scanner для всех колонок
-	columnCount := len(pkgSchema.Fields)
-	values := make([]any, columnCount)
-	valuePtrs := make([]any, columnCount)
-	for i := range values {
-		valuePtrs[i] = &values[i]
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Конвертируем в строки согласно TDTP формату
-		row := make([]string, columnCount)
-		for i, val := range values {
-			if i < len(pkgSchema.Fields) {
-				row[i] = a.valueToString(val, pkgSchema.Fields[i])
-			} else {
-				row[i] = a.valueToString(val, packet.Field{Type: "TEXT"})
-			}
-		}
-
-		result = append(result, row)
-	}
-
-	return result, rows.Err()
-}
-
-// valueToString конвертирует значение БД в строку для TDTP
-// Делегирует в UniversalTypeConverter для устранения дублирования кода
-func (a *Adapter) valueToString(value any, field packet.Field) string {
-	// Делегируем в UniversalTypeConverter с MSSQL-specific обработкой
-	rawStr := a.converter.DBValueToString(value, field, "mssql")
-	// Конвертируем в TDTP формат
-	return a.converter.ConvertValueToTDTP(field, rawStr)
+	return base.ScanSQLRows(rows, pkgSchema, a.converter, "mssql")
 }
 
 // GetRowCount implements base.DataReader interface

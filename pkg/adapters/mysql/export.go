@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -106,29 +107,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchem
 	}
 	defer func() { _ = rows.Close() }()
 
-	var result [][]string
-	columnCount := len(pkgSchema.Fields)
-	values := make([]any, columnCount)
-	valuePtrs := make([]any, columnCount)
-	for i := range values {
-		valuePtrs[i] = &values[i]
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		row := make([]string, columnCount)
-		for i, val := range values {
-			// Конвертируем через UniversalTypeConverter
-			rawStr := a.converter.DBValueToString(val, pkgSchema.Fields[i], "mysql")
-			row[i] = a.converter.ConvertValueToTDTP(pkgSchema.Fields[i], rawStr)
-		}
-		result = append(result, row)
-	}
-
-	return result, rows.Err()
+	return base.ScanSQLRows(rows, pkgSchema, a.converter, "mysql")
 }
 
 // GetRowCount возвращает количество строк в таблице
