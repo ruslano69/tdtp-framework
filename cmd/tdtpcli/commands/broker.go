@@ -13,16 +13,21 @@ import (
 
 // BrokerConfig holds broker configuration
 type BrokerConfig struct {
-	Type       string
-	Host       string
-	Port       int
-	User       string
-	Password   string
-	Queue      string
-	VHost      string
-	UseTLS     bool
-	Exchange   string
-	RoutingKey string
+	Type           string
+	Host           string
+	Port           int
+	User           string
+	Password       string
+	Queue          string
+	VHost          string
+	UseTLS         bool
+	TLSSkipVerify  bool
+	Exchange       string
+	RoutingKey     string
+	Durable        bool
+	AutoDelete     bool
+	Exclusive      bool
+	PassiveDeclare bool
 }
 
 // ExportToBroker exports table data to message broker
@@ -179,16 +184,21 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 // createBroker creates a message broker based on configuration
 func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 	brokerConfig := brokers.Config{
-		Type:       cfg.Type,
-		Host:       cfg.Host,
-		Port:       cfg.Port,
-		User:       cfg.User,
-		Password:   cfg.Password,
-		Queue:      cfg.Queue,
-		VHost:      cfg.VHost,
-		UseTLS:     cfg.UseTLS,
-		Exchange:   cfg.Exchange,
-		RoutingKey: cfg.RoutingKey,
+		Type:           cfg.Type,
+		Host:           cfg.Host,
+		Port:           cfg.Port,
+		User:           cfg.User,
+		Password:       cfg.Password,
+		Queue:          cfg.Queue,
+		VHost:          cfg.VHost,
+		UseTLS:         cfg.UseTLS,
+		TLSSkipVerify:  cfg.TLSSkipVerify,
+		Exchange:       cfg.Exchange,
+		RoutingKey:     cfg.RoutingKey,
+		Durable:        cfg.Durable,
+		AutoDelete:     cfg.AutoDelete,
+		Exclusive:      cfg.Exclusive,
+		PassiveDeclare: cfg.PassiveDeclare,
 	}
 
 	return brokers.New(brokerConfig)
