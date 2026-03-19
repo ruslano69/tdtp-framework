@@ -58,6 +58,12 @@ type Config struct {
 	// При экспорте: если дата в поле совпадает с sentinel → кодируется как "0000-00-00" в TDTP.
 	// Пример для MSSQL: ["1900-01-01", "1753-01-01"]
 	NoDateSentinels []string
+
+	// Charset — кодировка строковых данных в БД.
+	// Оставить пустым если драйвер конвертирует в UTF-8 автоматически (pgx, go-mssqldb, modernc/sqlite).
+	// Указать явно для адаптеров где auto-conversion отсутствует (ODBC, JDBC, legacy drivers).
+	// Примеры: "windows-1251", "koi8-r", "iso-8859-1"
+	Charset string
 }
 
 // SSLConfig - настройки SSL/TLS подключения
