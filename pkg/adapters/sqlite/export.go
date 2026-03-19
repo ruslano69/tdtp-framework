@@ -137,35 +137,5 @@ func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, err
 // scanRows сканирует sql.Rows в [][]string
 // Используется ReadAllRows и ReadRowsWithSQL
 func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, error) {
-	var result [][]string
-
-	// Подготавливаем scanner для всех колонок
-	scanArgs := make([]any, len(schema.Fields))
-	for i := range scanArgs {
-		var v sql.NullString
-		scanArgs[i] = &v
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Конвертируем в строки согласно TDTP формату
-		row := make([]string, len(schema.Fields))
-		for i, arg := range scanArgs {
-			v := arg.(*sql.NullString)
-			if v.Valid {
-				// Используем универсальный конвертер из base
-				row[i] = a.converter.ConvertValueToTDTP(schema.Fields[i], v.String)
-			} else {
-				// NULL → NullSentinel; будет заменён маркером [NULL] в DetectAndApply (generator)
-				row[i] = base.NullSentinel
-			}
-		}
-
-		result = append(result, row)
-	}
-
-	return result, rows.Err()
+	return base.ScanSQLRows(rows, schema, a.converter, "sqlite")
 }

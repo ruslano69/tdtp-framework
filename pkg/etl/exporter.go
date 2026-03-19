@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
@@ -202,25 +203,24 @@ func (e *Exporter) exportDirect(ctx context.Context, dataPacket *packet.DataPack
 	}
 }
 
-// exportToTDTP экспортирует в TDTP XML файл.
-// Если output.tdtp.encryption: true — шифрует через xZMercury (UUID-binding флоу).
-// При сбое xZMercury записывает error-пакет вместо незашифрованных данных (exit 0).
+// exportToTDTP экспортирует в TDTP XML файл(ы).
+// Использует GenerateReference для сплита на части (тот же путь что и --export).
+// При включённом encryption каждая часть шифруется отдельно.
 func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.TDTP == nil {
 		return fmt.Errorf("TDTP config is not set")
 	}
-
 	destination := e.config.TDTP.Destination
 	if destination == "" {
 		return fmt.Errorf("TDTP destination is not set")
 	}
 
-	// Применяем процессоры маскирования/нормализации/валидации перед экспортом
+	// Процессоры маскирования/нормализации/валидации
 	if err := e.applyPreExport(ctx, dataPacket); err != nil {
 		return err
 	}
 
-	// Применяем compact-формат если настроен (до сжатия)
+	// Compact-формат (до сплита)
 	if e.config.TDTP.Compact {
 		fixedNames := packet.ResolveFixedFields(dataPacket.Schema, e.config.TDTP.FixedFields)
 		if len(fixedNames) > 0 {
@@ -230,35 +230,70 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		}
 	}
 
-	// Применяем сжатие если настроено
-	if e.config.TDTP.Compression {
-		if err := e.compressDataPacket(dataPacket); err != nil {
-			return fmt.Errorf("failed to compress data: %w", err)
+	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
+	generator := packet.NewGenerator()
+	rows := packet.ParseRows(dataPacket.Data.Rows, packet.NewParser())
+	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
+	if err != nil {
+		return fmt.Errorf("failed to generate parts: %w", err)
+	}
+
+	for _, part := range parts {
+		// Сжатие применяем к каждой части отдельно
+		if e.config.TDTP.Compression {
+			if err := e.compressDataPacket(part); err != nil {
+				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)
+			}
+		}
+
+		partDest := tdtpPartDestination(destination, part.Header.PartNumber, part.Header.TotalParts)
+
+		xmlData, err := generator.ToXML(part, true)
+		if err != nil {
+			return fmt.Errorf("failed to generate XML for part %d: %w", part.Header.PartNumber, err)
+		}
+
+		if e.config.TDTP.Encryption {
+			if err := e.exportEncrypted(ctx, generator, xmlData, partDest); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if storage.IsRemote(partDest) {
+			if err := e.uploadToStorage(ctx, xmlData, partDest, part); err != nil {
+				return err
+			}
+		} else {
+			if err := os.WriteFile(partDest, xmlData, 0o600); err != nil {
+				return fmt.Errorf("failed to write part %d: %w", part.Header.PartNumber, err)
+			}
 		}
 	}
-
-	// Создаем генератор пакетов
-	generator := packet.NewGenerator()
-
-	// Генерируем XML
-	xmlData, err := generator.ToXML(dataPacket, true) // pretty = true
-	if err != nil {
-		return fmt.Errorf("failed to generate XML: %w", err)
-	}
-
-	// --- Шифрование (если включено) ---
-	if e.config.TDTP.Encryption {
-		return e.exportEncrypted(ctx, generator, xmlData, destination)
-	}
-
-	// Записываем: в S3 или локальный файл
-	if storage.IsRemote(destination) {
-		return e.uploadToStorage(ctx, xmlData, destination, dataPacket)
-	}
-	if err := os.WriteFile(destination, xmlData, 0o600); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
 	return nil
+}
+
+// tdtpPartDestination формирует имя файла/ключа для конкретной части.
+// Одна часть: destination без суффикса.
+// Несколько частей: base_part_N_of_Total.ext
+func tdtpPartDestination(destination string, partNum, totalParts int) string {
+	if totalParts <= 1 {
+		return destination
+	}
+	ext := ""
+	base := destination
+	if idx := lastSep(destination); idx > 0 {
+		name := destination[idx+1:]
+		dir := destination[:idx+1]
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			ext = name[dot:]
+			base = dir + name[:dot]
+		}
+	} else if dot := strings.LastIndex(destination, "."); dot >= 0 {
+		ext = destination[dot:]
+		base = destination[:dot]
+	}
+	return fmt.Sprintf("%s_part_%d_of_%d%s", base, partNum, totalParts, ext)
 }
 
 // uploadToStorage стримит xmlData в S3-совместимое хранилище через io.Pipe.
