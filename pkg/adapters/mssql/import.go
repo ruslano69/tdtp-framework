@@ -16,7 +16,29 @@ import (
 
 // ImportPacket импортирует один TDTP пакет в БД
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-	return a.ImportPackets(ctx, []*packet.DataPacket{pkt}, strategy)
+	// DDL вне транзакции — чтобы не блокироваться на Sch-M lock
+	tableName := pkt.Header.TableName
+	exists, err := a.TableExists(ctx, tableName)
+	if err != nil {
+		return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
+	}
+	if !exists {
+		if err := a.CreateTable(ctx, tableName, pkt.Schema); err != nil {
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+	}
+
+	// DML в транзакции
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ImportPackets импортирует множество пакетов атомарно (в одной транзакции)
@@ -25,41 +47,40 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 		return nil
 	}
 
-	// Начинаем транзакцию
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback() // игнорируем ошибку, если tx.Commit() был успешным
-	}()
-
+	// DDL (CREATE TABLE) выполняем ВНЕ транзакции.
+	// Внутри транзакции DDL берёт Sch-M lock и блокируется если другое соединение
+	// (например BC) держит Sch-S lock на схему — это причина зависания.
 	for i, pkt := range packets {
 		if pkt == nil {
 			return fmt.Errorf("packet %d is nil", i)
 		}
-
-		// Проверяем существование таблицы
 		tableName := pkt.Header.TableName
 		exists, err := a.TableExists(ctx, tableName)
 		if err != nil {
 			return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
 		}
-
-		// Создаем таблицу если нужно
 		if !exists {
-			if err := a.createTableInTx(ctx, tx, tableName, pkt.Schema); err != nil {
+			if err := a.CreateTable(ctx, tableName, pkt.Schema); err != nil {
 				return fmt.Errorf("failed to create table %s: %w", tableName, err)
 			}
 		}
+	}
 
-		// Импортируем данные
+	// DML (INSERT/MERGE) — в транзакции для атомарности
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	for i, pkt := range packets {
 		if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
 			return fmt.Errorf("failed to import packet %d: %w", i, err)
 		}
 	}
 
-	// Commit транзакции
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
