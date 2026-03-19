@@ -157,16 +157,19 @@ database:
 
 # Настройки message broker (опционально)
 broker:
-  type: rabbitmq        # rabbitmq | msmq
+  type: rabbitmq          # rabbitmq | msmq
   host: localhost
-  port: 5672            # 5672 для RabbitMQ
+  port: 5672              # 5672 (plain) или 5671 (TLS)
   user: guest
   password: guest
-  queue: tdtp_queue     # Имя очереди
-  vhost: /              # Virtual host (RabbitMQ)
-  durable: true         # Устойчивость очереди
-  auto_delete: false    # Автоудаление очереди
-  exclusive: false      # Эксклюзивность очереди
+  queue: tdtp_queue       # Имя очереди
+  vhost: /                # Virtual host (RabbitMQ)
+  use_tls: false          # true → amqps:// (порт 5671)
+  tls_skip_verify: false  # true → пропустить проверку сертификата (self-signed)
+  durable: true           # Устойчивость очереди
+  auto_delete: false      # Автоудаление очереди
+  exclusive: false        # Эксклюзивность очереди
+  passive_declare: false  # true → не создавать очередь, просто подключиться к существующей
 ```
 
 ### Примеры конфигураций
@@ -201,6 +204,7 @@ broker:
   durable: true
   auto_delete: false
   exclusive: false
+  passive_declare: false  # установить true если очередь создана сторонней системой
 ```
 
 **MS SQL Server:**
@@ -1145,7 +1149,7 @@ export MERCURY_SERVER_SECRET=dev-secret
 
 ### RabbitMQ
 
-**Настройка конфигурации:**
+**Локальный RabbitMQ (без TLS):**
 ```yaml
 broker:
   type: rabbitmq
@@ -1160,10 +1164,29 @@ broker:
   exclusive: false
 ```
 
+**Managed RabbitMQ с TLS (CloudAMQP, Amazon MQ и т.д.):**
+```yaml
+broker:
+  type: rabbitmq
+  host: seal.lmq.cloudamqp.com
+  port: 5671              # TLS порт
+  user: myuser
+  password: mypassword
+  vhost: myuser           # у CloudAMQP vhost = имя пользователя
+  queue: myqueue
+  use_tls: true
+  tls_skip_verify: true   # если сертификат self-signed или от managed-провайдера
+  passive_declare: true   # очередь уже существует — не трогаем её параметры
+```
+
 **Параметры очереди:**
-- `durable: true` - очередь сохраняется при перезапуске RabbitMQ
-- `auto_delete: false` - очередь не удаляется автоматически
-- `exclusive: false` - очередь доступна для нескольких подключений
+- `durable: true` — очередь сохраняется при перезапуске RabbitMQ
+- `auto_delete: false` — очередь не удаляется автоматически
+- `exclusive: false` — очередь доступна для нескольких подключений
+- `passive_declare: true` — **не создавать** очередь, только подключиться к существующей; спасает от ошибки `406 PRECONDITION_FAILED` когда очередь создана сторонней системой с другими параметрами
+
+> **Когда использовать `passive_declare: true`?**
+> Когда очередь создана другим сервисом (Spring Boot, PHP consumer и т.д.) и вы не знаете или не контролируете её параметры. tdtpcli просто подключится к очереди не пытаясь её пересоздать.
 
 **Типичный workflow:**
 
