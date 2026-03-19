@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -123,9 +124,15 @@ type ImportBrokerOptions struct {
 	IdleTimeout time.Duration // how long to wait for the next message before stopping (0 = default 5s)
 }
 
-// ImportFromBroker imports data from message broker to database (or saves to file).
+// ImportFromBroker imports one complete export batch from the broker queue.
+//
+// All packets of the same export share a common batch ID embedded in MessageID
+// (e.g. "REF-20250319-ABCD1234-P1", "REF-20250319-ABCD1234-P2", ...).
+// Packets from a different batch are Nack'd with requeue=true so they stay in
+// the queue untouched. The function exits once all TotalParts are received or
+// the idle timeout fires (queue empty).
 func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, opts ImportBrokerOptions) error {
-	// In file-save mode we don't need a DB adapter
+	// In file-save mode we don't need a DB adapter.
 	var adapter adapters.Adapter
 	if opts.OutputFile == "" {
 		var err error
@@ -136,7 +143,7 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		defer func() { _ = adapter.Close(ctx) }()
 	}
 
-	// Create and connect broker
+	// Create and connect broker.
 	broker, err := createBroker(brokerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
@@ -147,81 +154,146 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		return fmt.Errorf("failed to connect to broker: %w", err)
 	}
 
-	if opts.OutputFile != "" {
-		fmt.Printf("Saving messages from queue '%s' to file(s)...\n", brokerCfg.Queue)
-	} else {
-		fmt.Printf("Importing from queue '%s' (strategy: %s)...\n", brokerCfg.Queue, opts.Strategy)
-	}
-
 	idleTimeout := opts.IdleTimeout
 	if idleTimeout == 0 {
 		idleTimeout = defaultIdleTimeout
 	}
 
-	messageCount := 0
+	// Helpers for manual ack/nack.
+	ackLast := func() error {
+		if acker, ok := broker.(interface{ AckLast() error }); ok {
+			return acker.AckLast()
+		}
+		return nil
+	}
+	nackLast := func() error {
+		if nacker, ok := broker.(interface{ NackLast(bool) error }); ok {
+			return nacker.NackLast(true) // requeue=true — leave in queue
+		}
+		return nil
+	}
+
 	parser := packet.NewParser()
 	generator := packet.NewGenerator()
 
-	for messageCount < 100 { // reasonable limit; use --listen for continuous mode
-		// Use a per-receive timeout so we exit cleanly when the queue is empty.
+	receive := func() ([]byte, error) {
 		recvCtx, cancel := context.WithTimeout(ctx, idleTimeout)
-		xmlData, err := broker.Receive(recvCtx)
-		cancel()
-		if err != nil {
-			if recvCtx.Err() != nil {
-				// Timeout — queue is empty, normal exit
-				fmt.Printf("Queue is empty (no message in %s). Done.\n", idleTimeout)
-			} else {
-				fmt.Printf("Stopped: %v\n", err)
-			}
-			break
+		defer cancel()
+		data, err := broker.Receive(recvCtx)
+		if err != nil && recvCtx.Err() != nil {
+			return nil, fmt.Errorf("queue empty (no message in %s)", idleTimeout)
 		}
+		return data, err
+	}
 
-		messageCount++
-
-		pkt, err := parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string) ([]string, error) {
+	parse := func(xmlData []byte) (*packet.DataPacket, error) {
+		return parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string) ([]string, error) {
 			return decompressData(compressed)
 		})
-		if err != nil {
-			return fmt.Errorf("failed to parse packet %d: %w", messageCount, err)
-		}
+	}
 
-		// Bug fix 1: override table name from --table flag
+	// ── Step 1: read the first packet to learn batchID and TotalParts ──────
+	xmlData, err := receive()
+	if err != nil {
+		fmt.Printf("Queue is empty: %v\n", err)
+		return nil
+	}
+
+	firstPkt, err := parse(xmlData)
+	if err != nil {
+		return fmt.Errorf("failed to parse first packet: %w", err)
+	}
+
+	batchID := batchIDFromMessageID(firstPkt.Header.MessageID)
+	totalParts := firstPkt.Header.TotalParts
+	if totalParts == 0 {
+		totalParts = 1 // single-packet export
+	}
+
+	if opts.OutputFile != "" {
+		fmt.Printf("Saving batch '%s' (%d part(s)) from queue '%s'...\n", batchID, totalParts, brokerCfg.Queue)
+	} else {
+		fmt.Printf("Importing batch '%s' (%d part(s)) from queue '%s' (strategy: %s)...\n",
+			batchID, totalParts, brokerCfg.Queue, opts.Strategy)
+	}
+
+	// ── Step 2: process packets, skipping those from other batches ──────────
+	processPacket := func(pkt *packet.DataPacket, n int) error {
 		if opts.TargetTable != "" {
 			pkt.Header.TableName = opts.TargetTable
 		}
-
-		fmt.Printf("Received message %d for table '%s' (%d row(s))\n",
-			messageCount, pkt.Header.TableName, len(pkt.Data.Rows))
+		fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+			pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
 
 		if opts.OutputFile != "" {
-			// Bug fix 2: --output saves to file instead of importing to DB
-			filename := brokerOutputFilename(opts.OutputFile, messageCount)
+			filename := brokerOutputFilename(opts.OutputFile, n)
 			xmlBytes, err := generator.ToXML(pkt, true)
 			if err != nil {
-				return fmt.Errorf("failed to marshal packet %d: %w", messageCount, err)
+				return fmt.Errorf("failed to marshal packet: %w", err)
 			}
 			if err := os.WriteFile(filename, xmlBytes, 0o600); err != nil {
-				return fmt.Errorf("failed to write file '%s': %w", filename, err)
+				return fmt.Errorf("failed to write '%s': %w", filename, err)
 			}
-			fmt.Printf("✓ Saved to: %s\n", filename)
+			fmt.Printf("  ✓ Saved to: %s\n", filename)
 		} else {
 			if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
-				return fmt.Errorf("import failed for packet %d: %w", messageCount, err)
+				return fmt.Errorf("import failed: %w", err)
 			}
-			fmt.Printf("✓ Imported %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+			fmt.Printf("  ✓ Imported %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+		}
+		return nil
+	}
+
+	if err := processPacket(firstPkt, 1); err != nil {
+		return err
+	}
+	if err := ackLast(); err != nil {
+		return fmt.Errorf("ack failed: %w", err)
+	}
+	received := 1
+
+	for received < totalParts {
+		xmlData, err := receive()
+		if err != nil {
+			fmt.Printf("Queue empty after %d/%d parts: %v\n", received, totalParts, err)
+			break
 		}
 
-		// Acknowledge only after successful processing
-		if acker, ok := broker.(interface{ AckLast() error }); ok {
-			if err := acker.AckLast(); err != nil {
-				return fmt.Errorf("failed to acknowledge message: %w", err)
+		pkt, err := parse(xmlData)
+		if err != nil {
+			return fmt.Errorf("failed to parse packet: %w", err)
+		}
+
+		thisBatchID := batchIDFromMessageID(pkt.Header.MessageID)
+		if thisBatchID != batchID {
+			// This packet belongs to a different export — put it back.
+			fmt.Printf("  ⚠ Packet from batch '%s' (expected '%s') — requeueing\n", thisBatchID, batchID)
+			if err := nackLast(); err != nil {
+				return fmt.Errorf("nack failed: %w", err)
 			}
+			continue
+		}
+
+		received++
+		if err := processPacket(pkt, received); err != nil {
+			return err
+		}
+		if err := ackLast(); err != nil {
+			return fmt.Errorf("ack failed: %w", err)
 		}
 	}
 
-	fmt.Printf("✓ Done. %d message(s) processed.\n", messageCount)
+	fmt.Printf("✓ Done. %d/%d part(s) processed.\n", received, totalParts)
 	return nil
+}
+
+// batchIDFromMessageID extracts the export batch ID from a MessageID.
+// Format: "REF-20250319-ABCD1234-P3" → "REF-20250319-ABCD1234"
+func batchIDFromMessageID(messageID string) string {
+	if idx := strings.LastIndex(messageID, "-P"); idx >= 0 {
+		return messageID[:idx]
+	}
+	return messageID
 }
 
 // brokerOutputFilename returns output path for message N.
