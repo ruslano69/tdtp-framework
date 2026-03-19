@@ -374,7 +374,11 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
-			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, strategy)
+			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, commands.ImportBrokerOptions{
+				Strategy:    strategy,
+				TargetTable: *flags.Table,
+				OutputFile:  *flags.Output,
+			})
 		})
 
 		// Incremental Sync command

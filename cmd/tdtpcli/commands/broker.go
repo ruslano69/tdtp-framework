@@ -4,6 +4,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
@@ -108,48 +110,56 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	return nil
 }
 
-// ImportFromBroker imports data from message broker to database
-func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, strategy adapters.ImportStrategy) error {
-	// Create database adapter
-	adapter, err := adapters.New(ctx, *dbConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create adapter: %w", err)
-	}
-	defer func() { _ = adapter.Close(ctx) }()
+// ImportBrokerOptions holds options for ImportFromBroker
+type ImportBrokerOptions struct {
+	Strategy    adapters.ImportStrategy
+	TargetTable string // override table name from packet header (fixes name conflicts)
+	OutputFile  string // if set, save packets to file(s) instead of importing to DB
+}
 
-	// Create broker
+// ImportFromBroker imports data from message broker to database (or saves to file).
+func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, opts ImportBrokerOptions) error {
+	// In file-save mode we don't need a DB adapter
+	var adapter adapters.Adapter
+	if opts.OutputFile == "" {
+		var err error
+		adapter, err = adapters.New(ctx, *dbConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create adapter: %w", err)
+		}
+		defer func() { _ = adapter.Close(ctx) }()
+	}
+
+	// Create and connect broker
 	broker, err := createBroker(brokerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
 	}
 	defer func() { _ = broker.Close() }()
 
-	// Connect to broker
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to broker: %w", err)
 	}
 
-	fmt.Printf("Importing from queue '%s'...\n", brokerCfg.Queue)
-	fmt.Printf("Import strategy: %s\n", strategy)
+	if opts.OutputFile != "" {
+		fmt.Printf("Saving messages from queue '%s' to file(s)...\n", brokerCfg.Queue)
+	} else {
+		fmt.Printf("Importing from queue '%s' (strategy: %s)...\n", brokerCfg.Queue, opts.Strategy)
+	}
 
-	// Receive and process messages
-	// Note: This is a simplified implementation that processes one message
-	// In production, you would want a loop with timeout and signal handling
 	messageCount := 0
 	parser := packet.NewParser()
+	generator := packet.NewGenerator()
 
-	for messageCount < 100 { // Limit to prevent infinite loop in demo
-		// Receive message
+	for messageCount < 100 { // reasonable limit; use --listen for continuous mode
 		xmlData, err := broker.Receive(ctx)
 		if err != nil {
-			// If no more messages, break
 			fmt.Printf("No more messages (or error): %v\n", err)
 			break
 		}
 
 		messageCount++
 
-		// Parse packet with automatic decompression if needed
 		pkt, err := parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string) ([]string, error) {
 			return decompressData(compressed)
 		})
@@ -157,18 +167,33 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 			return fmt.Errorf("failed to parse packet %d: %w", messageCount, err)
 		}
 
-		fmt.Printf("Received message %d for table '%s'\n", messageCount, pkt.Header.TableName)
-
-		fmt.Printf("  %d row(s) to import\n", len(pkt.Data.Rows))
-
-		// Import to database
-		if err := adapter.ImportPacket(ctx, pkt, strategy); err != nil {
-			return fmt.Errorf("import failed: %w", err)
+		// Bug fix 1: override table name from --table flag
+		if opts.TargetTable != "" {
+			pkt.Header.TableName = opts.TargetTable
 		}
 
-		fmt.Printf("✓ Imported %d row(s) to table '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+		fmt.Printf("Received message %d for table '%s' (%d row(s))\n",
+			messageCount, pkt.Header.TableName, len(pkt.Data.Rows))
 
-		// Acknowledge message after successful import
+		if opts.OutputFile != "" {
+			// Bug fix 2: --output saves to file instead of importing to DB
+			filename := brokerOutputFilename(opts.OutputFile, messageCount)
+			xmlBytes, err := generator.ToXML(pkt, true)
+			if err != nil {
+				return fmt.Errorf("failed to marshal packet %d: %w", messageCount, err)
+			}
+			if err := os.WriteFile(filename, xmlBytes, 0o600); err != nil {
+				return fmt.Errorf("failed to write file '%s': %w", filename, err)
+			}
+			fmt.Printf("✓ Saved to: %s\n", filename)
+		} else {
+			if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
+				return fmt.Errorf("import failed for packet %d: %w", messageCount, err)
+			}
+			fmt.Printf("✓ Imported %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+		}
+
+		// Acknowledge only after successful processing
 		if acker, ok := broker.(interface{ AckLast() error }); ok {
 			if err := acker.AckLast(); err != nil {
 				return fmt.Errorf("failed to acknowledge message: %w", err)
@@ -176,9 +201,19 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 	}
 
-	fmt.Printf("✓ Import from broker complete! (%d message(s) processed)\n", messageCount)
-
+	fmt.Printf("✓ Done. %d message(s) processed.\n", messageCount)
 	return nil
+}
+
+// brokerOutputFilename returns output path for message N.
+// Message 1 → outputFile as-is; messages 2+ get a numeric suffix before the extension.
+func brokerOutputFilename(outputFile string, n int) string {
+	if n == 1 {
+		return outputFile
+	}
+	ext := filepath.Ext(outputFile)
+	base := outputFile[:len(outputFile)-len(ext)]
+	return fmt.Sprintf("%s_%d%s", base, n, ext)
 }
 
 // createBroker creates a message broker based on configuration
