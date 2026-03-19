@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
@@ -110,11 +111,16 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	return nil
 }
 
+// defaultIdleTimeout is how long --import-broker waits for the next message
+// before deciding the queue is empty and stopping.
+const defaultIdleTimeout = 5 * time.Second
+
 // ImportBrokerOptions holds options for ImportFromBroker
 type ImportBrokerOptions struct {
 	Strategy    adapters.ImportStrategy
-	TargetTable string // override table name from packet header (fixes name conflicts)
-	OutputFile  string // if set, save packets to file(s) instead of importing to DB
+	TargetTable string        // override table name from packet header (fixes name conflicts)
+	OutputFile  string        // if set, save packets to file(s) instead of importing to DB
+	IdleTimeout time.Duration // how long to wait for the next message before stopping (0 = default 5s)
 }
 
 // ImportFromBroker imports data from message broker to database (or saves to file).
@@ -147,14 +153,27 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		fmt.Printf("Importing from queue '%s' (strategy: %s)...\n", brokerCfg.Queue, opts.Strategy)
 	}
 
+	idleTimeout := opts.IdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = defaultIdleTimeout
+	}
+
 	messageCount := 0
 	parser := packet.NewParser()
 	generator := packet.NewGenerator()
 
 	for messageCount < 100 { // reasonable limit; use --listen for continuous mode
-		xmlData, err := broker.Receive(ctx)
+		// Use a per-receive timeout so we exit cleanly when the queue is empty.
+		recvCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+		xmlData, err := broker.Receive(recvCtx)
+		cancel()
 		if err != nil {
-			fmt.Printf("No more messages (or error): %v\n", err)
+			if recvCtx.Err() != nil {
+				// Timeout — queue is empty, normal exit
+				fmt.Printf("Queue is empty (no message in %s). Done.\n", idleTimeout)
+			} else {
+				fmt.Printf("Stopped: %v\n", err)
+			}
 			break
 		}
 
