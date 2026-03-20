@@ -50,7 +50,6 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	return schemaFromSampleRow(colOrder, vals), nil
 }
 
-
 // ReadAllRows reads all rows from a table.
 // Uses SELECT * to avoid re-encoding column names back into SQL (ODBC Unicode mismatch).
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema packet.Schema) ([][]string, error) {
@@ -144,5 +143,3 @@ func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, er
 	}
 	return result, rows.Err()
 }
-
-

@@ -65,7 +65,6 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	return nil
 }
 
-
 func (a *Adapter) Close(ctx context.Context) error {
 	if a.db != nil {
 		return a.db.Close()
