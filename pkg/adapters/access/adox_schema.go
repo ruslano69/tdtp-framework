@@ -22,6 +22,7 @@ type adoxField struct {
 	Type     string `json:"type"`
 	AdoxType int    `json:"adoxtype"`
 	Length   int    `json:"length"`
+	Key      bool   `json:"key"`
 }
 
 // adoxVBScript is the embedded VBScript that reads schema via ADOX.Catalog.
@@ -67,17 +68,32 @@ If Not found Then
     WScript.Quit 3
 End If
 
+
+' Collect primary key column names
+Dim pkCols, idx, idxCol
+pkCols = ""
+For Each idx In tbl.Indexes
+    If idx.PrimaryKey Then
+        For Each idxCol In idx.Columns
+            pkCols = pkCols & "|" & idxCol.Name & "|"
+        Next
+        Exit For
+    End If
+Next
+
 WScript.StdOut.Write "["
 Dim first
 first = True
 For Each col In tbl.Columns
     If Not first Then WScript.StdOut.Write ","
     first = False
-    Dim tdtpType, length
+    Dim tdtpType, length, isKey
     tdtpType = AdoxTypeToTDTP(col.Type)
     length = 0
     If tdtpType = "TEXT" Then length = 1000
-    WScript.StdOut.Write "{""name"":" & JsonStr(col.Name) & ",""type"":""" & tdtpType & """,""adoxtype"":" & col.Type & ",""length"":" & length & "}"
+    isKey = "false"
+    If InStr(pkCols, "|" & col.Name & "|") > 0 Then isKey = "true"
+    WScript.StdOut.Write "{""name"":" & JsonStr(col.Name) & ",""type"":""" & tdtpType & """,""adoxtype"":" & col.Type & ",""length"":" & length & ",""key"":" & isKey & "}"
 Next
 WScript.StdOut.WriteLine "]"
 Set cat = Nothing
@@ -214,7 +230,7 @@ func adoxFieldsToSchemaOrdered(fields []adoxField, colOrder []string) packet.Sch
 	schema := packet.Schema{Fields: make([]packet.Field, len(colOrder))}
 	for i, col := range colOrder {
 		if f, ok := byName[strings.ToLower(col)]; ok {
-			schema.Fields[i] = packet.Field{Name: col, Type: f.Type, Length: f.Length}
+			schema.Fields[i] = packet.Field{Name: col, Type: f.Type, Length: f.Length, Key: f.Key}
 		} else {
 			log.Printf("⚠ access ADOX: column %q not found in ADOX schema — defaulting to TEXT", col)
 			schema.Fields[i] = packet.Field{Name: col, Type: "TEXT", Length: 1000}
