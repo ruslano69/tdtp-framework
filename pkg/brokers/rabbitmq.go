@@ -92,7 +92,7 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		// PassiveDeclare: только проверить что очередь существует, не менять её параметры.
 		// Используется когда очередь создана сторонним сервисом с другими параметрами.
 		// Если очередь не существует — вернёт ошибку 404.
-		r.queue, err = r.channel.QueueInspect(r.config.Queue)
+		r.queue, err = r.channel.QueueDeclarePassive(r.config.Queue, false, false, false, false, nil)
 		if err != nil {
 			_ = r.channel.Close()
 			_ = r.conn.Close()

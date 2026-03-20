@@ -410,28 +410,3 @@ func convertPostgresTypeToTDTP(oid uint32) (string, int) {
 		return "TEXT", 1000
 	}
 }
-
-// formatPostgresValue форматирует значение PostgreSQL в строку для TDTP
-func formatPostgresValue(val any) string {
-	if val == nil {
-		return "" // NULL представляется пустой строкой
-	}
-
-	switch v := val.(type) {
-	case []byte:
-		return string(v)
-	case string:
-		return v
-	case int16, int32, int64, int:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%g", v)
-	case bool:
-		if v {
-			return "true"
-		}
-		return "false"
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
