@@ -40,8 +40,9 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	fields := make([]packet.Field, len(columns))
 	for i, col := range columns {
 		tdtpType, length := convertAccessTypeToTDTP(columnTypes[i].DatabaseTypeName())
+		// Column names arrive as UTF-8 from ODBC Unicode API (SQLDescribeColW) — no charset conversion needed.
 		fields[i] = packet.Field{
-			Name:   a.decodeString(col),
+			Name:   col,
 			Type:   tdtpType,
 			Length: length,
 		}
@@ -50,12 +51,9 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 }
 
 // ReadAllRows reads all rows from a table.
+// Uses SELECT * to avoid re-encoding column names back into SQL (ODBC Unicode mismatch).
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema packet.Schema) ([][]string, error) {
-	cols := make([]string, len(schema.Fields))
-	for i, f := range schema.Fields {
-		cols[i] = fmt.Sprintf("[%s]", f.Name)
-	}
-	query := fmt.Sprintf("SELECT %s FROM [%s]", strings.Join(cols, ", "), tableName)
+	query := fmt.Sprintf("SELECT * FROM [%s]", tableName)
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("access: failed to read rows from %s: %w", tableName, err)

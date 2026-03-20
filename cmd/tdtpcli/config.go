@@ -29,15 +29,17 @@ type ExportConfig struct {
 
 // DatabaseConfig contains database connection settings
 type DatabaseConfig struct {
-	Type        string `yaml:"type"`                   // sqlite, postgres, mssql
+	Type        string `yaml:"type"`                   // sqlite, postgres, mssql, access
 	Host        string `yaml:"host,omitempty"`         // For network databases
 	Port        int    `yaml:"port,omitempty"`         // Database port
-	Database    string `yaml:"database"`               // Database name or file path
+	Database    string `yaml:"database,omitempty"`     // Database name or file path
 	User        string `yaml:"user,omitempty"`         // Username
 	Password    string `yaml:"password,omitempty"`     // Password
 	Schema      string `yaml:"schema,omitempty"`       // PostgreSQL schema (default: public)
 	WindowsAuth bool   `yaml:"windows_auth,omitempty"` // MS SQL Windows authentication
 	SSLMode     string `yaml:"sslmode,omitempty"`      // PostgreSQL SSL mode
+	DSN         string `yaml:"dsn,omitempty"`          // Raw connection string (overrides other fields; required for access)
+	Charset     string `yaml:"charset,omitempty"`      // Charset for string decoding, e.g. "windows-1251" (ODBC/legacy drivers)
 }
 
 // BrokerConfig contains message broker settings
@@ -218,8 +220,12 @@ func CreateSampleConfig(dbType string) *Config {
 	return config
 }
 
-// BuildDSN constructs database connection string from config
+// BuildDSN constructs database connection string from config.
+// If DSN is set explicitly, it is returned as-is (adapter handles raw connection strings).
 func (c *DatabaseConfig) BuildDSN() string {
+	if c.DSN != "" {
+		return c.DSN
+	}
 	switch c.Type {
 	case "postgres", "postgresql":
 		sslMode := c.SSLMode
