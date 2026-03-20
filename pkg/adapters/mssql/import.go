@@ -90,18 +90,6 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 // ========== Table Creation ==========
 
-// createTableInTx создает таблицу в рамках транзакции
-func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, tableName string, pktSchema packet.Schema) error {
-	sqlCreate := a.buildCreateTableSQL(tableName, pktSchema)
-
-	_, err := tx.ExecContext(ctx, sqlCreate)
-	if err != nil {
-		return fmt.Errorf("failed to execute CREATE TABLE: %w", err)
-	}
-
-	return nil
-}
-
 // buildCreateTableSQL строит CREATE TABLE запрос
 func (a *Adapter) buildCreateTableSQL(tableName string, pktSchema packet.Schema) string {
 	schemaName, table := a.parseTableName(tableName)
@@ -328,65 +316,6 @@ func (a *Adapter) executeBatchMerge(
 		return fmt.Errorf("failed to execute batch MERGE (%d rows): %w", len(rows), err)
 	}
 	return nil
-}
-
-// buildMergeSQL строит MERGE запрос для UPSERT
-// SQL Server 2012+ syntax
-func (a *Adapter) buildMergeSQL(tableName string, pktSchema packet.Schema, pkFields []packet.Field) string {
-	// MERGE target USING source ON condition
-	// WHEN MATCHED THEN UPDATE
-	// WHEN NOT MATCHED THEN INSERT
-
-	sourceColumns := make([]string, 0, len(pktSchema.Fields))
-	n := len(pktSchema.Fields)
-	pkConditions := make([]string, 0, n)
-	updateSets := make([]string, 0, n)
-	insertColumns := make([]string, 0, n)
-	insertValues := make([]string, 0, n)
-
-	for _, field := range pktSchema.Fields {
-		colName := fmt.Sprintf("[%s]", field.Name)
-		paramName := "?"
-
-		sourceColumns = append(sourceColumns, fmt.Sprintf("%s AS %s", paramName, colName))
-		insertColumns = append(insertColumns, colName)
-		insertValues = append(insertValues, fmt.Sprintf("source.%s", colName))
-
-		// PK используется для MATCH
-		isPK := false
-		for _, pk := range pkFields {
-			if pk.Name == field.Name {
-				isPK = true
-				pkConditions = append(pkConditions, fmt.Sprintf("target.%s = source.%s", colName, colName))
-				break
-			}
-		}
-
-		// Non-PK используется для UPDATE
-		if !isPK {
-			updateSets = append(updateSets, fmt.Sprintf("target.%s = source.%s", colName, colName))
-		}
-	}
-
-	merge := fmt.Sprintf(`
-MERGE INTO %s AS target
-USING (SELECT %s) AS source
-ON %s
-WHEN MATCHED THEN
-    UPDATE SET %s
-WHEN NOT MATCHED THEN
-    INSERT (%s)
-    VALUES (%s);
-`,
-		tableName,
-		strings.Join(sourceColumns, ", "),
-		strings.Join(pkConditions, " AND "),
-		strings.Join(updateSets, ", "),
-		strings.Join(insertColumns, ", "),
-		strings.Join(insertValues, ", "),
-	)
-
-	return merge
 }
 
 // ========== INSERT OR IGNORE Strategy ==========
