@@ -1,6 +1,6 @@
 module github.com/ruslano69/tdtp-framework
 
-go 1.25.0
+go 1.24.0
 
 require (
 	github.com/alexbrainman/odbc v0.0.0-20250601004241-49e6b2bc0cf0
