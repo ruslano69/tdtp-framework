@@ -208,7 +208,6 @@ func adoxFieldsToSchemaOrdered(fields []adoxField, colOrder []string) packet.Sch
 	// Build lookup map: name → adoxField (case-insensitive)
 	byName := make(map[string]adoxField, len(fields))
 	for _, f := range fields {
-		log.Printf("access ADOX: col=%q adoxtype=%d → %s", f.Name, f.AdoxType, f.Type)
 		byName[strings.ToLower(f.Name)] = f
 	}
 
@@ -221,11 +220,6 @@ func adoxFieldsToSchemaOrdered(fields []adoxField, colOrder []string) packet.Sch
 			schema.Fields[i] = packet.Field{Name: col, Type: "TEXT", Length: 1000}
 		}
 	}
-	first5 := make([]string, min(len(schema.Fields), 5))
-	for i := range first5 {
-		first5[i] = schema.Fields[i].Name
-	}
-	log.Printf("access: schema result order (first 5): %v", first5)
 	return schema
 }
 

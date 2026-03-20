@@ -29,8 +29,6 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	if err != nil {
 		return packet.Schema{}, err
 	}
-	log.Printf("access: ODBC colOrder (first 5): %v", colOrder[:min(len(colOrder), 5)])
-
 	// Try ADOX for types; use ODBC colOrder as authoritative column order
 	adoxFields, adoxErr := getSchemaViaADOX(a.config.DSN, tableName)
 	if adoxErr == nil {
