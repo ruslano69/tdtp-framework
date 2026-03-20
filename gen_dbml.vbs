@@ -1,19 +1,28 @@
 ' gen_dbml.vbs — DBML schema generator for MS Access (.mdb)
 ' Output can be pasted into https://dbdiagram.io
 ' Requires: 32-bit cscript.exe (C:\Windows\SysWOW64\cscript.exe) + Jet 4.0
-' Usage: cscript //nologo gen_dbml.vbs <path_to.mdb> [output.dbml]
+' Usage: cscript //nologo gen_dbml.vbs <path_to.mdb> [output.dbml] [--native]
+'   --native  keep original names as-is (Cyrillic); dbdiagram.io supports Unicode
 
 Option Explicit
 
-Dim cat, args, mdbPath, outFile, connStr
+Dim cat, args, mdbPath, outFile, connStr, useNative
 Set args = WScript.Arguments
 If args.Count < 1 Then
-    WScript.StdErr.WriteLine "Usage: gen_dbml.vbs <mdb_path> [output.dbml]"
+    WScript.StdErr.WriteLine "Usage: gen_dbml.vbs <mdb_path> [output.dbml] [--native]"
     WScript.Quit 1
 End If
 mdbPath = args(0)
 outFile = ""
-If args.Count >= 2 Then outFile = args(1)
+useNative = False
+Dim ai
+For ai = 1 To args.Count - 1
+    If args(ai) = "--native" Then
+        useNative = True
+    ElseIf outFile = "" Then
+        outFile = args(ai)
+    End If
+Next
 
 Set cat = CreateObject("ADOX.Catalog")
 connStr = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" & mdbPath
@@ -43,20 +52,24 @@ For Each t In cat.Tables
         Next
 
         Dim entityName
-        entityName = Translit(t.Name)
-        lines = lines & "Table " & entityName & " [note: """ & EscQ(t.Name) & """] {" & vbLf
+        entityName = Name_(t.Name)
+        lines = lines & "Table " & entityName & " {" & vbLf
 
         For Each col In t.Columns
             Dim dbmlType, colName, attrs
             dbmlType = AdoxToDBML(col.Type)
-            colName = Translit(col.Name)
+            colName = Name_(col.Name)
             attrs = ""
-            Dim notes
-            notes = EscQ(col.Name)
             If InStr(pkCols, "|" & col.Name & "|") > 0 Then
-                attrs = " [pk, note: """ & notes & """]"
+                If useNative Then
+                    attrs = " [pk]"
+                Else
+                    attrs = " [pk, note: """ & EscQ(col.Name) & """]"
+                End If
             Else
-                attrs = " [note: """ & notes & """]"
+                If Not useNative Then
+                    attrs = " [note: """ & EscQ(col.Name) & """]"
+                End If
             End If
             lines = lines & "    " & colName & " " & dbmlType & attrs & vbLf
         Next
@@ -70,8 +83,8 @@ For Each t In cat.Tables
         For Each key In t.Keys
             If key.Type = 2 And key.RelatedTable <> "" Then
                 Dim srcTable, dstTable
-                srcTable = Translit(t.Name)
-                dstTable = Translit(key.RelatedTable)
+                srcTable = Name_(t.Name)
+                dstTable = Name_(key.RelatedTable)
                 ' Get first FK column
                 Dim fkCol, refCol
                 fkCol = ""
@@ -79,8 +92,8 @@ For Each t In cat.Tables
                 Dim kc
                 For Each kc In key.Columns
                     If fkCol = "" Then
-                        fkCol = Translit(kc.Name)
-                        refCol = Translit(kc.RelatedColumn)
+                        fkCol = Name_(kc.Name)
+                        refCol = Name_(kc.RelatedColumn)
                     End If
                 Next
                 If fkCol <> "" And refCol <> "" Then
@@ -123,6 +136,14 @@ End Function
 
 Function EscQ(s)
     EscQ = Replace(s, """", "'")
+End Function
+
+Function Name_(s)
+    If useNative Then
+        Name_ = s
+    Else
+        Name_ = Translit(s)
+    End If
 End Function
 
 Function Translit(s)
