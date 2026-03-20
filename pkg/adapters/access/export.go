@@ -6,49 +6,52 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
-// GetTableSchema reads column metadata via a schema-probe query (SELECT TOP 1 *).
-// Access doesn't support INFORMATION_SCHEMA, so we infer types from ColumnTypes().
+// GetTableSchema reads column metadata.
+// Column ORDER comes from ODBC (SELECT * — table definition order).
+// Column TYPES come from ADOX via VBScript (exact Access catalog types).
+// Fallback when ADOX unavailable: infer types from a sample row.
 func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error) {
-	// Use TOP 1 to avoid reading all data — just get column metadata
-	query := fmt.Sprintf("SELECT TOP 1 * FROM [%s]", tableName)
-	rows, err := a.db.QueryContext(ctx, query)
+	// Get column order + sample row from ODBC (table definition order)
+	rows, err := a.db.QueryContext(ctx, fmt.Sprintf("SELECT TOP 1 * FROM [%s]", tableName))
 	if err != nil {
-		// Try without TOP (for views/queries)
-		query = fmt.Sprintf("SELECT * FROM [%s] WHERE 1=0", tableName)
-		rows, err = a.db.QueryContext(ctx, query)
-		if err != nil {
-			return packet.Schema{}, fmt.Errorf("access: failed to get schema for %s: %w", tableName, err)
-		}
+		return packet.Schema{}, fmt.Errorf("access: failed to get schema for %s: %w", tableName, err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	columns, err := rows.Columns()
+	colOrder, err := rows.Columns()
 	if err != nil {
 		return packet.Schema{}, err
 	}
-	columnTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return packet.Schema{}, err
-	}
+	log.Printf("access: ODBC colOrder (first 5): %v", colOrder[:min(len(colOrder), 5)])
 
-	fields := make([]packet.Field, len(columns))
-	for i, col := range columns {
-		tdtpType, length := convertAccessTypeToTDTP(columnTypes[i].DatabaseTypeName())
-		// Column names arrive as UTF-8 from ODBC Unicode API (SQLDescribeColW) — no charset conversion needed.
-		fields[i] = packet.Field{
-			Name:   col,
-			Type:   tdtpType,
-			Length: length,
+	// Try ADOX for types; use ODBC colOrder as authoritative column order
+	adoxFields, adoxErr := getSchemaViaADOX(a.config.DSN, tableName)
+	if adoxErr == nil {
+		return adoxFieldsToSchemaOrdered(adoxFields, colOrder), nil
+	}
+	log.Printf("⚠ access: ADOX schema unavailable (%v) — falling back to sample-row inference", adoxErr)
+
+	// Fallback: scan sample row for type inference
+	vals := make([]any, len(colOrder))
+	ptrs := make([]any, len(colOrder))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	if rows.Next() {
+		if err := rows.Scan(ptrs...); err != nil {
+			return packet.Schema{}, fmt.Errorf("access: failed to scan schema row: %w", err)
 		}
 	}
-	return packet.Schema{Fields: fields}, nil
+	return schemaFromSampleRow(colOrder, vals), nil
 }
+
 
 // ReadAllRows reads all rows from a table.
 // Uses SELECT * to avoid re-encoding column names back into SQL (ODBC Unicode mismatch).
@@ -83,46 +86,65 @@ func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, err
 	return count, nil
 }
 
-// scanRows delegates to base.ScanSQLRows then applies charset conversion.
+// scanRows maps actual ODBC column positions to schema positions by name.
+// This is necessary because schema order (from ADOX/ODBC) and SELECT * order
+// may differ (e.g. ADOX returns columns alphabetically on old databases).
 func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, error) {
-	result, err := base.ScanSQLRows(rows, schema, a.converter, "sqlite") // generic path
+	actualCols, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
-	// Apply charset conversion if needed (e.g. Windows-1251 → UTF-8)
-	if a.decoder != nil {
-		for i, row := range result {
-			for j, val := range row {
-				result[i][j] = a.decodeString(val)
-			}
+
+	// Build schema position lookup: lowercase name → index
+	schemaPos := make(map[string]int, len(schema.Fields))
+	for i, f := range schema.Fields {
+		schemaPos[strings.ToLower(f.Name)] = i
+	}
+
+	// reorder[i] = schema index for actualCols[i], or -1 if not in schema
+	reorder := make([]int, len(actualCols))
+	identity := true
+	for i, col := range actualCols {
+		j, ok := schemaPos[strings.ToLower(col)]
+		if !ok {
+			j = -1
+		}
+		reorder[i] = j
+		if j != i {
+			identity = false
 		}
 	}
-	return result, nil
+
+	// Fast path: schema and data columns are in the same order
+	if identity && len(actualCols) == len(schema.Fields) {
+		return base.ScanSQLRows(rows, schema, a.converter, "access")
+	}
+
+	// Slow path: reorder values to match schema positions
+	values := make([]any, len(actualCols))
+	valuePtrs := make([]any, len(actualCols))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	var result [][]string
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		row := make([]string, len(schema.Fields))
+		for i, val := range values {
+			j := reorder[i]
+			if j < 0 {
+				continue
+			}
+			field := schema.Fields[j]
+			raw := a.converter.DBValueToString(val, field, "access")
+			row[j] = a.converter.ConvertValueToTDTP(field, raw)
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
 }
 
-// convertAccessTypeToTDTP maps Access/Jet ODBC type names to TDTP types.
-func convertAccessTypeToTDTP(odbcType string) (string, int) {
-	t := strings.ToUpper(odbcType)
-	switch {
-	case strings.Contains(t, "COUNTER"), strings.Contains(t, "AUTOINCREMENT"):
-		return "INTEGER", 0
-	case t == "INTEGER", t == "SMALLINT", t == "TINYINT", t == "BIGINT",
-		strings.Contains(t, "INT"):
-		return "INTEGER", 0
-	case t == "REAL", t == "FLOAT", t == "DOUBLE", t == "DECIMAL",
-		t == "NUMERIC", t == "CURRENCY", t == "SINGLE":
-		return "REAL", 0
-	case t == "BIT", t == "YESNO":
-		return "BOOLEAN", 0
-	case t == "DATETIME", t == "DATE", t == "TIME":
-		return "DATETIME", 0
-	case t == "LONGBINARY", t == "BINARY", t == "VARBINARY",
-		t == "IMAGE", t == "OLEOBJECT":
-		return "BLOB", 0
-	case strings.Contains(t, "CHAR"), strings.Contains(t, "TEXT"),
-		strings.Contains(t, "MEMO"), t == "LONGVARCHAR":
-		return "TEXT", 1000
-	default:
-		return "TEXT", 1000
-	}
-}
+

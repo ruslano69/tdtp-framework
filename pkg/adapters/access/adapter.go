@@ -12,8 +12,6 @@ import (
 	"strings"
 
 	_ "github.com/alexbrainman/odbc" // register odbc driver
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/charmap"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
@@ -27,12 +25,13 @@ func init() {
 }
 
 // Adapter implements adapters.Adapter for Microsoft Access via ODBC.
+// alexbrainman/odbc uses Unicode ODBC APIs (SQL_C_WCHAR) and returns UTF-8 strings —
+// no charset conversion is needed.
 type Adapter struct {
 	db           *sql.DB
 	config       adapters.Config
 	exportHelper *base.ExportHelper
 	converter    *base.UniversalTypeConverter
-	decoder      *encoding.Decoder // non-nil when charset conversion needed
 }
 
 // Connect opens an ODBC connection to an Access .mdb/.accdb file.
@@ -59,9 +58,6 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	a.db = db
 	a.config = cfg
 
-	// Set up charset decoder if needed
-	a.decoder = resolveDecoder(cfg.Charset)
-
 	// Init converter and export helper
 	a.converter = base.NewUniversalTypeConverter()
 	a.exportHelper = base.NewExportHelper(a, a, a.converter, nil)
@@ -69,23 +65,6 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	return nil
 }
 
-// resolveDecoder returns a decoder for the given charset name, or nil for UTF-8/empty.
-func resolveDecoder(charset string) *encoding.Decoder {
-	switch strings.ToLower(strings.ReplaceAll(charset, "-", "")) {
-	case "windows1251", "cp1251", "1251", "cyrillic":
-		return charmap.Windows1251.NewDecoder()
-	case "windows1252", "cp1252", "1252", "latin1":
-		return charmap.Windows1252.NewDecoder()
-	case "koi8r":
-		return charmap.KOI8R.NewDecoder()
-	case "iso88591":
-		return charmap.ISO8859_1.NewDecoder()
-	case "iso88592":
-		return charmap.ISO8859_2.NewDecoder()
-	default:
-		return nil // UTF-8 or driver handles it
-	}
-}
 
 func (a *Adapter) Close(ctx context.Context) error {
 	if a.db != nil {
@@ -140,7 +119,7 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		tables = append(tables, a.decodeString(name))
+		tables = append(tables, name)
 	}
 	return tables, rows.Err()
 }
@@ -169,7 +148,7 @@ func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error)
 		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		views = append(views, adapters.ViewInfo{Name: a.decodeString(name), IsUpdatable: false})
+		views = append(views, adapters.ViewInfo{Name: name, IsUpdatable: false})
 	}
 	return views, rows.Err()
 }
@@ -187,19 +166,6 @@ type accessTx struct{ tx *sql.Tx }
 
 func (t *accessTx) Commit(ctx context.Context) error   { return t.tx.Commit() }
 func (t *accessTx) Rollback(ctx context.Context) error { return t.tx.Rollback() }
-
-// decodeString converts a string from the configured charset to UTF-8.
-// If no decoder is set (UTF-8 or driver handles it), returns as-is.
-func (a *Adapter) decodeString(s string) string {
-	if a.decoder == nil || s == "" {
-		return s
-	}
-	utf8, err := a.decoder.String(s)
-	if err != nil {
-		return s // fallback to original on decode error
-	}
-	return utf8
-}
 
 // ExportTable exports a full table.
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
@@ -238,8 +204,8 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 
 	schema := packet.Schema{Fields: make([]packet.Field, len(columns))}
 	for i, col := range columns {
-		tdtpType, length := convertAccessTypeToTDTP(columnTypes[i].DatabaseTypeName())
-		schema.Fields[i] = packet.Field{Name: col, Type: tdtpType, Length: length}
+		_ = columnTypes[i] // type info not available via Jet ODBC; TEXT is safe default
+		schema.Fields[i] = packet.Field{Name: col, Type: "TEXT", Length: 1000}
 	}
 
 	scannedRows, err := a.scanRows(rows, schema)
