@@ -51,10 +51,10 @@ For Each t In cat.Tables
         For Each col In t.Columns
             Dim tdtpType, colName, pkMark
             tdtpType = AdoxToType(col.Type)
-            colName = SafeName(col.Name)
+            colName = Translit(SafeName(col.Name))
             pkMark = ""
             If InStr(pkCols, "|" & col.Name & "|") > 0 Then pkMark = " PK"
-            lines = lines & "        " & tdtpType & " " & colName & pkMark & vbLf
+            lines = lines & "        " & tdtpType & " " & colName & pkMark & " """ & col.Name & """" & vbLf
         Next
         lines = lines & "    }" & vbLf
     End If
