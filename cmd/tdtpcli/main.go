@@ -647,8 +647,9 @@ func main() {
 
 	// Build adapter config
 	adapterConfig := adapters.Config{
-		Type: config.Database.Type,
-		DSN:  config.Database.BuildDSN(),
+		Type:    config.Database.Type,
+		DSN:     config.Database.BuildDSN(),
+		Charset: config.Database.Charset,
 	}
 
 	// Build TDTQL query from flags

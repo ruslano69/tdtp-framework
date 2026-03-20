@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -166,7 +167,7 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 		case "MEDIUMTEXT":
 			field.Length = 16777215
 		case "LONGTEXT":
-			field.Length = 4294967295
+			field.Length = math.MaxInt32 // LONGTEXT max, capped to int32 for 32-bit compat
 		}
 
 	case "DATE":
