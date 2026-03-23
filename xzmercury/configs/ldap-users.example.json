@@ -1,0 +1,22 @@
+[
+  {
+    "username": "svc_tdtp",
+    "groups": ["tdtp-pipeline-users", "tdtp-admins"]
+  },
+  {
+    "username": "analyst1",
+    "groups": ["tdtp-pipeline-users"]
+  },
+  {
+    "username": "finance_svc",
+    "groups": ["tdtp-pipeline-users", "tdtp-finance"]
+  },
+  {
+    "username": "readonly",
+    "groups": ["tdtp-readonly"]
+  },
+  {
+    "username": "admin",
+    "groups": ["tdtp-pipeline-users", "tdtp-admins", "tdtp-finance"]
+  }
+]

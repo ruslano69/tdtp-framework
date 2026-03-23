@@ -1,0 +1,39 @@
+# =============================================================================
+# PIPELINE 0 — Получение списка уникальных регионов из PostgreSQL
+# =============================================================================
+# Используется run_chain.sh для динамического определения регионов.
+# Результат пишется в локальный файл /tmp/tdtp_regions.xml
+# =============================================================================
+
+name: "00-get-regions"
+version: "1.0"
+description: "Получение списка уникальных регионов для оркестрации"
+
+sources:
+  - name: src
+    type: postgres
+    dsn: "postgres://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test?sslmode=disable"
+    query: |
+      SELECT DISTINCT
+        CASE (REPLACE(u.username, 'user_', '')::int % 4)::text
+          WHEN '0' THEN 'NORTH'
+          WHEN '1' THEN 'SOUTH'
+          WHEN '2' THEN 'EAST'
+          ELSE 'WEST'
+        END AS region
+      FROM orders o JOIN users u ON o.user_id = u.id
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: "regions"
+  sql: |
+    SELECT region FROM src ORDER BY region
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    destination: "/tmp/tdtp_regions.xml"

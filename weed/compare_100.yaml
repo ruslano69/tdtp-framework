@@ -1,0 +1,23 @@
+name: compare-100
+version: "1.0"
+description: "Compare: TOP 100 rows via pipeline"
+
+sources:
+  - name: sp_ztr_employee
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=ZTR-Live&trusted_connection=yes&encrypt=disable"
+    query: "SELECT TOP 100 * FROM [dbo].[ZTR$Employee]"
+
+workspace:
+  type: sqlite
+  mode: memory
+
+transform:
+  sql: "SELECT * FROM sp_ztr_employee"
+  result_table: result
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    destination: "C:/tmp/pipeline_100.tdtp.xml"

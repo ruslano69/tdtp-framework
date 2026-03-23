@@ -4,15 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
+	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // multiPartRe matches filenames like: base_part_N_of_Total.ext
@@ -27,14 +34,18 @@ func tdtpMultiPartFiles(filePath string) []string {
 	if m := multiPartRe.FindStringSubmatch(filePath); m != nil {
 		base = m[1]
 		ext = m[4]
-		total, _ = strconv.Atoi(m[3])
+		if v, err := strconv.Atoi(m[3]); err == nil {
+			total = v
+		}
 	} else {
 		ext = filepath.Ext(filePath)
 		base = filePath[:len(filePath)-len(ext)]
 		matches, err := filepath.Glob(fmt.Sprintf("%s_part_1_of_*%s", base, ext))
 		if err == nil && len(matches) == 1 {
 			if m := multiPartRe.FindStringSubmatch(matches[0]); m != nil {
-				total, _ = strconv.Atoi(m[3])
+				if v, err := strconv.Atoi(m[3]); err == nil {
+					total = v
+				}
 			}
 		}
 	}
@@ -106,6 +117,11 @@ func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
 		if err := decompressTDTPPacket(pkt); err != nil {
 			return nil, fmt.Errorf("file '%s': %w", fp, err)
 		}
+		if pkt.Data.Compact {
+			if err := packet.ExpandCompactRows(pkt); err != nil {
+				return nil, fmt.Errorf("file '%s': compact expansion failed: %w", fp, err)
+			}
+		}
 		if merged == nil {
 			merged = pkt
 		} else {
@@ -119,6 +135,181 @@ func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
 	// имя как имя SQLite-таблицы, и именно это имя используется в transform SQL.
 	merged.Header.TableName = source.Name
 	return merged, nil
+}
+
+// loadEncryptedTDTPFile читает зашифрованный TDTP-файл, получает ключ через xZMercury
+// (burn-on-read) и возвращает расшифрованный пакет.
+//
+// Формат файла: [2B version][1B algo][16B uuid][12B nonce][...ciphertext]
+// UUID извлекается из заголовка и передаётся в POST /api/keys/retrieve.
+func loadEncryptedTDTPFile(ctx context.Context, source SourceConfig) (*packet.DataPacket, error) {
+	if source.DSN == "" {
+		return nil, fmt.Errorf("tdtp-enc source requires 'dsn' to be the file path")
+	}
+	if source.MercuryURL == "" {
+		return nil, fmt.Errorf("tdtp-enc source requires 'mercury_url'")
+	}
+
+	blob, err := os.ReadFile(source.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("read encrypted file: %w", err)
+	}
+
+	// Извлекаем UUID из бинарного заголовка без расшифровки.
+	packageUUID, err := tdtpcrypto.ExtractUUID(blob)
+	if err != nil {
+		return nil, fmt.Errorf("extract uuid from header: %w", err)
+	}
+
+	// Получаем ключ от xZMercury (burn-on-read — после этого вызова ключ удаляется).
+	timeout := source.MercuryTimeoutMs
+	if timeout <= 0 {
+		timeout = 5000
+	}
+	mc := mercury.NewClient(source.MercuryURL, timeout)
+	keyB64, err := mc.RetrieveKey(ctx, packageUUID)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve key (uuid=%s): %w", packageUUID, err)
+	}
+
+	key, err := mercury.DecodeKey(keyB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode key: %w", err)
+	}
+
+	// Расшифровываем AES-256-GCM.
+	_, plaintext, err := tdtpcrypto.Decrypt(key, blob)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt: %w", err)
+	}
+
+	// Парсим расшифрованный TDTP XML.
+	parser := packet.NewParser()
+	pkt, err := parser.ParseBytes(plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("parse decrypted TDTP: %w", err)
+	}
+
+	if err := decompressTDTPPacket(pkt); err != nil {
+		return nil, fmt.Errorf("decompress: %w", err)
+	}
+	if pkt.Data.Compact {
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			return nil, fmt.Errorf("compact expansion failed: %w", err)
+		}
+	}
+
+	pkt.Header.TableName = source.Name
+	return pkt, nil
+}
+
+// loadTDTPFromS3 скачивает TDTP-файл (или multi-part набор) из S3-совместимого
+// хранилища и возвращает распакованный DataPacket.
+//
+// DSN может быть:
+//   - полным URI: s3://bucket/path/to/file.tdtp.xml  (bucket берётся из URI)
+//   - ключом объекта: path/to/file.tdtp.xml          (bucket из source.S3.Bucket)
+//
+// Логика multi-part аналогична loadTDTPFile: если multi_part=true, функция
+// находит все части по суффиксу _part_N через store.List и объединяет их.
+func loadTDTPFromS3(ctx context.Context, source SourceConfig) (*packet.DataPacket, error) {
+	// Разбираем DSN: либо s3://bucket/key, либо просто ключ.
+	var bucket, key string
+	if storage.IsRemote(source.DSN) {
+		_, bucket, key, _ = storage.ParseURI(source.DSN)
+	} else {
+		key = source.DSN
+	}
+
+	// S3Config гарантированно не nil — валидатор это проверяет.
+	s3cfg := *source.S3
+	if bucket != "" {
+		// URI-bucket перекрывает значение из конфига (аналогично output).
+		s3cfg.Bucket = bucket
+	} else {
+		bucket = s3cfg.Bucket
+	}
+
+	if key == "" {
+		return nil, fmt.Errorf("tdtp-s3: object key is empty (check dsn)")
+	}
+
+	store, err := storage.New(storage.Config{Type: "s3", S3: s3cfg})
+	if err != nil {
+		return nil, fmt.Errorf("tdtp-s3: create storage driver: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Собираем список ключей для загрузки.
+	keys := []string{key}
+	if source.MultiPart && !containsPartSuffix(key) {
+		// Parts are named {base}_part_{N}_of_{total}{ext} — strip extension before "_part_".
+		keyExt := filepath.Ext(key)
+		keyBase := strings.TrimSuffix(key, keyExt)
+		objs, listErr := store.List(ctx, keyBase+"_part_")
+		if listErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: list parts for %q: %w", key, listErr)
+		}
+		if len(objs) > 0 {
+			sort.Slice(objs, func(i, j int) bool { return objs[i].Key < objs[j].Key })
+			keys = make([]string, len(objs))
+			for i, obj := range objs {
+				keys[i] = obj.Key
+			}
+		}
+	}
+
+	// Скачиваем и парсим каждую часть — аналогично loadTDTPFile.
+	parser := packet.NewParser()
+	var merged *packet.DataPacket
+
+	for _, k := range keys {
+		rc, getErr := store.Get(ctx, k)
+		if getErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: download s3://%s/%s: %w", bucket, k, getErr)
+		}
+		data, readErr := io.ReadAll(rc)
+		_ = rc.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: read s3://%s/%s: %w", bucket, k, readErr)
+		}
+
+		pkt, parseErr := parser.ParseBytes(data)
+		if parseErr != nil {
+			return nil, fmt.Errorf("tdtp-s3: parse s3://%s/%s: %w", bucket, k, parseErr)
+		}
+		if err := decompressTDTPPacket(pkt); err != nil {
+			return nil, fmt.Errorf("tdtp-s3: decompress s3://%s/%s: %w", bucket, k, err)
+		}
+		if pkt.Data.Compact {
+			if err := packet.ExpandCompactRows(pkt); err != nil {
+				return nil, fmt.Errorf("tdtp-s3: compact expand s3://%s/%s: %w", bucket, k, err)
+			}
+		}
+
+		if merged == nil {
+			merged = pkt
+		} else {
+			merged.Data.Rows = append(merged.Data.Rows, pkt.Data.Rows...)
+			merged.Header.RecordsInPart += pkt.Header.RecordsInPart
+		}
+	}
+
+	merged.Header.TableName = source.Name
+	return merged, nil
+}
+
+// containsPartSuffix проверяет, содержит ли ключ суффикс _part_ (уже является частью набора).
+func containsPartSuffix(key string) bool {
+	for i := len(key) - 1; i >= 0; i-- {
+		if key[i] == '/' {
+			break
+		}
+		if i+6 < len(key) && key[i:i+6] == "_part_" {
+			return true
+		}
+	}
+	return false
 }
 
 // SourceData представляет загруженные данные из одного источника
@@ -167,11 +358,11 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 			}
 
 			// Загружаем данные из источника
-			packet, err := l.loadFromSource(ctx, src)
+			pkt, err := l.loadFromSource(ctx, src)
 			if err != nil {
 				result.Error = err
 			} else {
-				result.Packet = packet
+				result.Packet = pkt
 			}
 
 			results <- result
@@ -185,7 +376,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 	}()
 
 	// Собираем результаты
-	var allResults []SourceData
+	allResults := make([]SourceData, 0, len(l.sources))
 	var sourceErrors []error
 
 	for result := range results {
@@ -232,7 +423,7 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 	}
 
 	// Загружаем данные
-	packet, err := l.loadFromSource(ctx, *source)
+	pkt, err := l.loadFromSource(ctx, *source)
 	if err != nil {
 		return &SourceData{
 			SourceName: source.Name,
@@ -244,7 +435,7 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 	return &SourceData{
 		SourceName: source.Name,
 		TableName:  source.Name,
-		Packet:     packet,
+		Packet:     pkt,
 	}, nil
 }
 
@@ -265,17 +456,28 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	if source.Type == "tdtp" {
 		return loadTDTPFile(source)
 	}
+
+	// Зашифрованный TDTP-файл — получаем ключ от xZMercury и расшифровываем.
+	if source.Type == "tdtp-enc" {
+		return loadEncryptedTDTPFile(timeoutCtx, source)
+	}
+
+	// TDTP-файл в S3-совместимом хранилище (SeaweedFS, MinIO, AWS S3 и т.п.).
+	if source.Type == "tdtp-s3" {
+		return loadTDTPFromS3(timeoutCtx, source)
+	}
 	_ = timeoutCtx // используется далее
 
 	// Создаем адаптер для источника
 	adapter, err := adapters.New(timeoutCtx, adapters.Config{
-		Type: source.Type,
-		DSN:  source.DSN,
+		Type:            source.Type,
+		DSN:             source.DSN,
+		NoDateSentinels: source.NoDateSentinels,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(timeoutCtx)
+	defer func() { _ = adapter.Close(timeoutCtx) }()
 
 	// Проверяем соединение
 	if err := adapter.Ping(timeoutCtx); err != nil {
@@ -284,15 +486,15 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 
 	// Выполняем SQL запрос источника с учетом timeout
 	// Используем ExecuteRawSQL для выполнения произвольного SELECT
-	packet, err := l.executeSourceQuery(timeoutCtx, adapter, source)
+	pkt, err := l.executeSourceQuery(timeoutCtx, adapter, source)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
 	// Обновляем имя таблицы в пакете на alias
-	packet.Header.TableName = source.Name
+	pkt.Header.TableName = source.Name
 
-	return packet, nil
+	return pkt, nil
 }
 
 // executeSourceQuery выполняет SQL запрос источника и возвращает DataPacket

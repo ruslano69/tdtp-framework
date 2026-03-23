@@ -208,12 +208,14 @@ func (da *DatabaseAppender) flushBatch(ctx context.Context) error {
 
 	// Создаем statement в контексте транзакции
 	stmt := tx.StmtContext(ctx, da.insertStmt)
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	// Вставляем все entries
 	for _, entry := range da.batchQueue {
-		metadataJSON, _ := json.Marshal(entry.Metadata)
-		dataJSON, _ := json.Marshal(entry.Data)
+		metadataJSON, errMeta := json.Marshal(entry.Metadata)
+		_ = errMeta
+		dataJSON, errData := json.Marshal(entry.Data)
+		_ = errData
 		durationMs := entry.Duration.Milliseconds()
 
 		_, err = stmt.ExecContext(
@@ -324,7 +326,7 @@ func (da *DatabaseAppender) Query(ctx context.Context, filter QueryFilter) ([]*E
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit log: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Читаем результаты
 	entries := make([]*Entry, 0)

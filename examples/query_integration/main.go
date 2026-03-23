@@ -7,7 +7,6 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
-	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
@@ -20,6 +19,7 @@ func main() {
 	// go get modernc.org/sqlite
 
 	demonstrateQueryIntegration()
+	demonstrateWithRealData()
 }
 
 func demonstrateQueryIntegration() {

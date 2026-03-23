@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import ctypes
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from tdtp._loader import lib, free_string
 from tdtp.exceptions import (
@@ -134,22 +137,25 @@ class TDTPClientJSON:
         data: dict,
         base_path: str,
         compress: bool = False,
+        algo: str = "zstd",
         level: int = 3,
         checksum: bool = True,
     ) -> dict:
         """Partition data and write all parts using the framework's native byte-size logic.
 
         Mirrors tdtpcli behaviour: data is split into ~3.8 MB parts automatically
-        (same ``generator.GenerateReference`` logic), with optional zstd compression
+        (same ``generator.GenerateReference`` logic), with optional compression
         and XXH3 checksums applied to each part before writing.
 
         Args:
             data:      Full dataset dict (schema + header + data rows).
             base_path: Output base path, e.g. ``"/tmp/out/Users.tdtp.xml"``.
                        Multiple parts are written as ``Users_part_1_of_N.tdtp.xml``.
-            compress:  Apply zstd compression (requires libtdtp built with
+            compress:  Apply compression (requires libtdtp built with
                        ``-tags compress``).
-            level:     zstd compression level 1–19 (default 3).
+            algo:      Compression algorithm: ``"zstd"`` (default) or ``"kanzi"``
+                       (higher ratio, ~10× slower, optimal for cold archiving).
+            level:     Compression level (default 3). zstd: 1–19; kanzi: 1–9.
             checksum:  Compute XXH3 checksum when compressing (default True).
 
         Returns:
@@ -163,13 +169,21 @@ class TDTPClientJSON:
             import pandas as pd
             df   = pd.read_sql_query("SELECT * FROM Users", conn)
             data = client.J_from_pandas(df, table_name="Users")
+
+            # standard zstd
             result = client.J_export_all(
                 data, "/tmp/export/Users.tdtp.xml",
                 compress=True, checksum=True,
             )
+
+            # kanzi for cold archiving
+            result = client.J_export_all(
+                data, "/tmp/archive/Users.tdtp.xml",
+                compress=True, algo="kanzi", level=6,
+            )
             print(result["total_parts"], "files written")
         """
-        opts = {"compress": compress, "level": level, "checksum": checksum}
+        opts = {"compress": compress, "algo": algo, "level": level, "checksum": checksum}
         return _call(
             lib.J_ExportAll,
             json.dumps(data).encode(),
@@ -301,6 +315,63 @@ class TDTPClientJSON:
     # -----------------------------------------------------------------------
     # Pandas integration (optional — requires pandas)
     # -----------------------------------------------------------------------
+
+    def read_pandas(self, path: str, where: str = "", limit: int = 0) -> "pd.DataFrame":
+        """Load a TDTP file directly into a pandas DataFrame.
+
+        One-step convenience for the common ``J_read → J_filter → J_to_pandas``
+        pipeline. When *where* is empty the file is returned as-is.
+
+        Args:
+            path:  path to the ``.tdtp.xml`` file.
+            where: optional TDTQL WHERE clause, e.g. ``"Balance > 1000"``.
+            limit: max rows (0 = all). Ignored when *where* is empty.
+
+        Returns:
+            ``pandas.DataFrame`` with dtypes inferred from the TDTP schema.
+
+        Raises:
+            TDTPParseError:  file cannot be read.
+            TDTPFilterError: invalid WHERE clause.
+            ImportError:     pandas is not installed.
+
+        Example::
+
+            from tdtp import TDTPClientJSON
+            client = TDTPClientJSON()
+
+            df = client.read_pandas("users.tdtp.xml")
+            df = client.read_pandas("users.tdtp.xml", where="Balance > 1000")
+            df = client.read_pandas("users.tdtp.xml", where="City = 'Omsk'", limit=100)
+        """
+        data = self.J_read(path)
+        if where:
+            data = self.J_filter(data, where, limit=limit)
+        return self.J_to_pandas(data)
+
+    def write_pandas(self, df: "pd.DataFrame", path: str, table_name: str = "") -> None:
+        """Write a pandas DataFrame to a TDTP file.
+
+        One-step convenience for the common ``J_from_pandas → J_write`` pipeline.
+
+        Args:
+            df:         DataFrame to write.
+            path:       destination ``.tdtp.xml`` file path.
+            table_name: TDTP table name; defaults to the file stem when empty.
+
+        Raises:
+            TDTPWriteError: writing fails.
+            ImportError:    pandas is not installed.
+
+        Example::
+
+            client.write_pandas(df, "output.tdtp.xml", table_name="users")
+        """
+        if not table_name:
+            from pathlib import Path
+            table_name = Path(path).stem.split(".")[0]
+        data = self.J_from_pandas(df, table_name=table_name)
+        self.J_write(data, path)
 
     def J_to_pandas(self, data: dict):
         """Convert a J_read result dict to a pandas DataFrame.

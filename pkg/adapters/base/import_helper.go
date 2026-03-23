@@ -3,12 +3,23 @@ package base
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
+
+// isDateFieldType reports whether a TDTP field type can carry NoDate or date-Infinity.
+// Mirrors packet.isDateField — redeclared here to avoid a circular import.
+func isDateFieldType(t string) bool {
+	switch strings.ToUpper(t) {
+	case "DATE", "DATETIME", "TIMESTAMP", "DATETIME2", "DATETIMEOFFSET", "SMALLDATETIME":
+		return true
+	}
+	return false
+}
 
 // TableManager предоставляет методы для управления таблицами
 type TableManager interface {
@@ -62,6 +73,8 @@ func NewImportHelper(
 }
 
 // ImportPacket импортирует один TDTP пакет в БД
+// StrategyCopy (и useTemporaryTables=true): атомарная замена через temp-таблицу.
+// StrategyReplace/Ignore/Fail: прямой UPSERT в существующую таблицу.
 // Общая реализация для всех адаптеров
 func (h *ImportHelper) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	// Проверяем тип пакета
@@ -71,12 +84,12 @@ func (h *ImportHelper) ImportPacket(ctx context.Context, pkt *packet.DataPacket,
 
 	tableName := pkt.Header.TableName
 
-	// Если включен режим временных таблиц - используем атомарную замену
-	if h.useTemporaryTables {
+	// Временные таблицы используем только для StrategyCopy
+	if h.useTemporaryTables && strategy == adapters.StrategyCopy {
 		return h.importWithTemporaryTable(ctx, pkt, strategy)
 	}
 
-	// Иначе - прямая вставка в таблицу
+	// Для всех остальных стратегий — прямая вставка (UPSERT/INSERT/etc.)
 	return h.importDirect(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy)
 }
 
@@ -88,6 +101,7 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 	}
 
 	tableName := packets[0].Header.TableName
+	canonicalSchema := packets[0].Schema
 
 	// Начинаем транзакцию
 	tx, err := h.transactionManager.BeginTx(ctx)
@@ -101,18 +115,16 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 		}
 	}()
 
-	// Если включен режим временных таблиц - используем один раз
-	if h.useTemporaryTables {
+	// StrategyCopy (и useTemporaryTables=true): атомарная замена через temp-таблицу.
+	// Остальные стратегии: прямой UPSERT — сохраняем строки которых нет в пакете.
+	if h.useTemporaryTables && strategy == adapters.StrategyCopy {
 		tempTableName := GenerateTempTableName(tableName)
 		fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
 
-		// 1. Создаем временную таблицу (используем схему из первого пакета)
-		if err := h.tableManager.CreateTable(ctx, tempTableName, packets[0].Schema); err != nil {
+		if err = h.tableManager.CreateTable(ctx, tempTableName, canonicalSchema); err != nil {
 			return fmt.Errorf("failed to create temporary table: %w", err)
 		}
 
-		// 2. Импортируем каждый пакет во временную таблицу
-		canonicalSchema := packets[0].Schema
 		for i, pkt := range packets {
 			if !packet.SchemaEquals(canonicalSchema, pkt.Schema) {
 				fmt.Printf("  ⚠️  Skipping packet %d/%d: schema mismatch (expected %d fields, got %d)\n",
@@ -122,8 +134,8 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
 
-			if err := h.dataInserter.InsertRows(ctx, tempTableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
-				_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
+			if err = h.dataInserter.InsertRows(ctx, tempTableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
+				_ = h.tableManager.DropTable(ctx, tempTableName)
 				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
 			}
 		}
@@ -131,15 +143,12 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 		fmt.Printf("✅ All packets loaded to temporary table\n")
 		fmt.Printf("🔄 Replacing production table: %s\n", tableName)
 
-		// 3. Заменяем продакшен таблицу временной
-		if err := h.replaceTables(ctx, tableName, tempTableName); err != nil {
-			_ = h.tableManager.DropTable(ctx, tempTableName) // игнорируем ошибку cleanup
+		if err = h.replaceTables(ctx, tableName, tempTableName); err != nil {
+			_ = h.tableManager.DropTable(ctx, tempTableName)
 			return fmt.Errorf("failed to replace tables: %w", err)
 		}
-
 	} else {
-		// Прямая вставка без временных таблиц
-		canonicalSchema := packets[0].Schema
+		// Прямая вставка: UPSERT/INSERT в целевую таблицу
 		for i, pkt := range packets {
 			if !packet.SchemaEquals(canonicalSchema, pkt.Schema) {
 				fmt.Printf("  ⚠️  Skipping packet %d/%d: schema mismatch (expected %d fields, got %d)\n",
@@ -149,14 +158,14 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
 
-			if err := h.importDirect(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
+			if err = h.importDirect(ctx, tableName, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
 				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
 			}
 		}
 	}
 
 	// Коммитим транзакцию
-	if err := tx.Commit(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -286,6 +295,49 @@ func ConvertRowToSQLValues(
 
 	for i, value := range rowValues {
 		field := pkgSchema.Fields[i]
+
+		// Декодируем маркеры SpecialValues (v1.3.1) перед разбором типа.
+		// Это гарантирует что SQL NULL восстанавливается корректно для всех типов,
+		// включая TEXT где "" — валидная пустая строка, а не NULL.
+		if sv := field.SpecialValues; sv != nil {
+			if sv.Null != nil && value == sv.Null.Marker {
+				args[i] = nil // принудительный SQL NULL
+				continue
+			}
+			// NoDate: "0000-00-00" → NULL (universal for all DBs)
+			if sv.NoDate != nil && value == sv.NoDate.Marker {
+				args[i] = nil
+				continue
+			}
+			// Date infinity (PostgreSQL uses string literals "infinity"/"-infinity")
+			if isDateFieldType(field.Type) {
+				if sv.Infinity != nil && value == sv.Infinity.Marker {
+					if dbType == "postgres" {
+						args[i] = "infinity" // pgx accepts string "infinity" for DATE/TIMESTAMP
+					} else {
+						args[i] = nil // other DBs don't support date infinity — use NULL
+					}
+					continue
+				}
+				if sv.NegInfinity != nil && value == sv.NegInfinity.Marker {
+					if dbType == "postgres" {
+						args[i] = "-infinity"
+					} else {
+						args[i] = nil
+					}
+					continue
+				}
+			}
+			// Числовые specials: приводим к strconv-совместимым значениям
+			switch {
+			case sv.Infinity != nil && value == sv.Infinity.Marker:
+				value = "+Inf"
+			case sv.NegInfinity != nil && value == sv.NegInfinity.Marker:
+				value = "-Inf"
+			case sv.NaN != nil && value == sv.NaN.Marker:
+				value = "NaN"
+			}
+		}
 
 		// Для ключевых полей (PRIMARY KEY) NULL не допускается
 		nullable := true

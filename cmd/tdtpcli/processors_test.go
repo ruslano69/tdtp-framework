@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
@@ -136,73 +138,137 @@ func TestProcessorManager_AddMaskProcessor(t *testing.T) {
 }
 
 func TestProcessorManager_AddValidateProcessor(t *testing.T) {
-	tests := []struct {
-		name        string
-		rulesFile   string
-		expectError bool
-	}{
-		{
-			name:        "Empty rules file",
-			rulesFile:   "",
-			expectError: false,
-		},
-		{
-			name:        "With rules file",
-			rulesFile:   "rules.yaml",
-			expectError: false,
-		},
+	writeTemp := func(t *testing.T, content string) string {
+		t.Helper()
+		f, err := os.CreateTemp(t.TempDir(), "validate-*.yaml")
+		if err != nil {
+			t.Fatalf("create temp file: %v", err)
+		}
+		if _, err := f.WriteString(content); err != nil {
+			t.Fatalf("write temp file: %v", err)
+		}
+		f.Close()
+		return f.Name()
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pm := NewProcessorManager()
-			err := pm.AddValidateProcessor(tt.rulesFile)
+	t.Run("empty path skips silently", func(t *testing.T) {
+		pm := NewProcessorManager()
+		if err := pm.AddValidateProcessor(""); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if pm.HasProcessors() {
+			t.Error("expected no processors when path is empty")
+		}
+	})
 
-			if tt.expectError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}
-		})
-	}
+	t.Run("yaml without rules section skips silently", func(t *testing.T) {
+		path := writeTemp(t, "# no rules here\nsome_other_key: value\n")
+		pm := NewProcessorManager()
+		if err := pm.AddValidateProcessor(path); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if pm.HasProcessors() {
+			t.Error("expected no processors when rules section is absent")
+		}
+	})
+
+	t.Run("valid rules yaml loads validator", func(t *testing.T) {
+		content := "rules:\n  email: email\n  age: range:0-150\n"
+		path := writeTemp(t, content)
+		pm := NewProcessorManager()
+		if err := pm.AddValidateProcessor(path); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !pm.HasProcessors() {
+			t.Error("expected validator to be added")
+		}
+	})
+
+	t.Run("non-existent file returns error", func(t *testing.T) {
+		pm := NewProcessorManager()
+		err := pm.AddValidateProcessor(filepath.Join(t.TempDir(), "missing.yaml"))
+		if err == nil {
+			t.Error("expected error for missing file, got nil")
+		}
+	})
+
+	t.Run("invalid yaml returns error", func(t *testing.T) {
+		path := writeTemp(t, "rules: [\nbad yaml{{{\n")
+		pm := NewProcessorManager()
+		if err := pm.AddValidateProcessor(path); err == nil {
+			t.Error("expected error for invalid yaml, got nil")
+		}
+	})
+
+	t.Run("invalid rule type returns error", func(t *testing.T) {
+		path := writeTemp(t, "rules:\n  age: nonexistent_rule\n")
+		pm := NewProcessorManager()
+		if err := pm.AddValidateProcessor(path); err == nil {
+			t.Error("expected error for unknown rule type, got nil")
+		}
+	})
 }
 
 func TestProcessorManager_AddNormalizeProcessor(t *testing.T) {
-	tests := []struct {
-		name        string
-		rulesFile   string
-		expectError bool
-	}{
-		{
-			name:        "Empty rules file",
-			rulesFile:   "",
-			expectError: false,
-		},
-		{
-			name:        "With rules file",
-			rulesFile:   "rules.yaml",
-			expectError: false,
-		},
+	writeTemp := func(t *testing.T, content string) string {
+		t.Helper()
+		f, err := os.CreateTemp(t.TempDir(), "normalize-*.yaml")
+		if err != nil {
+			t.Fatalf("create temp file: %v", err)
+		}
+		if _, err := f.WriteString(content); err != nil {
+			t.Fatalf("write temp file: %v", err)
+		}
+		f.Close()
+		return f.Name()
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pm := NewProcessorManager()
-			err := pm.AddNormalizeProcessor(tt.rulesFile)
+	t.Run("empty path skips silently", func(t *testing.T) {
+		pm := NewProcessorManager()
+		if err := pm.AddNormalizeProcessor(""); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if pm.HasProcessors() {
+			t.Error("expected no processors when path is empty")
+		}
+	})
 
-			if tt.expectError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}
-		})
-	}
+	t.Run("yaml without fields section skips silently", func(t *testing.T) {
+		path := writeTemp(t, "# no fields here\nsome_other_key: value\n")
+		pm := NewProcessorManager()
+		if err := pm.AddNormalizeProcessor(path); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if pm.HasProcessors() {
+			t.Error("expected no processors when fields section is absent")
+		}
+	})
+
+	t.Run("valid fields yaml loads normalizer", func(t *testing.T) {
+		content := "fields:\n  email: email\n  phone: phone\n  city: uppercase\n"
+		path := writeTemp(t, content)
+		pm := NewProcessorManager()
+		if err := pm.AddNormalizeProcessor(path); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !pm.HasProcessors() {
+			t.Error("expected normalizer to be added")
+		}
+	})
+
+	t.Run("non-existent file returns error", func(t *testing.T) {
+		pm := NewProcessorManager()
+		err := pm.AddNormalizeProcessor(filepath.Join(t.TempDir(), "missing.yaml"))
+		if err == nil {
+			t.Error("expected error for missing file, got nil")
+		}
+	})
+
+	t.Run("invalid normalize rule returns error", func(t *testing.T) {
+		path := writeTemp(t, "fields:\n  name: nonexistent_rule\n")
+		pm := NewProcessorManager()
+		if err := pm.AddNormalizeProcessor(path); err == nil {
+			t.Error("expected error for unknown rule, got nil")
+		}
+	})
 }

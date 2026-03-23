@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -41,7 +42,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	if err != nil {
 		return packet.Schema{}, fmt.Errorf("failed to get table info: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var fields []packet.Field
 
@@ -90,7 +91,7 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 		fieldNames[i] = field.Name
 	}
 
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("SELECT %s FROM %s",
 		strings.Join(fieldNames, ", "),
 		quotedTable)
@@ -99,7 +100,7 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 	if err != nil {
 		return nil, fmt.Errorf("failed to query table: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return a.scanRows(rows, schema)
 }
@@ -111,7 +112,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 	if err != nil {
 		return nil, fmt.Errorf("failed to query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return a.scanRows(rows, schema)
 }
@@ -119,7 +120,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 // GetRowCount возвращает количество строк в таблице
 // Реализует base.DataReader интерфейс
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
 
 	var count int64
@@ -136,34 +137,5 @@ func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, err
 // scanRows сканирует sql.Rows в [][]string
 // Используется ReadAllRows и ReadRowsWithSQL
 func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, error) {
-	var result [][]string
-
-	// Подготавливаем scanner для всех колонок
-	scanArgs := make([]any, len(schema.Fields))
-	for i := range scanArgs {
-		var v sql.NullString
-		scanArgs[i] = &v
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Конвертируем в строки согласно TDTP формату
-		row := make([]string, len(schema.Fields))
-		for i, arg := range scanArgs {
-			v := arg.(*sql.NullString)
-			if v.Valid {
-				// Используем универсальный конвертер из base
-				row[i] = a.converter.ConvertValueToTDTP(schema.Fields[i], v.String)
-			} else {
-				row[i] = "" // NULL представляется пустой строкой
-			}
-		}
-
-		result = append(result, row)
-	}
-
-	return result, rows.Err()
+	return base.ScanSQLRows(rows, schema, a.converter, "sqlite")
 }

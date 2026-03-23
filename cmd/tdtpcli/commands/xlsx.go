@@ -3,12 +3,14 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"github.com/ruslano69/tdtp-framework/pkg/xlsx"
 )
 
@@ -21,17 +23,58 @@ type XLSXOptions struct {
 	Strategy     adapters.ImportStrategy
 	Query        *packet.Query
 	ProcessorMgr ProcessorManager
+	// S3 output: non-nil → write to temp file, upload to S3, delete temp.
+	StorageCfg *storage.Config
+	StorageKey string // object key for output
 }
 
 // ConvertTDTPToXLSX converts a TDTP XML file to XLSX
 func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 	fmt.Printf("Converting TDTP to XLSX...\n")
 	fmt.Printf("Input: %s\n", opts.InputFile)
-	fmt.Printf("Output: %s\n", opts.OutputFile)
+	if opts.StorageCfg != nil && opts.StorageKey != "" {
+		fmt.Printf("Output: s3://%s/%s\n", opts.StorageCfg.S3.Bucket, opts.StorageKey)
+	} else {
+		fmt.Printf("Output: %s\n", opts.OutputFile)
+	}
 	fmt.Printf("Sheet: %s\n", opts.SheetName)
 
+	// Download input from S3 if needed
+	inputFile := opts.InputFile
+	if storage.IsRemote(opts.InputFile) && opts.StorageCfg != nil {
+		_, uriBucket, inputKey, _ := storage.ParseURI(opts.InputFile)
+		cfg := *opts.StorageCfg
+		if uriBucket != "" {
+			cfg.S3.Bucket = uriBucket
+		}
+		store, err := storage.New(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to open storage: %w", err)
+		}
+		defer func() { _ = store.Close() }()
+		fmt.Printf("  Downloading from s3://%s/%s...\n", cfg.S3.Bucket, inputKey)
+		rc, err := store.Get(ctx, inputKey)
+		if err != nil {
+			return fmt.Errorf("failed to get s3 object %s: %w", inputKey, err)
+		}
+		tmp, err := os.CreateTemp("", "tdtpcli-input-*.tdtp.xml")
+		if err != nil {
+			_ = rc.Close()
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		defer func() { _ = os.Remove(tmp.Name()) }()
+		if _, err := io.Copy(tmp, rc); err != nil {
+			_ = rc.Close()
+			_ = tmp.Close()
+			return fmt.Errorf("failed to download s3 object: %w", err)
+		}
+		_ = rc.Close()
+		_ = tmp.Close()
+		inputFile = tmp.Name()
+	}
+
 	// Read TDTP file
-	data, err := os.ReadFile(opts.InputFile)
+	data, err := os.ReadFile(inputFile)
 	if err != nil {
 		return fmt.Errorf("failed to read TDTP file: %w", err)
 	}
@@ -51,6 +94,14 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		}
 	}
 
+	// Expand compact v1.3.1 format (carry-forward fixed fields) before XLSX conversion
+	if pkt.Data.Compact {
+		fmt.Printf("  Expanding compact format (v1.3.1)...\n")
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			return fmt.Errorf("compact expansion failed: %w", err)
+		}
+	}
+
 	fmt.Printf("✓ Parsed packet for table '%s'\n", pkt.Header.TableName)
 	fmt.Printf("✓ Schema: %d field(s)\n", len(pkt.Schema.Fields))
 	fmt.Printf("✓ Data: %d row(s)\n", len(pkt.Data.Rows))
@@ -66,13 +117,34 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		fmt.Printf("✓ Filtered: %d row(s) matched\n", len(execResult.FilteredRows))
 	}
 
+	// Determine local output path (temp file when uploading to S3)
+	localOutput := opts.OutputFile
+	if opts.StorageCfg != nil && opts.StorageKey != "" {
+		tmp, err := os.CreateTemp("", "tdtpcli-xlsx-*.xlsx")
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		_ = tmp.Close()
+		defer func() { _ = os.Remove(tmp.Name()) }()
+		localOutput = tmp.Name()
+	}
+
 	// Convert to XLSX
-	if err := xlsx.ToXLSX(pkt, opts.OutputFile, opts.SheetName); err != nil {
+	if err := xlsx.ToXLSX(pkt, localOutput, opts.SheetName); err != nil {
 		return fmt.Errorf("conversion failed: %w", err)
 	}
 
-	fmt.Printf("✓ Conversion complete!\n")
-	fmt.Printf("✓ XLSX file: %s\n", opts.OutputFile)
+	// Upload to S3 if configured
+	if opts.StorageCfg != nil && opts.StorageKey != "" {
+		if err := uploadXLSXToS3(ctx, opts.StorageCfg, opts.StorageKey, localOutput); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Conversion complete!\n")
+		fmt.Printf("✓ Uploaded: s3://%s/%s\n", opts.StorageCfg.S3.Bucket, opts.StorageKey)
+	} else {
+		fmt.Printf("✓ Conversion complete!\n")
+		fmt.Printf("✓ XLSX file: %s\n", localOutput)
+	}
 
 	return nil
 }
@@ -109,7 +181,7 @@ func ConvertXLSXToTDTP(opts XLSXOptions) error {
 		// Ensure directory exists
 		dir := filepath.Dir(opts.OutputFile)
 		if dir != "" && dir != "." {
-			if err := os.MkdirAll(dir, 0o755); err != nil {
+			if err := os.MkdirAll(dir, 0o750); err != nil {
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 		}
@@ -132,7 +204,7 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting table '%s' to XLSX...\n", opts.TableName)
 
@@ -156,10 +228,10 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
 
-	// Use first packet (or merge if multiple)
+	// Merge all packets into the first one (XLSX has no size limits unlike TDTP parts)
 	pkt := packets[0]
-	if len(packets) > 1 {
-		fmt.Printf("⚠ Multiple packets detected, using first packet only\n")
+	for _, extra := range packets[1:] {
+		pkt.Data.Rows = append(pkt.Data.Rows, extra.Data.Rows...)
 	}
 
 	// Apply data processors if configured
@@ -171,16 +243,24 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 		fmt.Printf("✓ Data processors applied\n")
 	}
 
-	// Determine output file
-	outputFile := opts.OutputFile
-	if outputFile == "" {
-		outputFile = fmt.Sprintf("%s.xlsx", opts.TableName)
-	}
-
 	// Determine sheet name
 	sheetName := opts.SheetName
 	if sheetName == "" {
 		sheetName = opts.TableName
+	}
+
+	// Determine local output path (temp file when uploading to S3)
+	outputFile := opts.OutputFile
+	if opts.StorageCfg != nil && opts.StorageKey != "" {
+		tmp, err := os.CreateTemp("", "tdtpcli-xlsx-*.xlsx")
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		_ = tmp.Close()
+		defer func() { _ = os.Remove(tmp.Name()) }()
+		outputFile = tmp.Name()
+	} else if outputFile == "" {
+		outputFile = fmt.Sprintf("%s.xlsx", opts.TableName)
 	}
 
 	// Convert to XLSX
@@ -189,9 +269,18 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 	}
 
 	fmt.Printf("✓ Export complete!\n")
-	fmt.Printf("✓ XLSX file: %s\n", outputFile)
 	fmt.Printf("✓ Sheet: %s\n", sheetName)
 	fmt.Printf("✓ Rows: %d\n", len(pkt.Data.Rows))
+
+	// Upload to S3 if configured
+	if opts.StorageCfg != nil && opts.StorageKey != "" {
+		if err := uploadXLSXToS3(ctx, opts.StorageCfg, opts.StorageKey, outputFile); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Uploaded: s3://%s/%s\n", opts.StorageCfg.S3.Bucket, opts.StorageKey)
+	} else {
+		fmt.Printf("✓ XLSX file: %s\n", outputFile)
+	}
 
 	return nil
 }
@@ -227,7 +316,7 @@ func ImportXLSXToTable(ctx context.Context, config *adapters.Config, opts XLSXOp
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	// Import packet
 	if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
@@ -237,5 +326,26 @@ func ImportXLSXToTable(ctx context.Context, config *adapters.Config, opts XLSXOp
 	fmt.Printf("✓ Import complete!\n")
 	fmt.Printf("✓ Table '%s' updated with %d row(s)\n", pkt.Header.TableName, len(pkt.Data.Rows))
 
+	return nil
+}
+
+// uploadXLSXToS3 uploads a local file to S3 and deletes the local file on success.
+func uploadXLSXToS3(ctx context.Context, cfg *storage.Config, key, localPath string) error {
+	store, err := storage.New(*cfg)
+	if err != nil {
+		return fmt.Errorf("failed to open storage: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("failed to open temp file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	fmt.Printf("  Uploading to s3://%s/%s...\n", cfg.S3.Bucket, key)
+	if err := store.Put(ctx, key, f, nil); err != nil {
+		return fmt.Errorf("failed to upload to s3://%s/%s: %w", cfg.S3.Bucket, key, err)
+	}
 	return nil
 }

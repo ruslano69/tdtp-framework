@@ -3,13 +3,16 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // multiPartPattern matches filenames produced by export: {base}_part_{N}_of_{total}{ext}
@@ -18,9 +21,14 @@ var multiPartPattern = regexp.MustCompile(`^(.+)_part_(\d+)_of_(\d+)(\..+)$`)
 // ImportOptions holds options for import operations
 type ImportOptions struct {
 	FilePath     string
-	TargetTable  string // Переопределяет имя таблицы из XML (опционально)
+	TargetTable  string   // Переопределяет имя таблицы из XML (опционально)
+	Fields       []string // Column whitelist: only import these columns (nil/empty = all)
 	Strategy     adapters.ImportStrategy
 	ProcessorMgr ProcessorManager
+
+	// Object storage (S3/SeaweedFS). Non-nil → download from object storage instead of local file.
+	StorageCfg *storage.Config // storage driver config with bucket
+	StorageKey string          // object key within the bucket
 }
 
 // ImportFile imports a TDTP XML file (or multi-part set) to database.
@@ -29,19 +37,71 @@ type ImportOptions struct {
 // passed to adapter.ImportPackets — the framework handles temp table creation,
 // sequential insert of all packets, and atomic swap in one transaction.
 func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions) error {
-	// Detect multi-part set; fall back to single file
-	filePaths := discoverMultiPartFiles(opts.FilePath)
-	if filePaths == nil {
-		filePaths = []string{opts.FilePath}
+	// Collect raw data sources: either S3 objects or local files.
+	type dataSource struct {
+		label string
+		data  []byte
+	}
+
+	var sources []dataSource
+
+	if opts.StorageCfg != nil {
+		// Download from object storage
+		store, err := storage.New(*opts.StorageCfg)
+		if err != nil {
+			return fmt.Errorf("failed to open storage: %w", err)
+		}
+		defer func() { _ = store.Close() }()
+
+		keys := []string{opts.StorageKey}
+		// Check if this is a multi-part base key by listing the bucket with prefix.
+		// Parts are named {base}_part_{N}_of_{total}{ext} — same scheme as local files,
+		// so strip the extension before appending "_part_" (mirrors discoverMultiPartFiles).
+		if !strings.Contains(opts.StorageKey, "_part_") {
+			keyExt := filepath.Ext(opts.StorageKey)
+			keyBase := strings.TrimSuffix(opts.StorageKey, keyExt)
+			objs, err := store.List(ctx, keyBase+"_part_")
+			if err == nil && len(objs) > 0 {
+				keys = make([]string, len(objs))
+				for i, o := range objs {
+					keys[i] = o.Key
+				}
+			}
+		}
+
+		for _, key := range keys {
+			fmt.Printf("Downloading '%s' from s3://%s...\n", key, opts.StorageCfg.S3.Bucket)
+			rc, err := store.Get(ctx, key)
+			if err != nil {
+				return fmt.Errorf("failed to get object %s: %w", key, err)
+			}
+			data, err := io.ReadAll(rc)
+			_ = rc.Close()
+			if err != nil {
+				return fmt.Errorf("failed to read object %s: %w", key, err)
+			}
+			sources = append(sources, dataSource{label: "s3://" + opts.StorageCfg.S3.Bucket + "/" + key, data: data})
+		}
+	} else {
+		// Detect multi-part set; fall back to single file
+		filePaths := discoverMultiPartFiles(opts.FilePath)
+		if filePaths == nil {
+			filePaths = []string{opts.FilePath}
+		}
+		for _, fp := range filePaths {
+			data, err := os.ReadFile(fp)
+			if err != nil {
+				return fmt.Errorf("failed to read file: %w", err)
+			}
+			sources = append(sources, dataSource{label: fp, data: data})
+		}
 	}
 
 	// Read and parse all packets
-	packets := make([]*packet.DataPacket, 0, len(filePaths))
-	for _, fp := range filePaths {
-		data, err := os.ReadFile(fp)
-		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
-		}
+	packets := make([]*packet.DataPacket, 0, len(sources))
+	for _, src := range sources {
+		data := src.data
+		fp := src.label
 
 		fmt.Printf("Reading '%s'...\n", fp)
 
@@ -58,9 +118,24 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
+		// v1.3.1: expand compact format (carry-forward fixed fields) before any further processing
+		if pkt.Data.Compact {
+			fmt.Printf("  Expanding compact format (v1.3.1)...\n")
+			if err := packet.ExpandCompactRows(pkt); err != nil {
+				return fmt.Errorf("failed to expand compact rows: %w", err)
+			}
+		}
+
 		if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
 			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
 				return fmt.Errorf("processor failed: %w", err)
+			}
+		}
+
+		// Apply field whitelist: keep only requested columns
+		if len(opts.Fields) > 0 {
+			if err := filterPacketFields(pkt, opts.Fields); err != nil {
+				return fmt.Errorf("field filter failed: %w", err)
 			}
 		}
 
@@ -88,7 +163,7 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	tableName := packets[0].Header.TableName
 	canonicalSchema := packets[0].Schema
@@ -291,4 +366,44 @@ func extractBatchID(messageID string) string {
 
 	// No "-P" found, return full MessageID (single-part export)
 	return messageID
+}
+
+// filterPacketFields modifies a packet in-place to keep only the specified columns.
+// Returns error if any requested field is not found in the packet schema.
+func filterPacketFields(pkt *packet.DataPacket, fields []string) error {
+	// Build case-insensitive index: field name → position in schema
+	nameToIdx := make(map[string]int, len(pkt.Schema.Fields))
+	for i, f := range pkt.Schema.Fields {
+		nameToIdx[strings.ToLower(f.Name)] = i
+	}
+
+	// Resolve indices and build filtered schema
+	indices := make([]int, 0, len(fields))
+	filteredFields := make([]packet.Field, 0, len(fields))
+	for _, name := range fields {
+		idx, ok := nameToIdx[strings.ToLower(name)]
+		if !ok {
+			return fmt.Errorf("field '%s' not found in packet schema (table '%s')", name, pkt.Header.TableName)
+		}
+		indices = append(indices, idx)
+		filteredFields = append(filteredFields, pkt.Schema.Fields[idx])
+	}
+
+	// Project each row: parse pipe-delimited values, keep only requested columns
+	parser := packet.NewParser()
+	projected := make([][]string, len(pkt.Data.Rows))
+	for i, row := range pkt.Data.Rows {
+		values := parser.GetRowValues(row)
+		proj := make([]string, len(indices))
+		for j, idx := range indices {
+			if idx < len(values) {
+				proj[j] = values[idx]
+			}
+		}
+		projected[i] = proj
+	}
+
+	pkt.Schema.Fields = filteredFields
+	pkt.Data = packet.RowsToData(projected)
+	return nil
 }

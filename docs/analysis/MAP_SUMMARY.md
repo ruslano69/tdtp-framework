@@ -1,252 +1,227 @@
-# 🗺️ PROJECT MAP SUMMARY
+# PROJECT MAP SUMMARY
 
-**Updated:** 2026-02-20
-**Tool:** Manual analysis + funcfinder
-**Session:** claude/fix-adapter-interface-8GrFM
-
----
-
-## 📊 CODE STATISTICS
-
-| Component | Files | Est. Lines | Functions | Status |
-|-----------|-------|------------|-----------|--------|
-| **pkg/etl** | 11 | ~3640 | 80+ | ✅ Framework core |
-| **pkg/xlsx** | 1 | ~300 | 8 | ✅ Verified correct |
-| **pkg/adapters** | 30+ | ~2000 | 50+ | ✅ Framework core |
-| **cmd/tdtp-xray** | 15 | ~4442 | 100+ | ✅ Fixed today |
+**Updated:** 2026-02-25
+**Tool:** funcfinder v1.6.118 (auto-generated)
+**Branch:** claude/test-rdptcli-where-conditions-HQULZ
 
 ---
 
-## ✅ COMPONENTS VERIFIED TODAY
+## CODE STATISTICS
 
-### 1. pkg/etl/workspace.go
-**Status:** ✅ WORKS CORRECTLY
+### Go Source (production, excl. examples)
 
-**Key Functions:**
-- `NewWorkspace()` — creates :memory: SQLite
-- `CreateTable()` — uses types from schema ✅
-- `LoadData()` — bulk insert
-- `ExecuteSQL()` — query execution
-- `mapTDTPTypeToSQLite()` — type mapping
+| Component | Files | Lines | Functions | Structs/Types | Tests |
+|-----------|------:|------:|----------:|--------------:|------:|
+| **pkg/adapters** | 27 | 7 790 | 317 | 15+ | 27 |
+| **pkg/core** | 21 | 4 552 | 347 | 54 | 153 |
+| **pkg/etl** | 7 | 2 382 | 82 | — | 14 |
+| **pkg/processors** | 8 | 1 406 | 96 | — | 24 |
+| **pkg/resilience** | 3 | 692 | 54 | — | 13 |
+| **pkg/xlsx** | 1 | 298 | 7 | — | 0 |
+| **cmd/tdtp-xray** | 8 | 4 442 | 255 | 55 | 0 |
+| **cmd/tdtpcli** | 18 | 4 508 | 94 | — | 10 |
+| **cmd/tdtpserve** | 3 | 927 | 19 | — | 0 |
+| **TOTAL** | **125** | **32 850** | **~1 271** | **~125** | **241** |
 
-**Type Handling:**
-- INTEGER → INTEGER ✅
-- REAL/DECIMAL → REAL ✅
-- DATE/DATETIME → TEXT ✅
-- BOOLEAN → INTEGER (0/1) ✅
-- BLOB → BLOB ✅
+### Other languages
 
----
-
-### 2. pkg/xlsx/converter.go
-**Status:** ✅ VERIFIED - NO ISSUES
-
-**Key Functions:**
-- `ToXLSX()` — TDTP → Excel export
-- `FromXLSX()` — Excel → TDTP import
-- `parseHeader()` — extracts types from headers
-- `typedValueToExcel()` — type-safe conversion
-- `applyCellFormat()` — Excel native formatting
-
-**Type Preservation:**
-- EXPORT: Types saved in headers `field_name (TYPE)` ✅
-- EXPORT: Excel formats applied (numbers, dates) ✅
-- IMPORT: Types restored from headers ✅
-- IMPORT: Schema reconstructed correctly ✅
-
-**Uses Framework:**
-- `schema.Converter.ParseValue()` ✅
-- `packet.Parser.GetRowValues()` ✅
-- NO duplicate logic ✅
+| Language | Files | Functions |
+|----------|------:|----------:|
+| Python (bindings/) | 32 | 209 |
+| JavaScript (wizard.js, validation.js) | 2 | ~130 |
+| C# (libcs/) | 1 | — |
 
 ---
 
-### 3. cmd/tdtp-xray/app.go
-**Status:** ✅ FIXED TODAY
+## PACKAGE DEPENDENCY GRAPH (internal)
 
-**Changes Made:**
-1. Added `ColumnTypes map[string]string` to PreviewResult ✅
-2. Extract column types from all DB sources ✅
-3. Map database types to SQLite types ✅
-4. Use types in createAndFillTable() ✅
+Most-imported internal packages (by import count across all Go files):
 
-**Type Support:**
-- TDTP files: from schema ✅
-- PostgreSQL: from ColumnTypes() ✅
-- MySQL: from ColumnTypes() ✅
-- MSSQL: from ColumnTypes() ✅
-- SQLite: from ColumnTypes() ✅
-
-**Type Mapping:**
-```go
-func mapTDTPToSQLiteType(dbType string) string {
-    // PostgreSQL: INT4, FLOAT8, TIMESTAMPTZ, BYTEA
-    // MySQL: BIGINT, DOUBLE, DATETIME, BLOB
-    // MSSQL: INT, MONEY, DATETIME, VARBINARY
-    // TDTP: INTEGER, DECIMAL, DATE, BINARY
-
-    Contains("INT") → INTEGER
-    Contains("FLOAT/DOUBLE/DECIMAL") → REAL
-    Contains("DATE/TIME/TIMESTAMP") → TEXT
-    Contains("BOOL/BIT") → INTEGER
-    Contains("BLOB/BINARY/BYTEA") → BLOB
-    default → TEXT
-}
+```
+pkg/core/packet       98 imports  ← universal data carrier
+pkg/adapters          46 imports  ← DB I/O
+pkg/core/schema       31 imports  ← type system
+pkg/core/tdtql        16 imports  ← query language
+pkg/processors        11 imports  ← transforms
+pkg/etl                6 imports  ← pipeline runner
+pkg/adapters/base      6 imports  ← shared DB logic
+pkg/brokers            5 imports  ← message queues
+pkg/audit              4 imports  ← logging
+pkg/sync               3 imports  ← replication helpers
+pkg/xlsx               3 imports  ← Excel I/O
 ```
 
 ---
 
-### 4. cmd/tdtp-xray/services/preview_service.go
-**Status:** ✅ FIXED TODAY
+## COMPONENT BREAKDOWN
 
-**Changes Made:**
-1. Added `ColumnTypes map[string]string` field ✅
-2. Extract types via `rows.ColumnTypes()` ✅
-3. Return types in PreviewResult ✅
+### pkg/core — Framework Core (4 552 lines)
 
-**Before:**
-```go
-type PreviewResult struct {
-    Columns []string  // ❌ No type info
-    Rows    []map[string]any
-}
+**Subpackages:**
+
+| Subpackage | Key Types | Key Functions |
+|------------|-----------|---------------|
+| `schema` | `Builder`, `TypedValue`, `FieldDef`, `Converter`, `Validator` | ParseValue, Validate, Convert |
+| `tdtql` | `Parser`, `Lexer`, `SQLGenerator`, `FilterEngine`, `Executor`, `Translator` | Parse, GenerateSQL, Execute, Filter |
+| `tdtql/ast` | `SelectStatement`, `BinaryExpression`, `ComparisonExpression`, `InExpression`, `BetweenExpression`, `IsNullExpression`, `OrderByClause` | — (AST nodes) |
+| `packet` | `Query`, `Filters`, `Filter`, `LogicalGroup`, `OrderBy`, `OrderField` | — |
+
+**TDTQL AST** — full SQL subset implemented:
+- Binary ops: `AND`, `OR`
+- Comparisons: `=`, `!=`, `<`, `>`, `<=`, `>=`
+- Special: `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`
+- Ordering: `ORDER BY` with `ASC`/`DESC`
+
+---
+
+### pkg/adapters — Database Adapters (7 790 lines)
+
+**Interfaces:**
+
+```
+Adapter (adapter.go)          ← main interface
+├── IncrementalConfig         ← incremental sync config
+├── SSLConfig                 ← TLS params
+├── Tx                        ← transaction handle
+└── ViewInfo                  ← view metadata
+
+base/StandardSQLAdapter       ← shared SQL implementation
+base/MSSQLAdapter             ← MSSQL-specific
+base/ImportHelper             ← bulk insert helpers
+    ├── TableManager
+    ├── DataInserter
+    └── TransactionManager
 ```
 
-**After:**
-```go
-type PreviewResult struct {
-    Columns     []string
-    ColumnTypes map[string]string  // ✅ Type info!
-    Rows        []map[string]any
-}
+**Implemented adapters:** mssql, postgres, sqlite, mysql, clickhouse, oracle, redis, rabbitmq, kafka
+
+---
+
+### pkg/etl — Pipeline Runner (2 382 lines)
+
+Key functions:
+- `loader.go` — source loading, multi-part support, TDTP decompression
+- `exporter.go` — output writing (TDTP, XLSX, DB)
+- `workspace.go` — `:memory:` SQLite for transform execution
+- `config.go` — ETL YAML config parsing
+
+Type mapping (workspace):
+```
+INTEGER → INTEGER
+REAL/DECIMAL → REAL
+DATE/DATETIME → TEXT
+BOOLEAN → INTEGER (0/1)
+BLOB → BLOB
 ```
 
 ---
 
-## 🎯 KEY FINDINGS
+### cmd/tdtp-xray — Visual ETL Designer (4 442 lines Go + JS)
 
-### ✅ NO CRITICAL ISSUES
+**Go backend (app.go, services/):**
 
-1. **Type Preservation Works**
-   - pkg/etl: Always worked correctly ✅
-   - pkg/xlsx: Verified - works correctly ✅
-   - cmd/tdtp-xray: FIXED today ✅
+| Service | Structs | Key Functions |
+|---------|---------|---------------|
+| `App` (app.go) | 50+ structs | GenerateSQL, PreviewTransform, SaveToRepository, LoadFromRepository, ValidateTransformationSQL |
+| `ConnectionService` | 1 | TestConnection, GetTables, GetViews, QuickTest |
+| `ValidationService` | 1 | ValidateTransformationSQL, findColumnConflicts, SuggestMultiSourcePrefixes, GenerateCastWithPrefix |
+| `PreviewService` | 1 | PreviewQuery, PreviewMockSource, PreviewTDTPSource, EstimateRowCount |
+| `MetadataService` | 1 | GetTableSchema, InferTDTPSchema, getPrimaryKeys |
+| `SourceService` | 3 | LoadMockSource, ValidateRealSource, InferSchemaFromTable |
+| `TDTPService` | 2 | TestTDTPFile, collectAllParts, decompressPacket |
 
-2. **NO Duplicate Logic**
-   - XLSX uses `schema.Converter` ✅
-   - All components use framework primitives ✅
+**JavaScript frontend (wizard.js ~4 500 lines, validation.js):**
 
-3. **ConnectionService - NOT a Duplicate**
-   - Provides UI-specific functionality ✅
-   - GetTables()/GetViews() not in pkg/adapters ✅
-   - Needed for dropdown lists ✅
+The wizard implements a 7-step pipeline builder:
 
-4. **mapTDTPToSQLiteType - NOT a Duplicate**
-   - Different interfaces (string vs schema.DataType) ✅
-   - Used in different contexts ✅
-   - Both implementations needed ✅
+| Step | Description | Key JS functions |
+|------|-------------|-----------------|
+| Step 1 | Pipeline name/config | validatePipelineName, loadConfigurationFile, saveConfigurationFile |
+| Step 2 | Source management | renderSourceList, testConnection, saveSourceForm, generateDSN |
+| Step 3 | Canvas/JOIN designer | addTableToCanvas, renderCanvas, createTableCard, openFilterBuilder, cycleSortState, resetFieldSort, openSelectCastDialog |
+| Step 4 | Transform SQL preview | previewTransform, useGeneratedSQL |
+| Step 5 | Output config | loadOutputFormData, onOutputTypeChange |
+| Step 6 | Settings | setDefaultSettings, saveStep6 |
+| Step 7 | YAML generation | renderConfigSummary, generateAndShowYAML, saveYAMLToFile |
 
----
-
-## 📋 IMPROVEMENTS MADE TODAY
-
-### 1. Type Preservation for All Sources
-**Files Changed:**
-- `services/preview_service.go` — added ColumnTypes
-- `app.go` — use types in createAndFillTable()
-
-**Impact:**
-- BEFORE: All columns TEXT in inmemory SQLite ❌
-- AFTER: Proper types (INTEGER, REAL, etc) ✅
-
-### 2. SELECT CAST Functionality
-**Files Changed:**
-- `frontend/src/scripts/wizard.js` — clickable field names
-- `app.go` — SelectCast/SelectAlias in FieldDesign
-
-**Impact:**
-- Click field name → CAST dialog
-- Choose type + alias
-- SQL: `CAST(field AS TYPE) AS alias`
-
-### 3. Clear Filters Confirmation
-**Files Changed:**
-- `frontend/src/scripts/wizard.js` — confirmation dialog
-
-**Impact:**
-- BEFORE: One-click deletion without warning ❌
-- AFTER: Confirmation dialog with filter count ✅
-
-### 4. Clear Button Resets Sort
-**Files Changed:**
-- `frontend/src/scripts/wizard.js` — clear sort/sortCast
-
-**Impact:**
-- BEFORE: Clear only filter, sort stuck ❌
-- AFTER: Clear filter + sort + sortCast ✅
-
-### 5. LIMIT/OFFSET in SQL
-**Files Changed:**
-- `app.go` — apply LIMIT/OFFSET in GenerateSQL()
-
-**Impact:**
-- BEFORE: LIMIT ignored in generated SQL ❌
-- AFTER: LIMIT/OFFSET applied correctly ✅
+**Repository (SQLite `configs.db`):**
+- `SaveToRepository`, `ListRepositoryConfigs`, `LoadFromRepository`, `DeleteFromRepository`
+- Filter by name, technology flags (`us_pg`, `us_mssql`, etc.), AND/OR logic
 
 ---
 
-## 🚀 COMMITS TODAY
+### cmd/tdtpcli — CLI Tool (4 508 lines)
 
-1. `fix: correct SQLSQLColumnInfo → SQLColumnInfo` (d5fe80b)
-2. `feat: add confirmation dialog before clearing all filters` (80352c7)
-3. `fix: apply LIMIT/OFFSET to generated SQL` (d51e83a)
-4. `fix: Clear button now resets filter AND sort/sortCast` (18fa3a7)
-5. `feat: add CAST for SELECT via clickable field names` (09c7982)
-6. `fix: use TDTP schema types in inmemory SQLite tables` (3517656)
-7. `feat: preserve column types from all database sources` (e7551c8)
-8. `docs: add refactoring plan based on funcfinder analysis` (d5fe80b)
-9. `docs: add XLSX adapter analysis - types preserved correctly` (5627232)
+**Commands:**
 
-**Total:** 9 commits, ~500 lines changed
+| Command file | Description |
+|---|---|
+| `html.go` | NEW: TDTP → HTML viewer (ConvertTDTPToHTML, renderHTML, openInBrowser) |
+| `export.go` | Export DB → TDTP |
+| `import.go` | Import TDTP → DB |
+| `broker.go` | RabbitMQ/Kafka integration |
+| `pipeline.go` | Run ETL pipeline |
+| `diff.go` | Compare two TDTP files |
+| `merge.go` | Merge TDTP files |
+| `sync.go` | Incremental sync |
+| `xlsx.go` | TDTP ↔ XLSX |
+| `list.go` | List TDTP contents |
 
----
-
-## 💡 CONCLUSIONS
-
-### What We Learned:
-
-1. **"Duplicates" weren't really duplicates**
-   - Different interfaces for different purposes
-   - ConnectionService = UI layer
-   - mapTDTPToSQLiteType = different input types
-
-2. **Framework already works correctly**
-   - pkg/etl: types always preserved ✅
-   - pkg/xlsx: types always preserved ✅
-   - Only tdtp-xray needed fixes ✅
-
-3. **Refactoring not critical**
-   - Code works after today's fixes ✅
-   - No performance issues ✅
-   - Architecture is sound ✅
-
-### Recommendations:
-
-1. **Keep current architecture** ✅
-   - UI layer (tdtp-xray) separate from framework
-   - Specialized services for UI needs
-   - Framework primitives reused where possible
-
-2. **Add tests** (next step)
-   - Unit tests for type conversion
-   - Integration tests for preview
-   - Regression tests for UI
-
-3. **Documentation** (next step)
-   - API docs for ConnectionService
-   - Examples for XLSX adapter
-   - Architecture diagrams
+**Key flags (new):**
+- `--limit N` — first N rows (negative = last N, tail mode)
+- `--row N` — single row view
+- `-h` — short alias for `--help`
 
 ---
 
-**MAP VERIFIED ✅ — NO CRITICAL ISSUES FOUND**
+### pkg/resilience (692 lines)
+
+- `circuit_breaker.go` — circuit breaker pattern
+- Protects external connections (DB, broker) from cascade failures
+
+---
+
+## ARCHITECTURE PRINCIPLES
+
+1. **Single source of truth** — `pkg/core/packet` is the universal data carrier between all components
+2. **Adapter pattern** — all DB engines implement `Adapter` interface; callers are agnostic
+3. **ETL separation** — source loading, transform (SQLite workspace), output export are independent stages
+4. **UI layer isolation** — `cmd/tdtp-xray` is a self-contained Wails app; it uses `pkg/etl` and `pkg/adapters` but adds its own service layer for UI-specific logic
+5. **Type preservation chain** — DB types → TDTP schema types → SQLite in-memory types → output types
+
+---
+
+## NEW SINCE LAST ANALYSIS (2026-02-20)
+
+| Area | Change |
+|------|--------|
+| `cmd/tdtpcli/commands/html.go` | NEW — HTML viewer command (+478 lines) |
+| `cmd/tdtp-xray/services/validation_service.go` | NEW — SQL validation service (+242 lines) |
+| `cmd/tdtp-xray/frontend/src/scripts/validation.js` | NEW — realtime SQL validation in UI (+343 lines) |
+| `cmd/tdtp-xray/app.go` | +833 lines: repository, validation API, CAST support |
+| `cmd/tdtp-xray/frontend/src/scripts/wizard.js` | +1 251 lines: ORDER BY, IS NULL ops, field toolbar, CAST in WHERE |
+| `pkg/adapters/mssql/hex.go` | Optimized: timestamp→hex 3.33x faster, zero allocs |
+| `pkg/core/tdtql/sql_generator.go` | IS NULL / IS NOT NULL operators |
+| `pkg/etl/loader.go` | +116 lines: TDTP file source support |
+| `pkg/etl/exporter.go` | +42 lines: XLSX output |
+| `docs/` | 9 old doc files removed (~9 000 lines), DEVELOPER_GUIDE rewritten |
+| **funcfinder** | Updated v1.5.0 → **v1.6.118** (--struct extract fix, --dir . fix, auto-version) |
+
+---
+
+## TEST COVERAGE SNAPSHOT
+
+| Package | Test funcs | Notes |
+|---------|----------:|-------|
+| pkg/core | 153 | Best coverage in project |
+| pkg/processors | 24 | — |
+| pkg/adapters | 27 | Integration (require DB) |
+| pkg/resilience | 13 | — |
+| pkg/etl | 14 | — |
+| cmd/tdtpcli | 10 | — |
+| cmd/tdtp-xray | 0 | UI — no automated tests |
+| pkg/xlsx | 0 | Missing |
+
+**Total test functions: 241**
+
+---

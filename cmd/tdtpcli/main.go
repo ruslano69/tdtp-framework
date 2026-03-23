@@ -15,12 +15,14 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 
 	// Database adapters - blank imports for init() registration
+	// SQLite is in a separate file (drivers_sqlite.go) with a build tag
+	// so it can be excluded in environments where modernc.org/sqlite is unavailable.
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
-	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 )
 
 // routeCommand routes the command to the appropriate handler with production features
@@ -40,12 +42,12 @@ func routeCommand(
 
 	// Database commands
 	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
-	if *flags.List {
+	if flags.List.IsSet {
 		operation = audit.OpQuery
-		metadata = map[string]string{"command": "list"}
+		metadata = map[string]string{"command": "list", "pattern": flags.List.Pattern}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-tables", func() error {
-			return commands.ListTables(ctx, adapterConfig)
+			return commands.ListTables(ctx, adapterConfig, flags.List.Pattern)
 		})
 
 	} else if *flags.ListViews {
@@ -56,12 +58,51 @@ func routeCommand(
 			return commands.ListViews(ctx, adapterConfig)
 		})
 
+	} else if *flags.ToCompact != "" {
+		operation = audit.OpTransform
+		outputCompact := determineOutputFile(*flags.Output, *flags.ToCompact, "xml")
+		// Don't rename if output equals input (in-place overwrite)
+		if *flags.Output == "" {
+			outputCompact = *flags.ToCompact
+		}
+		metadata = map[string]string{
+			"command": "to-compact",
+			"input":   *flags.ToCompact,
+			"output":  outputCompact,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "to-compact", func() error {
+			return commands.ConvertToCompact(commands.ConvertCompactOptions{
+				InputFile:   *flags.ToCompact,
+				OutputFile:  outputCompact,
+				FixedFields: splitCommaSeparated(*flags.FixedFields),
+				Tail:        *flags.CompactTail,
+			})
+		})
+
 	} else if *flags.Export != "" {
 		// Merge compression settings: flag takes precedence, then config
 		compress := *flags.Compress || config.Export.Compress
 		compressLevel := *flags.CompressLevel
 		if compressLevel == 3 && config.Export.CompressLevel > 0 {
 			compressLevel = config.Export.CompressLevel
+		}
+
+		outputFile := determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml")
+
+		// Resolve storage target: s3:// URI → object storage; otherwise local file.
+		var exportStorageCfg *storage.Config
+		exportStorageKey := ""
+		if storage.IsRemote(outputFile) {
+			var uriBucket string
+			_, uriBucket, exportStorageKey, _ = storage.ParseURI(outputFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			exportStorageCfg = &sc
+			outputFile = "" // not writing to local file
 		}
 
 		operation = audit.OpExport
@@ -74,13 +115,20 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
 			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
 				TableName:      *flags.Export,
-				OutputFile:     determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
+				OutputFile:     outputFile,
 				Query:          query,
+				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
 				Compress:       compress,
 				CompressLevel:  compressLevel,
+				CompressAlgo:   *flags.CompressAlgo,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
+				Compact:        *flags.Compact,
+				FixedFields:    splitCommaSeparated(*flags.FixedFields),
+				CompactTail:    *flags.CompactTail,
+				StorageCfg:     exportStorageCfg,
+				StorageKey:     exportStorageKey,
 			})
 		})
 
@@ -88,6 +136,23 @@ func routeCommand(
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
 		if stratErr != nil {
 			return stratErr
+		}
+
+		importFile := *flags.Import
+
+		// Resolve storage source: s3:// URI → object storage; otherwise local file.
+		var importStorageCfg *storage.Config
+		importStorageKey := ""
+		if storage.IsRemote(importFile) {
+			var uriBucket string
+			_, uriBucket, importStorageKey, _ = storage.ParseURI(importFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			importStorageCfg = &sc
+			importFile = "" // not reading from local file
 		}
 
 		operation = audit.OpImport
@@ -99,10 +164,13 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
-				FilePath:     *flags.Import,
+				FilePath:     importFile,
 				TargetTable:  *flags.Table,
+				Fields:       splitCommaSeparated(*flags.Fields),
 				Strategy:     strategy,
 				ProcessorMgr: procMgr,
+				StorageCfg:   importStorageCfg,
+				StorageKey:   importStorageKey,
 			})
 		})
 
@@ -121,10 +189,10 @@ func routeCommand(
 		if *flags.Row != "" {
 			parts := strings.SplitN(*flags.Row, "-", 2)
 			if len(parts) == 2 {
-				rowStart, _ = strconv.Atoi(parts[0])
-				rowEnd, _ = strconv.Atoi(parts[1])
+				rowStart, _ = strconv.Atoi(parts[0]) //nolint:errcheck // invalid values are silently treated as 0
+				rowEnd, _ = strconv.Atoi(parts[1])   //nolint:errcheck // invalid values are silently treated as 0
 			} else if len(parts) == 1 {
-				rowStart, _ = strconv.Atoi(parts[0])
+				rowStart, _ = strconv.Atoi(parts[0]) //nolint:errcheck // invalid values are silently treated as 0
 			}
 		}
 
@@ -142,6 +210,32 @@ func routeCommand(
 
 		// XLSX commands
 	} else if *flags.ToXLSX != "" {
+		xlsxOutputFile := determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx")
+		var xlsxStorageCfg *storage.Config
+		xlsxStorageKey := ""
+		if storage.IsRemote(xlsxOutputFile) {
+			var uriBucket string
+			_, uriBucket, xlsxStorageKey, _ = storage.ParseURI(xlsxOutputFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			xlsxStorageCfg = &sc
+			xlsxOutputFile = ""
+		}
+		// Also set StorageCfg for S3 input (--to-xlsx s3://...)
+		if storage.IsRemote(*flags.ToXLSX) && xlsxStorageCfg == nil {
+			var uriBucket string
+			_, uriBucket, _, _ = storage.ParseURI(*flags.ToXLSX)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			xlsxStorageCfg = &sc
+		}
+
 		operation = audit.OpTransform
 		metadata = map[string]string{
 			"command": "to-xlsx",
@@ -152,9 +246,11 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-xlsx", func() error {
 			return commands.ConvertTDTPToXLSX(ctx, commands.XLSXOptions{
 				InputFile:  *flags.ToXLSX,
-				OutputFile: determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
+				OutputFile: xlsxOutputFile,
 				SheetName:  *flags.Sheet,
 				Query:      query,
+				StorageCfg: xlsxStorageCfg,
+				StorageKey: xlsxStorageKey,
 			})
 		})
 
@@ -175,6 +271,21 @@ func routeCommand(
 		})
 
 	} else if *flags.ExportXLSX != "" {
+		exXlsxOutputFile := determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx")
+		var exXlsxStorageCfg *storage.Config
+		exXlsxStorageKey := ""
+		if storage.IsRemote(exXlsxOutputFile) {
+			var uriBucket string
+			_, uriBucket, exXlsxStorageKey, _ = storage.ParseURI(exXlsxOutputFile)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			exXlsxStorageCfg = &sc
+			exXlsxOutputFile = ""
+		}
+
 		operation = audit.OpExport
 		metadata = map[string]string{
 			"command": "export-xlsx",
@@ -185,10 +296,12 @@ func routeCommand(
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table-to-xlsx", func() error {
 			return commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
 				TableName:    *flags.ExportXLSX,
-				OutputFile:   determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
+				OutputFile:   exXlsxOutputFile,
 				SheetName:    *flags.Sheet,
 				Query:        query,
 				ProcessorMgr: procMgr,
+				StorageCfg:   exXlsxStorageCfg,
+				StorageKey:   exXlsxStorageKey,
 			})
 		})
 
@@ -242,7 +355,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, *flags.CompressAlgo, procMgr, *flags.PacketSize)
 		})
 
 	} else if *flags.ImportBroker {
@@ -262,7 +375,11 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
-			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, strategy)
+			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, commands.ImportBrokerOptions{
+				Strategy:    strategy,
+				TargetTable: *flags.Table,
+				OutputFile:  *flags.Output,
+			})
 		})
 
 		// Incremental Sync command
@@ -283,6 +400,7 @@ func routeCommand(
 				TrackingField:  *flags.TrackingField,
 				CheckpointFile: *flags.CheckpointFile,
 				BatchSize:      *flags.BatchSize,
+				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
 			})
 		})
@@ -300,8 +418,21 @@ func routeCommand(
 			"mode":    modeLabel,
 		}
 
+		// Читаем --enc-dev флаг через flag.Lookup (флаг зарегистрирован только в !production сборках;
+		// в production Lookup вернёт nil → encDev остаётся false).
+		encDev := false
+		if f := flag.Lookup("enc-dev"); f != nil {
+			encDev = f.Value.String() == "true"
+		}
+
+		pipelineOpts := commands.PipelineOptions{
+			Unsafe:  *flags.Unsafe,
+			Encrypt: *flags.Encrypt,
+			EncDev:  encDev,
+		}
+
 		err = prodFeatures.ExecuteWithResilience(ctx, "etl-pipeline", func() error {
-			return commands.ExecutePipeline(ctx, *flags.Pipeline, *flags.Unsafe)
+			return commands.ExecutePipeline(ctx, *flags.Pipeline, pipelineOpts)
 		})
 
 		// Process Request command
@@ -379,6 +510,43 @@ func routeCommand(
 				Compress:      *flags.Compress,
 				ShowConflicts: *flags.ShowConflicts,
 			})
+		})
+
+		// Inspect command — no DB connection required, runs directly
+	} else if *flags.Inspect != "" {
+		var inspectStorageCfg *storage.Config
+		if storage.IsRemote(*flags.Inspect) {
+			var uriBucket string
+			_, uriBucket, _, _ = storage.ParseURI(*flags.Inspect)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			inspectStorageCfg = &sc
+		}
+		return commands.InspectFile(ctx, *flags.Inspect, inspectStorageCfg)
+		// [BETA] Streaming consumer daemon — Kafka only
+	} else if *flags.Listen {
+		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
+		if stratErr != nil {
+			return stratErr
+		}
+
+		brokerCfg := buildBrokerConfig(config)
+
+		operation = audit.OpImport
+		metadata = map[string]string{
+			"command":  "listen",
+			"broker":   brokerCfg.Type,
+			"topic":    brokerCfg.Queue,
+			"strategy": *flags.Strategy,
+		}
+
+		// Listen runs until SIGTERM — bypass resilience wrapper (it's an infinite loop)
+		err = commands.ListenKafkaStream(ctx, adapterConfig, commands.ListenConfig{
+			BrokerCfg: &brokerCfg,
+			Strategy:  strategy,
 		})
 	}
 
@@ -480,14 +648,26 @@ func main() {
 
 	// Build adapter config
 	adapterConfig := adapters.Config{
-		Type: config.Database.Type,
-		DSN:  config.Database.BuildDSN(),
+		Type:    config.Database.Type,
+		DSN:     config.Database.BuildDSN(),
+		Charset: config.Database.Charset,
 	}
 
 	// Build TDTQL query from flags
-	query, err := BuildTDTQLQuery(*flags.Where, *flags.OrderBy, *flags.Limit, *flags.Offset)
+	query, err := BuildTDTQLQuery([]string(flags.Where), *flags.OrderBy, *flags.Limit, *flags.Offset)
 	if err != nil {
 		fatal("Failed to build query: %v", err)
+	}
+
+	// Inject column projection into query when --fields is specified.
+	// This covers export-broker, export-xlsx and any other path that
+	// receives *packet.Query directly. For --export and --import the
+	// fields are also propagated via ExportOptions/ImportOptions.
+	if *flags.Fields != "" {
+		if query == nil {
+			query = packet.NewQuery()
+		}
+		query.Fields = splitCommaSeparated(*flags.Fields)
 	}
 
 	// Route commands with production features and processors
@@ -520,16 +700,22 @@ func createConfigTemplate(dbType string) {
 // buildBrokerConfig builds broker configuration from config
 func buildBrokerConfig(config *Config) commands.BrokerConfig {
 	return commands.BrokerConfig{
-		Type:       config.Broker.Type,
-		Host:       config.Broker.Host,
-		Port:       config.Broker.Port,
-		User:       config.Broker.User,
-		Password:   config.Broker.Password,
-		Queue:      config.Broker.Queue,
-		VHost:      config.Broker.VHost,
-		UseTLS:     config.Broker.UseTLS,
-		Exchange:   config.Broker.Exchange,
-		RoutingKey: config.Broker.RoutingKey,
+		Type:           config.Broker.Type,
+		Host:           config.Broker.Host,
+		Port:           config.Broker.Port,
+		User:           config.Broker.User,
+		Password:       config.Broker.Password,
+		Queue:          config.Broker.Queue,
+		VHost:          config.Broker.VHost,
+		UseTLS:         config.Broker.UseTLS,
+		TLSSkipVerify:  config.Broker.TLSSkipVerify,
+		Exchange:       config.Broker.Exchange,
+		RoutingKey:     config.Broker.RoutingKey,
+		Durable:        config.Broker.Durable,
+		AutoDelete:     config.Broker.AutoDelete,
+		Exclusive:      config.Broker.Exclusive,
+		PassiveDeclare: config.Broker.PassiveDeclare,
+		QueuePath:      config.Broker.QueuePath,
 	}
 }
 
@@ -564,10 +750,11 @@ func splitCommaSeparated(s string) []string {
 
 // commandWasSpecified checks if any command was specified
 func commandWasSpecified(flags *Flags) bool {
-	return *flags.List ||
+	return flags.List.IsSet ||
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
+		*flags.ToCompact != "" ||
 		*flags.ToHTML != "" ||
 		*flags.ToXLSX != "" ||
 		*flags.FromXLSX != "" ||
@@ -579,7 +766,9 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Pipeline != "" ||
 		*flags.ProcessRequest != "" ||
 		*flags.Diff != "" ||
-		*flags.Merge != ""
+		*flags.Merge != "" ||
+		*flags.Inspect != "" ||
+		*flags.Listen
 }
 
 // fatal prints error and exits

@@ -187,6 +187,32 @@ go test -v -timeout 60s ./tests/integration/...
 docker-compose down -v
 ```
 
+## TestXzmercuryPipeline (без Docker)
+
+Полный интеграционный тест всей системы — без внешних зависимостей:
+
+```bash
+# из корня репозитория
+go test -v -timeout 120s -run TestXzmercuryPipeline ./tests/integration/
+# или через make
+make test-xzmercury
+```
+
+Что проверяется:
+
+| Компонент | Режим |
+|-----------|-------|
+| xzmercury ACL / quota / keystore | реальный код, `--dev` флаг |
+| Redis | in-process miniredis (два экземпляра) |
+| LDAP | mock (ldap-users.json built-in) |
+| tdtpcli `--pipeline` | реальный binary |
+| ETL: load → SQLite workspace → transform → encrypt | полный прогон |
+| AES-256-GCM заголовок выходного файла | проверяется |
+| Второй запуск (новый UUID → новый ключ) | проверяется |
+
+Тест запускает xzmercury как subprocess (`go run`) на свободном порту,
+подставляет URL в `pipeline.yaml` и вызывает `tdtpcli --pipeline`.
+
 ## Notes
 
 - Tests use temporary queues with `auto_delete=true` to clean up automatically

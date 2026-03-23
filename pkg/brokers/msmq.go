@@ -15,11 +15,12 @@ import (
 // MSMQ реализует MessageBroker для Microsoft Message Queuing (Windows only)
 // Использует COM API через go-ole
 type MSMQ struct {
-	config      Config
-	queueInfo   *ole.IDispatch
-	sendQueue   *ole.IDispatch
-	recvQueue   *ole.IDispatch
-	initialized bool
+	config        Config
+	queueInfo     *ole.IDispatch
+	sendQueue     *ole.IDispatch
+	recvQueue     *ole.IDispatch
+	recvQueueInfo *ole.IDispatch // держим живым пока recvQueue открыт
+	initialized   bool
 }
 
 // MSMQ константы доступа
@@ -131,6 +132,12 @@ func (m *MSMQ) Close() error {
 		m.recvQueue = nil
 	}
 
+	// Освобождаем recvQueueInfo после закрытия recvQueue
+	if m.recvQueueInfo != nil {
+		m.recvQueueInfo.Release()
+		m.recvQueueInfo = nil
+	}
+
 	// Освобождаем QueueInfo
 	if m.queueInfo != nil {
 		m.queueInfo.Release()
@@ -152,11 +159,13 @@ func (m *MSMQ) Send(ctx context.Context, message []byte) error {
 
 	// Открываем очередь для отправки (если еще не открыта)
 	if m.sendQueue == nil {
-		result, err := oleutil.CallMethod(m.queueInfo, "Open", MQ_SEND_ACCESS, MQ_DENY_NONE)
+		result, err := oleutil.CallMethod(m.queueInfo, "Open", int32(MQ_SEND_ACCESS), int32(MQ_DENY_NONE))
 		if err != nil {
 			return fmt.Errorf("failed to open queue for sending: %w", err)
 		}
 		m.sendQueue = result.ToIDispatch()
+		m.sendQueue.AddRef()
+		result.Clear()
 	}
 
 	// Создаем объект MSMQMessage
@@ -173,7 +182,11 @@ func (m *MSMQ) Send(ctx context.Context, message []byte) error {
 	defer msgDispatch.Release()
 
 	// Устанавливаем тело сообщения
-	_, err = oleutil.PutProperty(msgDispatch, "Body", message)
+	// go-ole не поддерживает []byte в VARIANT напрямую — конвертируем в string (VT_BSTR)
+	bodyResult, err := oleutil.PutProperty(msgDispatch, "Body", string(message))
+	if bodyResult != nil {
+		bodyResult.Clear()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to set message body: %w", err)
 	}
@@ -184,8 +197,12 @@ func (m *MSMQ) Send(ctx context.Context, message []byte) error {
 		return fmt.Errorf("failed to set message label: %w", err)
 	}
 
-	// Отправляем сообщение
-	_, err = oleutil.CallMethod(m.sendQueue, "Send", msgDispatch)
+	// Отправляем сообщение: MSMQMessage.Send(DestinationQueue)
+	// Transaction не передаём — нетранзакционная очередь, default поведение
+	sendResult, err := oleutil.CallMethod(msgDispatch, "Send", m.sendQueue)
+	if sendResult != nil {
+		sendResult.Clear()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to send message to MSMQ: %w", err)
 	}
@@ -199,29 +216,62 @@ func (m *MSMQ) Receive(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("not connected to MSMQ")
 	}
 
-	// Открываем очередь для получения (если еще не открыта)
-	if m.recvQueue == nil {
-		result, err := oleutil.CallMethod(m.queueInfo, "Open", MQ_RECEIVE_ACCESS, MQ_DENY_NONE)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open queue for receiving: %w", err)
-		}
-		m.recvQueue = result.ToIDispatch()
+	// Открываем свежую очередь для получения каждый раз (как в production adapter)
+	recvInfoUnknown, err := oleutil.CreateObject("MSMQ.MSMQQueueInfo")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create recv MSMQQueueInfo: %w", err)
+	}
+	recvInfo, err := recvInfoUnknown.QueryInterface(ole.IID_IDispatch)
+	recvInfoUnknown.Release()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query IDispatch for recv queue info: %w", err)
+	}
+	defer recvInfo.Release()
+
+	putResult, err := oleutil.PutProperty(recvInfo, "PathName", m.config.QueuePath)
+	if putResult != nil {
+		putResult.Clear()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to set recv queue path: %w", err)
 	}
 
-	// Получаем сообщение с таймаутом 1 секунда
-	result, err := oleutil.CallMethod(m.recvQueue, "Receive", nil, nil, nil, 1000)
+	openResult, err := oleutil.CallMethod(recvInfo, "Open", int32(MQ_RECEIVE_ACCESS), int32(MQ_DENY_NONE))
 	if err != nil {
-		// Проверяем, не timeout ли это
+		return nil, fmt.Errorf("failed to open queue for receiving: %w", err)
+	}
+	recvQueue := openResult.ToIDispatch()
+	if recvQueue == nil {
+		openResult.Clear()
+		return nil, fmt.Errorf("failed to open queue for receiving: nil dispatch")
+	}
+	recvQueue.AddRef()
+	openResult.Clear()
+	defer func() {
+		closeRes, _ := oleutil.CallMethod(recvQueue, "Close")
+		if closeRes != nil {
+			closeRes.Clear()
+		}
+		recvQueue.Release()
+	}()
+
+	// Receive(Transaction, WantDestinationQueue, WantBody, ReceiveTimeout)
+	// WantBody=true (VT_BOOL=-1), WantDestinationQueue=false (VT_BOOL=0)
+	// go bool → VT_BOOL корректно, int32(1) → VT_I4 ≠ VT_BOOL → тело не загружается!
+	result, err := oleutil.CallMethod(recvQueue, "Receive", int32(0), false, true, int32(1000))
+	if err != nil {
 		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "Queue is empty") {
 			return nil, fmt.Errorf("no messages available in queue")
 		}
 		return nil, fmt.Errorf("failed to receive message: %w", err)
 	}
-
 	msgDispatch := result.ToIDispatch()
 	if msgDispatch == nil {
+		result.Clear()
 		return nil, fmt.Errorf("no messages available in queue")
 	}
+	msgDispatch.AddRef()
+	result.Clear()
 	defer msgDispatch.Release()
 
 	// Получаем тело сообщения
@@ -231,15 +281,28 @@ func (m *MSMQ) Receive(ctx context.Context) ([]byte, error) {
 	}
 
 	// Конвертируем VARIANT в []byte
-	body, ok := bodyVariant.Value().([]byte)
-	if !ok {
-		// Пробуем получить как string
-		bodyStr, ok := bodyVariant.Value().(string)
-		if ok {
-			body = []byte(bodyStr)
-		} else {
-			return nil, fmt.Errorf("failed to convert message body to bytes")
+	// MSMQ хранит байты как COM SAFEARRAY — go-ole может вернуть разные типы
+	var body []byte
+	switch v := bodyVariant.Value().(type) {
+	case []byte:
+		body = v
+	case string:
+		body = []byte(v)
+	case []interface{}:
+		// COM SAFEARRAY of VT_UI1 — го-ole декодирует как []interface{}{byte, byte, ...}
+		body = make([]byte, len(v))
+		for i, b := range v {
+			switch bv := b.(type) {
+			case byte: // uint8 alias
+				body[i] = bv
+			case int32:
+				body[i] = byte(bv)
+			default:
+				return nil, fmt.Errorf("unexpected SAFEARRAY element type at [%d]: %T", i, b)
+			}
 		}
+	default:
+		return nil, fmt.Errorf("failed to convert message body: unexpected type %T", bodyVariant.Value())
 	}
 
 	return body, nil
@@ -271,7 +334,16 @@ func (m *MSMQ) GetBrokerType() string {
 
 // queueExists проверяет существование очереди через MSMQQuery
 func (m *MSMQ) queueExists() (bool, error) {
-	// Используем MSMQQuery для проверки
+	// Приватные очереди (.\private$\...) не видны через LookupQueue (AD-only).
+	// Для них проверяем существование через попытку открыть на чтение.
+	path := m.config.QueuePath
+	isPrivate := strings.Contains(strings.ToLower(path), "private$")
+
+	if isPrivate {
+		return m.privateQueueExists()
+	}
+
+	// Публичные очереди — через MSMQQuery / LookupQueue
 	queryUnknown, err := oleutil.CreateObject("MSMQ.MSMQQuery")
 	if err != nil {
 		return false, fmt.Errorf("failed to create MSMQ.MSMQQuery object: %w", err)
@@ -284,10 +356,8 @@ func (m *MSMQ) queueExists() (bool, error) {
 	}
 	defer queryDispatch.Release()
 
-	// Ищем очередь по пути
-	result, err := oleutil.CallMethod(queryDispatch, "LookupQueue", nil, nil, nil, m.config.QueuePath)
+	result, err := oleutil.CallMethod(queryDispatch, "LookupQueue", nil, nil, nil, path)
 	if err != nil {
-		// Если очередь не найдена, это не ошибка
 		return false, nil
 	}
 
@@ -297,7 +367,6 @@ func (m *MSMQ) queueExists() (bool, error) {
 	}
 	defer queueInfos.Release()
 
-	// Проверяем, есть ли результаты
 	nextResult, err := oleutil.CallMethod(queueInfos, "Next")
 	if err != nil {
 		return false, nil
@@ -309,6 +378,30 @@ func (m *MSMQ) queueExists() (bool, error) {
 	}
 	defer nextQueue.Release()
 
+	return true, nil
+}
+
+// privateQueueExists проверяет существование приватной очереди через попытку открыть её.
+// LookupQueue работает только для публичных очередей (Active Directory).
+func (m *MSMQ) privateQueueExists() (bool, error) {
+	result, err := oleutil.CallMethod(m.queueInfo, "Open", int32(MQ_PEEK_ACCESS), int32(MQ_DENY_NONE))
+	if err != nil {
+		// Ошибка открытия — очереди нет
+		return false, nil
+	}
+	queue := result.ToIDispatch()
+	if queue == nil {
+		result.Clear()
+		return false, nil
+	}
+	queue.AddRef()
+	result.Clear()
+	// Закрываем сразу — просто проверяли наличие
+	closeResult, _ := oleutil.CallMethod(queue, "Close")
+	if closeResult != nil {
+		closeResult.Clear()
+	}
+	queue.Release()
 	return true, nil
 }
 

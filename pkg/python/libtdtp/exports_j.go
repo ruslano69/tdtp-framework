@@ -225,9 +225,12 @@ func J_WriteFile(dataJSON *C.char, path *C.char) *C.char {
 //
 // dataJSON    — full dataset (schema + header + data rows).
 // basePath    — output path, e.g. "/tmp/out/Users.tdtp.xml".
-//               Parts are written as Users_part_1_of_N.tdtp.xml, etc.
+//
+//	Parts are written as Users_part_1_of_N.tdtp.xml, etc.
+//
 // optionsJSON — {"compress":true,"level":3,"checksum":true}
-//               All keys are optional; compress defaults to false.
+//
+//	All keys are optional; compress defaults to false.
 //
 // Returns {"files":[...],"total_parts":N} or {"error":"..."}.
 // Caller must free result with J_FreeString.
@@ -259,6 +262,10 @@ func jExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char
 	if v, ok := opts["compress"].(bool); ok {
 		compress = v
 	}
+	algo := "zstd"
+	if v, ok := opts["algo"].(string); ok && v != "" {
+		algo = v
+	}
 	level := 3
 	if v, ok := opts["level"].(float64); ok {
 		level = int(v)
@@ -280,7 +287,7 @@ func jExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char
 
 	for i, pkt := range packets {
 		if compress {
-			if err := compressAndSign(pkt, level, withChecksum); err != nil {
+			if err := compressAndSign(pkt, algo, level, withChecksum); err != nil {
 				return jErr(fmt.Sprintf("compress part %d: %v", i+1, err))
 			}
 		}

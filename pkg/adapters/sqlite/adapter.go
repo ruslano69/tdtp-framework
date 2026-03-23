@@ -1,3 +1,4 @@
+// Package sqlite provides functionality for the TDTP framework.
 package sqlite
 
 import (
@@ -9,7 +10,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register sqlite driver
 )
 
 const driverSqlite = "sqlite"
@@ -45,26 +46,24 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 
 	// Проверяем подключение
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	a.db = db
 
 	// Применяем PRAGMA оптимизации для быстрого импорта
-	if err := a.applyPragmaOptimizations(ctx); err != nil {
-		db.Close()
-		return fmt.Errorf("failed to apply PRAGMA optimizations: %w", err)
-	}
+	a.applyPragmaOptimizations(ctx)
 
 	// Инициализируем base helpers
-	a.initHelpers()
+	a.initHelpers(cfg.NoDateSentinels)
 
 	return nil
 }
 
 // NewAdapter создает новый адаптер для SQLite (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapter(filePath string) (*Adapter, error) {
 	adapter := &Adapter{}
 	err := adapter.Connect(context.Background(), adapters.Config{
@@ -118,9 +117,12 @@ func (a *Adapter) DB() *sql.DB {
 }
 
 // initHelpers инициализирует базовые хелперы для устранения дублирования кода
-func (a *Adapter) initHelpers() {
+func (a *Adapter) initHelpers(noDateSentinels []string) {
 	// Создаем универсальный конвертер типов
 	a.converter = base.NewUniversalTypeConverter()
+	if len(noDateSentinels) > 0 {
+		a.converter.SetNoDateSentinels(noDateSentinels)
+	}
 
 	// Создаем export helper
 	// self реализует SchemaReader и DataReader интерфейсы
@@ -135,7 +137,7 @@ func (a *Adapter) initHelpers() {
 
 // applyPragmaOptimizations применяет PRAGMA оптимизации для быстрого импорта/экспорта
 // Эти настройки критичны для производительности SQLite при массовых операциях
-func (a *Adapter) applyPragmaOptimizations(ctx context.Context) error {
+func (a *Adapter) applyPragmaOptimizations(ctx context.Context) {
 	pragmas := []string{
 		// WAL mode: Write-Ahead Logging - до 10x быстрее записи, безопасно
 		"PRAGMA journal_mode = WAL",
@@ -166,7 +168,6 @@ func (a *Adapter) applyPragmaOptimizations(ctx context.Context) error {
 		}
 	}
 
-	return nil
 }
 
 // TableExists проверяет существование таблицы
@@ -201,7 +202,7 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get table names: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []string
 	for rows.Next() {
@@ -232,7 +233,7 @@ func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get view names: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var views []adapters.ViewInfo
 	for rows.Next() {
@@ -299,87 +300,45 @@ func (t *sqliteTx) Rollback(ctx context.Context) error {
 	return t.tx.Rollback()
 }
 
-// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket
-// Используется для ETL pipeline для загрузки данных из источников
+// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket.
+// Используется ETL pipeline для загрузки данных из источников.
+// Использует тот же путь что и ExportTable: ReadRowsWithSQL → scanRows → RowsToData.
 func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.DataPacket, error) {
 	if a.db == nil {
 		return nil, fmt.Errorf("adapter not connected")
 	}
 
-	// Выполняем SELECT запрос
+	// Получаем схему через метаданные запроса.
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer rows.Close()
-
-	// Получаем информацию о колонках
 	columns, err := rows.Columns()
 	if err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
-
 	columnTypes, err := rows.ColumnTypes()
 	if err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get column types: %w", err)
 	}
-
-	// Создаем схему на основе колонок результата
-	schema := packet.Schema{
-		Fields: make([]packet.Field, len(columns)),
-	}
-
+	schema := packet.Schema{Fields: make([]packet.Field, len(columns))}
 	for i, col := range columns {
-		// Получаем тип SQLite
-		sqliteType := columnTypes[i].DatabaseTypeName()
+		tdtpType, length := convertSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName())
+		schema.Fields[i] = packet.Field{Name: col, Type: tdtpType, Length: length}
+	}
+	_ = rows.Close()
 
-		// Конвертируем в TDTP тип
-		tdtpType, length := convertSQLiteTypeToTDTP(sqliteType)
-
-		schema.Fields[i] = packet.Field{
-			Name:   col,
-			Type:   tdtpType,
-			Length: length,
-		}
+	// Используем ReadRowsWithSQL — единственный путь конвертации типов в этом адаптере.
+	scannedRows, err := a.ReadRowsWithSQL(ctx, query, schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
 	}
 
-	// Читаем данные
-	var rowsData []packet.Row
-	scanArgs := make([]any, len(columns))
-	for i := range scanArgs {
-		var v sql.NullString
-		scanArgs[i] = &v
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Конвертируем значения в строку с разделителем |
-		rowValues := make([]string, len(columns))
-		for i, arg := range scanArgs {
-			v := arg.(*sql.NullString)
-			if v.Valid {
-				rowValues[i] = v.String
-			} else {
-				rowValues[i] = "" // NULL представляется пустой строкой
-			}
-		}
-
-		rowsData = append(rowsData, packet.Row{
-			Value: strings.Join(rowValues, "|"),
-		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error reading rows: %w", err)
-	}
-
-	// Создаем DataPacket
 	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
 	dataPacket.Schema = schema
-	dataPacket.Data.Rows = rowsData
+	dataPacket.Data = packet.RowsToData(scannedRows)
 
 	return dataPacket, nil
 }

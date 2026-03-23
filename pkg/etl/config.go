@@ -1,3 +1,4 @@
+// Package etl provides functionality for the TDTP framework.
 package etl
 
 import (
@@ -5,37 +6,71 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"gopkg.in/yaml.v3"
 )
 
 // PipelineConfig содержит полную конфигурацию ETL pipeline
 type PipelineConfig struct {
-	Name          string              `yaml:"name"`
-	Version       string              `yaml:"version"`
-	Description   string              `yaml:"description"`
-	Sources       []SourceConfig      `yaml:"sources"`
-	Workspace     WorkspaceConfig     `yaml:"workspace"`
-	Transform     TransformConfig     `yaml:"transform"`
-	Output        OutputConfig        `yaml:"output"`
-	Performance   PerformanceConfig   `yaml:"performance"`
-	Audit         AuditConfig         `yaml:"audit"`
-	ErrorHandling ErrorHandlingConfig `yaml:"error_handling"`
+	Name          string                     `yaml:"name"`
+	Version       string                     `yaml:"version"`
+	Description   string                     `yaml:"description"`
+	Sources       []SourceConfig             `yaml:"sources"`
+	Workspace     WorkspaceConfig            `yaml:"workspace"`
+	Transform     TransformConfig            `yaml:"transform"`
+	Processors    processors.ProcessorConfig `yaml:"processors"`
+	Output        OutputConfig               `yaml:"output"`
+	Performance   PerformanceConfig          `yaml:"performance"`
+	Audit         AuditConfig                `yaml:"audit"`
+	ErrorHandling ErrorHandlingConfig        `yaml:"error_handling"`
+	ResultLog     ResultLogConfig            `yaml:"result_log"`
+	Security      SecurityConfig             `yaml:"security"`
 }
 
-// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP)
+// SecurityConfig определяет параметры интеграции с xZMercury для шифрования результатов.
+// Используется когда output.tdtp.encryption: true.
+type SecurityConfig struct {
+	MercuryURL        string `yaml:"mercury_url"`        // URL xZMercury, например "http://mercury:3000"
+	RecipientResource string `yaml:"recipient_resource"` // Имя ресурса/очереди получателя
+	KeyTTLSeconds     int    `yaml:"key_ttl_seconds"`    // TTL ключа в Mercury Redis (по умолчанию 86400)
+	MercuryTimeoutMs  int    `yaml:"mercury_timeout_ms"` // Таймаут обращения к xZMercury (по умолчанию 5000)
+}
+
+// ResultLogConfig определяет параметры публикации результата выполнения пайплайна
+// Позволяет оркестратору отслеживать состояния через Redis (GET/SUBSCRIBE)
+type ResultLogConfig struct {
+	Type     string `yaml:"type"`     // Тип: redis (пустое = отключено)
+	Address  string `yaml:"address"`  // Адрес Redis, например "127.0.0.1:6379"
+	Name     string `yaml:"name"`     // Имя результата (ключ/канал), например "MASK_V001"
+	Password string `yaml:"password"` // Пароль Redis (опционально)
+	DB       int    `yaml:"db"`       // Индекс базы данных Redis (по умолчанию 0)
+	TTL      int    `yaml:"ttl"`      // TTL ключа в секундах (по умолчанию 3600)
+}
+
+// SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc, TDTP-S3)
 type SourceConfig struct {
-	Name      string `yaml:"name"`       // Имя источника (будет использовано как имя таблицы в workspace)
-	Type      string `yaml:"type"`       // Тип: postgres, mssql, mysql, sqlite, tdtp
-	DSN       string `yaml:"dsn"`        // Data Source Name (строка подключения или путь к TDTP-файлу)
-	Query     string `yaml:"query"`      // SQL запрос для извлечения данных (не используется для type: tdtp)
-	Timeout   int    `yaml:"timeout"`    // Таймаут в секундах (0 = без таймаута)
-	MultiPart bool   `yaml:"multi_part"` // Только для type: tdtp — загружать все части набора автоматически
+	Name             string `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
+	Type             string `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3
+	DSN              string `yaml:"dsn"`                // Data Source Name: строка подключения, путь к файлу или s3://bucket/key
+	Query            string `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc/tdtp-s3)
+	Timeout          int    `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
+	MultiPart        bool   `yaml:"multi_part"`         // Для type: tdtp/tdtp-s3 — загружать все части набора автоматически
+	MercuryURL       string `yaml:"mercury_url"`        // Только для type: tdtp-enc — URL xZMercury (например "http://mercury:3000")
+	MercuryTimeoutMs int    `yaml:"mercury_timeout_ms"` // Только для type: tdtp-enc — таймаут обращения к xZMercury (по умолчанию 5000)
+	// NoDateSentinels — список дат-заглушек для "нет даты" (DB-specific conventions).
+	// Пример для MSSQL: ["1900-01-01", "1753-01-01"]
+	NoDateSentinels []string `yaml:"no_date_sentinels"`
+	// S3 — конфигурация S3-совместимого хранилища (SeaweedFS, MinIO и т.п.).
+	// Используется только для type: tdtp-s3. DSN может быть s3://bucket/key (bucket перекрывает S3.Bucket)
+	// или просто ключом (путём к объекту) при заданном S3.Bucket.
+	S3 *storage.S3Config `yaml:"s3,omitempty"`
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
 type WorkspaceConfig struct {
-	Type   string                 `yaml:"type"`   // Тип: sqlite (только sqlite поддерживается)
-	Mode   string                 `yaml:"mode"`   // Режим: memory (:memory:) или путь к файлу
+	Type   string         `yaml:"type"`   // Тип: sqlite (только sqlite поддерживается)
+	Mode   string         `yaml:"mode"`   // Режим: memory (:memory:) или путь к файлу
 	Config map[string]any `yaml:"config"` // Дополнительные настройки SQLite
 }
 
@@ -53,6 +88,20 @@ type OutputConfig struct {
 	RabbitMQ *RabbitMQOutputConfig `yaml:"rabbitmq,omitempty"` // Конфигурация для RabbitMQ
 	Kafka    *KafkaOutputConfig    `yaml:"kafka,omitempty"`    // Конфигурация для Kafka
 	XLSX     *XLSXOutputConfig     `yaml:"xlsx,omitempty"`     // Конфигурация для XLSX
+
+	// Fallback — резервный канал доставки.
+	// Если primary-канал (Type) недоступен, tdtpcli автоматически переключается на fallback.
+	// Пример: primary=kafka, fallback=tdtp(s3://bucket/...) — данные не теряются при сбое брокера.
+	Fallback *OutputConfig `yaml:"fallback,omitempty"`
+	// Resilience — настройки circuit breaker для primary-канала.
+	// По умолчанию: max_failures=3, timeout_sec=60.
+	Resilience *OutputResilienceConfig `yaml:"resilience,omitempty"`
+}
+
+// OutputResilienceConfig настраивает circuit breaker для primary-канала доставки.
+type OutputResilienceConfig struct {
+	MaxFailures int `yaml:"max_failures"` // Число последовательных сбоев до переключения (default: 3)
+	TimeoutSec  int `yaml:"timeout_sec"`  // Время в Open-состоянии до следующей probe (default: 60)
 }
 
 // XLSXOutputConfig определяет параметры экспорта в Excel формат
@@ -63,9 +112,14 @@ type XLSXOutputConfig struct {
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
 type TDTPOutputConfig struct {
-	Format      string `yaml:"format"`      // Формат: xml, json (в будущем)
-	Compression bool   `yaml:"compression"` // Использовать zstd сжатие
-	Destination string `yaml:"destination"` // Путь к файлу
+	Format      string            `yaml:"format"`       // Формат: xml, json (в будущем)
+	Compression bool              `yaml:"compression"`  // Использовать zstd сжатие
+	Destination string            `yaml:"destination"`  // Путь к файлу или s3://bucket/key
+	Encryption  bool              `yaml:"encryption"`   // Шифровать результат через xZMercury (AES-256-GCM)
+	Compact     bool              `yaml:"compact"`      // v1.3.1: compact format
+	CompactTail bool              `yaml:"compact_tail"` // v1.3.1: tail-строка
+	FixedFields []string          `yaml:"fixed_fields"` // v1.3.1: явный список fixed полей
+	S3          *storage.S3Config `yaml:"s3,omitempty"` // S3-совместимое хранилище (SeaweedFS, MinIO и т.п.)
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ
@@ -119,13 +173,14 @@ func LoadConfig(path string) (*PipelineConfig, error) {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
+	// Установка значений по умолчанию до валидации —
+	// иначе опциональные поля с defaults (например result_table) ложно фейлят.
+	config.SetDefaults()
+
 	// Валидация конфигурации
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
-
-	// Установка значений по умолчанию
-	config.SetDefaults()
 
 	return &config, nil
 }
@@ -163,6 +218,11 @@ func (c *PipelineConfig) Validate() error {
 		return fmt.Errorf("output: %w", err)
 	}
 
+	// Проверка result_log (опционально)
+	if err := c.ResultLog.Validate(); err != nil {
+		return fmt.Errorf("result_log: %w", err)
+	}
+
 	return nil
 }
 
@@ -185,19 +245,37 @@ func (s *SourceConfig) Validate() error {
 		"mysql":    true,
 		"sqlite":   true,
 		"tdtp":     true, // TDTP XML/JSON file — DSN is the file path, query not required
+		"tdtp-enc": true, // Encrypted TDTP file — requires mercury_url for key retrieval
+		"tdtp-s3":  true, // TDTP file in S3-compatible storage — DSN is s3://bucket/key or just key
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3", s.Type)
 	}
 
-	// query обязателен для DB-источников, для TDTP-файла не нужен
-	if s.Type != "tdtp" && s.Query == "" {
+	// query обязателен для DB-источников, для TDTP-файлов не нужен
+	if s.Type != "tdtp" && s.Type != "tdtp-enc" && s.Type != "tdtp-s3" && s.Query == "" {
 		return fmt.Errorf("query is required for type '%s'", s.Type)
 	}
 
-	// multi_part имеет смысл только для TDTP
-	if s.MultiPart && s.Type != "tdtp" {
-		return fmt.Errorf("multi_part is only supported for type 'tdtp'")
+	// multi_part имеет смысл только для tdtp и tdtp-s3
+	if s.MultiPart && s.Type != "tdtp" && s.Type != "tdtp-s3" {
+		return fmt.Errorf("multi_part is only supported for type 'tdtp' or 'tdtp-s3'")
+	}
+
+	// mercury_url обязателен для tdtp-enc
+	if s.Type == "tdtp-enc" && s.MercuryURL == "" {
+		return fmt.Errorf("mercury_url is required for type 'tdtp-enc'")
+	}
+
+	// Валидация tdtp-s3: нужны credentials (либо в dsn s3://bucket/key, либо в s3.*)
+	if s.Type == "tdtp-s3" {
+		// DSN должен быть либо s3://bucket/key, либо ключом при заданном s3.bucket
+		if !storage.IsRemote(s.DSN) && (s.S3 == nil || s.S3.Bucket == "") {
+			return fmt.Errorf("tdtp-s3: dsn must be s3://bucket/key URI or set s3.bucket")
+		}
+		if s.S3 == nil || s.S3.AccessKey == "" || s.S3.SecretKey == "" {
+			return fmt.Errorf("tdtp-s3: s3.access_key and s3.secret_key are required")
+		}
 	}
 
 	return nil
@@ -220,7 +298,7 @@ func (w *WorkspaceConfig) Validate() error {
 // Validate проверяет корректность TransformConfig
 func (t *TransformConfig) Validate() error {
 	if t.SQL == "" {
-		return fmt.Errorf("transform SQL is required")
+		return fmt.Errorf("transform sql is required")
 	}
 	if t.ResultTable == "" {
 		return fmt.Errorf("transform result_table is required")
@@ -235,6 +313,23 @@ func (t *TransformConfig) Validate() error {
 func (e *ErrorHandlingConfig) Validate() error {
 	if e.OnSourceError != "" && e.OnSourceError != "fail" && e.OnSourceError != "continue" {
 		return fmt.Errorf("on_source_error must be 'fail' or 'continue'")
+	}
+	return nil
+}
+
+// Validate проверяет корректность ResultLogConfig
+func (r *ResultLogConfig) Validate() error {
+	if r.Type == "" || r.Type == "none" {
+		return nil
+	}
+	if r.Type != "redis" {
+		return fmt.Errorf("unsupported type '%s', must be 'redis'", r.Type)
+	}
+	if r.Address == "" {
+		return fmt.Errorf("address is required when type is 'redis'")
+	}
+	if r.Name == "" {
+		return fmt.Errorf("name is required when type is 'redis'")
 	}
 	return nil
 }
@@ -261,6 +356,15 @@ func (o *OutputConfig) Validate() error {
 		}
 		if o.TDTP.Format != "xml" && o.TDTP.Format != "json" {
 			return fmt.Errorf("tdtp.format must be 'xml' or 'json'")
+		}
+		// Если destination — remote URI, требуем S3-конфиг
+		if storage.IsRemote(o.TDTP.Destination) {
+			if o.TDTP.S3 == nil {
+				return fmt.Errorf("tdtp.s3 configuration is required when tdtp.destination is a remote URI (%s)", o.TDTP.Destination)
+			}
+			if o.TDTP.S3.AccessKey == "" || o.TDTP.S3.SecretKey == "" {
+				return fmt.Errorf("tdtp.s3.access_key and tdtp.s3.secret_key are required")
+			}
 		}
 
 	case "rabbitmq":
@@ -297,6 +401,16 @@ func (o *OutputConfig) Validate() error {
 		return fmt.Errorf("unsupported output type '%s', must be one of: tdtp, rabbitmq, kafka, xlsx", o.Type)
 	}
 
+	// Валидация резервного канала (рекурсивно, но без вложенного fallback)
+	if o.Fallback != nil {
+		if o.Fallback.Fallback != nil {
+			return fmt.Errorf("nested fallback is not supported (only one level allowed)")
+		}
+		if err := o.Fallback.Validate(); err != nil {
+			return fmt.Errorf("fallback: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -331,6 +445,21 @@ func (c *PipelineConfig) SetDefaults() {
 	if c.Output.Type == "tdtp" && c.Output.TDTP != nil {
 		if c.Output.TDTP.Format == "" {
 			c.Output.TDTP.Format = "xml"
+		}
+	}
+	if c.Output.Type == "tdtp" && c.Output.Fallback != nil && c.Output.Fallback.TDTP != nil {
+		if c.Output.Fallback.TDTP.Format == "" {
+			c.Output.Fallback.TDTP.Format = "xml"
+		}
+	}
+
+	// Defaults для resilience
+	if c.Output.Resilience != nil {
+		if c.Output.Resilience.MaxFailures == 0 {
+			c.Output.Resilience.MaxFailures = 3
+		}
+		if c.Output.Resilience.TimeoutSec == 0 {
+			c.Output.Resilience.TimeoutSec = 60
 		}
 	}
 
@@ -378,5 +507,18 @@ func (c *PipelineConfig) SetDefaults() {
 	}
 	if c.ErrorHandling.RetryDelaySeconds == 0 {
 		c.ErrorHandling.RetryDelaySeconds = 5
+	}
+
+	// Defaults для result_log
+	if c.ResultLog.Type == "redis" && c.ResultLog.TTL == 0 {
+		c.ResultLog.TTL = 3600 // 1 час по умолчанию
+	}
+
+	// Defaults для security
+	if c.Security.KeyTTLSeconds == 0 {
+		c.Security.KeyTTLSeconds = 86400 // 24 часа
+	}
+	if c.Security.MercuryTimeoutMs == 0 {
+		c.Security.MercuryTimeoutMs = 5000
 	}
 }

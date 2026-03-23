@@ -4,6 +4,7 @@ package packet
 type Query struct {
 	Language string   `xml:"language,attr"`
 	Version  string   `xml:"version,attr"`
+	Fields   []string `xml:"Fields>Field,omitempty"` // column projection: nil/empty = SELECT *
 	Filters  *Filters `xml:"Filters,omitempty"`
 	OrderBy  *OrderBy `xml:"OrderBy,omitempty"`
 	Limit    int      `xml:"Limit,omitempty"`

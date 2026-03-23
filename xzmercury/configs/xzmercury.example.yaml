@@ -1,0 +1,42 @@
+# xzmercury configuration example
+# Copy to xzmercury.yaml and adjust for your environment.
+# MERCURY_SERVER_SECRET env var overrides security.server_secret.
+
+server:
+  addr: ":3000"
+  read_timeout: 10s
+  write_timeout: 10s
+
+# Mercury Redis — stores AES keys (RAM-only, no persistence).
+# Each key lives for key_ttl and is deleted immediately on first read.
+mercury:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+
+key_ttl: 5m  # how long a bound key survives before auto-expiry
+
+# Pipeline Redis — stores quota balances, LDAP cache, request state.
+pipeline:
+  addr: "localhost:6380"  # separate instance recommended
+  password: ""
+  db: 0
+
+security:
+  # HMAC secret used to sign bind responses. Keep this secret.
+  # Override via MERCURY_SERVER_SECRET environment variable.
+  server_secret: ""
+  rate_limit: 100  # max requests/sec per IP (0 = disabled)
+
+ldap:
+  addr: "dc.corp.local:389"
+  bind_dn: "cn=svc_xzmercury,ou=service,dc=corp,dc=local"
+  bind_password: ""           # use a secret manager in production
+  base_dn: "dc=corp,dc=local"
+  cache_ttl: 120s             # LDAP membership cached in Pipeline Redis
+  mock_users_file: ""         # dev mode: path to ldap-users.json (empty = built-in defaults)
+  acl_file: ""                # path to pipeline-acl.yaml (empty = permissive defaults)
+
+quota:
+  default_hourly: 1000        # credits granted to a new group each hour
+  acl_file: "configs/pipeline-acl.yaml"  # override per-pipeline costs and groups

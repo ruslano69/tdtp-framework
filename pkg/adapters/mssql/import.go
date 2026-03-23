@@ -16,7 +16,29 @@ import (
 
 // ImportPacket импортирует один TDTP пакет в БД
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-	return a.ImportPackets(ctx, []*packet.DataPacket{pkt}, strategy)
+	// DDL вне транзакции — чтобы не блокироваться на Sch-M lock
+	tableName := pkt.Header.TableName
+	exists, err := a.TableExists(ctx, tableName)
+	if err != nil {
+		return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
+	}
+	if !exists {
+		if err := a.CreateTable(ctx, tableName, pkt.Schema); err != nil {
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+	}
+
+	// DML в транзакции
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ImportPackets импортирует множество пакетов атомарно (в одной транзакции)
@@ -25,41 +47,40 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 		return nil
 	}
 
-	// Начинаем транзакцию
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback() // игнорируем ошибку, если tx.Commit() был успешным
-	}()
-
+	// DDL (CREATE TABLE) выполняем ВНЕ транзакции.
+	// Внутри транзакции DDL берёт Sch-M lock и блокируется если другое соединение
+	// (например BC) держит Sch-S lock на схему — это причина зависания.
 	for i, pkt := range packets {
 		if pkt == nil {
 			return fmt.Errorf("packet %d is nil", i)
 		}
-
-		// Проверяем существование таблицы
 		tableName := pkt.Header.TableName
 		exists, err := a.TableExists(ctx, tableName)
 		if err != nil {
 			return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
 		}
-
-		// Создаем таблицу если нужно
 		if !exists {
-			if err := a.createTableInTx(ctx, tx, tableName, pkt.Schema); err != nil {
+			if err := a.CreateTable(ctx, tableName, pkt.Schema); err != nil {
 				return fmt.Errorf("failed to create table %s: %w", tableName, err)
 			}
 		}
+	}
 
-		// Импортируем данные
+	// DML (INSERT/MERGE) — в транзакции для атомарности
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	for i, pkt := range packets {
 		if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
 			return fmt.Errorf("failed to import packet %d: %w", i, err)
 		}
 	}
 
-	// Commit транзакции
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -69,27 +90,15 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 // ========== Table Creation ==========
 
-// createTableInTx создает таблицу в рамках транзакции
-func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, tableName string, schema packet.Schema) error {
-	sqlCreate := a.buildCreateTableSQL(tableName, schema)
-
-	_, err := tx.ExecContext(ctx, sqlCreate)
-	if err != nil {
-		return fmt.Errorf("failed to execute CREATE TABLE: %w", err)
-	}
-
-	return nil
-}
-
 // buildCreateTableSQL строит CREATE TABLE запрос
-func (a *Adapter) buildCreateTableSQL(tableName string, schema packet.Schema) string {
+func (a *Adapter) buildCreateTableSQL(tableName string, pktSchema packet.Schema) string {
 	schemaName, table := a.parseTableName(tableName)
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 
-	columns := make([]string, 0, len(schema.Fields))
+	columns := make([]string, 0, len(pktSchema.Fields))
 	var pkColumns []string
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		sqlType := TDTPToMSSQL(field)
 		column := fmt.Sprintf("[%s] %s", field.Name, sqlType)
 
@@ -186,80 +195,127 @@ func (a *Adapter) importWithMerge(ctx context.Context, tx *sql.Tx, pkt *packet.D
 		}()
 	}
 
-	// Строим MERGE запрос
-	mergeSQL := a.buildMergeSQL(fullTableName, pkt.Schema, pkFields)
+	// Батчевый MERGE: MSSQL поддерживает до 2100 параметров на запрос.
+	// Вместо 18 000 отдельных MERGE → ~37 батч-запросов по 500 строк.
+	// Это устраняет lock escalation (row locks не достигают порога 5000 за запрос)
+	// и резко сокращает число round-trips.
+	numCols := len(pkt.Schema.Fields)
+	batchSize := 2000 / numCols
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	if batchSize > 500 {
+		batchSize = 500
+	}
 
-	// Выполняем MERGE для каждой строки
-	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row, pkt.Schema)
-		args := a.rowToArgs(rowValues, pkt.Schema)
-		_, err := tx.ExecContext(ctx, mergeSQL, args...)
-		if err != nil {
-			return fmt.Errorf("failed to execute MERGE: %w", err)
+	rows := pkt.Data.Rows
+	for i := 0; i < len(rows); i += batchSize {
+		end := i + batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		if err := a.executeBatchMerge(ctx, tx, fullTableName, pkt.Schema, pkFields, rows[i:end]); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// buildMergeSQL строит MERGE запрос для UPSERT
-// SQL Server 2012+ syntax
-func (a *Adapter) buildMergeSQL(tableName string, schema packet.Schema, pkFields []packet.Field) string {
-	// MERGE target USING source ON condition
-	// WHEN MATCHED THEN UPDATE
-	// WHEN NOT MATCHED THEN INSERT
+// executeBatchMerge выполняет один MERGE с несколькими строками в VALUES.
+// Синтаксис: MERGE INTO t USING (VALUES (?,?),(?,?)) AS src([c1],[c2]) ON ...
+func (a *Adapter) executeBatchMerge(
+	ctx context.Context,
+	tx *sql.Tx,
+	fullTableName string,
+	pktSchema packet.Schema,
+	pkFields []packet.Field,
+	rows []packet.Row,
+) error {
+	if len(rows) == 0 {
+		return nil
+	}
 
-	var (
-		sourceColumns []string
-		pkConditions  []string
-		updateSets    []string
-		insertColumns []string
-		insertValues  []string
-	)
+	numCols := len(pktSchema.Fields)
 
-	for _, field := range schema.Fields {
-		colName := fmt.Sprintf("[%s]", field.Name)
-		paramName := "?"
+	// Строим список колонок источника
+	colNames := make([]string, numCols)
+	for i, f := range pktSchema.Fields {
+		colNames[i] = fmt.Sprintf("[%s]", f.Name)
+	}
 
-		sourceColumns = append(sourceColumns, fmt.Sprintf("%s AS %s", paramName, colName))
-		insertColumns = append(insertColumns, colName)
-		insertValues = append(insertValues, fmt.Sprintf("source.%s", colName))
+	// Строим VALUES (?,?,...),(?,?,...)
+	rowPlaceholders := make([]string, len(rows))
+	args := make([]any, 0, len(rows)*numCols)
+	for i, row := range rows {
+		vals := a.parseRow(row, pktSchema)
+		params := make([]string, numCols)
+		for j := range pktSchema.Fields {
+			params[j] = "?"
+			args = append(args, a.stringToValue(vals[j], pktSchema.Fields[j]))
+		}
+		rowPlaceholders[i] = fmt.Sprintf("(%s)", strings.Join(params, ","))
+	}
 
-		// PK используется для MATCH
+	// ON условие по PK
+	pkConds := make([]string, 0, len(pkFields))
+	for _, pk := range pkFields {
+		col := fmt.Sprintf("[%s]", pk.Name)
+		pkConds = append(pkConds, fmt.Sprintf("t.%s = s.%s", col, col))
+	}
+
+	// UPDATE SET для non-PK колонок
+	updateSets := make([]string, 0, numCols)
+	for _, f := range pktSchema.Fields {
 		isPK := false
 		for _, pk := range pkFields {
-			if pk.Name == field.Name {
+			if pk.Name == f.Name {
 				isPK = true
-				pkConditions = append(pkConditions, fmt.Sprintf("target.%s = source.%s", colName, colName))
 				break
 			}
 		}
-
-		// Non-PK используется для UPDATE
 		if !isPK {
-			updateSets = append(updateSets, fmt.Sprintf("target.%s = source.%s", colName, colName))
+			col := fmt.Sprintf("[%s]", f.Name)
+			updateSets = append(updateSets, fmt.Sprintf("t.%s = s.%s", col, col))
 		}
 	}
 
-	merge := fmt.Sprintf(`
-MERGE INTO %s AS target
-USING (SELECT %s) AS source
-ON %s
-WHEN MATCHED THEN
-    UPDATE SET %s
-WHEN NOT MATCHED THEN
-    INSERT (%s)
-    VALUES (%s);
-`,
-		tableName,
-		strings.Join(sourceColumns, ", "),
-		strings.Join(pkConditions, " AND "),
-		strings.Join(updateSets, ", "),
-		strings.Join(insertColumns, ", "),
-		strings.Join(insertValues, ", "),
-	)
+	srcCols := strings.Join(colNames, ",")
+	insertCols := srcCols
+	insertVals := make([]string, numCols)
+	for i, c := range colNames {
+		insertVals[i] = "s." + c
+	}
 
-	return merge
+	var mergeSQL string
+	if len(updateSets) > 0 {
+		mergeSQL = fmt.Sprintf(
+			"MERGE INTO %s AS t USING (VALUES %s) AS s(%s) ON %s WHEN MATCHED THEN UPDATE SET %s WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s);",
+			fullTableName,
+			strings.Join(rowPlaceholders, ","),
+			srcCols,
+			strings.Join(pkConds, " AND "),
+			strings.Join(updateSets, ","),
+			insertCols,
+			strings.Join(insertVals, ","),
+		)
+	} else {
+		// Все колонки — PK: только INSERT
+		mergeSQL = fmt.Sprintf(
+			"MERGE INTO %s AS t USING (VALUES %s) AS s(%s) ON %s WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s);",
+			fullTableName,
+			strings.Join(rowPlaceholders, ","),
+			srcCols,
+			strings.Join(pkConds, " AND "),
+			insertCols,
+			strings.Join(insertVals, ","),
+		)
+	}
+
+	if _, err := tx.ExecContext(ctx, mergeSQL, args...); err != nil {
+		return fmt.Errorf("failed to execute batch MERGE (%d rows): %w", len(rows), err)
+	}
+	return nil
 }
 
 // ========== INSERT OR IGNORE Strategy ==========
@@ -417,11 +473,11 @@ func (a *Adapter) importWithInsert(ctx context.Context, tx *sql.Tx, pkt *packet.
 }
 
 // buildInsertSQL строит INSERT запрос
-func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string {
-	columns := make([]string, 0, len(schema.Fields))
-	placeholders := make([]string, 0, len(schema.Fields))
+func (a *Adapter) buildInsertSQL(tableName string, pktSchema packet.Schema) string {
+	columns := make([]string, 0, len(pktSchema.Fields))
+	placeholders := make([]string, 0, len(pktSchema.Fields))
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		columns = append(columns, fmt.Sprintf("[%s]", field.Name))
 		placeholders = append(placeholders, "?")
 	}
@@ -449,14 +505,14 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 }
 
 // parseRow разбивает строку row.Value на отдельные значения
-func (a *Adapter) parseRow(row packet.Row, schema packet.Schema) []string {
+func (a *Adapter) parseRow(row packet.Row, pktSchema packet.Schema) []string {
 	// Используем Parser.GetRowValues() для правильной обработки экранирования
 	// Backslash escaping: \| → | и \\ → \
 	parser := packet.NewParser()
 	values := parser.GetRowValues(row)
 
 	// Дополняем пустыми значениями если не хватает
-	for len(values) < len(schema.Fields) {
+	for len(values) < len(pktSchema.Fields) {
 		values = append(values, "")
 	}
 
@@ -464,11 +520,11 @@ func (a *Adapter) parseRow(row packet.Row, schema packet.Schema) []string {
 }
 
 // rowToArgs конвертирует строку TDTP пакета в массив аргументов для SQL
-func (a *Adapter) rowToArgs(row []string, schema packet.Schema) []any {
+func (a *Adapter) rowToArgs(row []string, pktSchema packet.Schema) []any {
 	args := make([]any, len(row))
 	for i, val := range row {
-		if i < len(schema.Fields) {
-			args[i] = a.stringToValue(val, schema.Fields[i])
+		if i < len(pktSchema.Fields) {
+			args[i] = a.stringToValue(val, pktSchema.Fields[i])
 		} else {
 			args[i] = val
 		}
@@ -565,7 +621,7 @@ func (a *Adapter) tableHasIdentityColumn(ctx context.Context, tableName string) 
 // ========== base.TableManager interface methods ==========
 
 // CreateTable implements base.TableManager interface
-func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, pktSchema packet.Schema) error {
 	exists, err := a.TableExists(ctx, tableName)
 	if err != nil {
 		return err
@@ -573,7 +629,7 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 	if exists {
 		return nil
 	}
-	sqlCreate := a.buildCreateTableSQL(tableName, schema)
+	sqlCreate := a.buildCreateTableSQL(tableName, pktSchema)
 	_, err = a.db.ExecContext(ctx, sqlCreate)
 	if err != nil {
 		return fmt.Errorf("failed to execute CREATE TABLE: %w\nSQL: %s", err, sqlCreate)
@@ -584,9 +640,9 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 // DropTable implements base.TableManager interface
 func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 	schemaName, table := a.parseTableName(tableName)
-	sql := fmt.Sprintf("IF OBJECT_ID('[%s].[%s]', 'U') IS NOT NULL DROP TABLE [%s].[%s]",
+	sqlStr := fmt.Sprintf("IF OBJECT_ID('[%s].[%s]', 'U') IS NOT NULL DROP TABLE [%s].[%s]",
 		schemaName, table, schemaName, table)
-	_, err := a.db.ExecContext(ctx, sql)
+	_, err := a.db.ExecContext(ctx, sqlStr)
 	return err
 }
 
@@ -595,8 +651,8 @@ func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
 	schemaName, table := a.parseTableName(oldName)
 	_, newTableName := a.parseTableName(newName)
-	sql := fmt.Sprintf("EXEC sp_rename '[%s].[%s]', '%s', 'OBJECT'", schemaName, table, newTableName)
-	_, err := a.db.ExecContext(ctx, sql)
+	sqlStr := fmt.Sprintf("EXEC sp_rename '[%s].[%s]', '%s', 'OBJECT'", schemaName, table, newTableName)
+	_, err := a.db.ExecContext(ctx, sqlStr)
 	if err != nil {
 		return fmt.Errorf("failed to rename table %s to %s: %w", oldName, newName, err)
 	}
@@ -606,7 +662,7 @@ func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) erro
 // ========== base.DataInserter interface methods ==========
 
 // InsertRows implements base.DataInserter interface
-func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
+func (a *Adapter) InsertRows(ctx context.Context, tableName string, pktSchema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -621,7 +677,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 
 	pkt := &packet.DataPacket{
 		Header: packet.Header{TableName: tableName},
-		Schema: schema,
+		Schema: pktSchema,
 	}
 	pkt.Data.Rows = rows
 

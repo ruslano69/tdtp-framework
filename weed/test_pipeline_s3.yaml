@@ -1,0 +1,32 @@
+name: test-s3-export
+version: "1.0"
+description: "Benchmark: SP ZTR$Employee → SeaweedFS S3"
+
+sources:
+  - name: sp_ztr_employee
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=ZTR-Live&trusted_connection=yes&encrypt=disable"
+    query: "SELECT * FROM [dbo].[ZTR$Employee]"
+
+workspace:
+  type: sqlite
+  mode: memory
+
+transform:
+  sql: "SELECT * FROM sp_ztr_employee"
+  result_table: result
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compress: true
+    compress_level: 3
+    destination: "s3://tdtp-exports/test/employees.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "tdtp-exports"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true

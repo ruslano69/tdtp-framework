@@ -1,0 +1,48 @@
+# ─── LOAD: tour_sales ─────────────────────────────────────────────────────────
+name: "travel-load-sales-{{SYNC_TS}}"
+description: "Load tour_sales from S3 archive into PostgreSQL"
+
+sources:
+  - name: tour_sales
+    type: tdtp-s3
+    multi_part: true
+    dsn: "s3://travel-agency/sales/{{SYNC_TS}}.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "travel-agency"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: tour_sales
+  sql: SELECT * FROM tour_sales
+
+output:
+  type: postgres
+  postgres:
+    host: localhost
+    port: 5432
+    user: tdtp
+    password: tdtp
+    database: tdtp
+    sslmode: disable
+  table: tour_sales
+  mode: upsert
+  key_fields: [sale_id]
+
+result_log:
+  type: redis
+  address: "localhost:6379"
+  name: "travel:sales:load"
+  db: 0
+  ttl: 86400
+
+performance:
+  batch_size: 5000
+  max_memory_mb: 512

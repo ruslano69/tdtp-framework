@@ -8,7 +8,6 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
 // ========== Делегирование в ImportHelper ==========
@@ -30,7 +29,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 // CreateTable создает таблицу по TDTP схеме
 // Реализует base.TableManager интерфейс
 func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
-	var columns []string
+	columns := make([]string, 0, len(schema.Fields))
 	var pkColumns []string
 
 	for _, field := range schema.Fields {
@@ -51,7 +50,7 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 	}
 
 	// Экранируем tableName для защиты от SQL injection
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
 		quotedTable,
 		strings.Join(columns, ",\n  "))
@@ -67,7 +66,7 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 // DropTable удаляет таблицу
 // Реализует base.TableManager интерфейс
 func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
-	quotedTable := fmt.Sprintf("\"%s\"", tableName)
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("DROP TABLE IF EXISTS %s", quotedTable)
 	_, err := a.db.ExecContext(ctx, query)
 	return err
@@ -76,8 +75,8 @@ func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 // RenameTable переименовывает таблицу
 // Реализует base.TableManager интерфейс
 func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error {
-	quotedOld := fmt.Sprintf("\"%s\"", oldName)
-	quotedNew := fmt.Sprintf("\"%s\"", newName)
+	quotedOld := fmt.Sprintf("\"%s\"", oldName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
+	quotedNew := fmt.Sprintf("\"%s\"", newName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedNew)
 	_, err := a.db.ExecContext(ctx, query)
 	return err
@@ -173,13 +172,4 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 	}
 
 	return nil
-}
-
-// ========== Вспомогательные функции (сохранены для обратной совместимости) ==========
-
-// typedValueToSQL конвертирует TypedValue в значение для SQL
-// DEPRECATED: Используйте base.UniversalTypeConverter.TypedValueToSQL()
-// Оставлено для обратной совместимости с существующим кодом
-func (a *Adapter) typedValueToSQL(tv schema.TypedValue) any {
-	return a.converter.TypedValueToSQL(tv, "sqlite")
 }

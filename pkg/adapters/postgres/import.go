@@ -12,58 +12,61 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
-// ImportPacket импортирует один TDTP пакет в PostgreSQL через временную таблицу
+// ImportPacket импортирует один TDTP пакет в PostgreSQL.
+// StrategyCopy: атомарная замена таблицы через временную (temp → rename).
+// StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу.
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	tableName := pkt.Header.TableName
 
-	// Генерируем имя временной таблицы
-	tempTableName := generateTempTableName(tableName)
-
-	fmt.Printf("📋 Import to temporary table: %s\n", tempTableName)
-
-	// 1. Создаем временную таблицу
-	err := a.createTableFromSchema(ctx, tempTableName, pkt.Schema)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary table: %w", err)
-	}
-
-	// 2. Импортируем данные во временную таблицу
-	tempPacket := *pkt
-	tempPacket.Header.TableName = tempTableName
-
 	switch strategy {
 	case adapters.StrategyCopy:
-		err = a.importWithCopy(ctx, &tempPacket)
+		// Атомарная замена через временную таблицу
+		tempTableName := generateTempTableName(tableName)
+
+		fmt.Printf("📋 Import to temporary table: %s\n", tempTableName)
+
+		err := a.createTableFromSchema(ctx, tempTableName, pkt.Schema)
+		if err != nil {
+			return fmt.Errorf("failed to create temporary table: %w", err)
+		}
+
+		tempPacket := *pkt
+		tempPacket.Header.TableName = tempTableName
+
+		if err = a.importWithCopy(ctx, &tempPacket); err != nil {
+			_ = a.dropTable(ctx, tempTableName)
+			return fmt.Errorf("failed to import to temporary table: %w", err)
+		}
+
+		fmt.Printf("✅ Data loaded to temporary table\n")
+		fmt.Printf("🔄 Replacing production table: %s\n", tableName)
+
+		if err = a.replaceTables(ctx, tableName, tempTableName); err != nil {
+			_ = a.dropTable(ctx, tempTableName)
+			return fmt.Errorf("failed to replace tables: %w", err)
+		}
+
+		fmt.Printf("✅ Production table replaced successfully\n")
+		return nil
+
 	case adapters.StrategyReplace, adapters.StrategyIgnore, adapters.StrategyFail:
-		err = a.importWithInsert(ctx, &tempPacket, strategy)
+		// Убеждаемся что таблица существует, затем INSERT с ON CONFLICT
+		if err := a.createTableFromSchema(ctx, tableName, pkt.Schema); err != nil {
+			return fmt.Errorf("failed to create table: %w", err)
+		}
+		return a.importWithInsert(ctx, pkt, strategy)
+
 	default:
-		err = fmt.Errorf("unknown import strategy: %s", strategy)
+		return fmt.Errorf("unknown import strategy: %s", strategy)
 	}
-
-	if err != nil {
-		// Откатываем - удаляем временную таблицу
-		a.dropTable(ctx, tempTableName)
-		return fmt.Errorf("failed to import to temporary table: %w", err)
-	}
-
-	fmt.Printf("✅ Data loaded to temporary table\n")
-	fmt.Printf("🔄 Replacing production table: %s\n", tableName)
-
-	// 3. Заменяем продакшен таблицу временной (атомарная операция)
-	err = a.replaceTables(ctx, tableName, tempTableName)
-	if err != nil {
-		// Откатываем - удаляем временную таблицу
-		a.dropTable(ctx, tempTableName)
-		return fmt.Errorf("failed to replace tables: %w", err)
-	}
-
-	fmt.Printf("✅ Production table replaced successfully\n")
-
-	return nil
 }
 
 // ImportPackets импортирует множество пакетов атомарно через временную таблицу
+// ImportPackets импортирует множество пакетов атомарно.
+// StrategyCopy: атомарная замена таблицы через временную (temp → rename).
+// StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу,
+// что позволяет накапливать данные из нескольких источников/файлов без затирания.
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
 	if len(packets) == 0 {
@@ -71,64 +74,78 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	}
 
 	tableName := packets[0].Header.TableName
-	tempTableName := generateTempTableName(tableName)
 
-	fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
-
-	// Начинаем транзакцию
-	tx, err := a.BeginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	// 1. Создаем временную таблицу (используем схему из первого пакета)
-	err = a.createTableFromSchema(ctx, tempTableName, packets[0].Schema)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary table: %w", err)
-	}
-
-	// 2. Импортируем каждый пакет во временную таблицу
-	for i, pkt := range packets {
-		fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
-
-		tempPacket := *pkt
-		tempPacket.Header.TableName = tempTableName
-
-		err := a.importPacketData(ctx, &tempPacket, strategy)
-		if err != nil {
-			a.dropTable(ctx, tempTableName)
-			return fmt.Errorf("failed to import packet %d: %w", i+1, err)
-		}
-	}
-
-	fmt.Printf("✅ All packets loaded to temporary table\n")
-	fmt.Printf("🔄 Replacing production table: %s\n", tableName)
-
-	// 3. Заменяем продакшен таблицу временной
-	err = a.replaceTables(ctx, tableName, tempTableName)
-	if err != nil {
-		a.dropTable(ctx, tempTableName)
-		return fmt.Errorf("failed to replace tables: %w", err)
-	}
-
-	// Коммитим транзакцию
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	fmt.Printf("✅ Production table replaced successfully\n")
-
-	return nil
-}
-
-// importPacketData импортирует данные одного пакета (вспомогательная функция)
-func (a *Adapter) importPacketData(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
 	switch strategy {
 	case adapters.StrategyCopy:
-		return a.importWithCopy(ctx, pkt)
+		// Атомарная замена через временную таблицу
+		tempTableName := generateTempTableName(tableName)
+
+		fmt.Printf("📋 Import %d packets to temporary table: %s\n", len(packets), tempTableName)
+
+		tx, err := a.BeginTx(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		if err = a.createTableFromSchema(ctx, tempTableName, packets[0].Schema); err != nil {
+			return fmt.Errorf("failed to create temporary table: %w", err)
+		}
+
+		for i, pkt := range packets {
+			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
+
+			tempPacket := *pkt
+			tempPacket.Header.TableName = tempTableName
+
+			if err = a.importWithCopy(ctx, &tempPacket); err != nil {
+				_ = a.dropTable(ctx, tempTableName)
+				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
+			}
+		}
+
+		fmt.Printf("✅ All packets loaded to temporary table\n")
+		fmt.Printf("🔄 Replacing production table: %s\n", tableName)
+
+		if err = a.replaceTables(ctx, tableName, tempTableName); err != nil {
+			_ = a.dropTable(ctx, tempTableName)
+			return fmt.Errorf("failed to replace tables: %w", err)
+		}
+
+		if err = tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		fmt.Printf("✅ Production table replaced successfully\n")
+		return nil
+
 	case adapters.StrategyReplace, adapters.StrategyIgnore, adapters.StrategyFail:
-		return a.importWithInsert(ctx, pkt, strategy)
+		// Убеждаемся что таблица существует, затем INSERT с ON CONFLICT для каждого пакета
+		if err := a.createTableFromSchema(ctx, tableName, packets[0].Schema); err != nil {
+			return fmt.Errorf("failed to create table: %w", err)
+		}
+
+		tx, err := a.BeginTx(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		for i, pkt := range packets {
+			fmt.Printf("  📦 Importing packet %d/%d\n", i+1, len(packets))
+
+			if err := a.importWithInsert(ctx, pkt, strategy); err != nil {
+				return fmt.Errorf("failed to import packet %d: %w", i+1, err)
+			}
+		}
+
+		if err = tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		fmt.Printf("✅ All %d packets imported successfully\n", len(packets))
+		return nil
+
 	default:
 		return fmt.Errorf("unknown import strategy: %s", strategy)
 	}
@@ -171,7 +188,7 @@ func (a *Adapter) replaceTables(ctx context.Context, targetTable, tempTable stri
 		if err := a.Exec(ctx, sql); err != nil {
 			// Откатываем - возвращаем старое имя
 			rollbackSQL := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quotedOld, quotedTarget)
-			a.Exec(ctx, rollbackSQL)
+			_ = a.Exec(ctx, rollbackSQL)
 			return fmt.Errorf("failed to rename temp table: %w", err)
 		}
 
@@ -203,7 +220,7 @@ func (a *Adapter) dropTable(ctx context.Context, tableName string) error {
 }
 
 // createTableFromSchema создает таблицу на основе TDTP схемы
-func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, schema packet.Schema) error {
+func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, pktSchema packet.Schema) error {
 	quotedTable := QuoteIdentifier(tableName)
 	if a.schema != "public" {
 		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
@@ -220,10 +237,10 @@ func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, s
 	}
 
 	// Строим CREATE TABLE запрос
-	var columns []string
+	columns := make([]string, 0, len(pktSchema.Fields))
 	var pkColumns []string
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		colDef := a.buildColumnDefinition(field)
 		columns = append(columns, colDef)
 
@@ -270,7 +287,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 	}
 
 	// Строим список колонок
-	var columns []string
+	columns := make([]string, 0, len(pkt.Schema.Fields))
 	for _, field := range pkt.Schema.Fields {
 		columns = append(columns, QuoteIdentifier(field.Name))
 	}
@@ -324,7 +341,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 }
 
 // buildOnConflictClause строит ON CONFLICT клаузу
-func (a *Adapter) buildOnConflictClause(schema packet.Schema, strategy adapters.ImportStrategy) string {
+func (a *Adapter) buildOnConflictClause(pktSchema packet.Schema, strategy adapters.ImportStrategy) string {
 	if strategy == adapters.StrategyFail {
 		return ""
 	}
@@ -333,7 +350,7 @@ func (a *Adapter) buildOnConflictClause(schema packet.Schema, strategy adapters.
 	var pkColumns []string
 	var updateColumns []string
 
-	for _, field := range schema.Fields {
+	for _, field := range pktSchema.Fields {
 		if field.Key {
 			pkColumns = append(pkColumns, QuoteIdentifier(field.Name))
 		} else {
@@ -373,25 +390,14 @@ func (a *Adapter) importWithCopy(ctx context.Context, pkt *packet.DataPacket) er
 		return nil
 	}
 
-	quotedTable := QuoteIdentifier(pkt.Header.TableName)
-	if a.schema != "public" {
-		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
-	}
-
-	// Строим список колонок
-	var columns []string
-	for _, field := range pkt.Schema.Fields {
-		columns = append(columns, QuoteIdentifier(field.Name))
-	}
-
 	// Используем CopyFrom для bulk insert
-	var columnNames []string
+	columnNames := make([]string, 0, len(pkt.Schema.Fields))
 	for _, field := range pkt.Schema.Fields {
 		columnNames = append(columnNames, field.Name)
 	}
 
 	// Подготавливаем данные для COPY
-	var rows [][]any
+	rows := make([][]any, 0, len(pkt.Data.Rows))
 	for _, row := range pkt.Data.Rows {
 		values := parseRow(row.Value)
 		rowData := make([]any, len(values))
@@ -507,8 +513,8 @@ func (a *Adapter) convertValue(value string, field packet.Field) any {
 // ========== base.TableManager interface methods ==========
 
 // CreateTable implements base.TableManager interface
-func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
-	return a.createTableFromSchema(ctx, tableName, schema)
+func (a *Adapter) CreateTable(ctx context.Context, tableName string, pktSchema packet.Schema) error {
+	return a.createTableFromSchema(ctx, tableName, pktSchema)
 }
 
 // DropTable implements base.TableManager interface
@@ -531,14 +537,14 @@ func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) erro
 
 // InsertRows implements base.DataInserter interface
 // Uses COPY for bulk insert (PostgreSQL-specific fast path)
-func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
+func (a *Adapter) InsertRows(ctx context.Context, tableName string, pktSchema packet.Schema, rows []packet.Row, strategy adapters.ImportStrategy) error {
 	// PostgreSQL adapter использует COPY command для bulk insert
 	// Это быстрее чем INSERT statements
 	pkt := &packet.DataPacket{
 		Header: packet.Header{
 			TableName: tableName,
 		},
-		Schema: schema,
+		Schema: pktSchema,
 	}
 	pkt.Data.Rows = rows
 

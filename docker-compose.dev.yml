@@ -1,0 +1,104 @@
+# TDTP local dev environment
+# Только то, чего нет в реальной среде (MSSQL/MSMQ/RabbitMQ CloudAMQP/SeaweedFS — уже есть).
+#
+# Запуск:   docker-compose -f docker-compose.dev.yml up -d
+# Стоп:     docker-compose -f docker-compose.dev.yml down
+# Очистка:  docker-compose -f docker-compose.dev.yml down -v
+
+services:
+
+  # -----------------------------------------------
+  # PostgreSQL 16
+  # DSN: host=localhost port=5432 user=tdtp password=tdtp dbname=tdtp sslmode=disable
+  # -----------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: tdtp-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tdtp
+      POSTGRES_PASSWORD: tdtp
+      POSTGRES_DB: tdtp
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tdtp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # -----------------------------------------------
+  # Redis 7
+  # DSN: redis://localhost:6379
+  # -----------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: tdtp-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # -----------------------------------------------
+  # Kafka 3 (KRaft — без Zookeeper)
+  # Bootstrap: localhost:9092
+  # UI: http://localhost:8090
+  # -----------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: tdtp-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 2>/dev/null | grep -q '9092'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: tdtp-kafka-ui
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: tdtp-dev
+
+volumes:
+  postgres-data:
+    name: tdtp-dev-postgres
+  kafka-data:
+    name: tdtp-dev-kafka

@@ -1,0 +1,8 @@
+database:
+  type: access
+  dsn: "Driver={Microsoft Access Driver (*.mdb)};DBQ=H:\\Ruslan\\Code\\Go\\TDTP\\tdtp-framework\\DELO19_nopass.MDB;UID=Admin;PWD=;"
+  charset: windows-1251
+
+export:
+  compress: true
+  compress_level: 19

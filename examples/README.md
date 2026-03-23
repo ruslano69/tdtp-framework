@@ -238,6 +238,52 @@ go run main.go
 
 ---
 
+### [08. ETL Pipeline + xzmercury](./08-pipeline-encrypted/) 🔐
+**Сложность**: ⭐⭐ Средний
+**Время**: 5 минут
+
+Интеграционный пример: embedded xzmercury-mock + `tdtpcli --pipeline` с шифрованием.
+
+**Что демонстрирует**:
+- ✅ ETL pipeline (TDTP → SQLite workspace → transform → output)
+- ✅ Шифрование AES-256-GCM через xzmercury (bind → encrypt → burn-on-read)
+- ✅ Вызов `tdtpcli` как внешнего процесса
+- ✅ Нулевые внешние зависимости (mock-сервер встроен)
+
+**Когда использовать**:
+- Знакомство с интеграцией пайплайна и xzmercury
+- Тестирование pipeline без реального xzmercury
+- Шаблон для production (заменить mock на реальный сервер)
+
+```bash
+go run ./examples/08-pipeline-encrypted/
+```
+
+---
+
+### [09. S3 Pipeline Chain: Extract → Split by Region](./09-s3-pipeline-chain/)
+**Сложность:** ⭐ Начальный
+**Время:** 3 минуты
+
+Цепочка двух пайплайнов с оркестрирующим shell-скриптом.
+
+**Что демонстрирует:**
+- Pipeline 1: PostgreSQL → полный TDTP-файл в S3 (с zstd-сжатием)
+- Pipeline 2 (шаблон): S3-файл → фильтрация по региону → отдельный файл в S3
+- `run_chain.sh`: получает список уникальных значений из БД, запускает pipeline 2 для каждого через `sed`-подстановку в шаблон
+
+**Когда использовать:**
+- Нужно разбить один большой экспорт на файлы по категории (регион, статус, отдел)
+- Данные из S3 затем забирают независимые потребители (микросервисы, аналитические задания)
+- ETL fan-out без изменения кода фреймворка — только YAML + bash
+
+```bash
+cd examples/09-s3-pipeline-chain
+bash run_chain.sh
+```
+
+---
+
 ## Сравнение примеров
 
 | Пример | Сложность | Компоненты | Production-Ready | Use Case |
@@ -249,6 +295,8 @@ go run main.go
 | 04-audit-masking | ⭐⭐ | Audit, Processors | ✅ | Compliance, Data privacy |
 | 05-circuit-breaker | ⭐⭐ | Circuit Breaker | ✅ | API resilience |
 | 06-etl-pipeline | ⭐⭐⭐⭐ | All components | ✅ | Enterprise ETL |
+| 08-pipeline-encrypted | ⭐⭐ | ETL + xzmercury | ✅ | Encrypted pipeline, no external deps |
+| 09-s3-pipeline-chain | ⭐ | ETL + S3 + bash | ✅ | S3 fan-out, split by category |
 
 ## Основные компоненты
 
@@ -288,6 +336,7 @@ go run main.go
 - **GDPR compliance** → [04-audit-masking](./04-audit-masking/)
 - **Защитить API от сбоев** → [05-circuit-breaker](./05-circuit-breaker/)
 - **Полноценный ETL** → [06-etl-pipeline](./06-etl-pipeline/)
+- **ETL + шифрование (без внешних зависимостей)** → [08-pipeline-encrypted](./08-pipeline-encrypted/)
 
 ## Production Checklist
 

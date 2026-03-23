@@ -3,11 +3,24 @@ package processors
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+)
+
+// ValidationErrorStrategy defines how validation errors are handled.
+type ValidationErrorStrategy string
+
+const (
+	// StrategyFail aborts the operation and returns all collected errors (default).
+	StrategyFail ValidationErrorStrategy = "fail"
+	// StrategyFilter silently removes invalid rows and passes the rest through.
+	StrategyFilter ValidationErrorStrategy = "filter"
+	// StrategyWarn prints a warning for each invalid row but passes all rows through.
+	StrategyWarn ValidationErrorStrategy = "warn"
 )
 
 // ValidationRule определяет тип правила валидации
@@ -46,7 +59,8 @@ type FieldValidationRule struct {
 type FieldValidator struct {
 	name             string
 	fieldsToValidate map[string][]FieldValidationRule // field_name -> validation rules
-	stopOnFirstError bool                             // Остановиться на первой ошибке или собрать все
+	stopOnFirstError bool                             // Остановиться на первой ошибке (только для StrategyFail)
+	errorStrategy    ValidationErrorStrategy          // Стратегия обработки ошибок валидации
 
 	// Предкомпилированные регулярные выражения
 	emailRegex *regexp.Regexp
@@ -58,14 +72,16 @@ type FieldValidator struct {
 	customRegexes map[string]*regexp.Regexp
 }
 
-// NewFieldValidator создает новый валидатор полей
+// NewFieldValidator создает новый валидатор полей.
+// Стратегия по умолчанию — StrategyFail.
 func NewFieldValidator(fieldsToValidate map[string][]FieldValidationRule, stopOnFirstError bool) (*FieldValidator, error) {
 	validator := &FieldValidator{
 		name:             "field_validator",
 		fieldsToValidate: fieldsToValidate,
 		stopOnFirstError: stopOnFirstError,
+		errorStrategy:    StrategyFail,
 		emailRegex:       regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`),
-		phoneRegex:       regexp.MustCompile(`^\+?[0-9]{7,15}$`),
+		phoneRegex:       regexp.MustCompile(`^\+?\d{7,15}$`),
 		urlRegex:         regexp.MustCompile(`^https?://[a-zA-Z0-9.-]+(\.[a-zA-Z]{2,})?(/.*)?$`),
 		dateRegex:        regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`),
 		customRegexes:    make(map[string]*regexp.Regexp),
@@ -92,7 +108,11 @@ func (v *FieldValidator) Name() string {
 	return v.name
 }
 
-// Process реализует интерфейс Processor
+// Process реализует интерфейс Processor.
+// Поведение при ошибках определяется полем errorStrategy:
+//   - StrategyFail   — возвращает ошибку, данные не передаются
+//   - StrategyFilter — удаляет невалидные строки, передаёт остальные
+//   - StrategyWarn   — выводит предупреждения в stderr, передаёт все строки
 func (v *FieldValidator) Process(ctx context.Context, data [][]string, schema packet.Schema) ([][]string, error) {
 	if len(v.fieldsToValidate) == 0 {
 		return data, nil
@@ -107,11 +127,11 @@ func (v *FieldValidator) Process(ctx context.Context, data [][]string, schema pa
 	}
 
 	if len(fieldIndices) == 0 {
-		return data, nil // Нет полей для валидации
+		return data, nil
 	}
 
-	// Проходим по данным и валидируем
 	var validationErrors []string
+	invalidRows := make(map[int]bool)
 
 	for rowIdx, row := range data {
 		for colIdx, rules := range fieldIndices {
@@ -122,31 +142,58 @@ func (v *FieldValidator) Process(ctx context.Context, data [][]string, schema pa
 			value := row[colIdx]
 			fieldName := schema.Fields[colIdx].Name
 
-			// Применяем все правила к полю
 			for _, rule := range rules {
-				if err := v.validateValue(value, rule); err != nil {
-					errMsg := fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, err.Error())
-					if rule.ErrMsg != "" {
-						errMsg = fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, rule.ErrMsg)
-					}
+				err := v.validateValue(value, rule)
+				if err == nil {
+					continue
+				}
 
-					validationErrors = append(validationErrors, errMsg)
+				errMsg := fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, err.Error())
+				if rule.ErrMsg != "" {
+					errMsg = fmt.Sprintf("row %d, field '%s': %s", rowIdx+1, fieldName, rule.ErrMsg)
+				}
 
-					if v.stopOnFirstError {
-						return nil, fmt.Errorf("validation failed: %s", errMsg)
-					}
+				validationErrors = append(validationErrors, errMsg)
+				invalidRows[rowIdx] = true
+
+				if v.stopOnFirstError && v.errorStrategy == StrategyFail {
+					return nil, fmt.Errorf("validation failed: %s", errMsg)
 				}
 			}
 		}
 	}
 
-	// Если накопились ошибки, возвращаем их все
-	if len(validationErrors) > 0 {
-		return nil, fmt.Errorf("validation failed with %d errors:\n- %s",
-			len(validationErrors), strings.Join(validationErrors, "\n- "))
-	}
+	switch v.errorStrategy {
+	case StrategyFail:
+		if len(validationErrors) > 0 {
+			return nil, fmt.Errorf("validation failed with %d error(s):\n- %s",
+				len(validationErrors), strings.Join(validationErrors, "\n- "))
+		}
+		return data, nil
 
-	return data, nil
+	case StrategyFilter:
+		if len(invalidRows) == 0 {
+			return data, nil
+		}
+		filtered := make([][]string, 0, len(data)-len(invalidRows))
+		for i, row := range data {
+			if !invalidRows[i] {
+				filtered = append(filtered, row)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "⚠ field_validator [filter]: removed %d invalid row(s), %d passed\n",
+			len(invalidRows), len(filtered))
+		return filtered, nil
+
+	case StrategyWarn:
+		for _, msg := range validationErrors {
+			fmt.Fprintf(os.Stderr, "⚠ field_validator [warn]: %s\n", msg)
+		}
+		return data, nil
+
+	default:
+		return data, nil
+	}
 }
 
 // validateValue применяет правило валидации к значению
@@ -197,12 +244,12 @@ func (v *FieldValidator) validateRange(value, param string) error {
 		return fmt.Errorf("invalid range format '%s', expected 'min-max'", param)
 	}
 
-	min, err := strconv.ParseFloat(parts[0], 64)
+	minVal, err := strconv.ParseFloat(parts[0], 64)
 	if err != nil {
 		return fmt.Errorf("invalid min value in range '%s'", param)
 	}
 
-	max, err := strconv.ParseFloat(parts[1], 64)
+	maxVal, err := strconv.ParseFloat(parts[1], 64)
 	if err != nil {
 		return fmt.Errorf("invalid max value in range '%s'", param)
 	}
@@ -212,8 +259,8 @@ func (v *FieldValidator) validateRange(value, param string) error {
 		return fmt.Errorf("value '%s' is not a valid number", value)
 	}
 
-	if val < min || val > max {
-		return fmt.Errorf("value %g is out of range [%g, %g]", val, min, max)
+	if val < minVal || val > maxVal {
+		return fmt.Errorf("value %g is out of range [%g, %g]", val, minVal, maxVal)
 	}
 
 	return nil
@@ -248,19 +295,19 @@ func (v *FieldValidator) validateLength(value, param string) error {
 		return fmt.Errorf("invalid length format '%s', expected 'min-max'", param)
 	}
 
-	min, err := strconv.Atoi(parts[0])
+	minLen, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return fmt.Errorf("invalid min length in '%s'", param)
 	}
 
-	max, err := strconv.Atoi(parts[1])
+	maxLen, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return fmt.Errorf("invalid max length in '%s'", param)
 	}
 
 	length := len(value)
-	if length < min || length > max {
-		return fmt.Errorf("length %d is out of range [%d, %d]", length, min, max)
+	if length < minLen || length > maxLen {
+		return fmt.Errorf("length %d is out of range [%d, %d]", length, minLen, maxLen)
 	}
 
 	return nil
@@ -306,9 +353,12 @@ func (v *FieldValidator) validateDate(value string) error {
 
 	// Дополнительная проверка валидности даты
 	parts := strings.Split(value, "-")
-	year, _ := strconv.Atoi(parts[0])
-	month, _ := strconv.Atoi(parts[1])
-	day, _ := strconv.Atoi(parts[2])
+	year, errYear := strconv.Atoi(parts[0])
+	_ = errYear
+	month, errMonth := strconv.Atoi(parts[1])
+	_ = errMonth
+	day, errDay := strconv.Atoi(parts[2])
+	_ = errDay
 
 	if month < 1 || month > 12 {
 		return fmt.Errorf("invalid month: %d", month)
@@ -381,7 +431,21 @@ func NewFieldValidatorFromConfig(params map[string]any) (*FieldValidator, error)
 		fieldsToValidate[fieldName] = fieldRules
 	}
 
-	return NewFieldValidator(fieldsToValidate, stopOnFirstError)
+	validator, err := NewFieldValidator(fieldsToValidate, stopOnFirstError)
+	if err != nil {
+		return nil, err
+	}
+
+	if s, ok := params["on_error"].(string); ok {
+		switch ValidationErrorStrategy(s) {
+		case StrategyFail, StrategyFilter, StrategyWarn:
+			validator.errorStrategy = ValidationErrorStrategy(s)
+		default:
+			return nil, fmt.Errorf("invalid on_error value %q: must be 'fail', 'filter', or 'warn'", s)
+		}
+	}
+
+	return validator, nil
 }
 
 // parseValidationRule парсит правило валидации из строки

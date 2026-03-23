@@ -1,34 +1,77 @@
 package main
 
-import "flag"
+import (
+	"flag"
+	"strings"
+)
+
+// MultiStringFlag is a flag that can be specified multiple times.
+// Each occurrence appends to the slice.
+// Example: --where "A > 1" --where "B IN (1,2)" → ["A > 1", "B IN (1,2)"]
+type MultiStringFlag []string
+
+func (f *MultiStringFlag) String() string { return strings.Join(*f, "; ") }
+
+// Set implements flag.Value by appending the value to the slice.
+func (f *MultiStringFlag) Set(s string) error {
+	*f = append(*f, s)
+	return nil
+}
+
+// ListFlag is a custom flag that behaves like a bool when used without a value
+// (--list lists all tables) but also accepts an optional glob pattern
+// (--list "user*" filters tables by name).
+type ListFlag struct {
+	Pattern string // glob pattern; empty = show all
+	IsSet   bool
+}
+
+func (f *ListFlag) String() string { return f.Pattern }
+
+// Set implements flag.Value; accepts an optional glob pattern or "true" (bare --list).
+func (f *ListFlag) Set(s string) error {
+	f.IsSet = true
+	if s == "true" { // --list without value
+		f.Pattern = ""
+	} else {
+		f.Pattern = s
+	}
+	return nil
+}
+
+// IsBoolFlag makes the flag behave like a bool: --list works without a value.
+func (f *ListFlag) IsBoolFlag() bool { return true }
 
 // Flags holds all command-line flags
 type Flags struct {
 	// Commands
-	List         *bool
-	ListViews    *bool
-	Export       *string
-	Import       *string
-	ExportBroker *string
-	ImportBroker *bool
-	ToHTML       *string
-	OpenBrowser  *bool
-	Row          *string // Row range for HTML viewer (e.g., "100-150")
-	ToXLSX       *string
-	FromXLSX     *string
-	ExportXLSX   *string
-	ImportXLSX   *string
-	SyncIncr     *string
+	List           *ListFlag
+	ListViews      *bool
+	Export         *string
+	Import         *string
+	ExportBroker   *string
+	ImportBroker   *bool
+	ToHTML         *string
+	OpenBrowser    *bool
+	Row            *string // Row range for HTML viewer (e.g., "100-150")
+	ToXLSX         *string
+	FromXLSX       *string
+	ExportXLSX     *string
+	ImportXLSX     *string
+	SyncIncr       *string
 	Pipeline       *string
 	ProcessRequest *string // Process incoming TDTP request file and generate response
 	Diff           *string // First file for diff (second as positional arg)
 	Merge          *string // Comma-separated list of files to merge
+	Inspect        *string // Print YAML metadata summary of a TDTP file
+	Listen         *bool   // [BETA] Stream consumer daemon mode (Kafka only)
 
 	// TDTQL Filters
-	Where   *string
+	Where   MultiStringFlag // repeatable: --where "A>1" --where "B IN (1,2)"
 	OrderBy *string
 	Limit   *int
 	Offset  *int
+	Fields  *string // Column projection: comma-separated list (e.g. "id,email,status")
 
 	// Options
 	Config         *string
@@ -42,7 +85,18 @@ type Flags struct {
 	// Compression
 	Compress      *bool
 	CompressLevel *int
-	Hash          *bool // Add XXH3 checksum for data integrity verification
+	CompressAlgo  *string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
+	Hash          *bool   // Add XXH3 checksum for data integrity verification
+	PacketSize    *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
+
+	// Compact format (v1.3.1)
+	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
+	FixedFields *string // Comma-separated fixed field names for compact export
+	ToCompact   *string // Convert existing TDTP file to compact v1.3.1 format
+	CompactTail *bool   // Write tail row with all fixed fields explicit (stream validation / carry handoff)
+
+	// Encryption (xZMercury UUID-binding флоу)
+	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
 
 	// Incremental Sync
 	TrackingField  *string
@@ -71,8 +125,8 @@ type Flags struct {
 	ShowConflicts *bool
 
 	// Misc
-	Version *bool
-	Help    *bool
+	Version   *bool
+	Help      *bool
 	ShortHelp *bool
 }
 
@@ -81,7 +135,9 @@ func ParseFlags() *Flags {
 	f := &Flags{}
 
 	// Commands
-	f.List = flag.Bool("list", false, "List all tables in database")
+	f.List = &ListFlag{}
+	flag.Var(f.List, "list", `List tables in database, optionally filtered by glob pattern (e.g. --list "user*", --list "order?")`)
+
 	f.ListViews = flag.Bool("list-views", false, "List all database views with updatable status")
 	f.Export = flag.String("export", "", "Export table to TDTP XML file (table name)")
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
@@ -99,12 +155,15 @@ func ParseFlags() *Flags {
 	f.ProcessRequest = flag.String("process-request", "", "Process TDTP request file and generate response (file path)")
 	f.Diff = flag.String("diff", "", "Compare two TDTP files: --diff file1.xml file2.xml")
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
+	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
+	f.Listen = flag.Bool("listen", false, "[BETA] Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
 
 	// TDTQL Filters
-	f.Where = flag.String("where", "", "TDTQL WHERE clause (e.g., 'age > 18 AND status = active')")
+	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
 	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")
+	f.Fields = flag.String("fields", "", "Column projection: comma-separated list of columns to select/import (e.g. 'id,email,status')")
 
 	// Options
 	f.Config = flag.String("config", "config.yaml", "Configuration file path")
@@ -116,9 +175,20 @@ func ParseFlags() *Flags {
 	f.ReadOnlyFields = flag.Bool("readonly-fields", false, "Include read-only fields (timestamp, computed, identity) in export")
 
 	// Compression
-	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")
-	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1 (fastest) - 19 (best)")
+	f.Compress = flag.Bool("compress", false, "Enable compression for exported data")
+	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1-19 (zstd) or 6-7 (kanzi)")
+	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
+	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
 	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
+
+	// Compact format (v1.3.1)
+	f.Compact = flag.Bool("compact", false, "Enable TDTP v1.3.1 compact format on export (fixed fields written once per group)")
+	f.FixedFields = flag.String("fixed-fields", "", "Fixed fields for compact format: comma-separated names or '_' to auto-detect from _prefix columns")
+	f.ToCompact = flag.String("to-compact", "", "Convert existing TDTP v1.x file to compact v1.3.1 format (input file path)")
+	f.CompactTail = flag.Bool("compact-tail", false, "Write tail row with all fixed fields explicit for stream validation and carry-state handoff")
+
+	// Encryption
+	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")
 
 	// Incremental Sync Options
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")

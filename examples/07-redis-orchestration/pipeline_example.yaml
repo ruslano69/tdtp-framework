@@ -1,0 +1,39 @@
+# Пример пайплайна TDTP с публикацией результата в Redis
+#
+# После завершения (успешного или с ошибкой) фреймворк выполняет:
+#   SET  tdtp:pipeline:MASK_V001:state  <JSON>  EX 3600
+#   PUB  tdtp:pipeline:MASK_V001        <JSON>
+#
+# Воркер python_worker.py подхватит событие через psubscribe tdtp:pipeline:*
+
+name: erp_mask_sync
+
+source:
+  name: mask_data
+  type: mssql
+  mssql:
+    host: erp-db.internal
+    port: 1433
+    user: sa
+    password: secret
+    database: ERP_PROD
+  query: "SELECT id, name, amount FROM mask WHERE updated_at > :last_sync"
+
+output:
+  type: postgres
+  postgres:
+    host: dw.internal
+    port: 5432
+    user: etl_user
+    password: secret
+    database: datawarehouse
+  table: mask_staging
+  mode: upsert
+
+result_log:
+  type: redis
+  address: "127.0.0.1:6379"
+  name: MASK_V001        # Имя результата — используется как имя канала и ключа состояния
+  db: 0
+  ttl: 3600              # Ключ состояния живет 1 час (для polling-режима)
+  # password: ""         # Раскомментировать если Redis требует AUTH

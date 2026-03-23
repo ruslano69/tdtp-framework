@@ -21,7 +21,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.13'
+          # Use latest stable Go so stdlib vulns (GO-2026-4601, GO-2026-4602)
+          # fixed in go1.25.8 are covered. Pin to a specific minor only when
+          # a new stdlib CVE forces an upgrade again.
+          go-version: 'stable'
           cache: true
 
       - name: Install govulncheck

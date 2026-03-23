@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const version = "1.6.0"
+const version = "1.8.0-beta"
 
 // PrintVersion prints version information
 func PrintVersion() {
@@ -23,12 +23,13 @@ func PrintShortHelp() {
 	fmt.Println("COMMANDS:")
 	fmt.Println()
 	fmt.Println("  Database:")
-	fmt.Println("    --list                     List all tables")
+	fmt.Println("    --list[=pattern]           List tables; filter by glob (e.g. --list=user*, --list=order?)")
 	fmt.Println("    --list-views               List all database views")
 	fmt.Println("    --export <table>           Export table to TDTP XML")
 	fmt.Println("    --import <file>            Import TDTP XML to database")
 	fmt.Println()
 	fmt.Println("  File:")
+	fmt.Println("    --inspect <file>           Print YAML metadata summary (no config needed)")
 	fmt.Println("    --diff <file-a> <file-b>   Compare two TDTP files")
 	fmt.Println("    --merge <files>            Merge multiple TDTP files")
 	fmt.Println("    --to-html <file>           Convert TDTP to HTML viewer")
@@ -39,9 +40,10 @@ func PrintShortHelp() {
 	fmt.Println("    --export-xlsx <table>      Table → XLSX (direct)")
 	fmt.Println("    --import-xlsx <xlsx-file>  XLSX → Database (direct)")
 	fmt.Println()
-	fmt.Println("  Broker:")
+	fmt.Println("  Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed")
 	fmt.Println("    --export-broker <table>    Export to message broker")
 	fmt.Println("    --import-broker            Import from message broker")
+	fmt.Println("    --listen                   [BETA] Streaming consumer daemon (Kafka only)")
 	fmt.Println()
 	fmt.Println("  ETL:")
 	fmt.Println("    --sync-incremental <table> Incremental sync")
@@ -67,6 +69,7 @@ func PrintShortHelp() {
 	fmt.Println("    --order-by <fields>        ORDER BY clause")
 	fmt.Println("    --limit <n>                Rows: +N = first N, -N = last N (tail)")
 	fmt.Println("    --offset <n>               Skip N rows")
+	fmt.Println("    --fields <col1,col2>       Column projection: export/import only listed columns")
 	fmt.Println()
 	fmt.Println("  HTML Viewer:")
 	fmt.Println("    --open                     Open in browser")
@@ -109,12 +112,13 @@ func PrintHelp() {
 	fmt.Println()
 
 	fmt.Println("  Database Operations:")
-	fmt.Println("    --list                     List all tables in database")
+	fmt.Println("    --list[=pattern]           List tables; filter by glob (e.g. --list=user*, --list=order?)")
 	fmt.Println("    --export <table>           Export table to TDTP XML file")
 	fmt.Println("    --import <file>            Import TDTP XML file to database")
 	fmt.Println()
 
 	fmt.Println("  File Operations:")
+	fmt.Println("    --inspect <tdtp-file>      Print YAML metadata summary (no config needed)")
 	fmt.Println("    --diff <file-a> <file-b>   Compare two TDTP files and show differences")
 	fmt.Println("    --merge <files>            Merge multiple TDTP files into one")
 	fmt.Println("    --to-html <tdtp-file>      Convert TDTP to HTML viewer (fast preview)")
@@ -130,6 +134,14 @@ func PrintHelp() {
 	fmt.Println("  Message Broker Operations:")
 	fmt.Println("    --export-broker <table>    Export table to message broker")
 	fmt.Println("    --import-broker            Import from message broker")
+	fmt.Println("    --listen                   [BETA] Streaming consumer daemon (Kafka only)")
+	fmt.Println("                               Listens to Kafka topic and imports data as stream parts arrive.")
+	fmt.Println("                               Requires stable channel (99.99%+ uptime). NOT for RabbitMQ/MSMQ.")
+	fmt.Println()
+	fmt.Println("    Broker tiers:")
+	fmt.Println("      MSMQ     — Legacy     (Windows-only, no ordering guarantees, batch mode only)")
+	fmt.Println("      RabbitMQ — Stability  (reliable delivery, batch mode)")
+	fmt.Println("      Kafka    — Speed      (ordered partitions, batch + --listen streaming [BETA])")
 	fmt.Println()
 
 	fmt.Println("  Incremental Sync:")
@@ -162,6 +174,9 @@ func PrintHelp() {
 	fmt.Println("    --order-by <fields>        ORDER BY clause (e.g., 'name ASC, age DESC')")
 	fmt.Println("    --limit <n>                LIMIT rows: positive = first N, negative = last N (like tail -n)")
 	fmt.Println("    --offset <n>               OFFSET number of rows to skip")
+	fmt.Println("    --fields <col1,col2,...>   Column projection: export only listed columns (e.g. 'id,email,status')")
+	fmt.Println("                               For --import: whitelist — only these columns are written to DB")
+	fmt.Println("                               For --sync-incremental: tracking field is always included automatically")
 	fmt.Println()
 
 	fmt.Println("  XLSX Options:")
@@ -214,6 +229,11 @@ func PrintHelp() {
 	fmt.Println("  # List all tables")
 	fmt.Println("  tdtpcli --list --config pg.yaml")
 	fmt.Println()
+	fmt.Println("  # List tables matching a pattern (use = to pass the pattern)")
+	fmt.Println("  tdtpcli --list=user* --config pg.yaml")
+	fmt.Println("  tdtpcli --list=order? --config pg.yaml")
+	fmt.Println("  tdtpcli --list=%log% --config pg.yaml") // SQL-style % wildcard
+	fmt.Println()
 
 	fmt.Println("  # Export table to TDTP XML")
 	fmt.Println("  tdtpcli --export users --output users.tdtp.xml")
@@ -221,6 +241,14 @@ func PrintHelp() {
 
 	fmt.Println("  # Export with filters")
 	fmt.Println("  tdtpcli --export orders --where 'status = active' --limit 100")
+	fmt.Println()
+
+	fmt.Println("  # Export only specific columns (column projection)")
+	fmt.Println("  tdtpcli --export clients --fields id,email,status --output clients_slim.tdtp.xml")
+	fmt.Println()
+
+	fmt.Println("  # Import only specific columns from a wide TDTP file")
+	fmt.Println("  tdtpcli --import clients_full.tdtp.xml --fields id,email,status --table clients_slim")
 	fmt.Println()
 
 	fmt.Println("  # Export with compression")
@@ -278,6 +306,12 @@ func PrintHelp() {
 	fmt.Println("  # Import from RabbitMQ")
 	fmt.Println("  tdtpcli --import-broker --config rabbitmq.yaml")
 	fmt.Println()
+	fmt.Println("  # [BETA] Streaming consumer daemon — Kafka only")
+	fmt.Println("  #   Listens indefinitely; terminated by Ctrl+C / SIGTERM")
+	fmt.Println("  #   Recommended for stable channels (LAN, dedicated WAN, 99.99%+ uptime)")
+	fmt.Println("  #   NOT recommended for unreliable links — use --import-broker (batch) instead")
+	fmt.Println("  tdtpcli --listen --config kafka.yaml --strategy replace")
+	fmt.Println()
 
 	fmt.Println("  # Incremental sync")
 	fmt.Println("  tdtpcli --sync-incremental orders --tracking-field updated_at")
@@ -289,6 +323,10 @@ func PrintHelp() {
 
 	fmt.Println("  # Execute pipeline in unsafe mode (allows custom SQL)")
 	fmt.Println("  tdtpcli --pipeline etl-config.yaml --unsafe")
+	fmt.Println()
+
+	fmt.Println("  # Inspect TDTP file metadata (no config needed)")
+	fmt.Println("  tdtpcli --inspect orders.tdtp.xml")
 	fmt.Println()
 
 	fmt.Println("  # Import to different table name")
@@ -378,7 +416,11 @@ func PrintHelp() {
 	fmt.Println("FEATURES:")
 	fmt.Println()
 	fmt.Println("  ✅ Database Adapters: PostgreSQL, MS SQL, SQLite, MySQL")
-	fmt.Println("  ✅ Message Brokers: RabbitMQ, MSMQ, Kafka")
+	fmt.Println("  ✅ Message Brokers:")
+	fmt.Println("       MSMQ     — Legacy     (Windows-only, batch mode)")
+	fmt.Println("       RabbitMQ — Stability  (reliable delivery, batch mode)")
+	fmt.Println("       Kafka    — Speed      (ordered partitions, batch + streaming [BETA])")
+	fmt.Println("  🔶 Streaming Consumer: --listen (Kafka only, BETA) — stable channels only")
 	fmt.Println("  ✅ File Operations: Diff & Merge with conflict resolution")
 	fmt.Println("  ✅ XLSX Converter: Database ↔ Excel bidirectional 🍒")
 	fmt.Println("  ✅ Circuit Breaker: Protection from cascading failures")

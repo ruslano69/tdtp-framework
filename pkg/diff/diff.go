@@ -1,3 +1,4 @@
+// Package diff provides functionality for the TDTP framework.
 package diff
 
 import (
@@ -242,7 +243,7 @@ func (d *Differ) contains(slice []int, val int) bool {
 func (r *DiffResult) FormatText() string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("=== Diff Statistics ===\n"))
+	sb.WriteString("=== Diff Statistics ===\n")
 	sb.WriteString(fmt.Sprintf("Total in A: %d\n", r.Stats.TotalInA))
 	sb.WriteString(fmt.Sprintf("Total in B: %d\n", r.Stats.TotalInB))
 	sb.WriteString(fmt.Sprintf("Added:      %d\n", r.Stats.AddedCount))

@@ -23,7 +23,7 @@ func (p *Parser) ParseFile(filename string) (*DataPacket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	return p.Parse(file)
 }
@@ -40,6 +40,16 @@ func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
 	// Базовая валидация
 	if err := p.validatePacket(&packet); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	// Auto-expand compact v1.3.1 format (carry-forward fixed fields).
+	// Only when data is NOT compressed — compressed packets still have rows packed
+	// into a single blob; expansion must happen after decompression instead
+	// (see ParseWithDecompression / ParseBytesWithDecompression).
+	if packet.Data.Compact && packet.Data.Compression == "" {
+		if err := ExpandCompactRows(&packet); err != nil {
+			return nil, fmt.Errorf("compact expansion failed: %w", err)
+		}
 	}
 
 	return &packet, nil
@@ -89,7 +99,7 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 
 	// Проверка типа сообщения
 	switch packet.Header.Type {
-	case TypeReference, TypeRequest, TypeResponse, TypeAlarm:
+	case TypeReference, TypeRequest, TypeResponse, TypeAlarm, TypeError:
 		// OK
 	default:
 		return fmt.Errorf("invalid message type: %s", packet.Header.Type)
@@ -124,6 +134,13 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 	return nil
 }
 
+// ExpandCompactRows разворачивает compact-формат в пакете.
+// Это удобная обёртка над одноимённой функцией пакета.
+// Если Data.Compact == false — ничего не делает.
+func (p *Parser) ExpandCompactRows(packet *DataPacket) error {
+	return ExpandCompactRows(packet)
+}
+
 // IsCompressed проверяет, сжаты ли данные в пакете
 func (p *Parser) IsCompressed(packet *DataPacket) bool {
 	return packet.Data.Compression != ""
@@ -135,9 +152,9 @@ func (p *Parser) GetCompressionAlgorithm(packet *DataPacket) string {
 }
 
 // DecompressData распаковывает сжатые данные в пакете
-// decompressor - функция распаковки, должна принимать сжатую строку и возвращать массив строк
+// decompressor - функция распаковки, принимает сжатую строку и algo ("zstd", "kanzi" и т.д.)
 // Если данные не сжаты, возвращает их как есть
-func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompressor func(ctx context.Context, compressed string) ([]string, error)) error {
+func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompressor func(ctx context.Context, compressed string, algo string) ([]string, error)) error {
 	// Если данные не сжаты, ничего не делаем
 	if packet.Data.Compression == "" {
 		return nil
@@ -155,7 +172,7 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 
 	// Распаковываем
 	compressedData := packet.Data.Rows[0].Value
-	decompressedRows, err := decompressor(ctx, compressedData)
+	decompressedRows, err := decompressor(ctx, compressedData, packet.Data.Compression)
 	if err != nil {
 		return fmt.Errorf("decompression failed: %w", err)
 	}
@@ -171,7 +188,7 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 }
 
 // ParseWithDecompression парсит пакет и автоматически распаковывает сжатые данные
-func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx context.Context, compressed string) ([]string, error)) (*DataPacket, error) {
+func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx context.Context, compressed string, algo string) ([]string, error)) (*DataPacket, error) {
 	packet, err := p.Parse(r)
 	if err != nil {
 		return nil, err
@@ -182,13 +199,20 @@ func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx conte
 		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
 			return nil, err
 		}
+		// After decompression, expand compact if flagged (Parse() skips this
+		// when Compression != "" because rows are still a packed blob at that point).
+		if packet.Data.Compact {
+			if err := ExpandCompactRows(packet); err != nil {
+				return nil, fmt.Errorf("compact expansion failed: %w", err)
+			}
+		}
 	}
 
 	return packet, nil
 }
 
 // ParseBytesWithDecompression парсит пакет из байтов и автоматически распаковывает
-func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx context.Context, compressed string) ([]string, error)) (*DataPacket, error) {
+func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx context.Context, compressed string, algo string) ([]string, error)) (*DataPacket, error) {
 	packet, err := p.ParseBytes(data)
 	if err != nil {
 		return nil, err
@@ -198,6 +222,13 @@ func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx 
 	if p.IsCompressed(packet) && decompressor != nil {
 		if err := p.DecompressData(context.Background(), packet, decompressor); err != nil {
 			return nil, err
+		}
+		// After decompression, expand compact if flagged (ParseBytes() skips this
+		// when Compression != "" because rows are still a packed blob at that point).
+		if packet.Data.Compact {
+			if err := ExpandCompactRows(packet); err != nil {
+				return nil, fmt.Errorf("compact expansion failed: %w", err)
+			}
 		}
 	}
 
@@ -220,15 +251,16 @@ func (p *Parser) GetRowValues(row Row) []string {
 	for i := 0; i < n; i++ {
 		char := s[i]
 
-		if escaped {
+		switch {
+		case escaped:
 			buf.WriteByte(char)
 			escaped = false
-		} else if char == '\\' {
+		case char == '\\':
 			escaped = true
-		} else if char == '|' {
+		case char == '|':
 			values = append(values, buf.String())
 			buf.Reset()
-		} else {
+		default:
 			buf.WriteByte(char)
 		}
 	}

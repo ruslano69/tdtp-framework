@@ -55,12 +55,11 @@ func (g *Generator) generateFilters(expr Expression) (*packet.Filters, error) {
 	}
 
 	// Определяем, AND или OR на верхнем уровне
-	if g.isAndGroup(expr) {
-		filters.And = rootLogicalGroup
-	} else if g.isOrGroup(expr) {
+	switch {
+	case g.isOrGroup(expr):
 		filters.Or = rootLogicalGroup
-	} else {
-		// Одиночное условие оборачиваем в AND
+	default:
+		// AND group or single condition wrapped in AND
 		filters.And = rootLogicalGroup
 	}
 
@@ -73,7 +72,8 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 
 	switch e := expr.(type) {
 	case *BinaryExpression:
-		if e.Operator == "AND" {
+		switch e.Operator {
+		case "AND":
 			// Собираем все AND условия
 			leftGroup, err := g.expressionToLogicalGroup(e.Left)
 			if err != nil {
@@ -114,7 +114,7 @@ func (g *Generator) expressionToLogicalGroup(expr Expression) (*packet.LogicalGr
 				}
 			}
 
-		} else if e.Operator == "OR" {
+		case "OR":
 			// Собираем все OR условия
 			leftGroup, err := g.expressionToLogicalGroup(e.Left)
 			if err != nil {
@@ -240,14 +240,6 @@ func (g *Generator) generateOrderBy(clauses []*OrderByClause) *packet.OrderBy {
 	}
 
 	return orderBy
-}
-
-// isAndGroup проверяет, является ли выражение AND группой
-func (g *Generator) isAndGroup(expr Expression) bool {
-	if bin, ok := expr.(*BinaryExpression); ok {
-		return bin.Operator == "AND"
-	}
-	return false
 }
 
 // isOrGroup проверяет, является ли выражение OR группой

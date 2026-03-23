@@ -1,0 +1,22 @@
+{
+  "identities": [
+    {
+      "name": "tdtp_test",
+      "credentials": [
+        {
+          "accessKey": "tdtp_test_key",
+          "secretKey": "tdtp_test_secret_2025"
+        }
+      ],
+      "actions": [
+        "Admin",
+        "Read",
+        "ReadAcp",
+        "Write",
+        "WriteAcp",
+        "List",
+        "Tagging"
+      ]
+    }
+  ]
+}

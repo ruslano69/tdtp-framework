@@ -89,7 +89,7 @@ func TestTransformConfig_Validate(t *testing.T) {
 				ResultTable: "result",
 			},
 			wantErr: true,
-			errMsg:  "transform SQL is required",
+			errMsg:  "transform sql is required",
 		},
 		{
 			name: "Missing result table",

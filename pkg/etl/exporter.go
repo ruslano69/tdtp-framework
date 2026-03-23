@@ -1,13 +1,21 @@
 package etl
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/resilience"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"github.com/ruslano69/tdtp-framework/pkg/xlsx"
 )
 
@@ -21,29 +29,153 @@ type ExportResult struct {
 
 // Exporter отвечает за экспорт результатов ETL
 type Exporter struct {
-	config OutputConfig
+	config         OutputConfig
+	security       SecurityConfig
+	packageUUID    string
+	pipelineName   string
+	mercuryBinder  processors.MercuryBinder   // опциональная замена mercury.Client (dev-режим, тесты)
+	preExportChain *processors.Chain          // процессоры маскирования/нормализации/валидации перед экспортом
+	cb             *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
 }
 
 // NewExporter создает новый экспортер
 func NewExporter(config OutputConfig) *Exporter {
-	return &Exporter{
-		config: config,
+	e := &Exporter{config: config}
+
+	// Инициализируем circuit breaker если задан fallback-канал
+	if config.Fallback != nil {
+		cbCfg := resilience.DefaultConfig("output-primary")
+		if config.Resilience != nil {
+			if config.Resilience.MaxFailures > 0 {
+				cbCfg.MaxFailures = uint32(config.Resilience.MaxFailures) //nolint:gosec
+			}
+			if config.Resilience.TimeoutSec > 0 {
+				cbCfg.Timeout = time.Duration(config.Resilience.TimeoutSec) * time.Second
+			}
+		}
+		if cb, err := resilience.New(cbCfg); err == nil {
+			e.cb = cb
+		}
 	}
+
+	return e
 }
 
-// Export экспортирует DataPacket в сконфигурированный выход
+// WithSecurity добавляет конфигурацию шифрования.
+// Вызывается из processor.go когда output.tdtp.encryption: true.
+func (e *Exporter) WithSecurity(sec SecurityConfig, packageUUID, pipelineName string) *Exporter {
+	e.security = sec
+	e.packageUUID = packageUUID
+	e.pipelineName = pipelineName
+	return e
+}
+
+// WithMercuryBinder устанавливает замену Mercury-клиента (dev-режим, тесты).
+// Если не вызван — exportEncrypted создаёт mercury.NewClient() из SecurityConfig.
+func (e *Exporter) WithMercuryBinder(binder processors.MercuryBinder) *Exporter {
+	e.mercuryBinder = binder
+	return e
+}
+
+// WithPreExportChain устанавливает цепочку процессоров, которая применяется к данным
+// перед каждым экспортом (маскирование, нормализация, валидация).
+func (e *Exporter) WithPreExportChain(chain *processors.Chain) *Exporter {
+	e.preExportChain = chain
+	return e
+}
+
+// applyPreExport применяет preExportChain к строкам пакета in-place.
+// Если цепочка не задана или пуста — no-op.
+func (e *Exporter) applyPreExport(ctx context.Context, pkt *packet.DataPacket) error {
+	if e.preExportChain == nil || e.preExportChain.IsEmpty() {
+		return nil
+	}
+	rows := pkt.GetRows()
+	processed, err := e.preExportChain.Process(ctx, rows, pkt.Schema)
+	if err != nil {
+		return fmt.Errorf("pre-export processor failed: %w", err)
+	}
+	pkt.Data = packet.RowsToData(processed)
+	return nil
+}
+
+// Export экспортирует DataPacket в сконфигурированный выход.
+// Если настроен fallback-канал, при любой ошибке primary автоматически
+// переключается на резервный канал (Smart Failover через circuit breaker).
 func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*ExportResult, error) {
 	if dataPacket == nil {
 		return nil, fmt.Errorf("data packet is nil")
 	}
 
+	// Если fallback не настроен — обычный экспорт без CB
+	if e.config.Fallback == nil || e.cb == nil {
+		return e.exportDirect(ctx, dataPacket, e.config)
+	}
+
+	// Smart Failover: primary через circuit breaker, при ошибке — fallback
 	result := &ExportResult{
 		OutputType:   e.config.Type,
 		Destination:  e.getDestination(),
 		RowsExported: len(dataPacket.Data.Rows),
 	}
 
-	switch e.config.Type {
+	var primaryErr error
+	cbErr := e.cb.ExecuteWithImmediateFallback(
+		ctx,
+		func(ctx context.Context) error {
+			_, err := e.exportDirect(ctx, dataPacket, e.config)
+			return err
+		},
+		func(ctx context.Context) error {
+			fbExporter := &Exporter{
+				config:         *e.config.Fallback,
+				security:       e.security,
+				packageUUID:    e.packageUUID,
+				pipelineName:   e.pipelineName,
+				mercuryBinder:  e.mercuryBinder,
+				preExportChain: e.preExportChain,
+			}
+			fbResult, err := fbExporter.exportDirect(ctx, dataPacket, *e.config.Fallback)
+			if err == nil && fbResult != nil {
+				// Сообщаем куда реально ушли данные
+				result.OutputType = fbResult.OutputType + "(fallback)"
+				result.Destination = fbResult.Destination
+			}
+			return err
+		},
+		func(reason string) {
+			primaryErr = fmt.Errorf("primary output failed: %s", reason)
+			fmt.Printf("  ⚠ Smart Failover: switching to fallback (%s → %s). Reason: %s\n",
+				e.config.Type, e.config.Fallback.Type, reason)
+		},
+	)
+
+	if cbErr != nil {
+		result.Error = cbErr
+		return result, cbErr
+	}
+
+	// Если было переключение на fallback, логируем но не фейлим pipeline
+	if primaryErr != nil {
+		fmt.Printf("  ✓ Delivered via fallback channel (%s). CB state: %s\n",
+			e.config.Fallback.Type, e.cb.State())
+	}
+
+	return result, nil
+}
+
+// exportDirect выполняет экспорт напрямую без CB/fallback логики
+func (e *Exporter) exportDirect(ctx context.Context, dataPacket *packet.DataPacket, cfg OutputConfig) (*ExportResult, error) {
+	result := &ExportResult{
+		OutputType:   cfg.Type,
+		RowsExported: len(dataPacket.Data.Rows),
+	}
+
+	// Вычисляем destination для результата
+	tmpExporter := &Exporter{config: cfg}
+	result.Destination = tmpExporter.getDestination()
+
+	switch cfg.Type {
 	case "tdtp":
 		err := e.exportToTDTP(ctx, dataPacket)
 		result.Error = err
@@ -65,44 +197,214 @@ func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*
 		return result, err
 
 	default:
-		err := fmt.Errorf("unsupported output type: %s", e.config.Type)
+		err := fmt.Errorf("unsupported output type: %s", cfg.Type)
 		result.Error = err
 		return result, err
 	}
 }
 
-// exportToTDTP экспортирует в TDTP XML файл
+// exportToTDTP экспортирует в TDTP XML файл(ы).
+// Использует GenerateReference для сплита на части (тот же путь что и --export).
+// При включённом encryption каждая часть шифруется отдельно.
 func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.TDTP == nil {
 		return fmt.Errorf("TDTP config is not set")
 	}
-
 	destination := e.config.TDTP.Destination
 	if destination == "" {
 		return fmt.Errorf("TDTP destination is not set")
 	}
 
-	// Применяем сжатие если настроено
-	if e.config.TDTP.Compression {
-		if err := e.compressDataPacket(dataPacket); err != nil {
-			return fmt.Errorf("failed to compress data: %w", err)
+	// Процессоры маскирования/нормализации/валидации
+	if err := e.applyPreExport(ctx, dataPacket); err != nil {
+		return err
+	}
+
+	// Compact-формат (до сплита)
+	if e.config.TDTP.Compact {
+		fixedNames := packet.ResolveFixedFields(dataPacket.Schema, e.config.TDTP.FixedFields)
+		if len(fixedNames) > 0 {
+			if err := packet.ApplyCompact(dataPacket, fixedNames, e.config.TDTP.CompactTail); err != nil {
+				return fmt.Errorf("failed to apply compact format: %w", err)
+			}
 		}
 	}
 
-	// Создаем генератор пакетов
+	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
 	generator := packet.NewGenerator()
-
-	// Генерируем XML
-	xmlData, err := generator.ToXML(dataPacket, true) // pretty = true
+	rows := packet.ParseRows(dataPacket.Data.Rows, packet.NewParser())
+	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
 	if err != nil {
-		return fmt.Errorf("failed to generate XML: %w", err)
+		return fmt.Errorf("failed to generate parts: %w", err)
 	}
 
-	// Записываем в файл
-	if err := os.WriteFile(destination, xmlData, 0644); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+	for _, part := range parts {
+		// Сжатие применяем к каждой части отдельно
+		if e.config.TDTP.Compression {
+			if err := e.compressDataPacket(part); err != nil {
+				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)
+			}
+		}
+
+		partDest := tdtpPartDestination(destination, part.Header.PartNumber, part.Header.TotalParts)
+
+		xmlData, err := generator.ToXML(part, true)
+		if err != nil {
+			return fmt.Errorf("failed to generate XML for part %d: %w", part.Header.PartNumber, err)
+		}
+
+		if e.config.TDTP.Encryption {
+			if err := e.exportEncrypted(ctx, generator, xmlData, partDest); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if storage.IsRemote(partDest) {
+			if err := e.uploadToStorage(ctx, xmlData, partDest, part); err != nil {
+				return err
+			}
+		} else {
+			if err := os.WriteFile(partDest, xmlData, 0o600); err != nil {
+				return fmt.Errorf("failed to write part %d: %w", part.Header.PartNumber, err)
+			}
+		}
+	}
+	return nil
+}
+
+// tdtpPartDestination формирует имя файла/ключа для конкретной части.
+// Одна часть: destination без суффикса.
+// Несколько частей: base_part_N_of_Total.ext
+func tdtpPartDestination(destination string, partNum, totalParts int) string {
+	if totalParts <= 1 {
+		return destination
+	}
+	ext := ""
+	base := destination
+	if idx := lastSep(destination); idx > 0 {
+		name := destination[idx+1:]
+		dir := destination[:idx+1]
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			ext = name[dot:]
+			base = dir + name[:dot]
+		}
+	} else if dot := strings.LastIndex(destination, "."); dot >= 0 {
+		ext = destination[dot:]
+		base = destination[:dot]
+	}
+	return fmt.Sprintf("%s_part_%d_of_%d%s", base, partNum, totalParts, ext)
+}
+
+// uploadToStorage стримит xmlData в S3-совместимое хранилище через io.Pipe.
+// Метаданные пакета (таблица, строки) сохраняются как x-amz-meta-tdtp-* заголовки.
+func (e *Exporter) uploadToStorage(ctx context.Context, data []byte, destination string, pkt *packet.DataPacket) error {
+	tdtpCfg := e.config.TDTP
+	if tdtpCfg == nil || tdtpCfg.S3 == nil {
+		return fmt.Errorf("etl: S3 config is required for remote destination %s", destination)
 	}
 
+	_, uriBucket, key, _ := storage.ParseURI(destination)
+	s3cfg := *tdtpCfg.S3
+	if uriBucket != "" {
+		s3cfg.Bucket = uriBucket
+	}
+
+	store, err := storage.New(storage.Config{Type: "s3", S3: s3cfg})
+	if err != nil {
+		return fmt.Errorf("etl: failed to open storage: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	meta := map[string]string{
+		"protocol": "TDTP 1.0",
+		"pipeline": e.pipelineName,
+	}
+	if pkt != nil {
+		meta["table"] = pkt.Header.TableName
+		meta["rows"] = strconv.Itoa(len(pkt.Data.Rows))
+	}
+
+	pr, pw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() { errCh <- store.Put(ctx, key, pr, meta) }()
+
+	if _, err := io.Copy(pw, bytes.NewReader(data)); err != nil {
+		pw.CloseWithError(err)
+		<-errCh
+		return fmt.Errorf("etl: upload pipe write failed: %w", err)
+	}
+	_ = pw.Close()
+
+	if err := <-errCh; err != nil {
+		return fmt.Errorf("etl: storage Put failed: %w", err)
+	}
+	fmt.Printf("  → Uploaded to: %s\n", destination)
+	return nil
+}
+
+// exportEncrypted выполняет UUID-binding, шифрует xmlData и записывает в destination.
+// При недоступности xZMercury записывает error-пакет и возвращает исходную ошибку Mercury
+// (не nil) — вызывающий код проверяет errors.Is(err, mercury.Err*) и завершает pipeline с exit 0.
+// Незашифрованные данные НЕ записываются никогда.
+func (e *Exporter) exportEncrypted(ctx context.Context, generator *packet.Generator, xmlData []byte, destination string) error {
+	if e.packageUUID == "" {
+		return fmt.Errorf("encryption enabled but packageUUID not set")
+	}
+
+	// Выбираем Mercury-клиент: кастомный (DevClient / тесты) или production-клиент по конфигу
+	var binder processors.MercuryBinder
+	if e.mercuryBinder != nil {
+		binder = e.mercuryBinder
+	} else {
+		binder = mercury.NewClient(e.security.MercuryURL, e.security.MercuryTimeoutMs)
+	}
+
+	serverSecret := os.Getenv("MERCURY_SERVER_SECRET")
+	encryptor := processors.NewFileEncryptor(binder, serverSecret, e.packageUUID, e.pipelineName)
+
+	result, errCode, encErr := encryptor.Encrypt(ctx, xmlData)
+	if encErr != nil {
+		// xZMercury недоступен или HMAC не прошёл — записываем error-пакет
+		if writeErr := e.writeErrorPacket(ctx, generator, destination, errCode, encErr.Error()); writeErr != nil {
+			return fmt.Errorf("write error packet after mercury failure: %w", writeErr)
+		}
+		// Возвращаем исходную Mercury-ошибку: resultlog увидит completed_with_errors,
+		// а pipeline-команда проверит errors.Is и завершится с exit 0.
+		return encErr
+	}
+
+	// Записываем зашифрованный блоб
+	if storage.IsRemote(destination) {
+		return e.uploadToStorage(ctx, result.Encrypted, destination, nil)
+	}
+	if err := processors.WriteEncrypted(destination, result.Encrypted); err != nil {
+		return fmt.Errorf("write encrypted output: %w", err)
+	}
+	return nil
+}
+
+// writeErrorPacket записывает стандартный TDTP error-пакет в destination вместо данных.
+// Незашифрованный результат НЕ записывается. Pipeline завершается с exit 0.
+func (e *Exporter) writeErrorPacket(ctx context.Context, generator *packet.Generator, destination, errorCode, errorMessage string) error {
+	gen := packet.NewGenerator()
+	errPacket, err := gen.GenerateError(e.packageUUID, e.pipelineName, errorCode, errorMessage)
+	if err != nil {
+		return fmt.Errorf("generate error packet: %w", err)
+	}
+
+	xmlData, err := generator.ToXML(errPacket, true)
+	if err != nil {
+		return fmt.Errorf("serialize error packet: %w", err)
+	}
+
+	if storage.IsRemote(destination) {
+		return e.uploadToStorage(ctx, xmlData, destination, nil)
+	}
+	if err := os.WriteFile(destination, xmlData, 0o600); err != nil {
+		return fmt.Errorf("write error packet: %w", err)
+	}
+	// Возвращаем nil — pipeline завершается штатно (exit 0)
 	return nil
 }
 
@@ -132,7 +434,7 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
@@ -152,7 +454,7 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 // exportToKafka экспортирует в Kafka
 func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.Kafka == nil {
-		return fmt.Errorf("Kafka config is not set")
+		return fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := e.config.Kafka
@@ -171,7 +473,7 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Kafka: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
@@ -202,7 +504,7 @@ func (e *Exporter) exportToXLSX(dataPacket *packet.DataPacket) error {
 	// Создаём директорию если не существует
 	dir := destination[:max(0, lastSep(destination))]
 	if dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create output directory: %w", err)
 		}
 	}
@@ -276,13 +578,13 @@ func (e *Exporter) ValidateConfig() error {
 
 	case "kafka":
 		if e.config.Kafka == nil {
-			return fmt.Errorf("Kafka config is required for Kafka output")
+			return fmt.Errorf("kafka config is required for kafka output")
 		}
 		if len(e.config.Kafka.Brokers) == 0 {
-			return fmt.Errorf("Kafka brokers is required")
+			return fmt.Errorf("kafka brokers is required")
 		}
 		if e.config.Kafka.Topic == "" {
-			return fmt.Errorf("Kafka topic is required")
+			return fmt.Errorf("kafka topic is required")
 		}
 
 	default:
@@ -323,9 +625,11 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket) error {
 		return nil
 	}
 
-	// Обновляем DataPacket сжатыми данными
+	// Обновляем DataPacket сжатыми данными, сохраняя compact/tail атрибуты
 	dataPacket.Data = packet.Data{
 		Compression: "zstd",
+		Compact:     dataPacket.Data.Compact,
+		Tail:        dataPacket.Data.Tail,
 		Rows: []packet.Row{
 			{Value: compressedData},
 		},
@@ -411,7 +715,7 @@ func (e *Exporter) exportStreamToRabbitMQ(ctx context.Context, streamResult *Str
 // exportStreamToKafka выполняет потоковый экспорт в Kafka
 func (e *Exporter) exportStreamToKafka(ctx context.Context, streamResult *StreamingResult, tableName string) (*StreamingExportResult, error) {
 	if e.config.Kafka == nil {
-		return nil, fmt.Errorf("Kafka config is not set")
+		return nil, fmt.Errorf("kafka config is not set")
 	}
 
 	cfg := e.config.Kafka
@@ -443,7 +747,7 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 		result.Errors = append(result.Errors, err)
 		return result, fmt.Errorf("failed to connect to broker: %w", err)
 	}
-	defer broker.Close()
+	defer func() { _ = broker.Close() }()
 
 	// Создаем streaming generator
 	streamGen := packet.NewStreamingGenerator()
@@ -461,6 +765,13 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 	for part := range partsChan {
 		if part.Error != nil {
 			result.Errors = append(result.Errors, part.Error)
+			result.ErrorsCount++
+			continue
+		}
+
+		// Применяем процессоры маскирования/нормализации/валидации к каждой части
+		if err := e.applyPreExport(ctx, part.Packet); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("pre-export processor failed for part %d: %w", part.PartNum, err))
 			result.ErrorsCount++
 			continue
 		}
@@ -504,7 +815,7 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 	} else {
 		// summaryChan закрыт без отправки summary (ошибка или отмена контекста)
 		// TotalParts и TotalRows остаются 0 или частично заполненными
-		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context cancelled or generator error)"))
+		result.Errors = append(result.Errors, fmt.Errorf("streaming summary not received (likely context canceled or generator error)"))
 		result.ErrorsCount++
 	}
 

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>departments</TableName>
+    <MessageID>REF-2026-DEP001-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>4</RecordsInPart>
+    <Timestamp>2026-02-26T10:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="department_id"   type="INTEGER" key="true"></Field>
+    <Field name="department_name" type="TEXT"    length="100"></Field>
+    <Field name="head_count_plan" type="INTEGER"></Field>
+    <Field name="budget_annual"   type="DECIMAL"></Field>
+  </Schema>
+  <Data>
+    <R>1|Engineering|8|4500000</R>
+    <R>2|Human Resources|4|1200000</R>
+    <R>3|Finance|3|1800000</R>
+    <R>4|Product|5|2200000</R>
+  </Data>
+</DataPacket>

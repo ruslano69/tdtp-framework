@@ -93,7 +93,7 @@ func (r *Retryer) doInternal(ctx context.Context, fn RetryableFunc, data any, ad
 
 		// Проверяем context
 		if ctx.Err() != nil {
-			return fmt.Errorf("context cancelled: %w", ctx.Err())
+			return fmt.Errorf("context canceled: %w", ctx.Err())
 		}
 
 		// Вычисляем задержку
@@ -109,7 +109,7 @@ func (r *Retryer) doInternal(ctx context.Context, fn RetryableFunc, data any, ad
 		case <-time.After(delay):
 			// Продолжаем
 		case <-ctx.Done():
-			return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			return fmt.Errorf("context canceled during retry: %w", ctx.Err())
 		}
 	}
 }
@@ -123,11 +123,9 @@ func (r *Retryer) calculateDelay(attempt int) time.Duration {
 		delay = r.config.InitialDelay
 
 	case BackoffLinear:
-		// Linear: delay = initial * attempt
 		delay = r.config.InitialDelay * time.Duration(attempt)
 
 	case BackoffExponential:
-		// Exponential: delay = initial * multiplier^(attempt-1)
 		multiplier := math.Pow(r.config.BackoffMultiplier, float64(attempt-1))
 		delay = time.Duration(float64(r.config.InitialDelay) * multiplier)
 
@@ -142,7 +140,7 @@ func (r *Retryer) calculateDelay(attempt int) time.Duration {
 
 	// Добавляем jitter (случайность)
 	if r.config.Jitter > 0 {
-		jitter := time.Duration(float64(delay) * r.config.Jitter * (rand.Float64()*2 - 1))
+		jitter := time.Duration(float64(delay) * r.config.Jitter * (rand.Float64()*2 - 1)) //nolint:gosec // math/rand is fine for jitter
 		delay += jitter
 		if delay < 0 {
 			delay = r.config.InitialDelay

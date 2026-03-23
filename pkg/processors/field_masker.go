@@ -208,11 +208,9 @@ func (m *FieldMasker) maskFirst2Last2(value string) string {
 		for _, r := range value {
 			if r == ' ' {
 				newResult = append(newResult, ' ')
-			} else {
-				if maskedIdx < len(result) {
-					newResult = append(newResult, result[maskedIdx])
-					maskedIdx++
-				}
+			} else if maskedIdx < len(result) {
+				newResult = append(newResult, result[maskedIdx])
+				maskedIdx++
 			}
 		}
 		return string(newResult)

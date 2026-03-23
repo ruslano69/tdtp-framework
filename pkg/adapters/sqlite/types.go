@@ -98,10 +98,10 @@ func ParseSQLiteType(sqliteType string) (baseType string, length, precision, sca
 
 		// Проверяем наличие запятой (для DECIMAL)
 		if strings.Contains(params, ",") {
-			fmt.Sscanf(params, "%d,%d", &precision, &scale)
+			_, _ = fmt.Sscanf(params, "%d,%d", &precision, &scale)
 		} else {
 			// Для VARCHAR/CHAR - это length
-			fmt.Sscanf(params, "%d", &length)
+			_, _ = fmt.Sscanf(params, "%d", &length)
 		}
 	}
 

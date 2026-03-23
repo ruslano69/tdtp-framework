@@ -26,7 +26,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 
 // CreateTable создает таблицу из TDTP схемы
 func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error {
-	var columns []string
+	columns := make([]string, 0, len(schema.Fields))
 	var pkColumns []string
 
 	for _, field := range schema.Fields {
@@ -133,8 +133,8 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 
 // buildInsertSQL строит обычный INSERT
 func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string {
-	var columns []string
-	var placeholders []string
+	columns := make([]string, 0, len(schema.Fields))
+	placeholders := make([]string, 0, len(schema.Fields))
 
 	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
@@ -151,8 +151,8 @@ func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string 
 
 // buildInsertIgnoreSQL строит INSERT IGNORE (MySQL-специфично)
 func (a *Adapter) buildInsertIgnoreSQL(tableName string, schema packet.Schema) string {
-	var columns []string
-	var placeholders []string
+	columns := make([]string, 0, len(schema.Fields))
+	placeholders := make([]string, 0, len(schema.Fields))
 
 	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
@@ -169,8 +169,8 @@ func (a *Adapter) buildInsertIgnoreSQL(tableName string, schema packet.Schema) s
 
 // buildInsertOnDuplicateSQL строит INSERT ... ON DUPLICATE KEY UPDATE (MySQL-специфично)
 func (a *Adapter) buildInsertOnDuplicateSQL(tableName string, schema packet.Schema) string {
-	var columns []string
-	var placeholders []string
+	columns := make([]string, 0, len(schema.Fields))
+	placeholders := make([]string, 0, len(schema.Fields))
 	var updates []string
 
 	for _, field := range schema.Fields {

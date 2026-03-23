@@ -22,7 +22,11 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 	}
 
 	var parts []string
-	parts = append(parts, fmt.Sprintf("SELECT * FROM %s", tableName))
+	if len(query.Fields) > 0 {
+		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(query.Fields, ", "), tableName))
+	} else {
+		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", tableName))
+	}
 
 	// WHERE clause
 	if query.Filters != nil {
@@ -36,19 +40,32 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 	}
 
 	// ORDER BY clause
+	var orderByClause string
 	if query.OrderBy != nil {
-		orderByClause, err := g.generateOrderByClause(query.OrderBy)
-		if err != nil {
-			return "", fmt.Errorf("failed to generate ORDER BY clause: %w", err)
-		}
+		orderByClause = g.generateOrderByClause(query.OrderBy)
 		if orderByClause != "" {
 			parts = append(parts, "ORDER BY "+orderByClause)
 		}
 	}
 
 	// LIMIT clause
+	// Positive = first N rows; negative = last N rows (tail mode, like tail -n).
 	if query.Limit > 0 {
 		parts = append(parts, fmt.Sprintf("LIMIT %d", query.Limit))
+	} else if query.Limit < 0 {
+		n := -query.Limit
+		if orderByClause != "" {
+			// Tail mode with ORDER BY: wrap inner query with reversed sort so DB
+			// delivers the last N rows, then restore the original order in outer query.
+			reversedClause := g.generateReversedOrderByClause(query.OrderBy)
+			// Build inner SELECT: everything up to (not including) the ORDER BY part.
+			innerParts := parts[:len(parts)-1] // drop "ORDER BY ..." added above
+			innerSQL := strings.Join(innerParts, " ") +
+				fmt.Sprintf(" ORDER BY %s LIMIT %d", reversedClause, n)
+			return fmt.Sprintf("SELECT * FROM (%s) AS _tail ORDER BY %s", innerSQL, orderByClause), nil
+		}
+		// No ORDER BY: order is undefined; still honor the row count.
+		parts = append(parts, fmt.Sprintf("LIMIT %d", n))
 	}
 
 	// OFFSET clause
@@ -80,7 +97,7 @@ func (g *SQLGenerator) generateWhereClause(filters *packet.Filters) (string, err
 
 // generateLogicalGroup конвертирует LogicalGroup в SQL
 func (g *SQLGenerator) generateLogicalGroup(group *packet.LogicalGroup, operator string) (string, error) {
-	var conditions []string
+	conditions := make([]string, 0, len(group.Filters)+len(group.And)+len(group.Or))
 
 	// Обрабатываем фильтры
 	for _, filter := range group.Filters {
@@ -236,19 +253,47 @@ func (g *SQLGenerator) isNumeric(s string) bool {
 	}
 	// Строка только из "-" или "." не является числом
 	stripped := s
-	if len(stripped) > 0 && stripped[0] == '-' {
+	if stripped != "" && stripped[0] == '-' {
 		stripped = stripped[1:]
 	}
-	return len(stripped) > 0 && stripped != "."
+	return stripped != "" && stripped != "."
+}
+
+// reverseDirection returns the opposite SQL sort direction.
+func reverseDirection(dir string) string {
+	if strings.EqualFold(dir, "DESC") {
+		return "ASC"
+	}
+	return "DESC"
+}
+
+// generateReversedOrderByClause builds an ORDER BY clause with every direction flipped.
+// Used for tail-mode subqueries so that LIMIT N selects the last N rows.
+func (g *SQLGenerator) generateReversedOrderByClause(orderBy *packet.OrderBy) string {
+	if orderBy == nil {
+		return ""
+	}
+
+	parts := make([]string, 0, 1+len(orderBy.Fields))
+
+	if orderBy.Field != "" {
+		parts = append(parts, fmt.Sprintf("%s %s", orderBy.Field, reverseDirection(orderBy.Direction)))
+	}
+
+	for _, field := range orderBy.Fields {
+		parts = append(parts, fmt.Sprintf("%s %s", field.Name, reverseDirection(field.Direction)))
+	}
+
+	return strings.Join(parts, ", ")
 }
 
 // generateOrderByClause конвертирует OrderBy в SQL ORDER BY
-func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) (string, error) {
+func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 	if orderBy == nil {
-		return "", nil
+		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, 1+len(orderBy.Fields))
 
 	// Одиночная сортировка
 	if orderBy.Field != "" {
@@ -268,11 +313,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) (string, e
 		parts = append(parts, fmt.Sprintf("%s %s", field.Name, direction))
 	}
 
-	if len(parts) == 0 {
-		return "", nil
-	}
-
-	return strings.Join(parts, ", "), nil
+	return strings.Join(parts, ", ")
 }
 
 // CanTranslateToSQL проверяет можно ли запрос транслировать в SQL

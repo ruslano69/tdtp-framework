@@ -1,0 +1,77 @@
+# ─── EXTRACT: reference data (countries + tours + guides) ────────────────────
+# Низкая частота: справочники меняются редко, синхронизируем целиком.
+name: "travel-extract-reference-{{SYNC_TS}}"
+description: "Full export of reference tables: countries, tours, guides"
+
+sources:
+  - name: countries
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=TravelAgency&trusted_connection=yes&encrypt=disable&TrustServerCertificate=true"
+    query: |
+      SELECT country_id, country_code, country_name, continent,
+             currency_code, phone_code,
+             CAST(is_visa_required AS INT) AS is_visa_required,
+             official_languages,
+             CONVERT(VARCHAR(23), created_at, 126) AS created_at
+      FROM countries ORDER BY country_id
+
+  - name: tours
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=TravelAgency&trusted_connection=yes&encrypt=disable&TrustServerCertificate=true"
+    query: |
+      SELECT tour_id, tour_code, tour_name, description,
+             destination_country_id, duration_days, difficulty_level,
+             max_group_size, min_age,
+             CAST(base_price AS FLOAT) AS base_price,
+             includes, excludes, itinerary,
+             CAST(is_active AS INT) AS is_active,
+             CONVERT(VARCHAR(23), created_at, 126) AS created_at
+      FROM tours ORDER BY tour_id
+
+  - name: guides
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=TravelAgency&trusted_connection=yes&encrypt=disable&TrustServerCertificate=true"
+    query: |
+      SELECT guide_id, first_name, last_name, email, phone,
+             languages, specialization,
+             CAST(rating AS FLOAT) AS rating,
+             experience_years, certifications,
+             CAST(is_active AS INT) AS is_active,
+             CONVERT(VARCHAR(10), hire_date, 23) AS hire_date,
+             CAST(hourly_rate AS FLOAT) AS hourly_rate,
+             CONVERT(VARCHAR(23), last_updated, 126) AS last_updated
+      FROM guides ORDER BY guide_id
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: countries
+  sql: SELECT * FROM countries
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compression: true
+    compress_level: 3
+    destination: "s3://travel-agency/reference/{{SYNC_TS}}.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "travel-agency"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true
+
+result_log:
+  type: redis
+  address: "localhost:6379"
+  name: "travel:reference:extract"
+  db: 0
+  ttl: 86400
+
+performance:
+  batch_size: 1000
+  max_memory_mb: 128

@@ -1,0 +1,48 @@
+# ─── LOAD: tour_schedule ──────────────────────────────────────────────────────
+name: "travel-load-schedule-{{SYNC_TS}}"
+description: "Load tour_schedule from S3 archive into PostgreSQL"
+
+sources:
+  - name: tour_schedule
+    type: tdtp-s3
+    multi_part: true
+    dsn: "s3://travel-agency/schedule/{{SYNC_TS}}.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "travel-agency"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: tour_schedule
+  sql: SELECT * FROM tour_schedule
+
+output:
+  type: postgres
+  postgres:
+    host: localhost
+    port: 5432
+    user: tdtp
+    password: tdtp
+    database: tdtp
+    sslmode: disable
+  table: tour_schedule
+  mode: upsert
+  key_fields: [schedule_id]
+
+result_log:
+  type: redis
+  address: "localhost:6379"
+  name: "travel:schedule:load"
+  db: 0
+  ttl: 86400
+
+performance:
+  batch_size: 2000
+  max_memory_mb: 256

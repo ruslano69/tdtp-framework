@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -32,11 +33,12 @@ func main() {
 		log.Fatalf("Streaming export failed: %v", err)
 	}
 
-	// Небольшая пауза перед импортом
-	time.Sleep(2 * time.Second)
+	// Даём импортеру 30 секунд на вычитку всех частей из очереди
+	importCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
 	// Демонстрация параллельного импорта
-	if err := demonstrateParallelImport(ctx); err != nil {
+	if err := demonstrateParallelImport(importCtx); err != nil {
 		log.Fatalf("Parallel import failed: %v", err)
 	}
 }
@@ -65,7 +67,7 @@ func demonstrateStreamingExport(ctx context.Context) error {
 	// 3. Создаем экспортер для RabbitMQ
 	exporter := etl.NewExporter(etl.OutputConfig{
 		Type: "RabbitMQ",
-		RabbitMQ: &etl.RabbitMQConfig{
+		RabbitMQ: &etl.RabbitMQOutputConfig{
 			Host:     "localhost",
 			Port:     5672,
 			User:     "guest",
@@ -97,8 +99,9 @@ func demonstrateStreamingExport(ctx context.Context) error {
 	fmt.Printf("Duration:        %v\n", duration)
 	fmt.Printf("Errors:          %d\n", result.ErrorsCount)
 
-	if result.TotalParts > 0 {
-		avgRowsPerPart := result.TotalRows / result.TotalParts
+	// В streaming-режиме TotalParts неизвестен заранее, считаем по фактически отправленным частям
+	if result.PartsSent > 0 {
+		avgRowsPerPart := result.TotalRows / result.PartsSent
 		fmt.Printf("Avg Rows/Part:   %d\n", avgRowsPerPart)
 	}
 
@@ -167,7 +170,9 @@ func demonstrateParallelImport(ctx context.Context) error {
 	}
 
 	if len(packet.Data.Rows) > 0 {
-		fmt.Printf("✓ Imported rows verified: %s\n", packet.Data.Rows[0].Value)
+		// Row.Value содержит tab-separated значения; берём только первое поле (COUNT)
+		count := strings.SplitN(packet.Data.Rows[0].Value, "\t", 2)[0]
+		fmt.Printf("✓ Imported rows verified: %s\n", count)
 	}
 
 	fmt.Printf("\n✓ Parallel import completed successfully!\n\n")

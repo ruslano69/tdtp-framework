@@ -1,0 +1,54 @@
+# ─── LOAD: customers ──────────────────────────────────────────────────────────
+# S3 archive → PostgreSQL (upsert by customer_id)
+#
+# Template variables:
+#   {{SYNC_TS}}  — matches the extract run that produced the S3 file
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: "travel-load-customers-{{SYNC_TS}}"
+description: "Load customers from S3 archive into PostgreSQL"
+
+sources:
+  - name: customers
+    type: tdtp-s3
+    multi_part: true
+    dsn: "s3://travel-agency/customers/{{SYNC_TS}}.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "travel-agency"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: customers
+  sql: SELECT * FROM customers
+
+output:
+  type: postgres
+  postgres:
+    host: localhost
+    port: 5432
+    user: tdtp
+    password: tdtp
+    database: tdtp
+    sslmode: disable
+  table: customers
+  mode: upsert
+  key_fields: [customer_id]
+
+result_log:
+  type: redis
+  address: "localhost:6379"
+  name: "travel:customers:load"
+  db: 0
+  ttl: 86400
+
+performance:
+  batch_size: 2000
+  max_memory_mb: 256

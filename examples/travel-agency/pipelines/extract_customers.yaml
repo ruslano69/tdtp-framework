@@ -1,0 +1,71 @@
+# ─── EXTRACT: customers ───────────────────────────────────────────────────────
+# MSSQL TravelAgency.customers → S3 archive (.tdtp.xml, zstd)
+#
+# Template variables (substituted by coordinator.py):
+#   {{LAST_SYNC}}  — last sync timestamp, e.g. 2026-01-01 00:00:00
+#   {{SYNC_TS}}    — current sync run timestamp for S3 path, e.g. 20260323_100000
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: "travel-extract-customers-{{SYNC_TS}}"
+description: "Incremental export of customers modified since {{LAST_SYNC}}"
+
+sources:
+  - name: customers
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=TravelAgency&trusted_connection=yes&encrypt=disable&TrustServerCertificate=true"
+    query: |
+      SELECT
+        customer_id,
+        CAST(customer_uuid AS VARCHAR(36)) AS customer_uuid,
+        first_name,
+        last_name,
+        email,
+        phone,
+        CONVERT(VARCHAR(10), date_of_birth, 23) AS date_of_birth,
+        passport_number,
+        nationality_country_id,
+        address,
+        city,
+        postal_code,
+        loyalty_points,
+        CAST(is_vip AS INT) AS is_vip,
+        preferences,
+        CONVERT(VARCHAR(23), created_at, 126) AS created_at,
+        CONVERT(VARCHAR(23), last_updated, 126) AS last_updated
+      FROM customers
+      WHERE last_updated >= '{{LAST_SYNC}}'
+      ORDER BY customer_id
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: customers
+  sql: SELECT * FROM customers
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compression: true
+    compress_level: 3
+    destination: "s3://travel-agency/customers/{{SYNC_TS}}.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "travel-agency"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true
+
+result_log:
+  type: redis
+  address: "localhost:6379"
+  name: "travel:customers:extract"
+  db: 0
+  ttl: 86400
+
+performance:
+  batch_size: 2000
+  max_memory_mb: 256

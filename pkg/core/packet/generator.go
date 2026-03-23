@@ -28,6 +28,11 @@ func DefaultCompressionOptions() CompressionOptions {
 	}
 }
 
+// DefaultMaxMessageSize — размер по умолчанию (3.8MB оценка → ~1.9MB реального XML).
+// Внутренняя оценка намеренно вдвое больше реального XML,
+// т.к. размер строк считается в UTF-16 единицах (MSMQ/COM-совместимость).
+const DefaultMaxMessageSize = 3_800_000
+
 // Generator отвечает за генерацию TDTP пакетов
 type Generator struct {
 	maxMessageSize int                // в байтах
@@ -37,7 +42,7 @@ type Generator struct {
 // NewGenerator создает новый генератор
 func NewGenerator() *Generator {
 	return &Generator{
-		maxMessageSize: 3800000, // ~3.8MB для получения ~1.9MB XML (с учетом UTF-16 оценки)
+		maxMessageSize: DefaultMaxMessageSize,
 		compression:    DefaultCompressionOptions(),
 	}
 }
@@ -76,6 +81,9 @@ func (g *Generator) SetCompressionLevel(level int) {
 // GenerateReference создает reference пакет (полный справочник)
 func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]string) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
+
+	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
+	rows, schema = DetectAndApply(rows, schema)
 
 	// Разбиваем на части если нужно
 	partitions := g.partitionRows(rows, schema)
@@ -125,6 +133,10 @@ func (g *Generator) GenerateResponse(
 	sender, recipient string,
 ) ([]*DataPacket, error) {
 	packets := []*DataPacket{}
+
+	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
+	rows, schema = DetectAndApply(rows, schema)
+
 	partitions := g.partitionRows(rows, schema)
 
 	messageIDBase := g.generateMessageID(TypeResponse)
@@ -151,6 +163,34 @@ func (g *Generator) GenerateResponse(
 	}
 
 	return packets, nil
+}
+
+// GenerateError создает error пакет для записи в таблицу tdtp_errors.
+// Используется когда pipeline не может завершиться штатно (например, xZMercury недоступен).
+// В отличие от alarm, error — стандартный DataPacket с Schema+Data, совместимый с любым consumer.
+func (g *Generator) GenerateError(packageUUID, pipeline, errorCode, errorMessage string) (*DataPacket, error) {
+	packet := NewDataPacket(TypeError, "tdtp_errors")
+	packet.Header.MessageID = fmt.Sprintf("ERR-%d-%s-P1", time.Now().UTC().Year(), generateUUID()[:8])
+	packet.Header.PartNumber = 1
+	packet.Header.TotalParts = 1
+	packet.Header.RecordsInPart = 1
+
+	packet.Schema = Schema{
+		Fields: []Field{
+			{Name: "package_uuid", Type: "TEXT", Length: 36, Key: true},
+			{Name: "pipeline", Type: "TEXT", Length: 255},
+			{Name: "error_code", Type: "TEXT", Length: 64},
+			{Name: "error_message", Type: "TEXT", Length: 1000},
+			{Name: "created_at", Type: "TIMESTAMP", Timezone: "UTC"},
+		},
+	}
+
+	createdAt := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	packet.Data = RowsToData([][]string{
+		{packageUUID, pipeline, errorCode, errorMessage, createdAt},
+	})
+
+	return packet, nil
 }
 
 // GenerateAlarm создает alarm пакет
@@ -204,7 +244,7 @@ func (g *Generator) WriteToFile(packet *DataPacket, filename string) error {
 		return err
 	}
 
-	return os.WriteFile(filename, data, 0644)
+	return os.WriteFile(filename, data, 0o600)
 }
 
 // WriteToWriter записывает пакет в writer
@@ -219,7 +259,7 @@ func (g *Generator) WriteToWriter(packet *DataPacket, w io.Writer) error {
 }
 
 // partitionRows разбивает строки на части по размеру
-func (g *Generator) partitionRows(rows [][]string, schema Schema) [][][]string {
+func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
 	if len(rows) == 0 {
 		return [][][]string{{}}
 	}
@@ -362,6 +402,8 @@ func (g *Generator) generateMessageID(msgType MessageType) string {
 		prefix = "RESP"
 	case TypeAlarm:
 		prefix = "ALARM"
+	case TypeError:
+		prefix = "ERR"
 	}
 
 	year := time.Now().UTC().Year()

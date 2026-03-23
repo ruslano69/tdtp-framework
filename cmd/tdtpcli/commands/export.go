@@ -1,16 +1,20 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // ExportOptions holds options for export operations
@@ -18,11 +22,22 @@ type ExportOptions struct {
 	TableName      string
 	OutputFile     string
 	Query          *packet.Query
+	Fields         []string // Column projection: nil/empty = all columns
 	ProcessorMgr   ProcessorManager
 	Compress       bool
 	CompressLevel  int
-	EnableChecksum bool // Add XXH3 checksum for data integrity verification
-	ReadOnlyFields bool // Include read-only fields (timestamp, computed, identity)
+	CompressAlgo   string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
+	EnableChecksum bool   // Add XXH3 checksum for data integrity verification
+	ReadOnlyFields bool   // Include read-only fields (timestamp, computed, identity)
+
+	// v1.3.1 compact format
+	Compact     bool     // Enable compact format output
+	FixedFields []string // Explicit fixed field names; nil = auto-detect from _prefix
+	CompactTail bool     // Write tail row with all fixed fields explicit
+
+	// Object storage (S3/SeaweedFS). Non-nil → stream to object storage instead of local file.
+	StorageCfg *storage.Config // storage driver config with bucket
+	StorageKey string          // object key within the bucket
 }
 
 // ProcessorManager interface for applying data processors
@@ -38,13 +53,22 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	defer adapter.Close(ctx)
+	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting table '%s'...\n", opts.TableName)
 
 	// Add includeReadOnly flag to context for MS SQL adapter
 	// (other adapters will ignore it)
 	ctx = mssql.WithIncludeReadOnlyFields(ctx, opts.ReadOnlyFields)
+
+	// If fields projection is requested, ensure we go through ExportTableWithQuery
+	// (even if no other query params are set) so the adapter can build SELECT f1,f2,...
+	if len(opts.Fields) > 0 {
+		if opts.Query == nil {
+			opts.Query = packet.NewQuery()
+		}
+		opts.Query.Fields = opts.Fields
+	}
 
 	// Export with or without query
 	var packets []*packet.DataPacket
@@ -77,29 +101,70 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		fmt.Printf("✓ Data processors applied\n")
 	}
 
-	// Count total rows before compression
+	// Count total rows before any further processing
 	totalRows := 0
 	for _, pkt := range packets {
 		totalRows += len(pkt.Data.Rows)
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 
+	// Apply compact format (v1.3.1) if requested
+	if opts.Compact {
+		fixedNames := BuildFixedFieldsForExport(packets[0].Schema, opts.FixedFields)
+		if len(fixedNames) == 0 {
+			fmt.Println("⚠ compact requested but no fixed fields found (use --fixed-fields or add _ prefix to view columns)")
+		} else {
+			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
+			for _, pkt := range packets {
+				if err := applyCompactToPacket(pkt, fixedNames, opts.CompactTail); err != nil {
+					return fmt.Errorf("compact encoding failed: %w", err)
+				}
+			}
+			fmt.Printf("✓ Compact v1.3.1 format applied\n")
+		}
+	}
+
 	// Apply compression if enabled
 	if opts.Compress {
-		fmt.Printf("Compressing data (level %d)...\n", opts.CompressLevel)
+		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
 		for _, pkt := range packets {
-			if err := compressPacketData(pkt, opts.CompressLevel, opts.EnableChecksum); err != nil {
+			if err := compressPacketData(pkt, opts.CompressLevel, opts.CompressAlgo, opts.EnableChecksum); err != nil {
 				return fmt.Errorf("compression failed: %w", err)
 			}
 		}
-		fmt.Printf("✓ Data compressed with zstd\n")
+		fmt.Printf("✓ Data compressed with %s\n", opts.CompressAlgo)
 		if opts.EnableChecksum {
 			fmt.Printf("✓ Checksums generated (xxh3)\n")
 		}
 	}
 
-	// Write to file or stdout
-	if opts.OutputFile == "" || opts.OutputFile == "-" {
+	// Write to S3, stdout, or local file
+	switch {
+	case opts.StorageCfg != nil:
+		// Stream to object storage (S3 / SeaweedFS)
+		store, err := storage.New(*opts.StorageCfg)
+		if err != nil {
+			return fmt.Errorf("failed to open storage: %w", err)
+		}
+		defer func() { _ = store.Close() }()
+
+		if len(packets) == 1 {
+			key := opts.StorageKey
+			if err := uploadPacketToStorage(ctx, store, packets[0], key); err != nil {
+				return err
+			}
+			fmt.Printf("✓ Uploaded to: s3://%s/%s\n", opts.StorageCfg.S3.Bucket, key)
+		} else {
+			for i, pkt := range packets {
+				key := generatePacketFilename(opts.StorageKey, i+1, len(packets))
+				if err := uploadPacketToStorage(ctx, store, pkt, key); err != nil {
+					return err
+				}
+				fmt.Printf("✓ Uploaded packet %d/%d to: s3://%s/%s\n",
+					i+1, len(packets), opts.StorageCfg.S3.Bucket, key)
+			}
+		}
+	case opts.OutputFile == "" || opts.OutputFile == "-":
 		// Write to stdout
 		generator := packet.NewGenerator()
 		for _, pkt := range packets {
@@ -109,16 +174,14 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			}
 			fmt.Println(string(xml))
 		}
-	} else {
-		// Write to file(s)
+	default:
+		// Write to local file(s)
 		if len(packets) == 1 {
-			// Single file
 			if err := writePacketToFile(packets[0], opts.OutputFile); err != nil {
 				return err
 			}
 			fmt.Printf("✓ Written to: %s\n", opts.OutputFile)
 		} else {
-			// Multiple files (packets)
 			for i, pkt := range packets {
 				filename := generatePacketFilename(opts.OutputFile, i+1, len(packets))
 				if err := writePacketToFile(pkt, filename); err != nil {
@@ -132,12 +195,50 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	return nil
 }
 
+// uploadPacketToStorage serializes pkt to XML and streams it to store via io.Pipe.
+// Metadata includes table name, row count, and checksum (if present).
+func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt *packet.DataPacket, key string) error {
+	generator := packet.NewGenerator()
+	xmlBytes, err := generator.ToXML(pkt, true)
+	if err != nil {
+		return fmt.Errorf("failed to marshal packet: %w", err)
+	}
+
+	meta := map[string]string{
+		"table":    pkt.Header.TableName,
+		"protocol": "TDTP 1.0",
+		"rows":     strconv.Itoa(len(pkt.Data.Rows)),
+	}
+	if pkt.Data.Checksum != "" {
+		meta["checksum"] = pkt.Data.Checksum
+	}
+
+	// io.Pipe: uploader reads from pr while we write to pw concurrently.
+	pr, pw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.Put(ctx, key, pr, meta)
+	}()
+
+	if _, err := io.Copy(pw, bytes.NewReader(xmlBytes)); err != nil {
+		pw.CloseWithError(err)
+		<-errCh
+		return fmt.Errorf("failed to write to storage pipe: %w", err)
+	}
+	_ = pw.Close()
+
+	if err := <-errCh; err != nil {
+		return fmt.Errorf("storage Put failed: %w", err)
+	}
+	return nil
+}
+
 // writePacketToFile writes a TDTP packet to a file
 func writePacketToFile(pkt *packet.DataPacket, filename string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(filename)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 	}
@@ -164,11 +265,15 @@ func generatePacketFilename(baseFile string, n, total int) string {
 	return fmt.Sprintf("%s_part_%d_of_%d%s", base, n, total, ext)
 }
 
-// compressPacketData compresses the Data section of a packet using zstd
+// compressPacketData compresses the Data section of a packet using the specified algorithm.
 // and optionally generates XXH3 checksum for data integrity verification
-func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) error {
+func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableChecksum bool) error {
 	if len(pkt.Data.Rows) == 0 {
 		return nil
+	}
+
+	if algo == "" {
+		algo = processors.AlgoZstd
 	}
 
 	// Extract row values
@@ -178,7 +283,7 @@ func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) 
 	}
 
 	// Compress
-	compressed, stats, err := processors.CompressDataForTdtp(rows, level)
+	compressed, stats, err := processors.CompressDataForTdtpAlgo(rows, algo, level)
 	if err != nil {
 		return err
 	}
@@ -190,7 +295,7 @@ func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) 
 	}
 
 	// Update packet with compressed data
-	pkt.Data.Compression = "zstd"
+	pkt.Data.Compression = algo
 	pkt.Data.Rows = []packet.Row{{Value: compressed}}
 
 	// Log compression stats
@@ -203,8 +308,8 @@ func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) 
 	return nil
 }
 
-// decompressPacketData decompresses the Data section of a packet
-// and validates checksum if present (before decompression for efficiency)
+// decompressPacketData decompresses the Data section of a packet.
+// Алгоритм определяется из pkt.Data.Compression — поддерживает zstd и kanzi.
 func decompressPacketData(pkt *packet.DataPacket) error {
 	if pkt.Data.Compression == "" {
 		return nil // Not compressed
@@ -224,8 +329,8 @@ func decompressPacketData(pkt *packet.DataPacket) error {
 		fmt.Printf("  ✓ Checksum validated: %s\n", pkt.Data.Checksum)
 	}
 
-	// Decompress
-	rows, err := processors.DecompressDataForTdtp(compressedData)
+	// Decompress — dispatch by algorithm stored in packet
+	rows, err := processors.DecompressDataForTdtpAlgo(compressedData, pkt.Data.Compression)
 	if err != nil {
 		return err
 	}

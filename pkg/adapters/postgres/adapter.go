@@ -1,8 +1,10 @@
+// Package postgres provides functionality for the TDTP framework.
 package postgres
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -44,14 +46,14 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	}
 
 	// Настраиваем pool из конфига
-	if cfg.MaxConns > 0 {
-		config.MaxConns = int32(cfg.MaxConns)
+	if cfg.MaxConns > 0 && cfg.MaxConns <= math.MaxInt32 {
+		config.MaxConns = int32(cfg.MaxConns) //nolint:gosec
 	} else {
 		config.MaxConns = 10 // default
 	}
 
-	if cfg.MinConns > 0 {
-		config.MinConns = int32(cfg.MinConns)
+	if cfg.MinConns > 0 && cfg.MinConns <= math.MaxInt32 {
+		config.MinConns = int32(cfg.MinConns) //nolint:gosec
 	} else {
 		config.MinConns = 2 // default
 	}
@@ -75,24 +77,31 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	}
 
 	// Initialize base helpers (added in refactoring)
-	a.initHelpers()
+	a.initHelpers(cfg.NoDateSentinels)
 
 	return nil
 }
 
 // initHelpers initializes base package helpers for common operations
 // Added during refactoring to eliminate code duplication
-func (a *Adapter) initHelpers() {
+func (a *Adapter) initHelpers(noDateSentinels []string) {
 	// Initialize type converter
 	a.converter = base.NewUniversalTypeConverter()
+	if len(noDateSentinels) > 0 {
+		a.converter.SetNoDateSentinels(noDateSentinels)
+	}
 
-	// Initialize export helper with PostgreSQL-specific components
-	// Note: PostgreSQL doesn't use SQLAdapter (uses native pgx types)
+	// Initialize export helper with PostgreSQL-specific components.
+	// For non-public schemas, SQLAdapter qualifies table names: "schema"."table".
+	var sqlAdapter base.SQLAdapter
+	if a.schema != "public" && a.schema != "" {
+		sqlAdapter = base.NewPostgreSQLSchemaAdapter(a.schema)
+	}
 	a.exportHelper = base.NewExportHelper(
 		a,           // SchemaReader
 		a,           // DataReader
 		a.converter, // ValueConverter
-		nil,         // SQLAdapter (not needed for PostgreSQL)
+		sqlAdapter,  // nil for public schema, PostgreSQLSchemaAdapter otherwise
 	)
 
 	// Initialize import helper with temporary tables for atomic replace
@@ -105,13 +114,15 @@ func (a *Adapter) initHelpers() {
 }
 
 // NewAdapter создает новый адаптер для PostgreSQL (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapter(connString string) (*Adapter, error) {
 	return NewAdapterWithSchema(connString, "public")
 }
 
 // NewAdapterWithSchema создает адаптер с указанной схемой (legacy)
-// DEPRECATED: используйте adapters.New() с фабрикой
+//
+// Deprecated: используйте adapters.New() с фабрикой
 func NewAdapterWithSchema(connString, schema string) (*Adapter, error) {
 	adapter := &Adapter{}
 	err := adapter.Connect(context.Background(), adapters.Config{
@@ -337,71 +348,40 @@ func (a *Adapter) GetSchemas(ctx context.Context) ([]string, error) {
 	return schemas, rows.Err()
 }
 
-// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket
-// Используется для ETL pipeline для загрузки данных из источников
+// ExecuteRawQuery выполняет произвольный SQL SELECT запрос и возвращает результат как DataPacket.
+// Используется ETL pipeline для загрузки данных из источников.
+// Использует тот же путь что и ExportTable: ReadRowsWithSQL → convertValueToTDTP → RowsToData.
 func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.DataPacket, error) {
 	if a.pool == nil {
 		return nil, fmt.Errorf("adapter not connected")
 	}
 
-	// Выполняем SELECT запрос
+	// Получаем схему через кратковременный запрос (LIMIT 0).
 	rows, err := a.pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer rows.Close()
-
-	// Получаем информацию о колонках
 	fieldDescriptions := rows.FieldDescriptions()
+	rows.Close()
 	if len(fieldDescriptions) == 0 {
 		return nil, fmt.Errorf("query returned no columns")
 	}
 
-	// Создаем схему на основе колонок результата
-	schema := packet.Schema{
-		Fields: make([]packet.Field, len(fieldDescriptions)),
-	}
-
+	schema := packet.Schema{Fields: make([]packet.Field, len(fieldDescriptions))}
 	for i, fd := range fieldDescriptions {
-		// Конвертируем PostgreSQL тип в TDTP тип
 		tdtpType, length := convertPostgresTypeToTDTP(fd.DataTypeOID)
-
-		schema.Fields[i] = packet.Field{
-			Name:   string(fd.Name),
-			Type:   tdtpType,
-			Length: length,
-		}
+		schema.Fields[i] = packet.Field{Name: fd.Name, Type: tdtpType, Length: length}
 	}
 
-	// Читаем данные
-	var rowsData []packet.Row
-
-	for rows.Next() {
-		// Получаем значения строки
-		values, err := rows.Values()
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Конвертируем значения в строку с разделителем |
-		rowValues := make([]string, len(values))
-		for i, val := range values {
-			rowValues[i] = formatPostgresValue(val)
-		}
-
-		rowsData = append(rowsData, packet.Row{
-			Value: strings.Join(rowValues, "|"),
-		})
+	// Используем ReadRowsWithSQL — единственный путь конвертации типов в этом адаптере.
+	scannedRows, err := a.ReadRowsWithSQL(ctx, query, schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error reading rows: %w", err)
-	}
-
-	// Создаем DataPacket
 	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
 	dataPacket.Schema = schema
-	dataPacket.Data.Rows = rowsData
+	dataPacket.Data = packet.RowsToData(scannedRows)
 
 	return dataPacket, nil
 }
@@ -428,30 +408,5 @@ func convertPostgresTypeToTDTP(oid uint32) (string, int) {
 	default:
 		// Для неизвестных типов возвращаем TEXT
 		return "TEXT", 1000
-	}
-}
-
-// formatPostgresValue форматирует значение PostgreSQL в строку для TDTP
-func formatPostgresValue(val any) string {
-	if val == nil {
-		return "" // NULL представляется пустой строкой
-	}
-
-	switch v := val.(type) {
-	case []byte:
-		return string(v)
-	case string:
-		return v
-	case int16, int32, int64, int:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%g", v)
-	case bool:
-		if v {
-			return "true"
-		}
-		return "false"
-	default:
-		return fmt.Sprintf("%v", v)
 	}
 }

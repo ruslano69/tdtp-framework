@@ -50,7 +50,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Timeout <= 0 {
-		return fmt.Errorf("Timeout must be greater than 0")
+		return fmt.Errorf("timeout must be greater than 0")
 	}
 
 	if c.SuccessThreshold == 0 {

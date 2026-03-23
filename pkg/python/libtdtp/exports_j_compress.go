@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
@@ -29,21 +30,31 @@ func jDecompressRows(pkt *packet.DataPacket) *C.char {
 		}
 	}
 
-	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
+	lines, err := processors.DecompressDataForTdtpWithAlgo(pkt.Data.Rows[0].Value, pkt.Data.Compression)
 	if err != nil {
 		return jErr(fmt.Sprintf("decompress error: %v", err))
 	}
 
-	var rows [][]string
+	// Rebuild pkt.Data.Rows from decompressed lines so ExpandCompactRows can work.
+	decompRows := make([]packet.Row, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
-		rows = append(rows, parser.GetRowValues(packet.Row{Value: line}))
+		decompRows = append(decompRows, packet.Row{Value: line})
+	}
+	pkt.Data.Rows = decompRows
+	pkt.Data.Compression = ""
+	pkt.Data.Checksum = ""
+
+	// Expand compact carry-forward encoding so callers always receive fully-populated rows.
+	if pkt.Data.Compact {
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			return jErr(fmt.Sprintf("compact expand error: %v", err))
+		}
 	}
 
-	return jOK(packetToJPacket(pkt, rows))
+	return jOK(packetToJPacket(pkt, pkt.GetRows()))
 }
 
 // jApplyProcessor runs a single named processor.
@@ -112,7 +123,9 @@ func jApplyChain(dataJSON *C.char, chainJSON *C.char) *C.char {
 	return jOK(result)
 }
 
-// jRunCompress compresses rows with zstd, returns single-blob jPacket.
+// jRunCompress compresses rows with the requested algorithm, returns single-blob jPacket.
+// params["algo"] selects the algorithm ("zstd" default, "kanzi" for high-ratio).
+// params["level"] sets the compression level (default 3).
 func jRunCompress(jp jPacket, params map[string]any) *C.char {
 	level := 3
 	if v, ok := params["level"]; ok {
@@ -120,43 +133,35 @@ func jRunCompress(jp jPacket, params map[string]any) *C.char {
 			level = int(fv)
 		}
 	}
-
-	compressor, err := processors.NewCompressionProcessor(level)
-	if err != nil {
-		return jErr(fmt.Sprintf("compressor init error: %v", err))
+	algo := "zstd"
+	if v, ok := params["algo"]; ok {
+		if sv, ok := v.(string); ok && sv != "" {
+			algo = sv
+		}
 	}
-	defer compressor.Close()
 
-	rowBytes := make([]byte, 0, 4096)
+	rows := make([]string, len(jp.Data))
 	for i, row := range jp.Data {
-		for j, v := range row {
-			if j > 0 {
-				rowBytes = append(rowBytes, '|')
-			}
-			rowBytes = append(rowBytes, []byte(v)...)
-		}
-		if i < len(jp.Data)-1 {
-			rowBytes = append(rowBytes, '\n')
-		}
+		rows[i] = strings.Join(row, "|")
 	}
 
-	compressed, err := compressor.ProcessBlock(context.Background(), rowBytes)
+	compressed, _, err := processors.CompressDataForTdtpAlgo(rows, algo, level)
 	if err != nil {
 		return jErr(fmt.Sprintf("compression error: %v", err))
 	}
 
-	checksum := processors.ComputeChecksum(compressed)
+	checksum := processors.ComputeChecksum([]byte(compressed))
 
 	result := jp
-	result.Data = [][]string{{string(compressed)}}
-	result.Compression = "zstd"
+	result.Data = [][]string{{compressed}}
+	result.Compression = algo
 	result.Checksum = checksum
 	return jOK(result)
 }
 
-// compressAndSign applies zstd compression and optional XXH3 checksum
+// compressAndSign applies compression and optional XXH3 checksum
 // to a packet's Data section — mirrors compressPacketData() in export.go.
-func compressAndSign(pkt *packet.DataPacket, level int, enableChecksum bool) error {
+func compressAndSign(pkt *packet.DataPacket, algo string, level int, enableChecksum bool) error {
 	if len(pkt.Data.Rows) == 0 {
 		return nil
 	}
@@ -166,7 +171,7 @@ func compressAndSign(pkt *packet.DataPacket, level int, enableChecksum bool) err
 		rows[i] = row.Value
 	}
 
-	compressed, _, err := processors.CompressDataForTdtp(rows, level)
+	compressed, _, err := processors.CompressDataForTdtpAlgo(rows, algo, level)
 	if err != nil {
 		return err
 	}
@@ -174,7 +179,7 @@ func compressAndSign(pkt *packet.DataPacket, level int, enableChecksum bool) err
 	if enableChecksum {
 		pkt.Data.Checksum = processors.ComputeChecksum([]byte(compressed))
 	}
-	pkt.Data.Compression = "zstd"
+	pkt.Data.Compression = algo
 	pkt.Data.Rows = []packet.Row{{Value: compressed}}
 	return nil
 }
@@ -192,7 +197,7 @@ func jRunDecompress(jp jPacket) *C.char {
 	}
 
 	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtp(jp.Data[0][0])
+	lines, err := processors.DecompressDataForTdtpWithAlgo(jp.Data[0][0], jp.Compression)
 	if err != nil {
 		return jErr(fmt.Sprintf("decompress error: %v", err))
 	}

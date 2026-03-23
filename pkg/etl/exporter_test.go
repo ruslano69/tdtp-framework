@@ -165,7 +165,7 @@ func TestExporter_ValidateConfig(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "Kafka brokers is required",
+			errMsg:  "kafka brokers is required",
 		},
 		{
 			name: "Kafka without topic",
@@ -177,7 +177,7 @@ func TestExporter_ValidateConfig(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "Kafka topic is required",
+			errMsg:  "kafka topic is required",
 		},
 		{
 			name: "Empty output type",

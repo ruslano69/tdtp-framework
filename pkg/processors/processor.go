@@ -31,7 +31,7 @@ type PostProcessor interface {
 
 // Config содержит конфигурацию процессора
 type Config struct {
-	Type   string                 `yaml:"type"`   // Тип процессора (field_masker, normalizer, etc)
+	Type   string         `yaml:"type"`   // Тип процессора (field_masker, normalizer, etc)
 	Params map[string]any `yaml:"params"` // Параметры процессора
 }
 

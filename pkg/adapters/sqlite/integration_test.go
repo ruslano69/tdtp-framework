@@ -298,3 +298,183 @@ func insertTestData(ctx context.Context, adapter *Adapter) error {
 
 	return adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
 }
+
+// TestIntegration_FieldsProjection тестирует экспорт только выбранных колонок
+func TestIntegration_FieldsProjection(t *testing.T) {
+	if !isSQLiteDriverAvailable() {
+		t.Skip("SQLite driver not available")
+	}
+
+	ctx := context.Background()
+	dbFile := "testdata/test_fields_proj.db"
+	t.Cleanup(func() { os.Remove(dbFile) })
+
+	adapter, err := NewAdapter(dbFile)
+	if err != nil {
+		t.Fatalf("Failed to create adapter: %v", err)
+	}
+	defer adapter.Close(ctx)
+
+	if err := createTestTable(ctx, adapter); err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+	if err := insertTestData(ctx, adapter); err != nil {
+		t.Fatalf("Failed to insert data: %v", err)
+	}
+
+	// Запрашиваем только две колонки из четырёх
+	t.Run("Schema has only requested fields", func(t *testing.T) {
+		query := packet.NewQuery()
+		query.Fields = []string{"ID", "Name"}
+
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "test", "test")
+		if err != nil {
+			t.Fatalf("ExportTableWithQuery failed: %v", err)
+		}
+		if len(packets) == 0 {
+			t.Fatal("Expected at least one packet")
+		}
+
+		pkt := packets[0]
+
+		// Схема должна содержать ровно 2 поля
+		if len(pkt.Schema.Fields) != 2 {
+			t.Errorf("Expected 2 fields in schema, got %d", len(pkt.Schema.Fields))
+		}
+		if pkt.Schema.Fields[0].Name != "ID" {
+			t.Errorf("Expected field[0] = ID, got %s", pkt.Schema.Fields[0].Name)
+		}
+		if pkt.Schema.Fields[1].Name != "Name" {
+			t.Errorf("Expected field[1] = Name, got %s", pkt.Schema.Fields[1].Name)
+		}
+	})
+
+	t.Run("Rows contain only projected column values", func(t *testing.T) {
+		query := packet.NewQuery()
+		query.Fields = []string{"ID", "Name"}
+
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "test", "test")
+		if err != nil {
+			t.Fatalf("ExportTableWithQuery failed: %v", err)
+		}
+
+		pkt := packets[0]
+		parser := packet.NewParser()
+
+		// Каждая строка должна иметь ровно 2 значения (ID и Name)
+		for i, row := range pkt.Data.Rows {
+			values := parser.GetRowValues(row)
+			if len(values) != 2 {
+				t.Errorf("row %d: expected 2 values, got %d: %v", i, len(values), values)
+			}
+		}
+
+		// Все 3 строки должны присутствовать
+		if len(pkt.Data.Rows) != 3 {
+			t.Errorf("Expected 3 rows, got %d", len(pkt.Data.Rows))
+		}
+	})
+
+	t.Run("Fields combined with WHERE filter", func(t *testing.T) {
+		query := packet.NewQuery()
+		query.Fields = []string{"ID", "Balance"}
+		query.Filters = &packet.Filters{
+			And: &packet.LogicalGroup{
+				Filters: []packet.Filter{
+					{Field: "IsActive", Operator: "eq", Value: "1"},
+				},
+			},
+		}
+
+		packets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "test", "test")
+		if err != nil {
+			t.Fatalf("ExportTableWithQuery failed: %v", err)
+		}
+
+		pkt := packets[0]
+
+		// Только активные: John (IsActive=1) и Jane (IsActive=1), Bob не входит
+		if pkt.QueryContext.ExecutionResults.RecordsReturned != 2 {
+			t.Errorf("Expected 2 records, got %d", pkt.QueryContext.ExecutionResults.RecordsReturned)
+		}
+
+		// Схема — только 2 поля
+		if len(pkt.Schema.Fields) != 2 {
+			t.Errorf("Expected 2 fields, got %d", len(pkt.Schema.Fields))
+		}
+	})
+
+	t.Run("Unknown field returns error", func(t *testing.T) {
+		query := packet.NewQuery()
+		query.Fields = []string{"ID", "nonexistent_col"}
+
+		_, err := adapter.ExportTableWithQuery(ctx, "Users", query, "test", "test")
+		if err == nil {
+			t.Error("Expected error for unknown field, got nil")
+		}
+	})
+}
+
+// TestIntegration_FieldsProjection_FullCycle тестирует экспорт с проекцией → импорт в узкую таблицу
+func TestIntegration_FieldsProjection_FullCycle(t *testing.T) {
+	if !isSQLiteDriverAvailable() {
+		t.Skip("SQLite driver not available")
+	}
+
+	ctx := context.Background()
+
+	sourceFile := "testdata/fields_source.db"
+	targetFile := "testdata/fields_target.db"
+	t.Cleanup(func() {
+		os.Remove(sourceFile)
+		os.Remove(targetFile)
+	})
+
+	// Наполняем source (4 поля: ID, Name, Balance, IsActive)
+	source, err := NewAdapter(sourceFile)
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	defer source.Close(ctx)
+
+	createTestTable(ctx, source)
+	insertTestData(ctx, source)
+
+	// Экспортируем только ID и Name
+	query := packet.NewQuery()
+	query.Fields = []string{"ID", "Name"}
+
+	packets, err := source.ExportTableWithQuery(ctx, "Users", query, "source", "target")
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+
+	// Импортируем в target
+	target, err := NewAdapter(targetFile)
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	defer target.Close(ctx)
+
+	if err := target.ImportPackets(ctx, packets, adapters.StrategyReplace); err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	// В target должно быть 3 строки, и таблица должна иметь только 2 колонки
+	count, err := target.GetRowCount(ctx, "Users")
+	if err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("Expected 3 rows in target, got %d", count)
+	}
+
+	// Схема в target содержит только ID и Name
+	targetSchema, err := target.GetTableSchema(ctx, "Users")
+	if err != nil {
+		t.Fatalf("get target schema: %v", err)
+	}
+	if len(targetSchema.Fields) != 2 {
+		t.Errorf("Expected 2 fields in target schema, got %d", len(targetSchema.Fields))
+	}
+}

@@ -80,6 +80,17 @@ func (ts *TDTPService) TestTDTPFile(filePath string) TDTPTestResult {
 		}
 	}
 
+	// Expand compact v1.3.1 format (carry-forward fixed fields)
+	if firstPacket.Data.Compact {
+		if err := packet.ExpandCompactRows(firstPacket); err != nil {
+			return TDTPTestResult{
+				Success:  false,
+				Message:  fmt.Sprintf("Compact expansion failed: %v", err),
+				Duration: time.Since(startTime).Milliseconds(),
+			}
+		}
+	}
+
 	// Check if multi-volume source
 	totalParts := firstPacket.Header.TotalParts
 	partNumber := firstPacket.Header.PartNumber
@@ -186,6 +197,13 @@ func (ts *TDTPService) collectAllParts(initialPath string, firstPacket *packet.D
 		// Decompress data if compressed
 		if err := ts.decompressPacket(packet); err != nil {
 			return nil, fmt.Errorf("failed to decompress %s: %w", filename, err)
+		}
+
+		// Expand compact v1.3.1 format before merging
+		if packet.Data.Compact {
+			if err := packet.ExpandCompactRows(packet); err != nil {
+				return nil, fmt.Errorf("compact expansion failed for %s: %w", filename, err)
+			}
 		}
 
 		allPackets[partNum-1] = packet

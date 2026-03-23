@@ -55,6 +55,39 @@ services:
     networks:
       - tdtp-test-network
 
+  # SeaweedFS — S3-compatible object storage для тестов
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: tdtp-seaweedfs-test
+    command: >
+      server
+      -dir=/data
+      -filer=true
+      -s3=true
+      -s3.port=8333
+      -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=256
+      -volume.max=5
+    ports:
+      - "9333:9333"   # master API
+      - "8080:8080"   # volume server
+      - "8888:8888"   # filer API
+      - "8333:8333"   # S3 API
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs:/etc/seaweedfs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9333/cluster/status 2>/dev/null | grep -q 'IsLeader' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - tdtp-test-network
+
 networks:
   tdtp-test-network:
     driver: bridge
+
+volumes:
+  seaweedfs-data:

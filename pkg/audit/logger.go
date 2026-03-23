@@ -225,7 +225,7 @@ func (l *AuditLogger) drainChannel() {
 				return
 			}
 			if entry != nil {
-				l.writeEntry(context.Background(), entry)
+				_ = l.writeEntry(context.Background(), entry)
 			}
 		default:
 			return
@@ -243,7 +243,7 @@ func (l *AuditLogger) autoFlush() {
 	for {
 		select {
 		case <-ticker.C:
-			l.Flush()
+			_ = l.Flush()
 
 		case <-l.ctx.Done():
 			return
@@ -297,7 +297,7 @@ func (l *AuditLogger) Close() error {
 	l.wg.Wait()
 
 	// Flush перед закрытием
-	l.Flush()
+	_ = l.Flush()
 
 	// Закрываем appenders
 	l.mu.RLock()

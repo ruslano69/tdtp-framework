@@ -1,6 +1,6 @@
 # TDTP Framework Documentation
 
-Полная документация TDTP Framework v1.2.
+Полная документация TDTP Framework v1.3.
 
 ---
 
@@ -16,6 +16,8 @@
 
 2. **[USER_GUIDE.md](./USER_GUIDE.md)** - CLI утилита tdtpcli
    - Команды и параметры
+   - ETL Pipeline (`--pipeline`, `--enc`, `--enc-dev`)
+   - Шифрование AES-256-GCM через xZMercury
    - Конфигурация YAML
    - Работа с TDTQL фильтрами
    - Message Brokers интеграция
@@ -23,18 +25,25 @@
 
 ### Для разработчиков
 
-3. **[DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)** - Руководство разработчика
+3. **[ETL_PIPELINE.md](./ETL_PIPELINE.md)** - ETL Pipeline сценарии 🆕
+   - Справочник конфигурации YAML
+   - Сценарии: TDTP JOIN, PostgreSQL→TDTP, шифрование, Redis оркестрация
+   - Graceful degradation при отказе xZMercury
+   - CLI флаги, exit codes
+
+4. **[DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)** - Руководство разработчика
    - Архитектура фреймворка
    - Настройка тестовой среды
    - Core Modules (Packet, Schema, TDTQL)
    - Database Adapters (SQLite, PostgreSQL, MSSQL, MySQL)
    - Message Brokers (RabbitMQ, MSMQ, Kafka)
    - Production Features (Circuit Breaker, Retry, Audit, Processors)
+   - Security: Encryption v1.3 (pkg/mercury, pkg/crypto, xzmercury-mock)
    - Разработка нового адаптера
    - Best Practices
    - Testing
 
-4. **[SPECIFICATION.md](./SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
+5. **[SPECIFICATION.md](./SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
    - XML формат сообщений
    - Типы данных
    - TDTQL язык запросов
@@ -110,6 +119,7 @@
 2. **[examples/04-tdtp-xlsx/](../examples/04-tdtp-xlsx/)** - XLSX converter 🍒
 3. **[examples/02-rabbitmq-mssql/](../examples/02-rabbitmq-mssql/)** - Production integration
 4. **[examples/03-incremental-sync/](../examples/03-incremental-sync/)** - Incremental sync
+5. **[examples/encryption-test/](../examples/encryption-test/)** - ETL с шифрованием 🆕
 
 ---
 
@@ -130,6 +140,8 @@
 |--------|----------|
 | **Установить фреймворк** | [README.md](../README.md) |
 | **Использовать CLI** | [USER_GUIDE.md](./USER_GUIDE.md) |
+| **Запустить ETL pipeline** | [ETL_PIPELINE.md](./ETL_PIPELINE.md) 🆕 |
+| **Шифрование через xZMercury** | [ETL_PIPELINE.md § Сценарий 3](./ETL_PIPELINE.md#сценарий-3-шифрованный-вывод-через-xzmercury) 🆕 |
 | **Понять TDTP формат** | [SPECIFICATION.md](./SPECIFICATION.md) |
 | **Разрабатывать с фреймворком** | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) |
 | **Настроить тестовую среду** | [DEVELOPER_GUIDE.md § Настройка тестовой среды](./DEVELOPER_GUIDE.md#настройка-тестовой-среды) |
@@ -138,6 +150,7 @@
 | **Использовать TDTQL** | [DEVELOPER_GUIDE.md § TDTQL Module](./DEVELOPER_GUIDE.md#tdtql-module) |
 | **Интеграция с БД** | [DEVELOPER_GUIDE.md § Database Adapters](./DEVELOPER_GUIDE.md#database-adapters) |
 | **Разработать свой адаптер** | [DEVELOPER_GUIDE.md § Разработка нового адаптера](./DEVELOPER_GUIDE.md#разработка-нового-адаптера) |
+| **pkg/mercury, pkg/crypto** | [DEVELOPER_GUIDE.md § Security Encryption](./DEVELOPER_GUIDE.md#security-encryption-v13) 🆕 |
 | **Circuit Breaker** | [pkg/resilience/README.md](../pkg/resilience/README.md) |
 | **Retry mechanism** | [pkg/retry/README.md](../pkg/retry/README.md) |
 | **Audit Logging** | [pkg/audit/README.md](../pkg/audit/README.md) |
@@ -150,7 +163,23 @@
 
 ## 🔄 История изменений
 
-### v1.2 (17.11.2025) - Current
+### v1.3 (26.02.2026) - Current 🆕
+
+✅ **Новые фичи:**
+- AES-256-GCM шифрование через xZMercury (UUID-binding флоу)
+- Тип пакета `error` для управляемых ошибок ETL pipeline
+- pkg/mercury — HTTP клиент, HMAC верификация, DevClient для dev-сборок
+- pkg/crypto — AES-256-GCM с бинарным заголовком
+- cmd/xzmercury-mock — standalone mock-сервер для тестирования
+- `--enc` / `--enc-dev` флаги для tdtpcli
+- ResultLog: статус `completed_with_errors`, поле `package_uuid`
+- Graceful degradation: error-пакет при недоступности xZMercury, exit 0
+
+✅ **Документация:**
+- Новый ETL_PIPELINE.md — полное руководство с 5 сценариями
+- Обновлены SPECIFICATION.md (v1.3), USER_GUIDE.md, DEVELOPER_GUIDE.md
+
+### v1.2 (17.11.2025)
 
 ✅ **Новые фичи:**
 - XLSX Converter (Database ↔ Excel) 🍒
@@ -161,8 +190,6 @@
 ✅ **Документация:**
 - ✨ Новый DEVELOPER_GUIDE.md (комплексное руководство разработчика)
 - Обновлены USER_GUIDE.md и SPECIFICATION.md
-- Удалена устаревшая и временная документация
-- Исправлены все ссылки на репозиторий
 
 ### v1.1 (16.11.2025)
 
@@ -187,8 +214,9 @@
 docs/
 ├── README.md              # Этот файл - навигация по документации
 ├── DEVELOPER_GUIDE.md     # Руководство разработчика (архитектура, модули, адаптеры)
+├── ETL_PIPELINE.md        # ETL Pipeline — сценарии и примеры 🆕
 ├── USER_GUIDE.md          # Руководство пользователя CLI
-└── SPECIFICATION.md       # Спецификация TDTP v1.0 & TDTQL
+└── SPECIFICATION.md       # Спецификация TDTP v1.0-v1.3 & TDTQL
 
 Root:
 ├── README.md              # Главная страница проекта
@@ -204,5 +232,5 @@ Root:
 
 ---
 
-**Версия:** v1.2
-**Последнее обновление:** 17.11.2025
+**Версия:** v1.3
+**Последнее обновление:** 26.02.2026

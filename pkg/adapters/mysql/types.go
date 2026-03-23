@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -104,7 +105,9 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 	case "TINYINT", "SMALLINT", "MEDIUMINT", "INT", "INTEGER", "BIGINT":
 		field.Type = "INTEGER"
 		if len(params) > 0 {
-			field.Length, _ = strconv.Atoi(params[0])
+			if v, err := strconv.Atoi(params[0]); err == nil {
+				field.Length = v
+			}
 		}
 
 	case "FLOAT", "REAL":
@@ -115,13 +118,20 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 
 	case "DECIMAL", "NUMERIC":
 		field.Type = "DECIMAL"
-		if len(params) >= 2 {
-			field.Precision, _ = strconv.Atoi(params[0])
-			field.Scale, _ = strconv.Atoi(params[1])
-		} else if len(params) == 1 {
-			field.Precision, _ = strconv.Atoi(params[0])
+		switch {
+		case len(params) >= 2:
+			if v, err := strconv.Atoi(params[0]); err == nil {
+				field.Precision = v
+			}
+			if v, err := strconv.Atoi(params[1]); err == nil {
+				field.Scale = v
+			}
+		case len(params) == 1:
+			if v, err := strconv.Atoi(params[0]); err == nil {
+				field.Precision = v
+			}
 			field.Scale = 0
-		} else {
+		default:
 			field.Precision = 18
 			field.Scale = 2
 		}
@@ -129,7 +139,9 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 	case "CHAR":
 		field.Type = "CHAR"
 		if len(params) > 0 {
-			field.Length, _ = strconv.Atoi(params[0])
+			if v, err := strconv.Atoi(params[0]); err == nil {
+				field.Length = v
+			}
 		} else {
 			field.Length = 1
 		}
@@ -137,7 +149,9 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 	case "VARCHAR":
 		field.Type = "VARCHAR"
 		if len(params) > 0 {
-			field.Length, _ = strconv.Atoi(params[0])
+			if v, err := strconv.Atoi(params[0]); err == nil {
+				field.Length = v
+			}
 		} else {
 			field.Length = 255
 		}
@@ -153,7 +167,7 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 		case "MEDIUMTEXT":
 			field.Length = 16777215
 		case "LONGTEXT":
-			field.Length = 4294967295
+			field.Length = math.MaxInt32 // LONGTEXT max, capped to int32 for 32-bit compat
 		}
 
 	case "DATE":

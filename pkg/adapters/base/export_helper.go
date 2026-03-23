@@ -3,6 +3,7 @@ package base
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -38,6 +39,15 @@ type SQLAdapter interface {
 	AdaptSQL(standardSQL string, tableName string, schema packet.Schema, query *packet.Query) string
 }
 
+// RowPostProcessor — опциональный интерфейс для постобработки строк после чтения.
+// Адаптеры реализуют его когда нужна специфичная фильтрация столбцов
+// (например, MSSQL фильтрует read-only поля: identity, computed, timestamp).
+// ExportHelper проверяет DataReader на реализацию этого интерфейса
+// и вызывает PostProcessRows перед сборкой пакетов.
+type RowPostProcessor interface {
+	PostProcessRows(ctx context.Context, schema packet.Schema, rows [][]string) (packet.Schema, [][]string)
+}
+
 // ExportHelper содержит общую логику экспорта для всех адаптеров
 // Устраняет дублирование кода между SQLite, PostgreSQL, MS SQL Server, MySQL
 type ExportHelper struct {
@@ -45,6 +55,7 @@ type ExportHelper struct {
 	dataReader     DataReader
 	valueConverter ValueConverter
 	sqlAdapter     SQLAdapter
+	maxMessageSize int // 0 = use generator default
 }
 
 // NewExportHelper создает новый ExportHelper
@@ -62,6 +73,21 @@ func NewExportHelper(
 	}
 }
 
+// SetMaxMessageSize задаёт максимальный размер одного TDTP пакета в байтах.
+// Используется адаптерами для передачи настройки --packet-size из CLI.
+func (h *ExportHelper) SetMaxMessageSize(size int) {
+	h.maxMessageSize = size
+}
+
+// newGenerator возвращает генератор с учётом настройки maxMessageSize.
+func (h *ExportHelper) newGenerator() *packet.Generator {
+	g := packet.NewGenerator()
+	if h.maxMessageSize > 0 {
+		g.SetMaxMessageSize(h.maxMessageSize)
+	}
+	return g
+}
+
 // ExportTable экспортирует всю таблицу в TDTP reference пакеты
 // Общая реализация для всех адаптеров
 func (h *ExportHelper) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
@@ -77,8 +103,13 @@ func (h *ExportHelper) ExportTable(ctx context.Context, tableName string) ([]*pa
 		return nil, err
 	}
 
-	// 3. Генерируем reference пакеты
-	generator := packet.NewGenerator()
+	// 3. Постобработка (опционально): адаптер может отфильтровать столбцы (например, MSSQL read-only)
+	if pp, ok := h.dataReader.(RowPostProcessor); ok {
+		schema, rows = pp.PostProcessRows(ctx, schema, rows)
+	}
+
+	// 4. Генерируем reference пакеты
+	generator := h.newGenerator()
 	return generator.GenerateReference(tableName, schema, rows)
 }
 
@@ -90,21 +121,36 @@ func (h *ExportHelper) ExportTableWithQuery(
 	query *packet.Query,
 	sender, recipient string,
 ) ([]*packet.DataPacket, error) {
-	// 1. Получаем схему
-	pkgSchema, err := h.schemaReader.GetTableSchema(ctx, tableName)
+	// query == nil означает полный экспорт без фильтрации — делегируем в ExportTable
+	if query == nil {
+		return h.ExportTable(ctx, tableName)
+	}
+
+	// 1. Получаем полную схему таблицы
+	fullSchema, err := h.schemaReader.GetTableSchema(ctx, tableName)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. Валидация полей запроса (поля фильтров и ORDER BY) до чтения данных
+	// 2. Если задана проекция колонок — валидируем и строим filtered schema
+	pkgSchema := fullSchema
+	var fieldIndices []int // позиции выбранных полей в полной схеме (для fallback)
+	if len(query.Fields) > 0 {
+		pkgSchema, fieldIndices, err = filterSchemaByFields(fullSchema, query.Fields)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// 3. Валидация полей запроса (фильтры и ORDER BY) до чтения данных
 	executor := tdtql.NewExecutor()
-	if err := executor.ValidateQuery(query, pkgSchema); err != nil {
+	if err := executor.ValidateQuery(query, fullSchema); err != nil {
 		return nil, err
 	}
 	// Нормализация имён полей к каноническим из схемы (критично для PostgreSQL quoted identifiers)
-	executor.NormalizeQueryFields(query, pkgSchema)
+	executor.NormalizeQueryFields(query, fullSchema)
 
-	// 3. Пробуем транслировать TDTQL → SQL для оптимизации (pushdown filtering)
+	// 4. Пробуем транслировать TDTQL → SQL для оптимизации (pushdown filtering)
 	sqlGenerator := tdtql.NewSQLGenerator()
 	if sqlGenerator.CanTranslateToSQL(query) {
 		// Оптимизированный путь: фильтрация на уровне SQL
@@ -113,16 +159,20 @@ func (h *ExportHelper) ExportTableWithQuery(
 			// Адаптируем SQL под конкретную СУБД (если нужно)
 			adaptedSQL := standardSQL
 			if h.sqlAdapter != nil {
-				adaptedSQL = h.sqlAdapter.AdaptSQL(standardSQL, tableName, pkgSchema, query)
+				adaptedSQL = h.sqlAdapter.AdaptSQL(standardSQL, tableName, fullSchema, query)
 			}
 
-			// Выполняем SQL запрос напрямую
+			// Выполняем SQL запрос с filtered schema (количество колонок совпадает)
 			rows, err := h.dataReader.ReadRowsWithSQL(ctx, adaptedSQL, pkgSchema)
 			if err == nil {
-				// Генерируем Response пакеты
+				// Постобработка (опционально): фильтрация read-only полей и т.п.
+				if pp, ok := h.dataReader.(RowPostProcessor); ok {
+					pkgSchema, rows = pp.PostProcessRows(ctx, pkgSchema, rows)
+				}
+
 				queryContext := h.createQueryContextForSQL(ctx, query, rows, tableName)
 
-				generator := packet.NewGenerator()
+				generator := h.newGenerator()
 				return generator.GenerateResponse(
 					tableName,
 					packet.InReplyToDirectExport,
@@ -138,28 +188,90 @@ func (h *ExportHelper) ExportTableWithQuery(
 	}
 
 	// Fallback путь: in-memory фильтрация (для сложных запросов или если SQL не удался)
-	rows, err := h.dataReader.ReadAllRows(ctx, tableName, pkgSchema)
+	allRows, err := h.dataReader.ReadAllRows(ctx, tableName, fullSchema)
 	if err != nil {
 		return nil, err
 	}
 
-	// Применяем TDTQL фильтрацию в памяти
-	result, err := executor.Execute(query, rows, pkgSchema)
+	// Применяем TDTQL фильтрацию в памяти (по полной схеме)
+	result, err := executor.Execute(query, allRows, fullSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
+	// Применяем проекцию колонок если задана (после фильтрации)
+	filteredRows := result.FilteredRows
+	filteredSchema := fullSchema
+	if len(fieldIndices) > 0 {
+		filteredRows = projectRows(filteredRows, fieldIndices)
+		filteredSchema = pkgSchema
+	}
+
+	// Постобработка (опционально): фильтрация read-only полей и т.п.
+	if pp, ok := h.dataReader.(RowPostProcessor); ok {
+		filteredSchema, filteredRows = pp.PostProcessRows(ctx, filteredSchema, filteredRows)
+	}
+
 	// Генерируем Response пакеты с QueryContext
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	return generator.GenerateResponse(
 		tableName,
 		packet.InReplyToDirectExport,
-		pkgSchema,
-		result.FilteredRows,
+		filteredSchema,
+		filteredRows,
 		result.QueryContext,
 		sender,
 		recipient,
 	)
+}
+
+// FilterSchemaByFields возвращает схему только с запрошенными полями и их индексы
+// в исходной полной схеме. Возвращает ошибку если поле не найдено.
+// Экспортируется для использования в адаптерах (например, mssql).
+func FilterSchemaByFields(full packet.Schema, fields []string) (packet.Schema, []int, error) {
+	return filterSchemaByFields(full, fields)
+}
+
+// filterSchemaByFields возвращает схему только с запрошенными полями и их индексы
+// в исходной полной схеме. Возвращает ошибку если поле не найдено.
+func filterSchemaByFields(full packet.Schema, fields []string) (packet.Schema, []int, error) {
+	nameToIdx := make(map[string]int, len(full.Fields))
+	for i, f := range full.Fields {
+		nameToIdx[strings.ToLower(f.Name)] = i
+	}
+
+	var filtered packet.Schema
+	indices := make([]int, 0, len(fields))
+	for _, name := range fields {
+		idx, ok := nameToIdx[strings.ToLower(name)]
+		if !ok {
+			return packet.Schema{}, nil, fmt.Errorf("field '%s' not found in schema", name)
+		}
+		filtered.Fields = append(filtered.Fields, full.Fields[idx])
+		indices = append(indices, idx)
+	}
+	return filtered, indices, nil
+}
+
+// ProjectRows возвращает только колонки по указанным индексам из каждой строки.
+// Экспортируется для использования в адаптерах (например, mssql).
+func ProjectRows(rows [][]string, indices []int) [][]string {
+	return projectRows(rows, indices)
+}
+
+// projectRows возвращает только колонки по указанным индексам из каждой строки.
+func projectRows(rows [][]string, indices []int) [][]string {
+	result := make([][]string, len(rows))
+	for i, row := range rows {
+		projected := make([]string, len(indices))
+		for j, idx := range indices {
+			if idx < len(row) {
+				projected[j] = row[idx]
+			}
+		}
+		result[i] = projected
+	}
+	return result
 }
 
 // ExportTableIncremental экспортирует только измененные записи с момента последней синхронизации
@@ -210,7 +322,7 @@ func (h *ExportHelper) ExportTableIncremental(
 	}
 
 	// Генерируем пакеты
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	packets, err := generator.GenerateReference(tableName, pkgSchema, rows)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to generate packets: %w", err)
