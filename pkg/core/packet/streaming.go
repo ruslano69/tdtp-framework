@@ -16,7 +16,7 @@ type StreamingGenerator struct {
 func NewStreamingGenerator() *StreamingGenerator {
 	return &StreamingGenerator{
 		Generator:     NewGenerator(),
-		partSizeBytes: 3800000, // ~3.8MB для получения ~1.9MB XML
+		partSizeBytes: DefaultMaxMessageSize, // ~3.8MB для получения ~1.9MB XML
 	}
 }
 

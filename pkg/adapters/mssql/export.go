@@ -236,6 +236,12 @@ func (a *Adapter) PostProcessRows(ctx context.Context, schema packet.Schema, row
 	return filterReadOnlyFields(schema, rows, includeReadOnly)
 }
 
+// SetMaxMessageSize задаёт максимальный размер одного TDTP пакета (в байтах).
+// Вызывается из CLI при указании --packet-size.
+func (a *Adapter) SetMaxMessageSize(size int) {
+	a.exportHelper.SetMaxMessageSize(size)
+}
+
 // ExportTable экспортирует всю таблицу в TDTP reference пакеты
 // Делегирует в base.ExportHelper для устранения дублирования кода
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {

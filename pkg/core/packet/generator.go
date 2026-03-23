@@ -28,6 +28,11 @@ func DefaultCompressionOptions() CompressionOptions {
 	}
 }
 
+// DefaultMaxMessageSize — размер по умолчанию (3.8MB оценка → ~1.9MB реального XML).
+// Внутренняя оценка намеренно вдвое больше реального XML,
+// т.к. размер строк считается в UTF-16 единицах (MSMQ/COM-совместимость).
+const DefaultMaxMessageSize = 3_800_000
+
 // Generator отвечает за генерацию TDTP пакетов
 type Generator struct {
 	maxMessageSize int                // в байтах
@@ -37,7 +42,7 @@ type Generator struct {
 // NewGenerator создает новый генератор
 func NewGenerator() *Generator {
 	return &Generator{
-		maxMessageSize: 3800000, // ~3.8MB для получения ~1.9MB XML (с учетом UTF-16 оценки)
+		maxMessageSize: DefaultMaxMessageSize,
 		compression:    DefaultCompressionOptions(),
 	}
 }

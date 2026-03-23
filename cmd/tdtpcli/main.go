@@ -121,6 +121,7 @@ func routeCommand(
 				ProcessorMgr:   procMgr,
 				Compress:       compress,
 				CompressLevel:  compressLevel,
+				CompressAlgo:   *flags.CompressAlgo,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
 				Compact:        *flags.Compact,
@@ -354,7 +355,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, *flags.CompressAlgo, procMgr, *flags.PacketSize)
 		})
 
 	} else if *flags.ImportBroker {
@@ -714,6 +715,7 @@ func buildBrokerConfig(config *Config) commands.BrokerConfig {
 		AutoDelete:     config.Broker.AutoDelete,
 		Exclusive:      config.Broker.Exclusive,
 		PassiveDeclare: config.Broker.PassiveDeclare,
+		QueuePath:      config.Broker.QueuePath,
 	}
 }
 

@@ -32,10 +32,11 @@ type BrokerConfig struct {
 	AutoDelete     bool
 	Exclusive      bool
 	PassiveDeclare bool
+	QueuePath      string // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
 }
 
 // ExportToBroker exports table data to message broker
-func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, procMgr ProcessorManager) error {
+func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, compressAlgo string, procMgr ProcessorManager, packetSizeMB int) error {
 	// Create database adapter
 	adapter, err := adapters.New(ctx, *dbConfig)
 	if err != nil {
@@ -44,6 +45,15 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	defer func() { _ = adapter.Close(ctx) }()
 
 	fmt.Printf("Exporting table '%s' to broker...\n", tableName)
+
+	// Configure packet size if requested
+	type packetSizeSetter interface{ SetMaxMessageSize(int) }
+	if packetSizeMB > 0 {
+		if sizer, ok := adapter.(packetSizeSetter); ok {
+			sizer.SetMaxMessageSize(packetSizeMB * 2 * 1024 * 1024)
+			fmt.Printf("Packet size set to %dMB (internal estimate: %dMB)\n", packetSizeMB, packetSizeMB*2)
+		}
+	}
 
 	// Export data
 	var packets []*packet.DataPacket
@@ -67,15 +77,13 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 
 	// Apply compression if enabled
 	if compress {
-		fmt.Printf("Compressing data (level %d)...\n", compressLevel)
+		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
 		for _, pkt := range packets {
-			// Use common compression function from export.go
-			// Note: broker export doesn't support --hash flag yet, so enableChecksum=false
-			if err := compressPacketData(pkt, compressLevel, false); err != nil {
+			if err := compressPacketData(pkt, compressLevel, compressAlgo, false); err != nil {
 				return fmt.Errorf("compression failed: %w", err)
 			}
 		}
-		fmt.Printf("✓ Data compressed with zstd\n")
+		fmt.Printf("✓ Data compressed with %s\n", compressAlgo)
 	}
 
 	// Create broker
@@ -187,8 +195,8 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 	}
 
 	parse := func(xmlData []byte) (*packet.DataPacket, error) {
-		return parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string) ([]string, error) {
-			return decompressData(compressed)
+		return parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string, algo string) ([]string, error) {
+			return decompressData(compressed, algo)
 		})
 	}
 
@@ -325,12 +333,13 @@ func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 		AutoDelete:     cfg.AutoDelete,
 		Exclusive:      cfg.Exclusive,
 		PassiveDeclare: cfg.PassiveDeclare,
+		QueuePath:      cfg.QueuePath,
 	}
 
 	return brokers.New(brokerConfig)
 }
 
 // decompressData decompresses compressed data using processors package
-func decompressData(compressed string) ([]string, error) {
-	return processors.DecompressDataForTdtp(compressed)
+func decompressData(compressed string, algo string) ([]string, error) {
+	return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
 }

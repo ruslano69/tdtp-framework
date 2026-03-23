@@ -62,3 +62,23 @@ docs/analysis/.last_update
 
 # Claude Code local files
 .claude/
+
+# Access database research artifacts (local only)
+*.MDB
+*.mdb
+*.ldb
+*.7z
+*.rar
+DELO19/
+SYSTEM.MDA
+SYSTEM_2003.MDA
+analyze_relations.vbs
+analysis_result.txt
+relations_output.csv
+relations_utf8.csv
+DELO19_schema*
+
+# SeaweedFS local dev server (local only)
+weed/data/
+weed/weed.log
+weed/s3.json
