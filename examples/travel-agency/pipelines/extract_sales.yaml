@@ -1,0 +1,66 @@
+# ─── EXTRACT: tour_sales (высокая частота обновлений) ────────────────────────
+name: "travel-extract-sales-{{SYNC_TS}}"
+description: "Incremental export of tour_sales modified since {{LAST_SYNC}}"
+
+sources:
+  - name: tour_sales
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=TravelAgency&trusted_connection=yes&encrypt=disable&TrustServerCertificate=true"
+    query: |
+      SELECT
+        sale_id,
+        booking_reference,
+        schedule_id,
+        customer_id,
+        CONVERT(VARCHAR(23), booking_date, 126)       AS booking_date,
+        number_of_travelers,
+        CAST(total_amount AS FLOAT)                   AS total_amount,
+        CAST(deposit_paid AS FLOAT)                   AS deposit_paid,
+        CAST(balance_due AS FLOAT)                    AS balance_due,
+        payment_status,
+        payment_method,
+        special_requests,
+        CAST(insurance_purchased AS INT)              AS insurance_purchased,
+        CONVERT(VARCHAR(23), cancellation_date, 126)  AS cancellation_date,
+        cancellation_reason,
+        CAST(refund_amount AS FLOAT)                  AS refund_amount,
+        sales_agent,
+        CONVERT(VARCHAR(23), created_at, 126)         AS created_at,
+        CONVERT(VARCHAR(23), last_updated, 126)       AS last_updated
+      FROM tour_sales
+      WHERE last_updated >= '{{LAST_SYNC}}'
+      ORDER BY sale_id
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: tour_sales
+  sql: SELECT * FROM tour_sales
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compression: true
+    compress_level: 3
+    destination: "s3://travel-agency/sales/{{SYNC_TS}}.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "travel-agency"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true
+
+result_log:
+  type: redis
+  address: "localhost:6379"
+  name: "travel:sales:extract"
+  db: 0
+  ttl: 86400
+
+performance:
+  batch_size: 5000
+  max_memory_mb: 512

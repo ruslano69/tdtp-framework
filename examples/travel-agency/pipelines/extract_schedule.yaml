@@ -1,0 +1,60 @@
+# ─── EXTRACT: tour_schedule (средняя частота) ─────────────────────────────────
+name: "travel-extract-schedule-{{SYNC_TS}}"
+description: "Incremental export of tour_schedule modified since {{LAST_SYNC}}"
+
+sources:
+  - name: tour_schedule
+    type: mssql
+    dsn: "sqlserver://sql-srv1:1433?database=TravelAgency&trusted_connection=yes&encrypt=disable&TrustServerCertificate=true"
+    query: |
+      SELECT
+        schedule_id,
+        tour_id,
+        guide_id,
+        CONVERT(VARCHAR(10), start_date, 23)     AS start_date,
+        CONVERT(VARCHAR(10), end_date, 23)        AS end_date,
+        CONVERT(VARCHAR(8), departure_time, 108)  AS departure_time,
+        available_slots,
+        booked_slots,
+        CAST(price_modifier AS FLOAT)             AS price_modifier,
+        status,
+        notes,
+        CONVERT(VARCHAR(23), created_at, 126)     AS created_at,
+        CONVERT(VARCHAR(23), last_updated, 126)   AS last_updated
+      FROM tour_schedule
+      WHERE last_updated >= '{{LAST_SYNC}}'
+      ORDER BY schedule_id
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: tour_schedule
+  sql: SELECT * FROM tour_schedule
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compression: true
+    compress_level: 3
+    destination: "s3://travel-agency/schedule/{{SYNC_TS}}.tdtp.xml"
+    s3:
+      endpoint: "http://localhost:8333"
+      region: "us-east-1"
+      bucket: "travel-agency"
+      access_key: "tdtp_access"
+      secret_key: "tdtp_secret"
+      disable_ssl: true
+
+result_log:
+  type: redis
+  address: "localhost:6379"
+  name: "travel:schedule:extract"
+  db: 0
+  ttl: 86400
+
+performance:
+  batch_size: 2000
+  max_memory_mb: 256
