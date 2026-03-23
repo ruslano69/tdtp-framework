@@ -27,7 +27,7 @@ func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 	}
 
 	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
+	lines, err := processors.DecompressDataForTdtpWithAlgo(pkt.Data.Rows[0].Value, pkt.Data.Compression)
 	if err != nil {
 		dSetError(out, "decompress error: "+err.Error())
 		return 1
@@ -121,8 +121,9 @@ func D_ApplyDecompress(pkt *C.D_Packet, out *C.D_Packet) C.int {
 		return 1
 	}
 
+	algo := dReadStr((*C.char)(unsafe.Pointer(&pkt.compression[0])))
 	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtp(rows[0][0])
+	lines, err := processors.DecompressDataForTdtpWithAlgo(rows[0][0], algo)
 	if err != nil {
 		dSetError(out, "decompress error: "+err.Error())
 		return 1

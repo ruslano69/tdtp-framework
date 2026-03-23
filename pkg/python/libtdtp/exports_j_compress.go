@@ -29,7 +29,7 @@ func jDecompressRows(pkt *packet.DataPacket) *C.char {
 		}
 	}
 
-	lines, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
+	lines, err := processors.DecompressDataForTdtpWithAlgo(pkt.Data.Rows[0].Value, pkt.Data.Compression)
 	if err != nil {
 		return jErr(fmt.Sprintf("decompress error: %v", err))
 	}
@@ -202,7 +202,7 @@ func jRunDecompress(jp jPacket) *C.char {
 	}
 
 	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtp(jp.Data[0][0])
+	lines, err := processors.DecompressDataForTdtpWithAlgo(jp.Data[0][0], jp.Compression)
 	if err != nil {
 		return jErr(fmt.Sprintf("decompress error: %v", err))
 	}
