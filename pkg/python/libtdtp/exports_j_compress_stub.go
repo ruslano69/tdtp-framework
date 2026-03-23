@@ -37,7 +37,7 @@ func jApplyProcessor(dataJSON *C.char, procType *C.char, configJSON *C.char) *C.
 }
 
 // compressAndSign stub — always errors without compress tag.
-func compressAndSign(_ *packet.DataPacket, _ int, _ bool) error {
+func compressAndSign(_ *packet.DataPacket, _ string, _ int, _ bool) error {
 	return fmt.Errorf("compression requires libtdtp built with '-tags compress'")
 }
 
