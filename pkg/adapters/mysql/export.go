@@ -13,6 +13,11 @@ import (
 
 // ========== Публичные методы (делегируют в ExportHelper) ==========
 
+// SetSkipSpecialValues включает режим --fast: DetectAndApply пропускается.
+func (a *Adapter) SetSkipSpecialValues(skip bool) {
+	a.exportHelper.SetSkipSpecialValues(skip)
+}
+
 // ExportTable экспортирует всю таблицу - просто делегируем
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
 	return a.exportHelper.ExportTable(ctx, tableName)

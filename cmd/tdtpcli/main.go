@@ -124,6 +124,7 @@ func routeCommand(
 				CompressAlgo:   *flags.CompressAlgo,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
+				Fast:           *flags.Fast,
 				Compact:        *flags.Compact,
 				FixedFields:    splitCommaSeparated(*flags.FixedFields),
 				CompactTail:    *flags.CompactTail,

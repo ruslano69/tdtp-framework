@@ -35,8 +35,9 @@ const DefaultMaxMessageSize = 3_800_000
 
 // Generator отвечает за генерацию TDTP пакетов
 type Generator struct {
-	maxMessageSize int                // в байтах
-	compression    CompressionOptions // настройки сжатия
+	maxMessageSize    int                // в байтах
+	compression       CompressionOptions // настройки сжатия
+	skipSpecialValues bool               // --fast: пропустить DetectAndApply (без контроля NULL/NaN/Inf)
 }
 
 // NewGenerator создает новый генератор
@@ -67,6 +68,13 @@ func (g *Generator) DisableCompression() {
 	g.compression.Enabled = false
 }
 
+// SetSkipSpecialValues отключает DetectAndApply для максимальной скорости экспорта.
+// Используется с флагом --fast: NULL/NaN/Inf не получат canonical markers в схеме.
+// Применять только когда источник гарантированно не содержит спецзначений.
+func (g *Generator) SetSkipSpecialValues(skip bool) {
+	g.skipSpecialValues = skip
+}
+
 // SetCompressionLevel устанавливает уровень сжатия (1-19)
 func (g *Generator) SetCompressionLevel(level int) {
 	if level < 1 {
@@ -83,7 +91,9 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 	packets := []*DataPacket{}
 
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
-	rows, schema = DetectAndApply(rows, schema)
+	if !g.skipSpecialValues {
+		rows, schema = DetectAndApply(rows, schema)
+	}
 
 	// Разбиваем на части если нужно
 	partitions := g.partitionRows(rows, schema)
@@ -135,7 +145,9 @@ func (g *Generator) GenerateResponse(
 	packets := []*DataPacket{}
 
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
-	rows, schema = DetectAndApply(rows, schema)
+	if !g.skipSpecialValues {
+		rows, schema = DetectAndApply(rows, schema)
+	}
 
 	partitions := g.partitionRows(rows, schema)
 

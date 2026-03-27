@@ -65,6 +65,7 @@ func PrintShortHelp() {
 	fmt.Println("    --compress-algo <algo>     Algorithm: zstd (default) or kanzi (30% denser, slower)")
 	fmt.Println("    --compress-level <n>       Level: 1-19 (zstd) or 6-7 (kanzi), default: 3")
 	fmt.Println("    --hash                     Add XXH3 checksum for integrity (requires --compress)")
+	fmt.Println("    --fast                     Skip NULL/NaN/Inf detection for maximum throughput")
 	fmt.Println()
 	fmt.Println("  TDTQL Filters:")
 	fmt.Println("    --where <condition>        WHERE clause")
@@ -172,6 +173,7 @@ func PrintHelp() {
 	fmt.Println("    --compress-level <n>       Compression level: 1-19 (zstd) or 6-7 (kanzi), default: 3")
 	fmt.Println("    --hash                     Add XXH3 checksum for integrity verification (requires --compress)")
 	fmt.Println("    --packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)")
+	fmt.Println("    --fast                     Skip NULL/NaN/Inf detection for maximum throughput (no schema markers)")
 	fmt.Println()
 
 	fmt.Println("  TDTQL Filters:")

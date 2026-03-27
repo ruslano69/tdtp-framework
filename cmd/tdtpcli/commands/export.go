@@ -28,7 +28,8 @@ type ExportOptions struct {
 	CompressLevel  int
 	CompressAlgo   string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
 	EnableChecksum bool   // Add XXH3 checksum for data integrity verification
-	ReadOnlyFields bool   // Include read-only fields (timestamp, computed, identity)
+	ReadOnlyFields    bool // Include read-only fields (timestamp, computed, identity)
+	Fast              bool // Skip SpecialValues detection for maximum export speed
 
 	// v1.3.1 compact format
 	Compact     bool     // Enable compact format output
@@ -60,6 +61,14 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	// Add includeReadOnly flag to context for MS SQL adapter
 	// (other adapters will ignore it)
 	ctx = mssql.WithIncludeReadOnlyFields(ctx, opts.ReadOnlyFields)
+
+	// --fast: skip SpecialValues detection for maximum throughput
+	if opts.Fast {
+		type specialValueSkipper interface{ SetSkipSpecialValues(bool) }
+		if sv, ok := adapter.(specialValueSkipper); ok {
+			sv.SetSkipSpecialValues(true)
+		}
+	}
 
 	// If fields projection is requested, ensure we go through ExportTableWithQuery
 	// (even if no other query params are set) so the adapter can build SELECT f1,f2,...

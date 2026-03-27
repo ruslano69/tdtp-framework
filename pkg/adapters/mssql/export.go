@@ -242,6 +242,11 @@ func (a *Adapter) SetMaxMessageSize(size int) {
 	a.exportHelper.SetMaxMessageSize(size)
 }
 
+// SetSkipSpecialValues включает режим --fast: DetectAndApply пропускается.
+func (a *Adapter) SetSkipSpecialValues(skip bool) {
+	a.exportHelper.SetSkipSpecialValues(skip)
+}
+
 // ExportTable экспортирует всю таблицу в TDTP reference пакеты
 // Делегирует в base.ExportHelper для устранения дублирования кода
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
