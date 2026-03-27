@@ -121,6 +121,7 @@ func routeCommand(
 				ProcessorMgr:   procMgr,
 				Compress:       compress,
 				CompressLevel:  compressLevel,
+				CompressAlgo:   *flags.CompressAlgo,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
 				Compact:        *flags.Compact,
@@ -354,7 +355,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, procMgr)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, *flags.CompressAlgo, procMgr, *flags.PacketSize)
 		})
 
 	} else if *flags.ImportBroker {
@@ -374,7 +375,11 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
-			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, strategy)
+			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, commands.ImportBrokerOptions{
+				Strategy:    strategy,
+				TargetTable: *flags.Table,
+				OutputFile:  *flags.Output,
+			})
 		})
 
 		// Incremental Sync command
@@ -643,8 +648,9 @@ func main() {
 
 	// Build adapter config
 	adapterConfig := adapters.Config{
-		Type: config.Database.Type,
-		DSN:  config.Database.BuildDSN(),
+		Type:    config.Database.Type,
+		DSN:     config.Database.BuildDSN(),
+		Charset: config.Database.Charset,
 	}
 
 	// Build TDTQL query from flags
@@ -694,16 +700,22 @@ func createConfigTemplate(dbType string) {
 // buildBrokerConfig builds broker configuration from config
 func buildBrokerConfig(config *Config) commands.BrokerConfig {
 	return commands.BrokerConfig{
-		Type:       config.Broker.Type,
-		Host:       config.Broker.Host,
-		Port:       config.Broker.Port,
-		User:       config.Broker.User,
-		Password:   config.Broker.Password,
-		Queue:      config.Broker.Queue,
-		VHost:      config.Broker.VHost,
-		UseTLS:     config.Broker.UseTLS,
-		Exchange:   config.Broker.Exchange,
-		RoutingKey: config.Broker.RoutingKey,
+		Type:           config.Broker.Type,
+		Host:           config.Broker.Host,
+		Port:           config.Broker.Port,
+		User:           config.Broker.User,
+		Password:       config.Broker.Password,
+		Queue:          config.Broker.Queue,
+		VHost:          config.Broker.VHost,
+		UseTLS:         config.Broker.UseTLS,
+		TLSSkipVerify:  config.Broker.TLSSkipVerify,
+		Exchange:       config.Broker.Exchange,
+		RoutingKey:     config.Broker.RoutingKey,
+		Durable:        config.Broker.Durable,
+		AutoDelete:     config.Broker.AutoDelete,
+		Exclusive:      config.Broker.Exclusive,
+		PassiveDeclare: config.Broker.PassiveDeclare,
+		QueuePath:      config.Broker.QueuePath,
 	}
 }
 

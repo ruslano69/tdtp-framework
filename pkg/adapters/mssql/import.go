@@ -16,7 +16,29 @@ import (
 
 // ImportPacket импортирует один TDTP пакет в БД
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-	return a.ImportPackets(ctx, []*packet.DataPacket{pkt}, strategy)
+	// DDL вне транзакции — чтобы не блокироваться на Sch-M lock
+	tableName := pkt.Header.TableName
+	exists, err := a.TableExists(ctx, tableName)
+	if err != nil {
+		return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
+	}
+	if !exists {
+		if err := a.CreateTable(ctx, tableName, pkt.Schema); err != nil {
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+	}
+
+	// DML в транзакции
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ImportPackets импортирует множество пакетов атомарно (в одной транзакции)
@@ -25,41 +47,40 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 		return nil
 	}
 
-	// Начинаем транзакцию
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback() // игнорируем ошибку, если tx.Commit() был успешным
-	}()
-
+	// DDL (CREATE TABLE) выполняем ВНЕ транзакции.
+	// Внутри транзакции DDL берёт Sch-M lock и блокируется если другое соединение
+	// (например BC) держит Sch-S lock на схему — это причина зависания.
 	for i, pkt := range packets {
 		if pkt == nil {
 			return fmt.Errorf("packet %d is nil", i)
 		}
-
-		// Проверяем существование таблицы
 		tableName := pkt.Header.TableName
 		exists, err := a.TableExists(ctx, tableName)
 		if err != nil {
 			return fmt.Errorf("failed to check table existence for %s: %w", tableName, err)
 		}
-
-		// Создаем таблицу если нужно
 		if !exists {
-			if err := a.createTableInTx(ctx, tx, tableName, pkt.Schema); err != nil {
+			if err := a.CreateTable(ctx, tableName, pkt.Schema); err != nil {
 				return fmt.Errorf("failed to create table %s: %w", tableName, err)
 			}
 		}
+	}
 
-		// Импортируем данные
+	// DML (INSERT/MERGE) — в транзакции для атомарности
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	for i, pkt := range packets {
 		if err := a.importPacketDataInTx(ctx, tx, pkt, strategy); err != nil {
 			return fmt.Errorf("failed to import packet %d: %w", i, err)
 		}
 	}
 
-	// Commit транзакции
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -68,18 +89,6 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 }
 
 // ========== Table Creation ==========
-
-// createTableInTx создает таблицу в рамках транзакции
-func (a *Adapter) createTableInTx(ctx context.Context, tx *sql.Tx, tableName string, pktSchema packet.Schema) error {
-	sqlCreate := a.buildCreateTableSQL(tableName, pktSchema)
-
-	_, err := tx.ExecContext(ctx, sqlCreate)
-	if err != nil {
-		return fmt.Errorf("failed to execute CREATE TABLE: %w", err)
-	}
-
-	return nil
-}
 
 // buildCreateTableSQL строит CREATE TABLE запрос
 func (a *Adapter) buildCreateTableSQL(tableName string, pktSchema packet.Schema) string {
@@ -186,79 +195,127 @@ func (a *Adapter) importWithMerge(ctx context.Context, tx *sql.Tx, pkt *packet.D
 		}()
 	}
 
-	// Строим MERGE запрос
-	mergeSQL := a.buildMergeSQL(fullTableName, pkt.Schema, pkFields)
+	// Батчевый MERGE: MSSQL поддерживает до 2100 параметров на запрос.
+	// Вместо 18 000 отдельных MERGE → ~37 батч-запросов по 500 строк.
+	// Это устраняет lock escalation (row locks не достигают порога 5000 за запрос)
+	// и резко сокращает число round-trips.
+	numCols := len(pkt.Schema.Fields)
+	batchSize := 2000 / numCols
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	if batchSize > 500 {
+		batchSize = 500
+	}
 
-	// Выполняем MERGE для каждой строки
-	for _, row := range pkt.Data.Rows {
-		rowValues := a.parseRow(row, pkt.Schema)
-		args := a.rowToArgs(rowValues, pkt.Schema)
-		_, err := tx.ExecContext(ctx, mergeSQL, args...)
-		if err != nil {
-			return fmt.Errorf("failed to execute MERGE: %w", err)
+	rows := pkt.Data.Rows
+	for i := 0; i < len(rows); i += batchSize {
+		end := i + batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		if err := a.executeBatchMerge(ctx, tx, fullTableName, pkt.Schema, pkFields, rows[i:end]); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// buildMergeSQL строит MERGE запрос для UPSERT
-// SQL Server 2012+ syntax
-func (a *Adapter) buildMergeSQL(tableName string, pktSchema packet.Schema, pkFields []packet.Field) string {
-	// MERGE target USING source ON condition
-	// WHEN MATCHED THEN UPDATE
-	// WHEN NOT MATCHED THEN INSERT
+// executeBatchMerge выполняет один MERGE с несколькими строками в VALUES.
+// Синтаксис: MERGE INTO t USING (VALUES (?,?),(?,?)) AS src([c1],[c2]) ON ...
+func (a *Adapter) executeBatchMerge(
+	ctx context.Context,
+	tx *sql.Tx,
+	fullTableName string,
+	pktSchema packet.Schema,
+	pkFields []packet.Field,
+	rows []packet.Row,
+) error {
+	if len(rows) == 0 {
+		return nil
+	}
 
-	sourceColumns := make([]string, 0, len(pktSchema.Fields))
-	n := len(pktSchema.Fields)
-	pkConditions := make([]string, 0, n)
-	updateSets := make([]string, 0, n)
-	insertColumns := make([]string, 0, n)
-	insertValues := make([]string, 0, n)
+	numCols := len(pktSchema.Fields)
 
-	for _, field := range pktSchema.Fields {
-		colName := fmt.Sprintf("[%s]", field.Name)
-		paramName := "?"
+	// Строим список колонок источника
+	colNames := make([]string, numCols)
+	for i, f := range pktSchema.Fields {
+		colNames[i] = fmt.Sprintf("[%s]", f.Name)
+	}
 
-		sourceColumns = append(sourceColumns, fmt.Sprintf("%s AS %s", paramName, colName))
-		insertColumns = append(insertColumns, colName)
-		insertValues = append(insertValues, fmt.Sprintf("source.%s", colName))
+	// Строим VALUES (?,?,...),(?,?,...)
+	rowPlaceholders := make([]string, len(rows))
+	args := make([]any, 0, len(rows)*numCols)
+	for i, row := range rows {
+		vals := a.parseRow(row, pktSchema)
+		params := make([]string, numCols)
+		for j := range pktSchema.Fields {
+			params[j] = "?"
+			args = append(args, a.stringToValue(vals[j], pktSchema.Fields[j]))
+		}
+		rowPlaceholders[i] = fmt.Sprintf("(%s)", strings.Join(params, ","))
+	}
 
-		// PK используется для MATCH
+	// ON условие по PK
+	pkConds := make([]string, 0, len(pkFields))
+	for _, pk := range pkFields {
+		col := fmt.Sprintf("[%s]", pk.Name)
+		pkConds = append(pkConds, fmt.Sprintf("t.%s = s.%s", col, col))
+	}
+
+	// UPDATE SET для non-PK колонок
+	updateSets := make([]string, 0, numCols)
+	for _, f := range pktSchema.Fields {
 		isPK := false
 		for _, pk := range pkFields {
-			if pk.Name == field.Name {
+			if pk.Name == f.Name {
 				isPK = true
-				pkConditions = append(pkConditions, fmt.Sprintf("target.%s = source.%s", colName, colName))
 				break
 			}
 		}
-
-		// Non-PK используется для UPDATE
 		if !isPK {
-			updateSets = append(updateSets, fmt.Sprintf("target.%s = source.%s", colName, colName))
+			col := fmt.Sprintf("[%s]", f.Name)
+			updateSets = append(updateSets, fmt.Sprintf("t.%s = s.%s", col, col))
 		}
 	}
 
-	merge := fmt.Sprintf(`
-MERGE INTO %s AS target
-USING (SELECT %s) AS source
-ON %s
-WHEN MATCHED THEN
-    UPDATE SET %s
-WHEN NOT MATCHED THEN
-    INSERT (%s)
-    VALUES (%s);
-`,
-		tableName,
-		strings.Join(sourceColumns, ", "),
-		strings.Join(pkConditions, " AND "),
-		strings.Join(updateSets, ", "),
-		strings.Join(insertColumns, ", "),
-		strings.Join(insertValues, ", "),
-	)
+	srcCols := strings.Join(colNames, ",")
+	insertCols := srcCols
+	insertVals := make([]string, numCols)
+	for i, c := range colNames {
+		insertVals[i] = "s." + c
+	}
 
-	return merge
+	var mergeSQL string
+	if len(updateSets) > 0 {
+		mergeSQL = fmt.Sprintf(
+			"MERGE INTO %s AS t USING (VALUES %s) AS s(%s) ON %s WHEN MATCHED THEN UPDATE SET %s WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s);",
+			fullTableName,
+			strings.Join(rowPlaceholders, ","),
+			srcCols,
+			strings.Join(pkConds, " AND "),
+			strings.Join(updateSets, ","),
+			insertCols,
+			strings.Join(insertVals, ","),
+		)
+	} else {
+		// Все колонки — PK: только INSERT
+		mergeSQL = fmt.Sprintf(
+			"MERGE INTO %s AS t USING (VALUES %s) AS s(%s) ON %s WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s);",
+			fullTableName,
+			strings.Join(rowPlaceholders, ","),
+			srcCols,
+			strings.Join(pkConds, " AND "),
+			insertCols,
+			strings.Join(insertVals, ","),
+		)
+	}
+
+	if _, err := tx.ExecContext(ctx, mergeSQL, args...); err != nil {
+		return fmt.Errorf("failed to execute batch MERGE (%d rows): %w", len(rows), err)
+	}
+	return nil
 }
 
 // ========== INSERT OR IGNORE Strategy ==========

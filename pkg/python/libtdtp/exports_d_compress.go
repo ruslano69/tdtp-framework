@@ -9,7 +9,7 @@ package main
 */
 import "C"
 import (
-	"context"
+	"strings"
 	"unsafe"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -27,7 +27,7 @@ func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 	}
 
 	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
+	lines, err := processors.DecompressDataForTdtpWithAlgo(pkt.Data.Rows[0].Value, pkt.Data.Compression)
 	if err != nil {
 		dSetError(out, "decompress error: "+err.Error())
 		return 1
@@ -63,7 +63,8 @@ func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 	return 0
 }
 
-// D_ApplyCompress compresses pkt data with zstd, writing result to out.
+// D_ApplyCompress compresses pkt data, writing result to out.
+// The algorithm is read from pkt.compression[16]; if empty, "zstd" is used.
 // Returns 0 on success, 1 on error.
 // Caller must release out with D_FreePacket.
 //
@@ -71,28 +72,17 @@ func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 func D_ApplyCompress(pkt *C.D_Packet, level C.int, out *C.D_Packet) C.int {
 	rows := dGetRows(pkt)
 
-	compressor, err := processors.NewCompressionProcessor(int(level))
-	if err != nil {
-		dSetError(out, "compressor init error: "+err.Error())
-		return 1
+	algo := dReadStr((*C.char)(unsafe.Pointer(&pkt.compression[0])))
+	if algo == "" {
+		algo = "zstd"
 	}
-	defer compressor.Close()
 
-	// Serialize rows as pipe-separated lines.
-	rowBytes := make([]byte, 0, 4096)
+	rowStrings := make([]string, len(rows))
 	for i, row := range rows {
-		for j, v := range row {
-			if j > 0 {
-				rowBytes = append(rowBytes, '|')
-			}
-			rowBytes = append(rowBytes, []byte(v)...)
-		}
-		if i < len(rows)-1 {
-			rowBytes = append(rowBytes, '\n')
-		}
+		rowStrings[i] = strings.Join(row, "|")
 	}
 
-	compressed, err := compressor.ProcessBlock(context.Background(), rowBytes)
+	compressed, _, err := processors.CompressDataForTdtpAlgo(rowStrings, algo, int(level))
 	if err != nil {
 		dSetError(out, "compression error: "+err.Error())
 		return 1
@@ -100,12 +90,12 @@ func D_ApplyCompress(pkt *C.D_Packet, level C.int, out *C.D_Packet) C.int {
 
 	// Output: single row with the compressed blob.
 	dFillSchema(out, dGetSchema(pkt))
-	dFillRows(out, [][]string{{string(compressed)}})
+	dFillRows(out, [][]string{{compressed}})
 	dWriteStr((*C.char)(unsafe.Pointer(&out.msg_type[0])), dReadStr((*C.char)(unsafe.Pointer(&pkt.msg_type[0]))), 32)
 	dWriteStr((*C.char)(unsafe.Pointer(&out.table_name[0])), dReadStr((*C.char)(unsafe.Pointer(&pkt.table_name[0]))), 256)
 	dWriteStr((*C.char)(unsafe.Pointer(&out.message_id[0])), dReadStr((*C.char)(unsafe.Pointer(&pkt.message_id[0]))), 64)
 	out.timestamp_unix = pkt.timestamp_unix
-	dWriteStr((*C.char)(unsafe.Pointer(&out.compression[0])), "zstd", 16)
+	dWriteStr((*C.char)(unsafe.Pointer(&out.compression[0])), algo, 16)
 	return 0
 }
 
@@ -121,8 +111,9 @@ func D_ApplyDecompress(pkt *C.D_Packet, out *C.D_Packet) C.int {
 		return 1
 	}
 
+	algo := dReadStr((*C.char)(unsafe.Pointer(&pkt.compression[0])))
 	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtp(rows[0][0])
+	lines, err := processors.DecompressDataForTdtpWithAlgo(rows[0][0], algo)
 	if err != nil {
 		dSetError(out, "decompress error: "+err.Error())
 		return 1

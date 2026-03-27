@@ -85,7 +85,9 @@ type Flags struct {
 	// Compression
 	Compress      *bool
 	CompressLevel *int
-	Hash          *bool // Add XXH3 checksum for data integrity verification
+	CompressAlgo  *string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
+	Hash          *bool   // Add XXH3 checksum for data integrity verification
+	PacketSize    *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
 
 	// Compact format (v1.3.1)
 	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
@@ -173,8 +175,10 @@ func ParseFlags() *Flags {
 	f.ReadOnlyFields = flag.Bool("readonly-fields", false, "Include read-only fields (timestamp, computed, identity) in export")
 
 	// Compression
-	f.Compress = flag.Bool("compress", false, "Enable zstd compression for exported data")
-	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1 (fastest) - 19 (best)")
+	f.Compress = flag.Bool("compress", false, "Enable compression for exported data")
+	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1-19 (zstd) or 6-7 (kanzi)")
+	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
+	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
 	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
 
 	// Compact format (v1.3.1)

@@ -29,29 +29,37 @@ type ExportConfig struct {
 
 // DatabaseConfig contains database connection settings
 type DatabaseConfig struct {
-	Type        string `yaml:"type"`                   // sqlite, postgres, mssql
+	Type        string `yaml:"type"`                   // sqlite, postgres, mssql, access
 	Host        string `yaml:"host,omitempty"`         // For network databases
 	Port        int    `yaml:"port,omitempty"`         // Database port
-	Database    string `yaml:"database"`               // Database name or file path
+	Database    string `yaml:"database,omitempty"`     // Database name or file path
 	User        string `yaml:"user,omitempty"`         // Username
 	Password    string `yaml:"password,omitempty"`     // Password
 	Schema      string `yaml:"schema,omitempty"`       // PostgreSQL schema (default: public)
 	WindowsAuth bool   `yaml:"windows_auth,omitempty"` // MS SQL Windows authentication
 	SSLMode     string `yaml:"sslmode,omitempty"`      // PostgreSQL SSL mode
+	DSN         string `yaml:"dsn,omitempty"`          // Raw connection string (overrides other fields; required for access)
+	Charset     string `yaml:"charset,omitempty"`      // Charset for string decoding, e.g. "windows-1251" (ODBC/legacy drivers)
 }
 
 // BrokerConfig contains message broker settings
 type BrokerConfig struct {
-	Type       string `yaml:"type"`                  // rabbitmq, msmq, kafka
-	Host       string `yaml:"host,omitempty"`        // Broker host
-	Port       int    `yaml:"port,omitempty"`        // Broker port
-	User       string `yaml:"user,omitempty"`        // Username
-	Password   string `yaml:"password,omitempty"`    // Password
-	Queue      string `yaml:"queue,omitempty"`       // Queue/topic name
-	VHost      string `yaml:"vhost,omitempty"`       // RabbitMQ vhost
-	UseTLS     bool   `yaml:"use_tls,omitempty"`     // Use TLS/SSL (amqps) for RabbitMQ
-	Exchange   string `yaml:"exchange,omitempty"`    // RabbitMQ exchange (default = "")
-	RoutingKey string `yaml:"routing_key,omitempty"` // RabbitMQ routing key (default = queue name)
+	Type           string `yaml:"type"`                      // rabbitmq, msmq, kafka
+	Host           string `yaml:"host,omitempty"`            // Broker host
+	Port           int    `yaml:"port,omitempty"`            // Broker port
+	User           string `yaml:"user,omitempty"`            // Username
+	Password       string `yaml:"password,omitempty"`        // Password
+	Queue          string `yaml:"queue,omitempty"`           // Queue/topic name
+	VHost          string `yaml:"vhost,omitempty"`           // RabbitMQ vhost
+	UseTLS         bool   `yaml:"use_tls,omitempty"`         // Use TLS/SSL (amqps) for RabbitMQ
+	TLSSkipVerify  bool   `yaml:"tls_skip_verify,omitempty"` // Skip TLS certificate verification (self-signed certs)
+	Exchange       string `yaml:"exchange,omitempty"`        // RabbitMQ exchange (default = "")
+	RoutingKey     string `yaml:"routing_key,omitempty"`     // RabbitMQ routing key (default = queue name)
+	Durable        bool   `yaml:"durable,omitempty"`         // Queue survives broker restart
+	AutoDelete     bool   `yaml:"auto_delete,omitempty"`     // Queue deleted when no consumers
+	Exclusive      bool   `yaml:"exclusive,omitempty"`       // Queue accessible by one connection only
+	PassiveDeclare bool   `yaml:"passive_declare,omitempty"` // Don't create queue, just check it exists (avoids 406 PRECONDITION_FAILED)
+	QueuePath      string `yaml:"queue_path,omitempty"`      // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
 }
 
 // ResilienceConfig contains circuit breaker and retry settings
@@ -213,8 +221,12 @@ func CreateSampleConfig(dbType string) *Config {
 	return config
 }
 
-// BuildDSN constructs database connection string from config
+// BuildDSN constructs database connection string from config.
+// If DSN is set explicitly, it is returned as-is (adapter handles raw connection strings).
 func (c *DatabaseConfig) BuildDSN() string {
+	if c.DSN != "" {
+		return c.DSN
+	}
 	switch c.Type {
 	case "postgres", "postgresql":
 		sslMode := c.SSLMode

@@ -23,8 +23,8 @@ func main() {
 	defer f.Close()
 
 	parser := packet.NewParser()
-	pkt, err := parser.ParseWithDecompression(f, func(_ context.Context, compressed string) ([]string, error) {
-		return processors.DecompressDataForTdtp(compressed)
+	pkt, err := parser.ParseWithDecompression(f, func(_ context.Context, compressed string, algo string) ([]string, error) {
+		return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

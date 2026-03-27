@@ -1,3 +1,5 @@
+github.com/flanglet/kanzi-go/v2 v2.5.0 h1:S3QTUaOINtSow+fSRjFVxLt2APxZC7inOx3U426BgEc=
+github.com/flanglet/kanzi-go/v2 v2.5.0/go.mod h1:dONaJD4uGPR6MHaHsb8Eg5KBsHUQ2CR/Yxj3jZyIPYw=
 github.com/klauspost/compress v1.18.0 h1:c/Cqfb0r+Yi+JtIEq73FWXVkRonBlf0CRNYc8Zttxdo=
 github.com/klauspost/compress v1.18.0/go.mod h1:2Pp+KzxcywXVXMr50+X0Q/Lsb43OQHYWRCY2AiWywWQ=
 github.com/klauspost/cpuid/v2 v2.2.10 h1:tBs3QSyvjDyFTq3uoc/9xFpCuOsJQFNPiAhYdw2skhE=

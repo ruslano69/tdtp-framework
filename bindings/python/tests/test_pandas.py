@@ -551,3 +551,109 @@ class TestSpecialValues:
         val = specials_df.loc[specials_df["id"] == 1, "event_date"].values[0]
         assert val == "2024-01-15"
 
+
+# ---------------------------------------------------------------------------
+# Compress roundtrip → pandas
+# (требует libtdtp с -tags compress)
+# ---------------------------------------------------------------------------
+
+pytestmark_compress = pytest.mark.skipif(
+    True,  # заменить на проверку наличия compress-фичи в либе при необходимости
+    reason="placeholder — compress tests are gated per-test via try/except",
+)
+
+
+class TestCompressRoundTripPandas:
+    """pandas → J_export_all(compress) → J_read → pandas для zstd и kanzi."""
+
+    def _make_df(self) -> "pd.DataFrame":
+        return pd.DataFrame({
+            "ID":     pd.array([1, 2, 3, 4, 5], dtype="Int64"),
+            "Name":   ["Alice", "Bob", "Charlie", "Dave", "Eve"],
+            "Score":  [9.5, 7.2, 8.1, 6.0, 9.9],
+            "Active": pd.array([True, False, True, True, False], dtype="boolean"),
+        })
+
+    def _roundtrip(self, j_client, tmp_path, filename, algo, level=3):
+        """Export DataFrame → compressed TDTP → read back → return DataFrame."""
+        df_orig = self._make_df()
+        data    = pandas_to_data(df_orig, table_name="compress_test")
+        out     = tmp_path / filename
+
+        result = j_client.J_export_all(
+            data, str(out),
+            compress=True, algo=algo, level=level, checksum=True,
+        )
+        assert result["total_parts"] >= 1
+        assert len(result["files"]) == result["total_parts"]
+
+        # J_read автоматически распаковывает (DecompressDataForTdtpWithAlgo)
+        raw_back = j_client.J_read(result["files"][0])
+        return data_to_pandas(raw_back), df_orig
+
+    def test_zstd_compress_pandas_roundtrip(self, j_client, tmp_path) -> None:
+        """zstd: pandas → J_export_all → J_read → pandas — данные без потерь."""
+        try:
+            df_back, df_orig = self._roundtrip(
+                j_client, tmp_path, "zstd_test.tdtp.xml", algo="zstd", level=3
+            )
+        except Exception as e:
+            if "requires libtdtp" in str(e) or "compress" in str(e).lower():
+                pytest.skip(f"libtdtp built without -tags compress: {e}")
+            raise
+
+        assert list(df_back["Name"]) == list(df_orig["Name"])
+        assert list(df_back["ID"])   == list(df_orig["ID"])
+        assert len(df_back) == len(df_orig)
+
+    def test_kanzi_compress_pandas_roundtrip(self, j_client, tmp_path) -> None:
+        """kanzi: pandas → J_export_all(algo='kanzi') → J_read → pandas — данные без потерь."""
+        try:
+            df_back, df_orig = self._roundtrip(
+                j_client, tmp_path, "kanzi_test.tdtp.xml", algo="kanzi", level=6
+            )
+        except Exception as e:
+            if "requires libtdtp" in str(e) or "compress" in str(e).lower():
+                pytest.skip(f"libtdtp built without -tags compress: {e}")
+            raise
+
+        assert list(df_back["Name"]) == list(df_orig["Name"])
+        assert list(df_back["ID"])   == list(df_orig["ID"])
+        assert len(df_back) == len(df_orig)
+
+    def test_apply_processor_compress_algo_kanzi(self, j_client, sample_data_j) -> None:
+        """J_apply_processor('compress', algo='kanzi') → J_apply_processor('decompress') → данные восстановлены."""
+        try:
+            compressed = j_client.J_apply_processor(
+                sample_data_j, "compress", algo="kanzi", level=6
+            )
+        except Exception as e:
+            if "requires libtdtp" in str(e) or "compress" in str(e).lower():
+                pytest.skip(f"libtdtp built without -tags compress: {e}")
+            raise
+
+        assert compressed.get("compression") == "kanzi"
+        assert len(compressed["data"]) == 1  # один сжатый blob
+
+        decompressed = j_client.J_apply_processor(compressed, "decompress")
+        assert decompressed["data"] == sample_data_j["data"]
+
+    def test_read_pandas_compressed_file(self, j_client, tmp_path) -> None:
+        """read_pandas() прозрачно распаковывает сжатый файл."""
+        df_orig = self._make_df()
+        data    = pandas_to_data(df_orig, table_name="rp_test")
+        out     = tmp_path / "rp_zstd.tdtp.xml"
+
+        try:
+            result = j_client.J_export_all(
+                data, str(out), compress=True, algo="zstd", level=3
+            )
+        except Exception as e:
+            if "requires libtdtp" in str(e) or "compress" in str(e).lower():
+                pytest.skip(f"libtdtp built without -tags compress: {e}")
+            raise
+
+        # read_pandas — one-step convenience
+        df_back = j_client.read_pandas(result["files"][0])
+        assert list(df_back["Name"]) == list(df_orig["Name"])
+

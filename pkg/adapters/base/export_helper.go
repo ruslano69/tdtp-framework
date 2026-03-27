@@ -55,6 +55,7 @@ type ExportHelper struct {
 	dataReader     DataReader
 	valueConverter ValueConverter
 	sqlAdapter     SQLAdapter
+	maxMessageSize int // 0 = use generator default
 }
 
 // NewExportHelper создает новый ExportHelper
@@ -70,6 +71,21 @@ func NewExportHelper(
 		valueConverter: valueConverter,
 		sqlAdapter:     sqlAdapter,
 	}
+}
+
+// SetMaxMessageSize задаёт максимальный размер одного TDTP пакета в байтах.
+// Используется адаптерами для передачи настройки --packet-size из CLI.
+func (h *ExportHelper) SetMaxMessageSize(size int) {
+	h.maxMessageSize = size
+}
+
+// newGenerator возвращает генератор с учётом настройки maxMessageSize.
+func (h *ExportHelper) newGenerator() *packet.Generator {
+	g := packet.NewGenerator()
+	if h.maxMessageSize > 0 {
+		g.SetMaxMessageSize(h.maxMessageSize)
+	}
+	return g
 }
 
 // ExportTable экспортирует всю таблицу в TDTP reference пакеты
@@ -93,7 +109,7 @@ func (h *ExportHelper) ExportTable(ctx context.Context, tableName string) ([]*pa
 	}
 
 	// 4. Генерируем reference пакеты
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	return generator.GenerateReference(tableName, schema, rows)
 }
 
@@ -156,7 +172,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 
 				queryContext := h.createQueryContextForSQL(ctx, query, rows, tableName)
 
-				generator := packet.NewGenerator()
+				generator := h.newGenerator()
 				return generator.GenerateResponse(
 					tableName,
 					packet.InReplyToDirectExport,
@@ -197,7 +213,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 	}
 
 	// Генерируем Response пакеты с QueryContext
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	return generator.GenerateResponse(
 		tableName,
 		packet.InReplyToDirectExport,
@@ -306,7 +322,7 @@ func (h *ExportHelper) ExportTableIncremental(
 	}
 
 	// Генерируем пакеты
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	packets, err := generator.GenerateReference(tableName, pkgSchema, rows)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to generate packets: %w", err)

@@ -228,10 +228,10 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
 
-	// Use first packet (or merge if multiple)
+	// Merge all packets into the first one (XLSX has no size limits unlike TDTP parts)
 	pkt := packets[0]
-	if len(packets) > 1 {
-		fmt.Printf("⚠ Multiple packets detected, using first packet only\n")
+	for _, extra := range packets[1:] {
+		pkt.Data.Rows = append(pkt.Data.Rows, extra.Data.Rows...)
 	}
 
 	// Apply data processors if configured

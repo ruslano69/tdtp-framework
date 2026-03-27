@@ -67,8 +67,9 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 	if r.config.UseTLS {
 		// Для TLS используем DialTLS с правильной конфигурацией
 		tlsConfig := &tls.Config{
-			ServerName: r.config.Host,
-			MinVersion: tls.VersionTLS12,
+			ServerName:         r.config.Host,
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: r.config.TLSSkipVerify, //nolint:gosec // controlled by config
 		}
 		r.conn, err = amqp.DialTLS(connStr, tlsConfig)
 	} else {
@@ -86,21 +87,34 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to open channel: %w", err)
 	}
 
-	// Объявляем очередь (создается если не существует, идемпотентная операция)
-	// ВАЖНО: Параметры должны совпадать с существующей очередью!
-
-	r.queue, err = r.channel.QueueDeclare(
-		r.config.Queue,      // name
-		r.config.Durable,    // durable - очередь сохраняется при перезапуске RabbitMQ
-		r.config.AutoDelete, // auto-delete
-		r.config.Exclusive,  // exclusive
-		false,               // no-wait
-		nil,                 // arguments
-	)
-	if err != nil {
-		_ = r.channel.Close()
-		_ = r.conn.Close()
-		return fmt.Errorf("failed to declare queue: %w", err)
+	// Объявляем очередь или проверяем существующую
+	if r.config.PassiveDeclare {
+		// PassiveDeclare: только проверить что очередь существует, не менять её параметры.
+		// Используется когда очередь создана сторонним сервисом с другими параметрами.
+		// Если очередь не существует — вернёт ошибку 404.
+		r.queue, err = r.channel.QueueDeclarePassive(r.config.Queue, false, false, false, false, nil)
+		if err != nil {
+			_ = r.channel.Close()
+			_ = r.conn.Close()
+			return fmt.Errorf("queue '%s' not found (passive_declare=true): %w", r.config.Queue, err)
+		}
+	} else {
+		// Обычный declare: создать если не существует.
+		// ВАЖНО: параметры durable/auto_delete/exclusive должны совпадать с существующей очередью,
+		// иначе RabbitMQ вернёт 406 PRECONDITION_FAILED.
+		r.queue, err = r.channel.QueueDeclare(
+			r.config.Queue,      // name
+			r.config.Durable,    // durable
+			r.config.AutoDelete, // auto-delete
+			r.config.Exclusive,  // exclusive
+			false,               // no-wait
+			nil,                 // arguments
+		)
+		if err != nil {
+			_ = r.channel.Close()
+			_ = r.conn.Close()
+			return fmt.Errorf("failed to declare queue '%s': %w", r.config.Queue, err)
+		}
 	}
 
 	// Начинаем потребление сообщений (блокирующий режим)
