@@ -113,7 +113,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	// Count total rows before any further processing
 	totalRows := 0
 	for _, pkt := range packets {
-		totalRows += len(pkt.Data.Rows)
+		totalRows += pkt.Header.RecordsInPart
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 
@@ -216,7 +216,7 @@ func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt
 	meta := map[string]string{
 		"table":    pkt.Header.TableName,
 		"protocol": "TDTP 1.0",
-		"rows":     strconv.Itoa(len(pkt.Data.Rows)),
+		"rows":     strconv.Itoa(pkt.Header.RecordsInPart),
 	}
 	if pkt.Data.Checksum != "" {
 		meta["checksum"] = pkt.Data.Checksum
@@ -277,6 +277,10 @@ func generatePacketFilename(baseFile string, n, total int) string {
 // compressPacketData compresses the Data section of a packet using the specified algorithm.
 // and optionally generates XXH3 checksum for data integrity verification
 func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableChecksum bool) error {
+	// Materialize rawRows (GenerateReference fast-path) before compression
+	if pkt.Header.RecordsInPart > 0 && len(pkt.Data.Rows) == 0 {
+		pkt.SetRows(pkt.GetRows())
+	}
 	if len(pkt.Data.Rows) == 0 {
 		return nil
 	}

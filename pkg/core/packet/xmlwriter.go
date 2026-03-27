@@ -78,10 +78,27 @@ func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
 	}
 	w.WriteByte('>')
 
-	for i := range packet.Data.Rows {
-		w.Write(bTagROpen)
-		writeXMLChardata(w, packet.Data.Rows[i].Value)
-		w.Write(bTagRClose)
+	if len(packet.rawRows) > 0 {
+		// Fast path: rawRows установлены GenerateReference.
+		// Пишем значения напрямую — ни RowsToData, ни strings.Join не нужны.
+		// TDTP-экранирование (|→\|, \→\\) + XML-экранирование (<>&) — один проход.
+		for _, row := range packet.rawRows {
+			w.Write(bTagROpen)
+			for j, val := range row {
+				if j > 0 {
+					w.WriteByte('|')
+				}
+				writeRawValue(w, val)
+			}
+			w.Write(bTagRClose)
+		}
+	} else {
+		// Broker-путь или компрессия: Data.Rows уже содержат pipe-joined строки.
+		for i := range packet.Data.Rows {
+			w.Write(bTagROpen)
+			writeXMLChardata(w, packet.Data.Rows[i].Value)
+			w.Write(bTagRClose)
+		}
 	}
 
 	w.WriteString(`</Data>`)
@@ -141,6 +158,40 @@ func writeXMLAttrValue(w *bufio.Writer, s string) {
 		}
 		s = s[i+1:]
 	}
+}
+
+// writeRawValue пишет одно значение ячейки с комбинированным экранированием за один проход:
+//   - TDTP pipe-разделитель: | → \|,  \ → \\
+//   - XML chardata:          < → &lt;, > → &gt;, & → &amp;
+//
+// Заменяет связку escapeValue + strings.Join + writeXMLChardata — ноль аллокаций.
+func writeRawValue(w *bufio.Writer, s string) {
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '|':
+			w.WriteString(s[start:i])
+			w.WriteString(`\|`)
+			start = i + 1
+		case '\\':
+			w.WriteString(s[start:i])
+			w.WriteString(`\\`)
+			start = i + 1
+		case '<':
+			w.WriteString(s[start:i])
+			w.Write(bEscLt)
+			start = i + 1
+		case '>':
+			w.WriteString(s[start:i])
+			w.Write(bEscGt)
+			start = i + 1
+		case '&':
+			w.WriteString(s[start:i])
+			w.Write(bEscAmp)
+			start = i + 1
+		}
+	}
+	w.WriteString(s[start:])
 }
 
 // writeXMLChardata пишет строку с экранированием для XML chardata (<>&).

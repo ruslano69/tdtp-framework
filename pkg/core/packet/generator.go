@@ -108,8 +108,10 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 		// Schema во всех частях (для самодостаточности при файловом экспорте)
 		packet.Schema = schema
 
-		// Преобразуем строки в Data
-		packet.Data = RowsToData(partition)
+		// Сохраняем исходные строки — writePacketTo запишет их напрямую
+		// без pipe-join и промежуточных аллокаций (RowsToData не вызывается).
+		// Broker-путь (ToXML → компрессия) вызовет RowsToData сам если нужно.
+		packet.rawRows = partition
 
 		packets = append(packets, packet)
 	}
@@ -231,7 +233,14 @@ func (g *Generator) GenerateAlarm(
 // indent игнорируется — ручной writer всегда даёт компактный XML (корректный и быстрый).
 // Прежний xml.MarshalIndent на Data-секции занимал ~229ms на 100k строк;
 // ручной writer делает то же за ~15ms.
+// rawRows (если установлены) записываются напрямую без RowsToData.
 func (g *Generator) ToXML(packet *DataPacket, _ bool) ([]byte, error) {
+	// Broker/компрессия-путь: если сжатие включено, нужны Data.Rows (compressed string).
+	// В этом случае rawRows ещё не прошли через rowsToDataWithCompression.
+	if g.compression.Enabled && len(packet.rawRows) > 0 && len(packet.Data.Rows) == 0 {
+		packet.Data = RowsToData(packet.rawRows)
+		packet.rawRows = nil
+	}
 	data, err := packetToBytes(packet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write XML: %w", err)
