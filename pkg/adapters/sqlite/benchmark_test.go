@@ -309,7 +309,7 @@ func TestBenchmarkSetup(t *testing.T) {
 
 	var totalRows int
 	for _, pkt := range packets {
-		totalRows += len(pkt.Data.Rows)
+		totalRows += pkt.Header.RecordsInPart
 	}
 
 	if totalRows < 50000 {
