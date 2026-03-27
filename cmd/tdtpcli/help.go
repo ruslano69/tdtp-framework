@@ -63,6 +63,7 @@ func PrintShortHelp() {
 	fmt.Println("  Compression:")
 	fmt.Println("    --compress                 Enable zstd compression")
 	fmt.Println("    --compress-level <n>       Level: 1 (fastest) - 19 (best), default: 3")
+	fmt.Println("    --hash                     Add XXH3 checksum for integrity (requires --compress)")
 	fmt.Println()
 	fmt.Println("  TDTQL Filters:")
 	fmt.Println("    --where <condition>        WHERE clause")
@@ -167,6 +168,7 @@ func PrintHelp() {
 	fmt.Println("  Compression:")
 	fmt.Println("    --compress                 Enable zstd compression for exported data")
 	fmt.Println("    --compress-level <n>       Compression level: 1 (fastest) - 19 (best), default: 3")
+	fmt.Println("    --hash                     Add XXH3 checksum for integrity verification (requires --compress)")
 	fmt.Println()
 
 	fmt.Println("  TDTQL Filters:")
@@ -257,6 +259,12 @@ func PrintHelp() {
 
 	fmt.Println("  # Export with high compression")
 	fmt.Println("  tdtpcli --export logs --compress --compress-level 19 --output logs.tdtp.xml")
+	fmt.Println()
+	fmt.Println("  # Export with compression + XXH3 integrity checksum")
+	fmt.Println("  tdtpcli --export orders --compress --hash --output orders.tdtp.xml")
+	fmt.Println()
+	fmt.Println("  # Export archive-quality: max compression + checksum")
+	fmt.Println("  tdtpcli --export kadrovye_prikazy --compress --compress-level 19 --hash --output archive.tdtp.xml")
 	fmt.Println()
 
 	fmt.Println("  # Export with read-only fields (timestamp, computed, identity)")
@@ -415,7 +423,7 @@ func PrintHelp() {
 
 	fmt.Println("FEATURES:")
 	fmt.Println()
-	fmt.Println("  ✅ Database Adapters: PostgreSQL, MS SQL, SQLite, MySQL")
+	fmt.Println("  ✅ Database Adapters: PostgreSQL, MS SQL, SQLite, MySQL, Access (.mdb/.accdb, Windows)")
 	fmt.Println("  ✅ Message Brokers:")
 	fmt.Println("       MSMQ     — Legacy     (Windows-only, batch mode)")
 	fmt.Println("       RabbitMQ — Stability  (reliable delivery, batch mode)")
@@ -423,6 +431,7 @@ func PrintHelp() {
 	fmt.Println("  🔶 Streaming Consumer: --listen (Kafka only, BETA) — stable channels only")
 	fmt.Println("  ✅ File Operations: Diff & Merge with conflict resolution")
 	fmt.Println("  ✅ XLSX Converter: Database ↔ Excel bidirectional 🍒")
+	fmt.Println("  ✅ Compression: zstd level 1-19 + XXH3 integrity checksum (--compress --hash)")
 	fmt.Println("  ✅ Circuit Breaker: Protection from cascading failures")
 	fmt.Println("  ✅ Audit Logger: GDPR/HIPAA compliance")
 	fmt.Println("  ✅ Retry Mechanism: Exponential backoff with jitter")
