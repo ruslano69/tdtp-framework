@@ -54,6 +54,17 @@ func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value st
 		return NullSentinel
 	}
 
+	// Fast path: типы, для которых ParseValue→FormatValue — холостой ход.
+	// DBValueToString уже выдал корректную строку через strconv/time.Format,
+	// повторный round-trip (string→TypedValue→string) ничего не меняет.
+	switch schema.NormalizeType(schema.DataType(field.Type)) {
+	case schema.TypeText, schema.TypeInteger, schema.TypeBoolean:
+		// TEXT/VARCHAR/CHAR/STRING: Pass 2 возвращает ту же строку.
+		// INTEGER/INT: strconv.FormatInt → ParseInt → FormatInt — тот же результат.
+		// BOOLEAN/BOOL: "1"/"0" → parse → "1"/"0" — тот же результат.
+		return value
+	}
+
 	// Создаем FieldDef для использования converter
 	fieldDef := schema.FieldDef{
 		Name:      field.Name,
