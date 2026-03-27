@@ -6,6 +6,18 @@ import (
 	"encoding/xml"
 	"io"
 	"os"
+	"strings"
+)
+
+// Фиксированные байтовые константы для горячего пути записи строк.
+// Хардкодим как []byte чтобы избежать повторной конвертации string→[]byte в цикле.
+var (
+	bTagROpen   = []byte("<R>")
+	bTagRClose  = []byte("</R>")
+	bEscLt      = []byte("&lt;")
+	bEscGt      = []byte("&gt;")
+	bEscAmp     = []byte("&amp;")
+	bEscQuot    = []byte("&quot;")
 )
 
 // writePacketTo сериализует DataPacket в XML без encoding/xml reflection для Data-секции.
@@ -67,9 +79,9 @@ func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
 	w.WriteByte('>')
 
 	for i := range packet.Data.Rows {
-		w.WriteString(`<R>`)
+		w.Write(bTagROpen)
 		writeXMLChardata(w, packet.Data.Rows[i].Value)
-		w.WriteString(`</R>`)
+		w.Write(bTagRClose)
 	}
 
 	w.WriteString(`</Data>`)
@@ -108,49 +120,52 @@ func writeXMLAttr(w *bufio.Writer, name, value string) {
 
 // writeXMLAttrValue пишет строку с экранированием для XML атрибута (<>&"').
 func writeXMLAttrValue(w *bufio.Writer, s string) {
-	start := 0
-	for i := 0; i < len(s); i++ {
-		var esc string
+	for {
+		i := strings.IndexAny(s, `<>&"`)
+		if i < 0 {
+			w.WriteString(s)
+			return
+		}
+		if i > 0 {
+			w.WriteString(s[:i])
+		}
 		switch s[i] {
 		case '<':
-			esc = "&lt;"
+			w.Write(bEscLt)
 		case '>':
-			esc = "&gt;"
+			w.Write(bEscGt)
 		case '&':
-			esc = "&amp;"
+			w.Write(bEscAmp)
 		case '"':
-			esc = "&quot;"
-		default:
-			continue
+			w.Write(bEscQuot)
 		}
-		w.WriteString(s[start:i])
-		w.WriteString(esc)
-		start = i + 1
+		s = s[i+1:]
 	}
-	w.WriteString(s[start:])
 }
 
 // writeXMLChardata пишет строку с экранированием для XML chardata (<>&).
-// Кавычки не трогаем — в chardata они не нужны.
+// strings.IndexAny использует SIMD-оптимизированный поиск — быстрее побайтового цикла.
+// Для типичных строк без спецсимволов — один Write всей строки.
 func writeXMLChardata(w *bufio.Writer, s string) {
-	start := 0
-	for i := 0; i < len(s); i++ {
-		var esc string
+	for {
+		i := strings.IndexAny(s, "<>&")
+		if i < 0 {
+			w.WriteString(s)
+			return
+		}
+		if i > 0 {
+			w.WriteString(s[:i])
+		}
 		switch s[i] {
 		case '<':
-			esc = "&lt;"
+			w.Write(bEscLt)
 		case '>':
-			esc = "&gt;"
+			w.Write(bEscGt)
 		case '&':
-			esc = "&amp;"
-		default:
-			continue
+			w.Write(bEscAmp)
 		}
-		w.WriteString(s[start:i])
-		w.WriteString(esc)
-		start = i + 1
+		s = s[i+1:]
 	}
-	w.WriteString(s[start:])
 }
 
 // newPacketWriter создаёт bufio.Writer поверх w с буфером 4MB.
