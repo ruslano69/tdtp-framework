@@ -3,10 +3,12 @@ package base
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,18 +111,17 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		// Проверяем длину - если 16 байт и тип UUID, это может быть UUID
 		if len(v) == 16 && field.Type == "uuid" {
 			// Форматируем как UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-			// Используем strings.Builder для оптимизации (меньше аллокаций)
 			var sb strings.Builder
 			sb.Grow(36) // UUID length: 32 hex chars + 4 dashes
-			sb.WriteString(fmt.Sprintf("%x", v[0:4]))
+			sb.WriteString(hex.EncodeToString(v[0:4]))
 			sb.WriteByte('-')
-			sb.WriteString(fmt.Sprintf("%x", v[4:6]))
+			sb.WriteString(hex.EncodeToString(v[4:6]))
 			sb.WriteByte('-')
-			sb.WriteString(fmt.Sprintf("%x", v[6:8]))
+			sb.WriteString(hex.EncodeToString(v[6:8]))
 			sb.WriteByte('-')
-			sb.WriteString(fmt.Sprintf("%x", v[8:10]))
+			sb.WriteString(hex.EncodeToString(v[8:10]))
 			sb.WriteByte('-')
-			sb.WriteString(fmt.Sprintf("%x", v[10:16]))
+			sb.WriteString(hex.EncodeToString(v[10:16]))
 			return sb.String()
 		}
 		// Иначе возвращаем как строку (для TEXT полей или JSON)
@@ -128,18 +129,17 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 
 	case [16]byte:
 		// UUID как массив байт
-		// Используем strings.Builder для оптимизации
 		var sb strings.Builder
 		sb.Grow(36)
-		sb.WriteString(fmt.Sprintf("%x", v[0:4]))
+		sb.WriteString(hex.EncodeToString(v[0:4]))
 		sb.WriteByte('-')
-		sb.WriteString(fmt.Sprintf("%x", v[4:6]))
+		sb.WriteString(hex.EncodeToString(v[4:6]))
 		sb.WriteByte('-')
-		sb.WriteString(fmt.Sprintf("%x", v[6:8]))
+		sb.WriteString(hex.EncodeToString(v[6:8]))
 		sb.WriteByte('-')
-		sb.WriteString(fmt.Sprintf("%x", v[8:10]))
+		sb.WriteString(hex.EncodeToString(v[8:10]))
 		sb.WriteByte('-')
-		sb.WriteString(fmt.Sprintf("%x", v[10:16]))
+		sb.WriteString(hex.EncodeToString(v[10:16]))
 		return sb.String()
 
 	case map[string]any:
@@ -163,15 +163,32 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 	case string:
 		return v
 
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%d", v)
+	case int:
+		return strconv.FormatInt(int64(v), 10)
+	case int8:
+		return strconv.FormatInt(int64(v), 10)
+	case int16:
+		return strconv.FormatInt(int64(v), 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case int64:
+		return strconv.FormatInt(v, 10)
 
-	case uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
 
-	case float32, float64:
-		// Для float используем %v чтобы сохранить точность
-		return fmt.Sprintf("%v", v)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'g', -1, 32)
+	case float64:
+		return strconv.FormatFloat(v, 'g', -1, 64)
 
 	case bool:
 		if v {
@@ -237,7 +254,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		// Конвертируем в float64 для получения числового значения
 		f64, err := v.Float64Value()
 		if err == nil && f64.Valid {
-			return fmt.Sprintf("%v", f64.Float64)
+			return strconv.FormatFloat(f64.Float64, 'g', -1, 64)
 		}
 		// Fallback - используем строковое представление Int и Exp
 		return v.Int.String()
@@ -275,13 +292,25 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 		if field.Subtype == "uniqueidentifier" {
 			// Если получены 16 байт (native UNIQUEIDENTIFIER), конвертируем в UUID string
 			if len(v) == 16 {
-				// Формат UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-				return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-					binary.LittleEndian.Uint32(v[0:4]),
-					binary.LittleEndian.Uint16(v[4:6]),
-					binary.LittleEndian.Uint16(v[6:8]),
-					binary.BigEndian.Uint16(v[8:10]),
-					v[10:16])
+				// MSSQL stores UUID with mixed endianness (first 3 groups LE, last 2 BE)
+				var sb strings.Builder
+				sb.Grow(36)
+				p1 := make([]byte, 4)
+				binary.LittleEndian.PutUint32(p1, binary.LittleEndian.Uint32(v[0:4]))
+				sb.WriteString(hex.EncodeToString(p1))
+				sb.WriteByte('-')
+				p2 := make([]byte, 2)
+				binary.LittleEndian.PutUint16(p2, binary.LittleEndian.Uint16(v[4:6]))
+				sb.WriteString(hex.EncodeToString(p2))
+				sb.WriteByte('-')
+				p3 := make([]byte, 2)
+				binary.LittleEndian.PutUint16(p3, binary.LittleEndian.Uint16(v[6:8]))
+				sb.WriteString(hex.EncodeToString(p3))
+				sb.WriteByte('-')
+				sb.WriteString(hex.EncodeToString(v[8:10]))
+				sb.WriteByte('-')
+				sb.WriteString(hex.EncodeToString(v[10:16]))
+				return sb.String()
 			}
 			// Иначе это уже строка (из CONVERT), просто конвертируем []byte → string
 			return string(v)
@@ -300,14 +329,32 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 	case string:
 		return v
 
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%d", v)
+	case int:
+		return strconv.FormatInt(int64(v), 10)
+	case int8:
+		return strconv.FormatInt(int64(v), 10)
+	case int16:
+		return strconv.FormatInt(int64(v), 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case int64:
+		return strconv.FormatInt(v, 10)
 
-	case uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
 
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'g', -1, 32)
+	case float64:
+		return strconv.FormatFloat(v, 'g', -1, 64)
 
 	case bool:
 		if v {
@@ -352,14 +399,32 @@ func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Fiel
 	case string:
 		return v
 
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%d", v)
+	case int:
+		return strconv.FormatInt(int64(v), 10)
+	case int8:
+		return strconv.FormatInt(int64(v), 10)
+	case int16:
+		return strconv.FormatInt(int64(v), 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case int64:
+		return strconv.FormatInt(v, 10)
 
-	case uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
 
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'g', -1, 32)
+	case float64:
+		return strconv.FormatFloat(v, 'g', -1, 64)
 
 	case bool:
 		if v {
@@ -401,11 +466,7 @@ func bytesToHexWithoutLeadingZeros(b []byte) string {
 		return "0"
 	}
 
-	// Конвертируем без ведущих нулей, используем strings.Builder для оптимизации
-	var sb strings.Builder
-	sb.Grow(len(b[firstNonZero:]) * 2) // 2 hex chars per byte
-	sb.WriteString(fmt.Sprintf("%X", b[firstNonZero:]))
-	return sb.String()
+	return strings.ToUpper(hex.EncodeToString(b[firstNonZero:]))
 }
 
 // TypedValueToSQL конвертирует TypedValue в значение для SQL
