@@ -94,3 +94,29 @@ GOPROXY=https://goproxy.io GONOSUMDB='*' go build -tags nokafka -o /tmp/tdtpcli 
 ## Dev branch
 
 Feature branches: `claude/test-tdtpcli-new-keys-0Z7iA`
+
+---
+
+## TODO: Переключение SQLite-драйвера на mattn/go-sqlite3
+
+**Мотивация:** `modernc.org/sqlite` медленнее нативного libsqlite3 в ~3× на больших SELECT.
+Замеры из [cvilsmeier/go-sqlite-bench](https://github.com/cvilsmeier/go-sqlite-bench):
+
+| Драйвер  | 50k строк | 100k строк | 200k строк |
+|----------|-----------|------------|------------|
+| mattn    | 122ms     | 207ms      | 376ms      |
+| modernc  | 401ms     | 629ms      | 1094ms     |
+
+Наш замер: modernc читает 100k строк за ~800ms, Python (C sqlite3) за ~270ms — тот же 3×.
+
+**Что нужно сделать:**
+- Добавить build-тег `cgo_sqlite` (или `!purgo_sqlite`)
+- `pkg/adapters/sqlite/adapter.go` — условный импорт: `mattn` (имя `"sqlite3"`) vs `modernc` (имя `"sqlite"`)
+- `cmd/tdtpcli/drivers_sqlite.go` — аналогично
+- `cmd/bench_raw/main.go` — аналогично
+- `cmd/tdtp-xray/...` — аналогично
+- Обновить `driverSqlite` константу под тег
+- Проверить что `nokafka` + `cgo_sqlite` собираются вместе
+- CGO требует gcc; для CI добавить `apt-get install gcc`
+
+**Ожидаемый результат:** экспорт 100k строк SQLite ~500ms вместо ~1500ms.
