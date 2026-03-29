@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
@@ -368,7 +369,9 @@ func BenchmarkFullExport100k(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		start := time.Now()
 		packets, err := adapter.ExportTable(ctx, "Users")
+		elapsed := time.Since(start)
 		if err != nil {
 			b.Fatalf("Export failed: %v", err)
 		}
@@ -380,6 +383,6 @@ func BenchmarkFullExport100k(b *testing.B) {
 		if len(packets) > 0 {
 			colCount = len(packets[0].Schema.Fields)
 		}
-		b.ReportMetric(float64(totalRows*colCount)/b.Elapsed().Seconds()/1e6, "Mfields/s")
+		b.ReportMetric(float64(totalRows*colCount)/elapsed.Seconds()/1e6, "Mfields/s")
 	}
 }
