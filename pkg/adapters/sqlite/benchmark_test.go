@@ -376,6 +376,10 @@ func BenchmarkFullExport100k(b *testing.B) {
 		for _, pkt := range packets {
 			totalRows += pkt.Header.RecordsInPart
 		}
-		b.ReportMetric(float64(totalRows*16)/b.Elapsed().Seconds()/1e6, "Mfields/s")
+		colCount := 1
+		if len(packets) > 0 {
+			colCount = len(packets[0].Schema.Fields)
+		}
+		b.ReportMetric(float64(totalRows*colCount)/b.Elapsed().Seconds()/1e6, "Mfields/s")
 	}
 }
