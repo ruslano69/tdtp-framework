@@ -406,7 +406,7 @@ func RowsToData(rows [][]string) Data {
 func buildEscapeMask(schema Schema) []bool {
 	mask := make([]bool, len(schema.Fields))
 	for i, f := range schema.Fields {
-		mask[i] = !isNeverEscaped(strings.ToUpper(f.Type))
+		mask[i] = !isNeverEscaped(f.Type)
 	}
 	return mask
 }
@@ -415,7 +415,9 @@ func buildEscapeMask(schema Schema) []bool {
 func isNeverEscaped(t string) bool {
 	switch t {
 	case "INTEGER", "INT", "REAL", "FLOAT", "DOUBLE", "DECIMAL",
-		"BOOLEAN", "BOOL", "DATE", "DATETIME", "TIMESTAMP":
+		"BOOLEAN", "BOOL", "DATE", "DATETIME", "TIMESTAMP",
+		"integer", "int", "real", "float", "double", "decimal",
+		"boolean", "bool", "date", "datetime", "timestamp":
 		return true
 	}
 	return false
