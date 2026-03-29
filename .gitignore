@@ -82,3 +82,4 @@ DELO19_schema*
 weed/data/
 weed/weed.log
 weed/s3.json
+sqlite.test
