@@ -83,3 +83,4 @@ weed/data/
 weed/weed.log
 weed/s3.json
 sqlite.test
+postgres.test
