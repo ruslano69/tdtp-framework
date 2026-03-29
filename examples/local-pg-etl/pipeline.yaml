@@ -1,0 +1,70 @@
+# ETL: PostgreSQL clients + bookings → TOP клиентов по выручке → TDTP файл
+# Запуск: tdtpcli --pipeline pipeline.yaml
+# Только локальный PostgreSQL, никаких внешних сервисов
+
+name: "client-revenue-report"
+description: "Топ клиентов по выручке с количеством бронирований"
+
+sources:
+  - name: clients
+    type: postgres
+    dsn: "postgres://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test?sslmode=disable"
+    query: |
+      SELECT
+        client_id::text AS client_id,
+        full_name,
+        phone,
+        email,
+        birth_date::text AS birth_date,
+        registered_at::text AS registered_at
+      FROM clients
+
+  - name: bookings
+    type: postgres
+    dsn: "postgres://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test?sslmode=disable"
+    query: |
+      SELECT
+        client_id::text AS client_id,
+        COUNT(*)::integer            AS total_bookings,
+        SUM(total_rub)::numeric      AS total_revenue,
+        MAX(total_rub)::numeric      AS max_booking,
+        SUM(persons)::integer        AS total_persons,
+        COUNT(*) FILTER (WHERE status = 'confirmed')::integer AS confirmed_count,
+        COUNT(*) FILTER (WHERE status = 'cancelled')::integer AS cancelled_count
+      FROM bookings
+      GROUP BY client_id
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: client_revenue
+  sql: |
+    SELECT
+      c.full_name,
+      c.phone,
+      c.email,
+      c.birth_date,
+      b.total_bookings,
+      b.total_revenue,
+      b.max_booking,
+      b.total_persons,
+      b.confirmed_count,
+      b.cancelled_count,
+      c.registered_at
+    FROM clients c
+    JOIN bookings b ON c.client_id = b.client_id
+    ORDER BY CAST(b.total_revenue AS REAL) DESC
+    LIMIT 50
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compression: true
+    compress_level: 3
+    destination: "/tmp/client_revenue_report.tdtp.xml"
+
+error_handling:
+  on_source_error: "fail"

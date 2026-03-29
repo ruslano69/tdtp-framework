@@ -197,6 +197,7 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sqlQuery, resultTableName st
 	}
 
 	result.Data = packet.RowsToData(allRows)
+	result.Header.RecordsInPart = len(allRows)
 
 	return result, nil
 }
