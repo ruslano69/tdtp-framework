@@ -3,7 +3,9 @@ package etl
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
+	"time"
 
 	sqliteadapter "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -93,6 +95,83 @@ func TestWorkspace_LoadData_FromExport(t *testing.T) {
 		if row[0] != expected[i][0] {
 			t.Errorf("row %d product: got %q, want %q", i, row[0], expected[i][0])
 		}
+	}
+}
+
+// BenchmarkWorkspace_LoadData тестирует LoadData + ExecuteSQL на N строках in-memory SQLite.
+func BenchmarkWorkspace_LoadData(b *testing.B) {
+	const N = 100_000
+	ctx := context.Background()
+
+	// Один раз строим пакет с N строками (имитируем экспорт из источника)
+	fields := []packet.Field{
+		{Name: "ID", Type: "INTEGER"},
+		{Name: "Name", Type: "TEXT"},
+		{Name: "City", Type: "TEXT"},
+		{Name: "Balance", Type: "REAL"},
+		{Name: "IsActive", Type: "INTEGER"},
+		{Name: "RegisteredAt", Type: "TEXT"},
+	}
+	schema := packet.Schema{Fields: fields}
+	rawRows := make([][]string, N)
+	cities := []string{"Moscow", "Saint Petersburg", "Novosibirsk", "Kazan", "Samara"}
+	for i := 0; i < N; i++ {
+		rawRows[i] = []string{
+			fmt.Sprintf("%d", i+1),
+			fmt.Sprintf("User %d", i),
+			cities[i%len(cities)],
+			fmt.Sprintf("%.2f", float64(i%100000)),
+			fmt.Sprintf("%d", i%2),
+			"2024-01-01 00:00:00",
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ws, err := NewWorkspace(ctx)
+		if err != nil {
+			b.Fatalf("workspace: %v", err)
+		}
+		if err := ws.CreateTable(ctx, "users", fields); err != nil {
+			ws.Close(ctx)
+			b.Fatalf("create table: %v", err)
+		}
+
+		pkt := packet.NewDataPacket(packet.TypeReference, "users")
+		pkt.Schema = schema
+		pkt.Header.RecordsInPart = N
+		// Прямо в Data.Rows — без rawRows, честный INSERT benchmark
+		rows := make([]packet.Row, N)
+		for j, r := range rawRows {
+			var sb string
+			for k, v := range r {
+				if k > 0 {
+					sb += "|"
+				}
+				sb += v
+			}
+			rows[j] = packet.Row{Value: sb}
+		}
+		pkt.Data.Rows = rows
+
+		start := time.Now()
+		if err := ws.LoadData(ctx, "users", pkt); err != nil {
+			ws.Close(ctx)
+			b.Fatalf("load: %v", err)
+		}
+		result, err := ws.ExecuteSQL(ctx,
+			"SELECT ID, Name, Balance FROM users WHERE IsActive = 1 AND Balance > 50000 ORDER BY Balance DESC LIMIT 1000",
+			"result")
+		elapsed := time.Since(start)
+		if err != nil {
+			ws.Close(ctx)
+			b.Fatalf("sql: %v", err)
+		}
+
+		colCount := len(fields)
+		b.ReportMetric(float64(N*colCount)/elapsed.Seconds()/1e6, "Mfields/s")
+		_ = result
+		ws.Close(ctx)
 	}
 }
 
