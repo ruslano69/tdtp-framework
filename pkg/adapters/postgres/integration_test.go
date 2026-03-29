@@ -462,3 +462,33 @@ func TestIntegration_TypeMapping(t *testing.T) {
 
 	t.Log("✓ All type mappings correct")
 }
+
+// BenchmarkFullExport100k — полный экспорт 100k строк из PostgreSQL.
+// Требует таблицу users_bench (см. scripts/create_postgres_test_db.py).
+func BenchmarkFullExport100k(b *testing.B) {
+	ctx := context.Background()
+	adapter, err := NewAdapter(testConnString)
+	if err != nil {
+		b.Skipf("postgres not available: %v", err)
+	}
+	defer adapter.Close(ctx)
+
+	// Проверяем наличие таблицы
+	packets, err := adapter.ExportTable(ctx, "users_bench")
+	if err != nil || len(packets) == 0 {
+		b.Skipf("users_bench not found or empty: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pkts, err := adapter.ExportTable(ctx, "users_bench")
+		if err != nil {
+			b.Fatalf("Export failed: %v", err)
+		}
+		totalRows := 0
+		for _, pkt := range pkts {
+			totalRows += pkt.Header.RecordsInPart
+		}
+		b.ReportMetric(float64(totalRows*16)/b.Elapsed().Seconds()/1e6, "Mfields/s")
+	}
+}
