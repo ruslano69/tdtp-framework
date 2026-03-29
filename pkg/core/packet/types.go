@@ -144,6 +144,15 @@ func (p *DataPacket) SetRows(rows [][]string) {
 	p.Header.RecordsInPart = len(rows)
 }
 
+// MaterializeRows обеспечивает что Data.Rows заполнены из rawRows.
+// Вызывается перед передачей пакета в функции, работающие напрямую с Data.Rows (импорт, сжатие).
+func (p *DataPacket) MaterializeRows() {
+	if len(p.rawRows) > 0 && len(p.Data.Rows) == 0 {
+		p.Data = RowsToData(p.rawRows)
+		p.rawRows = nil
+	}
+}
+
 // SchemaEquals reports whether two schemas are structurally identical:
 // same number of fields, same names and types in the same order.
 func SchemaEquals(a, b Schema) bool {

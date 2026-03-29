@@ -46,10 +46,9 @@ func TestIntegration_ExportImport(t *testing.T) {
 
 	tableName := "test_export_import"
 
-	// Cleanup
-	t.Cleanup(func() {
-		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
-	})
+	// Удаляем если осталось от предыдущего прогона (defer закрывает адаптер раньше t.Cleanup)
+	adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем тестовую таблицу
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -99,7 +98,7 @@ func TestIntegration_ExportImport(t *testing.T) {
 	// Проверяем данные
 	totalRows := 0
 	for _, p := range packets {
-		totalRows += len(p.Data.Rows)
+		totalRows += p.Header.RecordsInPart
 	}
 
 	if totalRows != 3 {
@@ -147,10 +146,8 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 
 	tableName := "test_special_types"
 
-	// Cleanup
-	t.Cleanup(func() {
-		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
-	})
+	adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем таблицу со специальными типами
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -278,10 +275,8 @@ func TestIntegration_ExportWithQuery(t *testing.T) {
 
 	tableName := "test_export_query"
 
-	// Cleanup
-	t.Cleanup(func() {
-		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
-	})
+	adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем таблицу
 	createSQL := `CREATE TABLE ` + tableName + ` (
@@ -317,7 +312,7 @@ func TestIntegration_ExportWithQuery(t *testing.T) {
 	// Проверяем количество записей
 	totalRows := 0
 	for _, p := range packets {
-		totalRows += len(p.Data.Rows)
+		totalRows += p.Header.RecordsInPart
 	}
 
 	if totalRows != 2 {
@@ -349,10 +344,8 @@ func TestIntegration_ImportStrategies(t *testing.T) {
 
 	tableName := "test_import_strategies"
 
-	// Cleanup
-	t.Cleanup(func() {
-		adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
-	})
+	adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
+	defer adapter.Exec(ctx, "DROP TABLE IF EXISTS "+tableName)
 
 	// Создаем схему TDTP
 	builder := schema.NewBuilder()

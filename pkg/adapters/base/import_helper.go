@@ -77,6 +77,9 @@ func NewImportHelper(
 // StrategyReplace/Ignore/Fail: прямой UPSERT в существующую таблицу.
 // Общая реализация для всех адаптеров
 func (h *ImportHelper) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
+	// Материализуем rawRows → Data.Rows если пакет пришёл из GenerateReference (fast-path).
+	pkt.MaterializeRows()
+
 	// Проверяем тип пакета
 	if pkt.Header.Type != packet.TypeReference && pkt.Header.Type != packet.TypeResponse {
 		return fmt.Errorf("can only import reference or response packets, got: %s", pkt.Header.Type)
@@ -102,6 +105,11 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 	tableName := packets[0].Header.TableName
 	canonicalSchema := packets[0].Schema
+
+	// Материализуем rawRows → Data.Rows для всех пакетов
+	for _, pkt := range packets {
+		pkt.MaterializeRows()
+	}
 
 	// Начинаем транзакцию
 	tx, err := h.transactionManager.BeginTx(ctx)

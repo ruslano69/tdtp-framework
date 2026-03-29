@@ -167,7 +167,7 @@ func (p *Processor) loadSources(ctx context.Context) ([]SourceData, error) {
 	for _, data := range sourcesData {
 		if data.Error == nil && data.Packet != nil {
 			successCount++
-			p.stats.TotalRowsLoaded += len(data.Packet.Data.Rows)
+			p.stats.TotalRowsLoaded += data.Packet.Header.RecordsInPart
 		}
 	}
 	p.stats.SourcesLoaded = successCount
