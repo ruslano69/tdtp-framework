@@ -170,7 +170,8 @@ func (g *Generator) GenerateResponse(
 			packet.QueryContext = queryContext
 		}
 
-		packet.Data = RowsToData(partition)
+		mask := buildEscapeMask(schema)
+		packet.Data = rowsToDataMasked(partition, mask)
 		packets = append(packets, packet)
 	}
 
@@ -224,7 +225,7 @@ func (g *Generator) GenerateAlarm(
 	}
 
 	packet.Schema = schema
-	packet.Data = RowsToData(rows)
+	packet.Data = rowsToDataMasked(rows, buildEscapeMask(schema))
 
 	return packet, nil
 }
@@ -238,7 +239,7 @@ func (g *Generator) ToXML(packet *DataPacket, _ bool) ([]byte, error) {
 	// Broker/компрессия-путь: если сжатие включено, нужны Data.Rows (compressed string).
 	// В этом случае rawRows ещё не прошли через rowsToDataWithCompression.
 	if g.compression.Enabled && len(packet.rawRows) > 0 && len(packet.Data.Rows) == 0 {
-		packet.Data = RowsToData(packet.rawRows)
+		packet.Data = rowsToDataMasked(packet.rawRows, buildEscapeMask(packet.Schema))
 		packet.rawRows = nil
 	}
 	data, err := packetToBytes(packet)
@@ -295,13 +296,17 @@ func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
 // compressor - функция сжатия, если nil - сжатие не применяется
 func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]string, compressor func(ctx context.Context, rows []string, level int) (string, error)) (Data, error) {
 	// Сначала создаем обычные строки
+	var sb strings.Builder
 	rowStrings := make([]string, len(rows))
 	for i, row := range rows {
-		escapedValues := make([]string, len(row))
+		sb.Reset()
 		for j, value := range row {
-			escapedValues[j] = escapeValue(value)
+			if j > 0 {
+				sb.WriteByte('|')
+			}
+			writeEscaped(&sb, value)
 		}
-		rowStrings[i] = strings.Join(escapedValues, "|")
+		rowStrings[i] = sb.String()
 	}
 
 	// Если сжатие не включено или компрессор не задан
@@ -347,14 +352,33 @@ func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]stri
 	}, nil
 }
 
-// escapeValue экранирует специальные символы в значении
-// Backslash (\) экранируется как \\
-// Pipe (|) экранируется как \|
+// escapeValue экранирует специальные символы в значении за один проход.
+// Backslash (\) → \\, Pipe (|) → \|
 func escapeValue(value string) string {
-	// Сначала экранируем backslash, потом pipe (важен порядок!)
-	escaped := strings.ReplaceAll(value, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, "|", "\\|")
-	return escaped
+	// fast-path: нет спецсимволов — возвращаем как есть без аллокаций
+	hasSpecial := false
+	for i := 0; i < len(value); i++ {
+		if value[i] == '\\' || value[i] == '|' {
+			hasSpecial = true
+			break
+		}
+	}
+	if !hasSpecial {
+		return value
+	}
+	var sb strings.Builder
+	sb.Grow(len(value) + 4)
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\\':
+			sb.WriteString(`\\`)
+		case '|':
+			sb.WriteString(`\|`)
+		default:
+			sb.WriteByte(value[i])
+		}
+	}
+	return sb.String()
 }
 
 // RowsToData преобразует [][]string в Data (публичная функция)
@@ -363,20 +387,78 @@ func RowsToData(rows [][]string) Data {
 	data := Data{
 		Rows: make([]Row, len(rows)),
 	}
-
+	var sb strings.Builder
 	for i, row := range rows {
-		// Экранируем разделитель | и backslash в данных
-		escapedValues := make([]string, len(row))
+		sb.Reset()
 		for j, value := range row {
-			escapedValues[j] = escapeValue(value)
+			if j > 0 {
+				sb.WriteByte('|')
+			}
+			writeEscaped(&sb, value)
 		}
+		data.Rows[i] = Row{Value: sb.String()}
+	}
+	return data
+}
 
-		data.Rows[i] = Row{
-			Value: strings.Join(escapedValues, "|"),
+// buildEscapeMask возвращает маску полей: true если поле может содержать | или \.
+// Числа, даты, булевы — не требуют экранирования.
+func buildEscapeMask(schema Schema) []bool {
+	mask := make([]bool, len(schema.Fields))
+	for i, f := range schema.Fields {
+		mask[i] = !isNeverEscaped(strings.ToUpper(f.Type))
+	}
+	return mask
+}
+
+// isNeverEscaped возвращает true для типов, которые физически не содержат | или \.
+func isNeverEscaped(t string) bool {
+	switch t {
+	case "INTEGER", "INT", "REAL", "FLOAT", "DOUBLE", "DECIMAL",
+		"BOOLEAN", "BOOL", "DATE", "DATETIME", "TIMESTAMP":
+		return true
+	}
+	return false
+}
+
+// rowsToDataMasked — RowsToData с маской экранирования по типам полей.
+// Поля с mask[j]=false записываются без escaping (числа, даты, булевы).
+func rowsToDataMasked(rows [][]string, mask []bool) Data {
+	data := Data{Rows: make([]Row, len(rows))}
+	var sb strings.Builder
+	for i, row := range rows {
+		sb.Reset()
+		for j, value := range row {
+			if j > 0 {
+				sb.WriteByte('|')
+			}
+			if j < len(mask) && !mask[j] {
+				sb.WriteString(value)
+			} else {
+				writeEscaped(&sb, value)
+			}
+		}
+		data.Rows[i] = Row{Value: sb.String()}
+	}
+	return data
+}
+
+// writeEscaped пишет value в sb с TDTP-экранированием за один проход.
+func writeEscaped(sb *strings.Builder, value string) {
+	start := 0
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\\':
+			sb.WriteString(value[start:i])
+			sb.WriteString(`\\`)
+			start = i + 1
+		case '|':
+			sb.WriteString(value[start:i])
+			sb.WriteString(`\|`)
+			start = i + 1
 		}
 	}
-
-	return data
+	sb.WriteString(value[start:])
 }
 
 // estimateRowSize примерно оценивает размер строки в байтах
