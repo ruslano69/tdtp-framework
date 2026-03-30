@@ -112,8 +112,9 @@ type XLSXOutputConfig struct {
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
 type TDTPOutputConfig struct {
-	Format      string            `yaml:"format"`       // Формат: xml, json (в будущем)
-	Compression bool              `yaml:"compression"`  // Использовать zstd сжатие
+	Format      string            `yaml:"format"`                  // Формат: xml, json (в будущем)
+	Compression bool              `yaml:"compression"`             // Использовать zstd сжатие
+	Compress    bool              `yaml:"compress"`                // Алиас для compression (совместимость с CLI)
 	Destination string            `yaml:"destination"`  // Путь к файлу или s3://bucket/key
 	Encryption  bool              `yaml:"encryption"`   // Шифровать результат через xZMercury (AES-256-GCM)
 	Compact     bool              `yaml:"compact"`      // v1.3.1: compact format

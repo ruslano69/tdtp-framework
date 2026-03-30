@@ -240,7 +240,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 
 	for _, part := range parts {
 		// Сжатие применяем к каждой части отдельно
-		if e.config.TDTP.Compression {
+		if e.config.TDTP.Compression || e.config.TDTP.Compress {
 			if err := e.compressDataPacket(part); err != nil {
 				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)
 			}
@@ -596,6 +596,9 @@ func (e *Exporter) ValidateConfig() error {
 
 // compressDataPacket сжимает данные в DataPacket используя zstd
 func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket) error {
+	// Materialize rawRows (GenerateReference fast-path) перед сжатием.
+	// Без этого Data.Rows пуст и сжатие молча пропускается.
+	dataPacket.MaterializeRows()
 	if len(dataPacket.Data.Rows) == 0 {
 		return nil // Нечего сжимать
 	}
