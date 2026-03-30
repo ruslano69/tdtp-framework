@@ -175,6 +175,77 @@ func BenchmarkWorkspace_LoadData(b *testing.B) {
 	}
 }
 
+// TestWorkspace_DateTypes проверяет что DATE/DATETIME типы сохраняются при прохождении через workspace.
+// Баг: mapTDTPTypeToSQLite создавал колонку как TEXT, DatabaseTypeName() возвращал "TEXT",
+// mapSQLiteTypeToTDTP не мог восстановить DATE/DATETIME — всё становилось TEXT.
+// Фикс: объявляем колонку как DATE/DATETIME — SQLite сохраняет имя типа.
+func TestWorkspace_DateTypes(t *testing.T) {
+	ctx := context.Background()
+
+	ws, err := NewWorkspace(ctx)
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	defer ws.Close(ctx)
+
+	fields := []packet.Field{
+		{Name: "id", Type: "INTEGER"},
+		{Name: "birth_date", Type: "DATE"},
+		{Name: "created_at", Type: "DATETIME"},
+		{Name: "name", Type: "TEXT"},
+		{Name: "score", Type: "REAL"},
+	}
+	if err := ws.CreateTable(ctx, "employees", fields); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	pkt := packet.NewDataPacket(packet.TypeReference, "employees")
+	pkt.Schema.Fields = fields
+	pkt.Header.RecordsInPart = 2
+	pkt.Data.Rows = []packet.Row{
+		{Value: "1|1990-05-15|2024-01-10 09:00:00|Alice|95.5"},
+		{Value: "2|1985-11-20|2023-06-01 14:30:00|Bob|88.0"},
+	}
+
+	if err := ws.LoadData(ctx, "employees", pkt); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	result, err := ws.ExecuteSQL(ctx, "SELECT * FROM employees ORDER BY id", "result")
+	if err != nil {
+		t.Fatalf("sql: %v", err)
+	}
+
+	// Проверяем что типы сохранились
+	typeMap := make(map[string]string)
+	for _, f := range result.Schema.Fields {
+		typeMap[f.Name] = f.Type
+	}
+
+	checks := []struct{ field, want string }{
+		{"id", "INTEGER"},
+		{"birth_date", "DATE"},
+		{"created_at", "DATETIME"},
+		{"name", "TEXT"},
+		{"score", "REAL"},
+	}
+	for _, c := range checks {
+		got := typeMap[c.field]
+		if got != c.want {
+			t.Errorf("field %q: type = %q, want %q", c.field, got, c.want)
+		}
+	}
+
+	// Проверяем что данные дошли целыми
+	rows := result.GetRows()
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+	if rows[0][1] != "1990-05-15" {
+		t.Errorf("birth_date: got %q, want %q", rows[0][1], "1990-05-15")
+	}
+}
+
 // TestWorkspace_LoadData_EmptyPacket проверяет что пустой пакет обрабатывается без ошибок.
 func TestWorkspace_LoadData_EmptyPacket(t *testing.T) {
 	ctx := context.Background()

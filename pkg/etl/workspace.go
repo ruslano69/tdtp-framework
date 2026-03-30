@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -172,10 +173,17 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sqlQuery, resultTableName st
 	}
 
 	// Читаем данные
+	// Для DATE/DATETIME используем *string — иначе modernc парсит в time.Time.
 	values := make([]any, len(columns))
 	valuePtrs := make([]any, len(columns))
-	for i := range values {
-		valuePtrs[i] = &values[i]
+	strBuf := make([]string, len(columns))
+	for i, ct := range columnTypes {
+		dbType := strings.ToUpper(ct.DatabaseTypeName())
+		if dbType == "DATE" || strings.Contains(dbType, "DATETIME") || strings.Contains(dbType, "TIMESTAMP") {
+			valuePtrs[i] = &strBuf[i]
+		} else {
+			valuePtrs[i] = &values[i]
+		}
 	}
 
 	var allRows [][]string
@@ -185,8 +193,13 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sqlQuery, resultTableName st
 		}
 
 		rowValues := make([]string, len(values))
-		for i, val := range values {
-			rowValues[i] = w.formatValue(val)
+		for i, ct := range columnTypes {
+			dbType := strings.ToUpper(ct.DatabaseTypeName())
+			if dbType == "DATE" || strings.Contains(dbType, "DATETIME") || strings.Contains(dbType, "TIMESTAMP") {
+				rowValues[i] = normalizeDateString(strBuf[i], dbType)
+			} else {
+				rowValues[i] = w.formatValue(values[i])
+			}
 		}
 
 		allRows = append(allRows, rowValues)
@@ -254,8 +267,14 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sqlQuery, resultTableN
 
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
+		strBuf := make([]string, len(columns))
+		for i, ct := range columnTypes {
+			dbType := strings.ToUpper(ct.DatabaseTypeName())
+			if dbType == "DATE" || strings.Contains(dbType, "DATETIME") || strings.Contains(dbType, "TIMESTAMP") {
+				valuePtrs[i] = &strBuf[i]
+			} else {
+				valuePtrs[i] = &values[i]
+			}
 		}
 
 		for rows.Next() {
@@ -273,8 +292,13 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sqlQuery, resultTableN
 			}
 
 			rowValues := make([]string, len(values))
-			for i, val := range values {
-				rowValues[i] = w.formatValue(val)
+			for i, ct := range columnTypes {
+				dbType := strings.ToUpper(ct.DatabaseTypeName())
+				if dbType == "DATE" || strings.Contains(dbType, "DATETIME") || strings.Contains(dbType, "TIMESTAMP") {
+					rowValues[i] = normalizeDateString(strBuf[i], dbType)
+				} else {
+					rowValues[i] = w.formatValue(values[i])
+				}
 			}
 
 			select {
@@ -328,8 +352,10 @@ func (w *Workspace) mapTDTPTypeToSQLite(tdtpType schema.DataType) string {
 		return "REAL"
 	case schema.TypeBoolean, schema.TypeBool:
 		return "INTEGER" // SQLite хранит boolean как 0/1
-	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
-		return "TEXT" // SQLite хранит даты как TEXT или INTEGER
+	case schema.TypeDate:
+		return "DATE" // Сохраняем имя типа — DatabaseTypeName() вернёт "DATE"
+	case schema.TypeDatetime, schema.TypeTimestamp:
+		return "DATETIME" // Аналогично для DATETIME
 	case schema.TypeBlob:
 		return "BLOB"
 	default:
@@ -337,7 +363,9 @@ func (w *Workspace) mapTDTPTypeToSQLite(tdtpType schema.DataType) string {
 	}
 }
 
-// mapSQLiteTypeToTDTP конвертирует SQLite тип в TDTP тип
+// mapSQLiteTypeToTDTP конвертирует SQLite тип в TDTP тип.
+// Для DATE/DATETIME колонок SQLite сохраняет объявленное имя типа —
+// DatabaseTypeName() возвращает "DATE"/"DATETIME", а не "TEXT".
 func (w *Workspace) mapSQLiteTypeToTDTP(sqliteType string) string {
 	sqliteType = strings.ToUpper(sqliteType)
 	switch {
@@ -347,6 +375,10 @@ func (w *Workspace) mapSQLiteTypeToTDTP(sqliteType string) string {
 		return "REAL"
 	case strings.Contains(sqliteType, "BLOB"):
 		return "BLOB"
+	case sqliteType == "DATE":
+		return "DATE"
+	case strings.Contains(sqliteType, "DATETIME"), strings.Contains(sqliteType, "TIMESTAMP"):
+		return "DATETIME"
 	default:
 		return "TEXT"
 	}
@@ -377,6 +409,25 @@ func (w *Workspace) convertValue(value, fieldType string) any {
 	default:
 		return value
 	}
+}
+
+// normalizeDateString нормализует строку даты/времени после round-trip через modernc.
+// modernc при *string scan для DATE-колонок возвращает RFC3339 ("1990-05-15T00:00:00Z"),
+// а не исходную строку. Парсим обратно и форматируем в стандартный TDTP формат.
+func normalizeDateString(s, dbType string) string {
+	if s == "" {
+		return s
+	}
+	// Пробуем распарсить распространённые форматы
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02 15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			if dbType == "DATE" {
+				return t.Format("2006-01-02")
+			}
+			return t.Format("2006-01-02 15:04:05")
+		}
+	}
+	return s // если не распознали — вернуть как есть
 }
 
 // formatValue конвертирует значение из SQL в строку для TDTP
