@@ -53,20 +53,29 @@ pg_isready
 
 ---
 
-## Сжатие (zstd)
+## Сжатие (zstd + kanzi)
 
-Бенчмарк на 100k строк SQLite (benchmark_100k.db):
+Бенчмарк на 100k строк SQLite (benchmark_100k.db, синтетические данные Users):
 
-| Режим              | Время   | Размер | Коэф. |
-|--------------------|---------|--------|-------|
-| Без сжатия         | 850 мс  | 9.9 MB | —     |
-| zstd level 3       | 843 мс  | 2.9 MB | 3.07× |
-| zstd level 19      | 1558 мс | 2.4 MB | 3.71× |
+| Режим              | Время    | Размер | Коэф. |
+|--------------------|----------|--------|-------|
+| Без сжатия         | 673 мс   | 9.9 MB | —     |
+| zstd level 3       | 751 мс   | 2.9 MB | 3.4×  |
+| zstd level 19      | 2363 мс  | 2.4 MB | 4.1×  |
+| kanzi level 6      | 1279 мс  | 1.5 MB | 6.6×  |
+| kanzi level 7      | 1449 мс  | 1.4 MB | 7.1×  |
 
-**Вывод**: zstd level 3 практически бесплатен по времени, экономит 3× дискового и сетевого трафика.
+**Вывод по алгоритмам:**
+- `zstd level 3` — дефолт для потоков реального времени: почти бесплатен, 3× экономия
+- `kanzi level 6` — оптимум для архивов и бэкапов: **в 2 раза плотнее zstd3**, быстрее zstd19
+- `kanzi level 7` — максимум плотности, +170 мс к level 6, выгоден только при медленном канале
+
+На реальных данных с разнородным текстом (кадровые приказы, нарративные описания) kanzi
+показывает x10-12 против исходного размера — BWT разворачивается на полную мощность.
+На синтетических коротких строках — 6-7×, но это всё равно **на 30-50% плотнее zstd**.
+
 `compress: true` и `compress_level: 3` — дефолт в шаблоне конфига (`CreateSampleConfig`). Не менять.
-
-Level 19 даёт +20% к сжатию ценой ×2 времени — только для архивного хранения.
+Для архивных задач: `--compress-algo kanzi --compress-level 6 --hash`.
 
 ---
 
@@ -85,3 +94,29 @@ GOPROXY=https://goproxy.io GONOSUMDB='*' go build -tags nokafka -o /tmp/tdtpcli 
 ## Dev branch
 
 Feature branches: `claude/test-tdtpcli-new-keys-0Z7iA`
+
+---
+
+## TODO: Переключение SQLite-драйвера на mattn/go-sqlite3
+
+**Мотивация:** `modernc.org/sqlite` медленнее нативного libsqlite3 в ~3× на больших SELECT.
+Замеры из [cvilsmeier/go-sqlite-bench](https://github.com/cvilsmeier/go-sqlite-bench):
+
+| Драйвер  | 50k строк | 100k строк | 200k строк |
+|----------|-----------|------------|------------|
+| mattn    | 122ms     | 207ms      | 376ms      |
+| modernc  | 401ms     | 629ms      | 1094ms     |
+
+Наш замер: modernc читает 100k строк за ~800ms, Python (C sqlite3) за ~270ms — тот же 3×.
+
+**Что нужно сделать:**
+- Добавить build-тег `cgo_sqlite` (или `!purgo_sqlite`)
+- `pkg/adapters/sqlite/adapter.go` — условный импорт: `mattn` (имя `"sqlite3"`) vs `modernc` (имя `"sqlite"`)
+- `cmd/tdtpcli/drivers_sqlite.go` — аналогично
+- `cmd/bench_raw/main.go` — аналогично
+- `cmd/tdtp-xray/...` — аналогично
+- Обновить `driverSqlite` константу под тег
+- Проверить что `nokafka` + `cgo_sqlite` собираются вместе
+- CGO требует gcc; для CI добавить `apt-get install gcc`
+
+**Ожидаемый результат:** экспорт 100k строк SQLite ~500ms вместо ~1500ms.

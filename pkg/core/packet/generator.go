@@ -2,10 +2,8 @@ package packet
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 )
@@ -28,16 +26,22 @@ func DefaultCompressionOptions() CompressionOptions {
 	}
 }
 
+// DefaultMaxMessageSize — размер по умолчанию (3.8MB оценка → ~1.9MB реального XML).
+// Внутренняя оценка намеренно вдвое больше реального XML,
+// т.к. размер строк считается в UTF-16 единицах (MSMQ/COM-совместимость).
+const DefaultMaxMessageSize = 3_800_000
+
 // Generator отвечает за генерацию TDTP пакетов
 type Generator struct {
-	maxMessageSize int                // в байтах
-	compression    CompressionOptions // настройки сжатия
+	maxMessageSize    int                // в байтах
+	compression       CompressionOptions // настройки сжатия
+	skipSpecialValues bool               // --fast: пропустить DetectAndApply (без контроля NULL/NaN/Inf)
 }
 
 // NewGenerator создает новый генератор
 func NewGenerator() *Generator {
 	return &Generator{
-		maxMessageSize: 3800000, // ~3.8MB для получения ~1.9MB XML (с учетом UTF-16 оценки)
+		maxMessageSize: DefaultMaxMessageSize,
 		compression:    DefaultCompressionOptions(),
 	}
 }
@@ -62,6 +66,13 @@ func (g *Generator) DisableCompression() {
 	g.compression.Enabled = false
 }
 
+// SetSkipSpecialValues отключает DetectAndApply для максимальной скорости экспорта.
+// Используется с флагом --fast: NULL/NaN/Inf не получат canonical markers в схеме.
+// Применять только когда источник гарантированно не содержит спецзначений.
+func (g *Generator) SetSkipSpecialValues(skip bool) {
+	g.skipSpecialValues = skip
+}
+
 // SetCompressionLevel устанавливает уровень сжатия (1-19)
 func (g *Generator) SetCompressionLevel(level int) {
 	if level < 1 {
@@ -78,7 +89,9 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 	packets := []*DataPacket{}
 
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
-	rows, schema = DetectAndApply(rows, schema)
+	if !g.skipSpecialValues {
+		rows, schema = DetectAndApply(rows, schema)
+	}
 
 	// Разбиваем на части если нужно
 	partitions := g.partitionRows(rows, schema)
@@ -95,8 +108,10 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 		// Schema во всех частях (для самодостаточности при файловом экспорте)
 		packet.Schema = schema
 
-		// Преобразуем строки в Data
-		packet.Data = RowsToData(partition)
+		// Сохраняем исходные строки — writePacketTo запишет их напрямую
+		// без pipe-join и промежуточных аллокаций (RowsToData не вызывается).
+		// Broker-путь (ToXML → компрессия) вызовет RowsToData сам если нужно.
+		packet.rawRows = partition
 
 		packets = append(packets, packet)
 	}
@@ -130,7 +145,9 @@ func (g *Generator) GenerateResponse(
 	packets := []*DataPacket{}
 
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
-	rows, schema = DetectAndApply(rows, schema)
+	if !g.skipSpecialValues {
+		rows, schema = DetectAndApply(rows, schema)
+	}
 
 	partitions := g.partitionRows(rows, schema)
 
@@ -153,7 +170,8 @@ func (g *Generator) GenerateResponse(
 			packet.QueryContext = queryContext
 		}
 
-		packet.Data = RowsToData(partition)
+		mask := buildEscapeMask(schema)
+		packet.Data = rowsToDataMasked(partition, mask)
 		packets = append(packets, packet)
 	}
 
@@ -207,50 +225,38 @@ func (g *Generator) GenerateAlarm(
 	}
 
 	packet.Schema = schema
-	packet.Data = RowsToData(rows)
+	packet.Data = rowsToDataMasked(rows, buildEscapeMask(schema))
 
 	return packet, nil
 }
 
-// ToXML сериализует пакет в XML
-func (g *Generator) ToXML(packet *DataPacket, indent bool) ([]byte, error) {
-	var data []byte
-	var err error
-
-	if indent {
-		data, err = xml.MarshalIndent(packet, "", "  ")
-	} else {
-		data, err = xml.Marshal(packet)
+// ToXML сериализует пакет в XML.
+// indent игнорируется — ручной writer всегда даёт компактный XML (корректный и быстрый).
+// Прежний xml.MarshalIndent на Data-секции занимал ~229ms на 100k строк;
+// ручной writer делает то же за ~15ms.
+// rawRows (если установлены) записываются напрямую без RowsToData.
+func (g *Generator) ToXML(packet *DataPacket, _ bool) ([]byte, error) {
+	// Broker/компрессия-путь: если сжатие включено, нужны Data.Rows (compressed string).
+	// В этом случае rawRows ещё не прошли через rowsToDataWithCompression.
+	if g.compression.Enabled && len(packet.rawRows) > 0 && len(packet.Data.Rows) == 0 {
+		packet.Data = rowsToDataMasked(packet.rawRows, buildEscapeMask(packet.Schema))
+		packet.rawRows = nil
 	}
-
+	data, err := packetToBytes(packet)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal XML: %w", err)
+		return nil, fmt.Errorf("failed to write XML: %w", err)
 	}
-
-	// Добавляем XML declaration
-	xmlDeclaration := []byte(xml.Header)
-	return append(xmlDeclaration, data...), nil
+	return data, nil
 }
 
-// WriteToFile записывает пакет в файл
+// WriteToFile записывает пакет прямо в файл без промежуточного []byte.
 func (g *Generator) WriteToFile(packet *DataPacket, filename string) error {
-	data, err := g.ToXML(packet, true)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filename, data, 0o600)
+	return g.WriteToFileFast(packet, filename)
 }
 
-// WriteToWriter записывает пакет в writer
+// WriteToWriter записывает пакет в writer.
 func (g *Generator) WriteToWriter(packet *DataPacket, w io.Writer) error {
-	data, err := g.ToXML(packet, true)
-	if err != nil {
-		return err
-	}
-
-	_, err = w.Write(data)
-	return err
+	return writePacketTo(newPacketWriter(w), packet)
 }
 
 // partitionRows разбивает строки на части по размеру
@@ -290,13 +296,17 @@ func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
 // compressor - функция сжатия, если nil - сжатие не применяется
 func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]string, compressor func(ctx context.Context, rows []string, level int) (string, error)) (Data, error) {
 	// Сначала создаем обычные строки
+	var sb strings.Builder
 	rowStrings := make([]string, len(rows))
 	for i, row := range rows {
-		escapedValues := make([]string, len(row))
+		sb.Reset()
 		for j, value := range row {
-			escapedValues[j] = escapeValue(value)
+			if j > 0 {
+				sb.WriteByte('|')
+			}
+			writeEscaped(&sb, value)
 		}
-		rowStrings[i] = strings.Join(escapedValues, "|")
+		rowStrings[i] = sb.String()
 	}
 
 	// Если сжатие не включено или компрессор не задан
@@ -342,14 +352,33 @@ func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]stri
 	}, nil
 }
 
-// escapeValue экранирует специальные символы в значении
-// Backslash (\) экранируется как \\
-// Pipe (|) экранируется как \|
+// escapeValue экранирует специальные символы в значении за один проход.
+// Backslash (\) → \\, Pipe (|) → \|
 func escapeValue(value string) string {
-	// Сначала экранируем backslash, потом pipe (важен порядок!)
-	escaped := strings.ReplaceAll(value, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, "|", "\\|")
-	return escaped
+	// fast-path: нет спецсимволов — возвращаем как есть без аллокаций
+	hasSpecial := false
+	for i := 0; i < len(value); i++ {
+		if value[i] == '\\' || value[i] == '|' {
+			hasSpecial = true
+			break
+		}
+	}
+	if !hasSpecial {
+		return value
+	}
+	var sb strings.Builder
+	sb.Grow(len(value) + 4)
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\\':
+			sb.WriteString(`\\`)
+		case '|':
+			sb.WriteString(`\|`)
+		default:
+			sb.WriteByte(value[i])
+		}
+	}
+	return sb.String()
 }
 
 // RowsToData преобразует [][]string в Data (публичная функция)
@@ -358,20 +387,80 @@ func RowsToData(rows [][]string) Data {
 	data := Data{
 		Rows: make([]Row, len(rows)),
 	}
-
+	var sb strings.Builder
 	for i, row := range rows {
-		// Экранируем разделитель | и backslash в данных
-		escapedValues := make([]string, len(row))
+		sb.Reset()
 		for j, value := range row {
-			escapedValues[j] = escapeValue(value)
+			if j > 0 {
+				sb.WriteByte('|')
+			}
+			writeEscaped(&sb, value)
 		}
+		data.Rows[i] = Row{Value: sb.String()}
+	}
+	return data
+}
 
-		data.Rows[i] = Row{
-			Value: strings.Join(escapedValues, "|"),
+// buildEscapeMask возвращает маску полей: true если поле может содержать | или \.
+// Числа, даты, булевы — не требуют экранирования.
+func buildEscapeMask(schema Schema) []bool {
+	mask := make([]bool, len(schema.Fields))
+	for i, f := range schema.Fields {
+		mask[i] = !isNeverEscaped(f.Type)
+	}
+	return mask
+}
+
+// isNeverEscaped возвращает true для типов, которые физически не содержат | или \.
+func isNeverEscaped(t string) bool {
+	switch t {
+	case "INTEGER", "INT", "REAL", "FLOAT", "DOUBLE", "DECIMAL",
+		"BOOLEAN", "BOOL", "DATE", "DATETIME", "TIMESTAMP",
+		"integer", "int", "real", "float", "double", "decimal",
+		"boolean", "bool", "date", "datetime", "timestamp":
+		return true
+	}
+	return false
+}
+
+// rowsToDataMasked — RowsToData с маской экранирования по типам полей.
+// Поля с mask[j]=false записываются без escaping (числа, даты, булевы).
+func rowsToDataMasked(rows [][]string, mask []bool) Data {
+	data := Data{Rows: make([]Row, len(rows))}
+	var sb strings.Builder
+	for i, row := range rows {
+		sb.Reset()
+		for j, value := range row {
+			if j > 0 {
+				sb.WriteByte('|')
+			}
+			if j < len(mask) && !mask[j] {
+				sb.WriteString(value)
+			} else {
+				writeEscaped(&sb, value)
+			}
+		}
+		data.Rows[i] = Row{Value: sb.String()}
+	}
+	return data
+}
+
+// writeEscaped пишет value в sb с TDTP-экранированием за один проход.
+func writeEscaped(sb *strings.Builder, value string) {
+	start := 0
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\\':
+			sb.WriteString(value[start:i])
+			sb.WriteString(`\\`)
+			start = i + 1
+		case '|':
+			sb.WriteString(value[start:i])
+			sb.WriteString(`\|`)
+			start = i + 1
 		}
 	}
-
-	return data
+	sb.WriteString(value[start:])
 }
 
 // estimateRowSize примерно оценивает размер строки в байтах

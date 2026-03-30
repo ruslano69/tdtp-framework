@@ -17,6 +17,7 @@ import (
 // StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу.
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
+	pkt.MaterializeRows()
 	tableName := pkt.Header.TableName
 
 	switch strategy {
@@ -71,6 +72,10 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
 	if len(packets) == 0 {
 		return nil
+	}
+
+	for _, pkt := range packets {
+		pkt.MaterializeRows()
 	}
 
 	tableName := packets[0].Header.TableName

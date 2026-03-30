@@ -75,7 +75,8 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 		return fmt.Errorf("table %s does not exist in workspace", tableName)
 	}
 
-	if len(dataPacket.Data.Rows) == 0 {
+	rows := dataPacket.GetRows()
+	if len(rows) == 0 {
 		return nil // Нет данных для загрузки
 	}
 
@@ -114,9 +115,7 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	txStmt := tx.StmtContext(ctx, stmt)
 
 	// Вставляем каждую строку
-	parser := packet.NewParser()
-	for i, row := range dataPacket.Data.Rows {
-		values := parser.GetRowValues(row)
+	for i, values := range rows {
 		if len(values) != numFields {
 			return fmt.Errorf("row %d has %d values, expected %d", i, len(values), numFields)
 		}
@@ -198,6 +197,7 @@ func (w *Workspace) ExecuteSQL(ctx context.Context, sqlQuery, resultTableName st
 	}
 
 	result.Data = packet.RowsToData(allRows)
+	result.Header.RecordsInPart = len(allRows)
 
 	return result, nil
 }

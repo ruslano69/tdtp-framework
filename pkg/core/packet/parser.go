@@ -152,9 +152,9 @@ func (p *Parser) GetCompressionAlgorithm(packet *DataPacket) string {
 }
 
 // DecompressData распаковывает сжатые данные в пакете
-// decompressor - функция распаковки, должна принимать сжатую строку и возвращать массив строк
+// decompressor - функция распаковки, принимает сжатую строку и algo ("zstd", "kanzi" и т.д.)
 // Если данные не сжаты, возвращает их как есть
-func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompressor func(ctx context.Context, compressed string) ([]string, error)) error {
+func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompressor func(ctx context.Context, compressed string, algo string) ([]string, error)) error {
 	// Если данные не сжаты, ничего не делаем
 	if packet.Data.Compression == "" {
 		return nil
@@ -172,7 +172,7 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 
 	// Распаковываем
 	compressedData := packet.Data.Rows[0].Value
-	decompressedRows, err := decompressor(ctx, compressedData)
+	decompressedRows, err := decompressor(ctx, compressedData, packet.Data.Compression)
 	if err != nil {
 		return fmt.Errorf("decompression failed: %w", err)
 	}
@@ -188,7 +188,7 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 }
 
 // ParseWithDecompression парсит пакет и автоматически распаковывает сжатые данные
-func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx context.Context, compressed string) ([]string, error)) (*DataPacket, error) {
+func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx context.Context, compressed string, algo string) ([]string, error)) (*DataPacket, error) {
 	packet, err := p.Parse(r)
 	if err != nil {
 		return nil, err
@@ -212,7 +212,7 @@ func (p *Parser) ParseWithDecompression(r io.Reader, decompressor func(ctx conte
 }
 
 // ParseBytesWithDecompression парсит пакет из байтов и автоматически распаковывает
-func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx context.Context, compressed string) ([]string, error)) (*DataPacket, error) {
+func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx context.Context, compressed string, algo string) ([]string, error)) (*DataPacket, error) {
 	packet, err := p.ParseBytes(data)
 	if err != nil {
 		return nil, err

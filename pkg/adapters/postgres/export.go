@@ -123,6 +123,11 @@ func (a *Adapter) getPrimaryKeyColumns(ctx context.Context, tableName string) ([
 	return pkColumns, rows.Err()
 }
 
+// SetSkipSpecialValues включает режим --fast: DetectAndApply пропускается.
+func (a *Adapter) SetSkipSpecialValues(skip bool) {
+	a.exportHelper.SetSkipSpecialValues(skip)
+}
+
 // ExportTable экспортирует таблицу в TDTP reference пакеты
 // Делегирует в base.ExportHelper для устранения дублирования кода
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {

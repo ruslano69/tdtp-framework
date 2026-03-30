@@ -51,10 +51,12 @@ type RowPostProcessor interface {
 // ExportHelper содержит общую логику экспорта для всех адаптеров
 // Устраняет дублирование кода между SQLite, PostgreSQL, MS SQL Server, MySQL
 type ExportHelper struct {
-	schemaReader   SchemaReader
-	dataReader     DataReader
-	valueConverter ValueConverter
-	sqlAdapter     SQLAdapter
+	schemaReader      SchemaReader
+	dataReader        DataReader
+	valueConverter    ValueConverter
+	sqlAdapter        SQLAdapter
+	maxMessageSize    int  // 0 = use generator default
+	skipSpecialValues bool // --fast: skip DetectAndApply
 }
 
 // NewExportHelper создает новый ExportHelper
@@ -70,6 +72,31 @@ func NewExportHelper(
 		valueConverter: valueConverter,
 		sqlAdapter:     sqlAdapter,
 	}
+}
+
+// SetMaxMessageSize задаёт максимальный размер одного TDTP пакета в байтах.
+// Используется адаптерами для передачи настройки --packet-size из CLI.
+func (h *ExportHelper) SetMaxMessageSize(size int) {
+	h.maxMessageSize = size
+}
+
+// SetSkipSpecialValues включает режим --fast: DetectAndApply пропускается.
+// NULL/NaN/Inf не получат canonical markers. Применять только для источников
+// без спецзначений или когда скорость важнее полноты метаданных.
+func (h *ExportHelper) SetSkipSpecialValues(skip bool) {
+	h.skipSpecialValues = skip
+}
+
+// newGenerator возвращает генератор с учётом всех настроек ExportHelper.
+func (h *ExportHelper) newGenerator() *packet.Generator {
+	g := packet.NewGenerator()
+	if h.maxMessageSize > 0 {
+		g.SetMaxMessageSize(h.maxMessageSize)
+	}
+	if h.skipSpecialValues {
+		g.SetSkipSpecialValues(true)
+	}
+	return g
 }
 
 // ExportTable экспортирует всю таблицу в TDTP reference пакеты
@@ -93,7 +120,7 @@ func (h *ExportHelper) ExportTable(ctx context.Context, tableName string) ([]*pa
 	}
 
 	// 4. Генерируем reference пакеты
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	return generator.GenerateReference(tableName, schema, rows)
 }
 
@@ -156,7 +183,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 
 				queryContext := h.createQueryContextForSQL(ctx, query, rows, tableName)
 
-				generator := packet.NewGenerator()
+				generator := h.newGenerator()
 				return generator.GenerateResponse(
 					tableName,
 					packet.InReplyToDirectExport,
@@ -197,7 +224,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 	}
 
 	// Генерируем Response пакеты с QueryContext
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	return generator.GenerateResponse(
 		tableName,
 		packet.InReplyToDirectExport,
@@ -306,7 +333,7 @@ func (h *ExportHelper) ExportTableIncremental(
 	}
 
 	// Генерируем пакеты
-	generator := packet.NewGenerator()
+	generator := h.newGenerator()
 	packets, err := generator.GenerateReference(tableName, pkgSchema, rows)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to generate packets: %w", err)

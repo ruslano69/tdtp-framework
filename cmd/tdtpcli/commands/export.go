@@ -26,8 +26,10 @@ type ExportOptions struct {
 	ProcessorMgr   ProcessorManager
 	Compress       bool
 	CompressLevel  int
-	EnableChecksum bool // Add XXH3 checksum for data integrity verification
-	ReadOnlyFields bool // Include read-only fields (timestamp, computed, identity)
+	CompressAlgo   string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
+	EnableChecksum bool   // Add XXH3 checksum for data integrity verification
+	ReadOnlyFields    bool // Include read-only fields (timestamp, computed, identity)
+	Fast              bool // Skip SpecialValues detection for maximum export speed
 
 	// v1.3.1 compact format
 	Compact     bool     // Enable compact format output
@@ -59,6 +61,14 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	// Add includeReadOnly flag to context for MS SQL adapter
 	// (other adapters will ignore it)
 	ctx = mssql.WithIncludeReadOnlyFields(ctx, opts.ReadOnlyFields)
+
+	// --fast: skip SpecialValues detection for maximum throughput
+	if opts.Fast {
+		type specialValueSkipper interface{ SetSkipSpecialValues(bool) }
+		if sv, ok := adapter.(specialValueSkipper); ok {
+			sv.SetSkipSpecialValues(true)
+		}
+	}
 
 	// If fields projection is requested, ensure we go through ExportTableWithQuery
 	// (even if no other query params are set) so the adapter can build SELECT f1,f2,...
@@ -103,7 +113,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	// Count total rows before any further processing
 	totalRows := 0
 	for _, pkt := range packets {
-		totalRows += len(pkt.Data.Rows)
+		totalRows += pkt.Header.RecordsInPart
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 
@@ -125,13 +135,13 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 
 	// Apply compression if enabled
 	if opts.Compress {
-		fmt.Printf("Compressing data (level %d)...\n", opts.CompressLevel)
+		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
 		for _, pkt := range packets {
-			if err := compressPacketData(pkt, opts.CompressLevel, opts.EnableChecksum); err != nil {
+			if err := compressPacketData(pkt, opts.CompressLevel, opts.CompressAlgo, opts.EnableChecksum); err != nil {
 				return fmt.Errorf("compression failed: %w", err)
 			}
 		}
-		fmt.Printf("✓ Data compressed with zstd\n")
+		fmt.Printf("✓ Data compressed with %s\n", opts.CompressAlgo)
 		if opts.EnableChecksum {
 			fmt.Printf("✓ Checksums generated (xxh3)\n")
 		}
@@ -206,7 +216,7 @@ func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt
 	meta := map[string]string{
 		"table":    pkt.Header.TableName,
 		"protocol": "TDTP 1.0",
-		"rows":     strconv.Itoa(len(pkt.Data.Rows)),
+		"rows":     strconv.Itoa(pkt.Header.RecordsInPart),
 	}
 	if pkt.Data.Checksum != "" {
 		meta["checksum"] = pkt.Data.Checksum
@@ -264,11 +274,19 @@ func generatePacketFilename(baseFile string, n, total int) string {
 	return fmt.Sprintf("%s_part_%d_of_%d%s", base, n, total, ext)
 }
 
-// compressPacketData compresses the Data section of a packet using zstd
+// compressPacketData compresses the Data section of a packet using the specified algorithm.
 // and optionally generates XXH3 checksum for data integrity verification
-func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) error {
+func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableChecksum bool) error {
+	// Materialize rawRows (GenerateReference fast-path) before compression
+	if pkt.Header.RecordsInPart > 0 && len(pkt.Data.Rows) == 0 {
+		pkt.SetRows(pkt.GetRows())
+	}
 	if len(pkt.Data.Rows) == 0 {
 		return nil
+	}
+
+	if algo == "" {
+		algo = processors.AlgoZstd
 	}
 
 	// Extract row values
@@ -278,7 +296,7 @@ func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) 
 	}
 
 	// Compress
-	compressed, stats, err := processors.CompressDataForTdtp(rows, level)
+	compressed, stats, err := processors.CompressDataForTdtpAlgo(rows, algo, level)
 	if err != nil {
 		return err
 	}
@@ -290,7 +308,7 @@ func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) 
 	}
 
 	// Update packet with compressed data
-	pkt.Data.Compression = "zstd"
+	pkt.Data.Compression = algo
 	pkt.Data.Rows = []packet.Row{{Value: compressed}}
 
 	// Log compression stats
@@ -303,8 +321,8 @@ func compressPacketData(pkt *packet.DataPacket, level int, enableChecksum bool) 
 	return nil
 }
 
-// decompressPacketData decompresses the Data section of a packet
-// and validates checksum if present (before decompression for efficiency)
+// decompressPacketData decompresses the Data section of a packet.
+// Алгоритм определяется из pkt.Data.Compression — поддерживает zstd и kanzi.
 func decompressPacketData(pkt *packet.DataPacket) error {
 	if pkt.Data.Compression == "" {
 		return nil // Not compressed
@@ -324,8 +342,8 @@ func decompressPacketData(pkt *packet.DataPacket) error {
 		fmt.Printf("  ✓ Checksum validated: %s\n", pkt.Data.Checksum)
 	}
 
-	// Decompress
-	rows, err := processors.DecompressDataForTdtp(compressedData)
+	// Decompress — dispatch by algorithm stored in packet
+	rows, err := processors.DecompressDataForTdtpAlgo(compressedData, pkt.Data.Compression)
 	if err != nil {
 		return err
 	}

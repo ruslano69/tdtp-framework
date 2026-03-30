@@ -16,6 +16,7 @@ import (
 
 // ImportPacket импортирует один TDTP пакет в БД
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
+	pkt.MaterializeRows()
 	// DDL вне транзакции — чтобы не блокироваться на Sch-M lock
 	tableName := pkt.Header.TableName
 	exists, err := a.TableExists(ctx, tableName)
@@ -45,6 +46,11 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
 func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacket, strategy adapters.ImportStrategy) error {
 	if len(packets) == 0 {
 		return nil
+	}
+
+	// Материализуем rawRows → Data.Rows для всех пакетов
+	for _, pkt := range packets {
+		pkt.MaterializeRows()
 	}
 
 	// DDL (CREATE TABLE) выполняем ВНЕ транзакции.

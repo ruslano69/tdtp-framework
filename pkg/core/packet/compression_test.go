@@ -16,7 +16,7 @@ func mockCompressor(ctx context.Context, rows []string, level int) (string, erro
 }
 
 // Mock decompressor для тестов
-func mockDecompressor(ctx context.Context, compressed string) ([]string, error) {
+func mockDecompressor(ctx context.Context, compressed string, algo string) ([]string, error) {
 	// Убираем префикс "COMPRESSED:"
 	data := strings.TrimPrefix(compressed, "COMPRESSED:")
 	if data == "" {

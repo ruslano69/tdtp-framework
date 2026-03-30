@@ -2,6 +2,7 @@ package processors
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -345,6 +346,146 @@ func BenchmarkDecompression(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// TestKanziRoundtrip проверяет сжатие и распаковку kanzi для уровней 6 и 7.
+func TestKanziRoundtrip(t *testing.T) {
+	inputs := []struct {
+		name string
+		data string
+	}{
+		{"simple", "value1|value2|value3"},
+		{"multiline", "row1_a|row1_b\nrow2_a|row2_b\nrow3_a|row3_b"},
+		{"xml_like", strings.Repeat("<row><id>1</id><name>Иванов Иван Иванович</name><dept>Бухгалтерия</dept></row>\n", 200)},
+		{"tabular", strings.Repeat("2024-01-15|Приказ №123|Иванов И.И.|Принят на работу|Бухгалтер|50000\n", 500)},
+	}
+
+	for _, level := range []int{6, 7} {
+		for _, tc := range inputs {
+			t.Run(fmt.Sprintf("level%d/%s", level, tc.name), func(t *testing.T) {
+				compressed, err := CompressKanzi([]byte(tc.data), level)
+				if err != nil {
+					t.Fatalf("CompressKanzi level %d failed: %v", level, err)
+				}
+				if len(tc.data) > 0 && len(compressed) == 0 {
+					t.Fatal("expected non-empty compressed output")
+				}
+
+				decompressed, err := DecompressKanzi(compressed)
+				if err != nil {
+					t.Fatalf("DecompressKanzi level %d failed: %v", level, err)
+				}
+				if string(decompressed) != tc.data {
+					t.Fatalf("roundtrip mismatch: got %q, want %q", string(decompressed), tc.data)
+				}
+			})
+		}
+	}
+}
+
+// TestKanziEmpty проверяет обработку пустых данных.
+func TestKanziEmpty(t *testing.T) {
+	compressed, err := CompressKanzi([]byte{}, 6)
+	if err != nil {
+		t.Fatalf("CompressKanzi empty: %v", err)
+	}
+	if compressed != nil {
+		t.Errorf("expected nil for empty input, got %d bytes", len(compressed))
+	}
+
+	decompressed, err := DecompressKanzi(nil)
+	if err != nil {
+		t.Fatalf("DecompressKanzi nil: %v", err)
+	}
+	if decompressed != nil {
+		t.Errorf("expected nil for nil input")
+	}
+}
+
+// TestCompressDataForTdtpAlgo проверяет dispatcher по алгоритму.
+func TestCompressDataForTdtpAlgo(t *testing.T) {
+	rows := []string{
+		"2024-01-15|Приказ №1|Иванов И.И.|Принят на работу",
+		"2024-01-16|Приказ №2|Петров П.П.|Уволен по собственному",
+		"2024-01-17|Приказ №3|Сидоров С.С.|Переведён в другой отдел",
+	}
+
+	for _, algo := range []string{AlgoZstd, AlgoKanzi} {
+		level := 3
+		if algo == AlgoKanzi {
+			level = 6
+		}
+		t.Run(algo, func(t *testing.T) {
+			compressed, stats, err := CompressDataForTdtpAlgo(rows, algo, level)
+			if err != nil {
+				t.Fatalf("CompressDataForTdtpAlgo(%s) failed: %v", algo, err)
+			}
+			if compressed == "" {
+				t.Fatal("expected non-empty compressed string")
+			}
+			if stats.Ratio <= 0 {
+				t.Errorf("expected ratio > 0, got %f", stats.Ratio)
+			}
+
+			decompressed, err := DecompressDataForTdtpWithAlgo(compressed, algo)
+			if err != nil {
+				t.Fatalf("DecompressDataForTdtpWithAlgo(%s) failed: %v", algo, err)
+			}
+			if len(decompressed) != len(rows) {
+				t.Fatalf("expected %d rows, got %d", len(rows), len(decompressed))
+			}
+			for i, row := range rows {
+				if decompressed[i] != row {
+					t.Errorf("row %d mismatch: got %q, want %q", i, decompressed[i], row)
+				}
+			}
+		})
+	}
+}
+
+// TestKanziVsZstdRatio сравнивает коэффициент сжатия kanzi и zstd на разных данных.
+// Kanzi выигрывает на живых разнородных текстах (реальные кадровые приказы, нарративный текст).
+// На синтетически повторяющихся строках zstd может быть плотнее — это нормально.
+// Тест логирует соотношение без падения: используется как benchmark-наблюдение.
+func TestKanziVsZstdRatio(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{
+			"repetitive_rows",
+			strings.Join(func() []string {
+				rows := make([]string, 300)
+				for i := range rows {
+					rows[i] = fmt.Sprintf("2024-%02d-15|Приказ №%d|Сотрудник Сотрудникович|Принят|75000.00", (i%12)+1, i+1)
+				}
+				return rows
+			}(), "\n"),
+		},
+		{
+			"varied_text",
+			strings.Join([]string{
+				"Иванов Иван Иванович|Принят на должность главного бухгалтера отдела финансов",
+				"Петров Пётр Петрович|Уволен по собственному желанию согласно заявлению от 15.01.2024",
+				"Сидорова Анна Николаевна|Переведена в филиал г. Екатеринбург на должность ведущего специалиста",
+				"Козлов Дмитрий Андреевич|Направлен в командировку в г. Москва сроком на 14 календарных дней",
+				"Новикова Елена Сергеевна|Предоставлен отпуск по уходу за ребёнком до достижения им возраста 3 лет",
+				"Морозов Алексей Владимирович|Установлена надбавка к должностному окладу в размере 25 процентов",
+				"Волкова Ирина Михайловна|Объявлена благодарность за добросовестный труд и высокие производственные показатели",
+				"Лебедев Сергей Юрьевич|Наложено дисциплинарное взыскание в виде выговора за нарушение трудовой дисциплины",
+			}, "\n"),
+		},
+	}
+
+	for _, tc := range tests {
+		data := []byte(tc.data)
+		zstdOut, _ := Compress(data, 3)
+		kanziOut, _ := CompressKanzi(data, 6)
+		zstdRatio := float64(len(data)) / float64(len(zstdOut))
+		kanziRatio := float64(len(data)) / float64(len(kanziOut))
+		t.Logf("[%s] original=%d  zstd=%.2fx (%d bytes)  kanzi=%.2fx (%d bytes)",
+			tc.name, len(data), zstdRatio, len(zstdOut), kanziRatio, len(kanziOut))
 	}
 }
 

@@ -484,6 +484,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
 	dataPacket.Schema = schema
 	dataPacket.Data = packet.RowsToData(scannedRows)
+	dataPacket.Header.RecordsInPart = len(scannedRows)
 
 	return dataPacket, nil
 }
