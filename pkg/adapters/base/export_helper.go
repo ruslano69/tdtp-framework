@@ -350,17 +350,16 @@ func (h *ExportHelper) createQueryContextForSQL(
 	rows [][]string,
 	tableName string,
 ) *packet.QueryContext {
-	// Получаем общее количество записей в таблице
-	totalCount, err := h.dataReader.GetRowCount(ctx, tableName)
-	if err != nil {
-		totalCount = 0 // игнорируем ошибку, используем 0 если не удалось получить count
-	}
-
 	recordsReturned := len(rows)
 	moreDataAvailable := false
 	nextOffset := 0
+	var totalCount int64
 
+	// GetRowCount нужен только для пагинации (Limit > 0) — без него это лишний round-trip к БД.
 	if query != nil && query.Limit > 0 {
+		if count, err := h.dataReader.GetRowCount(ctx, tableName); err == nil {
+			totalCount = count
+		}
 		// Проверяем есть ли еще данные: offset + returned < total
 		currentPosition := query.Offset + recordsReturned
 		if currentPosition < int(totalCount) {
