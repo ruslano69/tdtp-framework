@@ -68,7 +68,7 @@ func isSQLiteDateType(t string) bool {
 // SQLite stores datetimes as "YYYY-MM-DD HH:MM:SS" (space separator, no Z).
 // TDTP expects RFC3339 "YYYY-MM-DDTHH:MM:SSZ" for DATETIME/TIMESTAMP.
 // DATE values ("YYYY-MM-DD") are returned as-is.
-func normalizeSQLiteDateTime(s string, fieldType string) string {
+func normalizeSQLiteDateTime(s, fieldType string) string {
 	if s == "" {
 		return s
 	}

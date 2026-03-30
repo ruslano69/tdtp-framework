@@ -340,6 +340,6 @@ func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 }
 
 // decompressData decompresses compressed data using processors package
-func decompressData(compressed string, algo string) ([]string, error) {
+func decompressData(compressed, algo string) ([]string, error) {
 	return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
 }

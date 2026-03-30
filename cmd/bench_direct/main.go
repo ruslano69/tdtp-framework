@@ -12,12 +12,15 @@ import (
 	sqlite "modernc.org/sqlite"
 )
 
-const DBFile = "benchmark_100k.db"
+const dbFile = "benchmark_100k.db"
 
 // ── Вариант A: через database/sql (текущий baseline) ─────────────────────
 func benchViaSQL(db *sql.DB) ([]byte, int) {
-	rows, _ := db.Query("SELECT * FROM Users")
-	defer rows.Close()
+	rows, err := db.Query("SELECT * FROM Users")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = rows.Close() }()
 
 	cols, _ := rows.Columns()
 	colCount := len(cols)
@@ -30,7 +33,9 @@ func benchViaSQL(db *sql.DB) ([]byte, int) {
 	buf := make([]byte, 0, 32*1024*1024)
 	n := 0
 	for rows.Next() {
-		rows.Scan(scanArgs...)
+		if err := rows.Scan(scanArgs...); err != nil {
+			panic(err)
+		}
 		buf = append(buf, '<', 'R', '>')
 		for i, val := range values {
 			if i > 0 {
@@ -60,25 +65,25 @@ func benchViaSQL(db *sql.DB) ([]byte, int) {
 func benchViaDirect() ([]byte, int) {
 	// Открываем через Driver напрямую — никакого connection pool, никакого mutex
 	var drv sqlite.Driver
-	driverConn, err := drv.Open(DBFile)
+	driverConn, err := drv.Open(dbFile)
 	if err != nil {
 		panic(err)
 	}
-	defer driverConn.Close()
+	defer func() { _ = driverConn.Close() }()
 
 	// Prepare через driver.Conn
 	driverStmt, err := driverConn.Prepare("SELECT * FROM Users")
 	if err != nil {
 		panic(err)
 	}
-	defer driverStmt.Close()
+	defer func() { _ = driverStmt.Close() }()
 
 	// Query через driver.Stmt (намеренно: бенчмарк низкоуровневого API без мьютекса)
 	driverRows, err := driverStmt.Query(nil) //nolint:staticcheck
 	if err != nil {
 		panic(err)
 	}
-	defer driverRows.Close()
+	defer func() { _ = driverRows.Close() }()
 
 	cols := driverRows.Columns()
 	colCount := len(cols)
@@ -143,15 +148,19 @@ func run(name string, runs int, f func() ([]byte, int)) {
 }
 
 func main() {
-	// database/sql pool
-	db, _ := sql.Open("sqlite", DBFile)
-	defer db.Close()
-
 	// Убеждаемся что файл существует
-	if _, err := os.Stat(DBFile); err != nil {
-		fmt.Println("Нет файла", DBFile)
+	if _, err := os.Stat(dbFile); err != nil {
+		fmt.Println("Нет файла", dbFile)
 		return
 	}
+
+	// database/sql pool
+	db, err := sql.Open("sqlite", dbFile)
+	if err != nil {
+		fmt.Println("Ошибка открытия БД:", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
 
 	const runs = 10
 	fmt.Printf("modernc.org/sqlite  |  %d прогонов  |  100k × 16\n\n", runs)

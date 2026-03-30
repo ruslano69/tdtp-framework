@@ -106,6 +106,15 @@ linters:
         linters:
           - revive
 
+      # bufio.Writer и strings.Builder: ошибки отдельных Write/WriteString/WriteByte
+      # накапливаются и возвращаются при Flush — проверять каждый вызов избыточно.
+      - text: "Error return value of `\\w+\\.(WriteString|WriteByte|Write)` is not checked"
+        linters:
+          - errcheck
+      - text: "Error return value of `fmt\\.Fprintf` is not checked"
+        linters:
+          - errcheck
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

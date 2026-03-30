@@ -11,18 +11,27 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const DBFile = "benchmark_100k.db"
+const dbFile = "benchmark_100k.db"
 
 // ── Вариант 1: оригинальный dynamic (interface{}) → файл ──────────────────
-func benchDynamicToFile(db *sql.DB) (int64, int) {
-	file, _ := os.Create("/tmp/bench_dynamic.xml")
-	defer file.Close()
+func benchDynamicToFile(db *sql.DB) int {
+	f, err := os.CreateTemp("", "bench_dynamic_*.xml")
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	}()
 
 	buf := make([]byte, 0, 8*1024*1024)
 	buf = append(buf, "<DATA>\n"...)
 
-	rows, _ := db.Query("SELECT * FROM Users")
-	defer rows.Close()
+	rows, err := db.Query("SELECT * FROM Users")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = rows.Close() }()
 
 	cols, _ := rows.Columns()
 	colCount := len(cols)
@@ -34,7 +43,9 @@ func benchDynamicToFile(db *sql.DB) (int64, int) {
 
 	n := 0
 	for rows.Next() {
-		rows.Scan(scanArgs...)
+		if err := rows.Scan(scanArgs...); err != nil {
+			panic(err)
+		}
 		buf = append(buf, "<R>"...)
 		for i, val := range values {
 			if i > 0 {
@@ -67,13 +78,17 @@ func benchDynamicToFile(db *sql.DB) (int64, int) {
 		buf = append(buf, "</R>\n"...)
 		n++
 		if len(buf) > 4*1024*1024 {
-			file.Write(buf)
+			if _, err := f.Write(buf); err != nil {
+				panic(err)
+			}
 			buf = buf[:0]
 		}
 	}
 	buf = append(buf, "</DATA>\n"...)
-	file.Write(buf)
-	return 0, n
+	if _, err := f.Write(buf); err != nil {
+		panic(err)
+	}
+	return n
 }
 
 // ── Вариант 2: dynamic только в память (без записи на диск) ──────────────
@@ -81,8 +96,11 @@ func benchDynamicMemOnly(db *sql.DB) ([]byte, int) {
 	buf := make([]byte, 0, 32*1024*1024)
 	buf = append(buf, "<DATA>\n"...)
 
-	rows, _ := db.Query("SELECT * FROM Users")
-	defer rows.Close()
+	rows, err := db.Query("SELECT * FROM Users")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = rows.Close() }()
 
 	cols, _ := rows.Columns()
 	colCount := len(cols)
@@ -94,7 +112,9 @@ func benchDynamicMemOnly(db *sql.DB) ([]byte, int) {
 
 	n := 0
 	for rows.Next() {
-		rows.Scan(scanArgs...)
+		if err := rows.Scan(scanArgs...); err != nil {
+			panic(err)
+		}
 		buf = append(buf, "<R>"...)
 		for i, val := range values {
 			if i > 0 {
@@ -133,8 +153,11 @@ func benchDynamicMemOnly(db *sql.DB) ([]byte, int) {
 
 // ── Вариант 3: только rows.Next()+Scan() без обработки (измеряем mutex) ──
 func benchScanOnly(db *sql.DB) int {
-	rows, _ := db.Query("SELECT * FROM Users")
-	defer rows.Close()
+	rows, err := db.Query("SELECT * FROM Users")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = rows.Close() }()
 
 	cols, _ := rows.Columns()
 	colCount := len(cols)
@@ -146,7 +169,9 @@ func benchScanOnly(db *sql.DB) int {
 
 	n := 0
 	for rows.Next() {
-		rows.Scan(scanArgs...)
+		if err := rows.Scan(scanArgs...); err != nil {
+			panic(err)
+		}
 		n++
 	}
 	return n
@@ -154,8 +179,11 @@ func benchScanOnly(db *sql.DB) int {
 
 // ── Вариант 4: *string scan (наш текущий путь для дат) ────────────────────
 func benchStringScan(db *sql.DB) int {
-	rows, _ := db.Query("SELECT * FROM Users")
-	defer rows.Close()
+	rows, err := db.Query("SELECT * FROM Users")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = rows.Close() }()
 
 	cols, _ := rows.Columns()
 	colCount := len(cols)
@@ -169,7 +197,9 @@ func benchStringScan(db *sql.DB) int {
 
 	n := 0
 	for rows.Next() {
-		rows.Scan(scanArgs...)
+		if err := rows.Scan(scanArgs...); err != nil {
+			panic(err)
+		}
 		n++
 	}
 	return n
@@ -200,12 +230,12 @@ func runN(name string, f func() (int, int64)) {
 }
 
 func main() {
-	db, err := sql.Open("sqlite", DBFile)
+	db, err := sql.Open("sqlite", dbFile)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	fmt.Println("Прогрев...")
 	benchDynamicToFile(db)
@@ -216,8 +246,7 @@ func main() {
 	fmt.Println("=== 10 прогонов, метрика — МИНИМУМ ===")
 
 	runN("1. interface{} scan → файл", func() (int, int64) {
-		_, n := benchDynamicToFile(db)
-		return n, 0
+		return benchDynamicToFile(db), 0
 	})
 	runN("2. interface{} scan → память", func() (int, int64) {
 		buf, n := benchDynamicMemOnly(db)

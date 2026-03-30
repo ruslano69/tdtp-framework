@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
@@ -34,12 +35,18 @@ func main() {
 
 // readSQLite читает все строки из SQLite в [][]string
 func readSQLite(path string) [][]string {
-	db, _ := sql.Open("sqlite", path)
-	defer db.Close()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = db.Close() }()
 
 	t0 := time.Now()
-	sqlRows, _ := db.Query("SELECT * FROM users")
-	defer sqlRows.Close()
+	sqlRows, err := db.Query("SELECT * FROM users")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = sqlRows.Close() }()
 
 	cols, _ := sqlRows.Columns()
 	vals := make([]any, len(cols))
@@ -50,7 +57,9 @@ func readSQLite(path string) [][]string {
 
 	var result [][]string
 	for sqlRows.Next() {
-		sqlRows.Scan(ptrs...)
+		if err := sqlRows.Scan(ptrs...); err != nil {
+			panic(err)
+		}
 		row := make([]string, len(cols))
 		for j, v := range vals {
 			if v != nil {
@@ -88,7 +97,7 @@ func benchDuckDB(data [][]string) {
 		return
 	}
 	db := sql.OpenDB(connector)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Создаём таблицу (все колонки как VARCHAR — имитируем ETL workspace)
 	createSQL := "CREATE TABLE users (c0 VARCHAR"
@@ -103,7 +112,11 @@ func benchDuckDB(data [][]string) {
 
 	// Bulk insert через Appender — один CGO-вызов на батч, не на строку
 	tLoad := time.Now()
-	conn, _ := connector.Connect(nil)
+	conn, err := connector.Connect(context.TODO())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "connect: %v\n", err)
+		return
+	}
 	appender, err := duckdb.NewAppenderFromConn(conn, "", "users")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "appender: %v\n", err)
@@ -114,9 +127,15 @@ func benchDuckDB(data [][]string) {
 		for i, v := range row {
 			irow[i] = v
 		}
-		appender.AppendRow(irow...)
+		if err := appender.AppendRow(irow...); err != nil {
+			fmt.Fprintf(os.Stderr, "append: %v\n", err)
+			return
+		}
 	}
-	appender.Close()
+	if err := appender.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "appender close: %v\n", err)
+		return
+	}
 	fmt.Printf("duckdb load:  %v (%d rows)\n", time.Since(tLoad), len(data))
 
 	// Читаем из DuckDB
@@ -126,7 +145,7 @@ func benchDuckDB(data [][]string) {
 		fmt.Fprintf(os.Stderr, "query: %v\n", err)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	scanVals := make([]any, cols)
 	scanPtrs := make([]any, cols)
@@ -134,13 +153,19 @@ func benchDuckDB(data [][]string) {
 		scanPtrs[i] = &scanVals[i]
 	}
 
-	out, _ := os.Create(os.DevNull)
+	out, err := os.Open(os.DevNull)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "devnull: %v\n", err)
+		return
+	}
+	defer func() { _ = out.Close() }()
 	w := bufio.NewWriterSize(out, bufferSize)
-	defer out.Close()
 
 	var count int64
 	for rows.Next() {
-		rows.Scan(scanPtrs...)
+		if err := rows.Scan(scanPtrs...); err != nil {
+			panic(err)
+		}
 		w.WriteString("<R>")
 		for j, v := range scanVals {
 			if j > 0 {
@@ -157,7 +182,9 @@ func benchDuckDB(data [][]string) {
 		w.WriteString("</R>\n")
 		count++
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "flush: %v\n", err)
+	}
 
 	elapsed := time.Since(tRead)
 	fmt.Printf("duckdb read:  %v\n", elapsed)

@@ -218,7 +218,7 @@ func DecompressDataForTdtp(compressed string) ([]string, error) {
 }
 
 // DecompressDataForTdtpWithAlgo декомпрессирует данные с учётом алгоритма.
-func DecompressDataForTdtpWithAlgo(compressed string, algo string) ([]string, error) {
+func DecompressDataForTdtpWithAlgo(compressed, algo string) ([]string, error) {
 	if compressed == "" {
 		return nil, nil
 	}
@@ -291,7 +291,7 @@ func DecompressKanzi(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kanzi reader: %w", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	decompressed, err := io.ReadAll(r)
 	if err != nil {
@@ -327,7 +327,7 @@ func CompressDataForTdtpAlgo(rows []string, algo string, level int) (compressedR
 }
 
 // DecompressDataForTdtpAlgo распаковывает данные TDTP-пакета по имени алгоритма.
-func DecompressDataForTdtpAlgo(compressed string, algo string) ([]string, error) {
+func DecompressDataForTdtpAlgo(compressed, algo string) ([]string, error) {
 	if compressed == "" {
 		return nil, nil
 	}

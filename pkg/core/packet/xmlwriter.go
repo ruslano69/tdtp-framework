@@ -12,12 +12,12 @@ import (
 // Фиксированные байтовые константы для горячего пути записи строк.
 // Хардкодим как []byte чтобы избежать повторной конвертации string→[]byte в цикле.
 var (
-	bTagROpen   = []byte("<R>")
-	bTagRClose  = []byte("</R>")
-	bEscLt      = []byte("&lt;")
-	bEscGt      = []byte("&gt;")
-	bEscAmp     = []byte("&amp;")
-	bEscQuot    = []byte("&quot;")
+	bTagROpen  = []byte("<R>")
+	bTagRClose = []byte("</R>")
+	bEscLt     = []byte("&lt;")
+	bEscGt     = []byte("&gt;")
+	bEscAmp    = []byte("&amp;")
+	bEscQuot   = []byte("&quot;")
 )
 
 // writePacketTo сериализует DataPacket в XML без encoding/xml reflection для Data-секции.
@@ -244,6 +244,9 @@ func (g *Generator) WriteToFileFast(packet *DataPacket, filename string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return writePacketTo(newPacketWriter(f), packet)
+	if err := writePacketTo(newPacketWriter(f), packet); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }

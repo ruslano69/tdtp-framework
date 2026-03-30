@@ -48,51 +48,40 @@ func xmlEscape(s string) string {
 	return b.String()
 }
 
-func main() {
-	dbPath := "/home/user/tdtp-framework/benchmark_100k.db"
-	outPath := "/tmp/bench_raw_out.xml"
-	if len(os.Args) > 1 {
-		dbPath = os.Args[1]
-	}
-	if len(os.Args) > 2 {
-		outPath = os.Args[2]
-	}
-
+func run(dbPath, outPath string) error {
 	t0 := time.Now()
 
 	// ── Open DB ──────────────────────────────────────────────────────────────
 	db, err := sql.Open(dbDriver, dbPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("open: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// ── Count rows ───────────────────────────────────────────────────────────
 	var total int64
 	if err := db.QueryRow("SELECT COUNT(*) FROM " + tableName).Scan(&total); err != nil {
-		fmt.Fprintf(os.Stderr, "count: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("count: %w", err)
 	}
 
 	// ── Read schema ──────────────────────────────────────────────────────────
 	rows, err := db.Query("SELECT * FROM " + tableName + " LIMIT 0")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "schema: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("schema: %w", err)
 	}
 	cols, _ := rows.Columns()
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("schema close: %w", err)
+	}
 
 	tOpen := time.Since(t0)
 
 	// ── Open output ──────────────────────────────────────────────────────────
 	out, err := os.Create(outPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "create: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("create: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	w := bufio.NewWriterSize(out, bufferSize)
 
 	// ── Fetch data ───────────────────────────────────────────────────────────
@@ -100,10 +89,9 @@ func main() {
 
 	dataRows, err := db.Query("SELECT * FROM " + tableName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "query: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("query: %w", err)
 	}
-	defer dataRows.Close()
+	defer func() { _ = dataRows.Close() }()
 
 	scanBuf := make([]any, len(cols))
 	scanPtrs := make([]any, len(cols))
@@ -132,8 +120,7 @@ func main() {
 
 	for dataRows.Next() {
 		if err := dataRows.Scan(scanPtrs...); err != nil {
-			fmt.Fprintf(os.Stderr, "scan: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("scan: %w", err)
 		}
 
 		// Batch separator (for multi-packet simulation)
@@ -163,7 +150,7 @@ func main() {
 				case time.Time:
 					w.WriteString(v.UTC().Format(time.RFC3339))
 				default:
-					w.WriteString(fmt.Sprintf("%v", v))
+					fmt.Fprintf(w, "%v", v)
 				}
 			}
 			w.WriteString("</V>")
@@ -172,13 +159,14 @@ func main() {
 		rowCount++
 	}
 	if err := dataRows.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "rows: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("rows: %w", err)
 	}
 
 	w.WriteString("  </Data>\n")
 	w.WriteString("</DataPacket>\n")
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("flush: %w", err)
+	}
 
 	tTotal := time.Since(t0)
 	tWrite := time.Since(tScan)
@@ -199,4 +187,21 @@ func main() {
 	fmt.Printf("─────────────────────────\n")
 	fmt.Printf("throughput:  %.2fM fields/sec\n", fieldsPerSec)
 	fmt.Printf("output:      %s\n", outPath)
+	_ = packetCount
+	return nil
+}
+
+func main() {
+	dbPath := "/home/user/tdtp-framework/benchmark_100k.db"
+	outPath := "/tmp/bench_raw_out.xml"
+	if len(os.Args) > 1 {
+		dbPath = os.Args[1]
+	}
+	if len(os.Args) > 2 {
+		outPath = os.Args[2]
+	}
+	if err := run(dbPath, outPath); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
