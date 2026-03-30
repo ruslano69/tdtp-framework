@@ -41,10 +41,34 @@ type ExportOptions struct {
 	StorageKey string          // object key within the bucket
 }
 
-// ProcessorManager interface for applying data processors
+// ProcessorManager interface for applying data processors.
+// Embeds processors.PacketProcessor so it can participate in PacketChain directly.
 type ProcessorManager interface {
-	ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error
+	processors.PacketProcessor // Name() + ProcessPacket()
 	HasProcessors() bool
+}
+
+// compactProc адаптирует applyCompactToPacket в PacketProcessor.
+type compactProc struct {
+	fixedNames []string
+	writeTail  bool
+}
+
+func (p *compactProc) Name() string { return "compact" }
+func (p *compactProc) ProcessPacket(_ context.Context, pkt *packet.DataPacket) error {
+	return applyCompactToPacket(pkt, p.fixedNames, p.writeTail)
+}
+
+// compressProc адаптирует compressPacketData в PacketProcessor.
+type compressProc struct {
+	algo     string
+	level    int
+	checksum bool
+}
+
+func (p *compressProc) Name() string { return "compress" }
+func (p *compressProc) ProcessPacket(_ context.Context, pkt *packet.DataPacket) error {
+	return compressPacketData(pkt, p.level, p.algo, p.checksum)
 }
 
 // ExportTable exports a table to TDTP XML file
@@ -99,108 +123,108 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
 
-	// Apply data processors if configured
-	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
-		fmt.Printf("Applying data processors...\n")
-		for _, pkt := range packets {
-			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
-				return fmt.Errorf("processor failed: %w", err)
-			}
-		}
-		fmt.Printf("✓ Data processors applied\n")
-	}
-
-	// Count total rows before any further processing
+	// Count total rows BEFORE processing:
+	// compact меняет RecordsInPart, compress заменяет все строки одним блобом.
 	totalRows := 0
 	for _, pkt := range packets {
 		totalRows += pkt.Header.RecordsInPart
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 
-	// Apply compact format (v1.3.1) if requested
+	// Build packet processing chain.
+	// Порядок: mask/normalize/validate → compact → compress → (encrypt) → (hash)
+	chain := processors.NewPacketChain()
+
+	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
+		chain.Add(opts.ProcessorMgr)
+	}
+
 	if opts.Compact {
 		fixedNames := BuildFixedFieldsForExport(packets[0].Schema, opts.FixedFields)
 		if len(fixedNames) == 0 {
 			fmt.Println("⚠ compact requested but no fixed fields found (use --fixed-fields or add _ prefix to view columns)")
 		} else {
 			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
-			for _, pkt := range packets {
-				if err := applyCompactToPacket(pkt, fixedNames, opts.CompactTail); err != nil {
-					return fmt.Errorf("compact encoding failed: %w", err)
-				}
-			}
-			fmt.Printf("✓ Compact v1.3.1 format applied\n")
+			chain.Add(&compactProc{fixedNames: fixedNames, writeTail: opts.CompactTail})
 		}
 	}
 
-	// Apply compression if enabled
 	if opts.Compress {
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
-		for _, pkt := range packets {
-			if err := compressPacketData(pkt, opts.CompressLevel, opts.CompressAlgo, opts.EnableChecksum); err != nil {
-				return fmt.Errorf("compression failed: %w", err)
-			}
-		}
-		fmt.Printf("✓ Data compressed with %s\n", opts.CompressAlgo)
-		if opts.EnableChecksum {
-			fmt.Printf("✓ Checksums generated (xxh3)\n")
-		}
+		chain.Add(&compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel, checksum: opts.EnableChecksum})
 	}
 
-	// Write to S3, stdout, or local file
-	switch {
-	case opts.StorageCfg != nil:
-		// Stream to object storage (S3 / SeaweedFS)
-		store, err := storage.New(*opts.StorageCfg)
+	// Open object storage once outside the loop (if needed).
+	var store storage.ObjectStorage
+	if opts.StorageCfg != nil {
+		store, err = storage.New(*opts.StorageCfg)
 		if err != nil {
 			return fmt.Errorf("failed to open storage: %w", err)
 		}
 		defer func() { _ = store.Close() }()
-
-		if len(packets) == 1 {
-			key := opts.StorageKey
-			if err := uploadPacketToStorage(ctx, store, packets[0], key); err != nil {
-				return err
-			}
-			fmt.Printf("✓ Uploaded to: s3://%s/%s\n", opts.StorageCfg.S3.Bucket, key)
-		} else {
-			for i, pkt := range packets {
-				key := generatePacketFilename(opts.StorageKey, i+1, len(packets))
-				if err := uploadPacketToStorage(ctx, store, pkt, key); err != nil {
-					return err
-				}
-				fmt.Printf("✓ Uploaded packet %d/%d to: s3://%s/%s\n",
-					i+1, len(packets), opts.StorageCfg.S3.Bucket, key)
-			}
-		}
-	case opts.OutputFile == "" || opts.OutputFile == "-":
-		// Write to stdout
-		generator := packet.NewGenerator()
-		for _, pkt := range packets {
-			xml, err := generator.ToXML(pkt, true)
-			if err != nil {
-				return fmt.Errorf("failed to marshal packet: %w", err)
-			}
-			fmt.Println(string(xml))
-		}
-	default:
-		// Write to local file(s)
-		if len(packets) == 1 {
-			if err := writePacketToFile(packets[0], opts.OutputFile); err != nil {
-				return err
-			}
-			fmt.Printf("✓ Written to: %s\n", opts.OutputFile)
-		} else {
-			for i, pkt := range packets {
-				filename := generatePacketFilename(opts.OutputFile, i+1, len(packets))
-				if err := writePacketToFile(pkt, filename); err != nil {
-					return err
-				}
-				fmt.Printf("✓ Written packet %d/%d to: %s\n", i+1, len(packets), filename)
-			}
-		}
 	}
 
+	// Process and write packet-by-packet: chain → write → release.
+	// Каждый пакет обрабатывается полностью до того как начинается следующий.
+	total := len(packets)
+	for i, pkt := range packets {
+		if err := chain.ProcessPacket(ctx, pkt); err != nil {
+			return err
+		}
+
+		if err := writePacket(ctx, pkt, i+1, total, opts, store); err != nil {
+			return err
+		}
+
+		packets[i] = nil // освобождаем память сразу после записи
+	}
+
+	if opts.EnableChecksum {
+		fmt.Printf("✓ Checksums generated (xxh3)\n")
+	}
+
+	return nil
+}
+
+// writePacket writes a single packet to the configured destination (S3, stdout, or local file).
+func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts ExportOptions, store storage.ObjectStorage) error {
+	switch {
+	case store != nil:
+		key := opts.StorageKey
+		if total > 1 {
+			key = generatePacketFilename(opts.StorageKey, n, total)
+		}
+		if err := uploadPacketToStorage(ctx, store, pkt, key); err != nil {
+			return err
+		}
+		if total == 1 {
+			fmt.Printf("✓ Uploaded to: s3://%s/%s\n", opts.StorageCfg.S3.Bucket, key)
+		} else {
+			fmt.Printf("✓ Uploaded packet %d/%d to: s3://%s/%s\n", n, total, opts.StorageCfg.S3.Bucket, key)
+		}
+
+	case opts.OutputFile == "" || opts.OutputFile == "-":
+		generator := packet.NewGenerator()
+		xml, err := generator.ToXML(pkt, true)
+		if err != nil {
+			return fmt.Errorf("failed to marshal packet: %w", err)
+		}
+		fmt.Println(string(xml))
+
+	default:
+		filename := opts.OutputFile
+		if total > 1 {
+			filename = generatePacketFilename(opts.OutputFile, n, total)
+		}
+		if err := writePacketToFile(pkt, filename); err != nil {
+			return err
+		}
+		if total == 1 {
+			fmt.Printf("✓ Written to: %s\n", filename)
+		} else {
+			fmt.Printf("✓ Written packet %d/%d to: %s\n", n, total, filename)
+		}
+	}
 	return nil
 }
 
