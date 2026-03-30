@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
@@ -164,25 +166,89 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		defer func() { _ = store.Close() }()
 	}
 
-	// Process and write packet-by-packet: chain → write → release.
-	// Каждый пакет обрабатывается полностью до того как начинается следующий.
 	total := len(packets)
-	for i, pkt := range packets {
-		if err := chain.ProcessPacket(ctx, pkt); err != nil {
+
+	// stdout требует строгого порядка → последовательно.
+	// Файлы и S3 независимы (разные имена/ключи) → параллельно.
+	if opts.OutputFile == "" || opts.OutputFile == "-" {
+		for i, pkt := range packets {
+			if err := chain.ProcessPacket(ctx, pkt); err != nil {
+				return err
+			}
+			if err := writePacket(ctx, pkt, i+1, total, opts, store); err != nil {
+				return err
+			}
+			packets[i] = nil
+		}
+	} else {
+		if err := parallelProcessAndWrite(ctx, packets, chain, total, opts, store); err != nil {
 			return err
 		}
-
-		if err := writePacket(ctx, pkt, i+1, total, opts, store); err != nil {
-			return err
-		}
-
-		packets[i] = nil // освобождаем память сразу после записи
 	}
 
 	if opts.EnableChecksum {
 		fmt.Printf("✓ Checksums generated (xxh3)\n")
 	}
 
+	return nil
+}
+
+// parallelProcessAndWrite обрабатывает и записывает пакеты параллельно.
+// Пакеты независимы (разные файлы/S3-ключи) → каждый пакет обрабатывается
+// в отдельной горутине. Размер пула = min(len(packets), runtime.NumCPU()).
+func parallelProcessAndWrite(
+	ctx context.Context,
+	packets []*packet.DataPacket,
+	chain *processors.PacketChain,
+	total int,
+	opts ExportOptions,
+	store storage.ObjectStorage,
+) error {
+	workers := runtime.NumCPU()
+	if workers > len(packets) {
+		workers = len(packets)
+	}
+
+	type job struct {
+		i   int
+		pkt *packet.DataPacket
+	}
+
+	jobCh := make(chan job, len(packets))
+	for i, pkt := range packets {
+		jobCh <- job{i, pkt}
+	}
+	close(jobCh)
+
+	errCh := make(chan error, workers)
+	var wg sync.WaitGroup
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobCh {
+				if err := chain.ProcessPacket(ctx, j.pkt); err != nil {
+					errCh <- err
+					return
+				}
+				if err := writePacket(ctx, j.pkt, j.i+1, total, opts, store); err != nil {
+					errCh <- err
+					return
+				}
+				packets[j.i] = nil // освобождаем память сразу после записи
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
