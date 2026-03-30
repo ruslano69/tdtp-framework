@@ -354,8 +354,9 @@ func BenchmarkSimpleFilter_SQL_WithStats(b *testing.B) {
 
 // BenchmarkFullExport100k — полный экспорт 100k строк без фильтров.
 // Запуск с профилировщиком:
-//   go test -bench=BenchmarkFullExport100k -benchtime=3x -cpuprofile=/tmp/cpu.prof ./pkg/adapters/sqlite/
-//   go tool pprof -top /tmp/cpu.prof
+//
+//	go test -bench=BenchmarkFullExport100k -benchtime=3x -cpuprofile=/tmp/cpu.prof ./pkg/adapters/sqlite/
+//	go tool pprof -top /tmp/cpu.prof
 func BenchmarkFullExport100k(b *testing.B) {
 	if _, err := os.Stat(benchmarkDB); os.IsNotExist(err) {
 		b.Skip("benchmark DB not found")

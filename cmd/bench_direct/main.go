@@ -1,3 +1,4 @@
+// bench_direct сравнивает database/sql и прямой driver.Conn (без мьютекса) для SQLite.
 package main
 
 import (
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	sqlite "modernc.org/sqlite"
-	_ "modernc.org/sqlite"
 )
 
 const DBFile = "benchmark_100k.db"
@@ -73,8 +73,8 @@ func benchViaDirect() ([]byte, int) {
 	}
 	defer driverStmt.Close()
 
-	// Query через driver.Stmt
-	driverRows, err := driverStmt.Query(nil)
+	// Query через driver.Stmt (намеренно: бенчмарк низкоуровневого API без мьютекса)
+	driverRows, err := driverStmt.Query(nil) //nolint:staticcheck
 	if err != nil {
 		panic(err)
 	}
@@ -159,9 +159,7 @@ func main() {
 	run("A. database/sql (mutex per row)", runs, func() ([]byte, int) {
 		return benchViaSQL(db)
 	})
-	run("B. driver.Conn напрямую (NO mutex)", runs, func() ([]byte, int) {
-		return benchViaDirect()
-	})
+	run("B. driver.Conn напрямую (NO mutex)", runs, benchViaDirect)
 
 	// Проверяем что результаты одинаковые
 	bufSQL, nSQL := benchViaSQL(db)

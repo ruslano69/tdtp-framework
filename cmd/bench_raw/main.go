@@ -18,7 +18,7 @@ import (
 const (
 	dbDriver   = "sqlite"
 	tableName  = "users"
-	batchSize  = 7143 // ~same per-packet as framework (100k/14 packets)
+	batchSize  = 7143            // ~same per-packet as framework (100k/14 packets)
 	bufferSize = 4 * 1024 * 1024 // 4MB write buffer
 )
 

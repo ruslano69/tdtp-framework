@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	sqliteadapter "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	_ "modernc.org/sqlite"
 )
 
 // TestWorkspace_LoadData_FromExport проверяет что LoadData корректно работает
@@ -37,7 +37,7 @@ func TestWorkspace_LoadData_FromExport(t *testing.T) {
 	}
 	db.Close()
 
-	src, err := sqliteadapter.NewAdapter(dbFile)
+	src, err := adapters.New(ctx, adapters.Config{Type: "sqlite", DSN: dbFile})
 	if err != nil {
 		t.Fatalf("adapter: %v", err)
 	}

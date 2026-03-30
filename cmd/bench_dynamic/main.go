@@ -1,3 +1,4 @@
+// bench_dynamic бенчмаркирует варианты сканирования строк SQLite: interface{} vs *string.
 package main
 
 import (
@@ -174,10 +175,12 @@ func benchStringScan(db *sql.DB) int {
 	return n
 }
 
-func runN(name string, n int, f func() (int, int64)) {
+const runNCount = 10
+
+func runN(name string, f func() (int, int64)) {
 	fmt.Printf("%-35s ", name)
-	var times [10]float64
-	for i := 0; i < n; i++ {
+	var times [runNCount]float64
+	for i := 0; i < runNCount; i++ {
 		t0 := time.Now()
 		rows, _ := f()
 		ms := float64(time.Since(t0).Milliseconds())
@@ -186,14 +189,14 @@ func runN(name string, n int, f func() (int, int64)) {
 	}
 	minT := times[0]
 	var sum float64
-	for _, t := range times[:n] {
+	for _, t := range times {
 		sum += t
 		if t < minT {
 			minT = t
 		}
 	}
 	mf := float64(100000*16) / (minT / 1000) / 1e6
-	fmt.Printf("min=%4.0fms  avg=%4.0fms  %.2f Mfields/s\n", minT, sum/float64(n), mf)
+	fmt.Printf("min=%4.0fms  avg=%4.0fms  %.2f Mfields/s\n", minT, sum/float64(runNCount), mf)
 }
 
 func main() {
@@ -210,20 +213,20 @@ func main() {
 	benchScanOnly(db)
 	benchStringScan(db)
 
-	fmt.Println("\n=== 10 прогонов, метрика — МИНИМУМ ===\n")
+	fmt.Println("=== 10 прогонов, метрика — МИНИМУМ ===")
 
-	runN("1. interface{} scan → файл", 10, func() (int, int64) {
+	runN("1. interface{} scan → файл", func() (int, int64) {
 		_, n := benchDynamicToFile(db)
 		return n, 0
 	})
-	runN("2. interface{} scan → память", 10, func() (int, int64) {
+	runN("2. interface{} scan → память", func() (int, int64) {
 		buf, n := benchDynamicMemOnly(db)
 		return n, int64(len(buf))
 	})
-	runN("3. scan only (mutex baseline)", 10, func() (int, int64) {
+	runN("3. scan only (mutex baseline)", func() (int, int64) {
 		return benchScanOnly(db), 0
 	})
-	runN("4. *string scan only (наш путь)", 10, func() (int, int64) {
+	runN("4. *string scan only (наш путь)", func() (int, int64) {
 		return benchStringScan(db), 0
 	})
 
