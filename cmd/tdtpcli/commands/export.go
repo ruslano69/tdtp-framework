@@ -277,10 +277,9 @@ func generatePacketFilename(baseFile string, n, total int) string {
 // compressPacketData compresses the Data section of a packet using the specified algorithm.
 // and optionally generates XXH3 checksum for data integrity verification
 func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableChecksum bool) error {
-	// Materialize rawRows (GenerateReference fast-path) before compression
-	if pkt.Header.RecordsInPart > 0 && len(pkt.Data.Rows) == 0 {
-		pkt.SetRows(pkt.GetRows())
-	}
+	// Materialize rawRows (GenerateReference fast-path) before compression.
+	// MaterializeRows() очищает rawRows — иначе writePacketTo пишет fast-path вместо сжатых данных.
+	pkt.MaterializeRows()
 	if len(pkt.Data.Rows) == 0 {
 		return nil
 	}
