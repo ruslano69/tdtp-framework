@@ -3,15 +3,18 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // partPattern matches filenames like name_part_3_of_6.tdtp.xml
@@ -23,6 +26,7 @@ type parsedPart struct {
 }
 
 // TestFile performs a dry-run integrity check on a TDTP file or a multi-part batch.
+// storageCfg may be nil for local files; required when filePath is an s3:// URI.
 //
 // Checks performed:
 //  1. XML parse
@@ -32,8 +36,18 @@ type parsedPart struct {
 //  5. RecordsInPart header vs actual row count
 //  6. XXH3 checksum (if present)
 //  7. Decompression (if compressed)
-func TestFile(_ context.Context, filePath string) error {
-	files, missing, err := resolvePartSet(filePath)
+func TestFile(ctx context.Context, filePath string, storageCfg *storage.Config) error {
+	var files, missing []string
+	var err error
+
+	if storage.IsRemote(filePath) {
+		if storageCfg == nil {
+			return fmt.Errorf("s3:// URI requires storage configuration (use --config)")
+		}
+		files, missing, err = resolvePartSetRemote(ctx, filePath, storageCfg)
+	} else {
+		files, missing, err = resolvePartSet(filePath)
+	}
 	if err != nil {
 		return err
 	}
@@ -48,6 +62,21 @@ func TestFile(_ context.Context, filePath string) error {
 
 	fmt.Printf("Testing %d TDTP file(s)...\n", len(files))
 
+	// Open storage once for all files if needed (remote path)
+	var store storage.ObjectStorage
+	if storage.IsRemote(filePath) && storageCfg != nil {
+		_, uriBucket, _, _ := storage.ParseURI(filePath)
+		cfg := *storageCfg
+		if uriBucket != "" {
+			cfg.S3.Bucket = uriBucket
+		}
+		store, err = storage.New(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to open storage: %w", err)
+		}
+		defer func() { _ = store.Close() }()
+	}
+
 	parser := packet.NewParser()
 	start := time.Now()
 	parts := make([]parsedPart, 0, len(files))
@@ -55,7 +84,26 @@ func TestFile(_ context.Context, filePath string) error {
 	// --- Pass 1: parse XML ---
 	parseErrors := 0
 	for _, f := range files {
-		pkt, err := parser.ParseFile(f)
+		var pkt *packet.DataPacket
+		if store != nil {
+			_, _, key, _ := storage.ParseURI(f)
+			rc, getErr := store.Get(ctx, key)
+			if getErr != nil {
+				fmt.Printf("  ✗ %s: S3 read failed: %v\n", key, getErr)
+				parseErrors++
+				continue
+			}
+			data, readErr := io.ReadAll(rc)
+			_ = rc.Close()
+			if readErr != nil {
+				fmt.Printf("  ✗ %s: S3 read failed: %v\n", key, readErr)
+				parseErrors++
+				continue
+			}
+			pkt, err = parser.ParseBytes(data)
+		} else {
+			pkt, err = parser.ParseFile(f)
+		}
 		if err != nil {
 			fmt.Printf("  ✗ %s: XML parse failed: %v\n", filepath.Base(f), err)
 			parseErrors++
@@ -239,3 +287,60 @@ func resolvePartSet(filePath string) (files, missing []string, err error) {
 	return foundFiles, missing, nil
 }
 
+// resolvePartSetRemote resolves a multi-part set from S3-compatible storage.
+// Uses store.List(prefix) to discover sibling parts from any single part URI.
+// Returns full s3://bucket/key URIs so the caller can read each part uniformly.
+func resolvePartSetRemote(ctx context.Context, uri string, storageCfg *storage.Config) (files, missing []string, err error) {
+	_, uriBucket, key, _ := storage.ParseURI(uri)
+
+	cfg := *storageCfg
+	if uriBucket != "" {
+		cfg.S3.Bucket = uriBucket
+	}
+
+	store, openErr := storage.New(cfg)
+	if openErr != nil {
+		return nil, nil, fmt.Errorf("failed to open storage: %w", openErr)
+	}
+	defer func() { _ = store.Close() }()
+
+	base := filepath.Base(key)
+	m := partPattern.FindStringSubmatch(base)
+	if m == nil {
+		// Single file — verify it exists
+		if _, statErr := store.Stat(ctx, key); statErr != nil {
+			return nil, nil, fmt.Errorf("S3 object not found: %s", key)
+		}
+		return []string{uri}, nil, nil
+	}
+
+	prefix := strings.TrimSuffix(key, base) + m[1] // dir/ + namePrefix
+	total, _ := strconv.Atoi(m[3])
+	ext := m[4]
+
+	// List all objects with the common prefix
+	objects, listErr := store.List(ctx, prefix)
+	if listErr != nil {
+		return nil, nil, fmt.Errorf("failed to list S3 objects with prefix %q: %w", prefix, listErr)
+	}
+	existingKeys := make(map[string]bool, len(objects))
+	for _, obj := range objects {
+		existingKeys[obj.Key] = true
+	}
+
+	dir := strings.TrimSuffix(key, base) // dir/ part of key
+	bucket := cfg.S3.Bucket
+	for i := 1; i <= total; i++ {
+		partName := fmt.Sprintf("%s_part_%d_of_%d%s", m[1], i, total, ext)
+		partKey := dir + partName
+		partURI := fmt.Sprintf("s3://%s/%s", bucket, partKey)
+		if existingKeys[partKey] {
+			files = append(files, partURI)
+		} else {
+			missing = append(missing, partURI)
+		}
+	}
+	sort.Strings(files)
+
+	return files, missing, nil
+}

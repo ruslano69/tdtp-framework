@@ -112,15 +112,17 @@ type XLSXOutputConfig struct {
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
 type TDTPOutputConfig struct {
-	Format      string            `yaml:"format"`                  // Формат: xml, json (в будущем)
-	Compression bool              `yaml:"compression"`             // Использовать zstd сжатие
-	Compress    bool              `yaml:"compress"`                // Алиас для compression (совместимость с CLI)
-	Destination string            `yaml:"destination"`  // Путь к файлу или s3://bucket/key
-	Encryption  bool              `yaml:"encryption"`   // Шифровать результат через xZMercury (AES-256-GCM)
-	Compact     bool              `yaml:"compact"`      // v1.3.1: compact format
-	CompactTail bool              `yaml:"compact_tail"` // v1.3.1: tail-строка
-	FixedFields []string          `yaml:"fixed_fields"` // v1.3.1: явный список fixed полей
-	S3          *storage.S3Config `yaml:"s3,omitempty"` // S3-совместимое хранилище (SeaweedFS, MinIO и т.п.)
+	Format        string            `yaml:"format"`         // Формат: xml, json (в будущем)
+	Compression   bool              `yaml:"compression"`    // Использовать сжатие
+	Compress      bool              `yaml:"compress"`       // Алиас для compression (совместимость с CLI)
+	CompressAlgo  string            `yaml:"compress_algo"`  // Алгоритм: zstd (по умолчанию) или kanzi
+	CompressLevel int               `yaml:"compress_level"` // Уровень: 1-19 (zstd), 6-7 (kanzi)
+	Destination   string            `yaml:"destination"`    // Путь к файлу или s3://bucket/key
+	Encryption    bool              `yaml:"encryption"`     // Шифровать результат через xZMercury (AES-256-GCM)
+	Compact       bool              `yaml:"compact"`        // v1.3.1: compact format
+	CompactTail   bool              `yaml:"compact_tail"`   // v1.3.1: tail-строка
+	FixedFields   []string          `yaml:"fixed_fields"`   // v1.3.1: явный список fixed полей
+	S3            *storage.S3Config `yaml:"s3,omitempty"`   // S3-совместимое хранилище (SeaweedFS, MinIO и т.п.)
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ
@@ -415,6 +417,21 @@ func (o *OutputConfig) Validate() error {
 	return nil
 }
 
+// setTDTPCompressionDefaults устанавливает дефолтные значения algo/level для TDTPOutputConfig.
+// Логика: kanzi → дефолт level 6; иное → zstd level 3.
+func setTDTPCompressionDefaults(t *TDTPOutputConfig) {
+	if t.CompressAlgo == "" {
+		t.CompressAlgo = "zstd"
+	}
+	if t.CompressLevel == 0 {
+		if t.CompressAlgo == "kanzi" {
+			t.CompressLevel = 6
+		} else {
+			t.CompressLevel = 3
+		}
+	}
+}
+
 // SetDefaults устанавливает значения по умолчанию для необязательных полей
 func (c *PipelineConfig) SetDefaults() {
 	// Defaults для version
@@ -447,11 +464,13 @@ func (c *PipelineConfig) SetDefaults() {
 		if c.Output.TDTP.Format == "" {
 			c.Output.TDTP.Format = "xml"
 		}
+		setTDTPCompressionDefaults(c.Output.TDTP)
 	}
 	if c.Output.Type == "tdtp" && c.Output.Fallback != nil && c.Output.Fallback.TDTP != nil {
 		if c.Output.Fallback.TDTP.Format == "" {
 			c.Output.Fallback.TDTP.Format = "xml"
 		}
+		setTDTPCompressionDefaults(c.Output.Fallback.TDTP)
 	}
 
 	// Defaults для resilience

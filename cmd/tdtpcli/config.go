@@ -23,9 +23,9 @@ type Config struct {
 
 // ExportConfig contains export settings
 type ExportConfig struct {
-	Compress      bool   `yaml:"compress"`        // Enable compression by default
-	CompressLevel int    `yaml:"compress_level"`  // Compression level: 1-19 (zstd) or 6-7 (kanzi)
-	CompressAlgo  string `yaml:"compress_algo"`   // Algorithm: "zstd" (default) or "kanzi"
+	Compress      bool   `yaml:"compress"`       // Enable compression by default
+	CompressLevel int    `yaml:"compress_level"` // Compression level: 1-19 (zstd) or 6-7 (kanzi)
+	CompressAlgo  string `yaml:"compress_algo"`  // Algorithm: "zstd" (default) or "kanzi"
 }
 
 // DatabaseConfig contains database connection settings
@@ -162,7 +162,7 @@ func CreateSampleConfig(dbType string) *Config {
 		},
 		Export: ExportConfig{
 			Compress:      true,   // Enable compression by default
-			CompressLevel: 3,     // Balanced speed/ratio
+			CompressLevel: 3,      // Balanced speed/ratio
 			CompressAlgo:  "zstd", // Algorithm: zstd (default) or kanzi
 		},
 		Resilience: ResilienceConfig{

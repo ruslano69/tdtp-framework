@@ -521,6 +521,21 @@ func routeCommand(
 			})
 		})
 
+		// Test command — integrity check, no DB required; supports s3:// URIs
+	} else if *flags.Test != "" {
+		var testStorageCfg *storage.Config
+		if storage.IsRemote(*flags.Test) {
+			var uriBucket string
+			_, uriBucket, _, _ = storage.ParseURI(*flags.Test)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			testStorageCfg = &sc
+		}
+		return commands.TestFile(ctx, *flags.Test, testStorageCfg)
+
 		// Inspect command — no DB connection required, runs directly
 	} else if *flags.Inspect != "" {
 		var inspectStorageCfg *storage.Config
@@ -614,14 +629,6 @@ func main() {
 	if !commandWasSpecified(flags) {
 		PrintHelp()
 		os.Exit(1)
-	}
-
-	// --test and --inspect operate on local files only — no DB config required.
-	if *flags.Test != "" {
-		if err := commands.TestFile(ctx, *flags.Test); err != nil {
-			fatal("Test failed: %v", err)
-		}
-		return
 	}
 
 	// Load configuration

@@ -17,6 +17,7 @@ import time
 import shutil
 import sqlite3
 import subprocess
+import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -28,6 +29,13 @@ OUTDIR  = Path("/tmp/tdtp_test_out")
 CFG     = "/tmp/tdtp_sqlite_test.yaml"          # plain config (no compression)
 CFG_C   = "/tmp/tdtp_sqlite_compress.yaml"      # config with compression from file
 CFG_IMP = "/tmp/tdtp_sqlite_import.yaml"        # import-target config
+
+# S3 (SeaweedFS) — optional, tests skip when weed is not running
+S3_ENDPOINT = "http://127.0.0.1:8333"
+S3_BUCKET   = "tdtp-test"
+S3_PREFIX   = "ci/t8"
+CFG_S3      = "/tmp/tdtp_sqlite_s3.yaml"
+CFG_ETL_S3  = "/tmp/tdtp_etl_s3.yaml"
 
 # ─── ANSI colors ──────────────────────────────────────────────────────────────
 GREEN  = "\033[32m"
@@ -570,6 +578,144 @@ def test_T7_compact():
         os.remove(import_db)
 
 
+# ─── T8 S3 Object Storage ─────────────────────────────────────────────────────
+
+def s3_available() -> bool:
+    """Return True if SeaweedFS S3 gateway is responding at S3_ENDPOINT."""
+    try:
+        with urllib.request.urlopen(S3_ENDPOINT + "/", timeout=2) as r:
+            return b"ListAllMyBucketsResult" in r.read(512)
+    except Exception:
+        return False
+
+
+def write_s3_cfg(path: str, db: str = TEST_DB):
+    """Write a SQLite config YAML with S3 storage section."""
+    with open(path, "w") as f:
+        f.write(f"database:\n  type: sqlite\n  database: {db}\n")
+        f.write(f"storage:\n  type: s3\n  s3:\n")
+        f.write(f"    endpoint: \"{S3_ENDPOINT}\"\n")
+        f.write(f"    region: \"us-east-1\"\n")
+        f.write(f"    bucket: \"{S3_BUCKET}\"\n")
+        f.write(f"    access_key: \"any\"\n")
+        f.write(f"    secret_key: \"any\"\n")
+        f.write(f"    path_style: true\n")
+        f.write(f"    disable_ssl: true\n")
+
+
+def write_etl_s3_pipeline(path: str, algo: str = "kanzi", level: int = 6):
+    """Write an ETL pipeline YAML: SQLite → S3 with given compress_algo.
+
+    Uses a cross-join to produce 100 rows (~10KB) — enough to exceed the
+    ETL compressor's 1KB minimum threshold.
+    """
+    dest = f"s3://{S3_BUCKET}/{S3_PREFIX}/etl_{algo}.tdtp.xml"
+    with open(path, "w") as f:
+        f.write(f"""name: test-s3-etl
+version: "1.0"
+sources:
+  - name: users
+    type: sqlite
+    dsn: {TEST_DB}
+    query: "SELECT a.ID*10+b.ID AS ID, a.Name, a.Email, a.Balance, a.IsActive, a.City, a.CreatedAt, a.LastLoginAt FROM users a, users b LIMIT 100"
+workspace:
+  type: sqlite
+  mode: memory
+transform:
+  sql: "SELECT * FROM users"
+  result_table: result
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    compress: true
+    compress_algo: {algo}
+    compress_level: {level}
+    destination: "{dest}"
+    s3:
+      endpoint: "{S3_ENDPOINT}"
+      region: "us-east-1"
+      bucket: "{S3_BUCKET}"
+      access_key: "any"
+      secret_key: "any"
+      path_style: true
+      disable_ssl: true
+""")
+    return dest
+
+
+def test_T8_s3():
+    print(f"\n{BOLD}=== T8 S3 Object Storage ==={RESET}")
+
+    if not s3_available():
+        print(f"  {YELLOW}SKIP{RESET} S3 not available at {S3_ENDPOINT}")
+        print(f"        Start weed: see CLAUDE.md → SeaweedFS S3 section")
+        return
+
+    write_s3_cfg(CFG_S3)
+    s3_plain = f"s3://{S3_BUCKET}/{S3_PREFIX}/users_plain.tdtp.xml"
+    s3_hash  = f"s3://{S3_BUCKET}/{S3_PREFIX}/users_hash.tdtp.xml"
+
+    # T8.1 — export to S3 → --inspect shows table name
+    t = time.monotonic()
+    p  = run("--export", "users", "--output", s3_plain, cfg=CFG_S3)
+    pi = run("--inspect", s3_plain, cfg=CFG_S3)
+    has_table = "users" in pi.stdout
+    record("T8.1 export to S3 → --inspect shows table",
+           p.returncode == 0 and has_table,
+           time.monotonic() - t, f"rc={p.returncode} inspect_ok={has_table}")
+
+    # T8.2 — export --compress --hash → --test s3:// checksum OK
+    t = time.monotonic()
+    p  = run("--export", "users", "--compress", "--hash",
+             "--output", s3_hash, cfg=CFG_S3)
+    pt = run("--test", s3_hash, cfg=CFG_S3)
+    checksum_ok = "checksum OK" in pt.stdout
+    record("T8.2 S3 export --hash → --test checksum OK",
+           p.returncode == 0 and pt.returncode == 0 and checksum_ok,
+           time.monotonic() - t, f"test_rc={pt.returncode}")
+
+    # T8.3 — import from S3 → 10 rows roundtrip
+    t = time.monotonic()
+    import_db = "/tmp/tdtp_s3_import.db"
+    if os.path.exists(import_db):
+        os.remove(import_db)
+    write_s3_cfg("/tmp/tdtp_s3_import_cfg.yaml", db=import_db)
+    p = subprocess.run(
+        [TDTPCLI, "--config", "/tmp/tdtp_s3_import_cfg.yaml",
+         "--import", s3_plain, "--table", "users_s3"],
+        capture_output=True, text=True, timeout=30,
+    )
+    rows = sqlite_query(import_db, "SELECT COUNT(*) FROM users_s3")[0][0] \
+           if p.returncode == 0 else -1
+    record("T8.3 import from S3 → 10 rows roundtrip",
+           p.returncode == 0 and rows == 10,
+           time.monotonic() - t, f"rows={rows}")
+    if os.path.exists(import_db):
+        os.remove(import_db)
+
+    # T8.4 — ETL pipeline with compress_algo: kanzi → --inspect shows kanzi
+    #         (verifies the ETL compress_algo bug fix in pkg/etl/exporter.go)
+    t = time.monotonic()
+    s3_kanzi = write_etl_s3_pipeline(CFG_ETL_S3, algo="kanzi", level=6)
+    p  = subprocess.run(
+        [TDTPCLI, "--pipeline", CFG_ETL_S3],
+        capture_output=True, text=True, timeout=60,
+    )
+    pi = run("--inspect", s3_kanzi, cfg=CFG_S3)
+    algo_ok = "kanzi" in pi.stdout
+    record("T8.4 ETL compress_algo: kanzi → inspect shows kanzi",
+           p.returncode == 0 and algo_ok,
+           time.monotonic() - t, f"pipeline_rc={p.returncode} algo_ok={algo_ok}")
+
+    # T8.5 — --test on nonexistent S3 key → error exit code
+    t = time.monotonic()
+    p = run("--test", f"s3://{S3_BUCKET}/ci/no_such_file_xyz.tdtp.xml", cfg=CFG_S3)
+    record("T8.5 --test nonexistent S3 key → error",
+           p.returncode != 0,
+           time.monotonic() - t, f"rc={p.returncode}")
+
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
 
 GROUPS = [
@@ -580,6 +726,7 @@ GROUPS = [
     ("T5", test_T5_integrity),
     ("T6", test_T6_edge_cases),
     ("T7", test_T7_compact),
+    ("T8", test_T8_s3),
 ]
 
 

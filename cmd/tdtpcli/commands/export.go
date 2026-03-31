@@ -30,8 +30,8 @@ type ExportOptions struct {
 	CompressLevel  int
 	CompressAlgo   string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
 	EnableChecksum bool   // Add XXH3 checksum for data integrity verification
-	ReadOnlyFields    bool // Include read-only fields (timestamp, computed, identity)
-	Fast              bool // Skip SpecialValues detection for maximum export speed
+	ReadOnlyFields bool   // Include read-only fields (timestamp, computed, identity)
+	Fast           bool   // Skip SpecialValues detection for maximum export speed
 
 	// v1.3.1 compact format
 	Compact     bool     // Enable compact format output
