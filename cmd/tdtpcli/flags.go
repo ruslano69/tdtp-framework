@@ -45,6 +45,7 @@ func (f *ListFlag) IsBoolFlag() bool { return true }
 // Flags holds all command-line flags
 type Flags struct {
 	// Commands
+	Test           *string // Dry-run integrity check of a TDTP file (decompress in memory, validate XML)
 	List           *ListFlag
 	ListViews      *bool
 	Export         *string
@@ -136,6 +137,8 @@ func ParseFlags() *Flags {
 	f := &Flags{}
 
 	// Commands
+	f.Test = flag.String("test", "", "Dry-run integrity check of a TDTP file: decompress in memory, verify checksum, validate XML (no DB needed)")
+
 	f.List = &ListFlag{}
 	flag.Var(f.List, "list", `List tables in database, optionally filtered by glob pattern (e.g. --list "user*", --list "order?")`)
 

@@ -608,10 +608,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --test and --inspect operate on local files only — no DB config required.
+	if *flags.Test != "" {
+		if err := commands.TestFile(ctx, *flags.Test); err != nil {
+			fatal("Test failed: %v", err)
+		}
+		return
+	}
+
 	// Load configuration
 	config, err := LoadConfig(*flags.Config)
 	if err != nil {
-		if *flags.Pipeline != "" && errors.Is(err, os.ErrNotExist) {
+		if (*flags.Pipeline != "" || *flags.Inspect != "") && errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "WARNING: config file %q not found. Audit log and Circuit Breaker set to defaults (disabled).\n", *flags.Config)
 			config = &Config{}
 		} else {
@@ -751,7 +759,8 @@ func splitCommaSeparated(s string) []string {
 
 // commandWasSpecified checks if any command was specified
 func commandWasSpecified(flags *Flags) bool {
-	return flags.List.IsSet ||
+	return *flags.Test != "" ||
+		flags.List.IsSet ||
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
