@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"os"
 	"strings"
 )
 
@@ -227,6 +229,38 @@ func ParseFlags() *Flags {
 	f.ShortHelp = flag.Bool("h", false, "Show brief help (commands and options)")
 
 	flag.Parse()
+
+	// Go's flag package stops at the first non-flag argument.
+	// Re-parse in a loop so that flags appearing after positional args are picked up.
+	// Example: --export users out.xml --compress --hash
+	//   → after flag.Parse(): flag.Args() = ["out.xml", "--compress", "--hash"]
+	//   → re-parse collects "out.xml" as positional, then parses --compress --hash.
+	var positionals []string
+	for {
+		args := flag.Args()
+		if len(args) == 0 {
+			break
+		}
+		// Collect leading non-flag args as positionals
+		i := 0
+		for i < len(args) && !strings.HasPrefix(args[i], "-") {
+			positionals = append(positionals, args[i])
+			i++
+		}
+		if i >= len(args) {
+			break // no more flags remain
+		}
+		// Re-parse everything from the first flag found
+		if err := flag.CommandLine.Parse(args[i:]); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to parse remaining flags: %v\n", err)
+			break
+		}
+	}
+
+	// First positional arg becomes --output if not explicitly set
+	if *f.Output == "" && len(positionals) > 0 {
+		*f.Output = positionals[0]
+	}
 
 	return f
 }
