@@ -279,4 +279,3 @@ func DecompressDataForTdtpAlgo(compressed, algo string) ([]string, error) {
 	}
 	return strings.Split(string(data), "\n"), nil
 }
-
