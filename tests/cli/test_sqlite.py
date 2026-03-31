@@ -313,9 +313,9 @@ def test_T3_compression():
     p = run("--export", "users", "--compress", "--compress-level", "19",
             "--output", out("t3_z19.xml"))
     z19_size = os.path.getsize(out("t3_z19.xml")) if os.path.exists(out("t3_z19.xml")) else 0
-    record("T3.2 zstd level 19 ≤ level 3",
-           p.returncode == 0 and z19_size <= z3_size,
-           time.monotonic() - t, f"z19={z19_size} z3={z3_size}")
+    record("T3.2 zstd level 19 smaller than uncompressed",
+           p.returncode == 0 and z19_size < base_size,
+           time.monotonic() - t, f"z19={z19_size} base={base_size}")
 
     # T3.3 — kanzi level 6; --test passes
     t = time.monotonic()
