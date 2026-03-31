@@ -540,6 +540,69 @@ def test_T6_edge_cases():
            time.monotonic() - t, f"rc={p.returncode}")
 
 
+# ─── T7 Compact Format (v1.3.1) ──────────────────────────────────────────────
+
+def test_T7_compact():
+    print(f"\n{BOLD}=== T7 Compact Format (v1.3.1) ==={RESET}")
+
+    # T7.1 — --compact --fixed-fields: protocol version must be 1.3.1
+    t = time.monotonic()
+    p = run("--export", "users", "--limit", "20",
+            "--compact", "--fixed-fields", "username,email",
+            "--output", out("t7_compact.xml"))
+    proto_ok = False
+    if os.path.exists(out("t7_compact.xml")):
+        try:
+            root = ET.parse(out("t7_compact.xml")).getroot()
+            proto_ok = root.get("version", "") == "1.3.1"
+        except ET.ParseError:
+            pass
+    record("T7.1 --compact → protocol TDTP 1.3.1",
+           p.returncode == 0 and proto_ok,
+           time.monotonic() - t, f"rc={p.returncode} proto_ok={proto_ok}")
+
+    # T7.2 — compact + compress + hash: full pipeline, --test must pass
+    t = time.monotonic()
+    p = run("--export", "users", "--limit", "20",
+            "--compact", "--fixed-fields", "username,email",
+            "--compress", "--hash",
+            "--output", out("t7_compact_comp.xml"))
+    pt = run_no_cfg("--test", out("t7_compact_comp.xml"))
+    checksum_ok = "checksum OK" in pt.stdout
+    record("T7.2 compact + compress + --hash → checksum OK",
+           p.returncode == 0 and pt.returncode == 0 and checksum_ok,
+           time.monotonic() - t, f"test_rc={pt.returncode}")
+
+    # T7.3 — --to-compact converts existing plain file
+    run("--export", "users", "--limit", "10",
+        "--output", out("t7_plain.xml"))
+    t = time.monotonic()
+    p = run_no_cfg("--to-compact", out("t7_plain.xml"),
+                   "--fixed-fields", "username,email",
+                   "--output", out("t7_converted.xml"))
+    proto_ok2 = False
+    if os.path.exists(out("t7_converted.xml")):
+        try:
+            root = ET.parse(out("t7_converted.xml")).getroot()
+            proto_ok2 = root.get("version", "") == "1.3.1"
+        except ET.ParseError:
+            pass
+    record("T7.3 --to-compact converts plain file → 1.3.1",
+           p.returncode == 0 and proto_ok2,
+           time.monotonic() - t, f"rc={p.returncode} proto_ok={proto_ok2}")
+
+    # T7.4 — compact roundtrip: import preserves row count
+    pg_query("DROP TABLE IF EXISTS rt_users_compact CASCADE")
+    t = time.monotonic()
+    p = _import(out("t7_compact.xml"), "rt_users_compact")
+    rows_sql = pg_query("SELECT COUNT(*) FROM rt_users_compact")
+    rows = int(rows_sql[0]) if p.returncode == 0 and rows_sql else -1
+    record("T7.4 compact roundtrip: 20 rows imported",
+           p.returncode == 0 and rows == 20,
+           time.monotonic() - t, f"rows={rows}")
+    pg_query("DROP TABLE IF EXISTS rt_users_compact CASCADE")
+
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
 
 GROUPS = [
@@ -549,6 +612,7 @@ GROUPS = [
     ("T4", test_T4_roundtrip),
     ("T5", test_T5_integrity),
     ("T6", test_T6_edge_cases),
+    ("T7", test_T7_compact),
 ]
 
 
