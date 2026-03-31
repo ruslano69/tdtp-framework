@@ -87,6 +87,10 @@ func routeCommand(
 		if compressLevel == 3 && config.Export.CompressLevel > 0 {
 			compressLevel = config.Export.CompressLevel
 		}
+		compressAlgo := *flags.CompressAlgo
+		if compressAlgo == "zstd" && config.Export.CompressAlgo != "" {
+			compressAlgo = config.Export.CompressAlgo
+		}
 
 		outputFile := determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml")
 
@@ -121,7 +125,7 @@ func routeCommand(
 				ProcessorMgr:   procMgr,
 				Compress:       compress,
 				CompressLevel:  compressLevel,
-				CompressAlgo:   *flags.CompressAlgo,
+				CompressAlgo:   compressAlgo,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
 				Fast:           *flags.Fast,
@@ -338,13 +342,17 @@ func routeCommand(
 		if compressLevel == 3 && config.Export.CompressLevel > 0 {
 			compressLevel = config.Export.CompressLevel
 		}
+		brokerCompressAlgo := *flags.CompressAlgo
+		if brokerCompressAlgo == "zstd" && config.Export.CompressAlgo != "" {
+			brokerCompressAlgo = config.Export.CompressAlgo
+		}
 
 		// Debug output
 		if config.Export.Compress {
-			fmt.Printf("Compression enabled from config (level: %d)\n", config.Export.CompressLevel)
+			fmt.Printf("Compression enabled from config (algo: %s, level: %d)\n", config.Export.CompressAlgo, config.Export.CompressLevel)
 		}
 		if *flags.Compress {
-			fmt.Printf("Compression enabled from --compress flag (level: %d)\n", compressLevel)
+			fmt.Printf("Compression enabled from --compress flag (algo: %s, level: %d)\n", brokerCompressAlgo, compressLevel)
 		}
 
 		operation = audit.OpExport
@@ -356,7 +364,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, *flags.CompressAlgo, procMgr, *flags.PacketSize)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize)
 		})
 
 	} else if *flags.ImportBroker {
