@@ -97,6 +97,88 @@ Feature branches: `claude/test-tdtpcli-new-keys-0Z7iA`
 
 ---
 
+## SeaweedFS S3 (локальное тестирование)
+
+### Бинарник
+```
+/tmp/weed   (version 30GB 3.80, linux amd64)
+```
+
+### ВАЖНО: `-ip` не работает в `weed server` — запускать компоненты отдельно!
+
+`weed server -ip=127.0.0.1` **игнорирует флаг** и всё равно использует 192.0.2.2 (внешний IP).
+Envoy-прокси sandbox блокирует gRPC между компонентами через внешний IP.
+**Решение** — запускать каждый компонент отдельно с явным `-ip=127.0.0.1`:
+
+```bash
+# 1. Master (порт 9333)
+/tmp/weed master -ip=127.0.0.1 -defaultReplication=000 -volumeSizeLimitMB=100 -port=9333 &
+sleep 18  # ждём выборов лидера (~15с)
+
+# 2. Volume server (порт 8080)
+/tmp/weed volume -ip=127.0.0.1 -dir=/tmp/seaweedfs-data -mserver=127.0.0.1:9333 -port=8080 &
+sleep 2
+
+# 3. Filer (порт 8888) — создаёт filerldb2/ в CWD, добавлен в .gitignore
+/tmp/weed filer -ip=127.0.0.1 -master=127.0.0.1:9333 -port=8888 &
+sleep 3
+
+# 4. S3 gateway (порт 8333) — флаг -ip не поддерживается, используем -ip.bind
+/tmp/weed s3 -ip.bind=127.0.0.1 -filer=127.0.0.1:8888 -port=8333 &
+sleep 2
+
+# Проверка
+curl -s http://127.0.0.1:9333/cluster/status   # {"IsLeader":true,...}
+curl -s http://127.0.0.1:8333/                 # <ListAllMyBucketsResult>...
+```
+
+### Существующий бакет
+```
+tdtp-test   — уже содержит volume, доступен для записи
+```
+Бакет `tdtp-new-bucket` создан, но без выделенного volume (записи падают с 500).
+**Использовать `tdtp-test`** для всех S3-тестов.
+
+### Credentials
+Weed в dev-режиме принимает любые ключи:
+```
+access_key: any
+secret_key: any
+```
+
+### Config для тестов
+```yaml
+storage:
+  type: s3
+  s3:
+    endpoint: "http://127.0.0.1:8333"
+    region: "us-east-1"
+    bucket: "tdtp-test"
+    access_key: "any"
+    secret_key: "any"
+    path_style: true
+    disable_ssl: true
+```
+
+### Проверка --test с S3
+```bash
+/tmp/tdtpcli --config /tmp/test_s3_cfg.yaml \
+  --export users --output "s3://tdtp-test/ci/users.tdtp.xml" --compress --hash
+
+/tmp/tdtpcli --config /tmp/test_s3_cfg.yaml \
+  --test "s3://tdtp-test/ci/users.tdtp.xml"
+# ✓ algo=zstd, 10 rows, decompressed 0s, checksum OK
+```
+
+### Лог-файлы
+```
+/tmp/seaweed.log        — предыдущая сессия (данные с 17 марта 2026)
+/tmp/seaweedfs-data/    — volume данные (8.dat, 8.idx, 8.vif)
+filerldb2/              — LevelDB filer (в .gitignore)
+```
+
+---
+
 ## TODO: Переключение SQLite-драйвера на mattn/go-sqlite3
 
 **Мотивация:** `modernc.org/sqlite` медленнее нативного libsqlite3 в ~3× на больших SELECT.
