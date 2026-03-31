@@ -191,7 +191,7 @@ func validatePacket(pkt *packet.DataPacket, label string) (int, error) {
 // resolvePartSet takes any file in a multi-part set and returns:
 //   - files:   sorted list of all found part files (or just the single file)
 //   - missing: list of expected-but-absent part paths
-func resolvePartSet(filePath string) (files []string, missing []string, err error) {
+func resolvePartSet(filePath string) (files, missing []string, err error) {
 	if _, statErr := os.Stat(filePath); statErr != nil {
 		return nil, nil, fmt.Errorf("cannot access %q: %w", filePath, statErr)
 	}
