@@ -241,7 +241,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	for _, part := range parts {
 		// Сжатие применяем к каждой части отдельно
 		if e.config.TDTP.Compression || e.config.TDTP.Compress {
-			if err := e.compressDataPacket(part); err != nil {
+			if err := e.compressDataPacket(part, e.config.TDTP.CompressAlgo, e.config.TDTP.CompressLevel); err != nil {
 				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)
 			}
 		}
@@ -594,13 +594,24 @@ func (e *Exporter) ValidateConfig() error {
 	return nil
 }
 
-// compressDataPacket сжимает данные в DataPacket используя zstd
-func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket) error {
+// compressDataPacket сжимает данные в DataPacket указанным алгоритмом и уровнем.
+func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string, level int) error {
 	// Materialize rawRows (GenerateReference fast-path) перед сжатием.
 	// Без этого Data.Rows пуст и сжатие молча пропускается.
 	dataPacket.MaterializeRows()
 	if len(dataPacket.Data.Rows) == 0 {
 		return nil // Нечего сжимать
+	}
+
+	if algo == "" {
+		algo = "zstd"
+	}
+	if level == 0 {
+		if algo == "kanzi" {
+			level = 6
+		} else {
+			level = 3
+		}
 	}
 
 	// Проверяем минимальный размер для сжатия (1KB)
@@ -616,21 +627,19 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket) error {
 		return nil
 	}
 
-	// Сжимаем данные используя CompressDataForTdtp
-	compressedData, stats, err := processors.CompressDataForTdtp(rowStrings, 3) // Level 3 - balanced
+	compressedData, stats, err := processors.CompressDataForTdtpAlgo(rowStrings, algo, level)
 	if err != nil {
 		return fmt.Errorf("compression failed: %w", err)
 	}
 
 	// Проверяем выгоду от сжатия (должно уменьшиться хотя бы на 10%)
 	if stats.CompressedSize >= int(float64(stats.OriginalSize)*0.9) {
-		// Сжатие не дало значительной выгоды, оставляем без сжатия
 		return nil
 	}
 
 	// Обновляем DataPacket сжатыми данными, сохраняя compact/tail атрибуты
 	dataPacket.Data = packet.Data{
-		Compression: "zstd",
+		Compression: algo,
 		Compact:     dataPacket.Data.Compact,
 		Tail:        dataPacket.Data.Tail,
 		Rows: []packet.Row{
