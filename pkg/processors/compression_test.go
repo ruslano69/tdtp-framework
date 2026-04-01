@@ -565,4 +565,3 @@ func TestCompressDecompress_NewlineInField(t *testing.T) {
 		})
 	}
 }
-
