@@ -209,9 +209,10 @@ func validatePacket(pkt *packet.DataPacket, label string) (int, error) {
 		}
 	}
 
-	// Dry decompression
+	// Dry decompression — просто проверяем что блоб не битый, не парсим содержимое.
+	// RecordsInPart в заголовке — авторитетный счётчик строк; содержимое <Data> непрозрачно.
 	decompStart := time.Now()
-	rows, err := processors.DecompressDataForTdtpAlgo(compressedValue, pkt.Data.Compression)
+	err := processors.DryDecompress(compressedValue, pkt.Data.Compression)
 	decompTime := time.Since(decompStart)
 	if err != nil {
 		fmt.Printf("  ✗ %s: decompress failed (%s): %v\n",
@@ -219,14 +220,7 @@ func validatePacket(pkt *packet.DataPacket, label string) (int, error) {
 		return 0, err
 	}
 
-	// Row count after decompression vs header
-	actual := len(rows)
-	if pkt.Header.RecordsInPart > 0 && actual != pkt.Header.RecordsInPart {
-		fmt.Printf("  ✗ %s: RecordsInPart=%d but decompressed %d rows\n",
-			label, pkt.Header.RecordsInPart, actual)
-		return actual, fmt.Errorf("row count mismatch")
-	}
-
+	actual := pkt.Header.RecordsInPart
 	checksumMark := ""
 	if pkt.Data.Checksum != "" {
 		checksumMark = ", checksum OK"

@@ -9,7 +9,6 @@ package main
 */
 import "C"
 import (
-	"strings"
 	"unsafe"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -79,7 +78,7 @@ func D_ApplyCompress(pkt *C.D_Packet, level C.int, out *C.D_Packet) C.int {
 
 	rowStrings := make([]string, len(rows))
 	for i, row := range rows {
-		rowStrings[i] = strings.Join(row, "|")
+		rowStrings[i] = packet.JoinRowEscaped(row)
 	}
 
 	compressed, _, err := processors.CompressDataForTdtpAlgo(rowStrings, algo, int(level))

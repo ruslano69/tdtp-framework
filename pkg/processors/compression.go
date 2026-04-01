@@ -180,7 +180,7 @@ func ShouldCompress(dataSize, minSize int) bool {
 // --- Functions for TDTP Integration ---
 
 // CompressDataForTdtp сжимает строки данных для TDTP пакета.
-// Объединяет строки, сжимает, кодирует в base64 и возвращает результат вместе со статистикой.
+// Строки объединяются через \n; \n внутри значений полей экранируется в writeEscaped.
 func CompressDataForTdtp(rows []string, level int) (compressedRow string, stats CompressionStats, err error) {
 	if len(rows) == 0 {
 		return "", CompressionStats{}, nil
@@ -253,6 +253,22 @@ func CompressDataForTdtpAlgo(rows []string, algo string, level int) (compressedR
 
 	stats = GetCompressionStats(originalData, compressedData, time.Since(start))
 	return string(compressedData), stats, nil
+}
+
+// DryDecompress проверяет что сжатый блоб валиден (не битый), не разбирая содержимое.
+// Используется в --test: содержимое <Data> непрозрачно, RecordsInPart — авторитетный счётчик.
+func DryDecompress(compressed, algo string) error {
+	if compressed == "" {
+		return nil
+	}
+	switch algo {
+	case AlgoKanzi:
+		_, err := DecompressKanzi([]byte(compressed))
+		return err
+	default:
+		_, err := Decompress([]byte(compressed))
+		return err
+	}
 }
 
 // DecompressDataForTdtpAlgo распаковывает данные TDTP-пакета по имени алгоритма.
