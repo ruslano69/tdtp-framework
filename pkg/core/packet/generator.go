@@ -383,6 +383,19 @@ func escapeValue(value string) string {
 	return sb.String()
 }
 
+// JoinRowEscaped объединяет поля строки через | с TDTP-экранированием.
+// Используется везде где []string → pipe-строка (компрессия, Python-байндинги).
+func JoinRowEscaped(fields []string) string {
+	var sb strings.Builder
+	for i, v := range fields {
+		if i > 0 {
+			sb.WriteByte('|')
+		}
+		writeEscaped(&sb, v)
+	}
+	return sb.String()
+}
+
 // RowsToData преобразует [][]string в Data (публичная функция)
 // Правильно экранирует специальные символы (|, \)
 func RowsToData(rows [][]string) Data {
