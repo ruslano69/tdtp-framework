@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Test: Cyrillic field names (typical for Russian ERP/legacy exports)
+  Import with translit only:
+    tdtpcli --import tests/sanitize/cyrillic_fields.tdtp.xml --translit --config config.yaml
+  Import with translit + clear (recommended):
+    tdtpcli --import tests/sanitize/cyrillic_fields.tdtp.xml --translit --clear --config config.yaml
+
+  Expected renames (translit+clear):
+    "Идентификатор"  → Identifikator
+    "Имя"            → Imia
+    "Фамилия"        → Familiia
+    "Дата рождения"  → Data_rozhdeniia
+    "Номер телефона" → Nomer_telefona
+    "Статус заказа"  → Status_zakaza
+    "Сумма (руб.)"   → Summa_rub
+-->
+<TDTP protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>сотрудники</TableName>
+    <MessageID>TEST-SANITIZE-CYR-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>3</RecordsInPart>
+    <Timestamp>2026-04-01T00:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="Идентификатор"  type="INTEGER" key="true"/>
+    <Field name="Имя"            type="TEXT" length="100"/>
+    <Field name="Фамилия"        type="TEXT" length="100"/>
+    <Field name="Дата рождения"  type="DATE"/>
+    <Field name="Номер телефона" type="TEXT" length="30"/>
+    <Field name="Статус заказа"  type="TEXT" length="50"/>
+    <Field name="Сумма (руб.)"   type="FLOAT"/>
+  </Schema>
+  <Data>
+    <R>1|Иван|Иванов|1985-03-15|+7-999-111-22-33|активный|75000.00</R>
+    <R>2|Мария|Петрова|1992-07-22|+7-999-444-55-66|активный|82000.50</R>
+    <R>3|Алексей|Сидоров|1978-11-01|+7-999-777-88-99|уволен|0.00</R>
+  </Data>
+</TDTP>

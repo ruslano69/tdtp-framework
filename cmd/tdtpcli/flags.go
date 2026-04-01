@@ -107,6 +107,10 @@ type Flags struct {
 	CheckpointFile *string
 	BatchSize      *int
 
+	// Field Name Sanitization (--import)
+	Translit *bool // transliterate non-ASCII field names to ASCII via go-unidecode
+	Clear    *bool // replace special chars (%, @, #, space, …) in field names with safe tokens
+
 	// Data Processors
 	Mask      *string
 	Validate  *string
@@ -201,6 +205,10 @@ func ParseFlags() *Flags {
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")
 	f.CheckpointFile = flag.String("checkpoint-file", "checkpoint.yaml", "Checkpoint file for incremental sync state")
 	f.BatchSize = flag.Int("batch-size", 1000, "Batch size for incremental sync")
+
+	// Field Name Sanitization
+	f.Translit = flag.Bool("translit", false, "Transliterate non-ASCII field names to ASCII (Cyrillic, European diacritics) using go-unidecode. Use with --import.")
+	f.Clear = flag.Bool("clear", false, "Replace special chars in field names with safe tokens (% → _pct, @ → _at, space → _, …). Use with --import.")
 
 	// Data Processors
 	f.Mask = flag.String("mask", "", "Mask sensitive fields (comma-separated: email,phone,card)")

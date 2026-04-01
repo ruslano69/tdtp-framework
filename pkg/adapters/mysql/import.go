@@ -40,6 +40,12 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 			pkColumns = append(pkColumns, fmt.Sprintf("`%s`", field.Name))
 		}
 
+		// Preserve original name as column COMMENT when field was sanitized
+		if field.OriginalName != "" {
+			escaped := strings.ReplaceAll(field.OriginalName, "'", "\\'")
+			column += fmt.Sprintf(" COMMENT 'original: %s'", escaped)
+		}
+
 		columns = append(columns, column)
 	}
 
