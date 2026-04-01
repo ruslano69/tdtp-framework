@@ -353,12 +353,12 @@ func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]stri
 }
 
 // escapeValue экранирует специальные символы в значении за один проход.
-// Backslash (\) → \\, Pipe (|) → \|
+// Backslash (\) → \\, Pipe (|) → \|, LF (\n) → \n (два символа).
 func escapeValue(value string) string {
 	// fast-path: нет спецсимволов — возвращаем как есть без аллокаций
 	hasSpecial := false
 	for i := 0; i < len(value); i++ {
-		if value[i] == '\\' || value[i] == '|' {
+		if value[i] == '\\' || value[i] == '|' || value[i] == '\n' {
 			hasSpecial = true
 			break
 		}
@@ -374,6 +374,8 @@ func escapeValue(value string) string {
 			sb.WriteString(`\\`)
 		case '|':
 			sb.WriteString(`\|`)
+		case '\n':
+			sb.WriteString(`\n`)
 		default:
 			sb.WriteByte(value[i])
 		}
@@ -446,6 +448,8 @@ func rowsToDataMasked(rows [][]string, mask []bool) Data {
 }
 
 // writeEscaped пишет value в sb с TDTP-экранированием за один проход.
+// Экранируются: \ → \\, | → \|, \n (LF) → \n (два символа).
+// После экранирования LF не встречается в строке — безопасен как разделитель строк в сжатом блобе.
 func writeEscaped(sb *strings.Builder, value string) {
 	start := 0
 	for i := 0; i < len(value); i++ {
@@ -457,6 +461,10 @@ func writeEscaped(sb *strings.Builder, value string) {
 		case '|':
 			sb.WriteString(value[start:i])
 			sb.WriteString(`\|`)
+			start = i + 1
+		case '\n':
+			sb.WriteString(value[start:i])
+			sb.WriteString(`\n`)
 			start = i + 1
 		}
 	}

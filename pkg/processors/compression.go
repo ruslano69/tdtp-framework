@@ -180,7 +180,7 @@ func ShouldCompress(dataSize, minSize int) bool {
 // --- Functions for TDTP Integration ---
 
 // CompressDataForTdtp сжимает строки данных для TDTP пакета.
-// Объединяет строки, сжимает, кодирует в base64 и возвращает результат вместе со статистикой.
+// Строки объединяются через \n; \n внутри значений полей экранируется в writeEscaped.
 func CompressDataForTdtp(rows []string, level int) (compressedRow string, stats CompressionStats, err error) {
 	if len(rows) == 0 {
 		return "", CompressionStats{}, nil

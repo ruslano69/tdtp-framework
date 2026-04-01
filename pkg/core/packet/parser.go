@@ -253,7 +253,11 @@ func (p *Parser) GetRowValues(row Row) []string {
 
 		switch {
 		case escaped:
-			buf.WriteByte(char)
+			if char == 'n' {
+				buf.WriteByte('\n')
+			} else {
+				buf.WriteByte(char)
+			}
 			escaped = false
 		case char == '\\':
 			escaped = true

@@ -532,3 +532,37 @@ func BenchmarkProcessorReuse(b *testing.B) {
 		}
 	})
 }
+
+// TestCompressDecompress_NewlineInField проверяет что \n внутри значения поля
+// не ломает подсчёт строк при сжатии/декомпрессии.
+// Компрессор получает уже экранированные строки (после writeEscaped): LF → \n (backslash+n).
+func TestCompressDecompress_NewlineInField(t *testing.T) {
+	// Строки как они выглядят ПОСЛЕ writeEscaped: LF (0x0A) → \n (0x5C 0x6E)
+	rows := []string{
+		`field1|line1\nline2|field3`,
+		`other|normal|row`,
+		`last|row|here`,
+	}
+
+	for _, algo := range []string{AlgoZstd, AlgoKanzi} {
+		t.Run(algo, func(t *testing.T) {
+			compressed, _, err := CompressDataForTdtpAlgo(rows, algo, 3)
+			if err != nil {
+				t.Fatalf("compress failed: %v", err)
+			}
+			got, err := DecompressDataForTdtpAlgo(compressed, algo)
+			if err != nil {
+				t.Fatalf("decompress failed: %v", err)
+			}
+			if len(got) != len(rows) {
+				t.Fatalf("row count: want %d, got %d", len(rows), len(got))
+			}
+			for i := range rows {
+				if got[i] != rows[i] {
+					t.Errorf("row %d: want %q, got %q", i, rows[i], got[i])
+				}
+			}
+		})
+	}
+}
+
