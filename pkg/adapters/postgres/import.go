@@ -269,6 +269,22 @@ func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, p
 		return fmt.Errorf("failed to execute CREATE TABLE: %w\nSQL: %s", err, createSQL)
 	}
 
+	// Add COMMENT ON COLUMN for fields that were sanitized (OriginalName is set)
+	for _, field := range pktSchema.Fields {
+		if field.OriginalName == "" {
+			continue
+		}
+		commentSQL := fmt.Sprintf(
+			"COMMENT ON COLUMN %s.%s IS 'original: %s'",
+			quotedTable,
+			QuoteIdentifier(field.Name),
+			strings.ReplaceAll(field.OriginalName, "'", "''"), // escape single quotes
+		)
+		if cerr := a.Exec(ctx, commentSQL); cerr != nil {
+			fmt.Printf("warning: could not add column comment for '%s': %v\n", field.Name, cerr)
+		}
+	}
+
 	return nil
 }
 

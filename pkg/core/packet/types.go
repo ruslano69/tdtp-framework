@@ -68,6 +68,11 @@ type Field struct {
 	ReadOnly      bool           `xml:"readonly,attr,omitempty"` // Read-only поля (timestamp, computed)
 	Fixed         bool           `xml:"fixed,attr,omitempty"`    // v1.3.1: значение не меняется в пределах пакета
 	SpecialValues *SpecialValues `xml:"SpecialValues,omitempty"` // v1.3.1: маркеры специальных значений
+
+	// OriginalName is set by the sanitizer when Name is transformed into a safe
+	// SQL identifier. It is never serialized (xml:"-", json:"-") and carries the
+	// original field name for storage as a database column comment.
+	OriginalName string `xml:"-" json:"-"`
 }
 
 // SpecialValues содержит маркеры специальных значений для поля (v1.3.1)

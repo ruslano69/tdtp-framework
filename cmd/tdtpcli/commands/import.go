@@ -12,6 +12,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/sanitize"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
@@ -25,6 +26,11 @@ type ImportOptions struct {
 	Fields       []string // Column whitelist: only import these columns (nil/empty = all)
 	Strategy     adapters.ImportStrategy
 	ProcessorMgr ProcessorManager
+
+	// Field name sanitization — applied to schema fields before import.
+	// Row data is positional and is never modified.
+	SanitizeClear    bool // replace special chars (%, @, #, space, …) with safe tokens
+	SanitizeTranslit bool // transliterate non-ASCII chars to ASCII (Cyrillic, European)
 
 	// Object storage (S3/SeaweedFS). Non-nil → download from object storage instead of local file.
 	StorageCfg *storage.Config // storage driver config with bucket
@@ -136,6 +142,17 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		if len(opts.Fields) > 0 {
 			if err := filterPacketFields(pkt, opts.Fields); err != nil {
 				return fmt.Errorf("field filter failed: %w", err)
+			}
+		}
+
+		// Sanitize field names in schema (data rows are positional — untouched)
+		if opts.SanitizeClear || opts.SanitizeTranslit {
+			sOpts := sanitize.Options{Clear: opts.SanitizeClear, Translit: opts.SanitizeTranslit}
+			if changed := sanitize.ApplyToSchema(&pkt.Schema, sOpts); len(changed) > 0 {
+				fmt.Printf("  Field name sanitization (%d renamed):\n", len(changed))
+				for _, r := range changed {
+					fmt.Printf("    '%s' → '%s'\n", r.OriginalName, r.SafeName)
+				}
 			}
 		}
 

@@ -169,13 +169,15 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
-				FilePath:     importFile,
-				TargetTable:  *flags.Table,
-				Fields:       splitCommaSeparated(*flags.Fields),
-				Strategy:     strategy,
-				ProcessorMgr: procMgr,
-				StorageCfg:   importStorageCfg,
-				StorageKey:   importStorageKey,
+				FilePath:         importFile,
+				TargetTable:      *flags.Table,
+				Fields:           splitCommaSeparated(*flags.Fields),
+				Strategy:         strategy,
+				ProcessorMgr:     procMgr,
+				StorageCfg:       importStorageCfg,
+				StorageKey:       importStorageKey,
+				SanitizeClear:    *flags.Clear,
+				SanitizeTranslit: *flags.Translit,
 			})
 		})
 
