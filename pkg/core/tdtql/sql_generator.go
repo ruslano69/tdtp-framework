@@ -141,9 +141,21 @@ func (g *SQLGenerator) generateLogicalGroup(group *packet.LogicalGroup, operator
 	return strings.Join(conditions, " "+operator+" "), nil
 }
 
+// quoteFieldName wraps a field name in double quotes when it contains characters
+// that are not safe as a bare SQL identifier (spaces, special chars, etc.).
+// Double quotes are standard SQL (ANSI); dialect adapters (MSSQL, MySQL) convert them.
+func quoteFieldName(name string) string {
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+		}
+	}
+	return name
+}
+
 // generateFilterCondition конвертирует Filter в SQL условие
 func (g *SQLGenerator) generateFilterCondition(filter packet.Filter) (string, error) {
-	field := filter.Field
+	field := quoteFieldName(filter.Field)
 	operator := filter.Operator
 	value := filter.Value
 	value2 := filter.Value2
@@ -277,11 +289,11 @@ func (g *SQLGenerator) generateReversedOrderByClause(orderBy *packet.OrderBy) st
 	parts := make([]string, 0, 1+len(orderBy.Fields))
 
 	if orderBy.Field != "" {
-		parts = append(parts, fmt.Sprintf("%s %s", orderBy.Field, reverseDirection(orderBy.Direction)))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(orderBy.Field), reverseDirection(orderBy.Direction)))
 	}
 
 	for _, field := range orderBy.Fields {
-		parts = append(parts, fmt.Sprintf("%s %s", field.Name, reverseDirection(field.Direction)))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(field.Name), reverseDirection(field.Direction)))
 	}
 
 	return strings.Join(parts, ", ")
@@ -301,7 +313,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 		if orderBy.Direction != "" {
 			direction = strings.ToUpper(orderBy.Direction)
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", orderBy.Field, direction))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(orderBy.Field), direction))
 	}
 
 	// Множественная сортировка
@@ -310,7 +322,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 		if field.Direction != "" {
 			direction = strings.ToUpper(field.Direction)
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", field.Name, direction))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(field.Name), direction))
 	}
 
 	return strings.Join(parts, ", ")

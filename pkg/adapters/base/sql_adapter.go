@@ -99,12 +99,18 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
 	sql := strings.Replace(standardSQL, tableName, fullTableName, 1)
 
-	// Квалифицируем имена полей квадратными скобками
+	// Квалифицируем имена полей квадратными скобками.
+	// Обрабатываем два варианта: ANSI "field" (из quoteFieldName для имён со спецсимволами)
+	// и голое имя (для безопасных идентификаторов).
 	for _, field := range schema.Fields {
-		// Заменяем field на [field] в WHERE и ORDER BY
-		sql = strings.ReplaceAll(sql, " "+field.Name+" ", " ["+field.Name+"] ")
-		sql = strings.ReplaceAll(sql, "("+field.Name+")", "(["+field.Name+"])")
-		sql = strings.ReplaceAll(sql, ","+field.Name+" ", ",["+field.Name+"] ")
+		bracket := "[" + strings.ReplaceAll(field.Name, "]", "]]") + "]"
+		ansi := `"` + strings.ReplaceAll(field.Name, `"`, `""`) + `"`
+		// Сначала ANSI-форма (чтобы не дублировать для безопасных имён)
+		sql = strings.ReplaceAll(sql, ansi, bracket)
+		// Затем голое имя (безопасные идентификаторы, не обёрнутые quoteFieldName)
+		sql = strings.ReplaceAll(sql, " "+field.Name+" ", " "+bracket+" ")
+		sql = strings.ReplaceAll(sql, "("+field.Name+")", "("+bracket+")")
+		sql = strings.ReplaceAll(sql, ","+field.Name+" ", ","+bracket+" ")
 	}
 
 	// Заменяем LIMIT/OFFSET на SQL Server синтаксис (SQL Server 2012+)
