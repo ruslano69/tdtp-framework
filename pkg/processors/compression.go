@@ -255,6 +255,22 @@ func CompressDataForTdtpAlgo(rows []string, algo string, level int) (compressedR
 	return string(compressedData), stats, nil
 }
 
+// DryDecompress проверяет что сжатый блоб валиден (не битый), не разбирая содержимое.
+// Используется в --test: содержимое <Data> непрозрачно, RecordsInPart — авторитетный счётчик.
+func DryDecompress(compressed, algo string) error {
+	if compressed == "" {
+		return nil
+	}
+	switch algo {
+	case AlgoKanzi:
+		_, err := DecompressKanzi([]byte(compressed))
+		return err
+	default:
+		_, err := Decompress([]byte(compressed))
+		return err
+	}
+}
+
 // DecompressDataForTdtpAlgo распаковывает данные TDTP-пакета по имени алгоритма.
 func DecompressDataForTdtpAlgo(compressed, algo string) ([]string, error) {
 	if compressed == "" {
