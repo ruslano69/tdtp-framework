@@ -12,11 +12,17 @@
 
 ```
 1. --list              → что есть в БД?
-2. --inspect <table>   → какая структура?
-3. --export --limit 5  → как выглядят данные?
-4. --pipeline etl.yaml → трансформация
-5. --diff a.xml b.xml  → что изменилось?
+2. --inspect <file>    → какая структура?   (понять — поля, типы, UUID)
+3. --test    <file>    → файл не повреждён? (целостность — чексумма, строки)
+4. --export --limit 5  → как выглядят данные?
+5. --pipeline etl.yaml → трансформация
+6. --diff a.xml b.xml  → что изменилось?
 ```
+
+> **--inspect vs --test:**
+> - `--inspect` — **понимание**: что за файл, какие поля, сколько строк, сжат ли.
+> - `--test` — **контроль целостности**: данные не повреждены, чексумма OK, multi-part полный.
+> - Оба не требуют подключения к БД. Оба работают с `s3://`.
 
 ---
 
@@ -94,6 +100,20 @@ tdtpcli --pipeline etl.yaml          # безопасный режим (толь
 tdtpcli --pipeline etl.yaml --unsafe # полный SQL (только при необходимости)
 ```
 
+### Проверка файла перед импортом
+
+```bash
+# ШАГ 1: понять структуру (поля, типы, имя таблицы)
+tdtpcli --inspect delivery.tdtp.xml
+
+# ШАГ 2: проверить целостность (распаковка, чексумма, строки)
+tdtpcli --test delivery.tdtp.xml
+# ✓ algo=zstd, 5000 rows, decompressed 23ms, checksum OK
+
+# ШАГ 3: только после этого — импорт
+tdtpcli --import delivery.tdtp.xml --config pg.yaml
+```
+
 ### Импорт результата
 
 ```bash
@@ -104,7 +124,32 @@ tdtpcli --import result.tdtp.xml --table new_table_name
 
 # Импорт только нужных колонок (whitelist)
 tdtpcli --import wide.tdtp.xml --fields id,email,status --table slim_table
+
+# Импорт с санитизацией имён полей (экзотические имена из MSSQL/Access/ERP)
+tdtpcli --import access_export.tdtp.xml --clear --strategy replace
+# "Order ID" → Order_ID  |  "Total Cost $" → Total_Cost_usd_  |  "Discount %" → Discount_pct_
+
+tdtpcli --import erp_1c.tdtp.xml --translit --clear --strategy replace
+# "Имя пользователя" → Imia_polzovatelia  |  "Дата рождения" → Data_rozhdeniia
+
+# Только транслитерация (нет спецсимволов, только кириллица/диакритики)
+tdtpcli --import eu_staff.tdtp.xml --translit --strategy replace
+# "Österreich" → Osterreich
+
+# --clear и --translit НЕ применяются к --export (экспорт = источник истины)
 ```
+
+### Bracket-quoted имена полей в --where
+
+Поля с пробелами и спецсимволами (MSSQL/Access) — используй квадратные скобки:
+
+```bash
+tdtpcli --export ZTR$Employee --where '[Termination Date] = "1753-01-01"'
+tdtpcli --export orders --where '[Total Cost $] > 100'
+tdtpcli --export leads --where '[Is Active?] = 1'
+```
+
+Скобки снимаются при парсинге и имя правильно квотируется для каждой СУБД.
 
 ### Инкрементальная синхронизация
 
@@ -202,9 +247,42 @@ tdtpcli --export orders --config config.yaml
 
 | Режим | SQL | Риск |
 |-------|-----|------|
-| `--export`, `--list`, `--inspect` | Нет | Нулевой |
+| `--export`, `--list`, `--inspect`, `--test` | Нет | Нулевой |
 | `--pipeline` (default) | SELECT/WITH only | Нулевой |
 | `--pipeline --unsafe` | Любой SQL | Только при явном указании |
 | `--import` | INSERT/UPDATE | Только явный импорт |
 
 Агент **не может случайно** выполнить UPDATE/DELETE/DROP.
+
+## Важные навыки
+
+### --test (контроль целостности пакета)
+
+```bash
+# Всегда запускать перед импортом сжатого/внешнего файла
+tdtpcli --test <file>
+
+# Работает с S3
+tdtpcli --test s3://bucket/key.tdtp.xml --config cfg.yaml
+
+# В скриптах: только импортировать если --test прошёл
+tdtpcli --test delivery.tdtp.xml && tdtpcli --import delivery.tdtp.xml --config pg.yaml
+```
+
+### --import с санитизацией полей (--translit / --clear)
+
+Для файлов из MSSQL/Access/1С/ERP где имена полей содержат кириллицу, пробелы, %, $:
+
+```bash
+# Access / Legacy MSSQL: пробелы и спецсимволы
+tdtpcli --import legacy.tdtp.xml --clear
+
+# 1С / Russian ERP: кириллица + спецсимволы
+tdtpcli --import 1c_export.tdtp.xml --translit --clear
+
+# European data: только диакритики (ö, ñ, ü, ...)
+tdtpcli --import eu_data.tdtp.xml --translit
+```
+
+Оригинальные имена сохраняются как комментарии к колонкам (PostgreSQL / MySQL).
+**`--export` всегда без санитизации** — он источник истины.
