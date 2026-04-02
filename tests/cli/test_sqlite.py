@@ -190,6 +190,22 @@ def setup_db():
         (10, "Speakers",            "Audio",         300.00,  5,  0, "2025-10-15 19:00:00"),
     ])
 
+    # Table with spaces and special characters in column names (MSSQL/Access export style)
+    c.execute("""CREATE TABLE "complex_fields" (
+        "Order ID" INTEGER PRIMARY KEY,
+        "Customer Name" TEXT,
+        "Total Cost $" REAL,
+        "Discount %" REAL,
+        "Is Active?" INTEGER
+    )""")
+    c.executemany('INSERT INTO "complex_fields" VALUES (?,?,?,?,?)', [
+        (1, "Alice",  150.00, 0.10, 1),
+        (2, "Bob",    200.00, 0.00, 1),
+        (3, "Carol",   80.00, 0.20, 0),
+        (4, "Dave",   320.00, 0.05, 1),
+        (5, "Eve",     50.00, 0.00, 0),
+    ])
+
     conn.commit()
     conn.close()
 
@@ -295,6 +311,26 @@ def test_T2_filters():
     record("T2.7 LIMIT -3 (last 3 rows, tail mode)",
            p.returncode == 0 and rows == 3,
            time.monotonic() - t, f"rows={rows}")
+
+    # T2.8 — bracket-quoted field name (MSSQL/Access style): [Order ID] > 3 → rows 4,5
+    t = time.monotonic()
+    p = run("--export", "complex_fields",
+            "--where", "[Order ID] > 3",
+            "--output", out("t2_8.xml"))
+    rows = count_rows_xml(out("t2_8.xml"))
+    record("T2.8 bracket-quoted WHERE [Order ID] > 3 → 2 rows",
+           p.returncode == 0 and rows == 2,
+           time.monotonic() - t, f"rc={p.returncode} rows={rows}")
+
+    # T2.9 — bracket-quoted name with special char: [Is Active?] = 1 → rows 1,2,4
+    t = time.monotonic()
+    p = run("--export", "complex_fields",
+            "--where", "[Is Active?] = 1",
+            "--output", out("t2_9.xml"))
+    rows = count_rows_xml(out("t2_9.xml"))
+    record("T2.9 bracket-quoted WHERE [Is Active?] = 1 → 3 rows",
+           p.returncode == 0 and rows == 3,
+           time.monotonic() - t, f"rc={p.returncode} rows={rows}")
 
 
 # ─── T3 Compression ───────────────────────────────────────────────────────────

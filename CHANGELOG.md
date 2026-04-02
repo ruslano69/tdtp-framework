@@ -2,6 +2,52 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.8.1-beta] — 2026-04-02
+
+### Added
+
+#### Field Name Sanitizer (`--translit`, `--clear`)
+- `pkg/sanitize` — new package with `ApplyToSchema()` single entry point
+  - `--clear`: symbol map replacement (`%` → `_pct_`, `$` → `_usd_`, `&` → `_and_`, `@` → `_at_`, `#` → `_xh_`, `?` → `_is_`, `~` → `_not_`, spaces/dots/dashes → `_`; consecutive `__` collapsed)
+  - `--translit`: non-ASCII transliteration via `github.com/mozillazg/go-unidecode v0.2.0` (Cyrillic, European diacritics)
+  - Combined mode: `--translit` runs first, then `--clear`
+  - Applied **only on `--import`** — `--export` always preserves original field names (source of truth)
+- `cmd/tdtpcli/flags.go`: `--translit` and `--clear` CLI flags
+- `cmd/tdtpcli/commands/import.go`: `SanitizeClear` / `SanitizeTranslit` options, applied after field whitelist
+- `pkg/etl/config.go`: `SanitizeFieldsConfig` struct; `sanitize.translit/clear` keys in ETL source YAML
+- `pkg/etl/processor.go`: per-source sanitization in `populateWorkspace`
+- `pkg/core/packet/types.go`: `OriginalName string` runtime field on `packet.Field` (never serialized)
+- DB column comments preserving original names:
+  - PostgreSQL: `COMMENT ON COLUMN t.col IS 'original: ...'`
+  - MySQL: inline `COMMENT 'original: ...'` in column definition
+- Test XMLs: `tests/sanitize/` — `access_fields.tdtp.xml`, `cyrillic_fields.tdtp.xml`, `exotic_mixed.tdtp.xml`, `safe_import.tdtp.xml`
+- `pkg/sanitize/fieldname_test.go` — 7 unit tests covering all sanitizer modes
+
+#### TDTQL: Bracket-Quoted Identifiers
+- `pkg/core/tdtql/lexer.go`: support for `[Field Name]` syntax (MSSQL/Access style)
+  - `[` token now reads to `]` and emits `TokenIdent` with the inner name (brackets stripped)
+  - Fixes: `--where "[Termination Date] = '1753-01-01'"` — was "parse error: expected field name, got 1"
+- `pkg/core/tdtql/sql_generator.go`: `quoteFieldName()` helper
+  - Names with non-safe chars → ANSI `"field name"` in generated SQL
+  - Applied in `generateFilterCondition`, `generateOrderByClause`, `generateReversedOrderByClause`
+- `pkg/adapters/base/sql_adapter.go`: `MSSQLAdapter.AdaptSQL` now converts ANSI-quoted `"field"` → `[field]`
+  - `StandardSQLAdapter` MySQL mode: existing `ReplaceAll("\"", "`")` handles ANSI → backtick conversion
+
+### Fixed
+- `pkg/brokers/kafka_stub.go`: removed unused `config Config` field; added doc comments to all exported methods (revive lint)
+- `pkg/processors/compression_test.go`: removed trailing blank line (gofmt)
+- `.git/hooks/pre-commit`: `golangci-lint run --tags` → `--build-tags` (golangci-lint v2 rename)
+
+### Documentation
+- `docs/USER_GUIDE.md`: added `--test` command section, `--translit`/`--clear` section, bracket-quoted WHERE section, parallel export note, pre-import workflow `--inspect → --test → --import`
+- `AGENTS.md`: added `--test` workflow, `--import --translit/--clear` skills, bracket-quoted `--where` examples
+- `cmd/tdtpcli/help.go`: bracket-quoted `--where` examples, `--test`/`--inspect` pre-import workflow in EXAMPLES section
+
+### Tests
+- `tests/cli/test_sqlite.py`: added `complex_fields` table (column names with spaces and special chars); T2.8 and T2.9 tests for bracket-quoted `--where` on this table
+
+---
+
 ## [1.8.0-beta] — 2026-03-31
 
 ### Added
