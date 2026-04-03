@@ -155,6 +155,13 @@ type Adapter interface {
 
 	// GetDatabaseType возвращает тип СУБД: "sqlite", "postgres", "mssql"
 	GetDatabaseType() string
+
+	// InspectTable returns extended metadata for a live DB table:
+	// native column types, FK relationships, row count, and a sample record.
+	// Unlike GetTableSchema (which returns TDTP-typed schema),
+	// InspectTable is optimized for agentic discovery — it reveals the
+	// "raw" database view of a table without any TDTP abstraction.
+	InspectTable(ctx context.Context, tableName string) (*TableReport, error)
 }
 
 // Tx - интерфейс транзакции
