@@ -27,6 +27,7 @@ func PrintShortHelp() {
 	fmt.Println("    --list-views               List all database views")
 	fmt.Println("    --export <table>           Export table to TDTP XML")
 	fmt.Println("    --import <file>            Import TDTP XML to database")
+	fmt.Println("    --inspect-table <table>    Inspect live DB table: native types, FKs, row count, sample row")
 	fmt.Println()
 	fmt.Println("  File:")
 	fmt.Println("    --inspect <file>           Print YAML metadata summary (no config needed)")
@@ -126,6 +127,7 @@ func PrintHelp() {
 	fmt.Println("    --list[=pattern]           List tables; filter by glob (e.g. --list=user*, --list=order?)")
 	fmt.Println("    --export <table>           Export table to TDTP XML file")
 	fmt.Println("    --import <file>            Import TDTP XML file to database")
+	fmt.Println("    --inspect-table <table>    Inspect live DB table: native types, FKs, row count, sample row")
 	fmt.Println()
 
 	fmt.Println("  File Operations:")
@@ -409,6 +411,14 @@ func PrintHelp() {
 
 	fmt.Println("  # Inspect TDTP file metadata (no config needed)")
 	fmt.Println("  tdtpcli --inspect orders.tdtp.xml")
+	fmt.Println()
+
+	fmt.Println("  # Inspect live DB table: native types, FK relationships, row count, sample record")
+	fmt.Println("  #   --inspect-table: connects to DB, queries system catalog, prints YAML.")
+	fmt.Println("  #   Bracket-quoted names (MSSQL/Access style) are supported.")
+	fmt.Println("  tdtpcli --inspect-table Employees --config pg.yaml")
+	fmt.Println("  tdtpcli --inspect-table \"[ZTR$Employee]\" --config mssql.yaml")
+	fmt.Println("  tdtpcli --inspect-table \"[dbo].[Orders]\" --config mssql.yaml")
 	fmt.Println()
 
 	fmt.Println("  # Import to different table name")
