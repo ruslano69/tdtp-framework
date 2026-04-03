@@ -1,0 +1,26 @@
+database:
+    type: postgres
+    host: localhost
+    port: 5432
+    database: tdtp
+    user: tdtp
+    password: tdtp
+    schema: public
+    sslmode: disable
+export:
+    compress: true
+    compress_level: 3
+resilience:
+    circuit_breaker:
+        enabled: true
+        threshold: 5
+        timeout: 60
+        max_concurrent: 100
+        success_threshold: 2
+    retry:
+        enabled: true
+        max_attempts: 3
+        strategy: exponential
+        initial_wait_ms: 500
+        max_wait_ms: 10000
+        jitter: true
