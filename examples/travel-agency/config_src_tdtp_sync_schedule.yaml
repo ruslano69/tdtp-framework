@@ -1,0 +1,18 @@
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  database: tdtp
+  user: tdtp
+  password: tdtp
+  schema: public
+  sslmode: disable
+
+broker:
+  type: rabbitmq
+  host: localhost
+  port: 5672
+  user: tdtp
+  password: tdtp
+  queue: tdtp.sync.schedule
+  durable: true
