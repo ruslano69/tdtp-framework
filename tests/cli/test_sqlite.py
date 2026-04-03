@@ -12,6 +12,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import time
 import shutil
@@ -115,6 +116,27 @@ def sqlite_query(db_path: str, sql: str) -> list:
 def out(name: str) -> str:
     """Return absolute path inside OUTDIR."""
     return str(OUTDIR / name)
+
+
+def modify_xml_field(src: str, dst: str, id_val: str, field_idx: int, new_value: str):
+    """Modify one field in TDTP XML pipe-separated rows where field[0] == id_val.
+
+    Parses <R>v0|v1|v2|...</R> elements using regex, changes field at field_idx
+    in the first matching row (where field[0] == id_val), writes result to dst.
+    Does not affect rows where field[0] != id_val.
+    """
+    with open(src) as fh:
+        content = fh.read()
+
+    def _replacer(m: "re.Match[str]") -> str:
+        vals = m.group(1).split("|")
+        if vals[0] == id_val:
+            vals[field_idx] = new_value
+        return "<R>" + "|".join(vals) + "</R>"
+
+    new_content = re.sub(r"<R>([^<]+)</R>", _replacer, content)
+    with open(dst, "w") as fh:
+        fh.write(new_content)
 
 
 def write_cfg(path: str, db: str = TEST_DB,
@@ -752,6 +774,203 @@ def test_T8_s3():
            time.monotonic() - t, f"rc={p.returncode}")
 
 
+# ─── T9 Diff ─────────────────────────────────────────────────────────────────
+
+def test_T9_diff():
+    print(f"\n{BOLD}=== T9 Diff ==={RESET}")
+
+    # ── Setup: export files used across all T9 subtests ──────────────────────
+    # Full 10-row users export (used as "baseline A")
+    run("--export", "users", "--output", out("t9_all.xml"))
+    # Subset: first 7 rows (IDs 1–7)
+    run("--export", "users", "--where", "ID <= 7", "--output", out("t9_7.xml"))
+    # Modified: change Balance (field index 3) of ID=1 from its original value to 9999
+    #   users schema: ID | Name | Email | Balance | IsActive | City | CreatedAt | LastLoginAt
+    #   field index:   0     1      2        3          4        5        6             7
+    modify_xml_field(out("t9_all.xml"), out("t9_modif.xml"), "1", 3, "9999")
+
+    # T9.1 — identical exports: same file diffed against itself
+    t = time.monotonic()
+    p = run("--diff", out("t9_all.xml"), out("t9_all.xml"))
+    record("T9.1 diff identical files → 'Files are identical'",
+           p.returncode == 0
+           and "Files are identical" in p.stdout
+           and "Added:      0" in p.stdout
+           and "Removed:    0" in p.stdout,
+           time.monotonic() - t, p.stdout.strip()[-80:])
+
+    # T9.2 — A has 10 rows, B has 7 → 3 rows removed in B relative to A
+    t = time.monotonic()
+    p = run("--diff", out("t9_all.xml"), out("t9_7.xml"))
+    record("T9.2 diff A(10) vs B(7) → Removed: 3, Files differ",
+           p.returncode == 0
+           and "Removed:    3" in p.stdout
+           and "Files differ" in p.stdout,
+           time.monotonic() - t, p.stdout.strip()[-80:])
+
+    # T9.3 — A has 7 rows, B has 10 → 3 rows added in B relative to A
+    t = time.monotonic()
+    p = run("--diff", out("t9_7.xml"), out("t9_all.xml"))
+    record("T9.3 diff A(7) vs B(10) → Added: 3, Files differ",
+           p.returncode == 0
+           and "Added:      3" in p.stdout
+           and "Files differ" in p.stdout,
+           time.monotonic() - t, p.stdout.strip()[-80:])
+
+    # T9.4 — one row has a modified field value → Modified: 1
+    t = time.monotonic()
+    p = run("--diff", out("t9_all.xml"), out("t9_modif.xml"))
+    record("T9.4 diff with one modified Balance → Modified: 1",
+           p.returncode == 0
+           and "Modified:   1" in p.stdout
+           and "Files differ" in p.stdout,
+           time.monotonic() - t, p.stdout.strip()[-80:])
+
+    # T9.5 — --ignore-fields skips the changed field → identical despite modification
+    # NOTE: filter flags (--ignore-fields, --key-fields) must appear BEFORE --diff
+    # because the second file path is a positional arg consumed by flag.Args();
+    # flags placed AFTER the second positional get re-parsed, clearing flag.Args().
+    t = time.monotonic()
+    p = run("--ignore-fields", "Balance",
+            "--diff", out("t9_all.xml"), out("t9_modif.xml"))
+    record("T9.5 --ignore-fields Balance → Files are identical",
+           p.returncode == 0 and "Files are identical" in p.stdout,
+           time.monotonic() - t, p.stdout.strip()[-60:])
+
+    # T9.6 — --key-fields explicit (overrides schema auto-detect), identical files
+    t = time.monotonic()
+    p = run("--key-fields", "ID",
+            "--diff", out("t9_all.xml"), out("t9_all.xml"))
+    record("T9.6 --key-fields ID explicit → 'Files are identical'",
+           p.returncode == 0 and "Files are identical" in p.stdout,
+           time.monotonic() - t, f"rc={p.returncode}")
+
+    # T9.7 — error: first file does not exist → exit != 0
+    t = time.monotonic()
+    p = run("--diff", out("t9_nonexistent_xyz.xml"), out("t9_all.xml"))
+    record("T9.7 diff nonexistent file → error exit code",
+           p.returncode != 0,
+           time.monotonic() - t, f"rc={p.returncode}")
+
+
+# ─── T10 Merge ────────────────────────────────────────────────────────────────
+
+def test_T10_merge():
+    print(f"\n{BOLD}=== T10 Merge ==={RESET}")
+
+    # ── Setup: export slices of users for various overlap scenarios ───────────
+    # Non-overlapping halves: IDs 1–5 and IDs 6–10
+    run("--export", "users", "--where", "ID <= 5",
+        "--output", out("t10_1to5.xml"))    # 5 rows
+    run("--export", "users", "--where", "ID > 5",
+        "--output", out("t10_6to10.xml"))   # 5 rows
+
+    # Overlapping halves: IDs 1–6 and IDs 5–10 (IDs 5,6 in both)
+    run("--export", "users", "--where", "ID <= 6",
+        "--output", out("t10_1to6.xml"))    # 6 rows
+    run("--export", "users", "--where", "ID >= 5",
+        "--output", out("t10_5to10.xml"))   # 6 rows
+
+    # Three non-overlapping parts for 3-file union test
+    run("--export", "users", "--where", "ID <= 3",
+        "--output", out("t10_p1.xml"))      # 3 rows: IDs 1,2,3
+    run("--export", "users", "--where", "ID > 3", "--where", "ID <= 7",
+        "--output", out("t10_p2.xml"))      # 4 rows: IDs 4,5,6,7
+    run("--export", "users", "--where", "ID > 7",
+        "--output", out("t10_p3.xml"))      # 3 rows: IDs 8,9,10
+
+    # Different table for schema-mismatch error test
+    run("--export", "orders", "--output", out("t10_orders.xml"))
+
+    # T10.1 — union of non-overlapping halves → 10 unique rows, no duplicates
+    t = time.monotonic()
+    files = f"{out('t10_1to5.xml')},{out('t10_6to10.xml')}"
+    p = run("--merge", files, "--output", out("t10_union_nooverlap.xml"))
+    rows = count_rows_xml(out("t10_union_nooverlap.xml")) if p.returncode == 0 else -1
+    record("T10.1 union non-overlapping (5+5) → 10 rows",
+           p.returncode == 0 and rows == 10
+           and "Merged file saved" in p.stdout
+           and "Duplicates:     0" in p.stdout,
+           time.monotonic() - t, f"rows={rows}")
+
+    # T10.2 — union of overlapping halves (IDs 5,6 shared) → 10 unique rows, 2 duplicates
+    t = time.monotonic()
+    files = f"{out('t10_1to6.xml')},{out('t10_5to10.xml')}"
+    p = run("--merge", files, "--output", out("t10_union_overlap.xml"))
+    rows = count_rows_xml(out("t10_union_overlap.xml")) if p.returncode == 0 else -1
+    record("T10.2 union overlapping (6+6, 2 shared) → 10 rows, Duplicates: 2",
+           p.returncode == 0 and rows == 10 and "Duplicates:     2" in p.stdout,
+           time.monotonic() - t, f"rows={rows}")
+
+    # T10.3 — intersection of overlapping → only rows present in both = 2 rows (IDs 5,6)
+    t = time.monotonic()
+    files = f"{out('t10_1to6.xml')},{out('t10_5to10.xml')}"
+    p = run("--merge", files, "--merge-strategy", "intersection",
+            "--output", out("t10_intersection.xml"))
+    rows = count_rows_xml(out("t10_intersection.xml")) if p.returncode == 0 else -1
+    record("T10.3 intersection → 2 rows (IDs 5,6 only)",
+           p.returncode == 0 and rows == 2,
+           time.monotonic() - t, f"rows={rows}")
+
+    # T10.4 — append: all rows concatenated without dedup → 6+6=12 rows
+    t = time.monotonic()
+    files = f"{out('t10_1to6.xml')},{out('t10_5to10.xml')}"
+    p = run("--merge", files, "--merge-strategy", "append",
+            "--output", out("t10_append.xml"))
+    rows = count_rows_xml(out("t10_append.xml")) if p.returncode == 0 else -1
+    record("T10.4 append (no dedup) → 12 rows",
+           p.returncode == 0 and rows == 12,
+           time.monotonic() - t, f"rows={rows}")
+
+    # T10.5 — left priority with --show-conflicts: duplicates keep first file's row
+    #   IDs 5,6 appear in both files (same values) → conflict registered, kept_existing
+    t = time.monotonic()
+    files = f"{out('t10_1to6.xml')},{out('t10_5to10.xml')}"
+    p = run("--merge", files, "--merge-strategy", "left", "--show-conflicts",
+            "--output", out("t10_left.xml"))
+    rows = count_rows_xml(out("t10_left.xml")) if p.returncode == 0 else -1
+    kept_ok = "kept_existing" in p.stdout
+    record("T10.5 left priority + --show-conflicts → 10 rows, 'kept_existing'",
+           p.returncode == 0 and rows == 10 and kept_ok,
+           time.monotonic() - t, f"rows={rows} kept={kept_ok}")
+
+    # T10.6 — right priority with --show-conflicts: duplicates overwritten by second file
+    t = time.monotonic()
+    files = f"{out('t10_1to6.xml')},{out('t10_5to10.xml')}"
+    p = run("--merge", files, "--merge-strategy", "right", "--show-conflicts",
+            "--output", out("t10_right.xml"))
+    rows = count_rows_xml(out("t10_right.xml")) if p.returncode == 0 else -1
+    used_ok = "used_new" in p.stdout
+    record("T10.6 right priority + --show-conflicts → 10 rows, 'used_new'",
+           p.returncode == 0 and rows == 10 and used_ok,
+           time.monotonic() - t, f"rows={rows} used={used_ok}")
+
+    # T10.7 — 3-file union (non-overlapping: 3+4+3=10) → 10 rows, Packets merged: 3
+    t = time.monotonic()
+    files = f"{out('t10_p1.xml')},{out('t10_p2.xml')},{out('t10_p3.xml')}"
+    p = run("--merge", files, "--output", out("t10_3way.xml"))
+    rows = count_rows_xml(out("t10_3way.xml")) if p.returncode == 0 else -1
+    packets_ok = "Packets merged: 3" in p.stdout
+    record("T10.7 3-file union (3+4+3) → 10 rows, 'Packets merged: 3'",
+           p.returncode == 0 and rows == 10 and packets_ok,
+           time.monotonic() - t, f"rows={rows} pkt={packets_ok}")
+
+    # T10.8 — error: only 1 file provided (no comma) → "merge requires at least 2 files"
+    t = time.monotonic()
+    p = run("--merge", out("t10_1to5.xml"), "--output", out("t10_err1.xml"))
+    record("T10.8 merge with 1 file → error exit code",
+           p.returncode != 0,
+           time.monotonic() - t, f"rc={p.returncode}")
+
+    # T10.9 — error: incompatible table names (users vs orders) → exit != 0
+    t = time.monotonic()
+    files = f"{out('t10_1to5.xml')},{out('t10_orders.xml')}"
+    p = run("--merge", files, "--output", out("t10_err2.xml"))
+    record("T10.9 merge incompatible table names → error exit code",
+           p.returncode != 0,
+           time.monotonic() - t, f"rc={p.returncode}")
+
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
 
 GROUPS = [
@@ -763,6 +982,8 @@ GROUPS = [
     ("T6", test_T6_edge_cases),
     ("T7", test_T7_compact),
     ("T8", test_T8_s3),
+    ("T9", test_T9_diff),
+    ("T10", test_T10_merge),
 ]
 
 

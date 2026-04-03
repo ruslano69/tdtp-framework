@@ -552,6 +552,19 @@ func routeCommand(
 			inspectStorageCfg = &sc
 		}
 		return commands.InspectFile(ctx, *flags.Inspect, inspectStorageCfg)
+
+		// InspectTable command — requires DB connection
+	} else if *flags.InspectTable != "" {
+		operation = audit.OpQuery
+		metadata = map[string]string{
+			"command": "inspect-table",
+			"table":   *flags.InspectTable,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "inspect-table", func() error {
+			return commands.InspectTable(ctx, adapterConfig, *flags.InspectTable)
+		})
+
 		// [BETA] Streaming consumer daemon — Kafka only
 	} else if *flags.Listen {
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
@@ -795,6 +808,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Diff != "" ||
 		*flags.Merge != "" ||
 		*flags.Inspect != "" ||
+		*flags.InspectTable != "" ||
 		*flags.Listen
 }
 
