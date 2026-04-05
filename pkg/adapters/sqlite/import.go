@@ -111,6 +111,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 	for i, field := range pkgSchema.Fields {
 		fieldNames[i] = field.Name
 	}
+	columnList := strings.Join(fieldNames, ", ")
 
 	// Батчинг: вставляем строки батчами.
 	// SQLite ограничивает число параметров до 999 (SQLITE_LIMIT_VARIABLE_NUMBER).
@@ -124,6 +125,13 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 		batchSize = 500 // разумный верхний предел для экономии памяти
 	}
 
+	// Строим плейсхолдер одной строки: (?, ?, ...) — одинаков для всех строк.
+	rowPH := "(" + strings.Repeat("?, ", numFields-1) + "?)"
+
+	// Кэшируем полный запрос для полных батчей (все батчи кроме последнего одинаковы).
+	fullBatchValues := strings.Repeat(rowPH+", ", batchSize-1) + rowPH
+	fullBatchQuery := fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, tableName, columnList, fullBatchValues)
+
 	// Вставляем батчами
 	for i := 0; i < len(rows); i += batchSize {
 		end := i + batchSize
@@ -133,22 +141,12 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 
 		batch := rows[i:end]
 
-		// Строим VALUES для батча: VALUES (?,?,...), (?,?,...), ...
-		valuePlaceholders := make([]string, len(batch))
-		for j := range batch {
-			placeholders := make([]string, len(pkgSchema.Fields))
-			for k := range placeholders {
-				placeholders[k] = "?"
-			}
-			valuePlaceholders[j] = fmt.Sprintf("(%s)", strings.Join(placeholders, ", "))
+		// Полный запрос — переиспользуем кэш или строим для неполного последнего батча.
+		query := fullBatchQuery
+		if len(batch) != batchSize {
+			partValues := strings.Repeat(rowPH+", ", len(batch)-1) + rowPH
+			query = fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, tableName, columnList, partValues)
 		}
-
-		// Полный запрос
-		query := fmt.Sprintf("%s INTO %s (%s) VALUES %s",
-			insertCmd,
-			tableName,
-			strings.Join(fieldNames, ", "),
-			strings.Join(valuePlaceholders, ", "))
 
 		// Собираем все аргументы для батча
 		args := make([]any, 0, len(batch)*len(pkgSchema.Fields))
