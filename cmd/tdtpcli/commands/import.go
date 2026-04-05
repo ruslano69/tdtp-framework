@@ -42,8 +42,8 @@ type ImportOptions struct {
 // inserted, and released before the next part is loaded. This keeps memory
 // usage constant regardless of the number of parts.
 func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions) error {
-	// Resolve the list of sources (S3 keys or local file paths) without loading data yet.
-	type sourceRef struct{ label, key string } // key = S3 key or local path
+	// Resolve source list without loading data yet.
+	type sourceRef struct{ label, key string }
 	var sourceRefs []sourceRef
 
 	var store storage.ObjectStorage
@@ -83,30 +83,14 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		}
 	}
 
-	// Connect adapter once before streaming.
-	adapter, err := adapters.New(ctx, *config)
-	if err != nil {
-		return fmt.Errorf("failed to create adapter: %w", err)
-	}
-	defer func() { _ = adapter.Close(ctx) }()
+	// Parse all parts: raw bytes released immediately after parse to save memory,
+	// but parsed packets are kept for atomic multi-part insertion via ImportPackets.
+	p := packet.NewParser()
+	packets := make([]*packet.DataPacket, 0, len(sourceRefs))
 
-	// sessionRef holds just enough metadata from the first packet for incremental
-	// multi-part validation — no row data kept after the first packet is inserted.
-	type sessionRef struct {
-		batchID    string
-		schema     packet.Schema
-		totalParts int
-		tableName  string
-		inReplyTo  string
-	}
-	var ref *sessionRef
-	seenParts := make(map[int]bool)
-	parser := packet.NewParser()
-	totalRows := 0
-
-	for i, src := range sourceRefs {
-		// Load one part at a time.
+	for _, src := range sourceRefs {
 		var data []byte
+		var err error
 		if store != nil {
 			fmt.Printf("Downloading '%s' from s3://%s...\n", src.key, opts.StorageCfg.S3.Bucket)
 			rc, err := store.Get(ctx, src.key)
@@ -126,8 +110,8 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
-		pkt, err := parser.ParseBytes(data)
-		data = nil // release raw bytes immediately
+		pkt, err := p.ParseBytes(data)
+		data = nil // release raw bytes immediately after parse
 		if err != nil {
 			return fmt.Errorf("failed to parse TDTP packet from '%s': %w", src.label, err)
 		}
@@ -168,68 +152,50 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
-		// Incremental multi-part validation (no need to hold all packets in memory).
-		if i == 0 {
-			ref = &sessionRef{
-				batchID:    extractBatchID(pkt.Header.MessageID),
-				schema:     pkt.Schema,
-				totalParts: pkt.Header.TotalParts,
-				tableName:  pkt.Header.TableName,
-				inReplyTo:  pkt.Header.InReplyTo,
-			}
-			if opts.TargetTable != "" {
-				fmt.Printf("Overriding table name: '%s' → '%s'\n", ref.tableName, opts.TargetTable)
-				ref.tableName = opts.TargetTable
-			}
-			fmt.Printf("Importing table '%s': %d part(s), strategy '%s'...\n",
-				ref.tableName, len(sourceRefs), opts.Strategy)
-		} else {
-			batchID := extractBatchID(pkt.Header.MessageID)
-			if batchID != ref.batchID {
-				return fmt.Errorf("multi-part validation failed: batch mismatch at part %d: "+
-					"expected '%s', got '%s'", i+1, ref.batchID, batchID)
-			}
-			if !packet.SchemaEquals(ref.schema, pkt.Schema) {
-				return fmt.Errorf("multi-part validation failed: schema mismatch at part %d", i+1)
-			}
-			if ref.inReplyTo != "" && pkt.Header.InReplyTo != ref.inReplyTo {
-				return fmt.Errorf("multi-part validation failed: InReplyTo mismatch at part %d", i+1)
-			}
-		}
+		fmt.Printf("  ✓ %d row(s)\n", len(pkt.Data.Rows))
+		packets = append(packets, pkt)
+	}
 
-		partNum := pkt.Header.PartNumber
-		if seenParts[partNum] {
-			return fmt.Errorf("multi-part validation failed: duplicate PartNumber %d", partNum)
-		}
-		seenParts[partNum] = true
+	// Validate session integrity unconditionally:
+	// - catches packets from different export sessions (batch ID mismatch)
+	// - catches partial imports (e.g. only 1 of 6 parts found on disk)
+	if err := validateMultiPartSession(packets); err != nil {
+		return fmt.Errorf("multi-part validation failed: %w", err)
+	}
 
-		if opts.TargetTable != "" {
+	if opts.TargetTable != "" {
+		fmt.Printf("Overriding table name: '%s' → '%s'\n", packets[0].Header.TableName, opts.TargetTable)
+		for _, pkt := range packets {
 			pkt.Header.TableName = opts.TargetTable
 		}
-
-		rowCount := len(pkt.Data.Rows)
-		fmt.Printf("  📦 Part %d/%d — %d row(s)\n", i+1, len(sourceRefs), rowCount)
-
-		if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
-			return fmt.Errorf("import failed at part %d: %w", i+1, err)
-		}
-		totalRows += rowCount
-		// pkt goes out of scope here — GC can reclaim rows immediately.
 	}
 
-	// Verify no gaps in part sequence for multi-part sets.
-	if ref != nil && ref.totalParts > 1 {
-		for p := 1; p <= ref.totalParts; p++ {
-			if !seenParts[p] {
-				return fmt.Errorf("multi-part validation failed: missing part %d of %d", p, ref.totalParts)
-			}
-		}
+	adapter, err := adapters.New(ctx, *config)
+	if err != nil {
+		return fmt.Errorf("failed to create adapter: %w", err)
+	}
+	defer func() { _ = adapter.Close(ctx) }()
+
+	tableName := packets[0].Header.TableName
+	totalRows := 0
+	for _, pkt := range packets {
+		totalRows += len(pkt.Data.Rows)
 	}
 
-	tableName := ""
-	if ref != nil {
-		tableName = ref.tableName
+	fmt.Printf("Importing table '%s': %d packet(s), %d row(s), strategy '%s'...\n",
+		tableName, len(packets), totalRows, opts.Strategy)
+
+	// Single packet: ImportPacket. Multiple packets: ImportPackets (one transaction,
+	// atomicity preserved, --strategy copy does a single temp-table swap).
+	if len(packets) == 1 {
+		err = adapter.ImportPacket(ctx, packets[0], opts.Strategy)
+	} else {
+		err = adapter.ImportPackets(ctx, packets, opts.Strategy)
 	}
+	if err != nil {
+		return fmt.Errorf("import failed: %w", err)
+	}
+
 	fmt.Printf("✓ Import complete! Table '%s' — %d row(s)\n", tableName, totalRows)
 	return nil
 }
