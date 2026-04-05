@@ -12,6 +12,9 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
+// sharedSchemaConverter — синглтон без состояния, потокобезопасен.
+var sharedSchemaConverter = schema.NewConverter()
+
 // ImportPacket импортирует один TDTP пакет в PostgreSQL.
 // StrategyCopy: атомарная замена таблицы через временную (temp → rename).
 // StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу.
@@ -482,9 +485,7 @@ func (a *Adapter) convertValue(value string, field packet.Field) any {
 	// Конвертируем packet.Field в schema.FieldDef
 	fieldDef := fieldToFieldDef(field)
 
-	// Используем schema.Converter для парсинга значения
-	converter := schema.NewConverter()
-	typedValue, err := converter.ParseValue(value, fieldDef)
+	typedValue, err := sharedSchemaConverter.ParseValue(value, fieldDef)
 	if err != nil {
 		// Если парсинг не удался, возвращаем строку как fallback
 		// (ошибка валидации будет обработана на уровне БД)

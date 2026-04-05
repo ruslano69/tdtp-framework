@@ -2,6 +2,48 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.8.2] — 2026-04-05
+
+### Performance
+
+#### Import pipeline — 2× speedup (1.55s → 0.77s, 100k rows × 7 fields, SQLite)
+
+- **Streaming import** (`cmd/tdtpcli/commands/import.go`): parts processed one at a time —
+  read → parse → insert → release. Previously all parts were buffered in memory
+  simultaneously before any inserts began. Memory usage is now constant regardless
+  of part count; GC pauses during insertion eliminated.
+
+- **`GetRowValues` fast path** (`pkg/core/packet/parser.go`): rows without escape
+  characters (`\|`, `\\`, `\n`) — the vast majority of real data — are split via
+  index scan returning subslices of the original string with zero per-field
+  allocations. Benchmark: `simple_10_fields` 409 ns/11 allocs → 150 ns/1 alloc (2.7×);
+  `many_fields_100` 5034 ns/105 allocs → 1079 ns/1 alloc (4.7×).
+
+- **Parser/Converter singletons** (`pkg/adapters/base/import_helper.go`,
+  `pkg/adapters/postgres/import.go`, `pkg/adapters/mssql/import.go`):
+  `packet.NewParser()` and `schema.NewConverter()` were allocated on every single row
+  in all adapters. Both structs are stateless (`{}`); replaced with package-level
+  singletons. Eliminates ~2 allocs × 100k rows per import.
+
+- **`PrepareContext` for SQLite batch INSERT** (`pkg/adapters/sqlite/import.go`):
+  the 994-parameter INSERT query was re-parsed by SQLite on every batch call
+  (~700 calls for 100k rows). Now prepared once; reused for all full batches.
+  Args slice reused across batches. Raw benchmark: 1043 ms → 433 ms (2.4×).
+
+#### Misc
+
+- **`help.go` refactor**: ~100 `fmt.Println` calls replaced with two embedded text
+  files (`help_short.txt`, `help_full.txt`) via `//go:embed`. Version injected via
+  `strings.ReplaceAll("{VERSION}", version)` at runtime.
+
+### Infrastructure
+
+- **Pre-commit hook** (`.git/hooks/pre-commit`): runs `gofmt`, `golint`, `go vet`
+  on staged `.go` files before every commit. `gofmt` and `go vet` are blocking;
+  `golint` is advisory.
+
+---
+
 ## [1.8.1-beta] — 2026-04-02
 
 ### Added
