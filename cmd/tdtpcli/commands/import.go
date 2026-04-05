@@ -156,11 +156,11 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		packets = append(packets, pkt)
 	}
 
-	// Validate multi-part session integrity.
-	if len(packets) > 1 {
-		if err := validateMultiPartSession(packets); err != nil {
-			return fmt.Errorf("multi-part validation failed: %w", err)
-		}
+	// Validate session integrity unconditionally:
+	// - catches packets from different export sessions (batch ID mismatch)
+	// - catches partial imports (e.g. only 1 of 6 parts found on disk)
+	if err := validateMultiPartSession(packets); err != nil {
+		return fmt.Errorf("multi-part validation failed: %w", err)
 	}
 
 	if opts.TargetTable != "" {
