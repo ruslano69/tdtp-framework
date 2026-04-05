@@ -1,0 +1,362 @@
+TDTP CLI - Table Data Transfer Protocol Command Line Interface
+Version: {VERSION}
+
+USAGE:
+  tdtpcli [command] [options]
+
+COMMANDS:
+
+  Database Operations:
+    --list[=pattern]           List tables; filter by glob (e.g. --list=user*, --list=order?)
+    --export <table>           Export table to TDTP XML file
+    --import <file>            Import TDTP XML file to database
+    --inspect-table <table>    Inspect live DB table: native types, FKs, row count, sample row
+
+  File Operations:
+    --inspect <tdtp-file>      Print YAML metadata summary (no config needed)
+    --diff <file-a> <file-b>   Compare two TDTP files and show differences
+    --merge <files>            Merge multiple TDTP files into one
+    --to-html <tdtp-file>      Convert TDTP to HTML viewer (fast preview)
+
+  XLSX Operations:
+    --to-xlsx <tdtp-file>      Convert TDTP XML to XLSX
+    --from-xlsx <xlsx-file>    Convert XLSX to TDTP XML
+    --export-xlsx <table>      Export table directly to XLSX
+    --import-xlsx <xlsx-file>  Import XLSX directly to database
+
+  Message Broker Operations:
+    --export-broker <table>    Export table to message broker
+    --import-broker            Import from message broker
+    --listen                   [BETA] Streaming consumer daemon (Kafka only)
+                               Listens to Kafka topic and imports data as stream parts arrive.
+                               Requires stable channel (99.99%+ uptime). NOT for RabbitMQ/MSMQ.
+
+    Broker tiers:
+      MSMQ     — Legacy     (Windows-only, no ordering guarantees, batch mode only)
+      RabbitMQ — Stability  (reliable delivery, batch mode)
+      Kafka    — Speed      (ordered partitions, batch + --listen streaming [BETA])
+
+  Incremental Sync:
+    --sync-incremental <table> Incremental sync from table
+
+  ETL Pipeline:
+    --pipeline <file>          Execute ETL pipeline from YAML config
+
+OPTIONS:
+
+  General:
+    --config <file>            Configuration file (default: config.yaml)
+    --output <file>            Output file path
+    --table <name>             Target table name (overrides name from XML during import)
+    --strategy <name>          Import strategy: replace, ignore, fail, copy
+    --batch <size>             Batch size for bulk operations (default: 1000)
+    --readonly-fields          Include read-only fields (timestamp, computed, identity)
+
+  Compression:
+    --compress                 Enable compression for exported data
+    --compress-algo <algo>     Algorithm: zstd (default) or kanzi (30% denser, slower)
+    --compress-level <n>       Compression level: 1-19 (zstd) or 6-7 (kanzi), default: 3
+    --hash                     Add XXH3 checksum for integrity verification (requires --compress)
+    --packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)
+    --fast                     Skip NULL/NaN/Inf detection for maximum throughput (no schema markers)
+
+  TDTQL Filters:
+    --where <condition>        WHERE clause (e.g., 'age > 18 AND status = active')
+                               Bracket-quoted identifiers for names with spaces or special chars
+                               (MSSQL/Access style): --where '[Termination Date] = "1753-01-01"'
+                               Brackets are stripped and the name is properly quoted per dialect:
+                                 MSSQL → [Termination Date]  PG/MySQL → "Termination Date"
+    --order-by <fields>        ORDER BY clause (e.g., 'name ASC, age DESC')
+    --limit <n>                LIMIT rows: positive = first N, negative = last N (like tail -n)
+    --offset <n>               OFFSET number of rows to skip
+    --fields <col1,col2,...>   Column projection: export only listed columns (e.g. 'id,email,status')
+                               For --import: whitelist — only these columns are written to DB
+                               For --sync-incremental: tracking field is always included automatically
+
+  XLSX Options:
+    --sheet <name>             Excel sheet name (default: Sheet1)
+
+  Incremental Sync Options:
+    --tracking-field <field>   Field to track changes (default: updated_at)
+    --checkpoint-file <file>   Checkpoint file (default: checkpoint.yaml)
+    --batch-size <size>        Batch size for sync (default: 1000)
+
+  ETL Pipeline Options:
+    --unsafe                   Enable unsafe mode (allows all SQL, requires admin)
+
+  Diff Options:
+    --key-fields <fields>      Key fields for comparison (comma-separated)
+    --ignore-fields <fields>   Fields to ignore in diff (comma-separated)
+    --case-sensitive           Case-sensitive comparison (default: false)
+
+  Merge Options:
+    --merge-strategy <name>    Merge strategy: union, intersection, left, right, append
+                               (default: union)
+    --show-conflicts           Show detailed conflict information
+
+  Field Name Sanitization (--import):
+    --clear                    Replace special chars in field names with safe SQL identifier tokens.
+                               Symbol map: % → _pct, $ → _usd, # → _xh, @ → _at, * → _star,
+                                           & → _and, ? → _is, ~ → _not, + → _plus, = → _eq,
+                                           ! → _bang, ^ → _hat, < → _lt, > → _gt,
+                                           space . , - / \ ` : | ; → _
+                               Remaining non-ASCII chars → _. Consecutive __ collapsed.
+    --translit                 Transliterate non-ASCII field names to closest ASCII equivalents
+                               using go-unidecode before applying --clear rules.
+                               Cyrillic: "Имя" → "Imia", "Дата рождения" → "Data_rozhdeniia"
+                               European: "Österreich" → "Osterreich", "Ñoño" → "Nono"
+                               Original names are preserved as DB column comments:
+                                 PostgreSQL: COMMENT ON COLUMN t.col IS 'original: ...'
+                                 MySQL:      col TEXT COMMENT 'original: ...'
+                               Test XMLs: tests/sanitize/ (access_fields, cyrillic, exotic_mixed)
+
+  Data Processors:
+    --mask <fields>            Mask sensitive fields (comma-separated)
+    --validate <file>          Validate fields (YAML rules file)
+    --normalize <file>         Normalize fields (YAML rules file)
+
+  Configuration:
+    --create-config-pg         Create PostgreSQL config template
+    --create-config-mssql      Create MS SQL config template
+    --create-config-sqlite     Create SQLite config template
+    --create-config-mysql      Create MySQL config template
+
+  Misc:
+    --version                  Show version information
+    --help                     Show this help message
+
+EXAMPLES:
+
+  # List all tables
+  tdtpcli --list --config pg.yaml
+
+  # List tables matching a pattern (use = to pass the pattern)
+  tdtpcli --list=user* --config pg.yaml
+  tdtpcli --list=order? --config pg.yaml
+  tdtpcli --list=%log% --config pg.yaml
+
+  # Export table to TDTP XML
+  tdtpcli --export users --output users.tdtp.xml
+
+  # Export with filters
+  tdtpcli --export orders --where 'status = active' --limit 100
+
+  # Field names with spaces/special chars (MSSQL/Access bracket syntax)
+  tdtpcli --export ZTR$Employee --where '[Termination Date] = "1753-01-01"'
+  tdtpcli --export orders --where '[Complex Name of Date] = "1999-01-01"'
+
+  # Export only specific columns (column projection)
+  tdtpcli --export clients --fields id,email,status --output clients_slim.tdtp.xml
+
+  # Import only specific columns from a wide TDTP file
+  tdtpcli --import clients_full.tdtp.xml --fields id,email,status --table clients_slim
+
+  # Export with compression (zstd level 3, balanced)
+  tdtpcli --export users --compress --output users.tdtp.xml
+
+  # Export with kanzi (30% denser than zstd, large text tables)
+  tdtpcli --export operations_log --compress --compress-algo kanzi --compress-level 6 --output ops.tdtp.xml
+
+  # Export with compression + XXH3 integrity checksum
+  tdtpcli --export orders --compress --hash --output orders.tdtp.xml
+
+  # Export archive-quality: kanzi max + checksum + large packet for broker
+  tdtpcli --export kadrovye_prikazy --compress --compress-algo kanzi --compress-level 7 --hash --packet-size 8 --output archive.tdtp.xml
+
+  # Export with read-only fields (timestamp, computed, identity)
+  tdtpcli --export employees --readonly-fields --output employees.tdtp.xml
+
+  # NOTE: export uses parallel packet processing — packet ORDER in multi-part
+  #       files is not guaranteed. Use --test to verify integrity before import.
+
+  # Preview TDTP file in browser (HTML viewer)
+  tdtpcli --to-html customers.tdtp.xml --open
+
+  # View specific row range (rows 100-500)
+  tdtpcli --to-html customers.tdtp.xml --row 100-500 --open
+
+  # View first 100 rows
+  tdtpcli --to-html orders.tdtp.xml --limit 100 --open
+
+  # View last 50 rows (tail mode)
+  tdtpcli --to-html logs.tdtp.xml --limit -50 --open
+
+  # Combine range and tail: last 20 rows from range 100-500
+  tdtpcli --to-html data.tdtp.xml --row 100-500 --limit -20 --open
+
+  # Export directly to Excel
+  tdtpcli --export-xlsx orders --output orders.xlsx
+
+  # Convert TDTP to XLSX
+  tdtpcli --to-xlsx orders.tdtp.xml --output orders.xlsx --sheet Orders
+
+  # Import XLSX to database
+  tdtpcli --import-xlsx orders.xlsx --strategy replace
+
+  # Check file BEFORE import: integrity + row count + checksum
+  #   --test: decompresses in memory, verifies XXH3 checksum (if --hash was used),
+  #           counts rows vs header, checks all multi-part siblings present.
+  #   WHAT YOU LEARN: 'is this file intact and complete?'
+  tdtpcli --test users.tdtp.xml
+
+  # Inspect file BEFORE import: schema, field types, row count (no DB needed)
+  #   --inspect: reads XML metadata, prints YAML summary of schema + header.
+  #   WHAT YOU LEARN: 'what is in this file — table name, field names, types?'
+  tdtpcli --inspect users.tdtp.xml
+
+  # Recommended pre-import workflow:
+  tdtpcli --inspect delivery.tdtp.xml   # understand structure
+  tdtpcli --test    delivery.tdtp.xml   # verify integrity
+  tdtpcli --import  delivery.tdtp.xml   # load to DB
+
+  # Import from TDTP file
+  tdtpcli --import users.tdtp.xml --strategy replace
+
+  # Import MS Access export with exotic field names (%, spaces, #, etc.)
+  tdtpcli --import access_export.tdtp.xml --clear --strategy replace
+
+  # Import Russian ERP export (Cyrillic field names) — transliterate + clean
+  tdtpcli --import erp_orders.tdtp.xml --translit --clear --strategy replace
+
+  # Import European data (diacritics only, no special symbols)
+  tdtpcli --import eu_data.tdtp.xml --translit --strategy replace
+
+  # Export to RabbitMQ
+  tdtpcli --export-broker orders --config rabbitmq.yaml
+
+  # Import from RabbitMQ
+  tdtpcli --import-broker --config rabbitmq.yaml
+
+  # [BETA] Streaming consumer daemon — Kafka only
+  #   Listens indefinitely; terminated by Ctrl+C / SIGTERM
+  #   Recommended for stable channels (LAN, dedicated WAN, 99.99%+ uptime)
+  #   NOT recommended for unreliable links — use --import-broker (batch) instead
+  tdtpcli --listen --config kafka.yaml --strategy replace
+
+  # Incremental sync
+  tdtpcli --sync-incremental orders --tracking-field updated_at
+
+  # Execute ETL pipeline
+  tdtpcli --pipeline etl-config.yaml
+
+  # Execute pipeline in unsafe mode (allows custom SQL)
+  tdtpcli --pipeline etl-config.yaml --unsafe
+
+  # ETL pipeline with field name sanitization (YAML snippet):
+  #   sources:
+  #     - name: legacy_erp
+  #       type: tdtp
+  #       dsn: erp_export.tdtp.xml
+  #       sanitize:
+  #         translit: true   # "Имя" → "Imia"
+  #         clear: true      # "Total %" → "Total_pct"
+
+  # Inspect TDTP file metadata (no config needed)
+  tdtpcli --inspect orders.tdtp.xml
+
+  # Inspect live DB table: native types, FK relationships, row count, sample record
+  #   --inspect-table: connects to DB, queries system catalog, prints YAML.
+  #   Bracket-quoted names (MSSQL/Access style) are supported.
+  tdtpcli --inspect-table Employees --config pg.yaml
+  tdtpcli --inspect-table "[ZTR$Employee]" --config mssql.yaml
+  tdtpcli --inspect-table "[dbo].[Orders]" --config mssql.yaml
+
+  # Import to different table name
+  tdtpcli --import users.xml --table users_backup
+
+  # Compare two TDTP files
+  tdtpcli --diff users-old.xml users-new.xml
+
+  # Compare with custom key fields
+  tdtpcli --diff old.xml new.xml --key-fields user_id --ignore-fields updated_at
+
+  # Merge multiple TDTP files (union)
+  tdtpcli --merge file1.xml,file2.xml,file3.xml --output merged.xml
+
+  # Merge with intersection strategy
+  tdtpcli --merge f1.xml,f2.xml --output common.xml --merge-strategy intersection
+
+  # Merge with conflict resolution
+  tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy right --show-conflicts
+
+  # Export with data masking
+  tdtpcli --export customers --mask email,phone
+
+WORKING WITH VIEWS:
+
+  tdtpcli supports database views for export/import operations:
+
+  ✅ Export: Works with all views
+  ✅ List: Use --list-views to see all views with updatable status
+  ⚠️  Import: Works only with updatable views (marked with U*)
+
+  # List all database views with updatable status
+  tdtpcli --list-views --config config.yaml
+
+  # Export from view (specify view name explicitly)
+  tdtpcli --export my_view --output view_data.xml
+
+  # Export from view with TDQL filters (e.g., by date)
+  tdtpcli --export orders_daily --where 'date eq "09.02.2026"' --output orders.xml
+
+  # Legend for --list-views output:
+    U* = Updatable view (can import)
+    R* = Read-only view (export only)
+
+  AUTOMATION WITH VIEWS:
+
+  Views allow powerful SQL-based data preparation combined with automatic exports.
+  Create views with JOINs, aggregations, and filters, then export programmatically:
+
+  # Check if required views exist before running export pipeline
+  if tdtpcli --list-views | grep -q "R\*orders_summary"; then
+    echo "View found, exporting..."
+    tdtpcli --export orders_summary --output daily_report.xlsx
+  fi
+
+  # Export all read-only views automatically
+  tdtpcli --list-views | grep "R\*" | while read line; do
+    view=$(echo $line | sed 's/.*R\*//' | awk '{print $1}')
+    tdtpcli --export "$view" --output "reports/${view}.xlsx"
+  done
+
+  # Setup test views in your database
+  ./scripts/setup-views.sh sqlite test_data.db
+  ./scripts/setup-views.sh postgres localhost 5432 postgres mydb
+
+CONFIGURATION:
+
+  Configuration files use YAML format. Create a sample config with:
+    tdtpcli --create-config-pg > config.yaml
+
+  Config structure includes:
+    - database: Connection settings
+    - broker: Message broker settings (optional)
+    - resilience: Circuit breaker and retry settings
+    - audit: Audit logging settings
+    - processors: Data masking, validation, normalization
+
+FEATURES:
+
+  ✅ Database Adapters: PostgreSQL, MS SQL, SQLite, MySQL, Access (.mdb/.accdb, Windows)
+  ✅ Message Brokers:
+       MSMQ     — Legacy     (Windows-only, batch mode)
+       RabbitMQ — Stability  (reliable delivery, batch mode)
+       Kafka    — Speed      (ordered partitions, batch + streaming [BETA])
+  🔶 Streaming Consumer: --listen (Kafka only, BETA) — stable channels only
+  ✅ File Operations: Diff & Merge with conflict resolution
+  ✅ XLSX Converter: Database ↔ Excel bidirectional
+  ✅ Compression: zstd (1-19) + kanzi (6-7, 30% denser) + XXH3 checksum (--compress --compress-algo --hash)
+  ✅ Circuit Breaker: Protection from cascading failures
+  ✅ Audit Logger: GDPR/HIPAA compliance
+  ✅ Retry Mechanism: Exponential backoff with jitter
+  ✅ Incremental Sync: Checkpoint-based synchronization
+  ✅ Data Processors: Masking, validation, normalization
+  ✅ TDTQL: SQL-like query language for filtering
+
+DOCUMENTATION:
+  https://github.com/ruslano69/tdtp-framework
+
+SUPPORT:
+  Issues: https://github.com/ruslano69/tdtp-framework/issues
+  Email: ruslano69@gmail.com
