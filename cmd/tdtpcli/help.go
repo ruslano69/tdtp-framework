@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const version = "1.8.0-beta"
+const version = "1.8.2"
 
 //go:embed help_short.txt
 var helpShortText string
