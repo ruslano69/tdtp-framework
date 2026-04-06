@@ -25,10 +25,12 @@ COMMANDS:
     --export-xlsx <table>      Table → XLSX (direct)
     --import-xlsx <xlsx-file>  XLSX → Database (direct)
 
-  Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed
-    --export-broker <table>    Export to message broker
-    --import-broker            Import from message broker
-    --listen                   [BETA] Streaming consumer daemon (Kafka only)
+  Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed+Production
+    --export-broker <table>    Export to message broker (parallel compress, single-roundtrip send)
+    --import-broker            Import from message broker to DB (parallel decompress)
+    --import-broker --output   Save to TDTP files (base_part_N_of_Total.tdtp.xml)
+    --import-broker --raw      Save raw queue bytes verbatim (no parse/decompress)
+    --listen                   Streaming consumer daemon (Kafka only)
 
   ETL:
     --sync-incremental <table> Incremental sync
@@ -46,7 +48,7 @@ OPTIONS:
 
   Compression:
     --compress                 Enable compression for exported data
-    --compress-algo <algo>     Algorithm: zstd (default) or kanzi (30% denser, slower)
+    --compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× vs raw, 30% denser than zstd)
     --compress-level <n>       Level: 1-19 (zstd) or 6-7 (kanzi), default: 3
     --hash                     Add XXH3 checksum for integrity (requires --compress)
     --fast                     Skip NULL/NaN/Inf detection for maximum throughput

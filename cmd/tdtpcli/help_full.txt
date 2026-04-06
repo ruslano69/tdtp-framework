@@ -26,15 +26,23 @@ COMMANDS:
 
   Message Broker Operations:
     --export-broker <table>    Export table to message broker
+                               All packets sent in a single network roundtrip (SendBatch).
+                               Compression and XML serialization run in parallel goroutines.
     --import-broker            Import from message broker
-    --listen                   [BETA] Streaming consumer daemon (Kafka only)
+                               Receives all packets first, decompresses in parallel, imports in order.
+    --import-broker --output   Save received packets as TDTP files instead of importing to DB.
+                               Multi-part exports are saved as base_part_N_of_Total.tdtp.xml
+    --import-broker --raw      Save broker messages as-is (no parse, no decompress, no validate).
+                               Reads TotalParts from the first message header for correct naming.
+                               Useful for forwarding or archiving raw queue traffic.
+    --listen                   Streaming consumer daemon (Kafka only)
                                Listens to Kafka topic and imports data as stream parts arrive.
                                Requires stable channel (99.99%+ uptime). NOT for RabbitMQ/MSMQ.
 
     Broker tiers:
       MSMQ     — Legacy     (Windows-only, no ordering guarantees, batch mode only)
       RabbitMQ — Stability  (reliable delivery, batch mode)
-      Kafka    — Speed      (ordered partitions, batch + --listen streaming [BETA])
+      Kafka    — Speed      (ordered partitions, batch + --listen streaming; production-ready)
 
   Incremental Sync:
     --sync-incremental <table> Incremental sync from table
@@ -54,7 +62,7 @@ OPTIONS:
 
   Compression:
     --compress                 Enable compression for exported data
-    --compress-algo <algo>     Algorithm: zstd (default) or kanzi (30% denser, slower)
+    --compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× denser than raw, 30% denser than zstd)
     --compress-level <n>       Compression level: 1-19 (zstd) or 6-7 (kanzi), default: 3
     --hash                     Add XXH3 checksum for integrity verification (requires --compress)
     --packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)
@@ -224,10 +232,22 @@ EXAMPLES:
   # Export to RabbitMQ
   tdtpcli --export-broker orders --config rabbitmq.yaml
 
-  # Import from RabbitMQ
-  tdtpcli --import-broker --config rabbitmq.yaml
+  # Export to Kafka with kanzi compression (4× less traffic than uncompressed)
+  tdtpcli --export-broker users --compress --compress-algo kanzi --compress-level 6 --config kafka.yaml
 
-  # [BETA] Streaming consumer daemon — Kafka only
+  # Import from RabbitMQ / Kafka to database
+  tdtpcli --import-broker --config rabbitmq.yaml
+  tdtpcli --import-broker --config kafka.yaml --strategy replace
+
+  # Import from broker — save as TDTP files instead of importing to DB
+  #   Multi-part: users_part_1_of_5.tdtp.xml, users_part_2_of_5.tdtp.xml, ...
+  tdtpcli --import-broker --output users.tdtp.xml --config kafka.yaml
+
+  # Import from broker — save raw bytes (no parse/decompress)
+  #   Exactly what the broker sent; naming: users_part_1_of_5.bin
+  tdtpcli --import-broker --raw --output users.bin --config kafka.yaml
+
+  # Streaming consumer daemon — Kafka only
   #   Listens indefinitely; terminated by Ctrl+C / SIGTERM
   #   Recommended for stable channels (LAN, dedicated WAN, 99.99%+ uptime)
   #   NOT recommended for unreliable links — use --import-broker (batch) instead
@@ -342,8 +362,11 @@ FEATURES:
   ✅ Message Brokers:
        MSMQ     — Legacy     (Windows-only, batch mode)
        RabbitMQ — Stability  (reliable delivery, batch mode)
-       Kafka    — Speed      (ordered partitions, batch + streaming [BETA])
-  🔶 Streaming Consumer: --listen (Kafka only, BETA) — stable channels only
+       Kafka    — Speed      (ordered partitions, batch + streaming; production-ready)
+  ✅ Broker Export: parallel compress+serialize, single-roundtrip SendBatch
+  ✅ Broker Import: parallel decompression, in-order processing
+  ✅ Raw Broker Save: --raw flag captures queue messages verbatim (no parse/decompress)
+  ✅ Streaming Consumer: --listen (Kafka only) — stable channels only
   ✅ File Operations: Diff & Merge with conflict resolution
   ✅ XLSX Converter: Database ↔ Excel bidirectional
   ✅ Compression: zstd (1-19) + kanzi (6-7, 30% denser) + XXH3 checksum (--compress --compress-algo --hash)

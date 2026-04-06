@@ -324,6 +324,33 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 
 	// Вставляем батчами по 1000 строк
 	batchSize := 1000
+	numFields := len(pkt.Schema.Fields)
+
+	// Предвычисляем плейсхолдеры для полного батча (строятся один раз)
+	buildPlaceholders := func(rowCount int) string {
+		var sb strings.Builder
+		argIndex := 1
+		for r := 0; r < rowCount; r++ {
+			if r > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteByte('(')
+			for f := 0; f < numFields; f++ {
+				if f > 0 {
+					sb.WriteString(", ")
+				}
+				fmt.Fprintf(&sb, "$%d", argIndex)
+				argIndex++
+			}
+			sb.WriteByte(')')
+		}
+		return sb.String()
+	}
+
+	fullBatchPH := buildPlaceholders(batchSize)
+	fullBatchSQL := insertSQL + fullBatchPH + onConflict
+	args := make([]any, 0, batchSize*numFields)
+
 	for i := 0; i < len(pkt.Data.Rows); i += batchSize {
 		end := i + batchSize
 		if end > len(pkt.Data.Rows) {
@@ -331,30 +358,22 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 		}
 
 		batch := pkt.Data.Rows[i:end]
-
-		// Строим VALUES для батча
-		var valuePlaceholders []string
-		var args []any
-		argIndex := 1
+		args = args[:0]
 
 		for _, row := range batch {
 			values := parseRow(row.Value)
-			var placeholders []string
-
 			for j, val := range values {
-				placeholders = append(placeholders, fmt.Sprintf("$%d", argIndex))
-				argIndex++
-
-				// Конвертируем значение в правильный тип
 				args = append(args, a.convertValue(val, pkt.Schema.Fields[j]))
 			}
-
-			valuePlaceholders = append(valuePlaceholders, fmt.Sprintf("(%s)", strings.Join(placeholders, ", ")))
 		}
 
-		sql := insertSQL + strings.Join(valuePlaceholders, ", ") + onConflict
+		var sql string
+		if len(batch) == batchSize {
+			sql = fullBatchSQL
+		} else {
+			sql = insertSQL + buildPlaceholders(len(batch)) + onConflict
+		}
 
-		// Выполняем INSERT
 		_, err := a.pool.Exec(ctx, sql, args...)
 		if err != nil {
 			return fmt.Errorf("failed to insert batch: %w\nSQL: %s", err, sql)

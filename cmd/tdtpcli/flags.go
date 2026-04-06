@@ -54,6 +54,7 @@ type Flags struct {
 	Import         *string
 	ExportBroker   *string
 	ImportBroker   *bool
+	RawBroker      *bool // --raw: save broker messages as-is, no parse/decompress
 	ToHTML         *string
 	OpenBrowser    *bool
 	Row            *string // Row range for HTML viewer (e.g., "100-150")
@@ -154,6 +155,7 @@ func ParseFlags() *Flags {
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
 	f.ExportBroker = flag.String("export-broker", "", "Export table to message broker (table name)")
 	f.ImportBroker = flag.Bool("import-broker", false, "Import from message broker to database")
+	f.RawBroker = flag.Bool("raw", false, "Save broker messages as-is without parsing or decompression (use with --import-broker --output)")
 	f.ToHTML = flag.String("to-html", "", "Convert TDTP XML file to HTML for browser viewing (input TDTP file)")
 	f.OpenBrowser = flag.Bool("open", false, "Open generated HTML file in default browser (use with --to-html)")
 	f.Row = flag.String("row", "", "Row range to display in HTML viewer, e.g. 100-150 (use with --to-html)")
@@ -168,7 +170,7 @@ func ParseFlags() *Flags {
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
 	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
 	f.InspectTable = flag.String("inspect-table", "", "Print extended metadata of a live DB table: native types, FK relationships, row count, sample row (Agentic Discovery Mode)")
-	f.Listen = flag.Bool("listen", false, "[BETA] Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
+	f.Listen = flag.Bool("listen", false, "Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
 
 	// TDTQL Filters
 	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")
