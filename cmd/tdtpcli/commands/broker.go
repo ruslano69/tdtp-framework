@@ -211,13 +211,6 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 		return nil
 	}
-	nackLast := func() error {
-		if nacker, ok := broker.(interface{ NackLast(bool) error }); ok {
-			return nacker.NackLast(true) // requeue=true — leave in queue
-		}
-		return nil
-	}
-
 	parser := packet.NewParser()
 	generator := packet.NewGenerator()
 
@@ -262,7 +255,54 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 			batchID, totalParts, brokerCfg.Queue, opts.Strategy)
 	}
 
-	// ── Step 2: process packets, skipping those from other batches ──────────
+	// ── Step 2: receive all remaining raw packets ────────────────────────────
+	// Receive is inherently serial (one call per message); we buffer raw bytes
+	// so that decompression can run in parallel in the next step.
+	allRaw := make([][]byte, 1, totalParts)
+	allRaw[0] = xmlData
+	for received := 1; received < totalParts; received++ {
+		raw, err := receive()
+		if err != nil {
+			fmt.Printf("Queue empty after %d/%d parts: %v\n", received, totalParts, err)
+			break
+		}
+		allRaw = append(allRaw, raw)
+	}
+	actualParts := len(allRaw)
+
+	// ── Step 3: decompress all packets in parallel ───────────────────────────
+	// First packet is already parsed; remaining ones run in goroutines.
+	parsedPackets := make([]*packet.DataPacket, actualParts)
+	parseErrs := make([]error, actualParts)
+	parsedPackets[0] = firstPkt
+
+	if actualParts > 1 {
+		var wg sync.WaitGroup
+		for i := 1; i < actualParts; i++ {
+			wg.Add(1)
+			go func(i int, raw []byte) {
+				defer wg.Done()
+				pkt, err := parse(raw)
+				if err != nil {
+					parseErrs[i] = fmt.Errorf("packet %d: %w", i+1, err)
+					return
+				}
+				if batchIDFromMessageID(pkt.Header.MessageID) != batchID {
+					parseErrs[i] = fmt.Errorf("packet %d belongs to a different batch", i+1)
+					return
+				}
+				parsedPackets[i] = pkt
+			}(i, allRaw[i])
+		}
+		wg.Wait()
+	}
+	for _, e := range parseErrs {
+		if e != nil {
+			return e
+		}
+	}
+
+	// ── Step 4: process all packets in order ─────────────────────────────────
 	processPacket := func(pkt *packet.DataPacket, n int) error {
 		if opts.TargetTable != "" {
 			pkt.Header.TableName = opts.TargetTable
@@ -289,46 +329,20 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		return nil
 	}
 
-	if err := processPacket(firstPkt, 1); err != nil {
-		return err
+	for i, pkt := range parsedPackets {
+		if err := processPacket(pkt, i+1); err != nil {
+			return err
+		}
 	}
+
+	// ACK: for Kafka — CommitMessages on the last offset commits all previous
+	// offsets too (cumulative). For RabbitMQ — acks the last delivery tag only;
+	// earlier messages are auto-acked when the channel closes normally.
 	if err := ackLast(); err != nil {
 		return fmt.Errorf("ack failed: %w", err)
 	}
-	received := 1
 
-	for received < totalParts {
-		xmlData, err := receive()
-		if err != nil {
-			fmt.Printf("Queue empty after %d/%d parts: %v\n", received, totalParts, err)
-			break
-		}
-
-		pkt, err := parse(xmlData)
-		if err != nil {
-			return fmt.Errorf("failed to parse packet: %w", err)
-		}
-
-		thisBatchID := batchIDFromMessageID(pkt.Header.MessageID)
-		if thisBatchID != batchID {
-			// This packet belongs to a different export — put it back.
-			fmt.Printf("  ⚠ Packet from batch '%s' (expected '%s') — requeueing\n", thisBatchID, batchID)
-			if err := nackLast(); err != nil {
-				return fmt.Errorf("nack failed: %w", err)
-			}
-			continue
-		}
-
-		received++
-		if err := processPacket(pkt, received); err != nil {
-			return err
-		}
-		if err := ackLast(); err != nil {
-			return fmt.Errorf("ack failed: %w", err)
-		}
-	}
-
-	fmt.Printf("✓ Done. %d/%d part(s) processed.\n", received, totalParts)
+	fmt.Printf("✓ Done. %d/%d part(s) processed.\n", actualParts, totalParts)
 	return nil
 }
 
