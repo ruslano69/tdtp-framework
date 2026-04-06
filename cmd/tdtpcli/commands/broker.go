@@ -203,6 +203,11 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		defer func() { _ = adapter.Close(ctx) }()
 	}
 
+	// --keep mode: streaming — receive → decompress → import immediately, no full buffer.
+	if opts.Keep {
+		return importBrokerKeep(ctx, broker, adapter, opts)
+	}
+
 	idleTimeout := opts.IdleTimeout
 	if idleTimeout == 0 {
 		idleTimeout = defaultIdleTimeout
@@ -313,7 +318,8 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 	}
 
-	if opts.OutputFile != "" {
+	switch {
+	case opts.OutputFile != "":
 		// File-save mode: write each part to disk.
 		for i, pkt := range parsedPackets {
 			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
@@ -328,20 +334,9 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 			}
 			fmt.Printf("  ✓ Saved to: %s\n", filename)
 		}
-	} else if opts.Keep {
-		// Non-atomic mode (--keep): import each part immediately.
-		// Earlier parts stay in the table even if a later part fails.
-		for i, pkt := range parsedPackets {
-			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
-				pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
-			if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
-				return fmt.Errorf("import failed at part %d: %w", i+1, err)
-			}
-			fmt.Printf("  ✓ Imported %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
-		}
-	} else {
+	default:
 		// Atomic mode (default): all parts in one transaction — all-or-nothing.
-		// Mirrors the behaviour of --import (file) which uses ImportPackets for multi-part.
+		// Mirrors the behavior of --import (file) which uses ImportPackets for multi-part.
 		totalRows := 0
 		for _, pkt := range parsedPackets {
 			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
@@ -372,6 +367,109 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 }
 
 // batchIDFromMessageID extracts the export batch ID from a MessageID.
+// importBrokerKeep is the streaming (non-atomic) import path used when --keep is set.
+// Each packet is received, decompressed, and committed to the DB immediately —
+// no full in-memory buffering of the whole batch. On failure the successfully
+// committed parts remain in the table and can be inspected or rolled back manually.
+func importBrokerKeep(ctx context.Context, broker brokers.MessageBroker, adapter adapters.Adapter, opts ImportBrokerOptions) error {
+	idleTimeout := opts.IdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = defaultIdleTimeout
+	}
+
+	ackLast := func() error {
+		if acker, ok := broker.(interface{ AckLast() error }); ok {
+			return acker.AckLast()
+		}
+		return nil
+	}
+
+	receive := func() ([]byte, error) {
+		recvCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+		defer cancel()
+		data, err := broker.Receive(recvCtx)
+		if err != nil && recvCtx.Err() != nil {
+			return nil, fmt.Errorf("queue empty (no message in %s)", idleTimeout)
+		}
+		return data, err
+	}
+
+	parse := func(xmlData []byte) (*packet.DataPacket, error) {
+		return packet.NewParser().ParseBytesWithDecompression(xmlData, func(pCtx context.Context, compressed string, algo string) ([]string, error) {
+			return decompressData(compressed, algo)
+		})
+	}
+
+	// Read first packet to learn batchID and TotalParts.
+	xmlData, err := receive()
+	if err != nil {
+		fmt.Printf("Queue is empty: %v\n", err)
+		return nil
+	}
+	firstPkt, err := parse(xmlData)
+	if err != nil {
+		return fmt.Errorf("failed to parse first packet: %w", err)
+	}
+	if opts.TargetTable != "" {
+		firstPkt.Header.TableName = opts.TargetTable
+	}
+
+	batchID := batchIDFromMessageID(firstPkt.Header.MessageID)
+	totalParts := firstPkt.Header.TotalParts
+	if totalParts == 0 {
+		totalParts = 1
+	}
+	fmt.Printf("Importing batch '%s' (%d part(s)) from queue '%s' (strategy: %s, --keep)\n",
+		batchID, totalParts, opts.IdleTimeout, opts.Strategy)
+
+	importOne := func(pkt *packet.DataPacket, n int) error {
+		fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+			pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+		if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
+			return fmt.Errorf("import failed at part %d: %w", n, err)
+		}
+		fmt.Printf("  ✓ Committed %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+		return nil
+	}
+
+	if err := importOne(firstPkt, 1); err != nil {
+		return err
+	}
+	if err := ackLast(); err != nil {
+		return fmt.Errorf("ack failed: %w", err)
+	}
+
+	committed := 1
+	for committed < totalParts {
+		raw, err := receive()
+		if err != nil {
+			fmt.Printf("Queue empty after %d/%d committed: %v\n", committed, totalParts, err)
+			break
+		}
+		pkt, err := parse(raw)
+		if err != nil {
+			return fmt.Errorf("failed to parse packet %d: %w", committed+1, err)
+		}
+		if batchIDFromMessageID(pkt.Header.MessageID) != batchID {
+			fmt.Printf("  ⚠ Packet from different batch — stopping\n")
+			break
+		}
+		if opts.TargetTable != "" {
+			pkt.Header.TableName = opts.TargetTable
+		}
+		committed++
+		if err := importOne(pkt, committed); err != nil {
+			return err
+		}
+		if err := ackLast(); err != nil {
+			return fmt.Errorf("ack failed: %w", err)
+		}
+	}
+
+	fmt.Printf("✓ Done. %d/%d part(s) committed.\n", committed, totalParts)
+	return nil
+}
+
 // Format: "REF-20250319-ABCD1234-P3" → "REF-20250319-ABCD1234"
 func batchIDFromMessageID(messageID string) string {
 	if idx := strings.LastIndex(messageID, "-P"); idx >= 0 {
