@@ -101,22 +101,36 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	}
 
 	// Publish packets
-	fmt.Printf("Sending to queue '%s'...\n", brokerCfg.Queue)
+	fmt.Printf("Sending %d packet(s) to queue '%s'...\n", len(packets), brokerCfg.Queue)
 	generator := packet.NewGenerator()
+
+	// Сериализуем все пакеты в XML
+	xmlMsgs := make([][]byte, len(packets))
 	for i, pkt := range packets {
-		// Marshal packet to XML
 		xml, err := generator.ToXML(pkt, true)
 		if err != nil {
 			return fmt.Errorf("failed to marshal packet %d: %w", i+1, err)
 		}
-
-		// Send to broker
-		if err := broker.Send(ctx, xml); err != nil {
-			return fmt.Errorf("failed to send packet %d: %w", i+1, err)
-		}
-		fmt.Printf("✓ Sent packet %d/%d\n", i+1, len(packets))
+		xmlMsgs[i] = xml
 	}
 
+	// Если брокер поддерживает пакетную отправку — используем один roundtrip
+	type batchSender interface {
+		SendBatch(ctx context.Context, messages [][]byte) error
+	}
+	if bs, ok := broker.(batchSender); ok {
+		if err := bs.SendBatch(ctx, xmlMsgs); err != nil {
+			return fmt.Errorf("failed to send batch: %w", err)
+		}
+	} else {
+		for i, msg := range xmlMsgs {
+			if err := broker.Send(ctx, msg); err != nil {
+				return fmt.Errorf("failed to send packet %d: %w", i+1, err)
+			}
+		}
+	}
+
+	fmt.Printf("✓ Sent %d packet(s)\n", len(packets))
 	fmt.Println("✓ Export to broker complete!")
 
 	return nil

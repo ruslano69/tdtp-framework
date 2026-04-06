@@ -42,12 +42,13 @@ func (k *Kafka) Connect(ctx context.Context) error {
 		Addr:         kafka.TCP(k.config.Brokers...),
 		Topic:        k.config.Topic,
 		Balancer:     &kafka.LeastBytes{}, // Балансировка по наименьшей загруженности
-		RequiredAcks: kafka.RequireAll,    // Ждем подтверждения от всех реплик
-		Async:        false,               // Синхронная отправка для надежности
+		RequiredAcks: kafka.RequireOne,    // Подтверждение от лидера (достаточно для надёжности)
+		Async:        false,               // Синхронная отправка
 		Compression:  kafka.Snappy,        // Сжатие данных
 		MaxAttempts:  3,                   // Повторные попытки
 		WriteTimeout: 30 * time.Second,
-		BatchBytes:   100 * 1024 * 1024, // 100MB — поддержка крупных TDTP-пакетов
+		BatchBytes:   100 * 1024 * 1024,    // 100MB — поддержка крупных TDTP-пакетов
+		BatchTimeout: 5 * time.Millisecond, // Не ждать накопления — отправлять сразу
 	}
 
 	// Создаем Reader для получения сообщений
@@ -98,20 +99,45 @@ func (k *Kafka) Send(ctx context.Context, message []byte) error {
 	}
 
 	msg := kafka.Message{
-		Key:   []byte(fmt.Sprintf("tdtp-%d", time.Now().UnixNano())), // Уникальный ключ
+		Key:   []byte(fmt.Sprintf("tdtp-%d", time.Now().UnixNano())),
 		Value: message,
 		Time:  time.Now(),
 		Headers: []kafka.Header{
-			{Key: "content-type", Value: []byte("application/xml")}, // TDTP пакеты в XML
+			{Key: "content-type", Value: []byte("application/xml")},
 			{Key: "protocol", Value: []byte("tdtp")},
 		},
 	}
 
-	err := k.writer.WriteMessages(ctx, msg)
-	if err != nil {
+	if err := k.writer.WriteMessages(ctx, msg); err != nil {
 		return fmt.Errorf("failed to write message to Kafka: %w", err)
 	}
+	return nil
+}
 
+// SendBatch отправляет все сообщения одним вызовом WriteMessages —
+// все пакеты уходят в одном roundtrip вместо N последовательных.
+func (k *Kafka) SendBatch(ctx context.Context, messages [][]byte) error {
+	if k.writer == nil {
+		return fmt.Errorf("not connected to Kafka")
+	}
+
+	now := time.Now()
+	msgs := make([]kafka.Message, len(messages))
+	for i, m := range messages {
+		msgs[i] = kafka.Message{
+			Key:   []byte(fmt.Sprintf("tdtp-%d-%d", now.UnixNano(), i)),
+			Value: m,
+			Time:  now,
+			Headers: []kafka.Header{
+				{Key: "content-type", Value: []byte("application/xml")},
+				{Key: "protocol", Value: []byte("tdtp")},
+			},
+		}
+	}
+
+	if err := k.writer.WriteMessages(ctx, msgs...); err != nil {
+		return fmt.Errorf("failed to write batch to Kafka: %w", err)
+	}
 	return nil
 }
 
