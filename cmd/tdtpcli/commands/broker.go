@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -77,41 +78,56 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
 
-	// Apply compression if enabled
-	if compress {
-		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
-		for _, pkt := range packets {
-			if err := compressPacketData(pkt, compressLevel, compressAlgo, false); err != nil {
-				return fmt.Errorf("compression failed: %w", err)
-			}
-		}
-		fmt.Printf("✓ Data compressed with %s\n", compressAlgo)
-	}
-
-	// Create broker
+	// Create broker (параллельно с подготовкой данных)
 	broker, err := createBroker(brokerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
 	}
 	defer func() { _ = broker.Close() }()
 
+	// Параллельное сжатие + сериализация всех пакетов
+	if compress {
+		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
+	}
+
+	xmlMsgs := make([][]byte, len(packets))
+	errs := make([]error, len(packets))
+
+	var wg sync.WaitGroup
+	for i, pkt := range packets {
+		wg.Add(1)
+		go func(i int, pkt *packet.DataPacket) {
+			defer wg.Done()
+			if compress {
+				if err := compressPacketData(pkt, compressLevel, compressAlgo, false); err != nil {
+					errs[i] = fmt.Errorf("packet %d compress: %w", i+1, err)
+					return
+				}
+			}
+			gen := packet.NewGenerator()
+			xml, err := gen.ToXML(pkt, true)
+			if err != nil {
+				errs[i] = fmt.Errorf("packet %d marshal: %w", i+1, err)
+				return
+			}
+			xmlMsgs[i] = xml
+		}(i, pkt)
+	}
+	wg.Wait()
+
+	for _, e := range errs {
+		if e != nil {
+			return e
+		}
+	}
+
+	if compress {
+		fmt.Printf("✓ Data compressed with %s\n", compressAlgo)
+	}
+
 	// Connect to broker
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to broker: %w", err)
-	}
-
-	// Publish packets
-	fmt.Printf("Sending %d packet(s) to queue '%s'...\n", len(packets), brokerCfg.Queue)
-	generator := packet.NewGenerator()
-
-	// Сериализуем все пакеты в XML
-	xmlMsgs := make([][]byte, len(packets))
-	for i, pkt := range packets {
-		xml, err := generator.ToXML(pkt, true)
-		if err != nil {
-			return fmt.Errorf("failed to marshal packet %d: %w", i+1, err)
-		}
-		xmlMsgs[i] = xml
 	}
 
 	// Если брокер поддерживает пакетную отправку — используем один roundtrip
