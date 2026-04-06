@@ -346,7 +346,8 @@ func batchIDFromMessageID(messageID string) string {
 // Multi-part: base_part_N_of_Total.ext  (compatible with --import multi-part convention)
 // importBrokerRaw drains the queue and writes each message as raw bytes.
 // No parsing, no decompression, no validation — exactly what the broker sent.
-// Files are named: outputFile (n=1) or base_N.ext (n>1), sequential until idle timeout.
+// Peeks at the first message header to learn TotalParts for _part_N_of_Total naming.
+// Files: outputFile (single) or base_part_N_of_Total.ext (multi-part).
 func importBrokerRaw(ctx context.Context, broker brokers.MessageBroker, opts ImportBrokerOptions) error {
 	if opts.OutputFile == "" {
 		return fmt.Errorf("--raw requires --output <file>")
@@ -357,44 +358,70 @@ func importBrokerRaw(ctx context.Context, broker brokers.MessageBroker, opts Imp
 		idleTimeout = defaultIdleTimeout
 	}
 
-	ext := filepath.Ext(opts.OutputFile)
-	base := opts.OutputFile[:len(opts.OutputFile)-len(ext)]
-
-	n := 0
-	totalBytes := 0
-	fmt.Printf("Raw drain → %s (idle timeout: %s)...\n", opts.OutputFile, idleTimeout)
-
-	for {
+	receive := func() ([]byte, error) {
 		recvCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+		defer cancel()
 		data, err := broker.Receive(recvCtx)
-		cancel()
-		if err != nil {
-			if recvCtx.Err() != nil {
-				break // idle timeout — queue empty
-			}
-			return fmt.Errorf("receive error: %w", err)
+		if err != nil && recvCtx.Err() != nil {
+			return nil, nil // idle timeout — queue empty
 		}
-
-		n++
-		var filename string
-		if n == 1 {
-			filename = opts.OutputFile
-		} else {
-			filename = fmt.Sprintf("%s_%d%s", base, n, ext)
-		}
-
-		if err := os.WriteFile(filename, data, 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", filename, err)
-		}
-		totalBytes += len(data)
-		fmt.Printf("  ✓ [%d] %s (%d bytes)\n", n, filename, len(data))
+		return data, err
 	}
 
-	if n == 0 {
+	// Read first message to peek TotalParts from header (no full parse needed).
+	first, err := receive()
+	if err != nil {
+		return fmt.Errorf("receive error: %w", err)
+	}
+	if first == nil {
 		fmt.Println("Queue is empty.")
 		return nil
 	}
-	fmt.Printf("✓ Done. %d message(s), %.1f MB total.\n", n, float64(totalBytes)/1024/1024)
+
+	// Quick header peek — parse only, raw bytes saved as-is.
+	totalParts := 0
+	if pkt, peekErr := packet.NewParser().ParseBytes(first); peekErr == nil {
+		totalParts = pkt.Header.TotalParts
+	}
+	if totalParts == 0 {
+		totalParts = 1 // unknown or single-part
+	}
+
+	fmt.Printf("Raw drain → %s (%d part(s) expected, idle timeout: %s)...\n",
+		opts.OutputFile, totalParts, idleTimeout)
+
+	saveRaw := func(data []byte, n int) error {
+		filename := brokerOutputFilename(opts.OutputFile, n, totalParts)
+		if err := os.WriteFile(filename, data, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", filename, err)
+		}
+		fmt.Printf("  ✓ [%d/%d] %s (%d bytes)\n", n, totalParts, filename, len(data))
+		return nil
+	}
+
+	totalBytes := len(first)
+	if err := saveRaw(first, 1); err != nil {
+		return err
+	}
+
+	n := 1
+	for n < totalParts {
+		data, err := receive()
+		if err != nil {
+			return fmt.Errorf("receive error: %w", err)
+		}
+		if data == nil {
+			fmt.Printf("  ⚠ Queue empty after %d/%d parts (idle timeout)\n", n, totalParts)
+			break
+		}
+		n++
+		totalBytes += len(data)
+		if err := saveRaw(data, n); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("✓ Done. %d/%d message(s), %.1f MB total.\n", n, totalParts, float64(totalBytes)/1024/1024)
 	return nil
 }
 
