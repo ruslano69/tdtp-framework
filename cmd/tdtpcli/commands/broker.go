@@ -159,9 +159,13 @@ const defaultIdleTimeout = 5 * time.Second
 // ImportBrokerOptions holds options for ImportFromBroker
 type ImportBrokerOptions struct {
 	Strategy    adapters.ImportStrategy
-	TargetTable string        // override table name from packet header (fixes name conflicts)
-	OutputFile  string        // if set, save packets to file(s) instead of importing to DB
-	Raw         bool          // save raw bytes as-is, no parse/decompress/validate
+	TargetTable string // override table name from packet header (fixes name conflicts)
+	OutputFile  string // if set, save packets to file(s) instead of importing to DB
+	Raw         bool   // save raw bytes as-is, no parse/decompress/validate
+	Keep        bool   // allow partial writes (non-atomic): import each part immediately.
+	// Default (Keep=false): all parts committed in one transaction via ImportPackets — all-or-nothing.
+	// Keep=true: each part committed individually; if a later part fails, earlier parts remain.
+	// Use Keep for batches too large for a single DB transaction.
 	IdleTimeout time.Duration // how long to wait for the next message before stopping (0 = default 5s)
 }
 
@@ -302,37 +306,58 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 	}
 
-	// ── Step 4: process all packets in order ─────────────────────────────────
-	processPacket := func(pkt *packet.DataPacket, n int) error {
-		if opts.TargetTable != "" {
+	// ── Step 4: process all packets ─────────────────────────────────────────
+	if opts.TargetTable != "" {
+		for _, pkt := range parsedPackets {
 			pkt.Header.TableName = opts.TargetTable
 		}
-		fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
-			pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+	}
 
-		if opts.OutputFile != "" {
-			filename := brokerOutputFilename(opts.OutputFile, n, totalParts)
+	if opts.OutputFile != "" {
+		// File-save mode: write each part to disk.
+		for i, pkt := range parsedPackets {
+			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+				pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+			filename := brokerOutputFilename(opts.OutputFile, i+1, totalParts)
 			xmlBytes, err := generator.ToXML(pkt, true)
 			if err != nil {
-				return fmt.Errorf("failed to marshal packet: %w", err)
+				return fmt.Errorf("failed to marshal packet %d: %w", i+1, err)
 			}
 			if err := os.WriteFile(filename, xmlBytes, 0o600); err != nil {
 				return fmt.Errorf("failed to write '%s': %w", filename, err)
 			}
 			fmt.Printf("  ✓ Saved to: %s\n", filename)
-		} else {
+		}
+	} else if opts.Keep {
+		// Non-atomic mode (--keep): import each part immediately.
+		// Earlier parts stay in the table even if a later part fails.
+		for i, pkt := range parsedPackets {
+			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+				pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
 			if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
-				return fmt.Errorf("import failed: %w", err)
+				return fmt.Errorf("import failed at part %d: %w", i+1, err)
 			}
 			fmt.Printf("  ✓ Imported %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
 		}
-		return nil
-	}
-
-	for i, pkt := range parsedPackets {
-		if err := processPacket(pkt, i+1); err != nil {
-			return err
+	} else {
+		// Atomic mode (default): all parts in one transaction — all-or-nothing.
+		// Mirrors the behaviour of --import (file) which uses ImportPackets for multi-part.
+		totalRows := 0
+		for _, pkt := range parsedPackets {
+			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+				pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+			totalRows += len(pkt.Data.Rows)
 		}
+		var importErr error
+		if len(parsedPackets) == 1 {
+			importErr = adapter.ImportPacket(ctx, parsedPackets[0], opts.Strategy)
+		} else {
+			importErr = adapter.ImportPackets(ctx, parsedPackets, opts.Strategy)
+		}
+		if importErr != nil {
+			return fmt.Errorf("import failed (all parts rolled back): %w", importErr)
+		}
+		fmt.Printf("  ✓ Imported %d row(s) into '%s'\n", totalRows, parsedPackets[0].Header.TableName)
 	}
 
 	// ACK: for Kafka — CommitMessages on the last offset commits all previous
