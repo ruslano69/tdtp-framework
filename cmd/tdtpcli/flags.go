@@ -168,7 +168,7 @@ func ParseFlags() *Flags {
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
 	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
 	f.InspectTable = flag.String("inspect-table", "", "Print extended metadata of a live DB table: native types, FK relationships, row count, sample row (Agentic Discovery Mode)")
-	f.Listen = flag.Bool("listen", false, "[BETA] Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
+	f.Listen = flag.Bool("listen", false, "Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
 
 	// TDTQL Filters
 	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")

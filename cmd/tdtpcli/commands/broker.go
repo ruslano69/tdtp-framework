@@ -32,7 +32,9 @@ type BrokerConfig struct {
 	AutoDelete     bool
 	Exclusive      bool
 	PassiveDeclare bool
-	QueuePath      string // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
+	QueuePath      string   // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
+	Brokers        []string // Kafka: список брокеров (["localhost:9092"])
+	ConsumerGroup  string   // Kafka: consumer group ID
 }
 
 // ExportToBroker exports table data to message broker
@@ -317,6 +319,16 @@ func brokerOutputFilename(outputFile string, n int) string {
 
 // createBroker creates a message broker based on configuration
 func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
+	// Kafka brokers list: use explicit Brokers slice; fall back to Host:Port
+	kafkaBrokers := cfg.Brokers
+	if len(kafkaBrokers) == 0 && cfg.Host != "" {
+		port := cfg.Port
+		if port == 0 {
+			port = 9092
+		}
+		kafkaBrokers = []string{fmt.Sprintf("%s:%d", cfg.Host, port)}
+	}
+
 	brokerConfig := brokers.Config{
 		Type:           cfg.Type,
 		Host:           cfg.Host,
@@ -334,6 +346,9 @@ func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 		Exclusive:      cfg.Exclusive,
 		PassiveDeclare: cfg.PassiveDeclare,
 		QueuePath:      cfg.QueuePath,
+		Brokers:        kafkaBrokers,
+		Topic:          cfg.Queue,
+		ConsumerGroup:  cfg.ConsumerGroup,
 	}
 
 	return brokers.New(brokerConfig)

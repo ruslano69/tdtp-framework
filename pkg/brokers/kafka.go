@@ -46,7 +46,8 @@ func (k *Kafka) Connect(ctx context.Context) error {
 		Async:        false,               // Синхронная отправка для надежности
 		Compression:  kafka.Snappy,        // Сжатие данных
 		MaxAttempts:  3,                   // Повторные попытки
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		BatchBytes:   100 * 1024 * 1024, // 100MB — поддержка крупных TDTP-пакетов
 	}
 
 	// Создаем Reader для получения сообщений
@@ -54,11 +55,11 @@ func (k *Kafka) Connect(ctx context.Context) error {
 		Brokers:        k.config.Brokers,
 		GroupID:        k.config.ConsumerGroup,
 		Topic:          k.config.Topic,
-		MinBytes:       1,                // Минимальный размер batch
-		MaxBytes:       10e6,             // 10MB максимальный размер
-		CommitInterval: 0,                // Manual commit
-		StartOffset:    kafka.LastOffset, // Начинаем с последнего offset (новые сообщения)
-		MaxWait:        1 * time.Second,  // Максимальное время ожидания
+		MinBytes:       1,                 // Минимальный размер batch
+		MaxBytes:       10e6,              // 10MB максимальный размер
+		CommitInterval: 0,                 // Manual commit
+		StartOffset:    kafka.FirstOffset, // earliest: читаем все непотреблённые сообщения
+		MaxWait:        1 * time.Second,   // Максимальное время ожидания
 		ReadBackoffMin: 100 * time.Millisecond,
 		ReadBackoffMax: 1 * time.Second,
 	})

@@ -61,6 +61,9 @@ type BrokerConfig struct {
 	Exclusive      bool   `yaml:"exclusive,omitempty"`       // Queue accessible by one connection only
 	PassiveDeclare bool   `yaml:"passive_declare,omitempty"` // Don't create queue, just check it exists (avoids 406 PRECONDITION_FAILED)
 	QueuePath      string `yaml:"queue_path,omitempty"`      // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
+	// Kafka-specific
+	Brokers       []string `yaml:"brokers,omitempty"`        // Kafka: список брокеров (["localhost:9092"])
+	ConsumerGroup string   `yaml:"consumer_group,omitempty"` // Kafka: consumer group ID
 }
 
 // ResilienceConfig contains circuit breaker and retry settings

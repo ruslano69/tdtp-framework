@@ -764,6 +764,8 @@ func buildBrokerConfig(config *Config) commands.BrokerConfig {
 		Exclusive:      config.Broker.Exclusive,
 		PassiveDeclare: config.Broker.PassiveDeclare,
 		QueuePath:      config.Broker.QueuePath,
+		Brokers:        config.Broker.Brokers,
+		ConsumerGroup:  config.Broker.ConsumerGroup,
 	}
 }
 
