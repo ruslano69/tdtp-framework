@@ -27,14 +27,14 @@ COMMANDS:
   Message Broker Operations:
     --export-broker <table>    Export table to message broker
     --import-broker            Import from message broker
-    --listen                   [BETA] Streaming consumer daemon (Kafka only)
+    --listen                   Streaming consumer daemon (Kafka only)
                                Listens to Kafka topic and imports data as stream parts arrive.
                                Requires stable channel (99.99%+ uptime). NOT for RabbitMQ/MSMQ.
 
     Broker tiers:
       MSMQ     — Legacy     (Windows-only, no ordering guarantees, batch mode only)
       RabbitMQ — Stability  (reliable delivery, batch mode)
-      Kafka    — Speed      (ordered partitions, batch + --listen streaming [BETA])
+      Kafka    — Speed      (ordered partitions, batch + --listen streaming)
 
   Incremental Sync:
     --sync-incremental <table> Incremental sync from table
@@ -227,7 +227,7 @@ EXAMPLES:
   # Import from RabbitMQ
   tdtpcli --import-broker --config rabbitmq.yaml
 
-  # [BETA] Streaming consumer daemon — Kafka only
+  # Streaming consumer daemon — Kafka only
   #   Listens indefinitely; terminated by Ctrl+C / SIGTERM
   #   Recommended for stable channels (LAN, dedicated WAN, 99.99%+ uptime)
   #   NOT recommended for unreliable links — use --import-broker (batch) instead
@@ -342,8 +342,8 @@ FEATURES:
   ✅ Message Brokers:
        MSMQ     — Legacy     (Windows-only, batch mode)
        RabbitMQ — Stability  (reliable delivery, batch mode)
-       Kafka    — Speed      (ordered partitions, batch + streaming [BETA])
-  🔶 Streaming Consumer: --listen (Kafka only, BETA) — stable channels only
+       Kafka    — Speed      (ordered partitions, batch + streaming)
+  ✅ Streaming Consumer: --listen (Kafka only) — stable channels only
   ✅ File Operations: Diff & Merge with conflict resolution
   ✅ XLSX Converter: Database ↔ Excel bidirectional
   ✅ Compression: zstd (1-19) + kanzi (6-7, 30% denser) + XXH3 checksum (--compress --compress-algo --hash)

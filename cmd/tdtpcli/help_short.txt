@@ -28,7 +28,7 @@ COMMANDS:
   Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed
     --export-broker <table>    Export to message broker
     --import-broker            Import from message broker
-    --listen                   [BETA] Streaming consumer daemon (Kafka only)
+    --listen                   Streaming consumer daemon (Kafka only)
 
   ETL:
     --sync-incremental <table> Incremental sync
