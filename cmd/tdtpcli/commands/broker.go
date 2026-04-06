@@ -266,7 +266,7 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 			pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
 
 		if opts.OutputFile != "" {
-			filename := brokerOutputFilename(opts.OutputFile, n)
+			filename := brokerOutputFilename(opts.OutputFile, n, totalParts)
 			xmlBytes, err := generator.ToXML(pkt, true)
 			if err != nil {
 				return fmt.Errorf("failed to marshal packet: %w", err)
@@ -336,15 +336,29 @@ func batchIDFromMessageID(messageID string) string {
 	return messageID
 }
 
-// brokerOutputFilename returns output path for message N.
-// Message 1 → outputFile as-is; messages 2+ get a numeric suffix before the extension.
-func brokerOutputFilename(outputFile string, n int) string {
-	if n == 1 {
+// brokerOutputFilename returns output path for part N of total.
+// Single-part: outputFile as-is.
+// Multi-part: base_part_N_of_Total.ext  (compatible with --import multi-part convention)
+func brokerOutputFilename(outputFile string, n, total int) string {
+	if total == 1 {
 		return outputFile
 	}
-	ext := filepath.Ext(outputFile)
-	base := outputFile[:len(outputFile)-len(ext)]
-	return fmt.Sprintf("%s_%d%s", base, n, ext)
+	// Strip double extension: "users.tdtp.xml" → base="users", ext=".tdtp.xml"
+	// to get "users_part_1_of_15.tdtp.xml"
+	name := filepath.Base(outputFile)
+	dir := filepath.Dir(outputFile)
+
+	// Find first dot to preserve compound extension (.tdtp.xml)
+	dotIdx := strings.Index(name, ".")
+	var base, ext string
+	if dotIdx >= 0 {
+		base = name[:dotIdx]
+		ext = name[dotIdx:]
+	} else {
+		base = name
+		ext = ""
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s_part_%d_of_%d%s", base, n, total, ext))
 }
 
 // createBroker creates a message broker based on configuration
