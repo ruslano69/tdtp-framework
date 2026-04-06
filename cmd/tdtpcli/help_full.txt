@@ -35,6 +35,10 @@ COMMANDS:
     --import-broker --raw      Save broker messages as-is (no parse, no decompress, no validate).
                                Reads TotalParts from the first message header for correct naming.
                                Useful for forwarding or archiving raw queue traffic.
+    --import-broker --keep     Non-atomic mode: import each part immediately as it arrives.
+                               If a later part fails, earlier parts stay committed in the table.
+                               Use for batches too large for a single DB transaction.
+                               Default (no --keep): all parts in one transaction — all-or-nothing.
     --listen                   Streaming consumer daemon (Kafka only)
                                Listens to Kafka topic and imports data as stream parts arrive.
                                Requires stable channel (99.99%+ uptime). NOT for RabbitMQ/MSMQ.

@@ -30,6 +30,7 @@ COMMANDS:
     --import-broker            Import from message broker to DB (parallel decompress)
     --import-broker --output   Save to TDTP files (base_part_N_of_Total.tdtp.xml)
     --import-broker --raw      Save raw queue bytes verbatim (no parse/decompress)
+    --import-broker --keep     Non-atomic: commit each part immediately (default: all-or-nothing)
     --listen                   Streaming consumer daemon (Kafka only)
 
   ETL:

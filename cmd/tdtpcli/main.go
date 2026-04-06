@@ -391,6 +391,7 @@ func routeCommand(
 				TargetTable: *flags.Table,
 				OutputFile:  *flags.Output,
 				Raw:         *flags.RawBroker,
+				Keep:        *flags.KeepBroker,
 			})
 		})
 
