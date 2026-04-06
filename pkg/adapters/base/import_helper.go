@@ -279,11 +279,17 @@ func (h *ImportHelper) replaceTables(ctx context.Context, targetTable, tempTable
 	return nil
 }
 
-// ParseRowValues парсит строку TDTP в массив значений
-// Общая утилита для всех адаптеров
+// sharedParser и sharedSchemaConverter — пакетные синглтоны без состояния.
+// Parser и Converter оба являются пустыми struct{}, потокобезопасны при чтении.
+var (
+	sharedParser          = packet.NewParser()
+	sharedSchemaConverter = schema.NewConverter()
+)
+
+// ParseRowValues парсит строку TDTP в массив значений.
+// Общая утилита для всех адаптеров.
 func ParseRowValues(row packet.Row) []string {
-	parser := packet.NewParser()
-	return parser.GetRowValues(row)
+	return sharedParser.GetRowValues(row)
 }
 
 // ConvertRowToSQLValues конвертирует строку TDTP в SQL значения для PreparedStatement
@@ -298,7 +304,6 @@ func ConvertRowToSQLValues(
 		return nil, fmt.Errorf("expected %d values, got %d", len(pkgSchema.Fields), len(rowValues))
 	}
 
-	schemaConverter := schema.NewConverter()
 	args := make([]any, len(rowValues))
 
 	for i, value := range rowValues {
@@ -365,7 +370,7 @@ func ConvertRowToSQLValues(
 		}
 
 		// Парсим значение
-		typedValue, err := schemaConverter.ParseValue(value, fieldDef)
+		typedValue, err := sharedSchemaConverter.ParseValue(value, fieldDef)
 		if err != nil {
 			return nil, fmt.Errorf("field %s: %w", fieldDef.Name, err)
 		}

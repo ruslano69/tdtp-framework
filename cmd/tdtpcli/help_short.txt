@@ -1,0 +1,96 @@
+TDTP CLI - Table Data Transfer Protocol Command Line Interface
+Version: {VERSION}
+
+USAGE:
+  tdtpcli [command] [options]
+
+COMMANDS:
+
+  Database:
+    --list[=pattern]           List tables; filter by glob (e.g. --list=user*, --list=order?)
+    --list-views               List all database views
+    --export <table>           Export table to TDTP XML
+    --import <file>            Import TDTP XML to database
+    --inspect-table <table>    Inspect live DB table: native types, FKs, row count, sample row
+
+  File:
+    --inspect <file>           Print YAML metadata summary (no config needed)
+    --diff <file-a> <file-b>   Compare two TDTP files
+    --merge <files>            Merge multiple TDTP files
+    --to-html <file>           Convert TDTP to HTML viewer
+
+  XLSX:
+    --to-xlsx <tdtp-file>      TDTP → XLSX
+    --from-xlsx <xlsx-file>    XLSX → TDTP
+    --export-xlsx <table>      Table → XLSX (direct)
+    --import-xlsx <xlsx-file>  XLSX → Database (direct)
+
+  Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed+Production
+    --export-broker <table>    Export to message broker (parallel compress, single-roundtrip send)
+    --import-broker            Import from message broker to DB (parallel decompress)
+    --import-broker --output   Save to TDTP files (base_part_N_of_Total.tdtp.xml)
+    --import-broker --raw      Save raw queue bytes verbatim (no parse/decompress)
+    --listen                   Streaming consumer daemon (Kafka only)
+
+  ETL:
+    --sync-incremental <table> Incremental sync
+    --pipeline <file>          Execute ETL pipeline
+
+OPTIONS:
+
+  General:
+    --config <file>            Config file (default: config.yaml)
+    --output <file>            Output file path
+    --table <name>             Target table name
+    --strategy <name>          Import strategy: replace, ignore, fail, copy
+    --batch <size>             Batch size (default: 1000)
+    --readonly-fields          Include read-only fields
+
+  Compression:
+    --compress                 Enable compression for exported data
+    --compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× vs raw, 30% denser than zstd)
+    --compress-level <n>       Level: 1-19 (zstd) or 6-7 (kanzi), default: 3
+    --hash                     Add XXH3 checksum for integrity (requires --compress)
+    --fast                     Skip NULL/NaN/Inf detection for maximum throughput
+
+  TDTQL Filters:
+    --where <condition>        WHERE clause; bracket-quoted names for spaces/special chars:
+                               --where '[Termination Date] = "1753-01-01"'
+    --order-by <fields>        ORDER BY clause
+    --limit <n>                Rows: +N = first N, -N = last N (tail)
+    --offset <n>               Skip N rows
+    --fields <col1,col2>       Column projection: export/import only listed columns
+
+  HTML Viewer:
+    --open                     Open in browser
+    --row <range>              Row range (e.g., 100-500)
+
+  XLSX:
+    --sheet <name>             Sheet name (default: Sheet1)
+
+  Diff/Merge:
+    --key-fields <fields>      Key fields (comma-separated)
+    --ignore-fields <fields>   Ignore fields (comma-separated)
+    --case-sensitive           Case-sensitive comparison
+    --merge-strategy <name>    union, intersection, left, right, append
+    --show-conflicts           Show conflict details
+
+  Field Name Sanitization (--import):
+    --clear                    Replace special chars in field names with safe tokens
+                               % → _pct, @ → _at, # → _xh, space → _, etc.
+    --translit                 Transliterate non-ASCII field names to ASCII
+                               Cyrillic/European: "Имя" → "Imia", "Österreich" → "Osterreich"
+                               Original names saved as DB column comments (PG/MySQL)
+
+  Data Processors:
+    --mask <fields>            Mask sensitive fields
+    --validate <file>          Validate (YAML rules)
+    --normalize <file>         Normalize (YAML rules)
+
+  Misc:
+    --version                  Show version
+    -h                         Show this brief help
+    --help                     Show detailed help with examples
+
+For detailed examples, run: tdtpcli --help
+Documentation: https://github.com/ruslano69/tdtp-framework

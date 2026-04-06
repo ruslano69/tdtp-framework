@@ -48,9 +48,11 @@ func DiffFiles(ctx context.Context, options *DiffOptions) error {
 	// Выводим результат
 	switch options.OutputFormat {
 	case "json":
-		// TODO: Можно добавить JSON форматирование позже
-		fmt.Println("JSON output not yet implemented")
-		return fmt.Errorf("JSON output not yet implemented")
+		output, err := result.FormatJSON()
+		if err != nil {
+			return fmt.Errorf("failed to format JSON: %w", err)
+		}
+		fmt.Println(output)
 	default:
 		// Text формат
 		output := result.FormatText()

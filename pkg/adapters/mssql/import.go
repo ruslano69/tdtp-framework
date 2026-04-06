@@ -12,6 +12,12 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
+// sharedParser и sharedSchemaConverter — синглтоны без состояния, потокобезопасны.
+var (
+	sharedParser          = packet.NewParser()
+	sharedSchemaConverter = schema.NewConverter()
+)
+
 // ========== Import Operations ==========
 
 // ImportPacket импортирует один TDTP пакет в БД
@@ -514,8 +520,7 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 func (a *Adapter) parseRow(row packet.Row, pktSchema packet.Schema) []string {
 	// Используем Parser.GetRowValues() для правильной обработки экранирования
 	// Backslash escaping: \| → | и \\ → \
-	parser := packet.NewParser()
-	values := parser.GetRowValues(row)
+	values := sharedParser.GetRowValues(row)
 
 	// Дополняем пустыми значениями если не хватает
 	for len(values) < len(pktSchema.Fields) {
@@ -545,8 +550,7 @@ func (a *Adapter) stringToValue(str string, field packet.Field) any {
 	fieldDef := fieldToFieldDef(field)
 
 	// Используем schema.Converter для парсинга значения
-	converter := schema.NewConverter()
-	typedValue, err := converter.ParseValue(str, fieldDef)
+	typedValue, err := sharedSchemaConverter.ParseValue(str, fieldDef)
 	if err != nil {
 		// Если парсинг не удался, возвращаем строку как fallback
 		// (ошибка валидации будет обработана на уровне БД)

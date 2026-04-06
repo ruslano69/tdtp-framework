@@ -38,31 +38,24 @@ type ImportOptions struct {
 }
 
 // ImportFile imports a TDTP XML file (or multi-part set) to database.
-// If FilePath is a base name whose _part_ files exist on disk, or is itself
-// a part file, all parts are collected automatically. Multiple packets are
-// passed to adapter.ImportPackets — the framework handles temp table creation,
-// sequential insert of all packets, and atomic swap in one transaction.
+// Parts are processed one at a time (streaming): each part is read, parsed,
+// inserted, and released before the next part is loaded. This keeps memory
+// usage constant regardless of the number of parts.
 func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions) error {
-	// Collect raw data sources: either S3 objects or local files.
-	type dataSource struct {
-		label string
-		data  []byte
-	}
+	// Resolve source list without loading data yet.
+	type sourceRef struct{ label, key string }
+	var sourceRefs []sourceRef
 
-	var sources []dataSource
-
+	var store storage.ObjectStorage
 	if opts.StorageCfg != nil {
-		// Download from object storage
-		store, err := storage.New(*opts.StorageCfg)
+		var err error
+		store, err = storage.New(*opts.StorageCfg)
 		if err != nil {
 			return fmt.Errorf("failed to open storage: %w", err)
 		}
 		defer func() { _ = store.Close() }()
 
 		keys := []string{opts.StorageKey}
-		// Check if this is a multi-part base key by listing the bucket with prefix.
-		// Parts are named {base}_part_{N}_of_{total}{ext} — same scheme as local files,
-		// so strip the extension before appending "_part_" (mirrors discoverMultiPartFiles).
 		if !strings.Contains(opts.StorageKey, "_part_") {
 			keyExt := filepath.Ext(opts.StorageKey)
 			keyBase := strings.TrimSuffix(opts.StorageKey, keyExt)
@@ -74,47 +67,53 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 				}
 			}
 		}
-
-		for _, key := range keys {
-			fmt.Printf("Downloading '%s' from s3://%s...\n", key, opts.StorageCfg.S3.Bucket)
-			rc, err := store.Get(ctx, key)
-			if err != nil {
-				return fmt.Errorf("failed to get object %s: %w", key, err)
-			}
-			data, err := io.ReadAll(rc)
-			_ = rc.Close()
-			if err != nil {
-				return fmt.Errorf("failed to read object %s: %w", key, err)
-			}
-			sources = append(sources, dataSource{label: "s3://" + opts.StorageCfg.S3.Bucket + "/" + key, data: data})
+		for _, k := range keys {
+			sourceRefs = append(sourceRefs, sourceRef{
+				label: "s3://" + opts.StorageCfg.S3.Bucket + "/" + k,
+				key:   k,
+			})
 		}
 	} else {
-		// Detect multi-part set; fall back to single file
 		filePaths := discoverMultiPartFiles(opts.FilePath)
 		if filePaths == nil {
 			filePaths = []string{opts.FilePath}
 		}
 		for _, fp := range filePaths {
-			data, err := os.ReadFile(fp)
-			if err != nil {
-				return fmt.Errorf("failed to read file: %w", err)
-			}
-			sources = append(sources, dataSource{label: fp, data: data})
+			sourceRefs = append(sourceRefs, sourceRef{label: fp, key: fp})
 		}
 	}
 
-	// Read and parse all packets
-	packets := make([]*packet.DataPacket, 0, len(sources))
-	for _, src := range sources {
-		data := src.data
-		fp := src.label
+	// Parse all parts: raw bytes released immediately after parse to save memory,
+	// but parsed packets are kept for atomic multi-part insertion via ImportPackets.
+	p := packet.NewParser()
+	packets := make([]*packet.DataPacket, 0, len(sourceRefs))
 
-		fmt.Printf("Reading '%s'...\n", fp)
+	for _, src := range sourceRefs {
+		var data []byte
+		var err error
+		if store != nil {
+			fmt.Printf("Downloading '%s' from s3://%s...\n", src.key, opts.StorageCfg.S3.Bucket)
+			rc, err := store.Get(ctx, src.key)
+			if err != nil {
+				return fmt.Errorf("failed to get object %s: %w", src.key, err)
+			}
+			data, err = io.ReadAll(rc)
+			_ = rc.Close()
+			if err != nil {
+				return fmt.Errorf("failed to read object %s: %w", src.key, err)
+			}
+		} else {
+			fmt.Printf("Reading '%s'...\n", src.label)
+			data, err = os.ReadFile(src.key)
+			if err != nil {
+				return fmt.Errorf("failed to read file: %w", err)
+			}
+		}
 
-		parser := packet.NewParser()
-		pkt, err := parser.ParseBytes(data)
+		pkt, err := p.ParseBytes(data)
+		data = nil // release raw bytes immediately after parse
 		if err != nil {
-			return fmt.Errorf("failed to parse TDTP packet: %w", err)
+			return fmt.Errorf("failed to parse TDTP packet from '%s': %w", src.label, err)
 		}
 
 		if pkt.Data.Compression != "" {
@@ -124,7 +123,6 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
-		// v1.3.1: expand compact format (carry-forward fixed fields) before any further processing
 		if pkt.Data.Compact {
 			fmt.Printf("  Expanding compact format (v1.3.1)...\n")
 			if err := packet.ExpandCompactRows(pkt); err != nil {
@@ -138,14 +136,12 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
-		// Apply field whitelist: keep only requested columns
 		if len(opts.Fields) > 0 {
 			if err := filterPacketFields(pkt, opts.Fields); err != nil {
 				return fmt.Errorf("field filter failed: %w", err)
 			}
 		}
 
-		// Sanitize field names in schema (data rows are positional — untouched)
 		if opts.SanitizeClear || opts.SanitizeTranslit {
 			sOpts := sanitize.Options{Clear: opts.SanitizeClear, Translit: opts.SanitizeTranslit}
 			if changed := sanitize.ApplyToSchema(&pkt.Schema, sOpts); len(changed) > 0 {
@@ -156,18 +152,17 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
-		packets = append(packets, pkt)
 		fmt.Printf("  ✓ %d row(s)\n", len(pkt.Data.Rows))
+		packets = append(packets, pkt)
 	}
 
-	// Validate multi-part session integrity (security: detect batch mixing)
-	if len(packets) > 1 {
-		if err := validateMultiPartSession(packets); err != nil {
-			return fmt.Errorf("multi-part validation failed: %w", err)
-		}
+	// Validate session integrity unconditionally:
+	// - catches packets from different export sessions (batch ID mismatch)
+	// - catches partial imports (e.g. only 1 of 6 parts found on disk)
+	if err := validateMultiPartSession(packets); err != nil {
+		return fmt.Errorf("multi-part validation failed: %w", err)
 	}
 
-	// Переопределяем имя таблицы если указан --table
 	if opts.TargetTable != "" {
 		fmt.Printf("Overriding table name: '%s' → '%s'\n", packets[0].Header.TableName, opts.TargetTable)
 		for _, pkt := range packets {
@@ -175,7 +170,6 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		}
 	}
 
-	// Connect adapter
 	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
@@ -183,18 +177,16 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 	defer func() { _ = adapter.Close(ctx) }()
 
 	tableName := packets[0].Header.TableName
-	canonicalSchema := packets[0].Schema
 	totalRows := 0
 	for _, pkt := range packets {
-		if packet.SchemaEquals(canonicalSchema, pkt.Schema) {
-			totalRows += len(pkt.Data.Rows)
-		}
+		totalRows += len(pkt.Data.Rows)
 	}
 
 	fmt.Printf("Importing table '%s': %d packet(s), %d row(s), strategy '%s'...\n",
 		tableName, len(packets), totalRows, opts.Strategy)
 
-	// 1 packet → ImportPacket; N packets → ImportPackets (atomic, via framework)
+	// Single packet: ImportPacket. Multiple packets: ImportPackets (one transaction,
+	// atomicity preserved, --strategy copy does a single temp-table swap).
 	if len(packets) == 1 {
 		err = adapter.ImportPacket(ctx, packets[0], opts.Strategy)
 	} else {

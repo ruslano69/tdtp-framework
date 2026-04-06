@@ -2,6 +2,103 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.0] — 2026-04-06
+
+### Message Broker — Production Release
+
+Kafka broker graduates from `[BETA]` to production-ready.
+Full pipeline (DB → Kafka → DB, DB → Kafka → files) benchmarked at **50 000 rows in ~7s**
+over localhost with 5 packets; traffic reduced 4× with kanzi vs uncompressed.
+
+#### Export (`--export-broker`)
+
+- **Parallel compress + serialize**: all packets processed in concurrent goroutines
+  (`sync.WaitGroup`); each goroutine owns its own `packet.NewGenerator()` instance.
+  kanzi: 6.7s → 5.1s (1.3×) on 100k rows.
+- **`SendBatch`** (`pkg/brokers/kafka.go`): all serialized packets sent in a single
+  `WriteMessages` call — one network roundtrip instead of N sequential sends.
+  kafka-go `BatchTimeout` lowered from default 1s to 5ms (eliminates per-packet 1s wait).
+  kafka-go `BatchBytes` raised to 100 MB (was 1 MB — caused "Message Size Too Large" on kanzi packets).
+
+#### Import (`--import-broker`)
+
+- **Parallel decompression**: all raw packets buffered first (receive is inherently serial),
+  then packets 2…N decompressed in parallel goroutines; results assembled in order.
+  ACK: single `CommitLast()` after all processing — for Kafka this commits the highest
+  offset, implicitly covering all previous offsets.
+- **`--output` mode**: instead of importing to DB, saves decompressed packets as
+  `base_part_N_of_Total.tdtp.xml` files compatible with `--import` multi-part convention.
+- **`--raw` flag** (`--import-broker --raw --output`): saves queue messages verbatim
+  without any parse, decompress, or validation. Peeks the first message header to read
+  `TotalParts` for correct `_part_N_of_Total` naming. No DB connection required.
+
+#### Broker Configuration (Kafka)
+
+- `brokers` (list) and `consumer_group` YAML fields added to `BrokerConfig`.
+- `StartOffset: kafka.FirstOffset` (was `LastOffset`) — fixes race where reader
+  positioned after messages sent during consumer group rebalance.
+
+#### Performance (50k rows, 5 packets, localhost)
+
+| Mode | Export | Import→files | Traffic |
+|------|--------|-------------|---------|
+| No compression | 3.4s | 3.8s | 7.2 MB |
+| zstd level 3 | 3.5s | 3.9s | 2.4 MB (3×) |
+| kanzi level 6 | 3.6s | 3.9s | 1.8 MB (4×) |
+
+Import time dominated by receive + XML re-serialize; decompression parallelism eliminates
+its contribution entirely at 5 packets.
+
+### Changed
+
+- `--listen` flag: removed `[BETA]` label. Streaming consumer is production-ready for Kafka.
+- Help (`help_full.txt`, `help_short.txt`): broker section expanded with `--raw`,
+  `--output` multi-part naming, parallel processing notes, kanzi traffic comparison.
+
+---
+
+## [1.8.2] — 2026-04-05
+
+### Performance
+
+#### Import pipeline — 2× speedup (1.55s → 0.77s, 100k rows × 7 fields, SQLite)
+
+- **Streaming import** (`cmd/tdtpcli/commands/import.go`): parts processed one at a time —
+  read → parse → insert → release. Previously all parts were buffered in memory
+  simultaneously before any inserts began. Memory usage is now constant regardless
+  of part count; GC pauses during insertion eliminated.
+
+- **`GetRowValues` fast path** (`pkg/core/packet/parser.go`): rows without escape
+  characters (`\|`, `\\`, `\n`) — the vast majority of real data — are split via
+  index scan returning subslices of the original string with zero per-field
+  allocations. Benchmark: `simple_10_fields` 409 ns/11 allocs → 150 ns/1 alloc (2.7×);
+  `many_fields_100` 5034 ns/105 allocs → 1079 ns/1 alloc (4.7×).
+
+- **Parser/Converter singletons** (`pkg/adapters/base/import_helper.go`,
+  `pkg/adapters/postgres/import.go`, `pkg/adapters/mssql/import.go`):
+  `packet.NewParser()` and `schema.NewConverter()` were allocated on every single row
+  in all adapters. Both structs are stateless (`{}`); replaced with package-level
+  singletons. Eliminates ~2 allocs × 100k rows per import.
+
+- **`PrepareContext` for SQLite batch INSERT** (`pkg/adapters/sqlite/import.go`):
+  the 994-parameter INSERT query was re-parsed by SQLite on every batch call
+  (~700 calls for 100k rows). Now prepared once; reused for all full batches.
+  Args slice reused across batches. Raw benchmark: 1043 ms → 433 ms (2.4×).
+
+#### Misc
+
+- **`help.go` refactor**: ~100 `fmt.Println` calls replaced with two embedded text
+  files (`help_short.txt`, `help_full.txt`) via `//go:embed`. Version injected via
+  `strings.ReplaceAll("{VERSION}", version)` at runtime.
+
+### Infrastructure
+
+- **Pre-commit hook** (`.git/hooks/pre-commit`): runs `gofmt`, `golint`, `go vet`
+  on staged `.go` files before every commit. `gofmt` and `go vet` are blocking;
+  `golint` is advisory.
+
+---
+
 ## [1.8.1-beta] — 2026-04-02
 
 ### Added
@@ -182,6 +279,7 @@ All notable changes to tdtp-framework are documented in this file.
 
 | Version | Highlights |
 |---------|-----------|
+| 1.9.0 | Kafka production-ready, parallel compress/decompress, `--raw`, `SendBatch`, `--output` multi-part save |
 | 1.8.0-beta | S3 object storage, `--test` integrity check, `compress_algo` config, Python CLI test suites |
 | 1.7.1-beta | Compact v1.3.1, `--compact`/`--to-compact`, `--inspect`, `--listen`, SpecialValues, xZMercury |
 | 1.7.0 | kanzi compression, `--fields`, MSMQ, `--packet-size` |

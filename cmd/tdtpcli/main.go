@@ -390,6 +390,7 @@ func routeCommand(
 				Strategy:    strategy,
 				TargetTable: *flags.Table,
 				OutputFile:  *flags.Output,
+				Raw:         *flags.RawBroker,
 			})
 		})
 
@@ -649,7 +650,18 @@ func main() {
 	// Load configuration
 	config, err := LoadConfig(*flags.Config)
 	if err != nil {
-		if (*flags.Pipeline != "" || *flags.Inspect != "") && errors.Is(err, os.ErrNotExist) {
+		// Commands that operate on files only and never connect to a database
+		// can run without a config file.
+		noDBRequired := *flags.Pipeline != "" ||
+			*flags.Inspect != "" ||
+			*flags.Test != "" ||
+			*flags.Diff != "" ||
+			*flags.Merge != "" ||
+			*flags.ToHTML != "" ||
+			*flags.ToCompact != "" ||
+			(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
+			(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
+		if noDBRequired && errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "WARNING: config file %q not found. Audit log and Circuit Breaker set to defaults (disabled).\n", *flags.Config)
 			config = &Config{}
 		} else {
@@ -755,6 +767,8 @@ func buildBrokerConfig(config *Config) commands.BrokerConfig {
 		Exclusive:      config.Broker.Exclusive,
 		PassiveDeclare: config.Broker.PassiveDeclare,
 		QueuePath:      config.Broker.QueuePath,
+		Brokers:        config.Broker.Brokers,
+		ConsumerGroup:  config.Broker.ConsumerGroup,
 	}
 }
 
