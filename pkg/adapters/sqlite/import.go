@@ -137,7 +137,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 	if err != nil {
 		return fmt.Errorf("failed to prepare batch insert: %w", err)
 	}
-	defer fullStmt.Close()
+	defer func() { _ = fullStmt.Close() }()
 
 	// Буфер аргументов переиспользуется между батчами.
 	args := make([]any, batchSize*numFields)
