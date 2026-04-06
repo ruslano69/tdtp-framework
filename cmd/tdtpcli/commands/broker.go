@@ -161,6 +161,7 @@ type ImportBrokerOptions struct {
 	Strategy    adapters.ImportStrategy
 	TargetTable string        // override table name from packet header (fixes name conflicts)
 	OutputFile  string        // if set, save packets to file(s) instead of importing to DB
+	Raw         bool          // save raw bytes as-is, no parse/decompress/validate
 	IdleTimeout time.Duration // how long to wait for the next message before stopping (0 = default 5s)
 }
 
@@ -172,17 +173,6 @@ type ImportBrokerOptions struct {
 // the queue untouched. The function exits once all TotalParts are received or
 // the idle timeout fires (queue empty).
 func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, opts ImportBrokerOptions) error {
-	// In file-save mode we don't need a DB adapter.
-	var adapter adapters.Adapter
-	if opts.OutputFile == "" {
-		var err error
-		adapter, err = adapters.New(ctx, *dbConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create adapter: %w", err)
-		}
-		defer func() { _ = adapter.Close(ctx) }()
-	}
-
 	// Create and connect broker.
 	broker, err := createBroker(brokerCfg)
 	if err != nil {
@@ -192,6 +182,21 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to broker: %w", err)
+	}
+
+	// --raw mode: drain queue, write bytes as-is, no parse/decompress.
+	if opts.Raw {
+		return importBrokerRaw(ctx, broker, opts)
+	}
+
+	// In file-save mode we don't need a DB adapter.
+	var adapter adapters.Adapter
+	if opts.OutputFile == "" {
+		adapter, err = adapters.New(ctx, *dbConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create adapter: %w", err)
+		}
+		defer func() { _ = adapter.Close(ctx) }()
 	}
 
 	idleTimeout := opts.IdleTimeout
@@ -339,6 +344,60 @@ func batchIDFromMessageID(messageID string) string {
 // brokerOutputFilename returns output path for part N of total.
 // Single-part: outputFile as-is.
 // Multi-part: base_part_N_of_Total.ext  (compatible with --import multi-part convention)
+// importBrokerRaw drains the queue and writes each message as raw bytes.
+// No parsing, no decompression, no validation — exactly what the broker sent.
+// Files are named: outputFile (n=1) or base_N.ext (n>1), sequential until idle timeout.
+func importBrokerRaw(ctx context.Context, broker brokers.MessageBroker, opts ImportBrokerOptions) error {
+	if opts.OutputFile == "" {
+		return fmt.Errorf("--raw requires --output <file>")
+	}
+
+	idleTimeout := opts.IdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = defaultIdleTimeout
+	}
+
+	ext := filepath.Ext(opts.OutputFile)
+	base := opts.OutputFile[:len(opts.OutputFile)-len(ext)]
+
+	n := 0
+	totalBytes := 0
+	fmt.Printf("Raw drain → %s (idle timeout: %s)...\n", opts.OutputFile, idleTimeout)
+
+	for {
+		recvCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+		data, err := broker.Receive(recvCtx)
+		cancel()
+		if err != nil {
+			if recvCtx.Err() != nil {
+				break // idle timeout — queue empty
+			}
+			return fmt.Errorf("receive error: %w", err)
+		}
+
+		n++
+		var filename string
+		if n == 1 {
+			filename = opts.OutputFile
+		} else {
+			filename = fmt.Sprintf("%s_%d%s", base, n, ext)
+		}
+
+		if err := os.WriteFile(filename, data, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", filename, err)
+		}
+		totalBytes += len(data)
+		fmt.Printf("  ✓ [%d] %s (%d bytes)\n", n, filename, len(data))
+	}
+
+	if n == 0 {
+		fmt.Println("Queue is empty.")
+		return nil
+	}
+	fmt.Printf("✓ Done. %d message(s), %.1f MB total.\n", n, float64(totalBytes)/1024/1024)
+	return nil
+}
+
 func brokerOutputFilename(outputFile string, n, total int) string {
 	if total == 1 {
 		return outputFile

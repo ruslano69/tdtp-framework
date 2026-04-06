@@ -54,6 +54,7 @@ type Flags struct {
 	Import         *string
 	ExportBroker   *string
 	ImportBroker   *bool
+	RawBroker      *bool // --raw: save broker messages as-is, no parse/decompress
 	ToHTML         *string
 	OpenBrowser    *bool
 	Row            *string // Row range for HTML viewer (e.g., "100-150")
@@ -154,6 +155,7 @@ func ParseFlags() *Flags {
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
 	f.ExportBroker = flag.String("export-broker", "", "Export table to message broker (table name)")
 	f.ImportBroker = flag.Bool("import-broker", false, "Import from message broker to database")
+	f.RawBroker = flag.Bool("raw", false, "Save broker messages as-is without parsing or decompression (use with --import-broker --output)")
 	f.ToHTML = flag.String("to-html", "", "Convert TDTP XML file to HTML for browser viewing (input TDTP file)")
 	f.OpenBrowser = flag.Bool("open", false, "Open generated HTML file in default browser (use with --to-html)")
 	f.Row = flag.String("row", "", "Row range to display in HTML viewer, e.g. 100-150 (use with --to-html)")
