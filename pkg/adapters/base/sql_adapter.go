@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // StandardSQLAdapter реализует SQLAdapter для стандартного SQL (SQLite, PostgreSQL, MySQL)
@@ -88,6 +89,7 @@ func NewMSSQLAdapter(schemaName string) *MSSQLAdapter {
 // 5. Квалифицирует имена полей: [field]
 func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Schema, query *packet.Query) string {
 	// Поддержка формата "schema.table" в tableName (например, "dbo.Users")
+	tableName = tdtql.StripBrackets(tableName)
 	schemaName := a.schemaName
 	table := tableName
 	if parts := strings.SplitN(tableName, ".", 2); len(parts) == 2 {

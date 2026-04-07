@@ -381,10 +381,7 @@ func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error)
 
 // TableExists checks if a table exists in the current schema.
 func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, error) {
-	schema := a.config.Schema
-	if schema == "" {
-		schema = "dbo"
-	}
+	schemaName, table := a.parseTableName(tableName)
 
 	query := `
 		SELECT COUNT(*)
@@ -395,7 +392,8 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 	`
 
 	var count int
-	err := a.db.QueryRowContext(ctx, query, schema, tableName).Scan(&count)
+	err := a.db.QueryRowContext(ctx, query, schemaName, table).Scan(&count)
+
 	if err != nil {
 		return false, fmt.Errorf("failed to check table existence: %w", err)
 	}
