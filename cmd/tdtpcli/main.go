@@ -796,51 +796,35 @@ func determineOutputFile(output, baseName, ext string) string {
 // Brackets are stripped; the inner name is returned as-is (no further trimming).
 // Used for --fields, --key-fields, --ignore-fields, --fixed-fields.
 func splitCommaSeparated(s string) []string {
-	if s == "" {
-		return nil
-	}
-	result := make([]string, 0, 4)
-	i := 0
+	var result []string
 	n := len(s)
-	for i < n {
-		// skip whitespace between tokens
-		for i < n && (s[i] == ' ' || s[i] == '\t') {
+
+	for i := 0; i < n; {
+		// 1. Skip leading whitespace and separators
+		if s[i] == ' ' || s[i] == '\t' || s[i] == ',' {
 			i++
+			continue
 		}
-		if i >= n {
-			break
-		}
+
+		start := i
 		if s[i] == '[' {
-			// bracket-quoted: read until ']'
+			// 2. Bracket-quoted mode: [Field Name] → "Field Name"
 			i++ // skip '['
-			start := i
+			start = i
 			for i < n && s[i] != ']' {
 				i++
 			}
-			name := s[start:i]
+			result = append(result, s[start:i])
 			if i < n {
 				i++ // skip ']'
 			}
-			result = append(result, name)
-			// skip optional comma after ']'
-			for i < n && (s[i] == ' ' || s[i] == '\t') {
-				i++
-			}
-			if i < n && s[i] == ',' {
-				i++
-			}
 		} else {
-			// plain token: read until comma
-			start := i
+			// 3. Plain mode: read until next comma
 			for i < n && s[i] != ',' {
 				i++
 			}
-			name := strings.TrimSpace(s[start:i])
-			if name != "" {
-				result = append(result, name)
-			}
-			if i < n {
-				i++ // skip ','
+			if token := strings.TrimSpace(s[start:i]); token != "" {
+				result = append(result, token)
 			}
 		}
 	}
