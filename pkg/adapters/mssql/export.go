@@ -9,6 +9,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // Context key для передачи флага includeReadOnly через контекст
@@ -273,7 +274,9 @@ func (a *Adapter) ExportTableWithQuery(
 //	"Users" → ("dbo", "Users")
 //	"dbo.Users" → ("dbo", "Users")
 //	"custom.Users" → ("custom", "Users")
+//	"[ZTR$Employee]" → ("dbo", "ZTR$Employee")
 func (a *Adapter) parseTableName(fullName string) (schema, table string) {
+	fullName = tdtql.StripBrackets(fullName)
 	parts := strings.Split(fullName, ".")
 	if len(parts) == 2 {
 		return parts[0], parts[1]

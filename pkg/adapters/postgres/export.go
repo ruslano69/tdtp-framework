@@ -7,11 +7,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // GetTableSchema читает схему таблицы из PostgreSQL через information_schema
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	query := `
 		SELECT
 			column_name,
@@ -336,6 +338,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 // Reads all rows from a table using a direct SQL query.
 // Note: must NOT call ExportTable (avoids circular call via exportHelper.ExportTable → ReadAllRows).
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, pkgSchema packet.Schema) ([][]string, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	quotedTable := QuoteIdentifier(tableName)
 	if a.schema != "public" {
 		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
@@ -353,6 +356,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchem
 // GetRowCount implements base.DataReader interface
 // Returns the number of rows in a table
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	quotedTable := QuoteIdentifier(tableName)
 	if a.schema != "public" {
 		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable

@@ -97,7 +97,6 @@ func TestLexer_Strings(t *testing.T) {
 	}{
 		{"'hello'", "hello"},
 		{"'hello world'", "hello world"},
-		{`"double quotes"`, "double quotes"},
 		{"'123'", "123"},
 		{"''", ""},
 		{`'it\'s'`, "it\\'s"}, // escaped quote (backslash preserved)
@@ -120,12 +119,14 @@ func TestLexer_Strings(t *testing.T) {
 
 func TestLexer_Identifiers(t *testing.T) {
 	tests := []struct {
-		input string
+		input    string
+		expected string
 	}{
-		{"Users"},
-		{"user_id"},
-		{"Balance123"},
-		{"CamelCase"},
+		{"Users", "Users"},
+		{"user_id", "user_id"},
+		{"Balance123", "Balance123"},
+		{"CamelCase", "CamelCase"},
+		{`"double quotes"`, "double quotes"},
 	}
 
 	for _, tt := range tests {
@@ -136,8 +137,8 @@ func TestLexer_Identifiers(t *testing.T) {
 			if tok.Type != TokenIdent {
 				t.Errorf("expected TokenIdent, got %v", tok.Type)
 			}
-			if tok.Literal != tt.input {
-				t.Errorf("expected %s, got %s", tt.input, tok.Literal)
+			if tok.Literal != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, tok.Literal)
 			}
 		})
 	}

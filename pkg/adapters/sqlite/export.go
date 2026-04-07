@@ -9,6 +9,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // ========== Делегирование в ExportHelper ==========
@@ -41,6 +42,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 // GetTableSchema читает схему таблицы из SQLite
 // Реализует base.SchemaReader интерфейс
 func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	query := fmt.Sprintf("PRAGMA table_info(%s)", tableName)
 
 	rows, err := a.db.QueryContext(ctx, query)
@@ -90,6 +92,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 // ReadAllRows читает все строки из таблицы
 // Реализует base.DataReader интерфейс
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema packet.Schema) ([][]string, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	// Формируем список полей для SELECT
 	fieldNames := make([]string, len(schema.Fields))
 	for i, field := range schema.Fields {
@@ -125,6 +128,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, schema p
 // GetRowCount возвращает количество строк в таблице
 // Реализует base.DataReader интерфейс
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
 
