@@ -43,7 +43,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 // Реализует base.SchemaReader интерфейс
 func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error) {
 	tableName = tdtql.StripBrackets(tableName)
-	query := fmt.Sprintf("PRAGMA table_info(%s)", tableName)
+	query := fmt.Sprintf("PRAGMA table_info(\"%s\")", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
@@ -93,10 +93,10 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 // Реализует base.DataReader интерфейс
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema packet.Schema) ([][]string, error) {
 	tableName = tdtql.StripBrackets(tableName)
-	// Формируем список полей для SELECT
+	// Формируем список полей для SELECT — квотируем каждое имя на случай пробелов
 	fieldNames := make([]string, len(schema.Fields))
 	for i, field := range schema.Fields {
-		fieldNames[i] = field.Name
+		fieldNames[i] = fmt.Sprintf("\"%s\"", field.Name) //nolint:gocritic // SQL identifier quoting, not Go string quoting
 	}
 
 	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
