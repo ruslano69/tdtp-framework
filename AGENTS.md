@@ -151,6 +151,18 @@ tdtpcli --export leads --where '[Is Active?] = 1'
 
 Скобки снимаются при парсинге и имя правильно квотируется для каждой СУБД.
 
+> **PowerShell (Windows):** двойные кавычки раскрывают `$переменные`, поэтому
+> `"[ZTR$Employee]"` превратится в `"[ZTR]"`. Используй **одинарные кавычки**:
+>
+> ```powershell
+> # ❌ двойные — $Employee раскроется как пустая переменная
+> .\tdtpcli.exe --inspect-table "[ZTR$Employee]"
+>
+> # ✅ одинарные — литерал передаётся как есть
+> .\tdtpcli.exe --inspect-table '[ZTR$Employee]'
+> .\tdtpcli.exe --export '[ZTR$Employee]' --where '[Termination Date] = "1753-01-01"'
+> ```
+
 ### Инкрементальная синхронизация
 
 ```bash
