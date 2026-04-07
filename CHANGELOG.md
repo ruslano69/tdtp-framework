@@ -52,8 +52,31 @@ its contribution entirely at 5 packets.
 ### Changed
 
 - `--listen` flag: removed `[BETA]` label. Streaming consumer is production-ready for Kafka.
+- **`--import-broker` atomicity** (`cmd/tdtpcli/commands/broker.go`): multi-part imports now
+  use a single `ImportPackets` transaction by default — all-or-nothing, mirrors `--import`
+  (file) behaviour. Previously each part was committed with a separate `ImportPacket` call,
+  leaving the table partially updated on failure.
+- **`--keep` flag** (`--import-broker --keep`): opt-in streaming mode — each packet is
+  received, decompressed, and committed immediately without buffering the full batch in
+  memory. On failure, successfully committed parts remain in the table for analysis.
+  Implemented in `importBrokerKeep()` as a separate code path (no full-batch buffer).
 - Help (`help_full.txt`, `help_short.txt`): broker section expanded with `--raw`,
-  `--output` multi-part naming, parallel processing notes, kanzi traffic comparison.
+  `--output` multi-part naming, `--keep` semantics, parallel processing notes, kanzi
+  traffic comparison.
+
+### Fixed
+
+- **`--fields` bracket-quoting** (`cmd/tdtpcli/main.go`): `splitCommaSeparated` now parses
+  `[Field Name]` syntax for field names containing spaces or commas, matching the
+  bracket-quoting already supported in `--where` (TDTQL lexer).
+  - `--fields "id,[Birth Date],status"` → `["id", "Birth Date", "status"]`
+  - `--fields "[First, Last],[Birth Date]"` → `["First, Last", "Birth Date"]`
+  - Same parser used for `--key-fields`, `--ignore-fields`, `--fixed-fields`.
+- **SELECT projection quoting** (`pkg/core/tdtql/sql_generator.go`): field names in
+  `query.Fields` were joined bare into `SELECT f1, f2 FROM ...` — a name like `Birth Date`
+  produced invalid SQL. Now each field passes through `quoteFieldName()` (same function
+  already used for WHERE and ORDER BY), producing `SELECT "Birth Date", id FROM ...`.
+  MSSQL/MySQL dialect adapters convert ANSI double-quotes downstream as before.
 
 ---
 
