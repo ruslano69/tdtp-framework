@@ -7,12 +7,13 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // InspectTable returns extended metadata for a live MSSQL table.
 // Implements adapters.Adapter.
 func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters.TableReport, error) {
-	schemaName, tableName := a.parseTableName(stripMSSQLBrackets(tableName))
+	schemaName, tableName := a.parseTableName(tdtql.StripBrackets(tableName))
 
 	dbVersion, err := a.GetDatabaseVersion(ctx)
 	if err != nil {
@@ -200,19 +201,4 @@ func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters
 	}
 
 	return report, nil
-}
-
-// stripMSSQLBrackets removes [schema].[table] or [table] bracket quoting.
-func stripMSSQLBrackets(name string) string {
-	// Handle [schema].[table] → schema.table
-	parts := strings.Split(name, ".")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if strings.HasPrefix(p, "[") && strings.HasSuffix(p, "]") {
-			p = p[1 : len(p)-1]
-		}
-		result = append(result, p)
-	}
-	return strings.Join(result, ".")
 }

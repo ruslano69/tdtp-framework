@@ -15,6 +15,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 
 	// Database adapters - blank imports for init() registration
@@ -786,49 +787,10 @@ func determineOutputFile(output, baseName, ext string) string {
 	return baseName
 }
 
-// splitCommaSeparated splits a comma-separated string into a slice.
-// Supports bracket-quoted identifiers for field names containing spaces or commas:
-//
-//	"id,email,status"             → ["id", "email", "status"]
-//	"id, [Birth Date], status"    → ["id", "Birth Date", "status"]
-//	"[First, Last],email"         → ["First, Last", "email"]
-//
-// Brackets are stripped; the inner name is returned as-is (no further trimming).
-// Used for --fields, --key-fields, --ignore-fields, --fixed-fields.
+// splitCommaSeparated splits a comma-separated field list.
+// Delegates to tdtql.SplitFieldList which handles bracket-quoted names.
 func splitCommaSeparated(s string) []string {
-	var result []string
-	n := len(s)
-
-	for i := 0; i < n; {
-		// 1. Skip leading whitespace and separators
-		if s[i] == ' ' || s[i] == '\t' || s[i] == ',' {
-			i++
-			continue
-		}
-
-		start := i
-		if s[i] == '[' {
-			// 2. Bracket-quoted mode: [Field Name] → "Field Name"
-			i++ // skip '['
-			start = i
-			for i < n && s[i] != ']' {
-				i++
-			}
-			result = append(result, s[start:i])
-			if i < n {
-				i++ // skip ']'
-			}
-		} else {
-			// 3. Plain mode: read until next comma
-			for i < n && s[i] != ',' {
-				i++
-			}
-			if token := strings.TrimSpace(s[start:i]); token != "" {
-				result = append(result, token)
-			}
-		}
-	}
-	return result
+	return tdtql.SplitFieldList(s)
 }
 
 // commandWasSpecified checks if any command was specified
