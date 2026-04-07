@@ -105,6 +105,43 @@ def create_test_tables(conn):
         );
     """)
     
+    print("📋 Creating table: complex_fields (spaces and special chars in column names)...")
+    cursor.execute("""
+        DROP TABLE IF EXISTS complex_fields CASCADE;
+        CREATE TABLE complex_fields (
+            "Order ID"        INTEGER PRIMARY KEY,
+            "Customer Name"   TEXT,
+            "Total Cost $"    NUMERIC(12,2),
+            "Discount %"      NUMERIC(5,2),
+            "Is Active?"      BOOLEAN
+        );
+        INSERT INTO complex_fields VALUES
+            (1, 'Alice',  150.00, 0.10, true),
+            (2, 'Bob',    200.00, 0.00, true),
+            (3, 'Carol',   80.00, 0.20, false),
+            (4, 'Dave',   320.00, 0.05, true),
+            (5, 'Eve',     50.00, 0.00, false);
+    """)
+
+    print("📋 Creating table: \"ERP$Entry\" ($ in table name, spaces in column names)...")
+    cursor.execute("""
+        DROP TABLE IF EXISTS "ERP$Entry" CASCADE;
+        CREATE TABLE "ERP$Entry" (
+            "No_"           INTEGER PRIMARY KEY,
+            "Document Type" INTEGER,
+            "Posting Date"  DATE,
+            "Description"   TEXT,
+            "Amount"        NUMERIC(14,2)
+        );
+        INSERT INTO "ERP$Entry" VALUES
+            (1, 1, '2025-01-10', 'Invoice payment',  1200.00),
+            (2, 2, '2025-01-15', 'Credit memo',       -300.00),
+            (3, 1, '2025-02-03', 'Invoice payment',   800.00),
+            (4, 3, '2025-02-20', 'Reminder fee',        15.00),
+            (5, 1, '2025-03-01', 'Invoice payment',  2500.00),
+            (6, 2, '2025-03-10', 'Credit memo',       -150.00);
+    """)
+
     conn.commit()
     cursor.close()
     print("✅ Tables created successfully")

@@ -225,7 +225,10 @@ tdtpcli --export employees --fields '[Last Name],[First Name],[Birth Date],id'
 tdtpcli --inspect-table '[ZTR$Employee]' --config mssql.yaml
 
 # Дата 1753-01-01 — "нулевая" дата в MSSQL (Dynamics NAV/BC)
-tdtpcli --export '[ZTR$Employee]' --where '[Termination Date] = "1753-01-01"'
+# bash/zsh: одинарные кавычки снаружи, одинарные для строкового значения внутри (escaping)
+tdtpcli --export '[ZTR$Employee]' --where '[Termination Date] = '"'"'1753-01-01'"'"'
+# PowerShell: --export одинарные (защита от $), --where двойные, значение в одинарных
+.\tdtpcli.exe --export '[ZTR$Employee]' --where "[Termination Date] = '1753-01-01'"
 ```
 
 ### Инкрементальная синхронизация
