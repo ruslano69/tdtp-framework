@@ -1186,7 +1186,10 @@ export MERCURY_SERVER_SECRET=dev-secret
 
 ```bash
 # Поле "Termination Date" из ZTR$Employee (MSSQL)
-tdtpcli --export ZTR$Employee --where '[Termination Date] = "1753-01-01"'
+# bash/zsh: таблица со $ — обязательно в одинарных кавычках с квадратными скобками
+tdtpcli --export '[ZTR$Employee]' --where '[Termination Date] = '"'"'1753-01-01'"'"'
+# PowerShell: таблица в одинарных, --where в двойных со значением в одинарных
+.\tdtpcli.exe --export '[ZTR$Employee]' --where "[Termination Date] = '1753-01-01'"
 
 # Поле "Total Cost $" из Access экспорта
 tdtpcli --export orders --where '[Total Cost $] > 100'

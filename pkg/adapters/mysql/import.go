@@ -85,37 +85,53 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 		return nil
 	}
 
-	// Выбираем SQL в зависимости от strategy
-	var insertSQL string
+	// Строим префикс INSERT и (опционально) суффикс ON DUPLICATE KEY UPDATE
+	var insertPrefix, insertSuffix string
 	switch strategy {
 	case adapters.StrategyReplace:
-		// MySQL-специфично: INSERT ... ON DUPLICATE KEY UPDATE
-		insertSQL = a.buildInsertOnDuplicateSQL(tableName, schema)
-
+		insertPrefix = a.buildInsertPrefix(tableName, schema)
+		insertSuffix = a.buildOnDuplicateKeySuffix(schema)
 	case adapters.StrategyIgnore:
-		// MySQL-специфично: INSERT IGNORE
-		insertSQL = a.buildInsertIgnoreSQL(tableName, schema)
-
+		insertPrefix = a.buildInsertIgnorePrefix(tableName, schema)
 	case adapters.StrategyFail:
-		// Обычный INSERT (fail on duplicate)
-		insertSQL = a.buildInsertSQL(tableName, schema)
-
+		insertPrefix = a.buildInsertPrefix(tableName, schema)
 	default:
 		return fmt.Errorf("unsupported import strategy: %v", strategy)
 	}
 
-	// Вставляем батчами по 1000 строк (для производительности)
-	batchSize := 1000
+	// Одна строка placeholders: (?, ?, ...) — одинакова для всех строк
+	numFields := len(schema.Fields)
+	rowPH := "(" + strings.Repeat("?, ", numFields-1) + "?)"
+
+	// Вставляем батчами. MySQL ограничивает число параметров (65535).
+	// batchSize × numFields должно быть < 65535.
+	batchSize := 65535 / numFields
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	if batchSize > 1000 {
+		batchSize = 1000
+	}
+
 	for i := 0; i < len(rows); i += batchSize {
 		end := i + batchSize
 		if end > len(rows) {
 			end = len(rows)
 		}
-
 		batch := rows[i:end]
 
-		// Подготавливаем значения
-		var args []any
+		// Строим multi-row INSERT: INSERT ... (cols) VALUES (?,?,...),(?,?,...) [ON DUPLICATE...]
+		valuePlaceholders := make([]string, len(batch))
+		for j := range batch {
+			valuePlaceholders[j] = rowPH
+		}
+		batchSQL := insertPrefix + " VALUES " + strings.Join(valuePlaceholders, ", ")
+		if insertSuffix != "" {
+			batchSQL += " " + insertSuffix
+		}
+
+		// Собираем аргументы для всех строк батча
+		args := make([]any, 0, len(batch)*numFields)
 		for _, row := range batch {
 			rowValues := base.ParseRowValues(row)
 			sqlValues, err := base.ConvertRowToSQLValues(rowValues, schema, a.converter, "mysql")
@@ -125,9 +141,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 			args = append(args, sqlValues...)
 		}
 
-		// Выполняем INSERT
-		_, err := a.db.ExecContext(ctx, insertSQL, args...)
-		if err != nil {
+		if _, err := a.db.ExecContext(ctx, batchSQL, args...); err != nil {
 			return fmt.Errorf("failed to insert batch: %w", err)
 		}
 	}
@@ -137,69 +151,35 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 
 // ========== MySQL-специфичные SQL builders ==========
 
-// buildInsertSQL строит обычный INSERT
-func (a *Adapter) buildInsertSQL(tableName string, schema packet.Schema) string {
+// buildInsertPrefix возвращает "INSERT INTO `table` (`col1`, `col2`, ...)" без VALUES
+func (a *Adapter) buildInsertPrefix(tableName string, schema packet.Schema) string {
 	columns := make([]string, 0, len(schema.Fields))
-	placeholders := make([]string, 0, len(schema.Fields))
-
 	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
-		placeholders = append(placeholders, "?")
 	}
-
-	return fmt.Sprintf(
-		"INSERT INTO `%s` (%s) VALUES (%s)",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "),
-	)
+	return fmt.Sprintf("INSERT INTO `%s` (%s)", tableName, strings.Join(columns, ", "))
 }
 
-// buildInsertIgnoreSQL строит INSERT IGNORE (MySQL-специфично)
-func (a *Adapter) buildInsertIgnoreSQL(tableName string, schema packet.Schema) string {
+// buildInsertIgnorePrefix возвращает "INSERT IGNORE INTO `table` (`col1`, ...)" без VALUES
+func (a *Adapter) buildInsertIgnorePrefix(tableName string, schema packet.Schema) string {
 	columns := make([]string, 0, len(schema.Fields))
-	placeholders := make([]string, 0, len(schema.Fields))
-
 	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
-		placeholders = append(placeholders, "?")
 	}
-
-	return fmt.Sprintf(
-		"INSERT IGNORE INTO `%s` (%s) VALUES (%s)",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "),
-	)
+	return fmt.Sprintf("INSERT IGNORE INTO `%s` (%s)", tableName, strings.Join(columns, ", "))
 }
 
-// buildInsertOnDuplicateSQL строит INSERT ... ON DUPLICATE KEY UPDATE (MySQL-специфично)
-func (a *Adapter) buildInsertOnDuplicateSQL(tableName string, schema packet.Schema) string {
-	columns := make([]string, 0, len(schema.Fields))
-	placeholders := make([]string, 0, len(schema.Fields))
+// buildOnDuplicateKeySuffix возвращает "ON DUPLICATE KEY UPDATE `col` = VALUES(`col`), ..."
+// только для non-PK колонок
+func (a *Adapter) buildOnDuplicateKeySuffix(schema packet.Schema) string {
 	var updates []string
-
 	for _, field := range schema.Fields {
-		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
-		placeholders = append(placeholders, "?")
-
-		// UPDATE часть только для non-PK колонок
 		if !field.Key {
 			updates = append(updates, fmt.Sprintf("`%s` = VALUES(`%s`)", field.Name, field.Name))
 		}
 	}
-
-	sql := fmt.Sprintf(
-		"INSERT INTO `%s` (%s) VALUES (%s)",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "),
-	)
-
-	// Добавляем ON DUPLICATE KEY UPDATE если есть non-PK поля
-	if len(updates) > 0 {
-		sql += " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ", ")
+	if len(updates) == 0 {
+		return ""
 	}
-
-	return sql
+	return "ON DUPLICATE KEY UPDATE " + strings.Join(updates, ", ")
 }

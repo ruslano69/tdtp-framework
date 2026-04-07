@@ -34,12 +34,13 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 
 	for _, field := range schema.Fields {
 		sqlType := TDTPToSQLite(field)
-		colDef := fmt.Sprintf("%s %s", field.Name, sqlType)
+		quotedName := fmt.Sprintf("\"%s\"", field.Name) //nolint:gocritic // SQL identifier quoting
+		colDef := fmt.Sprintf("%s %s", quotedName, sqlType)
 
 		columns = append(columns, colDef)
 
 		if field.Key {
-			pkColumns = append(pkColumns, field.Name)
+			pkColumns = append(pkColumns, quotedName)
 		}
 	}
 
@@ -106,10 +107,10 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 		insertCmd = "INSERT OR REPLACE"
 	}
 
-	// Формируем список колонок
+	// Формируем список колонок (квотируем для поддержки пробелов и спецсимволов)
 	fieldNames := make([]string, len(pkgSchema.Fields))
 	for i, field := range pkgSchema.Fields {
-		fieldNames[i] = field.Name
+		fieldNames[i] = fmt.Sprintf("\"%s\"", field.Name) //nolint:gocritic // SQL identifier quoting
 	}
 	columnList := strings.Join(fieldNames, ", ")
 

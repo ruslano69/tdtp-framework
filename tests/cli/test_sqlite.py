@@ -22,6 +22,10 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+# Force UTF-8 output so → and other Unicode chars work on Windows cp1251 terminals
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 ROOT    = Path(__file__).resolve().parent.parent.parent   # repo root
 TDTPCLI = os.environ.get("TDTPCLI_BIN", "/tmp/tdtpcli")
@@ -226,6 +230,23 @@ def setup_db():
         (3, "Carol",   80.00, 0.20, 0),
         (4, "Dave",   320.00, 0.05, 1),
         (5, "Eve",     50.00, 0.00, 0),
+    ])
+
+    # Table with $ in the table name (NAV/BC-style ERP tables)
+    c.execute("""CREATE TABLE "ERP$Entry" (
+        "No_" INTEGER PRIMARY KEY,
+        "Document Type" INTEGER,
+        "Posting Date" DATE,
+        "Description" TEXT,
+        "Amount" REAL
+    )""")
+    c.executemany('INSERT INTO "ERP$Entry" VALUES (?,?,?,?,?)', [
+        (1, 1, "2025-01-10", "Invoice payment",   1200.00),
+        (2, 2, "2025-01-15", "Credit memo",        -300.00),
+        (3, 1, "2025-02-03", "Invoice payment",    800.00),
+        (4, 3, "2025-02-20", "Reminder fee",         15.00),
+        (5, 1, "2025-03-01", "Invoice payment",   2500.00),
+        (6, 2, "2025-03-10", "Credit memo",       -150.00),
     ])
 
     conn.commit()
@@ -500,6 +521,39 @@ def test_T4_roundtrip():
     record("T4.5 --fields Name,Balance preserved in import",
            p.returncode == 0 and cols == ["Name", "Balance"],
            time.monotonic() - t, f"cols={cols}")
+
+    # T4.6 — bracket-quoted table name with $ (ERP$Entry) export → import
+    t = time.monotonic()
+    run("--export", "[ERP$Entry]", "--output", out("t4_erp.xml"))
+    p = _import(out("t4_erp.xml"), "erp_entry_copy")
+    rows = sqlite_query(IMPORT_DB, "SELECT COUNT(*) FROM erp_entry_copy")[0][0] \
+           if p.returncode == 0 else -1
+    record("T4.6 bracket-quoted table [ERP$Entry] roundtrip: 6 rows",
+           p.returncode == 0 and rows == 6,
+           time.monotonic() - t, f"rc={p.returncode} rows={rows}")
+
+    # T4.7 — bracket-quoted --fields with spaces and $ from complex_fields
+    t = time.monotonic()
+    run("--export", "[complex_fields]",
+        "--fields", "[Order ID],[Customer Name],[Total Cost $]",
+        "--output", out("t4_complex_proj.xml"))
+    p = _import(out("t4_complex_proj.xml"), "complex_proj")
+    cols = [c[1] for c in sqlite_query(IMPORT_DB, "PRAGMA table_info(complex_proj)")] \
+           if p.returncode == 0 else []
+    expected = ["Order ID", "Customer Name", "Total Cost $"]
+    record("T4.7 bracket-quoted --fields [Order ID],[Customer Name],[Total Cost $]",
+           p.returncode == 0 and cols == expected,
+           time.monotonic() - t, f"cols={cols}")
+
+    # T4.8 — bracket-quoted --where filter on field with $ (3 rows where Total Cost $ > 100)
+    t = time.monotonic()
+    p = run("--export", "[complex_fields]",
+            "--where", "[Total Cost $] > 100",
+            "--output", out("t4_complex_where.xml"))
+    rows = count_rows_xml(out("t4_complex_where.xml"))
+    record("T4.8 --where [Total Cost $] > 100 → 3 rows",
+           p.returncode == 0 and rows == 3,
+           time.monotonic() - t, f"rc={p.returncode} rows={rows}")
 
     if os.path.exists(IMPORT_DB):
         os.remove(IMPORT_DB)

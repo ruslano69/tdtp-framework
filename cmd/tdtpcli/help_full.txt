@@ -157,8 +157,9 @@ EXAMPLES:
   tdtpcli --export orders --where 'status = active' --limit 100
 
   # Field names with spaces/special chars (MSSQL/Access bracket syntax)
-  tdtpcli --export ZTR$Employee --where '[Termination Date] = "1753-01-01"'
-  tdtpcli --export orders --where '[Complex Name of Date] = "1999-01-01"'
+  # Table/field names with $ or spaces — wrap in single quotes + square brackets
+  tdtpcli --export '[ZTR$Employee]' --where "[Termination Date] = '1753-01-01'"
+  tdtpcli --export orders --where "[Complex Name of Date] = '1999-01-01'"
 
   # Export only specific columns (column projection)
   tdtpcli --export clients --fields id,email,status --output clients_slim.tdtp.xml
@@ -285,7 +286,7 @@ EXAMPLES:
   #   --inspect-table: connects to DB, queries system catalog, prints YAML.
   #   Bracket-quoted names (MSSQL/Access style) are supported.
   tdtpcli --inspect-table Employees --config pg.yaml
-  tdtpcli --inspect-table "[ZTR$Employee]" --config mssql.yaml
+  tdtpcli --inspect-table '[ZTR$Employee]' --config mssql.yaml
   tdtpcli --inspect-table "[dbo].[Orders]" --config mssql.yaml
 
   # Import to different table name

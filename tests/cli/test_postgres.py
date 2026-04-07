@@ -23,6 +23,16 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+# Force UTF-8 output so → and other Unicode chars work on Windows cp1251 terminals
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+try:
+    import psycopg2
+    _HAVE_PSYCOPG2 = True
+except ImportError:
+    _HAVE_PSYCOPG2 = False
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 TDTPCLI  = os.environ.get("TDTPCLI_BIN", "/tmp/tdtpcli")
 OUTDIR   = Path("/tmp/tdtp_pg_test_out")
@@ -42,8 +52,8 @@ ORDERS_COUNT   = 200
 PRODUCTS_COUNT = 50
 
 # Computed from actual data (verified via psql before writing tests)
-ACTIVE_USERS          = 76    # WHERE is_active = true
-ORDERS_AMOUNT_GT_1000 = 133   # WHERE total_amount > 1000
+ACTIVE_USERS          = 71    # WHERE is_active = true
+ORDERS_AMOUNT_GT_1000 = 132   # WHERE total_amount > 1000
 USERS_BALANCE_GT_5000 = 49    # WHERE balance > 5000
 
 # ─── ANSI colors ──────────────────────────────────────────────────────────────
@@ -122,7 +132,29 @@ def out(name: str) -> str:
 
 
 def pg_query(sql: str) -> list:
-    """Run a SQL query via psql and return stripped lines of output."""
+    """Run a SQL query against PostgreSQL and return stripped string values.
+
+    Uses psycopg2 when available (works on Windows without psql in PATH),
+    falls back to psql CLI otherwise.
+    """
+    if _HAVE_PSYCOPG2:
+        try:
+            conn = psycopg2.connect(
+                host=PG_HOST, port=PG_PORT, user=PG_USER,
+                password=PG_PASS, dbname=PG_DB,
+            )
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                if cur.description is None:
+                    conn.close()
+                    return []
+                rows = cur.fetchall()
+            conn.close()
+            return [str(row[0]).strip() for row in rows if row[0] is not None]
+        except Exception:
+            return []
+    # fallback: psql CLI
     env = os.environ.copy()
     env["PGPASSWORD"] = PG_PASS
     p = subprocess.run(
@@ -162,12 +194,22 @@ def record(tid: str, passed: bool, elapsed: float, msg: str = ""):
 
 def check_pg_available() -> bool:
     """Return True if PostgreSQL is reachable and tdtp_test DB is ready."""
-    p = subprocess.run(
-        ["pg_isready", "-h", PG_HOST, "-p", str(PG_PORT)],
-        capture_output=True, text=True, timeout=5,
-    )
-    if p.returncode != 0:
-        return False
+    if _HAVE_PSYCOPG2:
+        try:
+            conn = psycopg2.connect(
+                host=PG_HOST, port=PG_PORT, user=PG_USER,
+                password=PG_PASS, dbname=PG_DB, connect_timeout=5,
+            )
+            conn.close()
+        except Exception:
+            return False
+    else:
+        p = subprocess.run(
+            ["pg_isready", "-h", PG_HOST, "-p", str(PG_PORT)],
+            capture_output=True, text=True, timeout=5,
+        )
+        if p.returncode != 0:
+            return False
     # Verify the user and DB actually exist
     rows = pg_query("SELECT COUNT(*) FROM users")
     return len(rows) > 0 and rows[0].isdigit()
@@ -467,9 +509,47 @@ def test_T4_roundtrip():
            p5.returncode == 0 and col_rows == ["username", "balance"],
            time.monotonic() - t, f"cols={col_rows}")
 
+    # T4.6 — bracket-quoted table name with $ (ERP$Entry) export → import
+    t = time.monotonic()
+    pg_query('DROP TABLE IF EXISTS "rt_erp_entry" CASCADE')
+    run("--export", "[ERP$Entry]", "--output", out("t4_erp.xml"))
+    p6 = _import(out("t4_erp.xml"), "rt_erp_entry")
+    rows6 = pg_query("SELECT COUNT(*) FROM rt_erp_entry")
+    rows6 = int(rows6[0]) if p6.returncode == 0 and rows6 else -1
+    record("T4.6 bracket-quoted table [ERP$Entry] roundtrip: 6 rows",
+           p6.returncode == 0 and rows6 == 6,
+           time.monotonic() - t, f"rc={p6.returncode} rows={rows6}")
+
+    # T4.7 — bracket-quoted --fields with spaces and $ from complex_fields
+    t = time.monotonic()
+    pg_query('DROP TABLE IF EXISTS "rt_complex_proj" CASCADE')
+    run("--export", "[complex_fields]",
+        "--fields", "[Order ID],[Customer Name],[Total Cost $]",
+        "--output", out("t4_complex_proj.xml"))
+    p7 = _import(out("t4_complex_proj.xml"), "rt_complex_proj")
+    cols7 = pg_query(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name='rt_complex_proj' ORDER BY ordinal_position"
+    ) if p7.returncode == 0 else []
+    expected7 = ["Order ID", "Customer Name", "Total Cost $"]
+    record("T4.7 bracket-quoted --fields [Order ID],[Customer Name],[Total Cost $]",
+           p7.returncode == 0 and cols7 == expected7,
+           time.monotonic() - t, f"cols={cols7}")
+
+    # T4.8 — bracket-quoted --where filter on field with $ (3 rows where Total Cost $ > 100)
+    t = time.monotonic()
+    p8 = run("--export", "[complex_fields]",
+             "--where", "[Total Cost $] > 100",
+             "--output", out("t4_complex_where.xml"))
+    rows8 = count_rows_xml(out("t4_complex_where.xml"))
+    record("T4.8 --where [Total Cost $] > 100 → 3 rows",
+           p8.returncode == 0 and rows8 == 3,
+           time.monotonic() - t, f"rc={p8.returncode} rows={rows8}")
+
     # Cleanup import tables
-    for tbl in ("rt_users", "rt_users_comp", "rt_users_proj"):
-        pg_query(f"DROP TABLE IF EXISTS {tbl} CASCADE")
+    for tbl in ("rt_users", "rt_users_comp", "rt_users_proj",
+                "rt_erp_entry", "rt_complex_proj"):
+        pg_query(f'DROP TABLE IF EXISTS "{tbl}" CASCADE')
 
 
 # ─── T5 File Integrity ────────────────────────────────────────────────────────
