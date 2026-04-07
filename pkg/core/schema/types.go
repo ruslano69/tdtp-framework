@@ -45,6 +45,7 @@ type TypedValue struct {
 type FieldDef struct {
 	Name      string
 	Type      DataType
+	Subtype   string // e.g., "time", "jsonb", "uuid"
 	Length    int
 	Precision int
 	Scale     int

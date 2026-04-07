@@ -52,9 +52,9 @@ ORDERS_COUNT   = 200
 PRODUCTS_COUNT = 50
 
 # Computed from actual data (verified via psql before writing tests)
-ACTIVE_USERS          = 71    # WHERE is_active = true
+ACTIVE_USERS          = 73    # WHERE is_active = true (seed=42)
 ORDERS_AMOUNT_GT_1000 = 132   # WHERE total_amount > 1000
-USERS_BALANCE_GT_5000 = 49    # WHERE balance > 5000
+USERS_BALANCE_GT_5000 = 53    # WHERE balance > 5000 (seed=42)
 
 # ─── ANSI colors ──────────────────────────────────────────────────────────────
 GREEN  = "\033[32m"
