@@ -84,6 +84,9 @@ OPTIONS:
     --fields <col1,col2,...>   Column projection: export only listed columns (e.g. 'id,email,status')
                                For --import: whitelist — only these columns are written to DB
                                For --sync-incremental: tracking field is always included automatically
+                               Bracket-quoted names for fields with spaces or commas:
+                                 --fields "id,[Birth Date],status"
+                                 --fields "[First, Last],[Birth Date]"
 
   XLSX Options:
     --sheet <name>             Excel sheet name (default: Sheet1)

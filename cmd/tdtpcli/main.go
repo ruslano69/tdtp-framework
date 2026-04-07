@@ -786,17 +786,62 @@ func determineOutputFile(output, baseName, ext string) string {
 	return baseName
 }
 
-// splitCommaSeparated splits a comma-separated string into a slice
+// splitCommaSeparated splits a comma-separated string into a slice.
+// Supports bracket-quoted identifiers for field names containing spaces or commas:
+//
+//	"id,email,status"             → ["id", "email", "status"]
+//	"id, [Birth Date], status"    → ["id", "Birth Date", "status"]
+//	"[First, Last],email"         → ["First, Last", "email"]
+//
+// Brackets are stripped; the inner name is returned as-is (no further trimming).
+// Used for --fields, --key-fields, --ignore-fields, --fixed-fields.
 func splitCommaSeparated(s string) []string {
 	if s == "" {
 		return nil
 	}
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
+	result := make([]string, 0, 4)
+	i := 0
+	n := len(s)
+	for i < n {
+		// skip whitespace between tokens
+		for i < n && (s[i] == ' ' || s[i] == '\t') {
+			i++
+		}
+		if i >= n {
+			break
+		}
+		if s[i] == '[' {
+			// bracket-quoted: read until ']'
+			i++ // skip '['
+			start := i
+			for i < n && s[i] != ']' {
+				i++
+			}
+			name := s[start:i]
+			if i < n {
+				i++ // skip ']'
+			}
+			result = append(result, name)
+			// skip optional comma after ']'
+			for i < n && (s[i] == ' ' || s[i] == '\t') {
+				i++
+			}
+			if i < n && s[i] == ',' {
+				i++
+			}
+		} else {
+			// plain token: read until comma
+			start := i
+			for i < n && s[i] != ',' {
+				i++
+			}
+			name := strings.TrimSpace(s[start:i])
+			if name != "" {
+				result = append(result, name)
+			}
+			if i < n {
+				i++ // skip ','
+			}
 		}
 	}
 	return result
