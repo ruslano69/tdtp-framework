@@ -97,7 +97,6 @@ func TestLexer_Strings(t *testing.T) {
 	}{
 		{"'hello'", "hello"},
 		{"'hello world'", "hello world"},
-		{`"double quotes"`, "double quotes"},
 		{"'123'", "123"},
 		{"''", ""},
 		{`'it\'s'`, "it\\'s"}, // escaped quote (backslash preserved)
@@ -120,12 +119,14 @@ func TestLexer_Strings(t *testing.T) {
 
 func TestLexer_Identifiers(t *testing.T) {
 	tests := []struct {
-		input string
+		input    string
+		expected string
 	}{
-		{"Users"},
-		{"user_id"},
-		{"Balance123"},
-		{"CamelCase"},
+		{"Users", "Users"},
+		{"user_id", "user_id"},
+		{"Balance123", "Balance123"},
+		{"CamelCase", "CamelCase"},
+		{`"double quotes"`, "double quotes"},
 	}
 
 	for _, tt := range tests {
@@ -136,8 +137,8 @@ func TestLexer_Identifiers(t *testing.T) {
 			if tok.Type != TokenIdent {
 				t.Errorf("expected TokenIdent, got %v", tok.Type)
 			}
-			if tok.Literal != tt.input {
-				t.Errorf("expected %s, got %s", tt.input, tok.Literal)
+			if tok.Literal != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, tok.Literal)
 			}
 		})
 	}
@@ -303,6 +304,56 @@ func TestLexer_UnterminatedString(t *testing.T) {
 	// Строка должна содержать все до конца
 	if tok.Literal != "unterminated" {
 		t.Errorf("expected 'unterminated', got %q", tok.Literal)
+	}
+}
+
+func TestLexer_BracketedIdent(t *testing.T) {
+	cases := []struct {
+		input   string
+		literal string
+	}{
+		{"[Termination Date]", "Termination Date"},
+		{"[ZTR$Employee]", "ZTR$Employee"},
+		{"[Order #]", "Order #"},
+	}
+	for _, tc := range cases {
+		lexer := NewLexer(tc.input)
+		tok := lexer.NextToken()
+		if tok.Type != TokenIdent {
+			t.Errorf("%s: expected TokenIdent, got %v", tc.input, tok.Type)
+		}
+		if tok.Literal != tc.literal {
+			t.Errorf("%s: expected literal %q, got %q", tc.input, tc.literal, tok.Literal)
+		}
+		// Must be followed by EOF
+		if next := lexer.NextToken(); next.Type != TokenEOF {
+			t.Errorf("%s: expected EOF after ident, got %v", tc.input, next.Type)
+		}
+	}
+}
+
+func TestLexer_BracketedIdentInCondition(t *testing.T) {
+	// Full where-clause as used from MSSQL/Access command line
+	input := "[Termination Date] = '1753-01-01'"
+	lexer := NewLexer(input)
+
+	expected := []struct {
+		tt  TokenType
+		lit string
+	}{
+		{TokenIdent, "Termination Date"},
+		{TokenEq, "="},
+		{TokenString, "1753-01-01"},
+		{TokenEOF, ""},
+	}
+	for i, e := range expected {
+		tok := lexer.NextToken()
+		if tok.Type != e.tt {
+			t.Errorf("token[%d]: type want %v got %v", i, e.tt, tok.Type)
+		}
+		if e.lit != "" && tok.Literal != e.lit {
+			t.Errorf("token[%d]: literal want %q got %q", i, e.lit, tok.Literal)
+		}
 	}
 }
 

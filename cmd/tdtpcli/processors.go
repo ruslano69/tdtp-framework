@@ -145,11 +145,18 @@ func (pm *ProcessorManager) AddNormalizeProcessor(rulesFile string) error {
 	return nil
 }
 
+// Name implements processors.PacketProcessor.
+func (pm *ProcessorManager) Name() string { return "row-chain" }
+
 // ProcessPacket applies all processors to a packet's data
 func (pm *ProcessorManager) ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error {
 	if pm.chain.IsEmpty() {
 		return nil
 	}
+
+	// Материализуем rawRows (GenerateReference fast-path) — иначе Data.Rows пуст
+	// и mask/normalize/validate молча пропускаются.
+	pkt.MaterializeRows()
 
 	// Convert packet data to [][]string format
 	data := convertPacketToMatrix(pkt)

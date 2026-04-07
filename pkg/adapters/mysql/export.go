@@ -9,9 +9,15 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // ========== Публичные методы (делегируют в ExportHelper) ==========
+
+// SetSkipSpecialValues включает режим --fast: DetectAndApply пропускается.
+func (a *Adapter) SetSkipSpecialValues(skip bool) {
+	a.exportHelper.SetSkipSpecialValues(skip)
+}
 
 // ExportTable экспортирует всю таблицу - просто делегируем
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
@@ -32,6 +38,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 
 // GetTableSchema читает схему таблицы из information_schema
 func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	query := `
 		SELECT
 			column_name,
@@ -89,6 +96,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 
 // ReadAllRows читает все строки из таблицы
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, pkgSchema packet.Schema) ([][]string, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	// Формируем список колонок с backtick quoting
 	columns := make([]string, 0, len(pkgSchema.Fields))
 	for _, field := range pkgSchema.Fields {
@@ -112,6 +120,7 @@ func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sqlQuery string, pkgSchem
 
 // GetRowCount возвращает количество строк в таблице
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
+	tableName = tdtql.StripBrackets(tableName)
 	var count int64
 	query := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", tableName)
 	err := a.db.QueryRowContext(ctx, query).Scan(&count)

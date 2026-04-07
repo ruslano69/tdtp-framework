@@ -2,6 +2,7 @@
 package diff
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -279,6 +280,65 @@ func (r *DiffResult) FormatText() string {
 	}
 
 	return sb.String()
+}
+
+// jsonRow — вспомогательная структура для сериализации строки в JSON
+type jsonRow struct {
+	Fields map[string]string `json:"fields"`
+}
+
+// jsonModifiedRow — изменённая строка для JSON
+type jsonModifiedRow struct {
+	Key     string            `json:"key"`
+	Changes map[string]change `json:"changes"`
+}
+
+type change struct {
+	Old string `json:"old"`
+	New string `json:"new"`
+}
+
+// jsonOutput — корневая структура JSON-вывода
+type jsonOutput struct {
+	Stats    DiffStats         `json:"stats"`
+	Added    []jsonRow         `json:"added,omitempty"`
+	Removed  []jsonRow         `json:"removed,omitempty"`
+	Modified []jsonModifiedRow `json:"modified,omitempty"`
+}
+
+func (r *DiffResult) rowToJSON(values []string) jsonRow {
+	row := jsonRow{Fields: make(map[string]string, len(values))}
+	for i, v := range values {
+		if i < len(r.Schema.Fields) {
+			row.Fields[r.Schema.Fields[i].Name] = v
+		}
+	}
+	return row
+}
+
+// FormatJSON форматирует результат diff в JSON
+func (r *DiffResult) FormatJSON() (string, error) {
+	out := jsonOutput{Stats: r.Stats}
+
+	for _, row := range r.Added {
+		out.Added = append(out.Added, r.rowToJSON(row))
+	}
+	for _, row := range r.Removed {
+		out.Removed = append(out.Removed, r.rowToJSON(row))
+	}
+	for _, mod := range r.Modified {
+		jmod := jsonModifiedRow{Key: mod.Key, Changes: make(map[string]change, len(mod.Changes))}
+		for _, fc := range mod.Changes {
+			jmod.Changes[fc.FieldName] = change{Old: fc.OldValue, New: fc.NewValue}
+		}
+		out.Modified = append(out.Modified, jmod)
+	}
+
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // IsEqual проверяет идентичность данных

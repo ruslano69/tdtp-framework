@@ -23,8 +23,9 @@ type Config struct {
 
 // ExportConfig contains export settings
 type ExportConfig struct {
-	Compress      bool `yaml:"compress"`       // Enable zstd compression by default
-	CompressLevel int  `yaml:"compress_level"` // Compression level: 1-19 (default: 3)
+	Compress      bool   `yaml:"compress"`       // Enable compression by default
+	CompressLevel int    `yaml:"compress_level"` // Compression level: 1-19 (zstd) or 6-7 (kanzi)
+	CompressAlgo  string `yaml:"compress_algo"`  // Algorithm: "zstd" (default) or "kanzi"
 }
 
 // DatabaseConfig contains database connection settings
@@ -60,6 +61,9 @@ type BrokerConfig struct {
 	Exclusive      bool   `yaml:"exclusive,omitempty"`       // Queue accessible by one connection only
 	PassiveDeclare bool   `yaml:"passive_declare,omitempty"` // Don't create queue, just check it exists (avoids 406 PRECONDITION_FAILED)
 	QueuePath      string `yaml:"queue_path,omitempty"`      // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
+	// Kafka-specific
+	Brokers       []string `yaml:"brokers,omitempty"`        // Kafka: список брокеров (["localhost:9092"])
+	ConsumerGroup string   `yaml:"consumer_group,omitempty"` // Kafka: consumer group ID
 }
 
 // ResilienceConfig contains circuit breaker and retry settings
@@ -160,8 +164,9 @@ func CreateSampleConfig(dbType string) *Config {
 			Type: dbType,
 		},
 		Export: ExportConfig{
-			Compress:      true, // Enable compression by default
-			CompressLevel: 3,    // Balanced speed/ratio
+			Compress:      true,   // Enable compression by default
+			CompressLevel: 3,      // Balanced speed/ratio
+			CompressAlgo:  "zstd", // Algorithm: zstd (default) or kanzi
 		},
 		Resilience: ResilienceConfig{
 			CircuitBreaker: CircuitBreakerConfig{

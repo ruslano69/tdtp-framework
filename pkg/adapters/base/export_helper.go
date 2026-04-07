@@ -51,11 +51,12 @@ type RowPostProcessor interface {
 // ExportHelper содержит общую логику экспорта для всех адаптеров
 // Устраняет дублирование кода между SQLite, PostgreSQL, MS SQL Server, MySQL
 type ExportHelper struct {
-	schemaReader   SchemaReader
-	dataReader     DataReader
-	valueConverter ValueConverter
-	sqlAdapter     SQLAdapter
-	maxMessageSize int // 0 = use generator default
+	schemaReader      SchemaReader
+	dataReader        DataReader
+	valueConverter    ValueConverter
+	sqlAdapter        SQLAdapter
+	maxMessageSize    int  // 0 = use generator default
+	skipSpecialValues bool // --fast: skip DetectAndApply
 }
 
 // NewExportHelper создает новый ExportHelper
@@ -79,11 +80,21 @@ func (h *ExportHelper) SetMaxMessageSize(size int) {
 	h.maxMessageSize = size
 }
 
-// newGenerator возвращает генератор с учётом настройки maxMessageSize.
+// SetSkipSpecialValues включает режим --fast: DetectAndApply пропускается.
+// NULL/NaN/Inf не получат canonical markers. Применять только для источников
+// без спецзначений или когда скорость важнее полноты метаданных.
+func (h *ExportHelper) SetSkipSpecialValues(skip bool) {
+	h.skipSpecialValues = skip
+}
+
+// newGenerator возвращает генератор с учётом всех настроек ExportHelper.
 func (h *ExportHelper) newGenerator() *packet.Generator {
 	g := packet.NewGenerator()
 	if h.maxMessageSize > 0 {
 		g.SetMaxMessageSize(h.maxMessageSize)
+	}
+	if h.skipSpecialValues {
+		g.SetSkipSpecialValues(true)
 	}
 	return g
 }
@@ -339,17 +350,16 @@ func (h *ExportHelper) createQueryContextForSQL(
 	rows [][]string,
 	tableName string,
 ) *packet.QueryContext {
-	// Получаем общее количество записей в таблице
-	totalCount, err := h.dataReader.GetRowCount(ctx, tableName)
-	if err != nil {
-		totalCount = 0 // игнорируем ошибку, используем 0 если не удалось получить count
-	}
-
 	recordsReturned := len(rows)
 	moreDataAvailable := false
 	nextOffset := 0
+	var totalCount int64
 
+	// GetRowCount нужен только для пагинации (Limit > 0) — без него это лишний round-trip к БД.
 	if query != nil && query.Limit > 0 {
+		if count, err := h.dataReader.GetRowCount(ctx, tableName); err == nil {
+			totalCount = count
+		}
 		// Проверяем есть ли еще данные: offset + returned < total
 		currentPosition := query.Offset + recordsReturned
 		if currentPosition < int(totalCount) {

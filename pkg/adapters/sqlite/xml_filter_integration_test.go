@@ -154,7 +154,7 @@ func TestXMLFilterIntegration(t *testing.T) {
 	// 14. Проверяем количество строк
 	tempRowCount := 0
 	for _, pkt := range exportedTemp {
-		tempRowCount += len(pkt.Data.Rows)
+		tempRowCount += pkt.Header.RecordsInPart
 	}
 
 	if tempRowCount != totalRows {
@@ -166,15 +166,14 @@ func TestXMLFilterIntegration(t *testing.T) {
 	foundEve := false
 
 	for _, pkt := range exportedTemp {
-		for _, row := range pkt.Data.Rows {
-			fields := strings.Split(row.Value, "|")
-			if len(fields) < 6 {
-				t.Errorf("Row has insufficient fields: %s", row.Value)
+		for _, row := range pkt.GetRows() {
+			if len(row) < 6 {
+				t.Errorf("Row has insufficient fields: %v", row)
 				continue
 			}
 
-			name := fields[1] // name is second column
-			city := fields[4] // city is fifth column
+			name := row[1] // name is second column
+			city := row[4] // city is fifth column
 
 			if name == "Alice" && city == "Moscow" {
 				foundAlice = true

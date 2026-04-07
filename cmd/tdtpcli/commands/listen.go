@@ -1,6 +1,6 @@
 package commands
 
-// BETA: Streaming consumer daemon for Kafka only.
+// Streaming consumer daemon for Kafka only.
 //
 // Broker tier selection:
 //
@@ -96,7 +96,7 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 	}
 
 	topic := cfg.BrokerCfg.Queue
-	fmt.Printf("[listen] BETA streaming consumer started\n")
+	fmt.Printf("[listen] streaming consumer started\n")
 	fmt.Printf("[listen] Kafka topic : %s\n", topic)
 	fmt.Printf("[listen] DB strategy : %s\n", cfg.Strategy)
 	fmt.Printf("[listen] WARNING: requires stable channel (99.99%% uptime recommended)\n")

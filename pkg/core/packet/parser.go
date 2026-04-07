@@ -235,16 +235,35 @@ func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx 
 	return packet, nil
 }
 
-// GetRowValues разбивает строку данных на значения полей
-// Обрабатывает экранирование: \| → | и \\ → \
+// GetRowValues разбивает строку данных на значения полей.
+// Обрабатывает экранирование: \| → |, \\ → \, \n → newline.
+//
+// Fast path (нет '\' в строке): возвращает срезы исходной строки без аллокаций
+// на поле — только одна аллокация на весь срез результата.
+// Slow path (есть '\\'): прежняя логика со strings.Builder.
 func (p *Parser) GetRowValues(row Row) []string {
 	s := row.Value
-	n := len(s)
 
-	// Preallocate: estimate ~10 fields avg
+	// Fast path: нет escape-символов — срезы без копирования.
+	if strings.IndexByte(s, '\\') == -1 {
+		n := strings.Count(s, "|") + 1
+		values := make([]string, 0, n)
+		start := 0
+		for i := 0; i < len(s); i++ {
+			if s[i] == '|' {
+				values = append(values, s[start:i])
+				start = i + 1
+			}
+		}
+		values = append(values, s[start:])
+		return values
+	}
+
+	// Slow path: есть экранирование.
+	n := len(s)
 	values := make([]string, 0, 10)
 	var buf strings.Builder
-	buf.Grow(n / 10) // estimate avg field length
+	buf.Grow(n / 10)
 
 	escaped := false
 
@@ -253,7 +272,11 @@ func (p *Parser) GetRowValues(row Row) []string {
 
 		switch {
 		case escaped:
-			buf.WriteByte(char)
+			if char == 'n' {
+				buf.WriteByte('\n')
+			} else {
+				buf.WriteByte(char)
+			}
 			escaped = false
 		case char == '\\':
 			escaped = true
@@ -265,7 +288,6 @@ func (p *Parser) GetRowValues(row Row) []string {
 		}
 	}
 
-	// Trailing backslash
 	if escaped {
 		buf.WriteByte('\\')
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -32,7 +33,9 @@ type BrokerConfig struct {
 	AutoDelete     bool
 	Exclusive      bool
 	PassiveDeclare bool
-	QueuePath      string // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
+	QueuePath      string   // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
+	Brokers        []string // Kafka: список брокеров (["localhost:9092"])
+	ConsumerGroup  string   // Kafka: consumer group ID
 }
 
 // ExportToBroker exports table data to message broker
@@ -75,46 +78,75 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
 
-	// Apply compression if enabled
-	if compress {
-		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
-		for _, pkt := range packets {
-			if err := compressPacketData(pkt, compressLevel, compressAlgo, false); err != nil {
-				return fmt.Errorf("compression failed: %w", err)
-			}
-		}
-		fmt.Printf("✓ Data compressed with %s\n", compressAlgo)
-	}
-
-	// Create broker
+	// Create broker (параллельно с подготовкой данных)
 	broker, err := createBroker(brokerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
 	}
 	defer func() { _ = broker.Close() }()
 
+	// Параллельное сжатие + сериализация всех пакетов
+	if compress {
+		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
+	}
+
+	xmlMsgs := make([][]byte, len(packets))
+	errs := make([]error, len(packets))
+
+	var wg sync.WaitGroup
+	for i, pkt := range packets {
+		wg.Add(1)
+		go func(i int, pkt *packet.DataPacket) {
+			defer wg.Done()
+			if compress {
+				if err := compressPacketData(pkt, compressLevel, compressAlgo, false); err != nil {
+					errs[i] = fmt.Errorf("packet %d compress: %w", i+1, err)
+					return
+				}
+			}
+			gen := packet.NewGenerator()
+			xml, err := gen.ToXML(pkt, true)
+			if err != nil {
+				errs[i] = fmt.Errorf("packet %d marshal: %w", i+1, err)
+				return
+			}
+			xmlMsgs[i] = xml
+		}(i, pkt)
+	}
+	wg.Wait()
+
+	for _, e := range errs {
+		if e != nil {
+			return e
+		}
+	}
+
+	if compress {
+		fmt.Printf("✓ Data compressed with %s\n", compressAlgo)
+	}
+
 	// Connect to broker
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to broker: %w", err)
 	}
 
-	// Publish packets
-	fmt.Printf("Sending to queue '%s'...\n", brokerCfg.Queue)
-	generator := packet.NewGenerator()
-	for i, pkt := range packets {
-		// Marshal packet to XML
-		xml, err := generator.ToXML(pkt, true)
-		if err != nil {
-			return fmt.Errorf("failed to marshal packet %d: %w", i+1, err)
+	// Если брокер поддерживает пакетную отправку — используем один roundtrip
+	type batchSender interface {
+		SendBatch(ctx context.Context, messages [][]byte) error
+	}
+	if bs, ok := broker.(batchSender); ok {
+		if err := bs.SendBatch(ctx, xmlMsgs); err != nil {
+			return fmt.Errorf("failed to send batch: %w", err)
 		}
-
-		// Send to broker
-		if err := broker.Send(ctx, xml); err != nil {
-			return fmt.Errorf("failed to send packet %d: %w", i+1, err)
+	} else {
+		for i, msg := range xmlMsgs {
+			if err := broker.Send(ctx, msg); err != nil {
+				return fmt.Errorf("failed to send packet %d: %w", i+1, err)
+			}
 		}
-		fmt.Printf("✓ Sent packet %d/%d\n", i+1, len(packets))
 	}
 
+	fmt.Printf("✓ Sent %d packet(s)\n", len(packets))
 	fmt.Println("✓ Export to broker complete!")
 
 	return nil
@@ -127,8 +159,13 @@ const defaultIdleTimeout = 5 * time.Second
 // ImportBrokerOptions holds options for ImportFromBroker
 type ImportBrokerOptions struct {
 	Strategy    adapters.ImportStrategy
-	TargetTable string        // override table name from packet header (fixes name conflicts)
-	OutputFile  string        // if set, save packets to file(s) instead of importing to DB
+	TargetTable string // override table name from packet header (fixes name conflicts)
+	OutputFile  string // if set, save packets to file(s) instead of importing to DB
+	Raw         bool   // save raw bytes as-is, no parse/decompress/validate
+	Keep        bool   // allow partial writes (non-atomic): import each part immediately.
+	// Default (Keep=false): all parts committed in one transaction via ImportPackets — all-or-nothing.
+	// Keep=true: each part committed individually; if a later part fails, earlier parts remain.
+	// Use Keep for batches too large for a single DB transaction.
 	IdleTimeout time.Duration // how long to wait for the next message before stopping (0 = default 5s)
 }
 
@@ -140,17 +177,6 @@ type ImportBrokerOptions struct {
 // the queue untouched. The function exits once all TotalParts are received or
 // the idle timeout fires (queue empty).
 func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, opts ImportBrokerOptions) error {
-	// In file-save mode we don't need a DB adapter.
-	var adapter adapters.Adapter
-	if opts.OutputFile == "" {
-		var err error
-		adapter, err = adapters.New(ctx, *dbConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create adapter: %w", err)
-		}
-		defer func() { _ = adapter.Close(ctx) }()
-	}
-
 	// Create and connect broker.
 	broker, err := createBroker(brokerCfg)
 	if err != nil {
@@ -160,6 +186,26 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to broker: %w", err)
+	}
+
+	// --raw mode: drain queue, write bytes as-is, no parse/decompress.
+	if opts.Raw {
+		return importBrokerRaw(ctx, broker, opts)
+	}
+
+	// In file-save mode we don't need a DB adapter.
+	var adapter adapters.Adapter
+	if opts.OutputFile == "" {
+		adapter, err = adapters.New(ctx, *dbConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create adapter: %w", err)
+		}
+		defer func() { _ = adapter.Close(ctx) }()
+	}
+
+	// --keep mode: streaming — receive → decompress → import immediately, no full buffer.
+	if opts.Keep {
+		return importBrokerKeep(ctx, broker, adapter, opts)
 	}
 
 	idleTimeout := opts.IdleTimeout
@@ -174,13 +220,6 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 		return nil
 	}
-	nackLast := func() error {
-		if nacker, ok := broker.(interface{ NackLast(bool) error }); ok {
-			return nacker.NackLast(true) // requeue=true — leave in queue
-		}
-		return nil
-	}
-
 	parser := packet.NewParser()
 	generator := packet.NewGenerator()
 
@@ -225,65 +264,201 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 			batchID, totalParts, brokerCfg.Queue, opts.Strategy)
 	}
 
-	// ── Step 2: process packets, skipping those from other batches ──────────
-	processPacket := func(pkt *packet.DataPacket, n int) error {
-		if opts.TargetTable != "" {
+	// ── Step 2: receive all remaining raw packets ────────────────────────────
+	// Receive is inherently serial (one call per message); we buffer raw bytes
+	// so that decompression can run in parallel in the next step.
+	allRaw := make([][]byte, 1, totalParts)
+	allRaw[0] = xmlData
+	for received := 1; received < totalParts; received++ {
+		raw, err := receive()
+		if err != nil {
+			fmt.Printf("Queue empty after %d/%d parts: %v\n", received, totalParts, err)
+			break
+		}
+		allRaw = append(allRaw, raw)
+	}
+	actualParts := len(allRaw)
+
+	// ── Step 3: decompress all packets in parallel ───────────────────────────
+	// First packet is already parsed; remaining ones run in goroutines.
+	parsedPackets := make([]*packet.DataPacket, actualParts)
+	parseErrs := make([]error, actualParts)
+	parsedPackets[0] = firstPkt
+
+	if actualParts > 1 {
+		var wg sync.WaitGroup
+		for i := 1; i < actualParts; i++ {
+			wg.Add(1)
+			go func(i int, raw []byte) {
+				defer wg.Done()
+				pkt, err := parse(raw)
+				if err != nil {
+					parseErrs[i] = fmt.Errorf("packet %d: %w", i+1, err)
+					return
+				}
+				if batchIDFromMessageID(pkt.Header.MessageID) != batchID {
+					parseErrs[i] = fmt.Errorf("packet %d belongs to a different batch", i+1)
+					return
+				}
+				parsedPackets[i] = pkt
+			}(i, allRaw[i])
+		}
+		wg.Wait()
+	}
+	for _, e := range parseErrs {
+		if e != nil {
+			return e
+		}
+	}
+
+	// ── Step 4: process all packets ─────────────────────────────────────────
+	if opts.TargetTable != "" {
+		for _, pkt := range parsedPackets {
 			pkt.Header.TableName = opts.TargetTable
 		}
-		fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
-			pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+	}
 
-		if opts.OutputFile != "" {
-			filename := brokerOutputFilename(opts.OutputFile, n)
+	switch {
+	case opts.OutputFile != "":
+		// File-save mode: write each part to disk.
+		for i, pkt := range parsedPackets {
+			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+				pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+			filename := brokerOutputFilename(opts.OutputFile, i+1, totalParts)
 			xmlBytes, err := generator.ToXML(pkt, true)
 			if err != nil {
-				return fmt.Errorf("failed to marshal packet: %w", err)
+				return fmt.Errorf("failed to marshal packet %d: %w", i+1, err)
 			}
 			if err := os.WriteFile(filename, xmlBytes, 0o600); err != nil {
 				return fmt.Errorf("failed to write '%s': %w", filename, err)
 			}
 			fmt.Printf("  ✓ Saved to: %s\n", filename)
+		}
+	default:
+		// Atomic mode (default): all parts in one transaction — all-or-nothing.
+		// Mirrors the behavior of --import (file) which uses ImportPackets for multi-part.
+		totalRows := 0
+		for _, pkt := range parsedPackets {
+			fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+				pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+			totalRows += len(pkt.Data.Rows)
+		}
+		var importErr error
+		if len(parsedPackets) == 1 {
+			importErr = adapter.ImportPacket(ctx, parsedPackets[0], opts.Strategy)
 		} else {
-			if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
-				return fmt.Errorf("import failed: %w", err)
-			}
-			fmt.Printf("  ✓ Imported %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+			importErr = adapter.ImportPackets(ctx, parsedPackets, opts.Strategy)
+		}
+		if importErr != nil {
+			return fmt.Errorf("import failed (all parts rolled back): %w", importErr)
+		}
+		fmt.Printf("  ✓ Imported %d row(s) into '%s'\n", totalRows, parsedPackets[0].Header.TableName)
+	}
+
+	// ACK: for Kafka — CommitMessages on the last offset commits all previous
+	// offsets too (cumulative). For RabbitMQ — acks the last delivery tag only;
+	// earlier messages are auto-acked when the channel closes normally.
+	if err := ackLast(); err != nil {
+		return fmt.Errorf("ack failed: %w", err)
+	}
+
+	fmt.Printf("✓ Done. %d/%d part(s) processed.\n", actualParts, totalParts)
+	return nil
+}
+
+// batchIDFromMessageID extracts the export batch ID from a MessageID.
+// importBrokerKeep is the streaming (non-atomic) import path used when --keep is set.
+// Each packet is received, decompressed, and committed to the DB immediately —
+// no full in-memory buffering of the whole batch. On failure the successfully
+// committed parts remain in the table and can be inspected or rolled back manually.
+func importBrokerKeep(ctx context.Context, broker brokers.MessageBroker, adapter adapters.Adapter, opts ImportBrokerOptions) error {
+	idleTimeout := opts.IdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = defaultIdleTimeout
+	}
+
+	ackLast := func() error {
+		if acker, ok := broker.(interface{ AckLast() error }); ok {
+			return acker.AckLast()
 		}
 		return nil
 	}
 
-	if err := processPacket(firstPkt, 1); err != nil {
+	receive := func() ([]byte, error) {
+		recvCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+		defer cancel()
+		data, err := broker.Receive(recvCtx)
+		if err != nil && recvCtx.Err() != nil {
+			return nil, fmt.Errorf("queue empty (no message in %s)", idleTimeout)
+		}
+		return data, err
+	}
+
+	parse := func(xmlData []byte) (*packet.DataPacket, error) {
+		return packet.NewParser().ParseBytesWithDecompression(xmlData, func(pCtx context.Context, compressed string, algo string) ([]string, error) {
+			return decompressData(compressed, algo)
+		})
+	}
+
+	// Read first packet to learn batchID and TotalParts.
+	xmlData, err := receive()
+	if err != nil {
+		fmt.Printf("Queue is empty: %v\n", err)
+		return nil
+	}
+	firstPkt, err := parse(xmlData)
+	if err != nil {
+		return fmt.Errorf("failed to parse first packet: %w", err)
+	}
+	if opts.TargetTable != "" {
+		firstPkt.Header.TableName = opts.TargetTable
+	}
+
+	batchID := batchIDFromMessageID(firstPkt.Header.MessageID)
+	totalParts := firstPkt.Header.TotalParts
+	if totalParts == 0 {
+		totalParts = 1
+	}
+	fmt.Printf("Importing batch '%s' (%d part(s)) from queue '%s' (strategy: %s, --keep)\n",
+		batchID, totalParts, opts.IdleTimeout, opts.Strategy)
+
+	importOne := func(pkt *packet.DataPacket, n int) error {
+		fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
+			pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
+		if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {
+			return fmt.Errorf("import failed at part %d: %w", n, err)
+		}
+		fmt.Printf("  ✓ Committed %d row(s) into '%s'\n", len(pkt.Data.Rows), pkt.Header.TableName)
+		return nil
+	}
+
+	if err := importOne(firstPkt, 1); err != nil {
 		return err
 	}
 	if err := ackLast(); err != nil {
 		return fmt.Errorf("ack failed: %w", err)
 	}
-	received := 1
 
-	for received < totalParts {
-		xmlData, err := receive()
+	committed := 1
+	for committed < totalParts {
+		raw, err := receive()
 		if err != nil {
-			fmt.Printf("Queue empty after %d/%d parts: %v\n", received, totalParts, err)
+			fmt.Printf("Queue empty after %d/%d committed: %v\n", committed, totalParts, err)
 			break
 		}
-
-		pkt, err := parse(xmlData)
+		pkt, err := parse(raw)
 		if err != nil {
-			return fmt.Errorf("failed to parse packet: %w", err)
+			return fmt.Errorf("failed to parse packet %d: %w", committed+1, err)
 		}
-
-		thisBatchID := batchIDFromMessageID(pkt.Header.MessageID)
-		if thisBatchID != batchID {
-			// This packet belongs to a different export — put it back.
-			fmt.Printf("  ⚠ Packet from batch '%s' (expected '%s') — requeueing\n", thisBatchID, batchID)
-			if err := nackLast(); err != nil {
-				return fmt.Errorf("nack failed: %w", err)
-			}
-			continue
+		if batchIDFromMessageID(pkt.Header.MessageID) != batchID {
+			fmt.Printf("  ⚠ Packet from different batch — stopping\n")
+			break
 		}
-
-		received++
-		if err := processPacket(pkt, received); err != nil {
+		if opts.TargetTable != "" {
+			pkt.Header.TableName = opts.TargetTable
+		}
+		committed++
+		if err := importOne(pkt, committed); err != nil {
 			return err
 		}
 		if err := ackLast(); err != nil {
@@ -291,11 +466,10 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 	}
 
-	fmt.Printf("✓ Done. %d/%d part(s) processed.\n", received, totalParts)
+	fmt.Printf("✓ Done. %d/%d part(s) committed.\n", committed, totalParts)
 	return nil
 }
 
-// batchIDFromMessageID extracts the export batch ID from a MessageID.
 // Format: "REF-20250319-ABCD1234-P3" → "REF-20250319-ABCD1234"
 func batchIDFromMessageID(messageID string) string {
 	if idx := strings.LastIndex(messageID, "-P"); idx >= 0 {
@@ -304,19 +478,124 @@ func batchIDFromMessageID(messageID string) string {
 	return messageID
 }
 
-// brokerOutputFilename returns output path for message N.
-// Message 1 → outputFile as-is; messages 2+ get a numeric suffix before the extension.
-func brokerOutputFilename(outputFile string, n int) string {
-	if n == 1 {
+// brokerOutputFilename returns output path for part N of total.
+// Single-part: outputFile as-is.
+// Multi-part: base_part_N_of_Total.ext  (compatible with --import multi-part convention)
+// importBrokerRaw drains the queue and writes each message as raw bytes.
+// No parsing, no decompression, no validation — exactly what the broker sent.
+// Peeks at the first message header to learn TotalParts for _part_N_of_Total naming.
+// Files: outputFile (single) or base_part_N_of_Total.ext (multi-part).
+func importBrokerRaw(ctx context.Context, broker brokers.MessageBroker, opts ImportBrokerOptions) error {
+	if opts.OutputFile == "" {
+		return fmt.Errorf("--raw requires --output <file>")
+	}
+
+	idleTimeout := opts.IdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = defaultIdleTimeout
+	}
+
+	receive := func() ([]byte, error) {
+		recvCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+		defer cancel()
+		data, err := broker.Receive(recvCtx)
+		if err != nil && recvCtx.Err() != nil {
+			return nil, nil // idle timeout — queue empty
+		}
+		return data, err
+	}
+
+	// Read first message to peek TotalParts from header (no full parse needed).
+	first, err := receive()
+	if err != nil {
+		return fmt.Errorf("receive error: %w", err)
+	}
+	if first == nil {
+		fmt.Println("Queue is empty.")
+		return nil
+	}
+
+	// Quick header peek — parse only, raw bytes saved as-is.
+	totalParts := 0
+	if pkt, peekErr := packet.NewParser().ParseBytes(first); peekErr == nil {
+		totalParts = pkt.Header.TotalParts
+	}
+	if totalParts == 0 {
+		totalParts = 1 // unknown or single-part
+	}
+
+	fmt.Printf("Raw drain → %s (%d part(s) expected, idle timeout: %s)...\n",
+		opts.OutputFile, totalParts, idleTimeout)
+
+	saveRaw := func(data []byte, n int) error {
+		filename := brokerOutputFilename(opts.OutputFile, n, totalParts)
+		if err := os.WriteFile(filename, data, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", filename, err)
+		}
+		fmt.Printf("  ✓ [%d/%d] %s (%d bytes)\n", n, totalParts, filename, len(data))
+		return nil
+	}
+
+	totalBytes := len(first)
+	if err := saveRaw(first, 1); err != nil {
+		return err
+	}
+
+	n := 1
+	for n < totalParts {
+		data, err := receive()
+		if err != nil {
+			return fmt.Errorf("receive error: %w", err)
+		}
+		if data == nil {
+			fmt.Printf("  ⚠ Queue empty after %d/%d parts (idle timeout)\n", n, totalParts)
+			break
+		}
+		n++
+		totalBytes += len(data)
+		if err := saveRaw(data, n); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("✓ Done. %d/%d message(s), %.1f MB total.\n", n, totalParts, float64(totalBytes)/1024/1024)
+	return nil
+}
+
+func brokerOutputFilename(outputFile string, n, total int) string {
+	if total == 1 {
 		return outputFile
 	}
-	ext := filepath.Ext(outputFile)
-	base := outputFile[:len(outputFile)-len(ext)]
-	return fmt.Sprintf("%s_%d%s", base, n, ext)
+	// Strip double extension: "users.tdtp.xml" → base="users", ext=".tdtp.xml"
+	// to get "users_part_1_of_15.tdtp.xml"
+	name := filepath.Base(outputFile)
+	dir := filepath.Dir(outputFile)
+
+	// Find first dot to preserve compound extension (.tdtp.xml)
+	dotIdx := strings.Index(name, ".")
+	var base, ext string
+	if dotIdx >= 0 {
+		base = name[:dotIdx]
+		ext = name[dotIdx:]
+	} else {
+		base = name
+		ext = ""
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s_part_%d_of_%d%s", base, n, total, ext))
 }
 
 // createBroker creates a message broker based on configuration
 func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
+	// Kafka brokers list: use explicit Brokers slice; fall back to Host:Port
+	kafkaBrokers := cfg.Brokers
+	if len(kafkaBrokers) == 0 && cfg.Host != "" {
+		port := cfg.Port
+		if port == 0 {
+			port = 9092
+		}
+		kafkaBrokers = []string{fmt.Sprintf("%s:%d", cfg.Host, port)}
+	}
+
 	brokerConfig := brokers.Config{
 		Type:           cfg.Type,
 		Host:           cfg.Host,
@@ -334,12 +613,15 @@ func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 		Exclusive:      cfg.Exclusive,
 		PassiveDeclare: cfg.PassiveDeclare,
 		QueuePath:      cfg.QueuePath,
+		Brokers:        kafkaBrokers,
+		Topic:          cfg.Queue,
+		ConsumerGroup:  cfg.ConsumerGroup,
 	}
 
 	return brokers.New(brokerConfig)
 }
 
 // decompressData decompresses compressed data using processors package
-func decompressData(compressed string, algo string) ([]string, error) {
+func decompressData(compressed, algo string) ([]string, error) {
 	return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
 }

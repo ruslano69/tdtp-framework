@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Test: MS Access-style exotic field names
+  Import with:
+    tdtpcli --import tests/sanitize/access_fields.tdtp.xml --clear --config config.yaml
+  Expected renames:
+    "Order ID"      → Order_ID
+    "Total Cost $"  → Total_Cost_usd
+    "Discount %"    → Discount_pct
+    "E-mail"        → E_mail
+    "Phone #"       → Phone_xh
+    "Ship/Date"     → Ship_Date
+    "Tax (USD)"     → Tax_USD
+    "Is Active?"    → Is_Active_is
+    "Notes & Refs"  → Notes_and_Refs
+-->
+<TDTP protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>access_orders</TableName>
+    <MessageID>TEST-SANITIZE-ACCESS-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>3</RecordsInPart>
+    <Timestamp>2026-04-01T00:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="Order ID"     type="INTEGER" key="true"/>
+    <Field name="Total Cost $" type="FLOAT"/>
+    <Field name="Discount %"   type="FLOAT"/>
+    <Field name="E-mail"       type="TEXT" length="255"/>
+    <Field name="Phone #"      type="TEXT" length="30"/>
+    <Field name="Ship/Date"    type="DATE"/>
+    <Field name="Tax (USD)"    type="FLOAT"/>
+    <Field name="Is Active?"   type="INTEGER"/>
+    <Field name="Notes &amp; Refs" type="TEXT"/>
+  </Schema>
+  <Data>
+    <R>1|199.99|10.5|alice@example.com|+7-999-123-45-67|2026-04-01|19.99|1|see ref #42</R>
+    <R>2|49.00|0|bob@example.com|+1-800-555-0100|2026-04-02|4.90|1|</R>
+    <R>3|320.50|5.0|carol@example.com|+44-20-7946-0958|2026-04-03|32.05|0|cancelled</R>
+  </Data>
+</TDTP>

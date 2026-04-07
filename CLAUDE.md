@@ -53,20 +53,29 @@ pg_isready
 
 ---
 
-## Сжатие (zstd)
+## Сжатие (zstd + kanzi)
 
-Бенчмарк на 100k строк SQLite (benchmark_100k.db):
+Бенчмарк на 100k строк SQLite (benchmark_100k.db, синтетические данные Users):
 
-| Режим              | Время   | Размер | Коэф. |
-|--------------------|---------|--------|-------|
-| Без сжатия         | 850 мс  | 9.9 MB | —     |
-| zstd level 3       | 843 мс  | 2.9 MB | 3.07× |
-| zstd level 19      | 1558 мс | 2.4 MB | 3.71× |
+| Режим              | Время    | Размер | Коэф. |
+|--------------------|----------|--------|-------|
+| Без сжатия         | 673 мс   | 9.9 MB | —     |
+| zstd level 3       | 751 мс   | 2.9 MB | 3.4×  |
+| zstd level 19      | 2363 мс  | 2.4 MB | 4.1×  |
+| kanzi level 6      | 1279 мс  | 1.5 MB | 6.6×  |
+| kanzi level 7      | 1449 мс  | 1.4 MB | 7.1×  |
 
-**Вывод**: zstd level 3 практически бесплатен по времени, экономит 3× дискового и сетевого трафика.
+**Вывод по алгоритмам:**
+- `zstd level 3` — дефолт для потоков реального времени: почти бесплатен, 3× экономия
+- `kanzi level 6` — оптимум для архивов и бэкапов: **в 2 раза плотнее zstd3**, быстрее zstd19
+- `kanzi level 7` — максимум плотности, +170 мс к level 6, выгоден только при медленном канале
+
+На реальных данных с разнородным текстом (кадровые приказы, нарративные описания) kanzi
+показывает x10-12 против исходного размера — BWT разворачивается на полную мощность.
+На синтетических коротких строках — 6-7×, но это всё равно **на 30-50% плотнее zstd**.
+
 `compress: true` и `compress_level: 3` — дефолт в шаблоне конфига (`CreateSampleConfig`). Не менять.
-
-Level 19 даёт +20% к сжатию ценой ×2 времени — только для архивного хранения.
+Для архивных задач: `--compress-algo kanzi --compress-level 6 --hash`.
 
 ---
 
@@ -85,3 +94,86 @@ GOPROXY=https://goproxy.io GONOSUMDB='*' go build -tags nokafka -o /tmp/tdtpcli 
 ## Dev branch
 
 Feature branches: `claude/test-tdtpcli-new-keys-0Z7iA`
+
+---
+
+## SeaweedFS S3 (локальное тестирование)
+
+### Бинарник
+```
+/tmp/weed   (version 30GB 3.80, linux amd64)
+```
+
+### ВАЖНО: `-ip` не работает в `weed server` — запускать компоненты отдельно!
+
+`weed server -ip=127.0.0.1` **игнорирует флаг** и всё равно использует 192.0.2.2 (внешний IP).
+Envoy-прокси sandbox блокирует gRPC между компонентами через внешний IP.
+**Решение** — запускать каждый компонент отдельно с явным `-ip=127.0.0.1`:
+
+```bash
+# 1. Master (порт 9333)
+/tmp/weed master -ip=127.0.0.1 -defaultReplication=000 -volumeSizeLimitMB=100 -port=9333 &
+sleep 18  # ждём выборов лидера (~15с)
+
+# 2. Volume server (порт 8080)
+/tmp/weed volume -ip=127.0.0.1 -dir=/tmp/seaweedfs-data -mserver=127.0.0.1:9333 -port=8080 &
+sleep 2
+
+# 3. Filer (порт 8888) — создаёт filerldb2/ в CWD, добавлен в .gitignore
+/tmp/weed filer -ip=127.0.0.1 -master=127.0.0.1:9333 -port=8888 &
+sleep 3
+
+# 4. S3 gateway (порт 8333) — флаг -ip не поддерживается, используем -ip.bind
+/tmp/weed s3 -ip.bind=127.0.0.1 -filer=127.0.0.1:8888 -port=8333 &
+sleep 2
+
+# Проверка
+curl -s http://127.0.0.1:9333/cluster/status   # {"IsLeader":true,...}
+curl -s http://127.0.0.1:8333/                 # <ListAllMyBucketsResult>...
+```
+
+### Существующий бакет
+```
+tdtp-test   — уже содержит volume, доступен для записи
+```
+Бакет `tdtp-new-bucket` создан, но без выделенного volume (записи падают с 500).
+**Использовать `tdtp-test`** для всех S3-тестов.
+
+### Credentials
+Weed в dev-режиме принимает любые ключи:
+```
+access_key: any
+secret_key: any
+```
+
+### Config для тестов
+```yaml
+storage:
+  type: s3
+  s3:
+    endpoint: "http://127.0.0.1:8333"
+    region: "us-east-1"
+    bucket: "tdtp-test"
+    access_key: "any"
+    secret_key: "any"
+    path_style: true
+    disable_ssl: true
+```
+
+### Проверка --test с S3
+```bash
+/tmp/tdtpcli --config /tmp/test_s3_cfg.yaml \
+  --export users --output "s3://tdtp-test/ci/users.tdtp.xml" --compress --hash
+
+/tmp/tdtpcli --config /tmp/test_s3_cfg.yaml \
+  --test "s3://tdtp-test/ci/users.tdtp.xml"
+# ✓ algo=zstd, 10 rows, decompressed 0s, checksum OK
+```
+
+### Лог-файлы
+```
+/tmp/seaweed.log        — предыдущая сессия (данные с 17 марта 2026)
+/tmp/seaweedfs-data/    — volume данные (8.dat, 8.idx, 8.vif)
+filerldb2/              — LevelDB filer (в .gitignore)
+```
+

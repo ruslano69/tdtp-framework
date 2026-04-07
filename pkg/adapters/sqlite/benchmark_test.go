@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
@@ -309,7 +310,7 @@ func TestBenchmarkSetup(t *testing.T) {
 
 	var totalRows int
 	for _, pkt := range packets {
-		totalRows += len(pkt.Data.Rows)
+		totalRows += pkt.Header.RecordsInPart
 	}
 
 	if totalRows < 50000 {
@@ -348,5 +349,41 @@ func BenchmarkSimpleFilter_SQL_WithStats(b *testing.B) {
 
 	if totalReturned > 0 {
 		b.ReportMetric(float64(totalReturned), "records")
+	}
+}
+
+// BenchmarkFullExport100k — полный экспорт 100k строк без фильтров.
+// Запуск с профилировщиком:
+//
+//	go test -bench=BenchmarkFullExport100k -benchtime=3x -cpuprofile=/tmp/cpu.prof ./pkg/adapters/sqlite/
+//	go tool pprof -top /tmp/cpu.prof
+func BenchmarkFullExport100k(b *testing.B) {
+	if _, err := os.Stat(benchmarkDB); os.IsNotExist(err) {
+		b.Skip("benchmark DB not found")
+	}
+	ctx := context.Background()
+	adapter, err := NewAdapter(benchmarkDB)
+	if err != nil {
+		b.Fatalf("Cannot open benchmark DB: %v", err)
+	}
+	defer adapter.Close(ctx)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		packets, err := adapter.ExportTable(ctx, "Users")
+		elapsed := time.Since(start)
+		if err != nil {
+			b.Fatalf("Export failed: %v", err)
+		}
+		totalRows := 0
+		for _, pkt := range packets {
+			totalRows += pkt.Header.RecordsInPart
+		}
+		colCount := 1
+		if len(packets) > 0 {
+			colCount = len(packets[0].Schema.Fields)
+		}
+		b.ReportMetric(float64(totalRows*colCount)/elapsed.Seconds()/1e6, "Mfields/s")
 	}
 }

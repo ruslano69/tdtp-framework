@@ -112,8 +112,8 @@ func TestGenerateReference(t *testing.T) {
 	}
 
 	// Проверка Data
-	if len(packet.Data.Rows) != 2 {
-		t.Errorf("Expected 2 rows, got %d", len(packet.Data.Rows))
+	if got := len(packet.GetRows()); got != 2 {
+		t.Errorf("Expected 2 rows, got %d", got)
 	}
 }
 

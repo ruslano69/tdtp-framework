@@ -154,6 +154,19 @@ func TestRoundTrip_EscapeUnescape(t *testing.T) {
 				{"value1", "", "value3"},
 			},
 		},
+		{
+			name: "newline in field value",
+			rows: [][]string{
+				{"field1", "line1\nline2", "field3"},
+				{"other", "normal", "row"},
+			},
+		},
+		{
+			name: "newline and other special chars combined",
+			rows: [][]string{
+				{"text\nwith\nnewlines", "pipe|and\\slash\nnewline", "end"},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

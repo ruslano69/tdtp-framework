@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Test: Mixed exotic characters — European diacritics, symbols, Unicode
+  Covers: European languages, currency symbols, mathematical notation, etc.
+
+  Import with full sanitization:
+    tdtpcli --import tests/sanitize/exotic_mixed.tdtp.xml --translit --clear --config config.yaml
+
+  Expected renames (translit+clear):
+    "id"             → id  (unchanged)
+    "Österreich"     → Osterreich
+    "Ñoño"          → Nono
+    "Cena (zł)"     → Cena_zl
+    "Precio %"       → Precio_pct
+    "Коэф. роста"   → Koef_rosta
+    "Заказ №12"     → Zakaz_no12   (note: this is a field *name*, not value)
+    "~disabled"      → not_disabled
+    "a&b total"      → a_and_b_total
+    "cost@unit"      → cost_at_unit
+    "flag*"          → flag_star
+    "1st_place"      → _1st_place   (digit prefix)
+    "___"            → _field        (all-underscore collapses to empty → _field)
+-->
+<TDTP protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>exotic_test</TableName>
+    <MessageID>TEST-SANITIZE-MIXED-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>2</RecordsInPart>
+    <Timestamp>2026-04-01T00:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="id"           type="INTEGER" key="true"/>
+    <Field name="Österreich"   type="TEXT" length="100"/>
+    <Field name="Ñoño"         type="TEXT" length="100"/>
+    <Field name="Cena (zł)"    type="FLOAT"/>
+    <Field name="Precio %"     type="FLOAT"/>
+    <Field name="Коэф. роста"  type="FLOAT"/>
+    <Field name="~disabled"    type="INTEGER"/>
+    <Field name="a&amp;b total"    type="FLOAT"/>
+    <Field name="cost@unit"    type="FLOAT"/>
+    <Field name="flag*"        type="INTEGER"/>
+    <Field name="1st_place"    type="INTEGER"/>
+  </Schema>
+  <Data>
+    <R>1|Vienna|Quito|99.90|12.5|1.15|0|200.00|10.00|1|1</R>
+    <R>2|Graz|Bogota|45.00|0.0|0.98|1|150.00|8.50|0|2</R>
+  </Data>
+</TDTP>

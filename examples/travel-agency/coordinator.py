@@ -1,369 +1,326 @@
 #!/usr/bin/env python3
 """
-Travel Agency Pipeline Coordinator
-Управляет синхронизацией MSSQL → S3 → PostgreSQL через tdtpcli.
-Redis — единственный источник состояния. Все решения принимает по Redis.
+Travel Agency Coordinator — Event-Driven
+Слушает topic exchange RabbitMQ (события от activity.py),
+запускает tdtpcli --export-broker (source DB → named queue),
+публикует уведомление в Redis pub/sub.
 
-State model (Redis keys):
-  tdtp:travel:<table>:cursor          — ISO timestamp последнего успешного extract
-  tdtp:travel:<table>:sync_ts         — SYNC_TS последнего успешного extract
-  tdtp:travel:<table>:state           — JSON: {status, rows, duration, error, ts}
-  tdtp:travel:coordinator:alive       — heartbeat (TTL 90s)
-  tdtp:travel:coordinator:cycle       — номер цикла
-  tdtp:pipeline:<name>:state          — результат pipeline (пишет tdtpcli)
-
-Pub/Sub:
-  tdtp:travel:events                  — JSON события для мониторинга
-
-Usage:
-    python coordinator.py [--interval 30] [--tdtpcli ./tdtpcli.exe]
-                          [--redis localhost:6379] [--once]
+Импорт данных — задача consumer.py.
 
 Dependencies:
-    pip install redis colorama
+    pip install pika redis colorama
 """
 
-import argparse
 import json
 import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 
+import pika
 import redis
 from colorama import Fore, Style, init
 
 init(autoreset=True)
 
-# ─── Config ──────────────────────────────────────────────────────────────────
+# ─── Config ───────────────────────────────────────────────────────────────────
 
-REDIS_KEY_PREFIX = "tdtp:travel"
-PIPELINES_DIR    = Path(__file__).parent / "pipelines"
-TDTPCLI_DEFAULT  = str(Path(__file__).parents[3] / "tdtpcli.exe")
+REDIS_PREFIX    = "tdtp:travel"
+NOTIFY_CHANNEL  = f"{REDIS_PREFIX}:notify"
+EXCHANGE        = "travel"
+QUEUE           = "tdtp.coordinator"
+TRAVEL_DIR      = Path(__file__).parent
+TDTPCLI_DEFAULT = str(Path(__file__).parents[3] / "tdtpcli.exe")
+DEBOUNCE_TTL    = 10
+DEFAULT_CURSOR  = "2020-01-01 00:00:00"
 
-# Таблицы: (имя, интервал-кратность, начальный cursor)
-# кратность = синхронизируем каждые N циклов координатора
-TABLES = [
-    # name,         mult, init_cursor
-    ("reference",   10,   "2020-01-01 00:00:00"),   # справочники — редко
-    ("customers",   1,    "2020-01-01 00:00:00"),   # часто
-    ("schedule",    2,    "2020-01-01 00:00:00"),   # средне
-    ("sales",       1,    "2020-01-01 00:00:00"),   # часто
-]
+# ─── Routing table ────────────────────────────────────────────────────────────
+# table       — имя таблицы или VIEW в source DB
+# fields      — колонки для --fields (None = все)
+# incremental — поле для курсора инкрементала (None = полная выгрузка)
+# src_cfg     — имя config файла (в TRAVEL_DIR) с source DB + broker settings
+# queue       — named RabbitMQ queue
+# label       — читаемое название
 
-# ─── Logging ─────────────────────────────────────────────────────────────────
+ROUTE_MAP: dict[str, list[dict]] = {
+    "airline.flights.updated": [
+        {
+            "table":       "v_flights",
+            "fields":      None,
+            "incremental": "last_updated",
+            "src_cfg":     "config_src_tdtp_sync_flights.yaml",
+            "queue":       "tdtp.sync.flights",
+            "label":       "Airline → Central: flights",
+        },
+    ],
+    "airline.reservations.updated": [
+        {
+            "table":       "flight_reservations",
+            "fields":      "reservation_id,flight_id,booking_ref_external,passenger_name,seat_class,price_paid,status,agency_id,last_updated",
+            "incremental": "last_updated",
+            "src_cfg":     "config_src_tdtp_sync_reservations.yaml",
+            "queue":       "tdtp.sync.reservations",
+            "label":       "Airline → Central: reservations",
+        },
+    ],
+    "central.catalog.updated": [
+        {
+            "table":       "countries",
+            "fields":      "country_id,country_code,country_name,continent,currency_code,is_visa_required",
+            "incremental": None,
+            "src_cfg":     "config_src_tdtp_sync_countries.yaml",
+            "queue":       "tdtp.sync.countries",
+            "label":       "Central → Branch: countries",
+        },
+        {
+            "table":       "guides",
+            "fields":      "guide_id,first_name,last_name,specialization,rating,languages,is_active",
+            "incremental": "last_updated",
+            "src_cfg":     "config_src_tdtp_sync_guides.yaml",
+            "queue":       "tdtp.sync.guides",
+            "label":       "Central → Branch: guides",
+        },
+        {
+            "table":       "tours",
+            "fields":      "tour_id,tour_code,tour_name,description,destination_country_id,duration_days,difficulty_level,max_group_size,base_price,is_active",
+            "incremental": None,
+            "src_cfg":     "config_src_tdtp_sync_tours.yaml",
+            "queue":       "tdtp.sync.tours",
+            "label":       "Central → Branch: tours",
+        },
+        {
+            "table":       "tour_schedule",
+            "fields":      "schedule_id,tour_id,guide_id,start_date,end_date,available_slots,booked_slots,price_modifier,status",
+            "incremental": "last_updated",
+            "src_cfg":     "config_src_tdtp_sync_schedule.yaml",
+            "queue":       "tdtp.sync.schedule",
+            "label":       "Central → Branch: schedule",
+        },
+    ],
+    "branch.customers.registered": [
+        {
+            "table":       "v_local_customers",
+            "fields":      None,
+            "incremental": "last_updated",
+            "src_cfg":     "config_src_tdtp_sync_branch_customers.yaml",
+            "queue":       "tdtp.sync.branch.customers",
+            "label":       "Branch → Central: customers",
+        },
+    ],
+    "branch.sales.created": [
+        {
+            "table":       "v_local_sales",
+            "fields":      None,
+            "incremental": "last_updated",
+            "src_cfg":     "config_src_tdtp_sync_branch_sales.yaml",
+            "queue":       "tdtp.sync.branch.sales",
+            "label":       "Branch → Central: sales",
+        },
+    ],
+    "central.sales.changed":  [],
+    "central.customers.new":  [],
+}
 
-def log(color, tag, msg):
-    ts = datetime.now().strftime("%H:%M:%S")
-    print(f"{Fore.WHITE}[{ts}] {color}{tag:<22}{Style.RESET_ALL} {msg}")
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+def _ts():
+    return datetime.now().strftime("%H:%M:%S")
+
+def log_ok(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.GREEN}✓ {tag:<34}{Style.RESET_ALL} {msg}")
+def log_err(tag, msg):  print(f"{Fore.WHITE}[{_ts()}] {Fore.RED}✗ {tag:<34}{Style.RESET_ALL} {msg}")
+def log_info(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.CYAN}  {tag:<34}{Style.RESET_ALL} {msg}")
+def log_skip(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.WHITE}· {tag:<34}{Style.RESET_ALL} {msg}")
+def log_mq(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.MAGENTA}⇢ {tag:<34}{Style.RESET_ALL} {msg}")
+
+# ─── Redis helpers ────────────────────────────────────────────────────────────
+
+def get_cursor(r: redis.Redis, key: str) -> str:
+    v = r.get(f"{REDIS_PREFIX}:cursor:{key}")
+    return v if v else DEFAULT_CURSOR
 
 
-def log_ok(tag, msg):   log(Fore.GREEN,   f"✓ {tag}", msg)
-def log_err(tag, msg):  log(Fore.RED,     f"✗ {tag}", msg)
-def log_info(tag, msg): log(Fore.CYAN,    f"  {tag}", msg)
-def log_skip(tag, msg): log(Fore.WHITE,   f"· {tag}", msg)
-
-# ─── Redis state helpers ──────────────────────────────────────────────────────
-
-def get_cursor(r: redis.Redis, table: str, default: str) -> str:
-    key = f"{REDIS_KEY_PREFIX}:{table}:cursor"
-    val = r.get(key)
-    return val if val else default
+def set_cursor(r: redis.Redis, key: str, ts: str):
+    r.set(f"{REDIS_PREFIX}:cursor:{key}", ts)
 
 
-def set_cursor(r: redis.Redis, table: str, ts: str):
-    r.set(f"{REDIS_KEY_PREFIX}:{table}:cursor", ts)
+def debounce_check(r: redis.Redis, key: str) -> bool:
+    dkey = f"{REDIS_PREFIX}:debounce:{key}"
+    return not r.set(dkey, "1", nx=True, ex=DEBOUNCE_TTL)
 
 
-def set_state(r: redis.Redis, table: str, stage: str, state: dict):
-    key = f"{REDIS_KEY_PREFIX}:{table}:{stage}:state"
-    r.set(key, json.dumps(state), ex=86400)
+def set_state(r: redis.Redis, key: str, state: dict):
+    r.set(f"{REDIS_PREFIX}:coord:{key}", json.dumps(state), ex=86400)
 
 
-def get_last_sync_ts(r: redis.Redis, table: str) -> str | None:
-    key = f"{REDIS_KEY_PREFIX}:{table}:sync_ts"
-    return r.get(key)
+# ─── Export runner ────────────────────────────────────────────────────────────
 
+def run_export_broker(tdtpcli: str, entry: dict, cursor: str) -> tuple[bool, int]:
+    """Run tdtpcli --export-broker. Returns (ok, rows)."""
+    cfg_path = str(TRAVEL_DIR / entry["src_cfg"])
+    cmd = [tdtpcli, "--export-broker", entry["table"]]
+    if entry.get("fields"):
+        cmd += ["--fields", entry["fields"]]
+    if entry.get("incremental") and cursor != DEFAULT_CURSOR:
+        cmd += ["--where", f"{entry['incremental']} >= \"{cursor}\""]
+    cmd += ["--config", cfg_path]
 
-def set_sync_ts(r: redis.Redis, table: str, sync_ts: str):
-    r.set(f"{REDIS_KEY_PREFIX}:{table}:sync_ts", sync_ts, ex=86400)
-
-
-def publish(r: redis.Redis, event: dict):
-    r.publish(f"{REDIS_KEY_PREFIX}:events", json.dumps(event))
-
-# ─── Template substitution ────────────────────────────────────────────────────
-
-def render_template(yaml_path: Path, vars: dict) -> str:
-    """Substitute {{VAR}} placeholders in YAML template, return rendered text."""
-    text = yaml_path.read_text(encoding="utf-8")
-    for k, v in vars.items():
-        text = text.replace(f"{{{{{k}}}}}", v)
-    # Detect unreplaced placeholders
-    remaining = re.findall(r"\{\{[A-Z_]+\}\}", text)
-    if remaining:
-        raise ValueError(f"Unreplaced template vars in {yaml_path.name}: {remaining}")
-    return text
-
-
-def write_temp_yaml(content: str) -> str:
-    """Write content to a temp file, return its path."""
-    fd, path = tempfile.mkstemp(suffix=".yaml", prefix="tdtp_travel_")
-    os.write(fd, content.encode("utf-8"))
-    os.close(fd)
-    return path
-
-# ─── Pipeline runner ──────────────────────────────────────────────────────────
-
-def run_pipeline(tdtpcli: str, yaml_path: str, label: str) -> tuple[bool, str]:
-    """Run tdtpcli --pipeline, return (success, output)."""
-    cmd = [tdtpcli, "--pipeline", yaml_path]
     t0 = time.time()
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         elapsed = round(time.time() - t0, 1)
         out = (result.stdout + result.stderr).strip()
-        if result.returncode == 0:
-            return True, f"{elapsed}s\n{out}"
-        else:
-            return False, f"exit={result.returncode} {elapsed}s\n{out}"
+        rows = 0
+        m = re.search(r"(\d+)\s+row", out, re.IGNORECASE)
+        if not m:
+            m = re.search(r"Exported\s+(\d+)\s+packet", out, re.IGNORECASE)
+        if m:
+            rows = int(m.group(1))
+        # parse "Exported N packet(s)" → actual rows from import will tell us
+        # but for now estimate from output
+        ok = result.returncode == 0
+        return ok, elapsed, out, rows
     except subprocess.TimeoutExpired:
-        return False, "timeout (300s)"
+        return False, 120, "timeout (120s)", 0
     except FileNotFoundError:
-        return False, f"tdtpcli not found: {tdtpcli}"
+        return False, 0, f"tdtpcli not found: {tdtpcli}", 0
 
 
-def extract_rows_from_output(output: str) -> int:
-    """Parse row count from tdtpcli output if available."""
-    m = re.search(r"(\d+)\s+row", output, re.IGNORECASE)
-    return int(m.group(1)) if m else -1
+# ─── Core sync logic ──────────────────────────────────────────────────────────
 
-# ─── Sync one table ───────────────────────────────────────────────────────────
+def sync_route(r: redis.Redis, tdtpcli: str, routing_key: str, entry: dict) -> bool:
+    label      = entry["label"]
+    cursor_key = routing_key.replace(".", "_") + "__" + entry["table"]
+    cursor     = get_cursor(r, cursor_key)
 
-def sync_table(r: redis.Redis, tdtpcli: str, table: str, default_cursor: str) -> bool:
-    """
-    Full sync cycle for one table:
-      1. Read cursor from Redis
-      2. Render extract template → temp YAML → run tdtpcli
-      3. On success: render load template → temp YAML → run tdtpcli
-      4. Update cursor and state in Redis
-    Returns True if both stages succeeded.
-    """
-    sync_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    cursor  = get_cursor(r, table, default_cursor)
+    log_info(label, f"cursor={cursor}  →  {entry['queue']}")
 
-    log_info(table, f"cursor={cursor}  sync_ts={sync_ts}")
-
-    # ── Stage 1: Extract (MSSQL → S3) ────────────────────────────────────────
-    extract_tpl = PIPELINES_DIR / f"extract_{table}.yaml"
-    if not extract_tpl.exists():
-        log_err(table, f"missing template: {extract_tpl}")
-        return False
-
-    try:
-        extract_yaml = render_template(extract_tpl, {
-            "LAST_SYNC": cursor,
-            "SYNC_TS":   sync_ts,
-        })
-        tmp_extract = write_temp_yaml(extract_yaml)
-    except Exception as e:
-        log_err(table, f"template render error: {e}")
-        return False
-
-    t0 = datetime.now()
-    try:
-        ok, out = run_pipeline(tdtpcli, tmp_extract, f"{table}/extract")
-    finally:
-        os.unlink(tmp_extract)
-
-    rows = extract_rows_from_output(out)
-    duration = round((datetime.now() - t0).total_seconds(), 1)
+    ok, elapsed, out, rows = run_export_broker(tdtpcli, entry, cursor)
 
     if not ok:
-        log_err(f"{table}/extract", f"FAILED ({duration}s)\n{out[:300]}")
-        set_state(r, table, "extract", {
-            "status": "error", "error": out[:500],
-            "ts": datetime.now().isoformat(), "duration": duration,
-        })
-        publish(r, {"event": "extract_failed", "table": table,
-                    "sync_ts": sync_ts, "error": out[:200]})
+        log_err(label, f"FAILED {elapsed}s\n{out[:1000]}")
+        set_state(r, cursor_key, {"status": "error", "error": out[:2000], "ts": datetime.now().isoformat()})
         return False
 
-    log_ok(f"{table}/extract", f"{rows} rows  {duration}s")
-    set_state(r, table, "extract", {
-        "status": "ok", "rows": rows,
-        "ts": datetime.now().isoformat(), "duration": duration,
-        "sync_ts": sync_ts, "cursor": cursor,
-    })
-    set_sync_ts(r, table, sync_ts)
-    publish(r, {"event": "extract_ok", "table": table,
-                "sync_ts": sync_ts, "rows": rows, "duration": duration})
-
-    # Skip load if nothing new
-    if rows == 0:
-        log_skip(f"{table}/load", "nothing new, skipped")
-        return True
-
-    # ── Stage 2: Load (S3 → PostgreSQL) ──────────────────────────────────────
-    load_tpl = PIPELINES_DIR / f"load_{table}.yaml"
-    if not load_tpl.exists():
-        log_skip(f"{table}/load", f"no load template ({load_tpl.name}), skip")
-        # Still update cursor — extract succeeded
-        set_cursor(r, table, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        return True
-
-    try:
-        load_yaml = render_template(load_tpl, {"SYNC_TS": sync_ts})
-        tmp_load  = write_temp_yaml(load_yaml)
-    except Exception as e:
-        log_err(f"{table}/load", f"template render error: {e}")
-        return False
-
-    t0 = datetime.now()
-    try:
-        ok, out = run_pipeline(tdtpcli, tmp_load, f"{table}/load")
-    finally:
-        os.unlink(tmp_load)
-
-    duration = round((datetime.now() - t0).total_seconds(), 1)
-    rows_loaded = extract_rows_from_output(out)
-
-    if not ok:
-        log_err(f"{table}/load", f"FAILED ({duration}s)\n{out[:300]}")
-        set_state(r, table, "load", {
-            "status": "error", "error": out[:500],
-            "ts": datetime.now().isoformat(), "duration": duration,
-            "sync_ts": sync_ts,
-        })
-        publish(r, {"event": "load_failed", "table": table,
-                    "sync_ts": sync_ts, "error": out[:200]})
-        return False
-
-    log_ok(f"{table}/load", f"{rows_loaded} rows  {duration}s → PostgreSQL")
-    set_state(r, table, "load", {
-        "status": "ok", "rows": rows_loaded,
-        "ts": datetime.now().isoformat(), "duration": duration,
-        "sync_ts": sync_ts,
-    })
-
-    # ── Advance cursor only after both stages succeed ──────────────────────
+    log_ok(label, f"{elapsed}s → {entry['queue']}")
     new_cursor = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    set_cursor(r, table, new_cursor)
-    log_info(f"{table}/cursor", f"→ {new_cursor}")
+    set_cursor(r, cursor_key, new_cursor)
 
-    publish(r, {"event": "sync_complete", "table": table,
-                "sync_ts": sync_ts, "rows": rows_loaded,
-                "cursor": new_cursor})
+    # Notify consumer via Redis pub/sub
+    r.publish(NOTIFY_CHANNEL, json.dumps({
+        "queue":    entry["queue"],
+        "label":    label,
+        "sync_ts":  datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "cursor":   new_cursor,
+    }))
+    set_state(r, cursor_key, {
+        "status": "queued", "queue": entry["queue"],
+        "ts": datetime.now().isoformat(), "elapsed": elapsed,
+    })
     return True
 
-# ─── Dashboard ────────────────────────────────────────────────────────────────
 
-def print_dashboard(r: redis.Redis, cycle: int):
-    print(f"\n{Fore.WHITE}{'─'*60}")
-    print(f"  Coordinator  cycle={cycle}  "
-          f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'─'*60}{Style.RESET_ALL}")
-    for table, _, default in TABLES:
-        cursor = get_cursor(r, table, default)
-        ext = r.get(f"{REDIS_KEY_PREFIX}:{table}:extract:state")
-        lod = r.get(f"{REDIS_KEY_PREFIX}:{table}:load:state")
+# ─── Message handler ──────────────────────────────────────────────────────────
 
-        ext_s = json.loads(ext) if ext else {}
-        lod_s = json.loads(lod) if lod else {}
+def handle_message(channel, method, _properties, body, r: redis.Redis, tdtpcli: str):
+    routing_key = method.routing_key
+    try:
+        event = json.loads(body) if body else {}
+    except Exception:
+        event = {}
 
-        ext_ok  = "✓" if ext_s.get("status") == "ok"  else ("✗" if ext_s else "·")
-        lod_ok  = "✓" if lod_s.get("status") == "ok"  else ("✗" if lod_s else "·")
-        rows    = ext_s.get("rows", "-")
-        ldrows  = lod_s.get("rows", "-")
+    log_mq("MSG", f"{routing_key}  node={event.get('node','?')} event={event.get('event','?')}")
 
-        color = Fore.GREEN if ext_ok == "✓" and lod_ok == "✓" else \
-                Fore.RED   if "✗" in (ext_ok, lod_ok) else Fore.WHITE
+    entries = ROUTE_MAP.get(routing_key)
+    if entries is None:
+        log_skip("ROUTE", f"unknown: {routing_key}")
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+        return
+    if not entries:
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+        return
 
-        print(f"  {color}{table:<12}{Style.RESET_ALL}"
-              f"  cursor={cursor[:16]}"
-              f"  extract={ext_ok}({rows})"
-              f"  load={lod_ok}({ldrows})")
-    print()
+    if debounce_check(r, routing_key):
+        log_skip("DEBOUNCE", f"{routing_key} (within {DEBOUNCE_TTL}s)")
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+        return
 
-# ─── Main loop ────────────────────────────────────────────────────────────────
+    all_ok = True
+    for entry in entries:
+        if not sync_route(r, tdtpcli, routing_key, entry):
+            all_ok = False
+
+    r.set(f"{REDIS_PREFIX}:coordinator:alive", datetime.now().isoformat(), ex=90)
+    if all_ok:
+        log_ok("DONE", routing_key)
+    else:
+        log_err("PARTIAL", f"{routing_key}  some exports failed")
+
+    channel.basic_ack(delivery_tag=method.delivery_tag)
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Travel Agency Pipeline Coordinator")
-    parser.add_argument("--interval",  type=float, default=30.0,
-                        help="Seconds between coordinator cycles (default: 30)")
-    parser.add_argument("--tdtpcli",   default=TDTPCLI_DEFAULT,
-                        help="Path to tdtpcli executable")
-    parser.add_argument("--redis",     default="localhost:6379",
-                        help="Redis address (default: localhost:6379)")
-    parser.add_argument("--once",      action="store_true",
-                        help="Run one cycle and exit")
+    import argparse
+    parser = argparse.ArgumentParser(description="Travel Agency Coordinator")
+    parser.add_argument("--tdtpcli", default=TDTPCLI_DEFAULT)
+    parser.add_argument("--amqp",    default="amqp://tdtp:tdtp@localhost:5672/")
+    parser.add_argument("--redis",   default="localhost:6379")
     args = parser.parse_args()
 
     if not Path(args.tdtpcli).exists():
-        # Try current directory
         local = Path("tdtpcli.exe")
         if local.exists():
             args.tdtpcli = str(local)
         else:
-            print(f"{Fore.RED}tdtpcli not found: {args.tdtpcli}{Style.RESET_ALL}")
-            print(f"  Use --tdtpcli /path/to/tdtpcli.exe")
+            print(f"{Fore.RED}tdtpcli not found{Style.RESET_ALL}")
             sys.exit(1)
 
     host, port = args.redis.rsplit(":", 1)
     r = redis.Redis(host=host, port=int(port), decode_responses=True)
     r.ping()
+    log_ok("Redis", args.redis)
 
-    print(f"{Fore.GREEN}Travel Agency Coordinator{Style.RESET_ALL}")
-    print(f"  tdtpcli  : {args.tdtpcli}")
-    print(f"  interval : {args.interval}s")
-    print(f"  redis    : {args.redis}")
-    print(f"  pipelines: {PIPELINES_DIR}")
-    print(f"  Press Ctrl+C to stop\n")
+    params = pika.URLParameters(args.amqp)
+    params.heartbeat = 60
+    conn    = pika.BlockingConnection(params)
+    channel = conn.channel()
+    channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
+    channel.queue_declare(queue=QUEUE, durable=True)
+    channel.queue_bind(exchange=EXCHANGE, queue=QUEUE, routing_key="#")
+    channel.basic_qos(prefetch_count=1)
 
-    cycle = int(r.get(f"{REDIS_KEY_PREFIX}:coordinator:cycle") or 0)
+    def _on_message(ch, method, props, body):
+        handle_message(ch, method, props, body, r, args.tdtpcli)
 
+    channel.basic_consume(queue=QUEUE, on_message_callback=_on_message)
+
+    print(f"\n{Fore.GREEN}Travel Agency Coordinator{Style.RESET_ALL}")
+    print(f"  tdtpcli : {args.tdtpcli}")
+    print(f"  amqp    : {args.amqp}")
+    print(f"  redis   : {args.redis}  notify: {NOTIFY_CHANNEL}")
+    print(f"  debounce: {DEBOUNCE_TTL}s\n")
+    print(f"  Routes:")
+    for rk, entries in ROUTE_MAP.items():
+        for e in entries:
+            inc = f"  [incr: {e['incremental']}]" if e.get("incremental") else "  [full]"
+            print(f"    {rk:<42} → {e['queue']}{inc}")
+        if not entries:
+            print(f"    {rk:<42}   (local only)")
+    print(f"\n  Waiting for events... Ctrl+C to stop\n")
+
+    r.set(f"{REDIS_PREFIX}:coordinator:alive", datetime.now().isoformat(), ex=90)
     try:
         while True:
-            cycle += 1
-            r.set(f"{REDIS_KEY_PREFIX}:coordinator:alive",
-                  datetime.now().isoformat(), ex=90)
-            r.set(f"{REDIS_KEY_PREFIX}:coordinator:cycle", cycle)
-
-            log_info("CYCLE", f"#{cycle} starting")
-            publish(r, {"event": "cycle_start", "cycle": cycle,
-                        "ts": datetime.now().isoformat()})
-
-            for table, mult, default in TABLES:
-                if cycle % mult != 0:
-                    log_skip(table, f"every {mult} cycles, skip")
-                    continue
-                try:
-                    sync_table(r, args.tdtpcli, table, default)
-                except Exception as e:
-                    log_err(table, f"unhandled error: {e}")
-
-            publish(r, {"event": "cycle_done", "cycle": cycle,
-                        "ts": datetime.now().isoformat()})
-
-            print_dashboard(r, cycle)
-
-            if args.once:
-                break
-
-            log_info("SLEEP", f"{args.interval}s until cycle #{cycle+1}")
-            time.sleep(args.interval)
-
+            conn.process_data_events(time_limit=30)
+            r.set(f"{REDIS_PREFIX}:coordinator:alive", datetime.now().isoformat(), ex=90)
     except KeyboardInterrupt:
-        print(f"\n{Fore.YELLOW}Coordinator stopped at cycle {cycle}.{Style.RESET_ALL}")
+        print(f"\n{Fore.YELLOW}Coordinator stopped.{Style.RESET_ALL}")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

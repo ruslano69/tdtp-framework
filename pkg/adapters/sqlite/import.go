@@ -111,6 +111,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 	for i, field := range pkgSchema.Fields {
 		fieldNames[i] = field.Name
 	}
+	columnList := strings.Join(fieldNames, ", ")
 
 	// Батчинг: вставляем строки батчами.
 	// SQLite ограничивает число параметров до 999 (SQLITE_LIMIT_VARIABLE_NUMBER).
@@ -124,50 +125,52 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 		batchSize = 500 // разумный верхний предел для экономии памяти
 	}
 
-	// Вставляем батчами
+	// Строим плейсхолдер одной строки: (?, ?, ...) — одинаков для всех строк.
+	rowPH := "(" + strings.Repeat("?, ", numFields-1) + "?)"
+
+	// Строим запросы для полного батча и неполного последнего батча.
+	fullBatchValues := strings.Repeat(rowPH+", ", batchSize-1) + rowPH
+	fullBatchQuery := fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, tableName, columnList, fullBatchValues)
+
+	// Prepare полного батча один раз — SQLite не будет парсить запрос повторно.
+	fullStmt, err := a.db.PrepareContext(ctx, fullBatchQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare batch insert: %w", err)
+	}
+	defer func() { _ = fullStmt.Close() }()
+
+	// Буфер аргументов переиспользуется между батчами.
+	args := make([]any, batchSize*numFields)
+
 	for i := 0; i < len(rows); i += batchSize {
 		end := i + batchSize
 		if end > len(rows) {
 			end = len(rows)
 		}
-
 		batch := rows[i:end]
 
-		// Строим VALUES для батча: VALUES (?,?,...), (?,?,...), ...
-		valuePlaceholders := make([]string, len(batch))
-		for j := range batch {
-			placeholders := make([]string, len(pkgSchema.Fields))
-			for k := range placeholders {
-				placeholders[k] = "?"
-			}
-			valuePlaceholders[j] = fmt.Sprintf("(%s)", strings.Join(placeholders, ", "))
-		}
-
-		// Полный запрос
-		query := fmt.Sprintf("%s INTO %s (%s) VALUES %s",
-			insertCmd,
-			tableName,
-			strings.Join(fieldNames, ", "),
-			strings.Join(valuePlaceholders, ", "))
-
-		// Собираем все аргументы для батча
-		args := make([]any, 0, len(batch)*len(pkgSchema.Fields))
+		// Собираем аргументы батча в переиспользуемый буфер.
 		for rowIdx, row := range batch {
-			// Парсим строку
 			values := base.ParseRowValues(row)
-
-			// Конвертируем значения
 			rowArgs, err := base.ConvertRowToSQLValues(values, pkgSchema, a.converter, "sqlite")
 			if err != nil {
 				return fmt.Errorf("row %d: %w", i+rowIdx, err)
 			}
-
-			args = append(args, rowArgs...)
+			copy(args[rowIdx*numFields:], rowArgs)
 		}
 
-		// Выполняем батч INSERT
-		if _, err := a.db.ExecContext(ctx, query, args...); err != nil {
-			return fmt.Errorf("failed to insert batch at row %d: %w", i, err)
+		if len(batch) == batchSize {
+			// Полный батч — используем prepared statement.
+			if _, err := fullStmt.ExecContext(ctx, args...); err != nil {
+				return fmt.Errorf("failed to insert batch at row %d: %w", i, err)
+			}
+		} else {
+			// Последний неполный батч — строим и выполняем отдельно.
+			partValues := strings.Repeat(rowPH+", ", len(batch)-1) + rowPH
+			partQuery := fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, tableName, columnList, partValues)
+			if _, err := a.db.ExecContext(ctx, partQuery, args[:len(batch)*numFields]...); err != nil {
+				return fmt.Errorf("failed to insert last batch at row %d: %w", i, err)
+			}
 		}
 	}
 

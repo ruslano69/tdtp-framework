@@ -149,10 +149,20 @@ func (l *Lexer) NextToken() Token {
 	case '*':
 		tok.Type = TokenStar
 		tok.Literal = string(l.ch)
-	case '\'', '"':
+	case '\'':
 		tok.Type = TokenString
 		tok.Literal = l.readString(l.ch)
 		return tok // не вызываем l.readChar() так как readString уже продвинулся
+	case '"':
+		// ANSI SQL: double-quoted identifier "Field Name" → TokenIdent "Field Name"
+		tok.Type = TokenIdent
+		tok.Literal = l.readString(l.ch)
+		return tok
+	case '[':
+		// MSSQL/Access bracket-quoted identifier: [Field Name] → TokenIdent "Field Name"
+		tok.Type = TokenIdent
+		tok.Literal = l.readBracketedIdent()
+		return tok
 	default:
 		switch {
 		case isLetter(l.ch):
@@ -218,6 +228,22 @@ func (l *Lexer) readNumber() string {
 		l.readChar()
 	}
 	return l.input[position:l.pos]
+}
+
+// readBracketedIdent читает идентификатор в квадратных скобках MSSQL/Access-стиля.
+// Вызывается когда текущий символ — '['; возвращает содержимое без скобок.
+// Пример: [Termination Date] → "Termination Date"
+func (l *Lexer) readBracketedIdent() string {
+	l.readChar() // пропускаем '['
+	position := l.pos
+	for l.ch != ']' && l.ch != 0 {
+		l.readChar()
+	}
+	str := l.input[position:l.pos]
+	if l.ch == ']' {
+		l.readChar() // пропускаем ']'
+	}
+	return str
 }
 
 // readString читает строку в кавычках

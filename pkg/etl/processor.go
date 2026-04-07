@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/sanitize"
 )
 
 // ProcessorStats представляет статистику выполнения ETL
@@ -167,7 +168,7 @@ func (p *Processor) loadSources(ctx context.Context) ([]SourceData, error) {
 	for _, data := range sourcesData {
 		if data.Error == nil && data.Packet != nil {
 			successCount++
-			p.stats.TotalRowsLoaded += len(data.Packet.Data.Rows)
+			p.stats.TotalRowsLoaded += data.Packet.Header.RecordsInPart
 		}
 	}
 	p.stats.SourcesLoaded = successCount
@@ -200,6 +201,22 @@ func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceD
 
 		if source.Packet == nil {
 			return fmt.Errorf("source '%s' has no data", source.SourceName)
+		}
+
+		// Sanitize field names if configured for this source.
+		// Applied to schema only — row data is positional and never modified.
+		for i := range p.config.Sources {
+			if p.config.Sources[i].Name == source.SourceName && p.config.Sources[i].Sanitize.IsActive() {
+				sc := p.config.Sources[i].Sanitize
+				opts := sanitize.Options{Clear: sc.Clear, Translit: sc.Translit}
+				if changed := sanitize.ApplyToSchema(&source.Packet.Schema, opts); len(changed) > 0 {
+					fmt.Printf("  Source '%s': sanitized %d field name(s):\n", source.SourceName, len(changed))
+					for _, r := range changed {
+						fmt.Printf("    '%s' → '%s'\n", r.OriginalName, r.SafeName)
+					}
+				}
+				break
+			}
 		}
 
 		// Создаем таблицу в workspace

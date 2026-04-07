@@ -28,6 +28,12 @@ type DataPacket struct {
 	Schema       Schema        `xml:"Schema"`
 	Data         Data          `xml:"Data"`
 	AlarmDetails *AlarmDetails `xml:"AlarmDetails,omitempty"`
+
+	// rawRows хранит исходные строки до pipe-join/escape.
+	// Устанавливается GenerateReference; writePacketTo использует их напрямую
+	// (без RowsToData, без strings.Join, без промежуточных аллокаций).
+	// Если nil — используется Data.Rows (broker-путь, компрессия, etc.).
+	rawRows [][]string
 }
 
 // Header содержит метаданные сообщения
@@ -62,6 +68,11 @@ type Field struct {
 	ReadOnly      bool           `xml:"readonly,attr,omitempty"` // Read-only поля (timestamp, computed)
 	Fixed         bool           `xml:"fixed,attr,omitempty"`    // v1.3.1: значение не меняется в пределах пакета
 	SpecialValues *SpecialValues `xml:"SpecialValues,omitempty"` // v1.3.1: маркеры специальных значений
+
+	// OriginalName is set by the sanitizer when Name is transformed into a safe
+	// SQL identifier. It is never serialized (xml:"-", json:"-") and carries the
+	// original field name for storage as a database column comment.
+	OriginalName string `xml:"-" json:"-"`
 }
 
 // SpecialValues содержит маркеры специальных значений для поля (v1.3.1)
@@ -118,6 +129,11 @@ func NewDataPacket(msgType MessageType, tableName string) *DataPacket {
 // GetRows извлекает все данные из пакета в виде [][]string
 // Правильно обрабатывает экранирование специальных символов
 func (p *DataPacket) GetRows() [][]string {
+	// Если rawRows установлены (GenerateReference fast-path) — возвращаем напрямую.
+	// Это исходные значения до pipe-join, они уже в формате [][]string.
+	if len(p.rawRows) > 0 {
+		return p.rawRows
+	}
 	parser := NewParser()
 	rows := make([][]string, len(p.Data.Rows))
 	for i, row := range p.Data.Rows {
@@ -131,6 +147,15 @@ func (p *DataPacket) GetRows() [][]string {
 func (p *DataPacket) SetRows(rows [][]string) {
 	p.Data = RowsToData(rows)
 	p.Header.RecordsInPart = len(rows)
+}
+
+// MaterializeRows обеспечивает что Data.Rows заполнены из rawRows.
+// Вызывается перед передачей пакета в функции, работающие напрямую с Data.Rows (импорт, сжатие).
+func (p *DataPacket) MaterializeRows() {
+	if len(p.rawRows) > 0 && len(p.Data.Rows) == 0 {
+		p.Data = RowsToData(p.rawRows)
+		p.rawRows = nil
+	}
 }
 
 // SchemaEquals reports whether two schemas are structurally identical:

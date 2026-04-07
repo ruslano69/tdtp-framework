@@ -2,8 +2,8 @@
 
 **tdtpcli** - утилита командной строки для работы с TDTP (Table Data Transfer Protocol).
 
-**Версия:** 1.7.0
-**Дата:** 10.03.2026
+**Версия:** 1.8.0-beta
+**Дата:** 02.04.2026
 
 ---
 
@@ -13,21 +13,22 @@
 2. [Быстрый старт](#быстрый-старт)
 3. [Конфигурация](#конфигурация)
 4. [Команды](#команды)
-   - [--list](#--list) · [--list-views](#--list-views) · [--inspect](#--inspect)
-   - [--export](#--export) · [--import](#--import)
+   - [--list](#--list) · [--list-views](#--list-views) · [--inspect](#--inspect) · [--test](#--test)
+   - [--export](#--export) · [--import](#--import) · [Санитизация имён полей](#санитизация-имён-полей---translit---clear)
    - [--export-xlsx](#--export-xlsx) · [--import-xlsx](#--import-xlsx) · [--to-xlsx](#--to-xlsx) · [--from-xlsx](#--from-xlsx)
    - [--export-broker](#--export-broker) · [--import-broker](#--import-broker) · [--listen](#--listen-beta)
    - [--sync-incremental](#--sync-incremental)
    - [--diff](#--diff) · [--merge](#--merge)
    - [--to-compact](#--to-compact) · [--to-html](#--to-html)
    - [--pipeline](#--pipeline) · [--process-request](#--process-request)
-5. [Compact Format (v1.3.1)](#compact-format-v131)
-6. [ETL Pipeline](#etl-pipeline)
-7. [Шифрование AES-256-GCM](#шифрование-aes-256-gcm)
-8. [Фильтрация данных (TDTQL)](#фильтрация-данных-tdtql)
-9. [Работа с Message Brokers](#работа-с-message-brokers)
-10. [Примеры использования](#примеры-использования)
-11. [Устранение неполадок](#устранение-неполадок)
+5. [Рабочий процесс: --inspect → --test → --import](#рабочий-процесс-inspect--test--import)
+6. [Compact Format (v1.3.1)](#compact-format-v131)
+7. [ETL Pipeline](#etl-pipeline)
+8. [Шифрование AES-256-GCM](#шифрование-aes-256-gcm)
+9. [Фильтрация данных (TDTQL)](#фильтрация-данных-tdtql)
+10. [Работа с Message Brokers](#работа-с-message-brokers)
+11. [Примеры использования](#примеры-использования)
+12. [Устранение неполадок](#устранение-неполадок)
 
 ---
 
@@ -342,6 +343,51 @@ data:
 
 ---
 
+### --test
+
+Проверить целостность TDTP-файла без подключения к БД: распаковать в памяти, проверить XXH3-чексумму, сверить счётчик строк с заголовком.
+
+> **Отличие от `--inspect`:**
+> - `--inspect` отвечает на вопрос **"что внутри?"** — выводит имена полей, типы, имя таблицы, UUID.
+> - `--test` отвечает на вопрос **"файл не повреждён?"** — проверяет целостность данных и контрольные суммы.
+>
+> Рекомендуемый порядок перед импортом: `--inspect` → `--test` → `--import`
+
+**Синтаксис:**
+```bash
+tdtpcli --test <file>
+```
+
+**Что проверяется:**
+- Корректность XML-структуры
+- Счётчик строк (`<R>`) совпадает с `RecordsInPart` в заголовке
+- При `--compress`: распаковка без ошибок (zstd и kanzi)
+- При `--hash`: XXH3-контрольная сумма данных (`checksum OK` / `checksum MISMATCH`)
+- Для multi-part наборов: все `_part_N_of_M` части присутствуют, `InReplyTo` UUID совпадает у всех
+
+**Примеры:**
+```bash
+# Простая проверка
+tdtpcli --test users.tdtp.xml
+# ✓ 10 rows (uncompressed)   Total rows: 10
+
+# Сжатый + контрольная сумма
+tdtpcli --test orders.tdtp.xml
+# ✓ algo=zstd, 1000 rows, decompressed 12ms, checksum OK
+
+# S3-файл (без локального скачивания)
+tdtpcli --test s3://my-bucket/exports/users.tdtp.xml --config config.yaml
+
+# Проверка перед импортом (recommended)
+tdtpcli --test delivery.tdtp.xml && tdtpcli --import delivery.tdtp.xml
+```
+
+**Exit codes:**
+- `0` — файл прошёл все проверки
+- `1` — файл повреждён, отсутствуют части, или контрольная сумма не совпала
+
+---
+
 ### --to-html
 
 Конвертировать TDTP-файл в HTML для просмотра в браузере.
@@ -512,6 +558,59 @@ tdtpcli -config <config.yaml> --import <file> [--table <name>] [--strategy <stra
 - **reference** → REPLACE (полная замена через temp table)
 - **delta** → COPY (вставка новых записей)
 - **response** → REPLACE
+
+---
+
+### Санитизация имён полей (`--translit`, `--clear`)
+
+Флаги применяются **только при `--import`**. Экспорт всегда сохраняет оригинальные имена — они являются источником истины.
+
+| Флаг | Что делает |
+|------|-----------|
+| `--clear` | Заменяет спецсимволы в именах полей безопасными токенами: `%` → `_pct_`, `$` → `_usd_`, `#` → `_xh_`, `@` → `_at_`, `&` → `_and_`, `?` → `_is_`, `~` → `_not_`, пробел/`.`/`,`/`-` → `_`. Оставшиеся не-ASCII → `_`. |
+| `--translit` | Транслитерирует не-ASCII символы в ближайший ASCII через go-unidecode: `Имя` → `Imia`, `Österreich` → `Osterreich`, `Ñoño` → `Nono`. |
+
+Флаги можно комбинировать: `--translit` выполняется первым, затем `--clear`.
+
+**Оригинальные имена сохраняются как комментарии к колонкам:**
+- PostgreSQL: `COMMENT ON COLUMN t.col IS 'original: Имя пользователя'`
+- MySQL: `col TEXT COMMENT 'original: Имя пользователя'`
+
+**Примеры:**
+
+```bash
+# MS Access экспорт: поля "Order ID", "Total Cost $", "Discount %"
+tdtpcli --import access_orders.tdtp.xml --clear --strategy replace
+# Order ID  → Order_ID
+# Total Cost $ → Total_Cost_usd_
+# Discount % → Discount_pct_
+
+# 1С / ERP с кириллическими именами полей
+tdtpcli --import erp_export.tdtp.xml --translit --clear --strategy replace
+# Имя пользователя → Imia_polzovatelia
+# Дата рождения   → Data_rozhdeniia
+
+# Европейские диакритики (без спецсимволов)
+tdtpcli --import eu_staff.tdtp.xml --translit --strategy replace
+# Österreich → Osterreich
+
+# Предварительный просмотр: посмотреть схему перед импортом
+tdtpcli --inspect access_orders.tdtp.xml
+```
+
+**В ETL pipeline** санитизация настраивается на уровне источника в YAML:
+
+```yaml
+sources:
+  - name: legacy_erp
+    type: tdtp
+    dsn: erp_export.tdtp.xml
+    sanitize:
+      translit: true   # "Имя" → "Imia"
+      clear: true      # "Total %" → "Total_pct_"
+```
+
+**Тестовые XML-файлы:** `tests/sanitize/` — `access_fields.tdtp.xml`, `cyrillic_fields.tdtp.xml`, `exotic_mixed.tdtp.xml`, `safe_import.tdtp.xml`
 
 ---
 
@@ -799,6 +898,60 @@ Auto-detect по данным (VIEW с `_prefix`):
 
 ---
 
+## Рабочий процесс: --inspect → --test → --import
+
+### Понимание структуры vs. Контроль целостности
+
+Перед импортом внешнего файла рекомендуется выполнить два проверочных шага:
+
+```
+📋 --inspect   →  ЧТО в файле?       (структура, поля, типы, число строк)
+🔍 --test      →  ЦЕЛО ли это?       (распаковка, чексумма, completeness)
+📥 --import    →  Загрузка в БД
+```
+
+| Команда | Нужна БД? | Что проверяет |
+|---------|-----------|---------------|
+| `--inspect` | ❌ | Имена полей и типы, UUID, имя таблицы, число строк, сжатие, compact-формат |
+| `--test` | ❌ | Целостность данных: распаковка без ошибок, XXH3-чексумма, счётчик строк, все части multi-part набора |
+| `--import` | ✅ | Загружает данные в БД (меняет данные!) |
+
+### Типовой сценарий
+
+```bash
+# 1. Изучить файл — понять структуру
+tdtpcli --inspect delivery.tdtp.xml
+# file: delivery.tdtp.xml
+# table: orders
+# schema:
+#   fields: 8
+#   names: [OrderID, CustomerID, Total, ...]
+# data:
+#   rows: 5000
+# compressed: true  algo: zstd
+
+# 2. Убедиться в целостности
+tdtpcli --test delivery.tdtp.xml
+# ✓ algo=zstd, 5000 rows, decompressed 23ms, checksum OK
+
+# 3. Только после этого — импортировать
+tdtpcli --import delivery.tdtp.xml --config pg.yaml --strategy replace
+```
+
+### Параллельный экспорт и порядок пакетов
+
+Начиная с v1.8.0, экспорт использует **параллельную обработку пакетов** для максимальной скорости. Это означает:
+
+> ⚠️ **Порядок пакетов в multi-part файлах не гарантирован.**
+> `_part_1_of_4`, `_part_2_of_4` и т.д. — нумерация частей определяется порядком завершения
+> параллельных горутин, а не порядком строк в таблице.
+
+Это **не влияет на корректность данных** при импорте — `--import` собирает все части по `InReplyTo` UUID и восстанавливает полный набор независимо от порядка. Но важно понимать при ручной работе с файлами.
+
+`--test` всегда проверяет наличие **всех** частей и корректность `InReplyTo` у каждой.
+
+---
+
 ## Compact Format (v1.3.1)
 
 TDTP v1.3.1 вводит **compact-формат** для эффективного хранения данных с повторяющимися значениями в группах строк.
@@ -1026,6 +1179,28 @@ export MERCURY_SERVER_SECRET=dev-secret
 | `--order-by` | Сортировка | `--order-by "balance DESC"` |
 | `--limit` | Лимит записей | `--limit 100` |
 | `--offset` | Пропустить записей | `--offset 50` |
+
+### Имена полей с пробелами и спецсимволами
+
+Поля из MSSQL / MS Access часто содержат пробелы, `$`, `%`, `#` и другие символы. В TDTQL используйте **синтаксис квадратных скобок** — аналогично SSMS:
+
+```bash
+# Поле "Termination Date" из ZTR$Employee (MSSQL)
+tdtpcli --export ZTR$Employee --where '[Termination Date] = "1753-01-01"'
+
+# Поле "Total Cost $" из Access экспорта
+tdtpcli --export orders --where '[Total Cost $] > 100'
+
+# Поле с вопросительным знаком
+tdtpcli --export leads --where '[Is Active?] = 1'
+```
+
+Скобки снимаются при парсинге и имя поля правильно квотируется для каждой СУБД:
+- MSSQL: `[Termination Date]`
+- PostgreSQL / SQLite: `"Termination Date"`
+- MySQL: `` `Termination Date` ``
+
+Это работает для всех операторов: `=`, `>`, `IN`, `BETWEEN`, `IS NULL`, `LIKE`.
 
 ### Операторы WHERE
 

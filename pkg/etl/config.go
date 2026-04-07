@@ -48,6 +48,25 @@ type ResultLogConfig struct {
 	TTL      int    `yaml:"ttl"`      // TTL ключа в секундах (по умолчанию 3600)
 }
 
+// SanitizeFieldsConfig определяет правила санитайзинга имён полей источника.
+// Применяется к именам полей в схеме до загрузки в workspace; данные строк не изменяются.
+type SanitizeFieldsConfig struct {
+	// Enabled включает санитайзинг. Можно опустить — достаточно задать translit или clear.
+	Enabled bool `yaml:"enabled"`
+	// Translit транслитерирует не-ASCII символы в ASCII через go-unidecode
+	// (кириллица, европейские диакритики: "Имя" → "Imia", "Österreich" → "Osterreich").
+	Translit bool `yaml:"translit"`
+	// Clear заменяет спецсимволы безопасными токенами:
+	// % → _pct, @ → _at, # → _xh, пробел → _, и т.д.
+	// Оставшиеся не-ASCII символы заменяются на _.
+	Clear bool `yaml:"clear"`
+}
+
+// IsActive возвращает true если санитайзинг должен быть применён.
+func (s *SanitizeFieldsConfig) IsActive() bool {
+	return s != nil && (s.Enabled || s.Translit || s.Clear)
+}
+
 // SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc, TDTP-S3)
 type SourceConfig struct {
 	Name             string `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
@@ -65,6 +84,13 @@ type SourceConfig struct {
 	// Используется только для type: tdtp-s3. DSN может быть s3://bucket/key (bucket перекрывает S3.Bucket)
 	// или просто ключом (путём к объекту) при заданном S3.Bucket.
 	S3 *storage.S3Config `yaml:"s3,omitempty"`
+	// Sanitize — правила санитайзинга имён полей.
+	// Применяется к схеме источника до загрузки данных в workspace.
+	// Пример:
+	//   sanitize:
+	//     translit: true   # "Имя" → "Imia"
+	//     clear: true      # "Total %" → "Total_pct"
+	Sanitize *SanitizeFieldsConfig `yaml:"sanitize,omitempty"`
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -112,14 +138,17 @@ type XLSXOutputConfig struct {
 
 // TDTPOutputConfig определяет параметры экспорта в TDTP формат
 type TDTPOutputConfig struct {
-	Format      string            `yaml:"format"`       // Формат: xml, json (в будущем)
-	Compression bool              `yaml:"compression"`  // Использовать zstd сжатие
-	Destination string            `yaml:"destination"`  // Путь к файлу или s3://bucket/key
-	Encryption  bool              `yaml:"encryption"`   // Шифровать результат через xZMercury (AES-256-GCM)
-	Compact     bool              `yaml:"compact"`      // v1.3.1: compact format
-	CompactTail bool              `yaml:"compact_tail"` // v1.3.1: tail-строка
-	FixedFields []string          `yaml:"fixed_fields"` // v1.3.1: явный список fixed полей
-	S3          *storage.S3Config `yaml:"s3,omitempty"` // S3-совместимое хранилище (SeaweedFS, MinIO и т.п.)
+	Format        string            `yaml:"format"`         // Формат: xml, json (в будущем)
+	Compression   bool              `yaml:"compression"`    // Использовать сжатие
+	Compress      bool              `yaml:"compress"`       // Алиас для compression (совместимость с CLI)
+	CompressAlgo  string            `yaml:"compress_algo"`  // Алгоритм: zstd (по умолчанию) или kanzi
+	CompressLevel int               `yaml:"compress_level"` // Уровень: 1-19 (zstd), 6-7 (kanzi)
+	Destination   string            `yaml:"destination"`    // Путь к файлу или s3://bucket/key
+	Encryption    bool              `yaml:"encryption"`     // Шифровать результат через xZMercury (AES-256-GCM)
+	Compact       bool              `yaml:"compact"`        // v1.3.1: compact format
+	CompactTail   bool              `yaml:"compact_tail"`   // v1.3.1: tail-строка
+	FixedFields   []string          `yaml:"fixed_fields"`   // v1.3.1: явный список fixed полей
+	S3            *storage.S3Config `yaml:"s3,omitempty"`   // S3-совместимое хранилище (SeaweedFS, MinIO и т.п.)
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ
@@ -414,6 +443,21 @@ func (o *OutputConfig) Validate() error {
 	return nil
 }
 
+// setTDTPCompressionDefaults устанавливает дефолтные значения algo/level для TDTPOutputConfig.
+// Логика: kanzi → дефолт level 6; иное → zstd level 3.
+func setTDTPCompressionDefaults(t *TDTPOutputConfig) {
+	if t.CompressAlgo == "" {
+		t.CompressAlgo = "zstd"
+	}
+	if t.CompressLevel == 0 {
+		if t.CompressAlgo == "kanzi" {
+			t.CompressLevel = 6
+		} else {
+			t.CompressLevel = 3
+		}
+	}
+}
+
 // SetDefaults устанавливает значения по умолчанию для необязательных полей
 func (c *PipelineConfig) SetDefaults() {
 	// Defaults для version
@@ -446,11 +490,13 @@ func (c *PipelineConfig) SetDefaults() {
 		if c.Output.TDTP.Format == "" {
 			c.Output.TDTP.Format = "xml"
 		}
+		setTDTPCompressionDefaults(c.Output.TDTP)
 	}
 	if c.Output.Type == "tdtp" && c.Output.Fallback != nil && c.Output.Fallback.TDTP != nil {
 		if c.Output.Fallback.TDTP.Format == "" {
 			c.Output.Fallback.TDTP.Format = "xml"
 		}
+		setTDTPCompressionDefaults(c.Output.Fallback.TDTP)
 	}
 
 	// Defaults для resilience

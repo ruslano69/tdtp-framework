@@ -15,6 +15,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 
 	// Database adapters - blank imports for init() registration
@@ -87,6 +88,10 @@ func routeCommand(
 		if compressLevel == 3 && config.Export.CompressLevel > 0 {
 			compressLevel = config.Export.CompressLevel
 		}
+		compressAlgo := *flags.CompressAlgo
+		if compressAlgo == "zstd" && config.Export.CompressAlgo != "" {
+			compressAlgo = config.Export.CompressAlgo
+		}
 
 		outputFile := determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml")
 
@@ -121,9 +126,10 @@ func routeCommand(
 				ProcessorMgr:   procMgr,
 				Compress:       compress,
 				CompressLevel:  compressLevel,
-				CompressAlgo:   *flags.CompressAlgo,
+				CompressAlgo:   compressAlgo,
 				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields: *flags.ReadOnlyFields,
+				Fast:           *flags.Fast,
 				Compact:        *flags.Compact,
 				FixedFields:    splitCommaSeparated(*flags.FixedFields),
 				CompactTail:    *flags.CompactTail,
@@ -164,13 +170,15 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
-				FilePath:     importFile,
-				TargetTable:  *flags.Table,
-				Fields:       splitCommaSeparated(*flags.Fields),
-				Strategy:     strategy,
-				ProcessorMgr: procMgr,
-				StorageCfg:   importStorageCfg,
-				StorageKey:   importStorageKey,
+				FilePath:         importFile,
+				TargetTable:      *flags.Table,
+				Fields:           splitCommaSeparated(*flags.Fields),
+				Strategy:         strategy,
+				ProcessorMgr:     procMgr,
+				StorageCfg:       importStorageCfg,
+				StorageKey:       importStorageKey,
+				SanitizeClear:    *flags.Clear,
+				SanitizeTranslit: *flags.Translit,
 			})
 		})
 
@@ -337,13 +345,17 @@ func routeCommand(
 		if compressLevel == 3 && config.Export.CompressLevel > 0 {
 			compressLevel = config.Export.CompressLevel
 		}
+		brokerCompressAlgo := *flags.CompressAlgo
+		if brokerCompressAlgo == "zstd" && config.Export.CompressAlgo != "" {
+			brokerCompressAlgo = config.Export.CompressAlgo
+		}
 
 		// Debug output
 		if config.Export.Compress {
-			fmt.Printf("Compression enabled from config (level: %d)\n", config.Export.CompressLevel)
+			fmt.Printf("Compression enabled from config (algo: %s, level: %d)\n", config.Export.CompressAlgo, config.Export.CompressLevel)
 		}
 		if *flags.Compress {
-			fmt.Printf("Compression enabled from --compress flag (level: %d)\n", compressLevel)
+			fmt.Printf("Compression enabled from --compress flag (algo: %s, level: %d)\n", brokerCompressAlgo, compressLevel)
 		}
 
 		operation = audit.OpExport
@@ -355,7 +367,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, *flags.CompressAlgo, procMgr, *flags.PacketSize)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize)
 		})
 
 	} else if *flags.ImportBroker {
@@ -379,6 +391,8 @@ func routeCommand(
 				Strategy:    strategy,
 				TargetTable: *flags.Table,
 				OutputFile:  *flags.Output,
+				Raw:         *flags.RawBroker,
+				Keep:        *flags.KeepBroker,
 			})
 		})
 
@@ -512,6 +526,21 @@ func routeCommand(
 			})
 		})
 
+		// Test command — integrity check, no DB required; supports s3:// URIs
+	} else if *flags.Test != "" {
+		var testStorageCfg *storage.Config
+		if storage.IsRemote(*flags.Test) {
+			var uriBucket string
+			_, uriBucket, _, _ = storage.ParseURI(*flags.Test)
+			s3cfg := config.Storage.S3
+			if uriBucket != "" {
+				s3cfg.Bucket = uriBucket
+			}
+			sc := storage.Config{Type: config.Storage.Type, S3: s3cfg}
+			testStorageCfg = &sc
+		}
+		return commands.TestFile(ctx, *flags.Test, testStorageCfg)
+
 		// Inspect command — no DB connection required, runs directly
 	} else if *flags.Inspect != "" {
 		var inspectStorageCfg *storage.Config
@@ -526,6 +555,19 @@ func routeCommand(
 			inspectStorageCfg = &sc
 		}
 		return commands.InspectFile(ctx, *flags.Inspect, inspectStorageCfg)
+
+		// InspectTable command — requires DB connection
+	} else if *flags.InspectTable != "" {
+		operation = audit.OpQuery
+		metadata = map[string]string{
+			"command": "inspect-table",
+			"table":   *flags.InspectTable,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "inspect-table", func() error {
+			return commands.InspectTable(ctx, adapterConfig, *flags.InspectTable)
+		})
+
 		// [BETA] Streaming consumer daemon — Kafka only
 	} else if *flags.Listen {
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
@@ -610,7 +652,18 @@ func main() {
 	// Load configuration
 	config, err := LoadConfig(*flags.Config)
 	if err != nil {
-		if *flags.Pipeline != "" && errors.Is(err, os.ErrNotExist) {
+		// Commands that operate on files only and never connect to a database
+		// can run without a config file.
+		noDBRequired := *flags.Pipeline != "" ||
+			*flags.Inspect != "" ||
+			*flags.Test != "" ||
+			*flags.Diff != "" ||
+			*flags.Merge != "" ||
+			*flags.ToHTML != "" ||
+			*flags.ToCompact != "" ||
+			(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
+			(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
+		if noDBRequired && errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "WARNING: config file %q not found. Audit log and Circuit Breaker set to defaults (disabled).\n", *flags.Config)
 			config = &Config{}
 		} else {
@@ -716,6 +769,8 @@ func buildBrokerConfig(config *Config) commands.BrokerConfig {
 		Exclusive:      config.Broker.Exclusive,
 		PassiveDeclare: config.Broker.PassiveDeclare,
 		QueuePath:      config.Broker.QueuePath,
+		Brokers:        config.Broker.Brokers,
+		ConsumerGroup:  config.Broker.ConsumerGroup,
 	}
 }
 
@@ -732,25 +787,16 @@ func determineOutputFile(output, baseName, ext string) string {
 	return baseName
 }
 
-// splitCommaSeparated splits a comma-separated string into a slice
+// splitCommaSeparated splits a comma-separated field list.
+// Delegates to tdtql.SplitFieldList which handles bracket-quoted names.
 func splitCommaSeparated(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
+	return tdtql.SplitFieldList(s)
 }
 
 // commandWasSpecified checks if any command was specified
 func commandWasSpecified(flags *Flags) bool {
-	return flags.List.IsSet ||
+	return *flags.Test != "" ||
+		flags.List.IsSet ||
 		*flags.ListViews ||
 		*flags.Export != "" ||
 		*flags.Import != "" ||
@@ -768,6 +814,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Diff != "" ||
 		*flags.Merge != "" ||
 		*flags.Inspect != "" ||
+		*flags.InspectTable != "" ||
 		*flags.Listen
 }
 

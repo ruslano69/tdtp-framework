@@ -77,6 +77,9 @@ func NewImportHelper(
 // StrategyReplace/Ignore/Fail: прямой UPSERT в существующую таблицу.
 // Общая реализация для всех адаптеров
 func (h *ImportHelper) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
+	// Материализуем rawRows → Data.Rows если пакет пришёл из GenerateReference (fast-path).
+	pkt.MaterializeRows()
+
 	// Проверяем тип пакета
 	if pkt.Header.Type != packet.TypeReference && pkt.Header.Type != packet.TypeResponse {
 		return fmt.Errorf("can only import reference or response packets, got: %s", pkt.Header.Type)
@@ -102,6 +105,11 @@ func (h *ImportHelper) ImportPackets(ctx context.Context, packets []*packet.Data
 
 	tableName := packets[0].Header.TableName
 	canonicalSchema := packets[0].Schema
+
+	// Материализуем rawRows → Data.Rows для всех пакетов
+	for _, pkt := range packets {
+		pkt.MaterializeRows()
+	}
 
 	// Начинаем транзакцию
 	tx, err := h.transactionManager.BeginTx(ctx)
@@ -271,11 +279,17 @@ func (h *ImportHelper) replaceTables(ctx context.Context, targetTable, tempTable
 	return nil
 }
 
-// ParseRowValues парсит строку TDTP в массив значений
-// Общая утилита для всех адаптеров
+// sharedParser и sharedSchemaConverter — пакетные синглтоны без состояния.
+// Parser и Converter оба являются пустыми struct{}, потокобезопасны при чтении.
+var (
+	sharedParser          = packet.NewParser()
+	sharedSchemaConverter = schema.NewConverter()
+)
+
+// ParseRowValues парсит строку TDTP в массив значений.
+// Общая утилита для всех адаптеров.
 func ParseRowValues(row packet.Row) []string {
-	parser := packet.NewParser()
-	return parser.GetRowValues(row)
+	return sharedParser.GetRowValues(row)
 }
 
 // ConvertRowToSQLValues конвертирует строку TDTP в SQL значения для PreparedStatement
@@ -290,7 +304,6 @@ func ConvertRowToSQLValues(
 		return nil, fmt.Errorf("expected %d values, got %d", len(pkgSchema.Fields), len(rowValues))
 	}
 
-	schemaConverter := schema.NewConverter()
 	args := make([]any, len(rowValues))
 
 	for i, value := range rowValues {
@@ -357,7 +370,7 @@ func ConvertRowToSQLValues(
 		}
 
 		// Парсим значение
-		typedValue, err := schemaConverter.ParseValue(value, fieldDef)
+		typedValue, err := sharedSchemaConverter.ParseValue(value, fieldDef)
 		if err != nil {
 			return nil, fmt.Errorf("field %s: %w", fieldDef.Name, err)
 		}

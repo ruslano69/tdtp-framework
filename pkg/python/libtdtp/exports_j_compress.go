@@ -10,7 +10,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
@@ -142,7 +141,7 @@ func jRunCompress(jp jPacket, params map[string]any) *C.char {
 
 	rows := make([]string, len(jp.Data))
 	for i, row := range jp.Data {
-		rows[i] = strings.Join(row, "|")
+		rows[i] = packet.JoinRowEscaped(row)
 	}
 
 	compressed, _, err := processors.CompressDataForTdtpAlgo(rows, algo, level)

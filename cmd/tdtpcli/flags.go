@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"os"
 	"strings"
 )
 
@@ -45,12 +47,15 @@ func (f *ListFlag) IsBoolFlag() bool { return true }
 // Flags holds all command-line flags
 type Flags struct {
 	// Commands
+	Test           *string // Dry-run integrity check of a TDTP file (decompress in memory, validate XML)
 	List           *ListFlag
 	ListViews      *bool
 	Export         *string
 	Import         *string
 	ExportBroker   *string
 	ImportBroker   *bool
+	RawBroker      *bool // --raw: save broker messages as-is, no parse/decompress
+	KeepBroker     *bool // --keep: allow partial writes (non-atomic import from broker)
 	ToHTML         *string
 	OpenBrowser    *bool
 	Row            *string // Row range for HTML viewer (e.g., "100-150")
@@ -64,6 +69,7 @@ type Flags struct {
 	Diff           *string // First file for diff (second as positional arg)
 	Merge          *string // Comma-separated list of files to merge
 	Inspect        *string // Print YAML metadata summary of a TDTP file
+	InspectTable   *string // Print extended metadata of a live DB table (Agentic Discovery Mode)
 	Listen         *bool   // [BETA] Stream consumer daemon mode (Kafka only)
 
 	// TDTQL Filters
@@ -88,6 +94,7 @@ type Flags struct {
 	CompressAlgo  *string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
 	Hash          *bool   // Add XXH3 checksum for data integrity verification
 	PacketSize    *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
+	Fast          *bool   // Skip SpecialValues detection (no NULL/NaN/Inf markers) for maximum export speed
 
 	// Compact format (v1.3.1)
 	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
@@ -102,6 +109,10 @@ type Flags struct {
 	TrackingField  *string
 	CheckpointFile *string
 	BatchSize      *int
+
+	// Field Name Sanitization (--import)
+	Translit *bool // transliterate non-ASCII field names to ASCII via go-unidecode
+	Clear    *bool // replace special chars (%, @, #, space, …) in field names with safe tokens
 
 	// Data Processors
 	Mask      *string
@@ -135,6 +146,8 @@ func ParseFlags() *Flags {
 	f := &Flags{}
 
 	// Commands
+	f.Test = flag.String("test", "", "Dry-run integrity check of a TDTP file: decompress in memory, verify checksum, validate XML (no DB needed)")
+
 	f.List = &ListFlag{}
 	flag.Var(f.List, "list", `List tables in database, optionally filtered by glob pattern (e.g. --list "user*", --list "order?")`)
 
@@ -143,6 +156,8 @@ func ParseFlags() *Flags {
 	f.Import = flag.String("import", "", "Import TDTP XML file to database (file path)")
 	f.ExportBroker = flag.String("export-broker", "", "Export table to message broker (table name)")
 	f.ImportBroker = flag.Bool("import-broker", false, "Import from message broker to database")
+	f.RawBroker = flag.Bool("raw", false, "Save broker messages as-is without parsing or decompression (use with --import-broker --output)")
+	f.KeepBroker = flag.Bool("keep", false, "Allow partial writes: import each broker part immediately (non-atomic). Default: atomic (all-or-nothing via ImportPackets)")
 	f.ToHTML = flag.String("to-html", "", "Convert TDTP XML file to HTML for browser viewing (input TDTP file)")
 	f.OpenBrowser = flag.Bool("open", false, "Open generated HTML file in default browser (use with --to-html)")
 	f.Row = flag.String("row", "", "Row range to display in HTML viewer, e.g. 100-150 (use with --to-html)")
@@ -156,7 +171,8 @@ func ParseFlags() *Flags {
 	f.Diff = flag.String("diff", "", "Compare two TDTP files: --diff file1.xml file2.xml")
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
 	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
-	f.Listen = flag.Bool("listen", false, "[BETA] Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
+	f.InspectTable = flag.String("inspect-table", "", "Print extended metadata of a live DB table: native types, FK relationships, row count, sample row (Agentic Discovery Mode)")
+	f.Listen = flag.Bool("listen", false, "Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
 
 	// TDTQL Filters
 	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")
@@ -180,6 +196,7 @@ func ParseFlags() *Flags {
 	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
 	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
 	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
+	f.Fast = flag.Bool("fast", false, "Skip SpecialValues detection for maximum export speed (no NULL/NaN/Inf schema markers)")
 
 	// Compact format (v1.3.1)
 	f.Compact = flag.Bool("compact", false, "Enable TDTP v1.3.1 compact format on export (fixed fields written once per group)")
@@ -194,6 +211,10 @@ func ParseFlags() *Flags {
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")
 	f.CheckpointFile = flag.String("checkpoint-file", "checkpoint.yaml", "Checkpoint file for incremental sync state")
 	f.BatchSize = flag.Int("batch-size", 1000, "Batch size for incremental sync")
+
+	// Field Name Sanitization
+	f.Translit = flag.Bool("translit", false, "Transliterate non-ASCII field names to ASCII (Cyrillic, European diacritics) using go-unidecode. Use with --import.")
+	f.Clear = flag.Bool("clear", false, "Replace special chars in field names with safe tokens (% → _pct, @ → _at, space → _, …). Use with --import.")
 
 	// Data Processors
 	f.Mask = flag.String("mask", "", "Mask sensitive fields (comma-separated: email,phone,card)")
@@ -222,6 +243,38 @@ func ParseFlags() *Flags {
 	f.ShortHelp = flag.Bool("h", false, "Show brief help (commands and options)")
 
 	flag.Parse()
+
+	// Go's flag package stops at the first non-flag argument.
+	// Re-parse in a loop so that flags appearing after positional args are picked up.
+	// Example: --export users out.xml --compress --hash
+	//   → after flag.Parse(): flag.Args() = ["out.xml", "--compress", "--hash"]
+	//   → re-parse collects "out.xml" as positional, then parses --compress --hash.
+	var positionals []string
+	for {
+		args := flag.Args()
+		if len(args) == 0 {
+			break
+		}
+		// Collect leading non-flag args as positionals
+		i := 0
+		for i < len(args) && !strings.HasPrefix(args[i], "-") {
+			positionals = append(positionals, args[i])
+			i++
+		}
+		if i >= len(args) {
+			break // no more flags remain
+		}
+		// Re-parse everything from the first flag found
+		if err := flag.CommandLine.Parse(args[i:]); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to parse remaining flags: %v\n", err)
+			break
+		}
+	}
+
+	// First positional arg becomes --output if not explicitly set
+	if *f.Output == "" && len(positionals) > 0 {
+		*f.Output = positionals[0]
+	}
 
 	return f
 }

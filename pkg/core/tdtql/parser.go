@@ -293,7 +293,7 @@ func (p *Parser) parseCondition() (Expression, error) {
 	case TokenString, TokenNumber, TokenIdent:
 		value = p.curToken.Literal
 	default:
-		return nil, fmt.Errorf("expected value")
+		return nil, fmt.Errorf("expected value after operator (use quotes for strings: \"value\" or 'value')")
 	}
 	p.nextToken()
 

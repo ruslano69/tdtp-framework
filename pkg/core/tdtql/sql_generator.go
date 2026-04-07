@@ -15,17 +15,32 @@ func NewSQLGenerator() *SQLGenerator {
 	return &SQLGenerator{}
 }
 
+// quoteTableName quotes each part of a (schema-qualified) table name.
+// "ZTR$Employee" → `"ZTR$Employee"`;  "public.ZTR$Employee" → `"public"."ZTR$Employee"`
+func quoteTableName(name string) string {
+	parts := strings.Split(name, ".")
+	for i, p := range parts {
+		parts[i] = quoteFieldName(p)
+	}
+	return strings.Join(parts, ".")
+}
+
 // GenerateSQL конвертирует Query в SQL SELECT statement
 func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (string, error) {
+	qTable := quoteTableName(tableName)
 	if query == nil {
-		return fmt.Sprintf("SELECT * FROM %s", tableName), nil
+		return fmt.Sprintf("SELECT * FROM %s", qTable), nil
 	}
 
 	var parts []string
 	if len(query.Fields) > 0 {
-		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(query.Fields, ", "), tableName))
+		quoted := make([]string, len(query.Fields))
+		for i, f := range query.Fields {
+			quoted[i] = quoteFieldName(f)
+		}
+		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), qTable))
 	} else {
-		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", tableName))
+		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", qTable))
 	}
 
 	// WHERE clause
@@ -141,9 +156,21 @@ func (g *SQLGenerator) generateLogicalGroup(group *packet.LogicalGroup, operator
 	return strings.Join(conditions, " "+operator+" "), nil
 }
 
+// quoteFieldName wraps a field name in double quotes when it contains characters
+// that are not safe as a bare SQL identifier (spaces, special chars, etc.).
+// Double quotes are standard SQL (ANSI); dialect adapters (MSSQL, MySQL) convert them.
+func quoteFieldName(name string) string {
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+		}
+	}
+	return name
+}
+
 // generateFilterCondition конвертирует Filter в SQL условие
 func (g *SQLGenerator) generateFilterCondition(filter packet.Filter) (string, error) {
-	field := filter.Field
+	field := quoteFieldName(filter.Field)
 	operator := filter.Operator
 	value := filter.Value
 	value2 := filter.Value2
@@ -277,11 +304,11 @@ func (g *SQLGenerator) generateReversedOrderByClause(orderBy *packet.OrderBy) st
 	parts := make([]string, 0, 1+len(orderBy.Fields))
 
 	if orderBy.Field != "" {
-		parts = append(parts, fmt.Sprintf("%s %s", orderBy.Field, reverseDirection(orderBy.Direction)))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(orderBy.Field), reverseDirection(orderBy.Direction)))
 	}
 
 	for _, field := range orderBy.Fields {
-		parts = append(parts, fmt.Sprintf("%s %s", field.Name, reverseDirection(field.Direction)))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(field.Name), reverseDirection(field.Direction)))
 	}
 
 	return strings.Join(parts, ", ")
@@ -301,7 +328,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 		if orderBy.Direction != "" {
 			direction = strings.ToUpper(orderBy.Direction)
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", orderBy.Field, direction))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(orderBy.Field), direction))
 	}
 
 	// Множественная сортировка
@@ -310,7 +337,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 		if field.Direction != "" {
 			direction = strings.ToUpper(field.Direction)
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", field.Name, direction))
+		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(field.Name), direction))
 	}
 
 	return strings.Join(parts, ", ")
