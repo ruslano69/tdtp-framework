@@ -23,7 +23,11 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 
 	var parts []string
 	if len(query.Fields) > 0 {
-		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(query.Fields, ", "), tableName))
+		quoted := make([]string, len(query.Fields))
+		for i, f := range query.Fields {
+			quoted[i] = quoteFieldName(f)
+		}
+		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), tableName))
 	} else {
 		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", tableName))
 	}

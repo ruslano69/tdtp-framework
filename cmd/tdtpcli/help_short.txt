@@ -61,6 +61,7 @@ OPTIONS:
     --limit <n>                Rows: +N = first N, -N = last N (tail)
     --offset <n>               Skip N rows
     --fields <col1,col2>       Column projection: export/import only listed columns
+                               Bracket-quoted for names with spaces: [Birth Date],[First, Last]
 
   HTML Viewer:
     --open                     Open in browser
