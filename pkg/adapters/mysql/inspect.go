@@ -57,7 +57,7 @@ func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters
 	if err != nil {
 		return nil, fmt.Errorf("failed to query columns: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var (
@@ -130,7 +130,7 @@ func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters
 	`
 	fkRows, err := a.db.QueryContext(ctx, fkQuery, tableName)
 	if err == nil {
-		defer fkRows.Close()
+		defer func() { _ = fkRows.Close() }()
 		for fkRows.Next() {
 			var col, refTable, refCol, onDelete string
 			if err := fkRows.Scan(&col, &refTable, &refCol, &onDelete); err != nil {
@@ -159,7 +159,7 @@ func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters
 			strings.ReplaceAll(tableName, "`", "``"), orderCol)
 		sampleRows, err := a.db.QueryContext(ctx, sampleQuery)
 		if err == nil {
-			defer sampleRows.Close()
+			defer func() { _ = sampleRows.Close() }()
 			cols, _ := sampleRows.Columns()
 			if sampleRows.Next() {
 				values := make([]any, len(cols))
@@ -199,7 +199,7 @@ func (a *Adapter) getPrimaryKeyColumns(ctx context.Context, tableName string) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var cols []string
 	for rows.Next() {
