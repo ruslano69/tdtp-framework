@@ -99,7 +99,7 @@ func (a *Adapter) getPrimaryKeyColumns(ctx context.Context, tableName string) ([
 		SELECT a.attname
 		FROM pg_index i
 		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-		WHERE i.indrelid = ($1 || '.' || $2)::regclass
+		WHERE i.indrelid = (quote_ident($1) || '.' || quote_ident($2))::regclass
 		  AND i.indisprimary
 		ORDER BY array_position(i.indkey, a.attnum)
 	`

@@ -15,10 +15,21 @@ func NewSQLGenerator() *SQLGenerator {
 	return &SQLGenerator{}
 }
 
+// quoteTableName quotes each part of a (schema-qualified) table name.
+// "ZTR$Employee" → `"ZTR$Employee"`;  "public.ZTR$Employee" → `"public"."ZTR$Employee"`
+func quoteTableName(name string) string {
+	parts := strings.Split(name, ".")
+	for i, p := range parts {
+		parts[i] = quoteFieldName(p)
+	}
+	return strings.Join(parts, ".")
+}
+
 // GenerateSQL конвертирует Query в SQL SELECT statement
 func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (string, error) {
+	qTable := quoteTableName(tableName)
 	if query == nil {
-		return fmt.Sprintf("SELECT * FROM %s", tableName), nil
+		return fmt.Sprintf("SELECT * FROM %s", qTable), nil
 	}
 
 	var parts []string
@@ -27,9 +38,9 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 		for i, f := range query.Fields {
 			quoted[i] = quoteFieldName(f)
 		}
-		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), tableName))
+		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), qTable))
 	} else {
-		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", tableName))
+		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", qTable))
 	}
 
 	// WHERE clause

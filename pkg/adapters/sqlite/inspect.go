@@ -7,13 +7,14 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // InspectTable returns extended metadata for a live SQLite table.
 // Implements adapters.Adapter.
 func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters.TableReport, error) {
 	// Strip bracket-quoting if present: [TableName] → TableName
-	tableName = stripBrackets(tableName)
+	tableName = tdtql.StripBrackets(tableName)
 
 	dbVersion, err := a.GetDatabaseVersion(ctx)
 	if err != nil {
@@ -130,12 +131,4 @@ func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters
 	}
 
 	return report, nil
-}
-
-// stripBrackets removes leading [ and trailing ] from a table name.
-func stripBrackets(name string) string {
-	if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
-		return name[1 : len(name)-1]
-	}
-	return name
 }

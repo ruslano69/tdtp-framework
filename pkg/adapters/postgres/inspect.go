@@ -6,13 +6,14 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // InspectTable returns extended metadata for a live PostgreSQL table.
 // Implements adapters.Adapter.
 func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters.TableReport, error) {
 	// Strip bracket-quoting if present
-	tableName = stripBrackets(tableName)
+	tableName = tdtql.StripBrackets(tableName)
 
 	dbVersion, err := a.GetDatabaseVersion(ctx)
 	if err != nil {
@@ -199,12 +200,4 @@ func (a *Adapter) InspectTable(ctx context.Context, tableName string) (*adapters
 // quoteIdent wraps a PostgreSQL identifier in double-quotes.
 func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-}
-
-// stripBrackets removes leading [ and trailing ] from a table/column name.
-func stripBrackets(name string) string {
-	if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
-		return name[1 : len(name)-1]
-	}
-	return name
 }

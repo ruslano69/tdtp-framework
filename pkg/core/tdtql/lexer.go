@@ -149,10 +149,15 @@ func (l *Lexer) NextToken() Token {
 	case '*':
 		tok.Type = TokenStar
 		tok.Literal = string(l.ch)
-	case '\'', '"':
+	case '\'':
 		tok.Type = TokenString
 		tok.Literal = l.readString(l.ch)
 		return tok // не вызываем l.readChar() так как readString уже продвинулся
+	case '"':
+		// ANSI SQL: double-quoted identifier "Field Name" → TokenIdent "Field Name"
+		tok.Type = TokenIdent
+		tok.Literal = l.readString(l.ch)
+		return tok
 	case '[':
 		// MSSQL/Access bracket-quoted identifier: [Field Name] → TokenIdent "Field Name"
 		tok.Type = TokenIdent
