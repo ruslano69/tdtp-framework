@@ -139,29 +139,81 @@ tdtpcli --import eu_staff.tdtp.xml --translit --strategy replace
 # --clear и --translit НЕ применяются к --export (экспорт = источник истины)
 ```
 
-### Bracket-quoted имена полей в --where
+### Квотирование таблиц и полей — Enterprise-режим
 
-Поля с пробелами и спецсимволами (MSSQL/Access) — используй квадратные скобки:
+Реальные ERP/1С/NAV/Access базы содержат имена вида `ZTR$Employee`, `Last Name`,
+`Дата рождения`, `Total Cost $`. Вот полная шпаргалка.
+
+#### Правила квотирования
+
+| Ситуация | Синтаксис | Пример |
+|---|---|---|
+| Таблица со спецсимволом (`$`, пробел) | `[TableName]` | `[ZTR$Employee]` |
+| Поле с пробелом в `--where` | `[Field Name]` или `"Field Name"` | `[Last Name]` |
+| Поле с пробелом в `--fields` | `[Field Name]` | `[Last Name],[Birth Date]` |
+| Строковое значение в `--where` | одинарные `'...'` | `'Иванов'` |
+| Строковое значение с `%` (LIKE) | `"%pattern%"` | `"%ЧЕРКАС%"` |
+
+> Двойные кавычки `"..."` в `--where` = **идентификатор** (ANSI SQL).
+> Одинарные кавычки `'...'` в `--where` = **строковый литерал**.
+
+#### Пример — полный энтерпрайз-запрос
 
 ```bash
-tdtpcli --export ZTR$Employee --where '[Termination Date] = "1753-01-01"'
-tdtpcli --export orders --where '[Total Cost $] > 100'
-tdtpcli --export leads --where '[Is Active?] = 1'
+# bash / zsh / Linux / macOS
+tdtpcli --config mssql.yaml \
+  --export '[ZTR$Employee]' \
+  --where '[Last Name] LIKE "%ЧЕРКАСОВ%" AND [Termination Date] = "1753-01-01"' \
+  --fields 'No_,FullName,[Last Name],[Birth Date],[Termination Date]' \
+  --compress --compress-algo kanzi --compress-level 6 --hash \
+  --output exports/cherkasov_active.tdtp.xml
 ```
 
-Скобки снимаются при парсинге и имя правильно квотируется для каждой СУБД.
+```powershell
+# PowerShell — всё в одинарных кавычках, $ не раскрывается
+.\tdtpcli.exe --config mssql.yaml `
+  --export '[ZTR$Employee]' `
+  --where '[Last Name] LIKE "%ЧЕРКАСОВ%" AND [Termination Date] = ''1753-01-01''' `
+  --fields 'No_,FullName,[Last Name],[Birth Date],[Termination Date]' `
+  --compress --compress-algo kanzi --compress-level 6 --hash `
+  --output exports\cherkasov_active.tdtp.xml
+```
 
-> **PowerShell (Windows):** двойные кавычки раскрывают `$переменные`, поэтому
-> `"[ZTR$Employee]"` превратится в `"[ZTR]"`. Используй **одинарные кавычки**:
->
-> ```powershell
-> # ❌ двойные — $Employee раскроется как пустая переменная
-> .\tdtpcli.exe --inspect-table "[ZTR$Employee]"
->
-> # ✅ одинарные — литерал передаётся как есть
-> .\tdtpcli.exe --inspect-table '[ZTR$Employee]'
-> .\tdtpcli.exe --export '[ZTR$Employee]' --where '[Termination Date] = "1753-01-01"'
-> ```
+> **PowerShell-тонкость:** одинарная кавычка внутри одинарно-кавычечной строки
+> экранируется удвоением: `'значение с ''кавычкой'''`.
+
+#### PowerShell — почему двойные кавычки опасны
+
+```powershell
+# ❌ $Employee раскрывается как пустая переменная → таблица "[ZTR]" не найдена
+.\tdtpcli.exe --export "[ZTR$Employee]"
+
+# ❌ $ЧЕРКАСОВ раскрывается → паттерн LIKE пустой
+.\tdtpcli.exe --where '"Last Name" LIKE "%$ЧЕРКАСОВ%"'
+
+# ✅ одинарные кавычки — всё передаётся буквально
+.\tdtpcli.exe --export '[ZTR$Employee]'
+.\tdtpcli.exe --where '[Last Name] LIKE "%ЧЕРКАСОВ%"'
+```
+
+#### Быстрые примеры
+
+```bash
+# Поле с долларом в значении
+tdtpcli --export orders --where '[Total Cost $] > 100'
+
+# LIKE по кириллическому полю
+tdtpcli --export '[ZTR$Employee]' --where '[Last Name] LIKE "%Черкас%"'
+
+# Несколько составных полей в проекции
+tdtpcli --export employees --fields '[Last Name],[First Name],[Birth Date],id'
+
+# inspect-table с составным именем
+tdtpcli --inspect-table '[ZTR$Employee]' --config mssql.yaml
+
+# Дата 1753-01-01 — "нулевая" дата в MSSQL (Dynamics NAV/BC)
+tdtpcli --export '[ZTR$Employee]' --where '[Termination Date] = "1753-01-01"'
+```
 
 ### Инкрементальная синхронизация
 
