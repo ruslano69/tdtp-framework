@@ -74,7 +74,6 @@ func uint64ToBytes(v uint64) []byte {
 	return b
 }
 
-
 // bytesToUint64 конвертирует байтовый массив в uint64 (big-endian).
 func bytesToUint64(b []byte) uint64 {
 	if len(b) != 8 {
@@ -82,6 +81,7 @@ func bytesToUint64(b []byte) uint64 {
 	}
 	return binary.BigEndian.Uint64(b)
 }
+
 // --- Helper Functions ---
 
 // ComputeChecksum вычисляет xxh3 хеш данных и возвращает hex-encoded строку.
