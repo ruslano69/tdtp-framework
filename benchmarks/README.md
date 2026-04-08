@@ -14,11 +14,26 @@
 
 ## Запуск
 
+### Makefile (рекомендуется)
+
 ```bash
 # Все бенчмарки
-go test -bench=. ./... -run=XXX
+make bench-all
 
 # Конкретная категория
+make bench-core      # XML parsing, compression
+make bench-kafka     # Kafka performance  
+make bench-adapters  # DB comparison
+make bench-etl       # ETL pipeline
+
+# Специфичные
+make bench-parser    # Parser only
+make bench-db        # SQLite benchmark
+```
+
+### Go тесты напрямую
+
+```bash
 go test -bench=. ./pkg/core/packet/...
 go test -bench=. ./pkg/brokers/...
 go test -bench=. ./pkg/adapters/...
