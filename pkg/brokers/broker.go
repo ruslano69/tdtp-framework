@@ -19,6 +19,10 @@ type MessageBroker interface {
 	// message - тело сообщения (обычно XML содержимое TDTP пакета)
 	Send(ctx context.Context, message []byte) error
 
+	// SendBatch отправляет несколько сообщений эффективнее чем N вызовов Send.
+	// Kafka: один WriteMessages roundtrip; остальные брокеры — последовательные Send.
+	SendBatch(ctx context.Context, messages [][]byte) error
+
 	// Receive получает сообщение из очереди
 	// Блокирующий вызов - ждет пока не придет сообщение или не истечет timeout
 	Receive(ctx context.Context) ([]byte, error)

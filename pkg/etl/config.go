@@ -164,6 +164,15 @@ type RabbitMQOutputConfig struct {
 type KafkaOutputConfig struct {
 	Brokers []string `yaml:"brokers"` // Список Kafka brokers
 	Topic   string   `yaml:"topic"`   // Kafka topic
+
+	// Streaming spool — для надёжной отправки больших таблиц.
+	// Каждый пакет сжимается и пишется на диск; отдельная горутина
+	// читает файлы и шлёт пачками. Гарантирует < 1MB на сообщение.
+	SpoolDir      string `yaml:"spool_dir"`      // "" = os.TempDir()/tdtp-kafka-spool; явный путь — постоянный spool
+	PacketKB      int    `yaml:"packet_kb"`      // целевой размер пакета несжатого XML, КБ (default 750)
+	BatchSend     int    `yaml:"batch_send"`     // кол-во файлов в одном SendBatch (default 10)
+	CompressAlgo  string `yaml:"compress_algo"`  // zstd (default) или none
+	CompressLevel int    `yaml:"compress_level"` // уровень сжатия zstd (default 3)
 }
 
 // PerformanceConfig определяет параметры производительности

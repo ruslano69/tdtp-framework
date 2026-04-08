@@ -70,6 +70,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_MESSAGE_MAX_BYTES: 10485760          # 10MB — TDTP пакеты до 3.8MB несжатых
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760    # должен совпадать с message.max.bytes
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
       - kafka-data:/var/lib/kafka/data

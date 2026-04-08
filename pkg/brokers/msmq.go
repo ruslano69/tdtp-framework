@@ -332,6 +332,16 @@ func (m *MSMQ) GetBrokerType() string {
 	return "msmq"
 }
 
+// SendBatch отправляет несколько сообщений последовательно.
+func (m *MSMQ) SendBatch(ctx context.Context, messages [][]byte) error {
+	for i, msg := range messages {
+		if err := m.Send(ctx, msg); err != nil {
+			return fmt.Errorf("SendBatch: message %d/%d: %w", i+1, len(messages), err)
+		}
+	}
+	return nil
+}
+
 // queueExists проверяет существование очереди через MSMQQuery
 func (m *MSMQ) queueExists() (bool, error) {
 	// Приватные очереди (.\private$\...) не видны через LookupQueue (AD-only).
