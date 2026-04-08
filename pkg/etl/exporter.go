@@ -453,13 +453,16 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 
 // exportToKafka экспортирует в Kafka.
 //
-// Если в конфиге задан packet_kb или spool_dir — используется spool-pipeline:
-//   - пакет разбивается на части ≤ PacketKB несжатых байт
-//   - каждая часть сжимается zstd и пишется в spool-директорию
-//   - sender-горутина читает файлы и шлёт пачками через SendBatch
-//   - гарантирует < 1 MB на Kafka-сообщение без изменений конфига брокера
+// Маршруты (выбираются автоматически по конфигу):
 //
-// Иначе — legacy: один пакет = одно сообщение (может превысить message.max.bytes).
+//  1. mem_limit_mb > 0  — in-memory pipeline: сжатые пакеты буферизуются в RAM,
+//     backpressure не даёт выйти за лимит; нет записи на диск, нет resumability.
+//
+//  2. packet_kb > 0 | spool_dir != ""  — disk-spool pipeline: каждый пакет
+//     сжимается и пишется на диск; sender-горутина читает файлы и шлёт пачками;
+//     файлы остаются при падении — можно делать retry вручную.
+//
+//  3. legacy — один пакет = одно Kafka-сообщение (может превысить message.max.bytes).
 func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.Kafka == nil {
 		return fmt.Errorf("kafka config is not set")
@@ -467,8 +470,8 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 
 	cfg := e.config.Kafka
 
-	// ── Spool-pipeline (новый путь) ────────────────────────────────────────
-	if cfg.PacketKB > 0 || cfg.SpoolDir != "" {
+	// ── Spool / in-memory pipeline ─────────────────────────────────────────
+	if cfg.PacketKB > 0 || cfg.SpoolDir != "" || cfg.MemLimitMB > 0 {
 		return e.exportToKafkaSpool(ctx, dataPacket)
 	}
 

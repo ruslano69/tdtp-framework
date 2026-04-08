@@ -134,14 +134,28 @@ output:
 #    exchange: ""
 #    routing_key: etl_results
 
-# Kafka
+# Kafka — disk-spool pipeline (надёжный, файлы остаются при падении)
 #output:
 #  type: kafka
 #  kafka:
-#    brokers: "localhost:9092"
+#    brokers:
+#      - "localhost:9092"
 #    topic: etl_results
-#    partition: 0
-#    compression: gzip
+#    packet_kb: 750        # целевой размер пакета несжатого XML, КБ (default 750)
+#    batch_send: 10        # кол-во пакетов в одном WriteMessages (default 10)
+#    compress_algo: zstd   # zstd (default) или none
+#    compress_level: 3     # уровень сжатия zstd: 1-19 (default 3)
+#    spool_dir: ""         # "" = os.TempDir()/tdtp-kafka-spool; явный путь — постоянный spool
+
+# Kafka — in-memory pipeline (быстрее, без записи на диск)
+#output:
+#  type: kafka
+#  kafka:
+#    brokers:
+#      - "localhost:9092"
+#    topic: etl_results
+#    packet_kb: 750        # целевой размер пакета несжатого XML, КБ
+#    mem_limit_mb: 100     # лимит сжатых данных в памяти, МБ (0 = disk-spool)
 
 # ============================================================================
 # ПРОИЗВОДИТЕЛЬНОСТЬ

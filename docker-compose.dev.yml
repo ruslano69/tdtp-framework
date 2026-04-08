@@ -72,6 +72,7 @@ services:
       KAFKA_LOG_RETENTION_HOURS: 24
       KAFKA_MESSAGE_MAX_BYTES: 10485760          # 10MB — TDTP пакеты до 3.8MB несжатых
       KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760    # должен совпадать с message.max.bytes
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0  # не ждать других консьюмеров при JoinGroup
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
       - kafka-data:/var/lib/kafka/data

@@ -136,6 +136,11 @@ func (ke *KafkaSpoolExporter) ExportPackets(ctx context.Context, packets []*pack
 		return nil
 	}
 
+	// Быстрый путь: in-memory с ограничением памяти
+	if ke.cfg.MemLimitMB > 0 {
+		return ke.exportInMemory(ctx, packets)
+	}
+
 	// Канал путей к готовым файлам; буфер = BatchSend * 2 чтобы writer не ждал sender
 	fileCh := make(chan string, ke.cfg.BatchSend*2)
 
@@ -209,6 +214,184 @@ func (ke *KafkaSpoolExporter) writePacket(pkt *packet.DataPacket, path string) e
 	}
 
 	return nil
+}
+
+// ─── In-memory bounded pipeline ──────────────────────────────────────────────
+
+// bytesSemaphore — взвешенный семафор: блокирует Acquire пока
+// суммарный объём данных в полёте не снизится ниже лимита.
+type bytesSemaphore struct {
+	mu      sync.Mutex
+	cond    *sync.Cond
+	current int64
+	limit   int64
+}
+
+func newBytesSemaphore(limitBytes int64) *bytesSemaphore {
+	s := &bytesSemaphore{limit: limitBytes}
+	s.cond = sync.NewCond(&s.mu)
+	return s
+}
+
+// Acquire блокирует вызывающего пока current+n > limit или ctx отменён.
+func (s *bytesSemaphore) Acquire(ctx context.Context, n int64) error {
+	done := ctx.Done()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.current+n > s.limit {
+		// Проверяем контекст перед ожиданием
+		select {
+		case <-done:
+			return ctx.Err()
+		default:
+		}
+		s.cond.Wait()
+		// После пробуждения снова проверяем контекст
+		select {
+		case <-done:
+			return ctx.Err()
+		default:
+		}
+	}
+	s.current += n
+	return nil
+}
+
+// Release освобождает n байт и будит всех ожидающих.
+func (s *bytesSemaphore) Release(n int64) {
+	s.mu.Lock()
+	s.current -= n
+	s.mu.Unlock()
+	s.cond.Broadcast()
+}
+
+// exportInMemory — быстрый путь без диска.
+//
+// Writer сжимает пакеты и отправляет []byte в канал.
+// Семафор ограничивает суммарный объём сжатых байт в полёте ≤ MemLimitMB.
+// Sender батчит и отправляет в Kafka, после чего освобождает семафор.
+func (ke *KafkaSpoolExporter) exportInMemory(ctx context.Context, packets []*packet.DataPacket) error {
+	if len(packets) == 0 {
+		return nil
+	}
+
+	sem := newBytesSemaphore(int64(ke.cfg.MemLimitMB) * 1024 * 1024)
+
+	// Буфер 4 слота — writer не ждёт sender между пакетами
+	dataCh := make(chan []byte, 4)
+
+	var writerErr, senderErr error
+	var wg sync.WaitGroup
+
+	// ── Sender goroutine ─────────────────────────────────────────────────────
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		senderErr = ke.runInMemorySender(ctx, dataCh, sem)
+	}()
+
+	// ── Writer (текущая горутина) ─────────────────────────────────────────────
+	for _, pkt := range packets {
+		if ctx.Err() != nil {
+			writerErr = ctx.Err()
+			break
+		}
+
+		pkt.MaterializeRows()
+		xmlData, err := ke.gen.ToXML(pkt, true)
+		if err != nil {
+			writerErr = fmt.Errorf("ToXML: %w", err)
+			break
+		}
+
+		var payload []byte
+		if ke.cfg.CompressAlgo != "none" {
+			payload = ke.encoder.EncodeAll(xmlData, make([]byte, 0, len(xmlData)/4))
+		} else {
+			payload = xmlData
+		}
+
+		// Блокируемся если в канале накопилось ≥ MemLimitMB сжатых байт
+		if err := sem.Acquire(ctx, int64(len(payload))); err != nil {
+			writerErr = err
+			break
+		}
+
+		select {
+		case dataCh <- payload:
+		case <-ctx.Done():
+			sem.Release(int64(len(payload)))
+			writerErr = ctx.Err()
+		}
+		if writerErr != nil {
+			break
+		}
+	}
+	close(dataCh)
+
+	wg.Wait()
+
+	if writerErr != nil {
+		return writerErr
+	}
+	return senderErr
+}
+
+// runInMemorySender читает сжатые блоки из канала, батчит и шлёт в Kafka.
+// После отправки батча освобождает семафор для всех сообщений батча.
+func (ke *KafkaSpoolExporter) runInMemorySender(ctx context.Context, dataCh <-chan []byte, sem *bytesSemaphore) error {
+	type entry struct {
+		data []byte
+	}
+	batch := make([]entry, 0, ke.cfg.BatchSend)
+
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+
+		msgs := make([]kafka.Message, 0, len(batch))
+		now := time.Now()
+		var released int64
+		for i, e := range batch {
+			msgs = append(msgs, kafka.Message{
+				Key:   []byte(fmt.Sprintf("tdtp-%d-%d", now.UnixNano(), i)),
+				Value: e.data,
+				Time:  now,
+				Headers: []kafka.Header{
+					{Key: "content-type", Value: []byte("application/xml+zstd")},
+					{Key: "protocol", Value: []byte("tdtp")},
+				},
+			})
+			released += int64(len(e.data))
+		}
+
+		if err := ke.writer.WriteMessages(ctx, msgs...); err != nil {
+			return fmt.Errorf("WriteMessages (%d msgs): %w", len(msgs), err)
+		}
+
+		sem.Release(released)
+		batch = batch[:0]
+		return nil
+	}
+
+	for {
+		select {
+		case data, ok := <-dataCh:
+			if !ok {
+				return flush()
+			}
+			batch = append(batch, entry{data: data})
+			if len(batch) >= ke.cfg.BatchSend {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // ─── Sender helper ───────────────────────────────────────────────────────────
