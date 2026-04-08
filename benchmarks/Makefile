@@ -6,9 +6,9 @@
 bench-all:
 	@echo "=== Running all benchmarks ==="
 	@go test -bench=. -benchmem ./pkg/core/packet/... 2>&1 | grep -E "^(Benchmark|PASS|ok)"
-	@go test -bench=. -benchmem ./pkg/brokers/... -tags='!nokafka' 2>&1 | grep -E "^(Benchmark|PASS|ok)" || true
+	@go test -bench=. -benchmem ./pkg/brokers/... 2>&1 | grep -E "^(Benchmark|PASS|ok|SKIP)" || true
 	@go test -bench=. -benchmem ./pkg/adapters/... 2>&1 | grep -E "^(Benchmark|PASS|ok)"
-	@go test -bench=. -benchmem ./pkg/etl/... -tags='!nokafka' 2>&1 | grep -E "^(Benchmark|PASS|ok)" || true
+	@go test -bench=. -benchmem ./pkg/etl/... 2>&1 | grep -E "^(Benchmark|PASS|ok|SKIP)" || true
 
 # Core benchmarks (XML parsing, compression)
 bench-core:
@@ -21,9 +21,10 @@ bench-parser:
 	go test -bench=Parse -benchmem ./pkg/core/packet/...
 
 # Broker benchmarks (Kafka, RabbitMQ, MSMQ)
+# Tests will skip automatically if Kafka is not available
 bench-kafka:
 	@echo "=== Brokers: Kafka performance ==="
-	go test -bench=. -benchmem ./pkg/brokers/... -tags='!nokafka'
+	go test -bench=. -benchmem ./pkg/brokers/...
 
 # Adapter benchmarks (SQLite, PostgreSQL, MSSQL, MySQL)
 bench-adapters:
@@ -36,9 +37,10 @@ bench-db:
 	go test -bench=. -benchmem ./pkg/adapters/sqlite/...
 
 # ETL benchmarks (pipeline, Kafka spool)
+# Tests will skip automatically if Kafka is not available
 bench-etl:
 	@echo "=== ETL: Pipeline and spool ==="
-	go test -bench=. -benchmem ./pkg/etl/... -tags='!nokafka'
+	go test -bench=. -benchmem ./pkg/etl/...
 
 # Default target
 bench: bench-all
