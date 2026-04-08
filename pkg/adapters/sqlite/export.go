@@ -98,10 +98,18 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 // Реализует base.DataReader интерфейс
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema packet.Schema) ([][]string, error) {
 	tableName = tdtql.StripBrackets(tableName)
-	// Формируем список полей для SELECT — квотируем каждое имя на случай пробелов
+	// Формируем список полей для SELECT — квотируем каждое имя на случай пробелов.
+	// DATE/DATETIME/TIMESTAMP оборачиваем в CAST(... AS TEXT): modernc.parseTime
+	// вызывается безусловно при ColumnTypeDatabaseTypeName == DATE/DATETIME/TIMESTAMP,
+	// но если тип колонки TEXT — parseTime не вызывается.
 	fieldNames := make([]string, len(schema.Fields))
 	for i, field := range schema.Fields {
-		fieldNames[i] = fmt.Sprintf("\"%s\"", field.Name) //nolint:gocritic // SQL identifier quoting, not Go string quoting
+		quoted := fmt.Sprintf("\"%s\"", field.Name) //nolint:gocritic // SQL identifier quoting, not Go string quoting
+		if isSQLiteDateTDTPType(field.Type) {
+			fieldNames[i] = fmt.Sprintf("CAST(%s AS TEXT) AS %s", quoted, quoted)
+		} else {
+			fieldNames[i] = quoted
+		}
 	}
 
 	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
@@ -152,4 +160,16 @@ func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, err
 // Используется ReadAllRows и ReadRowsWithSQL
 func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, error) {
 	return base.ScanSQLRows(rows, schema, a.converter, "sqlite")
+}
+
+// isSQLiteDateTDTPType возвращает true для TDTP-типов, которые в SQLite хранятся как DATE/DATETIME/TIMESTAMP.
+// Эти колонки оборачиваются в CAST(... AS TEXT) чтобы избежать modernc.parseTime
+// (безусловно вызывается при ColumnTypeDatabaseTypeName == DATE/DATETIME/TIMESTAMP,
+// перебирает форматы через time.Parse, ~1.5 с на 100k строк).
+func isSQLiteDateTDTPType(tdtpType string) bool {
+	switch tdtpType {
+	case "DATE", "TIMESTAMP":
+		return true
+	}
+	return false
 }
