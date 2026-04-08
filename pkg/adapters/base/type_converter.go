@@ -480,21 +480,33 @@ func bytesToHexWithoutLeadingZeros(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-
-	// Находим первый ненулевой байт
-	firstNonZero := len(b) // Инициализируем как len(b) - если не найдем, значит все нули
+	// Fast path: rowversion/timestamp — ровно 8 байт, zero heap allocations
+	if len(b) == 8 {
+		v := binary.BigEndian.Uint64(b)
+		if v == 0 {
+			return "0"
+		}
+		const hexChars = "0123456789ABCDEF"
+		var buf [16]byte
+		pos := 16
+		for v > 0 {
+			pos--
+			buf[pos] = hexChars[v&0x0F]
+			v >>= 4
+		}
+		return string(buf[pos:])
+	}
+	// General path для нестандартных длин
+	firstNonZero := len(b)
 	for i, v := range b {
 		if v != 0 {
 			firstNonZero = i
 			break
 		}
 	}
-
-	// Если все нули (не нашли ненулевой байт), возвращаем "0"
 	if firstNonZero == len(b) {
 		return "0"
 	}
-
 	return strings.ToUpper(hex.EncodeToString(b[firstNonZero:]))
 }
 
