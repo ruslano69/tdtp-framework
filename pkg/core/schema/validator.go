@@ -179,6 +179,7 @@ func (v *Validator) schemaFieldToFieldDef(field packet.Field) FieldDef {
 	return FieldDef{
 		Name:      field.Name,
 		Type:      DataType(field.Type),
+		Subtype:   field.Subtype,
 		Length:    field.Length,
 		Precision: field.Precision,
 		Scale:     field.Scale,

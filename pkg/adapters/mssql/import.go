@@ -507,6 +507,7 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 	return schema.FieldDef{
 		Name:      field.Name,
 		Type:      schema.DataType(field.Type),
+		Subtype:   field.Subtype,
 		Length:    field.Length,
 		Precision: field.Precision,
 		Scale:     field.Scale,

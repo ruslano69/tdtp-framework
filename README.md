@@ -1,20 +1,113 @@
 # TDTP Framework
 
-**Table Data Transfer Protocol** — a framework for universal tabular data exchange via message brokers.
+**Table Data Transfer Protocol** — фреймворк для универсального обмена табличными данными через базы данных и message brokers.
 
 ---
 
-## Project Goals
+## Зачем это нужно
 
-- **Universality** — works with any tables and databases
-- **Transparency** — self-documenting XML messages
-- **Reliability** — stateless pattern, validation, pagination
-- **Security** — Zero Trust encryption, TLS, authentication, audit trail
-- **Simplicity** — clean API, intuitive structure
+### Для AI-агентов и инженеров данных:
+
+**Исследуй любую БД за минуты — без документации:**
+
+```bash
+# 1. Какие таблицы есть?
+tdtpcli --list --config my-db.yaml
+
+# 2. Как устроена таблица? (типы, ключи, FK)
+tdtpcli --inspect-table orders
+
+# 3. Как выглядят данные? (последняя запись)
+tdtpcli --export orders --limit -1
+```
+
+**Результат:** AI понимает структуру ЛЮБОЙ базы (Navision 2003, MSSQL, PostgreSQL, Access...) и может построить ETL автоматически.
 
 ---
 
-## What's Implemented (v1.8.0-beta)
+### Для enterprise интеграций:
+
+**Полный цикл: исследование → ETL → синхронизация → шифрование**
+
+| Уровень | Что делает | Команда |
+|---------|-----------|---------|
+| Исследование | Понять структуру любой БД | `--list`, `--inspect-table` |
+| Перекачка | Extract → Transform → Load | `--pipeline etl.yaml` |
+| Синхронизация | Event-driven distributed sync | `--export-broker` / `--import-broker` |
+| Защита | Zero Trust encryption (burn-on-read keys) | xzmercury + AES-256-GCM |
+
+---
+
+## Быстрый старт
+
+### 1. Установи и попробуй
+
+```bash
+# Скачай бинарник для своей ОС
+# Windows: tdtpcli.exe
+# Linux/Mac: tdtpcli
+
+# Создай конфиг для своей БД
+tdtpcli --create-config-pg > config.yaml
+# или для MSSQL, MySQL, SQLite, Access
+
+# Попробуй
+tdtpcli --list --config config.yaml
+```
+
+### 2. Что внутри TDTP файла
+
+Каждый TDTP.xml — **самодостаточный пакет** со всей информацией внутри:
+
+```xml
+<QueryContext>
+  <OriginalQuery>SELECT * FROM orders WHERE status = active</OriginalQuery>
+  <ExecutionResults>
+    <TotalRecordsInTable>10000</TotalRecordsInTable>
+    <RecordsReturned>1000</RecordsReturned>
+  </ExecutionResults>
+</QueryContext>
+
+<Schema>
+  <Field name="order_id" type="INTEGER" key="true"/>
+  <Field name="customer_id" type="INTEGER"/>
+  <Field name="total_amount" type="DECIMAL" precision="12" scale="2"/>
+  <Field name="status" type="TEXT" subtype="varchar" length="20"/>
+  <Field name="created_at" type="TIMESTAMP"/>
+</Schema>
+
+<Data>
+  <R>1|42|1299.99|active|2026-04-07T10:30:00Z</R>
+  <R>2|18|  550.00|pending|2026-04-07T11:45:00Z</R>
+</Data>
+```
+
+**Никакой внешней документации не нужно** — schema внутри пакета.
+
+### 3. Производительность
+
+| Сценарий | Время | Скорость |
+|----------|-------|----------|
+| Экспорт 100K rows → kanzi | 0.7 сек | ~70 MB/s |
+| 50K rows через Kafka → PostgreSQL | 7 сек | ~7K rows/s |
+| Сжатие kanzi level 6 | — | **4×** плотнее raw |
+
+### 4. Реальные примеры
+
+**Travel Agency** — 3 узла, event-driven синхронизация:
+- Central → Branch: страны, туры, гиды
+- Branch → Central: клиенты, продажи
+- Airline → Central: рейсы, брони
+
+```python
+# coordinator.py → RabbitMQ → consumer.py → staging → merge
+```
+
+[Примеры в examples/](/examples)
+
+---
+
+## What's Implemented (v1.9.1)
 
 ### Core Modules
 
@@ -27,11 +120,26 @@
   - Automatic compression on packet generation (threshold 1 KB)
   - Automatic decompression on parsing
   - XML attribute `compression="zstd"` for identifying compressed data
+- **Kanzi compression** (`--compress-algo kanzi`):
+  - 4× denser than raw, 30% denser than zstd level 3
+  - Levels 6–7 (default: 6)
+  - Ideal for large text tables, archive exports
+- **XXH3 checksum** (`--hash`):
+  - Integrity verification embedded in packet header
+  - Validated by `--test` before import
+- **`--fast` flag**: skip NULL/NaN/Inf detection for maximum throughput
+- **`--packet-size`**: configurable max broker packet size (default ~1.9MB, use 8 for kanzi)
 - **Compact format (v1.3.1)**:
   - Fixed fields written once per packet header, omitted from each row (`fixed="true"` in schema)
   - `RowsToCompactData` / `ExpandCompactRows` for encode/decode
   - Auto-detection of fixed fields: explicit list → `_`-prefix convention → data analysis (all-same values)
   - CLI: `--compact` on export, `--to-compact` for post-hoc conversion of existing files
+- **`--test` command**: file integrity verification (no DB needed)
+  - Multi-part file discovery and consistency checks
+  - Row count validation vs header
+  - XXH3 checksum verification (for `--hash` files)
+  - Dry-run decompression (zstd/kanzi)
+  - Duplicate `MessageID` detection
 - `QueryContext` for stateless pattern
 - Subtype support (UUID, JSONB, TIMESTAMPTZ)
 
@@ -89,6 +197,14 @@
 - Export/Import with MySQL type mapping
 - Support for MySQL-specific types
 
+#### MS Access Adapter (Windows)
+- Connection via ODBC (`alexbrainman/odbc`)
+- Schema via ADOX COM for exact Access catalog types (Text, Number, Date/Time, etc.)
+- Fallback to sample-row type inference when ADOX unavailable
+- `SELECT * FROM [TableName]` with bracket-quoted names
+- Windows-only (build tag `windows`)
+- Supports `.mdb` and `.accdb` files
+
 ---
 
 ### Message Brokers
@@ -104,12 +220,29 @@
 - Transactional queues support
 - Tested with MS SQL adapter
 
-#### Kafka
+#### Kafka (Production-Ready since v1.9.0)
 - High-throughput message streaming
 - Producer/Consumer with manual commit
 - Configurable partitioning and consumer groups
 - Stats and offset management (replay capability)
+- **`SendBatch`**: all packets sent in a single network roundtrip
+- **Parallel compress + serialize**: concurrent goroutines with per-goroutine generators
+- **Parallel decompression** on import: packets 2…N decompressed concurrently
+- **`--output` mode**: save received packets as `base_part_N_of_Total.tdtp.xml` files
+- **`--raw` flag**: save broker messages verbatim (no parse/decompress/validate)
+- **`--keep` flag**: non-atomic mode — import each part immediately as it arrives
+- **Atomic multi-part import** (default): all parts in one transaction — all-or-nothing
+- `StartOffset: kafka.FirstOffset` — fixes race during consumer group rebalance
+- `BatchBytes` raised to 100 MB, `BatchTimeout` lowered to 5ms
 - Tested with PostgreSQL adapter
+
+#### Performance (50k rows, 5 packets, localhost)
+
+| Mode | Export | Import→files | Traffic |
+|------|--------|-------------|---------|
+| No compression | 3.4s | 3.8s | 7.2 MB |
+| zstd level 3 | 3.5s | 3.9s | 2.4 MB (3×) |
+| kanzi level 6 | 3.6s | 3.9s | 1.8 MB (4×) |
 
 ---
 
@@ -427,20 +560,20 @@ security:
 
 **Database:**
 ```
---list                     List all tables
+--list                     List all tables (supports glob: --list=user*)
 --list-views               List database views (U* updatable, R* read-only)
 --export <table>           Export table/view to TDTP XML
 --import <file>            Import TDTP XML into database
+--inspect-table <table>    Inspect live DB table: native types, FKs, row count, sample
 ```
 
 **File:**
 ```
 --inspect <file>           Print YAML metadata summary of a TDTP file (no config needed)
-                           Accepts s3:// URI when storage is configured
+--test <file>              Verify file integrity: checksum, row count, multi-part completeness
 --diff <file-a> <file-b>   Compare two TDTP files
 --merge <files>            Merge multiple TDTP files
 --to-html <file>           Convert TDTP to HTML viewer
---to-compact <file>        Convert existing TDTP v1.x file to compact v1.3.1 format
 ```
 
 **Object Storage (S3):**
@@ -462,8 +595,12 @@ security:
 
 **Broker:**
 ```
---export-broker <table>    Export to message broker
---import-broker            Import from message broker
+--export-broker <table>    Export to message broker (parallel compress + SendBatch)
+--import-broker            Import from message broker (parallel decompress, atomic by default)
+--import-broker --output   Save as TDTP files instead of importing to DB
+--import-broker --raw      Save broker messages verbatim (no parse/decompress)
+--import-broker --keep     Non-atomic mode: import each part immediately
+--listen                   Streaming consumer daemon (Kafka only, production-ready)
 ```
 
 **ETL:**
@@ -486,32 +623,40 @@ security:
 
 **Compression:**
 ```
---compress                 Enable zstd compression for exported data
---compress-level <n>       Compression level: 1 (faster) — 19 (better), default: 3
+--compress                 Enable compression for exported data
+--compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× denser than raw)
+--compress-level <n>       Compression level: 1-19 (zstd) or 6-7 (kanzi), default: 3
+--hash                     Add XXH3 checksum for integrity verification (requires --compress)
+--packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)
+--fast                     Skip NULL/NaN/Inf detection for maximum throughput
 ```
 
-**Compact format (v1.3.1):**
+**Field Name Sanitization (--import only):**
 ```
---compact                  Enable TDTP v1.3.1 compact format on export
-                           (fixed fields written once per packet, omitted per row)
---fixed-fields <fields>    Fixed fields for compact format: comma-separated names
-                           or '_' prefix convention (e.g. '_city,_region')
---to-compact <file>        Convert existing TDTP v1.x file to compact v1.3.1 format
-                           (auto-detects fixed fields; use --fixed-fields to override)
+--clear                    Replace special chars in field names with safe SQL identifiers
+                           Symbol map: % → _pct, $ → _usd, # → _xh, @ → _at, * → _star,
+                                       & → _and, ? → _is, ~ → _not, + → _plus, = → _eq,
+                                       ! → _bang, ^ → _hat, < → _lt, > → _gt,
+                                       space . , - / \ ` : | ; → _
+--translit                 Transliterate non-ASCII field names to ASCII (go-unidecode)
+                           Cyrillic: "Имя" → "Imia", "Дата рождения" → "Data_rozhdeniia"
+                           European: "Österreich" → "Osterreich", "Ñoño" → "Nono"
+                           Original names preserved as DB column comments (PG/MySQL)
 ```
 
 **TDTQL Filters:**
 ```
---where <condition>        WHERE condition; repeatable — each flag is combined with AND
+--where <condition>        WHERE condition; bracket-quoted identifiers for names with
+                           spaces or special chars: --where '[Termination Date] = "1753-01-01"'
                            Operators: = != < > >= <= IN NOT IN BETWEEN LIKE IS NULL IS NOT NULL
                            Single:    --where 'age > 18'
                            IN list:   --where 'status IN (active,pending)'
-                                      --where 'dept_id IN (10,11,12)'
                            Multiple:  --where 'dept_id IN (10,11)' --where 'salary > 50000'
 --order-by <fields>        ORDER BY (e.g. 'name ASC, age DESC')
 --limit <n>                Row limit: +N = first N, -N = last N (like tail)
 --offset <n>               Skip N rows
 --fields <col1,col2,...>   Column projection: export/import only listed columns
+                           Bracket-quoted names for fields with spaces: --fields "id,[Birth Date]"
                            On --export/--export-broker/--export-xlsx: SELECT col1,col2 FROM ...
                            On --import: whitelist — only these columns written to DB
                            On --sync-incremental: tracking field auto-included
@@ -602,15 +747,19 @@ tdtp-framework/
 │  ├─ sqlite/            SQLite adapter (modernc.org/sqlite)
 │  ├─ postgres/          PostgreSQL adapter (pgx/v5)
 │  ├─ mssql/             MS SQL Server adapter (go-mssqldb)
-│  └─ mysql/             MySQL adapter (go-sql-driver/mysql)
+│  ├─ mysql/             MySQL adapter (go-sql-driver/mysql)
+│  └─ access/            MS Access adapter (ODBC + ADOX, Windows-only)
 │
 ├─ pkg/processors/       Data processing and transformation
-│  ├─ compression.go     zstd compression/decompression (klauspost/compress)
+│  ├─ compression.go     zstd/kanzi compression/decompression
 │  ├─ field_masker.go    PII masking (email, phone, card)
 │  ├─ field_validator.go Field validation (regex, range, format)
 │  ├─ field_normalizer.go Data normalization
 │  ├─ chain.go           Processor chains
 │  └─ factory.go         Processor factory
+│
+├─ pkg/sanitize/         Field name sanitization (--translit, --clear)
+│  └─ sanitizer.go       Symbol map + go-unidecode transliteration
 │
 ├─ pkg/security/         Security system
 │  ├─ privileges.go      IsAdmin() for Unix/Windows
@@ -719,14 +868,44 @@ tdtpcli --export users --output users.xml
 # Inspect TDTP file metadata (no database connection needed)
 tdtpcli --inspect users.xml
 
+# Test file integrity before import (checksum, row count, multi-part)
+tdtpcli --test users.xml
+
+# Recommended pre-import workflow:
+tdtpcli --inspect delivery.xml   # understand structure
+tdtpcli --test    delivery.xml   # verify integrity
+tdtpcli --import  delivery.xml   # load to DB
+
 # Export only specific columns (column projection)
 tdtpcli --export clients --fields id,email,status --output clients_slim.xml
+
+# Export with bracket-quoted field names (spaces/special chars)
+tdtpcli --export '[ZTR$Employee]' --where "[Termination Date] = '1753-01-01'"
+tdtpcli --export orders --fields "id,[Birth Date],status"
 
 # Export with column projection + filter + compression
 tdtpcli --export orders --fields order_id,amount,status --where 'status = active' --compress
 
+# Export with kanzi compression (4× denser than raw, ideal for large text)
+tdtpcli --export operations_log --compress --compress-algo kanzi --compress-level 6 --output ops.xml
+
+# Export with compression + XXH3 integrity checksum
+tdtpcli --export orders --compress --hash --output orders.xml
+
+# Archive-quality: kanzi max + checksum + large packet for broker
+tdtpcli --export kadrovye_prikazy --compress --compress-algo kanzi --compress-level 7 --hash --packet-size 8 --output archive.xml
+
 # Import only specific columns from a wide TDTP file
 tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
+
+# Import MS Access export with exotic field names (%, spaces, #, etc.)
+tdtpcli --import access_export.xml --clear --strategy replace
+
+# Import Russian ERP export (Cyrillic field names) — transliterate + clean
+tdtpcli --import erp_orders.xml --translit --clear --strategy replace
+
+# Import European data (diacritics only, no special symbols)
+tdtpcli --import eu_data.xml --translit --strategy replace
 
 # Export with filters and compression
 tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
@@ -761,19 +940,6 @@ tdtpcli --from-xlsx orders.xlsx --output orders.xml
 # Import Excel to database
 tdtpcli --import-xlsx orders.xlsx --strategy replace
 
-# Export in compact format (fixed fields written once, not repeated per row)
-tdtpcli --export orders --compact --fixed-fields city,region --output orders_compact.xml
-
-# Export compact with auto-detection via _prefix convention
-tdtpcli --export orders --compact --output orders_compact.xml
-# (columns named _city, _region in DB view are auto-detected as fixed)
-
-# Convert existing TDTP file to compact v1.3.1 in-place
-tdtpcli --to-compact orders.xml
-
-# Convert with explicit fixed fields and separate output
-tdtpcli --to-compact orders.xml --fixed-fields city,region --output orders_compact.xml
-
 # Compare two TDTP files
 tdtpcli --diff users-old.xml users-new.xml
 
@@ -802,6 +968,24 @@ sudo tdtpcli --pipeline pipeline.yaml --unsafe
 tdtpcli --create-config-pg > config.yaml
 tdtpcli --create-config-mysql > mysql.yaml
 
+# --- Broker Operations ---
+
+# Export to Kafka with kanzi compression (parallel compress + SendBatch)
+tdtpcli --export-broker users --compress --compress-algo kanzi --compress-level 6 --config kafka.yaml
+
+# Import from RabbitMQ / Kafka to database (atomic by default)
+tdtpcli --import-broker --config rabbitmq.yaml
+tdtpcli --import-broker --config kafka.yaml --strategy replace
+
+# Import from broker — save as TDTP files instead of importing to DB
+tdtpcli --import-broker --output users.xml --config kafka.yaml
+
+# Import from broker — save raw bytes (no parse/decompress)
+tdtpcli --import-broker --raw --output users.bin --config kafka.yaml
+
+# Streaming consumer daemon — Kafka only (production-ready)
+tdtpcli --listen --config kafka.yaml --strategy replace
+
 # --- Object Storage (S3 / SeaweedFS / MinIO) ---
 
 # Export table to S3 (multi-part automatic)
@@ -826,6 +1010,9 @@ tdtpcli --import s3://my-bucket/exports/users.tdtp.xml \
 
 # Inspect a packet in S3 without downloading full data
 tdtpcli --inspect s3://my-bucket/exports/users.tdtp_part_1_of_6.xml
+
+# Test a file in S3 before import
+tdtpcli --test s3://my-bucket/exports/users.tdtp.xml
 
 # Export table directly to XLSX in S3
 tdtpcli --export-xlsx users --output s3://my-bucket/reports/users.xlsx
@@ -919,8 +1106,16 @@ err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 cd examples/04-tdtp-xlsx
 go run main.go
 
+# PostgreSQL → TDTP XML export
+cd examples/01-basic-export
+go run main.go
+
 # RabbitMQ + MSSQL (Circuit Breaker, Audit, Retry)
 cd examples/02-rabbitmq-mssql
+go run main.go
+
+# RabbitMQ + MS SQL + ETL Pipeline
+cd examples/02b-rabbitmq-mssql-etl
 go run main.go
 
 # Incremental Sync (200x faster for large tables)
@@ -930,6 +1125,14 @@ go run main.go
 # Complete ETL pipeline
 cd examples/06-etl-pipeline
 go run main.go
+
+# ETL with encryption (xZMercury + AES-256-GCM)
+cd examples/08-pipeline-encrypted
+go run main.go
+
+# S3 pipeline chain (extract → split by region)
+cd examples/09-s3-pipeline-chain
+./run_chain.sh
 ```
 
 Examples documentation: [`examples/README.md`](examples/README.md)
@@ -1019,7 +1222,7 @@ go test -v ./pkg/core/packet/
 - `--compact` format support: carry-forward encoding for repeated field values
 - TDTP XML v1.3.1 spec: special values `[NULL]`, `[+INF]`, `[-INF]`, `[NaN]` with full cross-adapter support
 
-### v1.8.0 (current)
+### v1.8.0 (completed)
 - **Object Storage (S3)** — `pkg/storage` with driver registry and `aws-sdk-go-v2`
   - `--export … --output s3://bucket/key` — upload multi-part TDTP to S3
   - `--import s3://bucket/key` — download + auto-discover all `_part_N_of_M` files
@@ -1030,13 +1233,59 @@ go test -v ./pkg/core/packet/
   - All existing flags transparent: `--compress`, `--hash`, `--where`, `--fields`, `--compact`
   - Compatible with SeaweedFS, MinIO, Ceph RGW, AWS S3 (path-style and virtual-hosted)
   - Build tag `nos3` to exclude driver and drop `aws-sdk-go-v2` dependency
+- **`--test`** — file integrity verification (checksum, row count, multi-part, decompression)
+- **`compress_algo`** YAML config field — set default algorithm in config file
+- **CLI integration tests** — `tests/cli/test_sqlite.py` (31 tests), `tests/cli/test_postgres.py` (32 tests)
+
+### v1.8.1-beta (completed)
+- **Field Name Sanitizer** (`--translit`, `--clear`) — `pkg/sanitize`
+  - `--clear`: symbol map replacement (`%` → `_pct`, `$` → `_usd`, `&` → `_and_`, etc.)
+  - `--translit`: non-ASCII transliteration via go-unidecode (Cyrillic, European diacritics)
+  - Combined mode: `--translit` runs first, then `--clear`
+  - Applied **only on `--import`** — `--export` preserves original field names
+  - Original names preserved as DB column comments (PostgreSQL, MySQL)
+- **Bracket-quoted identifiers** in `--where` and `--fields`
+  - `[Field Name]` syntax for names with spaces or special chars (MSSQL/Access style)
+  - Brackets stripped, name properly quoted per dialect (PG/MySQL → `"..."`, MSSQL → `[...]`)
+- **ETL sanitization** — per-source `sanitize: {translit: true, clear: true}` in YAML config
+
+### v1.8.2 (completed)
+- **2× import speedup** (1.55s → 0.77s, 100k rows × 7 fields, SQLite)
+  - Streaming import: parts processed one at a time (constant memory, no GC pauses)
+  - `GetRowValues` fast path: zero-alloc split for rows without escape chars (2.7–4.7×)
+  - Parser/Converter singletons: eliminated ~2 allocs × 100k rows
+  - `PrepareContext` for SQLite batch INSERT: 2.4× faster (prepared once, reused)
+- **Help refactor**: ~100 `fmt.Println` → embedded text files via `//go:embed`
+- **Pre-commit hook**: `gofmt`, `golint`, `go vet` on staged `.go` files
+
+### v1.9.0 (current)
+- **Kafka production-ready** — removed `[BETA]` label
+- **Parallel compress + serialize** on export: concurrent goroutines, per-goroutine generators
+- **`SendBatch`**: all packets sent in a single network roundtrip
+- **Parallel decompression** on import: packets 2…N decompressed concurrently
+- **`--output` mode**: save received packets as `base_part_N_of_Total.tdtp.xml` files
+- **`--raw` flag**: save broker messages verbatim (no parse/decompress/validate)
+- **`--keep` flag**: non-atomic mode — import each part immediately as it arrives
+- **Atomic multi-part import** (default): all parts in one transaction — all-or-nothing
+- **`--import-broker` atomicity** mirrors `--import` (file) behaviour
+- **Kafka config**: `brokers` list, `consumer_group`, `StartOffset: kafka.FirstOffset`
+- **`BatchBytes`** raised to 100 MB, `BatchTimeout` lowered to 5ms
+- **Performance** (50k rows, 5 packets, localhost): kanzi 6 → 3.6s export, 3.9s import, 1.8 MB traffic (4× reduction)
 
 ### v2.0 (planned)
 - Streaming export/import (TotalParts=0, "TCP for tables")
+  - ✅ Код готов: `pkg/core/packet/streaming.go` — `StreamingGenerator` с channel-based API
+  - ❌ Не подключён к CLI (нет `--export-stream` / `--import-stream`)
 - Parallel import workers
-- Docker image (multi-stage build)
+- **Docker** (multi-stage build)
+  - ✅ `docker-compose.yml` для тестового окружения (RabbitMQ, MSSQL, PostgreSQL, MySQL, Adminer)
+  - ❌ Нет Dockerfile для сборки tdtpcli
 - Monitoring & metrics (Prometheus exporter)
+  - ❌ Нет встроенного Prometheus exporter
+  - ✅ Внутренние метрики есть в xzmercury (`xzmercury/internal/quota/metrics.go`)
 - Schema migration (ALTER TABLE)
+  - ⚠️ Частично: `ALTER TABLE RENAME TO` используется в StrategyReplace
+  - ❌ Полноценная миграция схем (добавление/удаление колонок, изменение типов) не реализована
 
 ---
 
@@ -1130,6 +1379,32 @@ MIT
 
 ---
 
+## Features
+
+✅ **Self-Documenting Packets**: каждый TDTP.xml содержит схему внутри — никакой документации не нужно
+✅ **Database Adapters**: PostgreSQL, MS SQL, SQLite, MySQL, Access (.mdb/.accdb, Windows)
+✅ **Message Brokers**:
+    - MSMQ — Legacy (Windows-only, batch mode)
+    - RabbitMQ — Stability (reliable delivery, batch mode)
+    - Kafka — Speed (ordered partitions, batch + streaming; production-ready)
+✅ **Broker Export**: parallel compress+serialize, single-roundtrip SendBatch
+✅ **Broker Import**: parallel decompression, in-order processing
+✅ **Raw Broker Save**: `--raw` flag captures queue messages verbatim (no parse/decompress)
+✅ **Streaming Consumer**: `--listen` (Kafka only) — stable channels only
+✅ **File Operations**: Diff & Merge with conflict resolution
+✅ **XLSX Converter**: Database ↔ Excel bidirectional
+✅ **Compression**: zstd (1-19) + kanzi (6-7, **4×** denser) + XXH3 checksum (`--compress --compress-algo --hash`)
+✅ **Circuit Breaker**: Protection from cascading failures
+✅ **Audit Logger**: GDPR/HIPAA compliance
+✅ **Retry Mechanism**: Exponential backoff with jitter
+✅ **Incremental Sync**: Checkpoint-based synchronization
+✅ **Data Processors**: Masking, validation, normalization
+✅ **TDTQL**: SQL-like query language for filtering
+✅ **Field Sanitization**: `--translit` / `--clear` for exotic field names (Access, 1C, ERP)
+✅ **Bracket-Quoted Identifiers**: `[Field Name]` syntax for MSSQL/Access
+
+---
+
 ## Contacts
 
 - **GitHub**: https://github.com/ruslano69/tdtp-framework
@@ -1138,4 +1413,4 @@ MIT
 
 ---
 
-*Version: v1.8.0-beta | Last updated: 17.03.2026*
+*Version: v1.9.1 | Last updated: 07.04.2026*

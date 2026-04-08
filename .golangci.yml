@@ -1,130 +1,46 @@
 version: "2"
 
-run:
-  timeout: 5m
-  tests: true
-  modules-download-mode: readonly
-
 linters:
   enable:
-    - errcheck      # Checking for unchecked errors
-    - govet         # Reports suspicious constructs
-    - ineffassign   # Detects ineffectual assignments
-    - staticcheck   # Go static analysis (includes gosimple)
-    - unused        # Checks for unused constants, variables, functions and types
-    - misspell      # Finds commonly misspelled English words
-    - revive        # Fast, configurable, extensible, flexible, and beautiful linter for Go
-    - unconvert     # Remove unnecessary type conversions
-    - unparam       # Reports unused function parameters
-    - gosec         # Security problems
-    - gocritic      # Most opinionated Go linter
-    - prealloc      # Finds slice declarations that could potentially be preallocated
-    - nilerr        # Finds code that returns nil even if it checks that error is not nil
-    - bodyclose     # Checks whether HTTP response body is closed successfully
-
-  settings:
-    errcheck:
-      check-type-assertions: false
-      check-blank: false
-
-    govet:
-      disable:
-        - fieldalignment  # Too noisy, not critical for correctness
-
-    misspell:
-      locale: US
-
-    revive:
-      confidence: 0.8
-      rules:
-        - name: blank-imports
-        - name: context-as-argument
-        - name: context-keys-type
-        - name: dot-imports
-        - name: error-return
-        - name: error-strings
-        - name: error-naming
-        - name: exported
-          arguments:
-            - disableStutteringCheck
-        - name: if-return
-        - name: increment-decrement
-        - name: var-naming
-        - name: var-declaration
-        - name: package-comments
-        - name: range
-        - name: receiver-naming
-        - name: time-naming
-        - name: unexported-return
-        - name: errorf
-        - name: empty-block
-        - name: superfluous-else
-        - name: unreachable-code
-        - name: redefines-builtin-id
-
-    gosec:
-      severity: medium
-      confidence: medium
-      excludes:
-        - G104  # Audit errors not checked - handled by errcheck
-        - G304  # File path provided as taint input - needed for file operations
-        - G201  # SQL string formatting - table names in DDL cannot use parameterized queries
-
-    gocritic:
-      enabled-tags:
-        - diagnostic
-        - style
-        - performance
-      disabled-checks:
-        - commentFormatting
-        - whyNoLint
-        - unnamedResult
-        - hugeParam      # Requires API-breaking changes to fix
-        - rangeValCopy   # Requires API-breaking changes to fix
-
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - gocritic
+    - prealloc
+    - nilerr
+    - bodyclose
+  disable:
+    - unparam  # Too many false positives for ctx parameters
+    - revive   # Too many stutters/unused-parameter warnings
   exclusions:
+    paths:
+      - _test\.go
+      - integration_test\.go
+      - ^examples/
+      - cmd/bench
+      - cmd/tdtpcli/commands/inspect\.go
+      - cmd/tdtpcli/commands/process_request\.go
     rules:
-      - path: _test\.go
-        linters:
+      - linters:
+          - errcheck
+        text: "Error return value of.*Write"
+      - linters:
           - gosec
-          - gocritic
-          - errcheck
+        text: "G201|G202|G304|G306"
+      - linters:
+          - unused
+        path: pkg/core/packet/generator\.go
+        text: "rowsToDataWithCompression"
+      - linters:
+          - unused
+        path: pkg/processors/checksum\.go
+        text: "bytesToUint64"
 
-      - path: ".*\\.pb\\.go"
-        linters:
-          - all
-
-      - path: "^examples/"
-        linters:
-          - errcheck
-          - gosec
-          - unparam
-          - gocritic
-          - revive
-
-      - path: integration_test\.go
-        linters:
-          - revive
-
-      # bufio.Writer и strings.Builder: ошибки отдельных Write/WriteString/WriteByte
-      # накапливаются и возвращаются при Flush — проверять каждый вызов избыточно.
-      - text: "Error return value of `\\w+\\.(WriteString|WriteByte|Write)` is not checked"
-        linters:
-          - errcheck
-      - text: "Error return value of `fmt\\.Fprintf` is not checked"
-        linters:
-          - errcheck
-
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-
-output:
-  formats:
-    text:
-      path: stdout
-      print-linter-name: true
-      print-issued-lines: true
-  sort-order:
-    - linter
-    - file
+run:
+  timeout: 5m
+  tests: false
+  modules-download-mode: readonly

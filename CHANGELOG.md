@@ -2,6 +2,33 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.1] — 2026-04-07
+
+### Fixed
+
+- **PostgreSQL TIME type** (`pkg/adapters/postgres/types.go`, `pkg/adapters/base/type_converter.go`):
+  - PostgreSQL `time without time zone` column now exports correctly as `08:00:00` instead of
+    failing with "invalid timestamp format, expected RFC3339".
+  - Root cause: `time` type was mapped to `TIMESTAMP` with subtype `"time"`, but converter
+    didn't handle the subtype during validation.
+  - Fix: Added `Subtype` field to `schema.FieldDef`, updated all `FieldDef` creation sites
+    to copy subtype from `packet.Field`, and modified `parseTimestamp` to check for
+    `subtype == "time"` and delegate to new `parseTime` function.
+  - Added `pgtype.Time` handler in `DBValueToString` for PostgreSQL driver.
+
+- **Test data reproducibility** (`scripts/create_postgres_test_db.py`):
+  - Added `random.seed(42)` for deterministic test data generation.
+  - Updated expected values in `tests/cli/test_postgres.py`: `ACTIVE_USERS=73`, `USERS_BALANCE_GT_5000=53`.
+
+### Added
+
+- **35/35 PostgreSQL CLI integration tests pass**:
+  - All tests in `tests/cli/test_postgres.py` now pass with deterministic data.
+  - Coverage: basic export, TDTQL filters, compression (zstd/kanzi/hash), export/import roundtrip,
+    file integrity, edge cases, compact format.
+
+---
+
 ## [1.9.0] — 2026-04-06
 
 ### Message Broker — Production Release
@@ -302,7 +329,10 @@ its contribution entirely at 5 packets.
 
 | Version | Highlights |
 |---------|-----------|
+| 1.9.1 | PostgreSQL TIME type fix, test data reproducibility (seed=42), 35/35 tests pass |
 | 1.9.0 | Kafka production-ready, parallel compress/decompress, `--raw`, `SendBatch`, `--output` multi-part save |
+| 1.8.2 | 2× import speedup, streaming import, `PrepareContext`, embedded help files |
+| 1.8.1-beta | `--translit`/`--clear` sanitization, bracket-quoted identifiers, ETL sanitize |
 | 1.8.0-beta | S3 object storage, `--test` integrity check, `compress_algo` config, Python CLI test suites |
 | 1.7.1-beta | Compact v1.3.1, `--compact`/`--to-compact`, `--inspect`, `--listen`, SpecialValues, xZMercury |
 | 1.7.0 | kanzi compression, `--fields`, MSMQ, `--packet-size` |

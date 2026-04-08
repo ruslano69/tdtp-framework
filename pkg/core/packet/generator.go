@@ -86,7 +86,6 @@ func (g *Generator) SetCompressionLevel(level int) {
 
 // GenerateReference создает reference пакет (полный справочник)
 func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]string) ([]*DataPacket, error) {
-	packets := []*DataPacket{}
 
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
 	if !g.skipSpecialValues {
@@ -95,6 +94,7 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 
 	// Разбиваем на части если нужно
 	partitions := g.partitionRows(rows, schema)
+	packets := make([]*DataPacket, 0, len(partitions))
 
 	messageIDBase := g.generateMessageID(TypeReference)
 
@@ -142,7 +142,6 @@ func (g *Generator) GenerateResponse(
 	queryContext *QueryContext,
 	sender, recipient string,
 ) ([]*DataPacket, error) {
-	packets := []*DataPacket{}
 
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
 	if !g.skipSpecialValues {
@@ -150,6 +149,7 @@ func (g *Generator) GenerateResponse(
 	}
 
 	partitions := g.partitionRows(rows, schema)
+	packets := make([]*DataPacket, 0, len(partitions))
 
 	messageIDBase := g.generateMessageID(TypeResponse)
 
@@ -290,66 +290,6 @@ func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
 	}
 
 	return partitions
-}
-
-// rowsToDataWithCompression преобразует срез строк в Data с опциональным сжатием
-// compressor - функция сжатия, если nil - сжатие не применяется
-func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]string, compressor func(ctx context.Context, rows []string, level int) (string, error)) (Data, error) {
-	// Сначала создаем обычные строки
-	var sb strings.Builder
-	rowStrings := make([]string, len(rows))
-	for i, row := range rows {
-		sb.Reset()
-		for j, value := range row {
-			if j > 0 {
-				sb.WriteByte('|')
-			}
-			writeEscaped(&sb, value)
-		}
-		rowStrings[i] = sb.String()
-	}
-
-	// Если сжатие не включено или компрессор не задан
-	if !g.compression.Enabled || compressor == nil {
-		data := Data{
-			Rows: make([]Row, len(rowStrings)),
-		}
-		for i, rowStr := range rowStrings {
-			data.Rows[i] = Row{Value: rowStr}
-		}
-		return data, nil
-	}
-
-	// Проверяем минимальный размер для сжатия
-	totalSize := 0
-	for _, rowStr := range rowStrings {
-		totalSize += len(rowStr)
-	}
-
-	if totalSize < g.compression.MinSize {
-		// Данные слишком маленькие, сжатие не выгодно
-		data := Data{
-			Rows: make([]Row, len(rowStrings)),
-		}
-		for i, rowStr := range rowStrings {
-			data.Rows[i] = Row{Value: rowStr}
-		}
-		return data, nil
-	}
-
-	// Сжимаем данные
-	compressed, err := compressor(ctx, rowStrings, g.compression.Level)
-	if err != nil {
-		return Data{}, fmt.Errorf("compression failed: %w", err)
-	}
-
-	// Возвращаем Data с одной сжатой строкой
-	return Data{
-		Compression: g.compression.Algorithm,
-		Rows: []Row{
-			{Value: compressed},
-		},
-	}, nil
 }
 
 // escapeValue экранирует специальные символы в значении за один проход.
@@ -515,4 +455,58 @@ func (g *Generator) generateMessageID(msgType MessageType) string {
 	uid := generateUUID()[:8]
 
 	return fmt.Sprintf("%s-%d-%s", prefix, year, uid)
+}
+
+// rowsToDataWithCompression преобразует срез строк в Data с опциональным сжатием
+// compressor - функция сжатия, если nil - сжатие не применяется
+func (g *Generator) rowsToDataWithCompression(ctx context.Context, rows [][]string, compressor func(ctx context.Context, rows []string, level int) (string, error)) (Data, error) {
+	var sb strings.Builder
+	rowStrings := make([]string, len(rows))
+	for i, row := range rows {
+		sb.Reset()
+		for j, value := range row {
+			if j > 0 {
+				sb.WriteByte('|')
+			}
+			writeEscaped(&sb, value)
+		}
+		rowStrings[i] = sb.String()
+	}
+
+	if !g.compression.Enabled || compressor == nil {
+		data := Data{
+			Rows: make([]Row, len(rowStrings)),
+		}
+		for i, rowStr := range rowStrings {
+			data.Rows[i] = Row{Value: rowStr}
+		}
+		return data, nil
+	}
+
+	totalSize := 0
+	for _, rowStr := range rowStrings {
+		totalSize += len(rowStr)
+	}
+
+	if totalSize < g.compression.MinSize {
+		data := Data{
+			Rows: make([]Row, len(rowStrings)),
+		}
+		for i, rowStr := range rowStrings {
+			data.Rows[i] = Row{Value: rowStr}
+		}
+		return data, nil
+	}
+
+	compressed, err := compressor(ctx, rowStrings, g.compression.Level)
+	if err != nil {
+		return Data{}, fmt.Errorf("compression failed: %w", err)
+	}
+
+	return Data{
+		Compression: g.compression.Algorithm,
+		Rows: []Row{
+			{Value: compressed},
+		},
+	}, nil
 }

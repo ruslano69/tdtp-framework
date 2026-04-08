@@ -69,6 +69,7 @@ func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value st
 	fieldDef := schema.FieldDef{
 		Name:      field.Name,
 		Type:      schema.DataType(field.Type),
+		Subtype:   field.Subtype,
 		Length:    field.Length,
 		Precision: field.Precision,
 		Scale:     field.Scale,
@@ -208,9 +209,26 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		return "0"
 
 	case time.Time:
+		// Проверяем subtype — для PostgreSQL "time" (время суток) возвращаем только время
+		if field.Subtype == "time" {
+			return v.Format("15:04:05") // HH:MM:SS
+		}
 		// Timestamp в RFC3339 формате (TDTP стандарт)
 		// Нормализуем в UTC для consistency
 		return v.UTC().Format(time.RFC3339)
+
+	case pgtype.Time:
+		// PostgreSQL TIME (время суток, например 08:00:00)
+		// Microseconds — количество микросекунд от полуночи
+		if !v.Valid {
+			return NullSentinel
+		}
+		// v.Microseconds — int64 микросекунд от полуночи
+		seconds := v.Microseconds / 1000000
+		hours := seconds / 3600
+		minutes := (seconds % 3600) / 60
+		secs := seconds % 60
+		return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, secs)
 
 	case pgtype.Date:
 		if !v.Valid {
@@ -462,21 +480,33 @@ func bytesToHexWithoutLeadingZeros(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-
-	// Находим первый ненулевой байт
-	firstNonZero := len(b) // Инициализируем как len(b) - если не найдем, значит все нули
+	// Fast path: rowversion/timestamp — ровно 8 байт, zero heap allocations
+	if len(b) == 8 {
+		v := binary.BigEndian.Uint64(b)
+		if v == 0 {
+			return "0"
+		}
+		const hexChars = "0123456789ABCDEF"
+		var buf [16]byte
+		pos := 16
+		for v > 0 {
+			pos--
+			buf[pos] = hexChars[v&0x0F]
+			v >>= 4
+		}
+		return string(buf[pos:])
+	}
+	// General path для нестандартных длин
+	firstNonZero := len(b)
 	for i, v := range b {
 		if v != 0 {
 			firstNonZero = i
 			break
 		}
 	}
-
-	// Если все нули (не нашли ненулевой байт), возвращаем "0"
 	if firstNonZero == len(b) {
 		return "0"
 	}
-
 	return strings.ToUpper(hex.EncodeToString(b[firstNonZero:]))
 }
 

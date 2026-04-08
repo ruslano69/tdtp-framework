@@ -232,7 +232,13 @@ func (c *Converter) parseDatetime(tv *TypedValue, field FieldDef) (*TypedValue, 
 }
 
 // parseTimestamp парсит TIMESTAMP (всегда UTC)
+// Если subtype="time" — это TIME (время суток из PostgreSQL time type)
 func (c *Converter) parseTimestamp(tv *TypedValue, field FieldDef) (*TypedValue, error) {
+	// Subtype "time" — это TIME из PostgreSQL (время суток, например 08:00:00)
+	if field.Subtype == "time" {
+		return c.parseTime(tv, field)
+	}
+
 	val, err := time.Parse(time.RFC3339, tv.RawValue)
 	if err != nil {
 		return nil, &ValidationError{
@@ -246,6 +252,32 @@ func (c *Converter) parseTimestamp(tv *TypedValue, field FieldDef) (*TypedValue,
 	val = val.UTC()
 	tv.TimeValue = &val
 	return tv, nil
+}
+
+// parseTime парсит TIME (время суток, например 08:00:00)
+func (c *Converter) parseTime(tv *TypedValue, field FieldDef) (*TypedValue, error) {
+	// Try standard time formats
+	formats := []string{
+		"15:04:05",        // 08:00:00
+		"15:04:05.000000", // 08:00:00.000000
+		"15:04",           // 08:00
+		"03:04:05 PM",     // 03:04:05 PM
+		"03:04 PM",        // 03:04 PM
+	}
+
+	for _, fmt := range formats {
+		if val, err := time.Parse(fmt, tv.RawValue); err == nil {
+			// Return as time-only (no date)
+			tv.TimeValue = &val
+			return tv, nil
+		}
+	}
+
+	return nil, &ValidationError{
+		Field:   field.Name,
+		Message: "invalid time format, expected HH:MM:SS",
+		Value:   tv.RawValue,
+	}
 }
 
 // parseBlob парсит BLOB (Base64)

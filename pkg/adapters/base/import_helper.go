@@ -361,6 +361,7 @@ func ConvertRowToSQLValues(
 		fieldDef := schema.FieldDef{
 			Name:      field.Name,
 			Type:      schema.DataType(field.Type),
+			Subtype:   field.Subtype,
 			Length:    field.Length,
 			Precision: field.Precision,
 			Scale:     field.Scale,

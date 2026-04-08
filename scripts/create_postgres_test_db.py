@@ -17,6 +17,9 @@ from datetime import datetime, timedelta
 import json
 import uuid
 
+# Fixed seed for reproducible test data
+random.seed(42)
+
 # Параметры подключения (из docker-compose.yml)
 DB_CONFIG = {
     'host': 'localhost',
