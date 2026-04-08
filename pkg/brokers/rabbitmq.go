@@ -117,22 +117,30 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		}
 	}
 
-	// Начинаем потребление сообщений (блокирующий режим)
+	return nil
+}
+
+// startConsuming регистрирует consumer на канале — вызывается лениво при первом Receive.
+// Разделение Connect и Consume необходимо: если вызвать Consume при отправке,
+// RabbitMQ начинает пушить unacked deliveries обратно; никто их не читает,
+// TCP-буфер забивается и следующий PublishWithContext блокируется навсегда.
+func (r *RabbitMQ) startConsuming() error {
+	if r.deliveryChan != nil {
+		return nil // уже зарегистрирован
+	}
+	var err error
 	r.deliveryChan, err = r.channel.Consume(
 		r.config.Queue, // queue
-		"",             // consumer tag (пустая строка = auto-generated)
-		false,          // auto-ack = false - MANUAL ACK!
+		"",             // consumer tag (auto-generated)
+		false,          // auto-ack = false — MANUAL ACK
 		false,          // exclusive
 		false,          // no-local
 		false,          // no-wait
 		nil,            // args
 	)
 	if err != nil {
-		_ = r.channel.Close()
-		_ = r.conn.Close()
 		return fmt.Errorf("failed to start consuming: %w", err)
 	}
-
 	return nil
 }
 
@@ -191,8 +199,11 @@ func (r *RabbitMQ) Send(ctx context.Context, message []byte) error {
 // ВАЖНО: Сообщение НЕ удаляется из очереди автоматически!
 // Нужно вызвать AckLast() после успешной обработки
 func (r *RabbitMQ) Receive(ctx context.Context) ([]byte, error) {
-	if r.deliveryChan == nil {
-		return nil, fmt.Errorf("not connected to RabbitMQ (deliveryChan is nil)")
+	if r.channel == nil {
+		return nil, fmt.Errorf("not connected to RabbitMQ")
+	}
+	if err := r.startConsuming(); err != nil {
+		return nil, err
 	}
 
 	// Блокирующее получение сообщения из канала
