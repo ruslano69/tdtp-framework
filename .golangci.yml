@@ -33,9 +33,6 @@ linters:
         text: "G201|G202|G304|G306"
       - linters:
           - unused
-        path: pkg/adapters/mssql/hex\.go
-      - linters:
-          - unused
         path: pkg/core/packet/generator\.go
         text: "rowsToDataWithCompression"
       - linters:
