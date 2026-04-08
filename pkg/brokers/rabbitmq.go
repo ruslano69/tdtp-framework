@@ -195,6 +195,17 @@ func (r *RabbitMQ) Send(ctx context.Context, message []byte) error {
 	return nil
 }
 
+// SendBatch отправляет несколько сообщений последовательно.
+// RabbitMQ не имеет нативного batch API, поэтому это N вызовов Send.
+func (r *RabbitMQ) SendBatch(ctx context.Context, messages [][]byte) error {
+	for i, msg := range messages {
+		if err := r.Send(ctx, msg); err != nil {
+			return fmt.Errorf("SendBatch: message %d/%d: %w", i+1, len(messages), err)
+		}
+	}
+	return nil
+}
+
 // Receive получает сообщение из RabbitMQ очереди
 // ВАЖНО: Сообщение НЕ удаляется из очереди автоматически!
 // Нужно вызвать AckLast() после успешной обработки

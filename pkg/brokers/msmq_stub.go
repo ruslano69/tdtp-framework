@@ -53,3 +53,13 @@ func (m *MSMQ) Ping(ctx context.Context) error {
 func (m *MSMQ) GetBrokerType() string {
 	return "msmq"
 }
+
+// SendBatch отправляет несколько сообщений последовательно (stub).
+func (m *MSMQ) SendBatch(ctx context.Context, messages [][]byte) error {
+	for i, msg := range messages {
+		if err := m.Send(ctx, msg); err != nil {
+			return fmt.Errorf("SendBatch: message %d/%d: %w", i+1, len(messages), err)
+		}
+	}
+	return nil
+}

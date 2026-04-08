@@ -164,6 +164,20 @@ type RabbitMQOutputConfig struct {
 type KafkaOutputConfig struct {
 	Brokers []string `yaml:"brokers"` // Список Kafka brokers
 	Topic   string   `yaml:"topic"`   // Kafka topic
+
+	// Streaming spool — для надёжной отправки больших таблиц.
+	// Каждый пакет сжимается и пишется на диск; отдельная горутина
+	// читает файлы и шлёт пачками. Гарантирует < 1MB на сообщение.
+	SpoolDir      string `yaml:"spool_dir"`      // "" = os.TempDir()/tdtp-kafka-spool; явный путь — постоянный spool
+	PacketKB      int    `yaml:"packet_kb"`      // целевой размер пакета несжатого XML, КБ (default 750)
+	BatchSend     int    `yaml:"batch_send"`     // кол-во пакетов в одном WriteMessages (default 10)
+	CompressAlgo  string `yaml:"compress_algo"`  // zstd (default) или none
+	CompressLevel int    `yaml:"compress_level"` // уровень сжатия zstd (default 3)
+
+	// MemLimitMB > 0 включает быстрый in-memory путь вместо disk-spool.
+	// Writer блокируется когда суммарный объём сжатых данных в канале
+	// превышает лимит. Нет записи на диск — нет resumability при падении.
+	MemLimitMB int `yaml:"mem_limit_mb"` // 0 = disk spool; > 0 = in-memory с backpressure
 }
 
 // PerformanceConfig определяет параметры производительности
@@ -506,6 +520,26 @@ func (c *PipelineConfig) SetDefaults() {
 		}
 		if c.Output.Resilience.TimeoutSec == 0 {
 			c.Output.Resilience.TimeoutSec = 60
+		}
+	}
+
+	// Defaults для Kafka spool / in-memory pipeline
+	if c.Output.Type == "kafka" && c.Output.Kafka != nil {
+		k := c.Output.Kafka
+		// Если задан любой из режимов pipeline — применяем дефолты
+		if k.PacketKB > 0 || k.SpoolDir != "" || k.MemLimitMB > 0 {
+			if k.PacketKB <= 0 {
+				k.PacketKB = defaultPacketKB // 750 KB
+			}
+			if k.BatchSend <= 0 {
+				k.BatchSend = defaultBatchSend // 10
+			}
+			if k.CompressAlgo == "" {
+				k.CompressAlgo = "zstd"
+			}
+			if k.CompressLevel <= 0 {
+				k.CompressLevel = defaultCompressLvl // 3
+			}
 		}
 	}
 

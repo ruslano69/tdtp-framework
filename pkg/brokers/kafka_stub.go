@@ -46,3 +46,8 @@ func (k *Kafka) GetBrokerType() string { return "kafka" }
 
 // SetOffset always returns an error in nokafka builds.
 func (k *Kafka) SetOffset(_ int64) error { return fmt.Errorf("kafka not available") }
+
+// SendBatch always returns an error in nokafka builds.
+func (k *Kafka) SendBatch(_ context.Context, _ [][]byte) error {
+	return fmt.Errorf("kafka not available")
+}

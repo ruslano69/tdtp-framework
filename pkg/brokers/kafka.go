@@ -35,41 +35,52 @@ func NewKafka(cfg Config) (*Kafka, error) {
 	}, nil
 }
 
-// Connect устанавливает соединение с Kafka
+// Connect устанавливает соединение с Kafka.
+// Reader создаётся лениво при первом вызове Receive() —
+// это убирает ~3-секундный блок в Close() когда брокер используется только для записи.
 func (k *Kafka) Connect(ctx context.Context) error {
-	// Создаем Writer для отправки сообщений
 	k.writer = &kafka.Writer{
 		Addr:         kafka.TCP(k.config.Brokers...),
 		Topic:        k.config.Topic,
-		Balancer:     &kafka.LeastBytes{}, // Балансировка по наименьшей загруженности
-		RequiredAcks: kafka.RequireOne,    // Подтверждение от лидера (достаточно для надёжности)
-		Async:        false,               // Синхронная отправка
-		Compression:  kafka.Snappy,        // Сжатие данных
-		MaxAttempts:  3,                   // Повторные попытки
+		Balancer:     &kafka.LeastBytes{},
+		RequiredAcks: kafka.RequireOne,
+		Async:        false,
+		Compression:  kafka.Snappy,
+		MaxAttempts:  3,
 		WriteTimeout: 30 * time.Second,
 		BatchBytes:   100 * 1024 * 1024,    // 100MB — поддержка крупных TDTP-пакетов
 		BatchTimeout: 5 * time.Millisecond, // Не ждать накопления — отправлять сразу
 	}
 
-	// Создаем Reader для получения сообщений
-	k.reader = kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        k.config.Brokers,
-		GroupID:        k.config.ConsumerGroup,
-		Topic:          k.config.Topic,
-		MinBytes:       1,                 // Минимальный размер batch
-		MaxBytes:       10e6,              // 10MB максимальный размер
-		CommitInterval: 0,                 // Manual commit
-		StartOffset:    kafka.FirstOffset, // earliest: читаем все непотреблённые сообщения
-		MaxWait:        1 * time.Second,   // Максимальное время ожидания
-		ReadBackoffMin: 100 * time.Millisecond,
-		ReadBackoffMax: 1 * time.Second,
-	})
-
-	// Проверяем подключение
+	// Проверяем подключение без создания Reader
 	return k.Ping(ctx)
 }
 
-// Close закрывает соединение с Kafka
+// ensureReader создаёт Reader при первом обращении к Receive().
+func (k *Kafka) ensureReader() {
+	if k.reader != nil {
+		return
+	}
+	k.reader = kafka.NewReader(kafka.ReaderConfig{
+		Brokers:           k.config.Brokers,
+		GroupID:           k.config.ConsumerGroup,
+		Topic:             k.config.Topic,
+		MinBytes:          1,
+		MaxBytes:          10e6,
+		CommitInterval:    0,                      // Manual commit
+		StartOffset:       kafka.FirstOffset,      // earliest
+		MaxWait:           1 * time.Second,
+		ReadBackoffMin:    100 * time.Millisecond,
+		ReadBackoffMax:    1 * time.Second,
+		HeartbeatInterval: 200 * time.Millisecond, // Close() ждёт не более одного интервала
+		SessionTimeout:    6 * time.Second,        // брокер считает консьюмера мёртвым через 6с
+	})
+}
+
+// Close закрывает соединение с Kafka.
+// reader.Close() может блокировать до MaxWait (fetch long-poll), поэтому
+// закрываем его в горутине с таймаутом 400 мс — этого достаточно для
+// нормального LeaveGroup + выхода heartbeat-цикла (HeartbeatInterval=200ms).
 func (k *Kafka) Close() error {
 	var errs []error
 
@@ -80,8 +91,15 @@ func (k *Kafka) Close() error {
 	}
 
 	if k.reader != nil {
-		if err := k.reader.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close reader: %w", err))
+		done := make(chan error, 1)
+		go func() { done <- k.reader.Close() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to close reader: %w", err))
+			}
+		case <-time.After(400 * time.Millisecond):
+			// reader.Close() завис в long-poll — игнорируем, сессия истечёт на брокере
 		}
 	}
 
@@ -141,13 +159,11 @@ func (k *Kafka) SendBatch(ctx context.Context, messages [][]byte) error {
 	return nil
 }
 
-// Receive получает сообщение из Kafka topic
+// Receive получает сообщение из Kafka topic.
 // ВАЖНО: offset НЕ коммитится автоматически!
-// Нужно вызвать CommitLast() после успешной обработки
+// Нужно вызвать CommitLast() после успешной обработки.
 func (k *Kafka) Receive(ctx context.Context) ([]byte, error) {
-	if k.reader == nil {
-		return nil, fmt.Errorf("not connected to Kafka")
-	}
+	k.ensureReader()
 
 	msg, err := k.reader.FetchMessage(ctx)
 	if err != nil {
@@ -159,7 +175,7 @@ func (k *Kafka) Receive(ctx context.Context) ([]byte, error) {
 	return msg.Value, nil
 }
 
-// CommitLast подтверждает последнее полученное сообщение (commit offset)
+// CommitLast подтверждает последнее полученное сообщение (commit offset).
 // Вызывайте ТОЛЬКО после успешной обработки сообщения!
 func (k *Kafka) CommitLast(ctx context.Context) error {
 	if k.lastMessage == nil {

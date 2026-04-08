@@ -451,7 +451,18 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 	return nil
 }
 
-// exportToKafka экспортирует в Kafka
+// exportToKafka экспортирует в Kafka.
+//
+// Маршруты (выбираются автоматически по конфигу):
+//
+//  1. mem_limit_mb > 0  — in-memory pipeline: сжатые пакеты буферизуются в RAM,
+//     backpressure не даёт выйти за лимит; нет записи на диск, нет resumability.
+//
+//  2. packet_kb > 0 | spool_dir != ""  — disk-spool pipeline: каждый пакет
+//     сжимается и пишется на диск; sender-горутина читает файлы и шлёт пачками;
+//     файлы остаются при падении — можно делать retry вручную.
+//
+//  3. legacy — один пакет = одно Kafka-сообщение (может превысить message.max.bytes).
 func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPacket) error {
 	if e.config.Kafka == nil {
 		return fmt.Errorf("kafka config is not set")
@@ -459,7 +470,12 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 
 	cfg := e.config.Kafka
 
-	// Создаем broker
+	// ── Spool / in-memory pipeline ─────────────────────────────────────────
+	if cfg.PacketKB > 0 || cfg.SpoolDir != "" || cfg.MemLimitMB > 0 {
+		return e.exportToKafkaSpool(ctx, dataPacket)
+	}
+
+	// ── Legacy: один пакет = одно Kafka-сообщение ─────────────────────────
 	broker, err := brokers.New(brokers.Config{
 		Type:    "kafka",
 		Brokers: cfg.Brokers,
@@ -468,26 +484,67 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 	if err != nil {
 		return fmt.Errorf("failed to create Kafka broker: %w", err)
 	}
-
-	// Подключаемся
 	if err := broker.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Kafka: %w", err)
 	}
 	defer func() { _ = broker.Close() }()
 
-	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
-	xmlData, err := generator.ToXML(dataPacket, false) // compact XML
+	xmlData, err := generator.ToXML(dataPacket, false)
 	if err != nil {
 		return fmt.Errorf("failed to generate XML: %w", err)
 	}
 
-	// Отправляем в Kafka
 	if err := broker.Send(ctx, xmlData); err != nil {
 		return fmt.Errorf("failed to send to Kafka: %w", err)
 	}
 
 	return nil
+}
+
+// exportToKafkaSpool разбивает DataPacket на части ≤ PacketKB и отправляет
+// через KafkaSpoolExporter (writer → spool-файл → sender → Kafka).
+func (e *Exporter) exportToKafkaSpool(ctx context.Context, dataPacket *packet.DataPacket) error {
+	cfg := e.config.Kafka
+
+	// Применяем pre-export цепочку (маскирование, нормализация и т.д.)
+	if err := e.applyPreExport(ctx, dataPacket); err != nil {
+		return err
+	}
+
+	// Разбиваем на части с учётом PacketKB
+	partSizeBytes := cfg.PacketKB * 1024
+	if partSizeBytes <= 0 {
+		partSizeBytes = defaultPacketKB * 1024
+	}
+
+	generator := packet.NewGenerator()
+	generator.SetMaxMessageSize(partSizeBytes)
+	rows := packet.ParseRows(dataPacket.Data.Rows, packet.NewParser())
+	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
+	if err != nil {
+		return fmt.Errorf("failed to split packets: %w", err)
+	}
+
+	// Уникальный ID job'а для изоляции spool-директории
+	jobID := dataPacket.Header.MessageID
+	if jobID == "" {
+		jobID = fmt.Sprintf("job-%d", len(parts))
+	}
+
+	exp, err := NewKafkaSpoolExporter(cfg, jobID)
+	if err != nil {
+		return err
+	}
+	defer exp.Close()
+
+	if exportErr := exp.ExportPackets(ctx, parts); exportErr != nil {
+		// Spool-файлы остаются на диске — можно сделать retry вручную
+		return fmt.Errorf("kafka spool export failed (spool: %s): %w", exp.SpoolDir(), exportErr)
+	}
+
+	// Успех — удаляем временную директорию
+	return exp.Cleanup()
 }
 
 // exportToXLSX записывает DataPacket в Excel-файл (.xlsx).
