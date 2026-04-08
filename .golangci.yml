@@ -17,13 +17,14 @@ linters:
     - unparam  # Too many false positives for ctx parameters
     - revive   # Too many stutters/unused-parameter warnings
   exclusions:
+    paths:
+      - _test\.go
+      - integration_test\.go
+      - ^examples/
+      - cmd/bench
+      - cmd/tdtpcli/commands/inspect\.go
+      - cmd/tdtpcli/commands/process_request\.go
     rules:
-      - path: _test\.go
-      - path: integration_test\.go
-      - path: ^examples/
-      - path: cmd/bench
-      - path: cmd/tdtpcli/commands/inspect\.go
-      - path: cmd/tdtpcli/commands/process_request\.go
       - linters:
           - errcheck
         text: "Error return value of.*Write"
