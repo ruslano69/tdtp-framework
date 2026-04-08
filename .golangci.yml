@@ -31,6 +31,17 @@ linters:
       - linters:
           - gosec
         text: "G201|G202|G304|G306"
+      - linters:
+          - unused
+        path: pkg/adapters/mssql/hex\.go
+      - linters:
+          - unused
+        path: pkg/core/packet/generator\.go
+        text: "rowsToDataWithCompression"
+      - linters:
+          - unused
+        path: pkg/processors/checksum\.go
+        text: "bytesToUint64"
 
 run:
   timeout: 5m
