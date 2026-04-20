@@ -36,11 +36,14 @@ CFG_C   = "/tmp/tdtp_sqlite_compress.yaml"      # config with compression from f
 CFG_IMP = "/tmp/tdtp_sqlite_import.yaml"        # import-target config
 
 # S3 (SeaweedFS) — optional, tests skip when weed is not running
-S3_ENDPOINT = "http://127.0.0.1:8333"
-S3_BUCKET   = "tdtp-test"
-S3_PREFIX   = "ci/t8"
-CFG_S3      = "/tmp/tdtp_sqlite_s3.yaml"
-CFG_ETL_S3  = "/tmp/tdtp_etl_s3.yaml"
+S3_ENDPOINT   = "http://127.0.0.1:8333"
+S3_BUCKET     = "tdtp-test"
+S3_PREFIX     = "ci/t8"
+# Credentials from weed/s3.json (IAM mode — "any"/"any" not accepted)
+S3_ACCESS_KEY = os.environ.get("TDTP_S3_ACCESS_KEY", "tdtp_access")
+S3_SECRET_KEY = os.environ.get("TDTP_S3_SECRET_KEY", "tdtp_secret")
+CFG_S3        = "/tmp/tdtp_sqlite_s3.yaml"
+CFG_ETL_S3    = "/tmp/tdtp_etl_s3.yaml"
 
 # ─── ANSI colors ──────────────────────────────────────────────────────────────
 GREEN  = "\033[32m"
@@ -693,10 +696,20 @@ def test_T7_compact():
 # ─── T8 S3 Object Storage ─────────────────────────────────────────────────────
 
 def s3_available() -> bool:
-    """Return True if SeaweedFS S3 gateway is responding at S3_ENDPOINT."""
+    """Return True if SeaweedFS S3 gateway is responding at S3_ENDPOINT.
+
+    Unauthenticated GET / returns HTTP 403 AccessDenied when IAM is enabled —
+    that still means the gateway is up.  Accept both the anonymous case
+    (ListAllMyBucketsResult) and the IAM-enforced case (403 / AccessDenied).
+    """
     try:
-        with urllib.request.urlopen(S3_ENDPOINT + "/", timeout=2) as r:
-            return b"ListAllMyBucketsResult" in r.read(512)
+        req = urllib.request.Request(S3_ENDPOINT + "/")
+        try:
+            with urllib.request.urlopen(req, timeout=2) as r:
+                body = r.read(512)
+                return b"ListAllMyBucketsResult" in body or b"AccessDenied" in body
+        except urllib.error.HTTPError as e:
+            return e.code in (400, 403)   # auth required → gateway is up
     except Exception:
         return False
 
@@ -709,8 +722,8 @@ def write_s3_cfg(path: str, db: str = TEST_DB):
         f.write(f"    endpoint: \"{S3_ENDPOINT}\"\n")
         f.write(f"    region: \"us-east-1\"\n")
         f.write(f"    bucket: \"{S3_BUCKET}\"\n")
-        f.write(f"    access_key: \"any\"\n")
-        f.write(f"    secret_key: \"any\"\n")
+        f.write(f"    access_key: \"{S3_ACCESS_KEY}\"\n")
+        f.write(f"    secret_key: \"{S3_SECRET_KEY}\"\n")
         f.write(f"    path_style: true\n")
         f.write(f"    disable_ssl: true\n")
 
@@ -748,8 +761,8 @@ output:
       endpoint: "{S3_ENDPOINT}"
       region: "us-east-1"
       bucket: "{S3_BUCKET}"
-      access_key: "any"
-      secret_key: "any"
+      access_key: "{S3_ACCESS_KEY}"
+      secret_key: "{S3_SECRET_KEY}"
       path_style: true
       disable_ssl: true
 """)
