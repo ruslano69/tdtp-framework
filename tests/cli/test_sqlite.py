@@ -850,7 +850,13 @@ CFG_MSMQ_IMP = "/tmp/tdtp_msmq_import.yaml"
 
 
 def msmq_available() -> bool:
-    """Return True if MSMQ service is running on the local machine."""
+    """Return True if MSMQ service is running on the local machine.
+
+    MSMQ is Windows-only — immediately returns False on non-Windows platforms
+    without spawning any subprocesses.
+    """
+    if sys.platform != "win32":
+        return False
     try:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
