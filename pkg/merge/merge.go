@@ -375,22 +375,22 @@ func (r *MergeResult) FormatText() string {
 	var sb strings.Builder
 
 	sb.WriteString("=== Merge Statistics ===\n")
-	sb.WriteString(fmt.Sprintf("Packets merged: %d\n", r.Stats.TotalPackets))
-	sb.WriteString(fmt.Sprintf("Total rows in:  %d\n", r.Stats.TotalRowsIn))
-	sb.WriteString(fmt.Sprintf("Total rows out: %d\n", r.Stats.TotalRowsOut))
-	sb.WriteString(fmt.Sprintf("Duplicates:     %d\n", r.Stats.Duplicates))
-	sb.WriteString(fmt.Sprintf("Conflicts:      %d\n\n", r.Stats.ConflictsCount))
+	fmt.Fprintf(&sb, "Packets merged: %d\n", r.Stats.TotalPackets)
+	fmt.Fprintf(&sb, "Total rows in:  %d\n", r.Stats.TotalRowsIn)
+	fmt.Fprintf(&sb, "Total rows out: %d\n", r.Stats.TotalRowsOut)
+	fmt.Fprintf(&sb, "Duplicates:     %d\n", r.Stats.Duplicates)
+	fmt.Fprintf(&sb, "Conflicts:      %d\n\n", r.Stats.ConflictsCount)
 
 	if len(r.Conflicts) > 0 && len(r.Conflicts) <= 10 {
 		sb.WriteString("=== Conflicts ===\n")
 		for _, c := range r.Conflicts {
-			sb.WriteString(fmt.Sprintf("Key %s: %s\n", c.Key, c.Resolution))
+			fmt.Fprintf(&sb, "Key %s: %s\n", c.Key, c.Resolution)
 		}
 	} else if len(r.Conflicts) > 10 {
-		sb.WriteString(fmt.Sprintf("=== Conflicts (%d total, showing first 10) ===\n", len(r.Conflicts)))
+		fmt.Fprintf(&sb, "=== Conflicts (%d total, showing first 10) ===\n", len(r.Conflicts))
 		for i := 0; i < 10; i++ {
 			c := r.Conflicts[i]
-			sb.WriteString(fmt.Sprintf("Key %s: %s\n", c.Key, c.Resolution))
+			fmt.Fprintf(&sb, "Key %s: %s\n", c.Key, c.Resolution)
 		}
 	}
 

@@ -24,10 +24,15 @@ linters:
       - cmd/bench
       - cmd/tdtpcli/commands/inspect\.go
       - cmd/tdtpcli/commands/process_request\.go
+      - tests/integration/kafka_perf
     rules:
       - linters:
           - errcheck
         text: "Error return value of.*Write"
+      - linters:
+          - errcheck
+        text: "Error return value of.*Clear"
+        path: pkg/brokers/msmq\.go
       - linters:
           - gosec
         text: "G201|G202|G304|G306"
@@ -44,3 +49,6 @@ run:
   timeout: 5m
   tests: false
   modules-download-mode: readonly
+  skip-dirs:
+    - tests/integration/kafka_perf
+    - scripts

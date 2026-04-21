@@ -61,7 +61,7 @@ func formatFilters(filters *packet.Filters) string {
 
 // formatLogicalGroup formats a logical group
 func formatLogicalGroup(group *packet.LogicalGroup, logic string) string {
-	parts := make([]string, 0)
+	parts := make([]string, 0, len(group.Filters)+len(group.And)+len(group.Or))
 
 	for _, f := range group.Filters {
 		parts = append(parts, formatFilter(f))

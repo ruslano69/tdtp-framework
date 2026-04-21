@@ -396,8 +396,8 @@ func (m *MSMQ) queueExists() (bool, error) {
 func (m *MSMQ) privateQueueExists() (bool, error) {
 	result, err := oleutil.CallMethod(m.queueInfo, "Open", int32(MQ_PEEK_ACCESS), int32(MQ_DENY_NONE))
 	if err != nil {
-		// Ошибка открытия — очереди нет
-		return false, nil
+		// Open error means the queue does not exist — not a caller error.
+		return false, nil //nolint:nilerr
 	}
 	queue := result.ToIDispatch()
 	if queue == nil {

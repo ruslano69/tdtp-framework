@@ -304,8 +304,8 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 	b.WriteString(`</span>`)
 	b.WriteString(`<span class="badge ` + badgeClass + `">` + html.EscapeString(strings.ToUpper(msgType)) + `</span>`)
 	if pkt.Header.PartNumber > 0 && pkt.Header.TotalParts > 1 {
-		b.WriteString(fmt.Sprintf(`<span class="badge badge-type">part %d / %d</span>`,
-			pkt.Header.PartNumber, pkt.Header.TotalParts))
+		fmt.Fprintf(&b, `<span class="badge badge-type">part %d / %d</span>`,
+			pkt.Header.PartNumber, pkt.Header.TotalParts)
 	}
 	b.WriteString(`</div>`) // header-top
 
@@ -331,7 +331,7 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 
 	// --- Schema card ---
 	b.WriteString(`<div class="card">`)
-	b.WriteString(fmt.Sprintf(`<div class="card-header">Schema <span class="pill">%d fields</span></div>`, len(pkt.Schema.Fields)))
+	fmt.Fprintf(&b, `<div class="card-header">Schema <span class="pill">%d fields</span></div>`, len(pkt.Schema.Fields))
 	b.WriteString(`<table class="schema-table">`)
 	b.WriteString(`<thead><tr>`)
 	b.WriteString(`<th>#</th><th>Field Name</th><th>Type</th><th>Attributes</th>`)
@@ -339,7 +339,7 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 
 	for i, field := range pkt.Schema.Fields {
 		b.WriteString(`<tr>`)
-		b.WriteString(fmt.Sprintf(`<td class="row-num">%d</td>`, i+1))
+		fmt.Fprintf(&b, `<td class="row-num">%d</td>`, i+1)
 		b.WriteString(`<td class="field-name">`)
 		b.WriteString(html.EscapeString(field.Name))
 		b.WriteString(`</td>`)
@@ -380,10 +380,10 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 	// --- Data card ---
 	b.WriteString(`<div class="card">`)
 	if len(parsedRows) < totalRows {
-		b.WriteString(fmt.Sprintf(`<div class="card-header">Data <span class="pill">%d–%d of %d rows</span></div>`,
-			displayOffset+1, displayOffset+len(parsedRows), totalRows))
+		fmt.Fprintf(&b, `<div class="card-header">Data <span class="pill">%d–%d of %d rows</span></div>`,
+			displayOffset+1, displayOffset+len(parsedRows), totalRows)
 	} else {
-		b.WriteString(fmt.Sprintf(`<div class="card-header">Data <span class="pill">%d rows</span></div>`, len(parsedRows)))
+		fmt.Fprintf(&b, `<div class="card-header">Data <span class="pill">%d rows</span></div>`, len(parsedRows))
 	}
 	b.WriteString(`<div class="data-wrapper"><table class="data-table"><thead><tr>`)
 
@@ -398,14 +398,14 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 		}
 		label := html.EscapeString(field.Name)
 		typeLabel := strings.ToLower(field.Type)
-		b.WriteString(fmt.Sprintf(`<th%s>%s<br><small>%s</small></th>`, cls, label, html.EscapeString(typeLabel)))
+		fmt.Fprintf(&b, `<th%s>%s<br><small>%s</small></th>`, cls, label, html.EscapeString(typeLabel))
 	}
 	b.WriteString(`</tr></thead><tbody>`)
 
 	// Data rows
 	for rowIdx, vals := range parsedRows {
 		b.WriteString(`<tr>`)
-		b.WriteString(fmt.Sprintf(`<td class="row-num">%d</td>`, rowIdx+displayOffset+1))
+		fmt.Fprintf(&b, `<td class="row-num">%d</td>`, rowIdx+displayOffset+1)
 
 		for colIdx, val := range vals {
 			if colIdx >= len(pkt.Schema.Fields) {
@@ -447,17 +447,17 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 		}
 	}
 	if len(parsedRows) < totalRows {
-		b.WriteString(fmt.Sprintf(`<div class="stats-bar">
+		fmt.Fprintf(&b, `<div class="stats-bar">
   <span>showing rows <strong>%d–%d</strong> of <strong>%d</strong></span>
   <span><strong>%d</strong> columns</span>
   <span><strong>%d</strong> primary key(s)</span>
-</div>`, displayOffset+1, displayOffset+len(parsedRows), totalRows, len(pkt.Schema.Fields), keyCount))
+</div>`, displayOffset+1, displayOffset+len(parsedRows), totalRows, len(pkt.Schema.Fields), keyCount)
 	} else {
-		b.WriteString(fmt.Sprintf(`<div class="stats-bar">
+		fmt.Fprintf(&b, `<div class="stats-bar">
   <span><strong>%d</strong> rows</span>
   <span><strong>%d</strong> columns</span>
   <span><strong>%d</strong> primary key(s)</span>
-</div>`, len(parsedRows), len(pkt.Schema.Fields), keyCount))
+</div>`, len(parsedRows), len(pkt.Schema.Fields), keyCount)
 	}
 
 	b.WriteString(`</div>`) // data card

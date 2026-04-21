@@ -245,36 +245,36 @@ func (r *DiffResult) FormatText() string {
 	var sb strings.Builder
 
 	sb.WriteString("=== Diff Statistics ===\n")
-	sb.WriteString(fmt.Sprintf("Total in A: %d\n", r.Stats.TotalInA))
-	sb.WriteString(fmt.Sprintf("Total in B: %d\n", r.Stats.TotalInB))
-	sb.WriteString(fmt.Sprintf("Added:      %d\n", r.Stats.AddedCount))
-	sb.WriteString(fmt.Sprintf("Removed:    %d\n", r.Stats.RemovedCount))
-	sb.WriteString(fmt.Sprintf("Modified:   %d\n", r.Stats.ModifiedCount))
-	sb.WriteString(fmt.Sprintf("Unchanged:  %d\n\n", r.Stats.UnchangedCount))
+	fmt.Fprintf(&sb, "Total in A: %d\n", r.Stats.TotalInA)
+	fmt.Fprintf(&sb, "Total in B: %d\n", r.Stats.TotalInB)
+	fmt.Fprintf(&sb, "Added:      %d\n", r.Stats.AddedCount)
+	fmt.Fprintf(&sb, "Removed:    %d\n", r.Stats.RemovedCount)
+	fmt.Fprintf(&sb, "Modified:   %d\n", r.Stats.ModifiedCount)
+	fmt.Fprintf(&sb, "Unchanged:  %d\n\n", r.Stats.UnchangedCount)
 
 	if len(r.Added) > 0 {
-		sb.WriteString(fmt.Sprintf("=== Added (%d) ===\n", len(r.Added)))
+		fmt.Fprintf(&sb, "=== Added (%d) ===\n", len(r.Added))
 		for _, row := range r.Added {
-			sb.WriteString(fmt.Sprintf("+ %s\n", strings.Join(row, " | ")))
+			fmt.Fprintf(&sb, "+ %s\n", strings.Join(row, " | "))
 		}
 		sb.WriteString("\n")
 	}
 
 	if len(r.Removed) > 0 {
-		sb.WriteString(fmt.Sprintf("=== Removed (%d) ===\n", len(r.Removed)))
+		fmt.Fprintf(&sb, "=== Removed (%d) ===\n", len(r.Removed))
 		for _, row := range r.Removed {
-			sb.WriteString(fmt.Sprintf("- %s\n", strings.Join(row, " | ")))
+			fmt.Fprintf(&sb, "- %s\n", strings.Join(row, " | "))
 		}
 		sb.WriteString("\n")
 	}
 
 	if len(r.Modified) > 0 {
-		sb.WriteString(fmt.Sprintf("=== Modified (%d) ===\n", len(r.Modified)))
+		fmt.Fprintf(&sb, "=== Modified (%d) ===\n", len(r.Modified))
 		for _, mod := range r.Modified {
-			sb.WriteString(fmt.Sprintf("~ Key: %s\n", mod.Key))
+			fmt.Fprintf(&sb, "~ Key: %s\n", mod.Key)
 			for idx, change := range mod.Changes {
-				sb.WriteString(fmt.Sprintf("  [%d] %s: '%s' → '%s'\n",
-					idx, change.FieldName, change.OldValue, change.NewValue))
+				fmt.Fprintf(&sb, "  [%d] %s: '%s' → '%s'\n",
+					idx, change.FieldName, change.OldValue, change.NewValue)
 			}
 		}
 	}

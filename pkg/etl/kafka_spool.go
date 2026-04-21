@@ -156,6 +156,7 @@ func (ke *KafkaSpoolExporter) ExportPackets(ctx context.Context, packets []*pack
 
 	// ── Writer (текущая горутина) ─────────────────────────────────────────────
 	var seq atomic.Int64
+writeLoop:
 	for _, pkt := range packets {
 		if ctx.Err() != nil {
 			writerErr = ctx.Err()
@@ -174,7 +175,7 @@ func (ke *KafkaSpoolExporter) ExportPackets(ctx context.Context, packets []*pack
 		case fileCh <- path:
 		case <-ctx.Done():
 			writerErr = ctx.Err()
-			break
+			break writeLoop
 		}
 	}
 	close(fileCh) // сигнал sender'у: больше файлов не будет
