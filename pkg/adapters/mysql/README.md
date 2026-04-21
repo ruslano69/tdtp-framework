@@ -2,15 +2,20 @@
 
 Высокопроизводительный адаптер для работы с MySQL/MariaDB базами данных.
 
+> **Статус: полностью рабочий** — 58/58 CLI integration tests pass (MySQL 8.4, 2026-04-21)
+
 ## 🎯 Особенности
 
 - ✅ **Полная поддержка TDTP спецификации**
 - ✅ **Использование schema.Converter** для строгой типизации
-- ✅ **Все стратегии импорта**: Replace, Ignore, Fail, Copy
-- ✅ **TDTQL фильтрация** с оптимизацией на уровне SQL
+- ✅ **Все стратегии импорта**: Replace (ON DUPLICATE KEY UPDATE), Ignore (INSERT IGNORE), Fail, Copy
+- ✅ **TDTQL фильтрация** с оптимизацией на уровне SQL (WHERE, ORDER BY, LIMIT/OFFSET, IN)
+- ✅ **Bracket-quoted имена** с пробелами и `$` (NAV/BC/ERP-стиль)
 - ✅ **Правильная обработка ошибок** через MySQL driver типы
 - ✅ **Транзакционная безопасность**
 - ✅ **Поддержка всех MySQL типов данных**
+- ✅ **Compact format** (v1.3.1), сжатие zstd/kanzi, хэш-верификация
+- ✅ **Cross-DB roundtrip**: MySQL → MySQL и MySQL → SQLite
 
 ## 📦 Установка
 
@@ -247,10 +252,39 @@ size, err := adapter.GetTableSize(ctx, "users")
 4. **Используйте StrategyReplace** для idempotent операций
 5. **Обрабатывайте ошибки** через типы MySQL driver
 
+## ✅ Статус тестирования
+
+CLI integration tests: **58 / 58 PASS** (MySQL 8.4.9, 2026-04-21)
+
+| Группа | Описание | Тесты |
+|--------|----------|-------|
+| T1 | Basic Export (rows, fields, list) | 4 |
+| T2 | TDTQL Filters (WHERE, IN, ORDER BY, LIMIT, bracket-quoted) | 9 |
+| T3 | Compression (zstd/kanzi, --hash, corruption) | 6 |
+| T4 | MySQL → MySQL Roundtrip (strategies, projection, ERP-style names) | 8 |
+| T5 | File Integrity (--test, --inspect) | 3 |
+| T6 | Edge Cases (empty result, errors) | 3 |
+| T7 | Compact Format v1.3.1 | 4 |
+| T8 | MySQL → SQLite Roundtrip (cross-DB) | 5 |
+| T9 | Diff | 7 |
+| T10 | Merge (union, intersection, append, left/right priority) | 9 |
+
+Запуск тестов:
+```bash
+# 1. Поднять контейнер (из корня репозитория)
+docker compose up -d mysql
+
+# 2. Запустить тесты
+TDTPCLI_BIN=/tmp/tdtpcli.exe py -3 tests/cli/test_mysql.py
+
+# 3. Только одна группа
+TDTPCLI_BIN=/tmp/tdtpcli.exe py -3 tests/cli/test_mysql.py T4
+```
+
 ## 📝 Совместимость
 
 - ✅ MySQL 5.7+
-- ✅ MySQL 8.0+
+- ✅ MySQL 8.0+ (integration-tested on 8.4.9)
 - ✅ MariaDB 10.3+
 - ✅ Percona Server 5.7+
 

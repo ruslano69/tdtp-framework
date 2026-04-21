@@ -53,7 +53,7 @@
 - **SQLite** - production-ready with optimizations
 - **PostgreSQL** - full feature support
 - **MS SQL Server** - enterprise-grade adapter
-- **MySQL** - complete implementation
+- **MySQL** - complete implementation, integration-tested (58/58 CLI tests, MySQL 8.4)
 - **Incremental sync** - timestamp-based delta exports
 
 ### 🚀 Message Brokers

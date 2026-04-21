@@ -2,6 +2,34 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.2] — 2026-04-21
+
+### Added
+
+- **MySQL adapter — 58/58 CLI integration tests pass** (`tests/cli/test_mysql.py`):
+  - T1 Basic Export: export all rows, `--fields` projection, `--list`
+  - T2 TDTQL Filters: WHERE, compound AND (multiple `--where`), IN, ORDER BY, LIMIT/OFFSET,
+    negative LIMIT (tail mode), bracket-quoted field names with spaces and `$`
+  - T3 Compression: zstd level 3/19, kanzi level 6, `--hash` checksum, corruption detection,
+    compress from config
+  - T4 MySQL→MySQL Roundtrip: plain/compressed import, replace/ignore strategies, `--fields`
+    projection, bracket-quoted tables (`[ERP$Entry]`, `[complex_fields]`), bracket-quoted WHERE
+  - T5 File Integrity: `--test`, `--test` with checksum, `--inspect`
+  - T6 Edge Cases: empty result set, nonexistent table error, import missing file error
+  - T7 Compact Format (v1.3.1): `--compact --fixed-fields`, compress+hash roundtrip,
+    `--to-compact` conversion, compact MySQL→MySQL roundtrip
+  - T8 MySQL→SQLite Roundtrip: plain/compressed cross-DB import, strategies, `--fields`,
+    bracket-quoted `[ERP$Entry]`
+  - T9 Diff: identical/added/removed/modified, `--ignore-fields`, `--key-fields`, error cases
+  - T10 Merge: union (non-overlapping/overlapping), intersection, append, left/right priority
+    with `--show-conflicts`, 3-file union, error cases
+
+- **`tests/cli/test_mysql.py`** rewritten: inline `setup_db()` via `docker exec`
+  (no external scripts, no `pymysql` dependency), aligned with `test_sqlite.py` structure.
+  Test environment: MySQL 8.4 in Docker (`docker compose up -d mysql`).
+
+---
+
 ## [1.9.1] — 2026-04-07
 
 ### Fixed

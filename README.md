@@ -194,8 +194,13 @@ tdtpcli --list --config config.yaml
 
 #### MySQL Adapter
 - Connection via `go-sql-driver/mysql`
-- Export/Import with MySQL type mapping
-- Support for MySQL-specific types
+- Export/Import with full MySQL type mapping (INT, DECIMAL, VARCHAR, DATETIME, TINYINT, BLOB, etc.)
+- TDTQL → SQL push-down: WHERE, ORDER BY, LIMIT/OFFSET, IN, bracket-quoted identifiers
+- All import strategies: replace (INSERT ... ON DUPLICATE KEY UPDATE), ignore (INSERT IGNORE), fail, copy
+- Bracket-quoted table/field names with spaces and `$` (NAV/BC/ERP style)
+- Compact format, compression (zstd/kanzi), hash verification
+- Roundtrip MySQL → MySQL and MySQL → SQLite verified: **58/58 CLI integration tests pass**
+- Docker-based test environment: `docker compose up -d mysql`
 
 #### MS Access Adapter (Windows)
 - Connection via ODBC (`alexbrainman/odbc`)
@@ -1187,7 +1192,7 @@ go test -v ./pkg/core/packet/
 - IncrementalSync, Data Processors
 - XLSX Converter (Database ↔ Excel)
 - ETL Pipeline Processor with 4-level security
-- MySQL adapter
+- MySQL adapter — integration-tested, 58/58 CLI tests pass
 - Full documentation
 
 ### v1.3.1 (completed)
