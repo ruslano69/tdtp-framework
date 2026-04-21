@@ -841,6 +841,116 @@ def test_T8_s3():
            time.monotonic() - t, f"rc={p.returncode}")
 
 
+# ─── T11 MSMQ Broker ─────────────────────────────────────────────────────────
+
+# MSMQ queue paths (node zt-2075).  Override via env vars for other machines.
+MSMQ_QUEUE = os.environ.get("TDTP_MSMQ_QUEUE", r".\private$\tdtp_test")
+CFG_MSMQ_EXP = "/tmp/tdtp_msmq_export.yaml"
+CFG_MSMQ_IMP = "/tmp/tdtp_msmq_import.yaml"
+
+
+def msmq_available() -> bool:
+    """Return True if MSMQ service is running on the local machine."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-Service -Name MSMQ -ErrorAction SilentlyContinue).Status"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() == "Running"
+    except Exception:
+        return False
+
+
+def write_msmq_cfg(path: str, db: str = TEST_DB, queue: str = MSMQ_QUEUE):
+    """Write a SQLite config YAML with MSMQ broker section."""
+    queue_yaml = queue.replace("\\", "\\\\")  # YAML requires \\ for literal backslash
+    with open(path, "w") as f:
+        f.write(f"database:\n  type: sqlite\n  database: {db}\n")
+        f.write(f"broker:\n  type: msmq\n")
+        f.write(f"  queue_path: \"{queue_yaml}\"\n")
+
+
+def test_T11_msmq():
+    print(f"\n{BOLD}=== T11 MSMQ Broker ==={RESET}")
+
+    if not msmq_available():
+        print(f"  {YELLOW}SKIP{RESET} MSMQ service not running")
+        print(f"        Enable: Control Panel → Programs → Windows Features → MSMQ")
+        return
+
+    write_msmq_cfg(CFG_MSMQ_EXP)
+
+    # T11.1 — export-broker → queue receives packets (exit 0)
+    t = time.monotonic()
+    p = run("--export-broker", "users", cfg=CFG_MSMQ_EXP, timeout=30)
+    record("T11.1 export-broker users → exit 0",
+           p.returncode == 0,
+           time.monotonic() - t, p.stderr.strip()[:120] if p.returncode != 0 else "")
+
+    # T11.2 — import-broker → 10 rows roundtrip in SQLite
+    t = time.monotonic()
+    import_db = "/tmp/tdtp_msmq_import.db"
+    if os.path.exists(import_db):
+        os.remove(import_db)
+    write_msmq_cfg(CFG_MSMQ_IMP, db=import_db)
+    p = subprocess.run(
+        [TDTPCLI, "--config", CFG_MSMQ_IMP,
+         "--import-broker", "--table", "users_msmq"],
+        capture_output=True, text=True, timeout=30,
+    )
+    rows = -1
+    if p.returncode == 0 and os.path.exists(import_db):
+        try:
+            rows = sqlite_query(import_db, "SELECT COUNT(*) FROM users_msmq")[0][0]
+        except Exception:
+            pass
+    record("T11.2 import-broker → 10 rows roundtrip",
+           p.returncode == 0 and rows == 10,
+           time.monotonic() - t, f"rows={rows}")
+    if os.path.exists(import_db):
+        os.remove(import_db)
+
+    # T11.3 — export-broker --compress → import-broker decompresses correctly
+    t = time.monotonic()
+    import_db2 = "/tmp/tdtp_msmq_import2.db"
+    if os.path.exists(import_db2):
+        os.remove(import_db2)
+    p_exp = run("--export-broker", "users", "--compress", cfg=CFG_MSMQ_EXP, timeout=30)
+    write_msmq_cfg(CFG_MSMQ_IMP, db=import_db2)
+    p_imp = subprocess.run(
+        [TDTPCLI, "--config", CFG_MSMQ_IMP,
+         "--import-broker", "--table", "users_msmq_c"],
+        capture_output=True, text=True, timeout=30,
+    )
+    rows2 = -1
+    if p_imp.returncode == 0 and os.path.exists(import_db2):
+        try:
+            rows2 = sqlite_query(import_db2, "SELECT COUNT(*) FROM users_msmq_c")[0][0]
+        except Exception:
+            pass
+    record("T11.3 export-broker --compress → import-broker roundtrip",
+           p_exp.returncode == 0 and p_imp.returncode == 0 and rows2 == 10,
+           time.monotonic() - t, f"rows={rows2}")
+    if os.path.exists(import_db2):
+        os.remove(import_db2)
+
+    # T11.4 — export-broker to nonexistent queue → non-zero exit
+    t = time.monotonic()
+    bad_cfg = "/tmp/tdtp_msmq_bad.yaml"
+    write_msmq_cfg(bad_cfg)
+    with open(bad_cfg, "a") as f:
+        pass
+    # Overwrite with bad queue path
+    with open(bad_cfg, "w") as f:
+        f.write("database:\n  type: sqlite\n  database: /tmp/no.db\n")
+        f.write("broker:\n  type: msmq\n  queue_path: \".\\\\private$\\\\tdtp_no_such_queue_xyz\"\n")
+    p = run("--export-broker", "users", cfg=bad_cfg, timeout=10)
+    record("T11.4 export-broker bad queue → non-zero exit",
+           p.returncode != 0,
+           time.monotonic() - t, f"rc={p.returncode}")
+
+
 # ─── T9 Diff ─────────────────────────────────────────────────────────────────
 
 def test_T9_diff():
@@ -1051,6 +1161,7 @@ GROUPS = [
     ("T8", test_T8_s3),
     ("T9", test_T9_diff),
     ("T10", test_T10_merge),
+    ("T11", test_T11_msmq),
 ]
 
 
