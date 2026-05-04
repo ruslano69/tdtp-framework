@@ -1,8 +1,16 @@
 //go:build windows
 
 // Package access provides a TDTP adapter for Microsoft Access (.mdb/.accdb) via ODBC.
-// Requires 32-bit ODBC driver (Microsoft Jet 4.0) — build with GOARCH=386.
-// For 64-bit support install Microsoft Access Database Engine 2016 Redistributable (x64).
+//
+// IMPORTANT CONSTRAINTS:
+//   - Windows only: uses Win32 COM (ADOX), MDAC ODBC and SysWOW64\cscript.exe.
+//   - 32-bit only: Microsoft Jet 4.0 ODBC is a 32-bit component.
+//     Always build with GOARCH=386:
+//     $env:GOARCH="386"; go build -tags nokafka -o tdtpcli_x86.exe ./cmd/tdtpcli/
+//
+// Schema introspection uses ADOX (ActiveX Data Objects Extensions) via an embedded
+// VBScript running under C:\Windows\SysWOW64\cscript.exe. The ADOX path requires
+// 32-bit COM regardless of the host process bitness, so x64 builds are not supported.
 package access
 
 import (

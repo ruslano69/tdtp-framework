@@ -9,7 +9,11 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
-const defaultPacketKB = 750
+const (
+	defaultPacketKB    = 750
+	defaultBatchSend   = 10
+	defaultCompressLvl = 3
+)
 
 // KafkaSpoolExporter — stub для сборок без Kafka.
 type KafkaSpoolExporter struct{}

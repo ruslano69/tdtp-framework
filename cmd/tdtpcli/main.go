@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -649,26 +648,32 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Commands that operate on files only and never connect to a database
+	// can run without a config file — skip loading entirely.
+	noDBRequired := *flags.Pipeline != "" ||
+		*flags.Inspect != "" ||
+		*flags.Test != "" ||
+		*flags.Diff != "" ||
+		*flags.Merge != "" ||
+		*flags.ToHTML != "" ||
+		*flags.ToCompact != "" ||
+		(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
+		(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
+
 	// Load configuration
-	config, err := LoadConfig(*flags.Config)
-	if err != nil {
-		// Commands that operate on files only and never connect to a database
-		// can run without a config file.
-		noDBRequired := *flags.Pipeline != "" ||
-			*flags.Inspect != "" ||
-			*flags.Test != "" ||
-			*flags.Diff != "" ||
-			*flags.Merge != "" ||
-			*flags.ToHTML != "" ||
-			*flags.ToCompact != "" ||
-			(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
-			(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
-		if noDBRequired && errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "WARNING: config file %q not found. Audit log and Circuit Breaker set to defaults (disabled).\n", *flags.Config)
-			config = &Config{}
+	var config *Config
+	if noDBRequired {
+		if cfg, err := LoadConfig(*flags.Config); err == nil {
+			config = cfg
 		} else {
+			config = &Config{}
+		}
+	} else {
+		cfg, err := LoadConfig(*flags.Config)
+		if err != nil {
 			fatal("Failed to load config: %v", err)
 		}
+		config = cfg
 	}
 
 	// Initialize production features (Circuit Breaker, Audit, Retry)
