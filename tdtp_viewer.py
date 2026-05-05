@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import argparse
 import html
-import os
+import re
 import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -41,6 +41,44 @@ _client: TDTPClientJSON = TDTPClientJSON()
 _data: dict = {}
 _file_path: str = ""
 _page_size: int = 200
+_parts: list = []       # list of Path objects, sorted by part number
+_current_part: int = 0  # 0-based index into _parts (0 when no multi-part)
+
+
+_PART_RE = re.compile(r"^(.+?)_part_(\d+)_of_(\d+)(\..+)$", re.IGNORECASE)
+
+
+def _detect_parts(filepath: str) -> tuple[list, int]:
+    """Return (sorted_part_paths, current_0based_index) for multi-part files."""
+    p = Path(filepath).resolve()
+    m = _PART_RE.match(p.name)
+    if not m:
+        return [p], 0
+    base, cur_n, total_m, ext = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+    siblings = []
+    for n in range(1, total_m + 1):
+        candidate = p.parent / f"{base}_part_{n}_of_{total_m}{ext}"
+        if candidate.exists():
+            siblings.append(candidate)
+    if not siblings:
+        return [p], 0
+    siblings.sort()
+    try:
+        idx = next(i for i, s in enumerate(siblings) if s.name == p.name)
+    except StopIteration:
+        idx = 0
+    return siblings, idx
+
+
+def _load_part(idx: int) -> None:
+    global _data, _file_path, _current_part
+    _current_part = idx
+    _file_path = str(_parts[idx])
+    print(f"Loading part {idx + 1}/{len(_parts)}: {_file_path} ...", end=" ", flush=True)
+    _data = _client.J_read(_file_path)
+    total = len(_data["data"])
+    table = _data["header"].get("table_name", "?")
+    print(f"OK  ({total} rows, table={table})")
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +143,26 @@ def _pagination(page: int, total_pages: int, where: str) -> str:
     return '<div class="pagination">' + "".join(parts) + "</div>"
 
 
+def _part_nav(where: str) -> str:
+    """Render Prev Part / Part N of M / Next Part bar (empty when only 1 part)."""
+    if len(_parts) <= 1:
+        return ""
+    n = _current_part + 1
+    m = len(_parts)
+    w = html.escape(where, quote=True)
+
+    def btn(part_idx: int, label: str, disabled: bool) -> str:
+        if disabled:
+            return f'<span class="pg-btn disabled">{label}</span>'
+        return (f'<a class="pg-btn" '
+                f'href="/?part={part_idx + 1}&page=1&where={w}">{label}</a>')
+
+    prev = btn(_current_part - 1, f"‹ Part {n-1}/{m}", n == 1)
+    nxt  = btn(_current_part + 1, f"Part {n+1}/{m} ›", n == m)
+    cur  = f'<span class="pg-btn current">Part {n} of {m}</span>'
+    return f'<div class="part-nav">{prev}{cur}{nxt}</div>'
+
+
 def render_page(page: int, where: str) -> str:
     offset = (page - 1) * _page_size
 
@@ -130,7 +188,8 @@ def render_page(page: int, where: str) -> str:
     badge   = BADGE.get(msg_type, "badge-reference")
     fname   = html.escape(Path(_file_path).name)
 
-    pager = _pagination(page, total_pages, where)
+    pager    = _pagination(page, total_pages, where)
+    part_nav = _part_nav(where)
 
     # --- filter bar ---
     where_val = html.escape(where, quote=True)
@@ -280,6 +339,9 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 .pg-dots{{display:inline-flex;align-items:center;color:#475569;padding:0 4px}}
 .footer{{text-align:center;padding:16px;font-size:11px;color:#334155}}
 .footer a{{color:#475569;text-decoration:none}}
+/* part navigation */
+.part-nav{{display:flex;gap:6px;align-items:center;margin-bottom:14px}}
+.part-nav .pg-btn{{font-size:13px;font-weight:600;padding:0 14px}}
 </style>
 </head>
 <body>
@@ -298,6 +360,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   </div>
 </div>
 
+{part_nav}
 {filter_bar}
 
 <div class="card">
@@ -353,6 +416,16 @@ class Handler(BaseHTTPRequestHandler):
             page = 1
         where = qs.get("where", [""])[0].strip()
 
+        # Part switching — reload data when requested part differs from current
+        if len(_parts) > 1 and "part" in qs:
+            try:
+                req_part = max(1, min(len(_parts), int(qs["part"][0]))) - 1
+            except ValueError:
+                req_part = _current_part
+            if req_part != _current_part:
+                _load_part(req_part)
+                page = 1
+
         try:
             body = render_page(page, where)
             encoded = body.encode("utf-8")
@@ -376,7 +449,7 @@ class Handler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def main():
-    global _data, _file_path, _page_size
+    global _data, _file_path, _page_size, _parts, _current_part
 
     ap = argparse.ArgumentParser(description="TDTP viewer with pagination")
     ap.add_argument("file", help="Path to .tdtp.xml file")
@@ -385,19 +458,20 @@ def main():
     ap.add_argument("--open", action="store_true", dest="open_browser")
     args = ap.parse_args()
 
-    _file_path = args.file
-    _page_size = args.page_size
-
-    if not Path(_file_path).exists():
-        print(f"ERROR: file not found: {_file_path}")
+    if not Path(args.file).exists():
+        print(f"ERROR: file not found: {args.file}")
         sys.exit(1)
 
-    print(f"Loading {_file_path} ...", end=" ", flush=True)
-    _data = _client.J_read(_file_path)
-    total = len(_data["data"])
-    table = _data["header"].get("table_name", "?")
-    fields = len(_data["schema"]["Fields"])
-    print(f"OK  ({total} rows, {fields} fields, table={table})")
+    _page_size = args.page_size
+    _parts, _current_part = _detect_parts(args.file)
+
+    if len(_parts) > 1:
+        print(f"Multi-part file: {len(_parts)} parts detected")
+        for i, p in enumerate(_parts):
+            marker = " <-- current" if i == _current_part else ""
+            print(f"  Part {i+1}/{len(_parts)}: {p.name}{marker}")
+
+    _load_part(_current_part)
 
     url = f"http://localhost:{args.port}/"
     print(f"Serving at {url}   (Ctrl+C to stop)")
