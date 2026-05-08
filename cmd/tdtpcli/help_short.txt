@@ -36,6 +36,9 @@ COMMANDS:
   ETL:
     --sync-incremental <table> Incremental sync
     --pipeline <file>          Execute ETL pipeline
+    @name=value                Pipeline variable (any number; after --pipeline flag)
+                               SQL: WHERE col = '@name'  (text) | WHERE n = @name  (numeric)
+                               YAML fields: destination: "out/{{name}}.tdtp.xml"
 
 OPTIONS:
 

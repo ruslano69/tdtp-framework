@@ -53,6 +53,8 @@ COMMANDS:
 
   ETL Pipeline:
     --pipeline <file>          Execute ETL pipeline from YAML config
+    @name=value                Pass variable to pipeline (any number, after --pipeline)
+                               Quotes around value are stripped automatically: @dept="97-256" → 97-256
 
 OPTIONS:
 
@@ -98,6 +100,15 @@ OPTIONS:
 
   ETL Pipeline Options:
     --unsafe                   Enable unsafe mode (allows all SQL, requires admin)
+
+  Pipeline Variable Substitution (@name=value):
+    SQL string context:        WHERE col = '@dept'       → WHERE col = '97-256'
+    SQL numeric context:       WHERE year = @year        → WHERE year = 2025
+    YAML fields ({{name}}):    destination: "out/{{dept}}.tdtp.xml" → out/97-256.tdtp.xml
+    Applies to:                sources[].query, transform.sql, description,
+                               output.tdtp.destination, output.xlsx.destination
+    Validation:                declared but not provided → error
+                               provided but unused       → warning
 
   Diff Options:
     --key-fields <fields>      Key fields for comparison (comma-separated)
@@ -266,6 +277,13 @@ EXAMPLES:
 
   # Execute ETL pipeline
   tdtpcli --pipeline etl-config.yaml
+
+  # Execute pipeline with variables (@name=value — parametric pipelines)
+  tdtpcli --pipeline dept_staff.yaml @dept=97-256
+  tdtpcli --pipeline report.yaml @dept=97-256 @date_from=2025-01-01 @date_to=2025-12-31
+  #   SQL:       WHERE col = '@dept'  → WHERE col = '97-256'   (text, quotes escaped)
+  #              WHERE year = @year   → WHERE year = 2025      (numeric, bare)
+  #   YAML dest: out/dept_{{dept}}.tdtp.xml → out/dept_97-256.tdtp.xml
 
   # Execute pipeline in unsafe mode (allows custom SQL)
   tdtpcli --pipeline etl-config.yaml --unsafe
