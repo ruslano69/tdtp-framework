@@ -449,7 +449,8 @@ def test_T4_roundtrip():
     write_cfg(CFG_IMP)   # same server, same DB — use --table to avoid collision
 
     # Clean up any leftover import tables
-    for tbl in ("rt_users", "rt_users_comp", "rt_users_proj"):
+    for tbl in ("rt_users", "rt_users_comp", "rt_users_proj", "rt_nullable_ts",
+                "nullable_ts_src"):
         pg_query(f"DROP TABLE IF EXISTS {tbl} CASCADE")
 
     # T4.1 — plain roundtrip: row count
@@ -545,6 +546,44 @@ def test_T4_roundtrip():
     record("T4.8 --where [Total Cost $] > 100 → 3 rows",
            p8.returncode == 0 and rows8 == 3,
            time.monotonic() - t, f"rc={p8.returncode} rows={rows8}")
+
+    # T4.9 — nullable TIMESTAMP roundtrip: NULL values preserved
+    # Verifies that [NULL] markers in TIMESTAMP columns survive export→import
+    # without "invalid input syntax for type timestamp" errors (regression for
+    # convertValue null-marker check in pkg/adapters/postgres/import.go).
+    pg_query("DROP TABLE IF EXISTS nullable_ts_src CASCADE")
+    pg_query("""
+        CREATE TABLE nullable_ts_src (
+            id          INTEGER PRIMARY KEY,
+            name        VARCHAR(50) NOT NULL,
+            event_time  TIMESTAMP NULL,
+            resolved_at TIMESTAMP NULL
+        )
+    """)
+    pg_query("""
+        INSERT INTO nullable_ts_src VALUES
+        (1, 'alpha',   '2026-01-15 10:30:00', '2026-01-16 08:00:00'),
+        (2, 'beta',    '2026-03-01 14:00:00', NULL),
+        (3, 'gamma',   NULL,                  NULL),
+        (4, 'delta',   '2026-04-20 09:15:00', '2026-04-21 17:30:00'),
+        (5, 'epsilon', NULL,                  '2026-05-01 12:00:00')
+    """)
+    pg_query("DROP TABLE IF EXISTS rt_nullable_ts CASCADE")
+    t = time.monotonic()
+    run("--export", "nullable_ts_src", "--output", out("t4_nullable_ts.xml"))
+    p9 = _import(out("t4_nullable_ts.xml"), "rt_nullable_ts")
+    rows9   = pg_query("SELECT COUNT(*) FROM rt_nullable_ts")          if p9.returncode == 0 else []
+    nulls_e = pg_query("SELECT COUNT(*) FROM rt_nullable_ts WHERE event_time IS NULL")   if p9.returncode == 0 else []
+    nulls_r = pg_query("SELECT COUNT(*) FROM rt_nullable_ts WHERE resolved_at IS NULL")  if p9.returncode == 0 else []
+    rows9_n   = int(rows9[0])   if rows9   else -1
+    nulls_e_n = int(nulls_e[0]) if nulls_e else -1
+    nulls_r_n = int(nulls_r[0]) if nulls_r else -1
+    record("T4.9 nullable TIMESTAMP roundtrip: 5 rows, 2+2 NULLs preserved",
+           p9.returncode == 0 and rows9_n == 5 and nulls_e_n == 2 and nulls_r_n == 2,
+           time.monotonic() - t,
+           f"rc={p9.returncode} rows={rows9_n} null_event={nulls_e_n} null_resolved={nulls_r_n}")
+    pg_query("DROP TABLE IF EXISTS nullable_ts_src CASCADE")
+    pg_query("DROP TABLE IF EXISTS rt_nullable_ts CASCADE")
 
     # Cleanup import tables
     for tbl in ("rt_users", "rt_users_comp", "rt_users_proj",

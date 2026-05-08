@@ -33,7 +33,7 @@ NOTIFY_CHANNEL  = f"{REDIS_PREFIX}:notify"
 EXCHANGE        = "travel"
 QUEUE           = "tdtp.coordinator"
 TRAVEL_DIR      = Path(__file__).parent
-TDTPCLI_DEFAULT = str(Path(__file__).parents[3] / "tdtpcli.exe")
+TDTPCLI_DEFAULT = str(Path(__file__).parents[2] / "tdtpcli.exe")
 DEBOUNCE_TTL    = 10
 DEFAULT_CURSOR  = "2020-01-01 00:00:00"
 

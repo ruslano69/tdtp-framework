@@ -99,3 +99,31 @@ graph TD
 *   `config_dst_...`: Настройки приемника для `consumer.py`.
 *   Сжатие: `compress: true`, уровень 3.
 *   Отказоустойчивость: экспоненциальные повторы при сбоях брокера или БД.
+
+## 📋 Заметки по схеме
+
+### Staging-таблицы и типы данных
+
+**Правило:** тип колонки в staging-таблице должен совпадать с типом в источнике.
+TDTP сохраняет NULL как маркер `[NULL]` в теле пакета и восстанавливает его в `nil`
+при импорте — но только если тип колонки назначения допускает это (не `TEXT`).
+
+Пример: `cancellation_date` в `branch_sales_inbox_staging` объявлена как
+`TIMESTAMP NULL` (не `TEXT`), хотя значение может отсутствовать:
+
+```sql
+-- Правильно: TIMESTAMP NULL — TDTP сам обработает [NULL] → NULL
+cancellation_date  TIMESTAMP NULL,
+
+-- Неправильно: TEXT вызовет ошибку pgx "unable to encode time.Time into text"
+-- cancellation_date  TEXT,
+```
+
+Merge-процедура получает `NULL` напрямую и не требует дополнительных кастов:
+```sql
+-- Правильно (после исправления):
+cancellation_date,
+
+-- Не нужно (старый обходной вариант):
+-- NULLIF(NULLIF(cancellation_date, ''), '[NULL]')::TIMESTAMP
+```

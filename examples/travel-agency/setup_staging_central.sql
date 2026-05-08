@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS branch_sales_inbox_staging (
     sales_agent          VARCHAR(50),
     special_requests     TEXT,
     insurance_purchased  BOOLEAN,           -- COALESCE(x,false) in v_local_sales view
-    cancellation_date    TEXT,              -- nullable timestamp → TEXT, cast in merge
+    cancellation_date    TIMESTAMP NULL,
     cancellation_reason  TEXT,
     refund_amount        NUMERIC(12,2),     -- COALESCE(x,0) in v_local_sales view
     created_at           TIMESTAMP,
@@ -209,7 +209,7 @@ BEGIN
         balance_due::DECIMAL(12,2),
         payment_status, payment_method, sales_agent,
         insurance_purchased,
-        NULLIF(NULLIF(cancellation_date, ''), '[NULL]')::TIMESTAMP,  -- cancellation_date stored as TEXT
+        cancellation_date,
         NULLIF(cancellation_reason, ''),
         refund_amount::DECIMAL(12,2),
         created_at,

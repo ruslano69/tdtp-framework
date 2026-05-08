@@ -35,7 +35,7 @@ init(autoreset=True)
 REDIS_PREFIX    = "tdtp:travel"
 NOTIFY_CHANNEL  = f"{REDIS_PREFIX}:notify"
 TRAVEL_DIR      = Path(__file__).parent
-TDTPCLI_DEFAULT = str(Path(__file__).parents[3] / "tdtpcli.exe")
+TDTPCLI_DEFAULT = str(Path(__file__).parents[2] / "tdtpcli.exe")
 
 S3_ENDPOINT   = "http://localhost:8333"
 S3_BUCKET     = "travel-agency"
