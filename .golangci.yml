@@ -49,6 +49,8 @@ run:
   timeout: 5m
   tests: false
   modules-download-mode: readonly
-  skip-dirs:
+
+issues:
+  exclude-dirs:
     - tests/integration/kafka_perf
     - scripts
