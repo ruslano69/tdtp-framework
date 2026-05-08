@@ -86,7 +86,7 @@ pg_isready
 
 Быстрая сборка без Kafka:
 ```bash
-GOPROXY=https://goproxy.io GONOSUMDB='*' go build -tags nokafka -o /tmp/tdtpcli ./cmd/tdtpcli/
+GOPROXY=https://goproxy.io GONOSUMDB='*' go build -tags nokafka -o H:\Ruslan\Code\Go\TDTP\tdtp-main-clean\tdtpcli.exe ./cmd/tdtpcli/
 ```
 
 ---
@@ -146,6 +146,44 @@ access_key: any
 secret_key: any
 ```
 
+### ВАЖНО: `curl -u` НЕ работает для проверки S3 авторизации!
+
+`curl -u "tdtp_access:tdtp_secret" http://127.0.0.1:8333/` всегда возвращает `AccessDenied` —
+потому что curl отправляет **HTTP Basic Auth**, а S3 требует **AWS Signature V4**.
+
+**Проверять доступ только через boto3 или tdtpcli:**
+```python
+import boto3, botocore.config
+s3 = boto3.client('s3', endpoint_url='http://127.0.0.1:8333',
+    aws_access_key_id='tdtp_access', aws_secret_access_key='tdtp_secret',
+    config=botocore.config.Config(signature_version='s3v4'), region_name='us-east-1')
+print([b['Name'] for b in s3.list_buckets()['Buckets']])
+```
+
+### S3 для travel-agency (H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed)
+
+Бинарник, данные и конфиги лежат в `H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed\`:
+```
+weed.exe          — SeaweedFS 30GB 4.17 (Windows)
+s3.json           — credentials: tdtp_access / tdtp_secret
+data/             — volume данные и filerldb2/
+config.yaml       — tdtpcli config для MSSQL + S3 (endpoint 8333, bucket tdtp-exports)
+```
+
+Запуск (компонентами отдельно, из папки weed/):
+```powershell
+cd H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed
+
+.\weed.exe master -ip=127.0.0.1 -defaultReplication=000 -volumeSizeLimitMB=30000 -port=9333
+# ждать ~18с до выборов лидера
+
+.\weed.exe volume -ip=127.0.0.1 -dir=./data -mserver=127.0.0.1:9333 -port=8080
+.\weed.exe filer  -ip=127.0.0.1 -master=127.0.0.1:9333 -port=8888
+.\weed.exe s3     -ip.bind=127.0.0.1 -filer=127.0.0.1:8888 -port=8333 -config=./s3.json
+```
+
+**Бакеты:** `travel-agency`, `tdtp-test`, `tdtp-exports`
+
 ### Config для тестов
 ```yaml
 storage:
@@ -162,10 +200,10 @@ storage:
 
 ### Проверка --test с S3
 ```bash
-/tmp/tdtpcli --config /tmp/test_s3_cfg.yaml \
+H:\Ruslan\Code\Go\TDTP\tdtp-main-clean\tdtpcli.exe --config /tmp/test_s3_cfg.yaml \
   --export users --output "s3://tdtp-test/ci/users.tdtp.xml" --compress --hash
 
-/tmp/tdtpcli --config /tmp/test_s3_cfg.yaml \
+H:\Ruslan\Code\Go\TDTP\tdtp-main-clean\tdtpcli.exe --config /tmp/test_s3_cfg.yaml \
   --test "s3://tdtp-test/ci/users.tdtp.xml"
 # ✓ algo=zstd, 10 rows, decompressed 0s, checksum OK
 ```

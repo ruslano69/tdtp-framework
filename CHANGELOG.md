@@ -47,6 +47,36 @@ All notable changes to tdtp-framework are documented in this file.
   смешанный, неизвестная переменная), `substituteYAML`, `ApplyVariables` (полная подстановка,
   ошибка при отсутствии переменной, предупреждение при лишней переменной, noop для пустого конфига).
 
+### Fixed
+
+- **NULL-маркер в TIMESTAMP-колонках при импорте в PostgreSQL / MSSQL**
+  (`pkg/adapters/postgres/import.go`, `pkg/adapters/mssql/import.go`):
+
+  TDTP кодирует NULL-значения полей как строку `[NULL]` в теле пакета.
+  `convertValue` (PostgreSQL) и `stringToValue` (MSSQL) не проверяли этот маркер
+  до передачи значения в `schema.Converter.ParseValue()`. В результате `[NULL]`
+  доходил до драйвера как строка и вызывал ошибку на уровне БД:
+
+  ```
+  ERROR: invalid input syntax for type timestamp: "[NULL]" (SQLSTATE 22007)
+  ```
+
+  Исправление: проверка `field.SpecialValues.Null.Marker` добавлена **до**
+  вызова `ParseValue` — так же, как это уже реализовано в `base/import_helper.go`
+  (используется MySQL-адаптером).
+
+  Обнаружено в `examples/travel-agency` при синхронизации `branch_sales_inbox_staging`,
+  где `cancellation_date TIMESTAMP NULL` содержала реальные NULL-значения.
+
+- **Регрессионный тест T4.9** (`tests/cli/test_postgres.py`):
+  экспорт таблицы с двумя nullable TIMESTAMP-колонками (5 строк, по 2 NULL в каждой),
+  импорт, проверка что NULL-значения сохранены точно.
+
+- **`setup_staging_central.sql`** (`examples/travel-agency`):
+  `cancellation_date` в `branch_sales_inbox_staging` изменён с `TEXT` на `TIMESTAMP NULL`;
+  соответствующий каст `NULLIF(NULLIF(x,''),'[NULL]')::TIMESTAMP` в `merge_branch_sales_inbox`
+  упрощён до прямой передачи значения.
+
 ---
 
 ## [1.9.2] — 2026-04-21

@@ -494,6 +494,12 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 // convertValue конвертирует строковое значение в правильный тип для PostgreSQL
 // Использует schema.Converter для строгой типизации и валидации
 func (a *Adapter) convertValue(value string, field packet.Field) any {
+	// Проверяем NULL-маркер TDTP до любой конвертации типа
+	if field.SpecialValues != nil && field.SpecialValues.Null != nil &&
+		value == field.SpecialValues.Null.Marker {
+		return nil
+	}
+
 	// Для типов с subtype используем строку без дополнительной конвертации
 	if field.Subtype != "" {
 		if value == "" {
