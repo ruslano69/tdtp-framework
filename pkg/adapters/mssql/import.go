@@ -547,6 +547,12 @@ func (a *Adapter) rowToArgs(row []string, pktSchema packet.Schema) []any {
 // stringToValue конвертирует строку из TDTP в значение для БД
 // Использует schema.Converter для строгой типизации и валидации
 func (a *Adapter) stringToValue(str string, field packet.Field) any {
+	// Проверяем NULL-маркер TDTP до любой конвертации типа
+	if field.SpecialValues != nil && field.SpecialValues.Null != nil &&
+		str == field.SpecialValues.Null.Marker {
+		return nil
+	}
+
 	// Конвертируем packet.Field в schema.FieldDef
 	fieldDef := fieldToFieldDef(field)
 
