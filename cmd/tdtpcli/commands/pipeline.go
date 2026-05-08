@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/etl"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
@@ -13,9 +15,10 @@ import (
 
 // PipelineOptions содержит опции выполнения ETL пайплайна.
 type PipelineOptions struct {
-	Unsafe  bool // --unsafe: разрешить все SQL операции (требует admin)
-	Encrypt bool // --enc: переопределить output.tdtp.encryption: true
-	EncDev  bool // --enc-dev: использовать DevClient вместо xZMercury (только !production сборки)
+	Unsafe    bool              // --unsafe: разрешить все SQL операции (требует admin)
+	Encrypt   bool              // --enc: переопределить output.tdtp.encryption: true
+	EncDev    bool              // --enc-dev: использовать DevClient вместо xZMercury (только !production сборки)
+	Variables map[string]string // @name=value аргументы из CLI
 }
 
 // ExecutePipeline executes an ETL pipeline from YAML configuration file.
@@ -56,6 +59,17 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 		config.Output.TDTP.Encryption = true
 	}
 
+	// 2b. Apply CLI pipeline variables (@name=value) — substitution before SQL validation
+	if len(opts.Variables) > 0 {
+		varWarnings, varErr := etl.ApplyVariables(config, opts.Variables)
+		if varErr != nil {
+			return varErr
+		}
+		for _, w := range varWarnings {
+			fmt.Printf("WARNING: %s\n", w)
+		}
+	}
+
 	// 3. Initialize SQL validator based on mode
 	validator := security.NewSQLValidator(!opts.Unsafe) // safe mode is the inverse of unsafe flag
 
@@ -79,6 +93,14 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 	}
 	fmt.Printf("   Version: %s\n", config.Version)
 	fmt.Printf("   Mode: %s\n", getSecurityModeLabel(opts.Unsafe))
+	if len(opts.Variables) > 0 {
+		names := make([]string, 0, len(opts.Variables))
+		for k := range opts.Variables {
+			names = append(names, "@"+k+"="+opts.Variables[k])
+		}
+		sort.Strings(names)
+		fmt.Printf("   Variables: %s\n", strings.Join(names, ", "))
+	}
 	fmt.Printf("   Sources: %d\n", len(config.Sources))
 	fmt.Printf("   Workspace: %s (%s)\n", config.Workspace.Type, config.Workspace.Mode)
 	fmt.Printf("   Output: %s%s\n", config.Output.Type, encLabel)

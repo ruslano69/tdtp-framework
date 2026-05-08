@@ -2,8 +2,8 @@
 
 Документация по ETL pipeline функциональности `tdtpcli --pipeline`.
 
-**Версия:** 1.3
-**Дата:** 26.02.2026
+**Версия:** 1.4
+**Дата:** 08.05.2026
 
 ---
 
@@ -11,13 +11,14 @@
 
 1. [Обзор](#обзор)
 2. [Справочник конфигурации](#справочник-конфигурации)
-3. [Сценарий 1: Два TDTP-источника → JOIN → TDTP](#сценарий-1-два-tdtp-источника--join--tdtp)
-4. [Сценарий 2: PostgreSQL → TDTP](#сценарий-2-postgresql--tdtp)
-5. [Сценарий 3: Шифрованный вывод через xZMercury](#сценарий-3-шифрованный-вывод-через-xzmercury)
-6. [Сценарий 4: Redis оркестрация](#сценарий-4-redis-оркестрация)
-7. [Сценарий 5: Graceful degradation при отказе xZMercury](#сценарий-5-graceful-degradation)
-8. [CLI-флаги pipeline](#cli-флаги-pipeline)
-9. [Exit codes](#exit-codes)
+3. [Переменные пайплайна (CLI Variables)](#переменные-пайплайна-cli-variables)
+4. [Сценарий 1: Два TDTP-источника → JOIN → TDTP](#сценарий-1-два-tdtp-источника--join--tdtp)
+5. [Сценарий 2: PostgreSQL → TDTP](#сценарий-2-postgresql--tdtp)
+6. [Сценарий 3: Шифрованный вывод через xZMercury](#сценарий-3-шифрованный-вывод-через-xzmercury)
+7. [Сценарий 4: Redis оркестрация](#сценарий-4-redis-оркестрация)
+8. [Сценарий 5: Graceful degradation при отказе xZMercury](#сценарий-5-graceful-degradation)
+9. [CLI-флаги pipeline](#cli-флаги-pipeline)
+10. [Exit codes](#exit-codes)
 
 ---
 
@@ -139,6 +140,119 @@ error_handling:
 | `mssql` | `server=host;user id=sa;password=X;database=DB` | SQL SELECT |
 | `mysql` | `user:pass@tcp(host:3306)/db?parseTime=true` | SQL SELECT |
 | `tdtp` | `path/to/file.tdtp.xml` | не используется |
+
+---
+
+## Переменные пайплайна (CLI Variables)
+
+Переменные позволяют создавать **параметрические пайплайны** — один YAML-файл,
+множество запусков с разными фильтрами (подразделение, период, код объекта и т.п.).
+
+### Синтаксис передачи
+
+```bash
+# Одна переменная
+./tdtpcli.exe --pipeline report.yaml @dept=97-256
+
+# Кавычки вокруг значения снимаются автоматически — эквивалентно
+./tdtpcli.exe --pipeline report.yaml @dept="97-256"
+
+# Несколько переменных
+./tdtpcli.exe --pipeline report.yaml @dept=97-256 @date_from=2025-01-01 @date_to=2025-12-31
+```
+
+### Синтаксис в YAML
+
+| Контекст              | Паттерн    | Пример                                     |
+|-----------------------|------------|--------------------------------------------|
+| SQL — строковый литерал | `'@name'` | `WHERE dept = '@dept'`                     |
+| SQL — числовой/bare   | `@name`    | `WHERE year = @year`                       |
+| YAML-поля             | `{{name}}` | `destination: "out/dept_{{dept}}.tdtp.xml"` |
+
+Одна и та же переменная может использоваться в обоих контекстах одновременно.
+
+### Поля, поддерживающие подстановку
+
+- `sources[].query` — SQL-запросы источников (`'@name'` и `@name`)
+- `sources[].dsn` — строка подключения (`{{name}}`)
+- `transform.sql` — SQL трансформации (`'@name'` и `@name`)
+- `description` — описание пайплайна (`{{name}}`)
+- `output.tdtp.destination` — путь к выходному файлу (`{{name}}`)
+- `output.xlsx.destination` — путь к XLSX (`{{name}}`)
+- `output.fallback.tdtp.destination` — fallback-цепочка (`{{name}}`)
+
+### Валидация
+
+- Переменная **объявлена в конфиге** (`'@dept'` или `{{dept}}`), но **не передана** на CLI → **ошибка** (pipeline не запускается).
+- Переменная **передана на CLI**, но **не используется** в конфиге → **предупреждение** (pipeline продолжает работу).
+
+### Безопасность
+
+Подстановка выполняется **до** SQL-валидатора. Попытки SQL-инъекции через значения
+переменных блокируются существующим валидатором (`SELECT/WITH only` в safe mode).
+Для строковых литералов (`'@name'`) одиночные кавычки внутри значения экранируются
+автоматически (`'` → `''`).
+
+### Пример: отчёт по подразделению за период
+
+```yaml
+name: "dept-staff-hiredate"
+description: "Список відділу {{dept}} за {{date_from}} – {{date_to}}"
+version: "1.0"
+
+sources:
+  - name: data
+    type: mssql
+    dsn: "server=sql-srv1;database=ZTR;trusted_connection=yes"
+    query: |
+      SELECT
+          s.[ТабНомер],
+          s.[ФИО],
+          s.[ПолнаяДолжність],
+          CONVERT(varchar(10), eh.[Employment Date], 104) AS ДатаПриема
+      FROM dbo.vw_ActiveStaff s
+      JOIN [ZTR$Employment History] eh
+          ON eh.[Employee No_] = s.[КодСотрудника]
+         AND eh.[Termination Date] = '1753-01-01'
+      WHERE s.[КодПодразділення] = '@dept'
+        AND eh.[Employment Date] >= '@date_from'
+        AND eh.[Employment Date] <= '@date_to'
+        AND s.[ТипЗанятості] = 1
+      ORDER BY s.[ФИО]
+
+workspace:
+  type: sqlite
+  mode: memory
+
+transform:
+  sql: SELECT * FROM data
+
+output:
+  type: tdtp
+  tdtp:
+    destination: "pipelines/out/dept_{{dept}}_{{date_from}}_{{date_to}}.tdtp.xml"
+    compress: true
+    compress_level: 3
+```
+
+```bash
+./tdtpcli.exe --pipeline pipelines/dept_staff_hiredate.yaml \
+  @dept=97-256 @date_from=2025-01-01 @date_to=2025-12-31
+```
+
+Вывод при запуске:
+
+```
+Pipeline: dept-staff-hiredate
+   Список відділу 97-256 за 2025-01-01 – 2025-12-31
+   Version: 1.0
+   Mode: 🔒 SAFE (READ-ONLY: SELECT/WITH only)
+   Variables: @date_from=2025-01-01, @date_to=2025-12-31, @dept=97-256
+   Sources: 1
+   ...
+```
+
+Результат записывается в `pipelines/out/dept_97-256_2025-01-01_2025-12-31.tdtp.xml`.
 
 ---
 

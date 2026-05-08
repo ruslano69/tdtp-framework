@@ -126,7 +126,8 @@ type Flags struct {
 	CreateConfigMySQL  *bool
 
 	// ETL Pipeline
-	Unsafe *bool
+	Unsafe       *bool
+	PipelineVars map[string]string // @name=value args passed after --pipeline flag
 
 	// Diff/Merge Options
 	KeyFields     *string
@@ -255,10 +256,28 @@ func ParseFlags() *Flags {
 		if len(args) == 0 {
 			break
 		}
-		// Collect leading non-flag args as positionals
+		// Collect leading non-flag args as positionals (or pipeline variables).
+		// @name=value args are pipeline variables and are not added to positionals.
 		i := 0
 		for i < len(args) && !strings.HasPrefix(args[i], "-") {
-			positionals = append(positionals, args[i])
+			arg := args[i]
+			if strings.HasPrefix(arg, "@") {
+				if eq := strings.IndexByte(arg, '='); eq >= 2 {
+					name := arg[1:eq]
+					value := arg[eq+1:]
+					if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+						value = value[1 : len(value)-1]
+					}
+					if f.PipelineVars == nil {
+						f.PipelineVars = make(map[string]string)
+					}
+					f.PipelineVars[name] = value
+				} else {
+					positionals = append(positionals, arg)
+				}
+			} else {
+				positionals = append(positionals, arg)
+			}
 			i++
 		}
 		if i >= len(args) {
