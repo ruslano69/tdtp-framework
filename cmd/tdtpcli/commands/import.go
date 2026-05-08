@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,10 @@ type ImportOptions struct {
 	// Object storage (S3/SeaweedFS). Non-nil → download from object storage instead of local file.
 	StorageCfg *storage.Config // storage driver config with bucket
 	StorageKey string          // object key within the bucket
+
+	// PipelineContext precondition check (v1.4): --expect-var name=value.
+	// Import fails before any DB writes if packet variables don't match.
+	ExpectVars map[string]string
 }
 
 // ImportFile imports a TDTP XML file (or multi-part set) to database.
@@ -161,6 +166,14 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 	// - catches partial imports (e.g. only 1 of 6 parts found on disk)
 	if err := validateMultiPartSession(packets); err != nil {
 		return fmt.Errorf("multi-part validation failed: %w", err)
+	}
+
+	// PipelineContext precondition check (v1.4): --expect-var name=value.
+	// Check first packet only — all parts share the same PipelineContext.
+	if len(opts.ExpectVars) > 0 {
+		if err := CheckPipelineVars(packets[0], opts.ExpectVars); err != nil {
+			return err
+		}
 	}
 
 	if opts.TargetTable != "" {
@@ -375,6 +388,40 @@ func extractBatchID(messageID string) string {
 
 	// No "-P" found, return full MessageID (single-part export)
 	return messageID
+}
+
+// CheckPipelineVars verifies PipelineContext variables in a packet against expected values.
+// Returns error if a required variable is missing or has a different value.
+// Called before any DB writes so import fails fast without side effects.
+func CheckPipelineVars(pkt *packet.DataPacket, expectVars map[string]string) error {
+	if len(expectVars) == 0 {
+		return nil
+	}
+	if pkt.PipelineContext == nil {
+		return fmt.Errorf("--expect-var: packet has no PipelineContext (was it exported without --pipeline?)")
+	}
+
+	// Build lookup from packet variables
+	packetVars := make(map[string]string, len(pkt.PipelineContext.Variables))
+	for _, v := range pkt.PipelineContext.Variables {
+		packetVars[v.Name] = v.Value
+	}
+
+	var mismatches []string
+	for name, want := range expectVars {
+		got, ok := packetVars[name]
+		if !ok {
+			mismatches = append(mismatches, fmt.Sprintf("  @%s: expected %q, not present in packet", name, want))
+		} else if got != want {
+			mismatches = append(mismatches, fmt.Sprintf("  @%s: expected %q, got %q", name, want, got))
+		}
+	}
+	if len(mismatches) > 0 {
+		sort.Strings(mismatches)
+		return fmt.Errorf("--expect-var check failed (pipeline: %s):\n%s",
+			pkt.PipelineContext.Pipeline.Name, strings.Join(mismatches, "\n"))
+	}
+	return nil
 }
 
 // filterPacketFields modifies a packet in-place to keep only the specified columns.

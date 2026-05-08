@@ -32,6 +32,7 @@ type Processor struct {
 	packageUUID    string                   // UUID пакета генерируется в начале Execute, используется для шифрования
 	mercuryBinder  processors.MercuryBinder // опциональная замена mercury.Client (dev-режим, тесты)
 	preExportChain *processors.Chain        // цепочка pre-export процессоров из config.Processors.PreExport
+	pipelineCtx    *packet.PipelineContext  // метаданные pipeline (v1.4), встраиваются в пакеты при экспорте
 }
 
 // NewProcessor создает новый ETL процессор
@@ -53,6 +54,13 @@ func (p *Processor) GetPackageUUID() string {
 // Должен быть вызван до Execute(). Propagates в Exporter через initWorkspace().
 func (p *Processor) WithMercuryBinder(binder processors.MercuryBinder) *Processor {
 	p.mercuryBinder = binder
+	return p
+}
+
+// SetPipelineContext встраивает метаданные pipeline в экспортируемые пакеты (v1.4).
+// Должен быть вызван до Execute().
+func (p *Processor) SetPipelineContext(ctx *packet.PipelineContext) *Processor {
+	p.pipelineCtx = ctx
 	return p
 }
 
@@ -126,6 +134,11 @@ func (p *Processor) initWorkspace(ctx context.Context) error {
 	p.workspace = workspace
 	p.executor = NewExecutor(workspace)
 	p.exporter = NewExporter(p.config.Output)
+
+	// Встраиваем метаданные pipeline в экспортер (v1.4)
+	if p.pipelineCtx != nil {
+		p.exporter.WithPipelineContext(p.pipelineCtx)
+	}
 
 	// Если шифрование включено — передаём security-контекст в exporter
 	if p.config.Output.Type == "tdtp" &&

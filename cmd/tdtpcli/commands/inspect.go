@@ -101,6 +101,21 @@ func InspectFile(ctx context.Context, inputFile string, storageCfg *storage.Conf
 	fmt.Printf("filter: %s\n", filter)
 	fmt.Printf("special_values: %s\n", specialValues)
 
+	if pkt.PipelineContext != nil {
+		pc := pkt.PipelineContext
+		ver := ""
+		if pc.Pipeline.Version != "" {
+			ver = " v" + pc.Pipeline.Version
+		}
+		fmt.Printf("pipeline: %s%s\n", pc.Pipeline.Name, ver)
+		if len(pc.Variables) > 0 {
+			fmt.Println("pipeline_vars:")
+			for _, v := range pc.Variables {
+				fmt.Printf("  %s: %s\n", v.Name, v.Value)
+			}
+		}
+	}
+
 	return nil
 }
 

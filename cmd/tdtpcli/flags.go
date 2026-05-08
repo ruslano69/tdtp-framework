@@ -129,6 +129,9 @@ type Flags struct {
 	Unsafe       *bool
 	PipelineVars map[string]string // @name=value args passed after --pipeline flag
 
+	// Import precondition check (v1.4)
+	ExpectVars map[string]string // --expect-var name=value: verify PipelineContext before import
+
 	// Diff/Merge Options
 	KeyFields     *string
 	IgnoreFields  *string
@@ -230,6 +233,19 @@ func ParseFlags() *Flags {
 
 	// ETL Pipeline
 	f.Unsafe = flag.Bool("unsafe", false, "Enable unsafe mode for pipeline (allows all SQL, requires admin)")
+
+	// Import precondition check (v1.4)
+	flag.Func("expect-var", "Require PipelineContext variable to match before import (name=value); repeatable", func(s string) error {
+		eq := strings.IndexByte(s, '=')
+		if eq < 1 {
+			return fmt.Errorf("--expect-var requires name=value format, got: %s", s)
+		}
+		if f.ExpectVars == nil {
+			f.ExpectVars = make(map[string]string)
+		}
+		f.ExpectVars[s[:eq]] = s[eq+1:]
+		return nil
+	})
 
 	// Diff/Merge Options
 	f.KeyFields = flag.String("key-fields", "", "Key fields for diff/merge (comma-separated)")
