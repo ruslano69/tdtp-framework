@@ -18,16 +18,36 @@ const (
 // сгенерированных командой --export без входящего request (автономный экспорт).
 const InReplyToDirectExport = "DirectExport"
 
+// PipelineContext содержит метаданные pipeline, встроенные в пакет при экспорте (v1.4).
+// Позволяет получателю проверить параметры источника через --expect-var.
+type PipelineContext struct {
+	Pipeline  PipelineInfo  `xml:"Pipeline"`
+	Variables []PipelineVar `xml:"Variables>Var,omitempty"`
+}
+
+// PipelineInfo описывает pipeline-источник: имя и версию конфига.
+type PipelineInfo struct {
+	Name    string `xml:"name,attr"`
+	Version string `xml:"version,attr,omitempty"`
+}
+
+// PipelineVar — одна переменная pipeline, использованная при экспорте.
+type PipelineVar struct {
+	Name  string `xml:"name,attr"`
+	Value string `xml:"value,attr"`
+}
+
 // DataPacket представляет корневой элемент TDTP сообщения
 type DataPacket struct {
-	Protocol     string        `xml:"protocol,attr"`
-	Version      string        `xml:"version,attr"`
-	Header       Header        `xml:"Header"`
-	Query        *Query        `xml:"Query,omitempty"`
-	QueryContext *QueryContext `xml:"QueryContext,omitempty"`
-	Schema       Schema        `xml:"Schema"`
-	Data         Data          `xml:"Data"`
-	AlarmDetails *AlarmDetails `xml:"AlarmDetails,omitempty"`
+	Protocol        string           `xml:"protocol,attr"`
+	Version         string           `xml:"version,attr"`
+	Header          Header           `xml:"Header"`
+	Query           *Query           `xml:"Query,omitempty"`
+	QueryContext    *QueryContext    `xml:"QueryContext,omitempty"`
+	PipelineContext *PipelineContext `xml:"PipelineContext,omitempty"`
+	Schema          Schema           `xml:"Schema"`
+	Data            Data             `xml:"Data"`
+	AlarmDetails    *AlarmDetails    `xml:"AlarmDetails,omitempty"`
 
 	// rawRows хранит исходные строки до pipe-join/escape.
 	// Устанавливается GenerateReference; writePacketTo использует их напрямую

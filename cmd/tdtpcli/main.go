@@ -178,6 +178,7 @@ func routeCommand(
 				StorageKey:       importStorageKey,
 				SanitizeClear:    *flags.Clear,
 				SanitizeTranslit: *flags.Translit,
+				ExpectVars:       flags.ExpectVars,
 			})
 		})
 
@@ -392,6 +393,7 @@ func routeCommand(
 				OutputFile:  *flags.Output,
 				Raw:         *flags.RawBroker,
 				Keep:        *flags.KeepBroker,
+				ExpectVars:  flags.ExpectVars,
 			})
 		})
 

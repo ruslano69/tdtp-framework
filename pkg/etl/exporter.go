@@ -33,6 +33,7 @@ type Exporter struct {
 	security       SecurityConfig
 	packageUUID    string
 	pipelineName   string
+	pipelineCtx    *packet.PipelineContext    // метаданные pipeline (v1.4), встраиваются в каждую часть
 	mercuryBinder  processors.MercuryBinder   // опциональная замена mercury.Client (dev-режим, тесты)
 	preExportChain *processors.Chain          // процессоры маскирования/нормализации/валидации перед экспортом
 	cb             *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
@@ -81,6 +82,12 @@ func (e *Exporter) WithMercuryBinder(binder processors.MercuryBinder) *Exporter 
 // перед каждым экспортом (маскирование, нормализация, валидация).
 func (e *Exporter) WithPreExportChain(chain *processors.Chain) *Exporter {
 	e.preExportChain = chain
+	return e
+}
+
+// WithPipelineContext встраивает метаданные pipeline в каждую часть TDTP-пакета (v1.4).
+func (e *Exporter) WithPipelineContext(ctx *packet.PipelineContext) *Exporter {
+	e.pipelineCtx = ctx
 	return e
 }
 
@@ -239,6 +246,11 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	}
 
 	for _, part := range parts {
+		// Встраиваем метаданные pipeline (v1.4) если заданы
+		if e.pipelineCtx != nil {
+			part.PipelineContext = e.pipelineCtx
+		}
+
 		// Сжатие применяем к каждой части отдельно
 		if e.config.TDTP.Compression || e.config.TDTP.Compress {
 			if err := e.compressDataPacket(part, e.config.TDTP.CompressAlgo, e.config.TDTP.CompressLevel); err != nil {
@@ -436,6 +448,11 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 	}
 	defer func() { _ = broker.Close() }()
 
+	// Встраиваем метаданные pipeline (v1.4) если заданы
+	if e.pipelineCtx != nil {
+		dataPacket.PipelineContext = e.pipelineCtx
+	}
+
 	// Генерируем XML из пакета
 	generator := packet.NewGenerator()
 	xmlData, err := generator.ToXML(dataPacket, false) // compact XML
@@ -489,6 +506,11 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 	}
 	defer func() { _ = broker.Close() }()
 
+	// Встраиваем метаданные pipeline (v1.4) если заданы
+	if e.pipelineCtx != nil {
+		dataPacket.PipelineContext = e.pipelineCtx
+	}
+
 	generator := packet.NewGenerator()
 	xmlData, err := generator.ToXML(dataPacket, false)
 	if err != nil {
@@ -537,6 +559,13 @@ func (e *Exporter) exportToKafkaSpool(ctx context.Context, dataPacket *packet.Da
 		return err
 	}
 	defer exp.Close()
+
+	// Встраиваем метаданные pipeline (v1.4) во все части если заданы
+	if e.pipelineCtx != nil {
+		for _, part := range parts {
+			part.PipelineContext = e.pipelineCtx
+		}
+	}
 
 	if exportErr := exp.ExportPackets(ctx, parts); exportErr != nil {
 		// Spool-файлы остаются на диске — можно сделать retry вручную

@@ -167,6 +167,9 @@ type ImportBrokerOptions struct {
 	// Keep=true: each part committed individually; if a later part fails, earlier parts remain.
 	// Use Keep for batches too large for a single DB transaction.
 	IdleTimeout time.Duration // how long to wait for the next message before stopping (0 = default 5s)
+
+	// PipelineContext precondition check (v1.4): --expect-var name=value.
+	ExpectVars map[string]string
 }
 
 // ImportFromBroker imports one complete export batch from the broker queue.
@@ -315,6 +318,13 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 	if opts.TargetTable != "" {
 		for _, pkt := range parsedPackets {
 			pkt.Header.TableName = opts.TargetTable
+		}
+	}
+
+	// PipelineContext precondition check (v1.4): --expect-var name=value.
+	if len(opts.ExpectVars) > 0 {
+		if err := CheckPipelineVars(parsedPackets[0], opts.ExpectVars); err != nil {
+			return err
 		}
 	}
 

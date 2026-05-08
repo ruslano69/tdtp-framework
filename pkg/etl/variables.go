@@ -111,6 +111,29 @@ func applyOutputVars(out *OutputConfig, vars map[string]string) {
 	applyOutputVars(out.Fallback, vars)
 }
 
+// UsedVariables returns only the variables from vars that are actually referenced
+// in config (via @name in SQL or {{name}} in YAML fields). Unused vars are excluded.
+// Call after ApplyVariables so config is already substituted; declared set is stable.
+func UsedVariables(config *PipelineConfig, vars map[string]string) map[string]string {
+	if len(vars) == 0 {
+		return nil
+	}
+	declared := collectDeclaredVars(config)
+	if len(declared) == 0 {
+		return nil
+	}
+	used := make(map[string]string, len(declared))
+	for name := range declared {
+		if val, ok := vars[name]; ok {
+			used[name] = val
+		}
+	}
+	if len(used) == 0 {
+		return nil
+	}
+	return used
+}
+
 // collectDeclaredVars returns the set of variable names referenced in the config.
 // SQL fields are scanned for @name; YAML string fields are scanned for {{name}}.
 func collectDeclaredVars(config *PipelineConfig) map[string]bool {

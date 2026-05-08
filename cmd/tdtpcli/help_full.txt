@@ -55,6 +55,9 @@ COMMANDS:
     --pipeline <file>          Execute ETL pipeline from YAML config
     @name=value                Pass variable to pipeline (any number, after --pipeline)
                                Quotes around value are stripped automatically: @dept="97-256" → 97-256
+                               Used variables are embedded in the output packet as PipelineContext
+    --expect-var <name=value>  Verify PipelineContext variable before import (repeatable)
+                               Import fails before any DB writes if value doesn't match
 
 OPTIONS:
 
@@ -100,6 +103,8 @@ OPTIONS:
 
   ETL Pipeline Options:
     --unsafe                   Enable unsafe mode (allows all SQL, requires admin)
+    --expect-var <name=value>  Require PipelineContext variable to match before import (repeatable)
+                               Fails fast before any DB writes on mismatch or missing variable
 
   Pipeline Variable Substitution (@name=value):
     SQL string context:        WHERE col = '@dept'       → WHERE col = '97-256'
@@ -284,6 +289,16 @@ EXAMPLES:
   #   SQL:       WHERE col = '@dept'  → WHERE col = '97-256'   (text, quotes escaped)
   #              WHERE year = @year   → WHERE year = 2025      (numeric, bare)
   #   YAML dest: out/dept_{{dept}}.tdtp.xml → out/dept_97-256.tdtp.xml
+
+  # Pipeline embeds used variables into output packet (PipelineContext v1.4)
+  #   --inspect shows:  pipeline: dept-sync v2.1
+  #                     pipeline_vars:
+  #                       dept: sales
+  tdtpcli --pipeline dept_staff.yaml @dept=sales
+
+  # Import with precondition check: verify packet came from the expected pipeline run
+  tdtpcli --config cfg.yaml --import data.tdtp.xml --expect-var dept=sales
+  tdtpcli --config cfg.yaml --import-broker --expect-var dept=sales --expect-var region=EMEA
 
   # Execute pipeline in unsafe mode (allows custom SQL)
   tdtpcli --pipeline etl-config.yaml --unsafe

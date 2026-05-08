@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/etl"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/resultlog"
@@ -60,6 +61,7 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 	}
 
 	// 2b. Apply CLI pipeline variables (@name=value) — substitution before SQL validation
+	var pipelineCtx *packet.PipelineContext
 	if len(opts.Variables) > 0 {
 		varWarnings, varErr := etl.ApplyVariables(config, opts.Variables)
 		if varErr != nil {
@@ -68,6 +70,14 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 		for _, w := range varWarnings {
 			fmt.Printf("WARNING: %s\n", w)
 		}
+
+		// Build PipelineContext with only variables actually used in config (v1.4)
+		usedVars := etl.UsedVariables(config, opts.Variables)
+		if len(usedVars) > 0 || config.Name != "" {
+			pipelineCtx = buildPipelineContext(config.Name, config.Version, usedVars)
+		}
+	} else if config.Name != "" {
+		pipelineCtx = buildPipelineContext(config.Name, config.Version, nil)
 	}
 
 	// 3. Initialize SQL validator based on mode
@@ -104,10 +114,16 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 	fmt.Printf("   Sources: %d\n", len(config.Sources))
 	fmt.Printf("   Workspace: %s (%s)\n", config.Workspace.Type, config.Workspace.Mode)
 	fmt.Printf("   Output: %s%s\n", config.Output.Type, encLabel)
+	if pipelineCtx != nil {
+		fmt.Printf("   Context: %d variable(s) embedded in output packet\n", len(pipelineCtx.Variables))
+	}
 	fmt.Println()
 
 	// 6. Create ETL processor
 	processor := etl.NewProcessor(config)
+	if pipelineCtx != nil {
+		processor.SetPipelineContext(pipelineCtx)
+	}
 
 	// 6a. Если --enc-dev — подключаем DevClient вместо xZMercury (только !production сборки)
 	if opts.EncDev {
@@ -187,6 +203,25 @@ func validatePipelineSQL(config *etl.PipelineConfig, validator *security.SQLVali
 	}
 
 	return nil
+}
+
+// buildPipelineContext создаёт PipelineContext для встраивания в пакет (v1.4).
+func buildPipelineContext(name, version string, vars map[string]string) *packet.PipelineContext {
+	ctx := &packet.PipelineContext{
+		Pipeline: packet.PipelineInfo{Name: name, Version: version},
+	}
+	if len(vars) > 0 {
+		names := make([]string, 0, len(vars))
+		for k := range vars {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		ctx.Variables = make([]packet.PipelineVar, 0, len(vars))
+		for _, k := range names {
+			ctx.Variables = append(ctx.Variables, packet.PipelineVar{Name: k, Value: vars[k]})
+		}
+	}
+	return ctx
 }
 
 // getSecurityModeLabel returns a human-readable security mode label

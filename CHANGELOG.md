@@ -6,6 +6,67 @@ All notable changes to tdtp-framework are documented in this file.
 
 ### Added
 
+- **PipelineContext в заголовке TDTP-пакета + `--expect-var`** (`pkg/core/packet/types.go`, `pkg/etl/`, `cmd/tdtpcli/`):
+
+  При экспорте через `--pipeline` каждый сгенерированный пакет теперь содержит блок
+  `<PipelineContext>` — метаданные о pipeline-источнике, встроенные прямо в XML:
+
+  ```xml
+  <PipelineContext>
+    <Pipeline name="daily-sync" version="2.1"/>
+    <Variables>
+      <Var name="dept" value="sales"/>
+      <Var name="region" value="EMEA"/>
+    </Variables>
+  </PipelineContext>
+  ```
+
+  В `Variables` попадают **только те переменные, которые фактически используются в конфиге**
+  (через `@name` в SQL или `{{name}}` в YAML-полях). Переменные, переданные в CLI но
+  не задействованные в конфиге, исключаются.
+
+  Покрытие: `exportToTDTP` (каждая часть), `exportToRabbitMQ`, `exportToKafka` (legacy),
+  `exportToKafkaSpool` (каждая часть).
+
+  **Новый флаг `--expect-var name=value`** (`cmd/tdtpcli/`):
+
+  При импорте (`--import`, `--import-broker`) позволяет проверить переменные источника
+  **до** любых операций с БД — fail-fast без побочных эффектов:
+
+  ```bash
+  # Consumer.py, tdtpcli --import-broker --expect-var region=EMEA --expect-var dept=sales
+  tdtpcli --config cfg.yaml --import-broker --expect-var region=EMEA --expect-var dept=sales
+  ```
+
+  Если переменная отсутствует или имеет другое значение — импорт прерывается с чётким сообщением:
+
+  ```
+  --expect-var check failed (pipeline: daily-sync):
+    @dept: expected "hr", got "sales"
+    @region: expected "APAC", not present in packet
+  ```
+
+  Флаг повторяемый; порядок проверок не важен.
+
+  **`--inspect` теперь показывает PipelineContext** (`cmd/tdtpcli/commands/inspect.go`):
+
+  ```yaml
+  pipeline: daily-sync v2.1
+  pipeline_vars:
+    dept: sales
+    region: EMEA
+  ```
+
+  Строки выводятся только если `<PipelineContext>` присутствует в пакете — обратная
+  совместимость с пакетами, созданными до v1.4, сохранена.
+
+  **Новые функции и методы:**
+  - `packet.PipelineContext`, `packet.PipelineInfo`, `packet.PipelineVar` — типы данных
+  - `etl.UsedVariables(config, vars)` — возвращает только используемые переменные
+  - `Exporter.WithPipelineContext(ctx)` — устанавливает контекст на экспортер
+  - `Processor.SetPipelineContext(ctx)` — устанавливает контекст на процессор
+  - `commands.CheckPipelineVars(pkt, expectVars)` — проверка перед импортом
+
 - **Pipeline Variables — параметрические пайплайны через CLI** (`pkg/etl/variables.go`):
 
   Переменные передаются напрямую в командной строке без дополнительного флага:
