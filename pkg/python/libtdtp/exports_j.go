@@ -199,6 +199,26 @@ func J_ReadFile(path *C.char) *C.char {
 	return jOK(packetToJPacket(pkt, pkt.GetRows()))
 }
 
+// J_ParseBytes parses a TDTP packet directly from a byte buffer without touching the filesystem.
+// data must point to a valid TDTP XML blob (plain or compressed); length is the byte count.
+// Caller must free result with J_FreeString.
+//
+//export J_ParseBytes
+func J_ParseBytes(data *C.char, length C.int) *C.char {
+	raw := C.GoBytes(unsafe.Pointer(data), length)
+	parser := packet.NewParser()
+	pkt, err := parser.ParseBytes(raw)
+	if err != nil {
+		return jErr(fmt.Sprintf("parse error: %v", err))
+	}
+
+	if pkt.Data.Compression != "" {
+		return jDecompressRows(pkt)
+	}
+
+	return jOK(packetToJPacket(pkt, pkt.GetRows()))
+}
+
 // J_WriteFile generates a TDTP file from JSON data and writes it to path.
 // Returns {"ok":true} or {"error":"..."}.
 // Caller must free result with J_FreeString.

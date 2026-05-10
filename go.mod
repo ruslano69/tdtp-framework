@@ -83,3 +83,7 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace (
+	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 => golang.org/x/mod v0.29.0
+)
