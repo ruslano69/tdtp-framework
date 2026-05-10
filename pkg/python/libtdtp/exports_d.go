@@ -265,6 +265,32 @@ func D_ReadFile(path *C.char, out *C.D_Packet) C.int {
 	return 0
 }
 
+// D_ParseBytes parses a TDTP packet directly from a byte buffer without touching the filesystem.
+// data must point to a valid TDTP XML blob (plain or compressed); length is the byte count.
+// Returns 0 on success, 1 on error (check out.error).
+// Caller must release with D_FreePacket(&out) when done.
+//
+//export D_ParseBytes
+func D_ParseBytes(data *C.char, length C.int, out *C.D_Packet) C.int {
+	raw := C.GoBytes(unsafe.Pointer(data), length)
+	pkt, err := packet.NewParser().ParseBytes(raw)
+	if err != nil {
+		dSetError(out, "parse error: "+err.Error())
+		return 1
+	}
+
+	if pkt.Data.Compression != "" {
+		return dDecompressRows(pkt, out)
+	}
+
+	rows := pkt.GetRows()
+	rows = dDecodeSpecialValues(rows, pkt.Schema)
+	dFillSchema(out, pkt.Schema)
+	dFillRows(out, rows)
+	dFillHeader(out, pkt)
+	return 0
+}
+
 // D_WriteFile generates a TDTP file from pkt and writes it to path.
 // Returns 0 on success, 1 on error (check out.error).
 //
