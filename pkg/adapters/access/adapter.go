@@ -20,6 +20,8 @@ import (
 	"strings"
 
 	_ "github.com/alexbrainman/odbc" // register odbc driver
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
@@ -33,13 +35,45 @@ func init() {
 }
 
 // Adapter implements adapters.Adapter for Microsoft Access via ODBC.
-// alexbrainman/odbc uses Unicode ODBC APIs (SQL_C_WCHAR) and returns UTF-8 strings —
-// no charset conversion is needed.
+// Column names arrive as UTF-8 via ODBC Unicode API (SQLDescribeColW).
+// Cell data from old Jet 2.x databases may arrive as ANSI bytes — use charset config to convert.
 type Adapter struct {
 	db           *sql.DB
 	config       adapters.Config
 	exportHelper *base.ExportHelper
 	converter    *base.UniversalTypeConverter
+	decoder      *encoding.Decoder // non-nil when charset conversion needed (e.g. windows-1251)
+}
+
+// resolveDecoder returns a charmap decoder for the given charset name, or nil for UTF-8/empty.
+func resolveDecoder(charset string) *encoding.Decoder {
+	switch strings.ToLower(strings.ReplaceAll(charset, "-", "")) {
+	case "windows1251", "cp1251", "1251", "cyrillic":
+		return charmap.Windows1251.NewDecoder()
+	case "windows1252", "cp1252", "1252", "latin1":
+		return charmap.Windows1252.NewDecoder()
+	case "koi8r":
+		return charmap.KOI8R.NewDecoder()
+	case "iso88591":
+		return charmap.ISO8859_1.NewDecoder()
+	case "iso88592":
+		return charmap.ISO8859_2.NewDecoder()
+	default:
+		return nil
+	}
+}
+
+// decodeString converts a string from the source charset to UTF-8.
+// Returns s unchanged when decoder is nil (already UTF-8).
+func (a *Adapter) decodeString(s string) string {
+	if a.decoder == nil {
+		return s
+	}
+	out, err := a.decoder.String(s)
+	if err != nil {
+		return s // return original on decode error
+	}
+	return out
 }
 
 // Connect opens an ODBC connection to an Access .mdb/.accdb file.
@@ -65,6 +99,7 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 
 	a.db = db
 	a.config = cfg
+	a.decoder = resolveDecoder(cfg.Charset)
 
 	// Init converter and export helper
 	a.converter = base.NewUniversalTypeConverter()

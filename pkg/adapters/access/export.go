@@ -114,7 +114,18 @@ func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, er
 
 	// Fast path: schema and data columns are in the same order
 	if identity && len(actualCols) == len(schema.Fields) {
-		return base.ScanSQLRows(rows, schema, a.converter, "access")
+		result, err := base.ScanSQLRows(rows, schema, a.converter, "access")
+		if err != nil {
+			return nil, err
+		}
+		if a.decoder != nil {
+			for i, row := range result {
+				for j, val := range row {
+					result[i][j] = a.decodeString(val)
+				}
+			}
+		}
+		return result, nil
 	}
 
 	// Slow path: reorder values to match schema positions
@@ -137,7 +148,8 @@ func (a *Adapter) scanRows(rows *sql.Rows, schema packet.Schema) ([][]string, er
 			}
 			field := schema.Fields[j]
 			raw := a.converter.DBValueToString(val, field, "access")
-			row[j] = a.converter.ConvertValueToTDTP(field, raw)
+			converted := a.converter.ConvertValueToTDTP(field, raw)
+			row[j] = a.decodeString(converted)
 		}
 		result = append(result, row)
 	}
