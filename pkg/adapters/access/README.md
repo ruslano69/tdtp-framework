@@ -13,22 +13,151 @@
 
 ---
 
-## 🔨 Сборка (PowerShell — одна строка)
+## 🔨 Сборка для 32-битного ODBC
+
+### Почему обязателен GOARCH=386
+
+Microsoft Jet 4.0 ODBC — **32-битный** In-Process COM-сервер (`msjet40.dll`).
+Windows не позволяет 64-битному процессу загрузить 32-битную DLL в своё адресное пространство.
+
+Последствия попытки запустить x64-бинарник:
+
+```
+sql: unknown driver "odbc" — драйвер не зарегистрирован
+```
+или
+```
+Architecture mismatch: cannot load 32-bit DLL into 64-bit process
+```
+
+Единственное решение — собрать Go-бинарник как **32-битный** (`GOARCH=386`), чтобы он сам был
+32-битным процессом и мог загружать Jet ODBC DLL напрямую.
+
+> **Примечание.** Microsoft Access Database Engine 2016 Redistributable существует в x64-варианте
+> и поддерживает `.accdb` и современные `.mdb` (Jet 4.0). Но для старых баз (Jet 2.x / 3.x)
+> он не всегда работает. Jet 4.0 32-bit — универсальное решение для любого формата `.mdb`.
+
+---
+
+### 32-битный ODBC vs 64-битный ODBC на Windows
+
+На Windows существуют **два независимых** диспетчера ODBC:
+
+| | 64-bit ODBC | 32-bit ODBC |
+|---|---|---|
+| Утилита настройки | `C:\Windows\System32\odbcad32.exe` | `C:\Windows\SysWOW64\odbcad32.exe` |
+| Реестр | `HKLM\SOFTWARE\ODBC` | `HKLM\SOFTWARE\WOW6432Node\ODBC` |
+| Драйверы Access | ❌ нет (Jet только 32-bit) | ✅ есть |
+| Используется | 64-bit процессами | 32-bit процессами |
+
+Стандартный `odbcad32.exe` из `System32` — **64-битный**. Он не покажет драйверы Access.
+Чтобы убедиться что 32-bit драйвер установлен, нужно запустить именно `SysWOW64\odbcad32.exe`.
+
+Проверка из PowerShell:
+```powershell
+# 32-битные драйверы Access
+Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\ODBC\ODBCINST.INI\ODBC Drivers" |
+    Select-Object -Property * | Where-Object { $_ -match "Access" }
+```
+
+Или из Python:
+```python
+import winreg
+key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+    r"SOFTWARE\WOW6432Node\ODBC\ODBCINST.INI\ODBC Drivers")
+i = 0
+while True:
+    try:
+        name, _, _ = winreg.EnumValue(key, i); print(name); i += 1
+    except OSError:
+        break
+```
+
+---
+
+### Сборка (PowerShell — одна строка)
 
 ```powershell
 $env:GOPROXY="https://goproxy.io"; $env:GONOSUMDB="*"; $env:GOARCH="386"; go build -tags nokafka -o tdtpcli_x86.exe ./cmd/tdtpcli/; $env:GOARCH=""
 ```
 
-Или по шагам:
+По шагам:
 ```powershell
-$env:GOPROXY   = "https://goproxy.io"
-$env:GONOSUMDB = "*"
-$env:GOARCH    = "386"
+$env:GOPROXY   = "https://goproxy.io"   # прямой прокси, без googleapis redirect
+$env:GONOSUMDB = "*"                    # отключить sum-проверку для старых псевдоверсий
+$env:GOARCH    = "386"                  # цель: 32-bit x86
 go build -tags nokafka -o tdtpcli_x86.exe ./cmd/tdtpcli/
-$env:GOARCH    = ""   # сбросить после сборки!
+$env:GOARCH    = ""                     # сбросить, иначе все следующие сборки будут x86
 ```
 
-> **Почему `-tags nokafka`?** Kafka-go тянет CGo-зависимости, несовместимые с `GOARCH=386`. Access-адаптер Kafka не нужен.
+> **`-tags nokafka`** — kafka-go тянет CGo-зависимости, несовместимые с `GOARCH=386`.
+> Access-адаптеру Kafka не нужна, тег безопасно исключает её из сборки.
+
+---
+
+### Почему GOPROXY=goproxy.io, а не proxy.golang.org
+
+`proxy.golang.org` перенаправляет скачивание модулей на `storage.googleapis.com`.
+Если в окружении прописан `no_proxy=*.googleapis.com`, скачивание падает с 403/timeout.
+
+`goproxy.io` отдаёт модули напрямую без редиректов — работает даже в закрытых сетях.
+
+Альтернативная цепочка (если goproxy.io не доступен):
+```powershell
+$env:GOPROXY = "https://goproxy.cn,https://goproxy.io,direct"
+```
+
+---
+
+### Регистрация адаптера в бинарнике
+
+Access-адаптер регистрируется через `init()` по blank-импорту. Файл использует build tag
+`//go:build windows`, поэтому на Linux/macOS он автоматически исключается из компиляции:
+
+```go
+// cmd/tdtpcli/drivers_access.go
+//go:build windows
+
+package main
+
+import _ "github.com/ruslano69/tdtp-framework/pkg/adapters/access"
+```
+
+Без этого файла в бинарнике `access` не появится в списке адаптеров — `--list` вернёт
+`unknown database type: access`.
+
+---
+
+### Схема работы 32-битного стека
+
+```
+tdtpcli_x86.exe (32-bit Go процесс)
+       │
+       │  database/sql  →  odbc driver (alexbrainman/odbc)
+       │                       │
+       │                       │  ODBC API (Unicode: SQLConnectW, SQLExecDirectW)
+       │                       ▼
+       │              msjet40.dll  (Jet 4.0, 32-bit COM, In-Process)
+       │                       │
+       │                       ▼
+       │              DELO26.MDB  (Jet 2.x/3.x/4.x формат)
+       │
+       │  Schema introspection (ADOX)
+       │       │
+       │       │  os/exec  →  C:\Windows\SysWOW64\cscript.exe (32-bit)
+       │       │                       │
+       │       │               VBScript  →  ADOX.Catalog  →  Jet OLE DB 4.0
+       │       │                       │
+       │       └──────── JSON схема ◄──┘
+       │
+       ▼
+  TDTP XML (UTF-8, XML-escaped, windows-1251 → UTF-8 если charset задан)
+```
+
+`alexbrainman/odbc` использует Unicode ODBC API (`SQL_C_WCHAR`) — имена колонок всегда
+приходят как UTF-16 и конвертируются в UTF-8 автоматически. Данные из Jet 2.x могут
+приходить как ANSI-байты (Windows-1251) — для них нужен параметр `charset: windows-1251`
+в конфиге, который активирует побайтовую конвертацию через `charmap.Windows1251`.
 
 ---
 
