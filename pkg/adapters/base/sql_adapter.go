@@ -98,8 +98,14 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 	}
 
 	// Квалифицируем имя таблицы: [schema].[table]
+	// GenerateSQL wraps names with special chars in ANSI double-quotes (e.g. "ZTR$Timesheet Line").
+	// Replace the ANSI-quoted form first to avoid partial substring corruption.
 	fullTableName := fmt.Sprintf("[%s].[%s]", schemaName, table)
-	sql := strings.Replace(standardSQL, tableName, fullTableName, 1)
+	ansiTable := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+	sql := strings.Replace(standardSQL, ansiTable, fullTableName, 1)
+	if sql == standardSQL {
+		sql = strings.Replace(standardSQL, tableName, fullTableName, 1)
+	}
 
 	// Квалифицируем имена полей квадратными скобками.
 	// Обрабатываем два варианта: ANSI "field" (из quoteFieldName для имён со спецсимволами)

@@ -3,6 +3,7 @@ package base
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -194,7 +195,7 @@ func (h *ExportHelper) ExportTableWithQuery(
 					recipient,
 				)
 			}
-			// Если SQL запрос не удался, fallback на in-memory фильтрацию
+			log.Printf("WARNING: SQL pushdown failed for table %q: %v — falling back to full table scan (may use significant memory)", tableName, err)
 		}
 	}
 
