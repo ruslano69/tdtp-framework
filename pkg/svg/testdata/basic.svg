@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+  <rect x="10" y="10" width="30" height="30" fill="red" stroke="black" stroke-width="2"/>
+  <circle cx="70" cy="25" r="15" fill="blue"/>
+  <g transform="translate(10,60)">
+    <text x="0" y="20" fill="black">Hello <tspan fill="green">world</tspan>!</text>
+  </g>
+</svg>
