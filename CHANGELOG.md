@@ -5,130 +5,26 @@ All notable changes to tdtp-framework are documented in this file.
 ## [1.9.4] — 2026-05-20
 
 ### Added
-
-- **TDTP v1.4 — секция `<Dictionary>` в схеме** (`pkg/core/packet/`):
-
-  Словарь коротких токенов → полных строк, встроенный прямо в `<Schema>`.
-  Позволяет сжимать повторяющиеся длинные значения (URI namespace, типы материалов,
-  сетевые адреса узлов) до коротких символических имён с `@`-сигилом:
-
-  ```xml
-  <Schema>
-    <Field name="namespace" type="TEXT"/>
-    <Dictionary>
-      <Entry short="@W3"   full="http://www.w3.org/2000/svg"/>
-      <Entry short="@inks" full="http://www.inkscape.org/namespaces/inkscape"/>
-    </Dictionary>
-  </Schema>
-  ```
-
-  Токены разворачиваются при чтении (`ExpandDictionary`), сворачиваются при записи
-  (`ContractDictionary`). Обратная совместимость: пакеты без `<Dictionary>` читаются
-  без изменений.
-
-  Архитектурный смысл: словарь — точка сопряжения метаданных. Может хранить не только
-  сокращения URI, но и доменные типы (`@T_CTC_03` → тип обмотки), сетевые адреса узлов
-  распределённого чертежа, правила валидации. Пакет несёт в себе инструкцию по
-  собственной интерпретации.
-
-- **`tdtp-svg` — новый бинарник, SVG ↔ TDTP конвертер** (`cmd/tdtp-svg/`, `pkg/svg/`):
-
-  Конвертирует SVG-документы в TDTP-пакеты и обратно. Каждый SVG-элемент становится
-  строкой реляционной таблицы. Дерево кодируется через `(id, parent_id, order_idx)`.
-
-  ```bash
-  tdtp-svg --from-svg schema.svg  --output schema.tdtp.xml
-  tdtp-svg --to-svg schema.tdtp.xml --output schema_restored.svg
-  tdtp-svg --from-svg schema.svg --compress --compress-algo kanzi --output schema.tdtp.xml
-  ```
-
-  **Схема** (24 колонки): структурные (`id`, `parent_id`, `order_idx`, `tag`,
-  `namespace`, `text_content`), overflow (`attrs_json`), 17 широких атрибутов
-  (`fill`, `stroke`, `d`, `transform`, `viewBox`, `href`, …).
-
-  **Парсер** (`pkg/svg/parser.go`): потоковый `xml.Decoder`, память O(глубина дерева)
-  а не O(размер файла) — масштабируется на тяжёлые CAD-экспорты.
-
-  **Результаты на реальных данных**: схема БД из 50 таблиц / 100+ связей,
-  4 171 графических элементов, координаты с 6–7 знаками после запятой (ручная
-  расстановка без сетки):
-  ```
-  580 KB SVG  →  65 KB binary (kanzi)  →  87 KB TDTP XML (base64)
-  Коэффициент: 8.9×  (сжатие структурное: XML-многословность устранена,
-  координаты с максимальной энтропией — не сжимаются алгоритмически)
-  ```
-
-  **Что открывается после препарирования**:
-  - TDTQL-запросы по геометрии: `--where 'tag = "rect" AND fill = "#ff0000"'`
-  - Обнаружение ошибок сетки: `x % grid_size` → выброс
-  - Детекция копипастов: fingerprint поддерева (tag + style детей)
-  - Экспорт в pandas/numpy через libtdtp → sklearn кластеризация, scipy анализ
-  - RAG: `text_content` + `parent_id` → структурированные чанки с контекстом
-  - Bulk-редактирование чертежа через SQL: `UPDATE … SET fill=… WHERE tag=… AND …`
-
-  **Словарь namespace** (`pkg/svg/dict.go`): 5 токенов для SVG/Inkscape/Sketch URI.
-
-- **`--fallback-row-limit` — защита от неожиданного full table scan** (`pkg/adapters/base/export_helper.go`):
-
-  Когда SQL pushdown не удался и код падает в `ReadAllRows` (in-memory фильтрация),
-  новый лимит ограничивает количество строк которые будут прочитаны из таблицы.
-  Предотвращает аварийное потребление памяти на больших таблицах.
-
-  ```bash
-  tdtpcli --export "BigTable" --where "..." --fallback-row-limit 100000
-  ```
-
-  По умолчанию: 0 (без ограничения, поведение как раньше). При превышении —
-  ошибка с явным сообщением вместо OOM.
+- **TDTP v1.4 Dictionary** (`pkg/core/packet/`): секция `<Dictionary>` в схеме —
+  токены `@name` → полные строки (URI namespace, типы домена).
+  `ExpandDictionary` / `ContractDictionary`. Обратная совместимость сохранена.
+- **`tdtp-svg`** (`cmd/tdtp-svg/`, `pkg/svg/`): SVG ↔ TDTP конвертер.
+  Каждый элемент → строка таблицы, дерево через `(id, parent_id, order_idx)`.
+  Схема 24 колонки: 6 структурных + `attrs_json` + 17 широких атрибутов.
+  Парсер потоковый — O(глубина), не O(размер файла).
+  Бенчмарк: 4171 элементов, 580 KB SVG → 87 KB TDTP (kanzi, 8.9×).
+- **`--fallback-row-limit N`** (`pkg/adapters/base/export_helper.go`):
+  ограничивает `ReadAllRows` при fallback с SQL pushdown. По умолчанию 0.
 
 ### Fixed
-
-- **MSSQL: катастрофический full table scan на таблицах со спецсимволами в имени**
-  (`pkg/adapters/base/sql_adapter.go`):
-
-  `GenerateSQL` оборачивает имена с `$` или пробелами в ANSI-кавычки: `"ZTR$Timesheet Line"`.
-  `MSSQLAdapter.AdaptSQL` искал голую подстроку внутри этого токена и производил
-  невалидный SQL `"[dbo].[ZTR$Timesheet Line]"` (смешанные кавычки). MSSQL отвергал
-  запрос, код молча падал в `ReadAllRows` — загружал всю таблицу в память.
-
-  **Наблюдаемый эффект**: 17 GB RAM при запросе `--where '[Calendar Date] >= "2024-08-12"'`
-  на таблице `ZTR$Timesheet Line`.
-
-  **Исправление**: сначала ищем и заменяем ANSI-quoted форму (`"ZTR$Timesheet Line"` →
-  `[dbo].[ZTR$Timesheet Line]`), только если не нашли — пробуем голое имя (для
-  безопасных идентификаторов без спецсимволов).
-
-  Добавлены регрессионные тесты: `pkg/adapters/base/sql_adapter_test.go`.
-
-- **MSSQL: ISO 8601 суффикс `Z` в datetime-литералах** (`pkg/adapters/base/sql_adapter.go`):
-
-  Значения дат из TDTQL (`"2024-08-12T00:00:00Z"`) передавались в MSSQL как
-  `'2024-08-12T00:00:00Z'`. Суффикс `Z` отвергается неявным преобразованием
-  в ряде версий MSSQL. Адаптер теперь стрипает `Z` перед подстановкой в SQL.
-
-- **SQL pushdown: предупреждение вместо молчаливого fallback**
-  (`pkg/adapters/base/export_helper.go`):
-
-  При любом сбое SQL pushdown теперь выводится явное предупреждение в лог:
-  ```
-  WARNING: SQL pushdown failed for table "...": <причина> — falling back to full table scan
-  ```
-  Позволяет обнаружить проблему до того как она приведёт к OOM.
-
-### Architecture Note
-
-  Сегодняшний день сформулировал философию протокола:
-
-  **TDTP — это паспорт + данные + схема сборки с верификацией.**
-
-  Не файловый формат. Не API. Единица обмена: самоописывающая, верифицируемая,
-  компонуемая. Dictionary v1.4 + Pipeline + expect-var + tdtp-svg = LEGO-кирпичи
-  из которых собирается любая инфраструктура данных — от табеля на 24M строк
-  до распределённого хранения инженерных чертежей.
-
-  Отправная точка: Access 2.0 с кириллицей и спецсимволами в именах полей.
-  Пункт назначения на сегодня: протокол распределённых CAD-документов с RAG и
-  аналитикой через numpy/sklearn. Один бинарник. 30 MB. Без зависимостей.
+- **MSSQL full table scan на именах с `$` / пробелами** (`pkg/adapters/base/sql_adapter.go`):
+  `AdaptSQL` портил ANSI-quoted имя (`"ZTR$Timesheet Line"` → `"[dbo].[ZTR$Timesheet Line]"`),
+  MSSQL отвергал, код падал в `ReadAllRows`. Наблюдалось 17 GB RAM.
+  Теперь ANSI-форма заменяется первой. Регрессионный тест добавлен.
+- **MSSQL datetime суффикс `Z`** (`pkg/adapters/base/sql_adapter.go`):
+  `'2024-08-12T00:00:00Z'` → `'2024-08-12T00:00:00'`.
+- **SQL pushdown silent fallback** (`pkg/adapters/base/export_helper.go`):
+  молчаливый fallback заменён на `log.Printf WARNING`.
 
 ## [1.9.3] — 2026-05-08
 
