@@ -94,7 +94,8 @@ type Flags struct {
 	CompressAlgo  *string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
 	Hash          *bool   // Add XXH3 checksum for data integrity verification
 	PacketSize    *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
-	Fast          *bool   // Skip SpecialValues detection (no NULL/NaN/Inf markers) for maximum export speed
+	Fast             *bool  // Skip SpecialValues detection (no NULL/NaN/Inf markers) for maximum export speed
+	FallbackRowLimit *int64 // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
 	// Compact format (v1.3.1)
 	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
@@ -201,6 +202,7 @@ func ParseFlags() *Flags {
 	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
 	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
 	f.Fast = flag.Bool("fast", false, "Skip SpecialValues detection for maximum export speed (no NULL/NaN/Inf schema markers)")
+	f.FallbackRowLimit = flag.Int64("fallback-row-limit", 1_000_000, "Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited). Protects prod DBs from full-table scans on broken queries")
 
 	// Compact format (v1.3.1)
 	f.Compact = flag.Bool("compact", false, "Enable TDTP v1.3.1 compact format on export (fixed fields written once per group)")

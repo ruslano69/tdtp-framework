@@ -56,8 +56,9 @@ type ExportHelper struct {
 	dataReader        DataReader
 	valueConverter    ValueConverter
 	sqlAdapter        SQLAdapter
-	maxMessageSize    int  // 0 = use generator default
-	skipSpecialValues bool // --fast: skip DetectAndApply
+	maxMessageSize    int   // 0 = use generator default
+	skipSpecialValues bool  // --fast: skip DetectAndApply
+	maxFallbackRows   int64 // 0 = unlimited; > 0 = abort fallback path if table has more rows
 }
 
 // NewExportHelper создает новый ExportHelper
@@ -86,6 +87,13 @@ func (h *ExportHelper) SetMaxMessageSize(size int) {
 // без спецзначений или когда скорость важнее полноты метаданных.
 func (h *ExportHelper) SetSkipSpecialValues(skip bool) {
 	h.skipSpecialValues = skip
+}
+
+// SetMaxFallbackRows задаёт лимит строк для in-memory fallback при провале SQL pushdown.
+// При 0 — без лимита (текущее поведение). При > 0 — если таблица больше лимита,
+// возвращается ошибка вместо чтения всей таблицы в RAM. Защищает прод-БД от 17 GB сканов.
+func (h *ExportHelper) SetMaxFallbackRows(n int64) {
+	h.maxFallbackRows = n
 }
 
 // newGenerator возвращает генератор с учётом всех настроек ExportHelper.
@@ -195,7 +203,17 @@ func (h *ExportHelper) ExportTableWithQuery(
 					recipient,
 				)
 			}
-			log.Printf("WARNING: SQL pushdown failed for table %q: %v — falling back to full table scan (may use significant memory)", tableName, err)
+			log.Printf("WARNING: SQL pushdown failed for table %q: %v\nSQL: %s\n— falling back to full table scan (may use significant memory)", tableName, err, adaptedSQL)
+		}
+	}
+
+	// Safety-net: проверяем размер таблицы до in-memory сканирования.
+	// Защищает прод-БД от обвала при WHERE/проекции которые не транслировались в SQL.
+	if h.maxFallbackRows > 0 {
+		if count, cntErr := h.dataReader.GetRowCount(ctx, tableName); cntErr == nil && count > h.maxFallbackRows {
+			return nil, fmt.Errorf("fallback aborted: table %q has %d rows (limit %d). "+
+				"SQL pushdown failed — fix the query or raise --fallback-row-limit (0 = unlimited)",
+				tableName, count, h.maxFallbackRows)
 		}
 	}
 
