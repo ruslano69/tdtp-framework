@@ -2,11 +2,17 @@ package base
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
+
+// isoDatetimeZ matches ISO 8601 datetime literals with UTC 'Z' suffix in SQL strings.
+// SQL Server datetime type rejects 'Z'; datetime2/datetimeoffset accept it.
+// We strip 'Z' unconditionally so pushdown works for all datetime column types.
+var isoDatetimeZ = regexp.MustCompile(`'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z'`)
 
 // StandardSQLAdapter реализует SQLAdapter для стандартного SQL (SQLite, PostgreSQL, MySQL)
 // Использует синтаксис LIMIT/OFFSET
@@ -120,6 +126,9 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 		sql = strings.ReplaceAll(sql, "("+field.Name+")", "("+bracket+")")
 		sql = strings.ReplaceAll(sql, ","+field.Name+" ", ","+bracket+" ")
 	}
+
+	// SQL Server datetime does not accept ISO 8601 'Z' suffix; strip it.
+	sql = isoDatetimeZ.ReplaceAllString(sql, "'$1'")
 
 	// Заменяем LIMIT/OFFSET на SQL Server синтаксис (SQL Server 2012+)
 	if query != nil && (query.Limit > 0 || query.Offset > 0) {
