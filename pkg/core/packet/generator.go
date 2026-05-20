@@ -87,6 +87,14 @@ func (g *Generator) SetCompressionLevel(level int) {
 // GenerateReference создает reference пакет (полный справочник)
 func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]string) ([]*DataPacket, error) {
 
+	// Validate optional v1.4 Dictionary up-front so producers see errors
+	// at generation time rather than at distant decode time.
+	if schema.Dictionary != nil && len(schema.Dictionary.Entries) > 0 {
+		if err := ValidateDictionary(schema.Dictionary.Entries); err != nil {
+			return nil, fmt.Errorf("invalid schema dictionary: %w", err)
+		}
+	}
+
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
 	if !g.skipSpecialValues {
 		rows, schema = DetectAndApply(rows, schema)
@@ -100,6 +108,12 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 
 	for i, partition := range partitions {
 		packet := NewDataPacket(TypeReference, tableName)
+		// Bump protocol version when Dictionary is present.
+		// v1.3 readers ignore unknown <Dictionary> via xml.Decoder
+		// default, so this is forward-compatible.
+		if schema.Dictionary != nil && len(schema.Dictionary.Entries) > 0 {
+			packet.Version = "1.4"
+		}
 		packet.Header.MessageID = fmt.Sprintf("%s-P%d", messageIDBase, i+1)
 		packet.Header.PartNumber = i + 1
 		packet.Header.TotalParts = len(partitions)
