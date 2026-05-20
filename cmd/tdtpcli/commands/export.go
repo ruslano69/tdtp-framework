@@ -31,7 +31,8 @@ type ExportOptions struct {
 	CompressAlgo   string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
 	EnableChecksum bool   // Add XXH3 checksum for data integrity verification
 	ReadOnlyFields bool   // Include read-only fields (timestamp, computed, identity)
-	Fast           bool   // Skip SpecialValues detection for maximum export speed
+	Fast             bool  // Skip SpecialValues detection for maximum export speed
+	FallbackRowLimit int64 // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
 	// v1.3.1 compact format
 	Compact     bool     // Enable compact format output
@@ -93,6 +94,14 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		type specialValueSkipper interface{ SetSkipSpecialValues(bool) }
 		if sv, ok := adapter.(specialValueSkipper); ok {
 			sv.SetSkipSpecialValues(true)
+		}
+	}
+
+	// --fallback-row-limit: safety-net против обвала на in-memory сканах
+	if opts.FallbackRowLimit > 0 {
+		type fallbackLimiter interface{ SetMaxFallbackRows(int64) }
+		if fl, ok := adapter.(fallbackLimiter); ok {
+			fl.SetMaxFallbackRows(opts.FallbackRowLimit)
 		}
 	}
 

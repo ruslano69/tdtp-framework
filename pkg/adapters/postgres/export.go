@@ -130,6 +130,11 @@ func (a *Adapter) SetSkipSpecialValues(skip bool) {
 	a.exportHelper.SetSkipSpecialValues(skip)
 }
 
+// SetMaxFallbackRows задаёт лимит строк для in-memory fallback при провале SQL pushdown.
+func (a *Adapter) SetMaxFallbackRows(n int64) {
+	a.exportHelper.SetMaxFallbackRows(n)
+}
+
 // ExportTable экспортирует таблицу в TDTP reference пакеты
 // Делегирует в base.ExportHelper для устранения дублирования кода
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
