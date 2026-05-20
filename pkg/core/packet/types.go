@@ -70,9 +70,32 @@ type Header struct {
 	Recipient     string      `xml:"Recipient,omitempty"`
 }
 
-// Schema описывает структуру таблицы
+// Schema описывает структуру таблицы.
+//
+// Dictionary (since TDTP v1.4) — опциональная таблица сокращений для
+// громоздких повторяющихся значений (XML namespace URI, CRS-коды,
+// ontology prefixes и т.п.). Хранится как opaque metadata: core НЕ
+// разворачивает токены автоматически, это делает domain-консьюмер.
+// См. ExpandDictionary / ContractDictionary в этом пакете.
 type Schema struct {
-	Fields []Field `xml:"Field"`
+	Fields     []Field     `xml:"Field"`
+	Dictionary *Dictionary `xml:"Dictionary,omitempty"`
+}
+
+// Dictionary — обёртка над []DictEntry, чтобы encoding/xml корректно
+// опускал секцию когда нет записей (`omitempty` для slice работает
+// только на содержимом, не на контейнерном теге).
+type Dictionary struct {
+	Entries []DictEntry `xml:"Entry"`
+}
+
+// DictEntry — одна запись словаря: короткий токен (например "@W3") и его
+// полное значение (URI, описание, etc.). Применяется только когда ячейка
+// данных РАВНА токену целиком (whole-cell match по regex
+// ^@[A-Za-z][A-Za-z0-9_]*$). Substring внутри текста не трогается.
+type DictEntry struct {
+	Short string `xml:"short,attr"`
+	Full  string `xml:"full,attr"`
 }
 
 // Field описывает одно поле таблицы
