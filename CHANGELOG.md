@@ -2,6 +2,30 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.4] — 2026-05-20
+
+### Added
+- **TDTP v1.4 Dictionary** (`pkg/core/packet/`): секция `<Dictionary>` в схеме —
+  токены `@name` → полные строки (URI namespace, типы домена).
+  `ExpandDictionary` / `ContractDictionary`. Обратная совместимость сохранена.
+- **`tdtp-svg`** (`cmd/tdtp-svg/`, `pkg/svg/`): SVG ↔ TDTP конвертер.
+  Каждый элемент → строка таблицы, дерево через `(id, parent_id, order_idx)`.
+  Схема 24 колонки: 6 структурных + `attrs_json` + 17 широких атрибутов.
+  Парсер потоковый — O(глубина), не O(размер файла).
+  Бенчмарк: 4171 элементов, 580 KB SVG → 87 KB TDTP (kanzi, 8.9×).
+- **`--fallback-row-limit N`** (`pkg/adapters/base/export_helper.go`):
+  ограничивает `ReadAllRows` при fallback с SQL pushdown. По умолчанию 0.
+
+### Fixed
+- **MSSQL full table scan на именах с `$` / пробелами** (`pkg/adapters/base/sql_adapter.go`):
+  `AdaptSQL` портил ANSI-quoted имя (`"ZTR$Timesheet Line"` → `"[dbo].[ZTR$Timesheet Line]"`),
+  MSSQL отвергал, код падал в `ReadAllRows`. Наблюдалось 17 GB RAM.
+  Теперь ANSI-форма заменяется первой. Регрессионный тест добавлен.
+- **MSSQL datetime суффикс `Z`** (`pkg/adapters/base/sql_adapter.go`):
+  `'2024-08-12T00:00:00Z'` → `'2024-08-12T00:00:00'`.
+- **SQL pushdown silent fallback** (`pkg/adapters/base/export_helper.go`):
+  молчаливый fallback заменён на `log.Printf WARNING`.
+
 ## [1.9.3] — 2026-05-08
 
 ### Added
@@ -495,6 +519,8 @@ its contribution entirely at 5 packets.
 
 | Version | Highlights |
 |---------|-----------|
+| 1.9.4 | TDTP v1.4 Dictionary, tdtp-svg (SVG↔TDTP), MSSQL 17GB fix, --fallback-row-limit |
+| 1.9.3 | PipelineContext + --expect-var, pipeline variables @name=value |
 | 1.9.1 | PostgreSQL TIME type fix, test data reproducibility (seed=42), 35/35 tests pass |
 | 1.9.0 | Kafka production-ready, parallel compress/decompress, `--raw`, `SendBatch`, `--output` multi-part save |
 | 1.8.2 | 2× import speedup, streaming import, `PrepareContext`, embedded help files |
