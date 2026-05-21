@@ -157,6 +157,68 @@ func TestRoundTrip_PacketWithDictionary(t *testing.T) {
 	}
 }
 
+// TestDowngrade verifies that a v1.4 packet is correctly converted to v1.3.1:
+// all token cells are expanded, Dictionary is removed, version is downgraded.
+func TestDowngrade(t *testing.T) {
+	entries := []DictEntry{
+		{Short: "@W3", Full: "http://www.w3.org/2000/svg"},
+		{Short: "@inks", Full: "http://www.inkscape.org/namespaces/inkscape"},
+	}
+	schema := Schema{
+		Fields:     []Field{{Name: "ns", Type: "TEXT"}},
+		Dictionary: &Dictionary{Entries: entries},
+	}
+	gen := NewGenerator()
+	pkts, err := gen.GenerateReference("test", schema, [][]string{{"@W3"}, {"@inks"}, {"plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkt := pkts[0]
+	if pkt.Version != "1.4" {
+		t.Fatalf("expected v1.4 before downgrade, got %q", pkt.Version)
+	}
+
+	Downgrade(pkt)
+
+	if pkt.Version != "1.3.1" {
+		t.Errorf("expected v1.3.1 after downgrade, got %q", pkt.Version)
+	}
+	if pkt.Schema.Dictionary != nil {
+		t.Errorf("Dictionary should be nil after downgrade")
+	}
+	// Verify token expansion in rows
+	want := []string{"http://www.w3.org/2000/svg", "http://www.inkscape.org/namespaces/inkscape", "plain"}
+	parser := NewParser()
+	for i, row := range pkt.Data.Rows {
+		vals := parser.GetRowValues(row)
+		if len(vals) == 0 || vals[0] != want[i] {
+			t.Errorf("row[%d]: got %q, want %q", i, vals[0], want[i])
+		}
+	}
+	// Verify XML output has no Dictionary and correct version
+	xmlBytes, _ := gen.ToXML(pkt, false)
+	if bytes.Contains(xmlBytes, []byte("<Dictionary>")) {
+		t.Errorf("downgraded XML must not contain <Dictionary>")
+	}
+	if !bytes.Contains(xmlBytes, []byte(`version="1.3.1"`)) {
+		t.Errorf("downgraded XML must contain version=1.3.1")
+	}
+}
+
+// TestDowngrade_Noop verifies that Downgrade is a no-op on packets
+// that have no Dictionary (already v1.3.1 or v1.0).
+func TestDowngrade_Noop(t *testing.T) {
+	schema := Schema{Fields: []Field{{Name: "id", Type: "INTEGER"}}}
+	gen := NewGenerator()
+	pkts, _ := gen.GenerateReference("test", schema, [][]string{{"1"}})
+	pkt := pkts[0]
+	versionBefore := pkt.Version
+	Downgrade(pkt) // must not panic or mutate version
+	if pkt.Version != versionBefore {
+		t.Errorf("Downgrade mutated version of packet without Dictionary: %q → %q", versionBefore, pkt.Version)
+	}
+}
+
 // TestForwardCompat_NoDictionary verifies that pre-v1.4 generators
 // (no Dictionary) still produce v1.0 packets and no <Dictionary> element.
 // This locks in backward compatibility: nothing changes for users who

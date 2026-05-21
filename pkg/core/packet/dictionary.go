@@ -84,3 +84,20 @@ func ContractDictionary(entries []DictEntry, cell string) string {
 	}
 	return cell
 }
+
+// Downgrade converts a v1.4 packet with a Dictionary into a v1.3.1
+// compatible packet by expanding all token cells inline and removing
+// the Dictionary. The original packet is modified in place.
+// No-op if the packet has no Dictionary or is already v1.3.1.
+func Downgrade(pkt *DataPacket) {
+	if pkt.Schema.Dictionary == nil || len(pkt.Schema.Dictionary.Entries) == 0 {
+		return
+	}
+	entries := pkt.Schema.Dictionary.Entries
+	pkt.MaterializeRows()
+	for i, row := range pkt.Data.Rows {
+		pkt.Data.Rows[i].Value = ExpandDictionary(entries, row.Value)
+	}
+	pkt.Schema.Dictionary = nil
+	pkt.Version = "1.3.1"
+}
