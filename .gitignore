@@ -81,6 +81,8 @@ analysis_result.txt
 relations_output.csv
 relations_utf8.csv
 DELO19_schema*
+delo19-migration-toolkit/
+delo19-migration-toolkit.zip
 
 # SeaweedFS local dev server (local only — never commit production configs)
 weed/
