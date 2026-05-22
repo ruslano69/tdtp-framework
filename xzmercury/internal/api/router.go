@@ -51,13 +51,15 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL) http.Hand
 	})
 
 	// Hash registry — v1.4 packet integrity verification.
-	// POST   /api/hashes        — register (producer, X-Caller required)
-	// GET    /api/hashes/{hash} — verify   (consumer, no auth)
-	// DELETE /api/hashes/{hash} — revoke   (admin,    X-Caller required)
+	// Redis key: mercury:hash:{uuid}:{part}  (SET NX — one slot, registered once)
+	//
+	// POST   /api/hashes                — register (producer, X-Caller required)
+	// GET    /api/hashes/{uuid}/{part}  — verify   (consumer, no auth, ?xxh3=<hash>)
+	// DELETE /api/hashes/{uuid}/{part}  — revoke   (admin,    X-Caller required)
 	r.Route("/api/hashes", func(r chi.Router) {
 		r.Post("/", hh.Register)
-		r.Get("/{hash}", hh.Verify)
-		r.Delete("/{hash}", hh.Revoke)
+		r.Get("/{uuid}/{part}", hh.Verify)
+		r.Delete("/{uuid}/{part}", hh.Revoke)
 	})
 
 	r.Get("/api/requests/{id}", handleGetRequest(inf))

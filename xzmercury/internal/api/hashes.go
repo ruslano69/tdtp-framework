@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,14 +15,17 @@ import (
 
 // hashesHandler handles /api/hashes endpoints.
 //
-// POST   /api/hashes          — Register (producer, auth required via X-Caller header)
-// GET    /api/hashes/{hash}   — Verify   (consumer, no auth — just checks existence)
-// DELETE /api/hashes/{hash}   — Revoke   (admin, auth required via X-Caller header)
+// POST   /api/hashes                  — Register (producer, X-Caller required)
+// GET    /api/hashes/{uuid}/{part}    — Verify   (consumer, no auth)
+// DELETE /api/hashes/{uuid}/{part}    — Revoke   (admin, X-Caller required)
 //
-// Key difference from /api/keys:
-//   - Keys are burn-on-read (GETDEL): consumed and destroyed on retrieval.
-//   - Hashes are read-only (GET): persist for HashTTL (default 24h) regardless of
-//     how many times Verify is called.
+// Redis key: mercury:hash:{uuid}:{part}  (SET NX — one registration per slot, ever)
+//
+// Why UUID+part as key (not the hash):
+//   The producer registers the hash for a specific packet identity (UUID+part).
+//   Consumer presents its pkt.XXH3; Mercury compares against what the producer
+//   stored. Attacker cannot re-register a forged hash for the same slot (NX)
+//   and cannot use a different UUID (UUIDs are globally unique, new per packet).
 type hashesHandler struct {
 	store *hashstore.Store
 }
@@ -31,19 +35,23 @@ type hashesHandler struct {
 // ────────────────────────────────────────────────────────────────────────────
 
 type registerHashRequest struct {
-	Hash          string `json:"hash"`           // xxh3_128 hex, 32 chars
+	UUID          string `json:"uuid"`           // DataPacket Header.MessageID
+	Part          int    `json:"part"`           // Header.PartNumber (0 = single-part)
+	XXH3          string `json:"xxh3"`           // 32-char xxh3_128 hex fingerprint
 	TableName     string `json:"table"`          // TDTP Schema name
-	Sender        string `json:"sender"`         // service account / pipeline name
+	Sender        string `json:"sender"`         // service account / pipeline
 	PacketVersion string `json:"packet_version"` // must be "1.4"
 }
 
 type registerHashResponse struct {
-	Hash      string `json:"hash"`
-	ExpiresIn string `json:"expires_in"` // human-readable: "24h0m0s"
+	UUID      string `json:"uuid"`
+	Part      int    `json:"part"`
+	XXH3      string `json:"xxh3"`
+	ExpiresIn string `json:"expires_in"`
 }
 
-// Register stores a packet hash fingerprint. Requires X-Caller header.
-// Only TDTP v1.4 packets are accepted — older versions have no integrity hashes.
+// Register stores a packet hash fingerprint under UUID+part (SET NX).
+// Requires X-Caller header. Only TDTP v1.4 accepted.
 func (h *hashesHandler) Register(w http.ResponseWriter, r *http.Request) {
 	caller := r.Header.Get("X-Caller")
 	if caller == "" {
@@ -56,12 +64,12 @@ func (h *hashesHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
-	if req.Hash == "" || req.TableName == "" || req.Sender == "" {
-		writeError(w, http.StatusBadRequest, "hash, table, and sender are required")
+	if req.UUID == "" || req.XXH3 == "" || req.TableName == "" || req.Sender == "" {
+		writeError(w, http.StatusBadRequest, "uuid, xxh3, table, and sender are required")
 		return
 	}
-	if len(req.Hash) != 32 {
-		writeError(w, http.StatusBadRequest, "hash must be 32-char xxh3_128 hex")
+	if len(req.XXH3) != 32 {
+		writeError(w, http.StatusBadRequest, "xxh3 must be 32-char hex (xxh3_128)")
 		return
 	}
 	if req.PacketVersion != "1.4" {
@@ -71,7 +79,9 @@ func (h *hashesHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec := hashstore.HashRecord{
-		Hash:          req.Hash,
+		UUID:          req.UUID,
+		Part:          req.Part,
+		XXH3:          req.XXH3,
 		TableName:     req.TableName,
 		Sender:        req.Sender,
 		PacketVersion: req.PacketVersion,
@@ -80,43 +90,53 @@ func (h *hashesHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	err := h.store.Register(ctx, rec)
+
 	if errors.Is(err, hashstore.ErrHashAlreadyRegistered) {
-		// Idempotent: already registered is fine — return the existing TTL
-		remaining, _ := h.store.TTLRemaining(ctx, req.Hash)
-		log.Info().Str("hash", req.Hash).Str("caller", caller).Msg("hash already registered (idempotent)")
-		writeJSON(w, http.StatusOK, registerHashResponse{
-			Hash:      req.Hash,
-			ExpiresIn: remaining.Truncate(time.Second).String(),
+		// Slot taken — check if it's the same producer retrying (idempotent)
+		// or an attacker trying to overwrite. Either way, the stored value wins.
+		remaining, _ := h.store.TTLRemaining(ctx, req.UUID, req.Part)
+		log.Warn().
+			Str("uuid", req.UUID).Int("part", req.Part).
+			Str("caller", caller).
+			Msg("hash slot already registered — registration blocked (SET NX)")
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":      "hash already registered for this UUID+part",
+			"expires_in": remaining.Truncate(time.Second).String(),
 		})
 		return
 	}
 	if err != nil {
-		log.Error().Err(err).Str("hash", req.Hash).Msg("hash register failed")
+		log.Error().Err(err).Str("uuid", req.UUID).Msg("hash register failed")
 		writeError(w, http.StatusInternalServerError, "register failed")
 		return
 	}
 
-	remaining, _ := h.store.TTLRemaining(ctx, req.Hash)
+	remaining, _ := h.store.TTLRemaining(ctx, req.UUID, req.Part)
 	log.Info().
-		Str("hash", req.Hash).
+		Str("uuid", req.UUID).Int("part", req.Part).
+		Str("xxh3", req.XXH3).
 		Str("table", req.TableName).
-		Str("sender", req.Sender).
 		Str("caller", caller).
 		Msg("hash registered")
 
 	writeJSON(w, http.StatusCreated, registerHashResponse{
-		Hash:      req.Hash,
+		UUID:      req.UUID,
+		Part:      req.Part,
+		XXH3:      req.XXH3,
 		ExpiresIn: remaining.Truncate(time.Second).String(),
 	})
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// GET /api/hashes/{hash}
+// GET /api/hashes/{uuid}/{part}
 // ────────────────────────────────────────────────────────────────────────────
 
 type verifyHashResponse struct {
 	Registered       bool      `json:"registered"`
-	Hash             string    `json:"hash"`
+	Match            bool      `json:"match"`             // presented xxh3 == stored xxh3
+	UUID             string    `json:"uuid,omitempty"`
+	Part             int       `json:"part,omitempty"`
+	StoredXXH3       string    `json:"stored_xxh3,omitempty"`
 	TableName        string    `json:"table,omitempty"`
 	Sender           string    `json:"sender,omitempty"`
 	PacketVersion    string    `json:"packet_version,omitempty"`
@@ -124,49 +144,75 @@ type verifyHashResponse struct {
 	ExpiresInSeconds int64     `json:"expires_in_seconds,omitempty"`
 }
 
-// Verify checks whether a packet hash is registered. No authentication required —
-// consumers do a pre-flight check without needing Mercury credentials.
-// Returns 200 + registered:true/false. Never returns 404 (absence is not an error).
+// Verify checks UUID+part and compares the stored hash against presented xxh3.
+// No authentication required — consumer calls this as pre-flight.
+//
+// Query parameter: ?xxh3=<presented_hash>  (the value from pkt.XXH3)
+// Response always 200:
+//   - registered:false → slot unknown → BLOCK
+//   - registered:true, match:false → slot found but hash differs → BLOCK (tampered)
+//   - registered:true, match:true  → OK → proceed
 func (h *hashesHandler) Verify(w http.ResponseWriter, r *http.Request) {
-	hash := chi.URLParam(r, "hash")
-	if len(hash) != 32 {
-		writeError(w, http.StatusBadRequest, "hash must be 32-char xxh3_128 hex")
+	uuid := chi.URLParam(r, "uuid")
+	partStr := chi.URLParam(r, "part")
+	presentedXXH3 := r.URL.Query().Get("xxh3")
+
+	part, err := strconv.Atoi(partStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "part must be an integer")
+		return
+	}
+	if uuid == "" {
+		writeError(w, http.StatusBadRequest, "uuid is required")
+		return
+	}
+	if len(presentedXXH3) != 32 {
+		writeError(w, http.StatusBadRequest, "xxh3 query param must be 32-char hex")
 		return
 	}
 
 	ctx := r.Context()
-	rec, ok, err := h.store.Verify(ctx, hash)
-	if err != nil {
-		log.Error().Err(err).Str("hash", hash).Msg("hash verify failed")
+	rec, match, verifyErr := h.store.Verify(ctx, uuid, part, presentedXXH3)
+	if verifyErr != nil {
+		log.Error().Err(verifyErr).Str("uuid", uuid).Msg("hash verify error")
 		writeError(w, http.StatusInternalServerError, "verify failed")
 		return
 	}
 
-	if !ok {
-		log.Warn().Str("hash", hash).Msg("hash not registered — BLOCK signal")
-		writeJSON(w, http.StatusOK, verifyHashResponse{Registered: false, Hash: hash})
+	if rec == nil {
+		log.Warn().Str("uuid", uuid).Int("part", part).Msg("hash not registered — BLOCK signal")
+		writeJSON(w, http.StatusOK, verifyHashResponse{Registered: false})
 		return
 	}
 
-	remaining, _ := h.store.TTLRemaining(ctx, hash)
-	resp := verifyHashResponse{
+	if !match {
+		log.Error().
+			Str("uuid", uuid).Int("part", part).
+			Str("presented", presentedXXH3).
+			Str("stored", rec.XXH3).
+			Msg("hash MISMATCH — packet tampered — BLOCK signal")
+	}
+
+	remaining, _ := h.store.TTLRemaining(ctx, uuid, part)
+	writeJSON(w, http.StatusOK, verifyHashResponse{
 		Registered:       true,
-		Hash:             rec.Hash,
+		Match:            match,
+		UUID:             rec.UUID,
+		Part:             rec.Part,
+		StoredXXH3:       rec.XXH3,
 		TableName:        rec.TableName,
 		Sender:           rec.Sender,
 		PacketVersion:    rec.PacketVersion,
 		RegisteredAt:     rec.RegisteredAt,
 		ExpiresInSeconds: int64(remaining.Seconds()),
-	}
-	writeJSON(w, http.StatusOK, resp)
+	})
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// DELETE /api/hashes/{hash}
+// DELETE /api/hashes/{uuid}/{part}
 // ────────────────────────────────────────────────────────────────────────────
 
-// Revoke deletes a registered hash before its TTL expiry.
-// Requires X-Caller header. Used by admins to invalidate a packet.
+// Revoke deletes a registered hash slot before TTL expiry. Requires X-Caller.
 func (h *hashesHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	caller := r.Header.Get("X-Caller")
 	if caller == "" {
@@ -174,18 +220,23 @@ func (h *hashesHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash := chi.URLParam(r, "hash")
-	ctx := r.Context()
+	uuid := chi.URLParam(r, "uuid")
+	partStr := chi.URLParam(r, "part")
+	part, err := strconv.Atoi(partStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "part must be an integer")
+		return
+	}
 
-	if err := h.store.Revoke(ctx, hash); errors.Is(err, hashstore.ErrHashNotFound) {
-		writeError(w, http.StatusNotFound, "hash not found")
+	if err := h.store.Revoke(r.Context(), uuid, part); errors.Is(err, hashstore.ErrHashNotFound) {
+		writeError(w, http.StatusNotFound, "hash slot not found")
 		return
 	} else if err != nil {
-		log.Error().Err(err).Str("hash", hash).Msg("hash revoke failed")
+		log.Error().Err(err).Str("uuid", uuid).Msg("hash revoke failed")
 		writeError(w, http.StatusInternalServerError, "revoke failed")
 		return
 	}
 
-	log.Warn().Str("hash", hash).Str("caller", caller).Msg("hash REVOKED by admin")
+	log.Warn().Str("uuid", uuid).Int("part", part).Str("caller", caller).Msg("hash slot REVOKED by admin")
 	w.WriteHeader(http.StatusNoContent)
 }

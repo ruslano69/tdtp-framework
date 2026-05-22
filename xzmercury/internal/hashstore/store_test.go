@@ -12,6 +12,11 @@ import (
 	"github.com/ruslano69/xzmercury/internal/hashstore"
 )
 
+const (
+	testUUID = "550e8400-e29b-41d4-a716-446655440000"
+	testHash = "a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5"
+)
+
 func newTestStore(t *testing.T, ttl time.Duration) (*hashstore.Store, *miniredis.Miniredis) {
 	t.Helper()
 	mr, err := miniredis.Run()
@@ -19,148 +24,196 @@ func newTestStore(t *testing.T, ttl time.Duration) (*hashstore.Store, *miniredis
 		t.Fatalf("miniredis: %v", err)
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() {
-		_ = rdb.Close()
-		mr.Close()
-	})
+	t.Cleanup(func() { _ = rdb.Close(); mr.Close() })
 	return hashstore.New(rdb, ttl), mr
 }
 
-func sampleRecord(hash string) hashstore.HashRecord {
+func sampleRecord(uuid string, part int, xxh3 string) hashstore.HashRecord {
 	return hashstore.HashRecord{
-		Hash:          hash,
+		UUID:          uuid,
+		Part:          part,
+		XXH3:          xxh3,
 		TableName:     "payroll_q1",
 		Sender:        "axapta-prod",
 		PacketVersion: "1.4",
 	}
 }
 
-// TestRegister_ThenVerify: basic round-trip.
-func TestRegister_ThenVerify(t *testing.T) {
+// TestRegister_ThenVerify_Match: basic round-trip, hash matches.
+func TestRegister_ThenVerify_Match(t *testing.T) {
 	store, _ := newTestStore(t, time.Minute)
 	ctx := context.Background()
-	hash := "a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5"
 
-	if err := store.Register(ctx, sampleRecord(hash)); err != nil {
+	if err := store.Register(ctx, sampleRecord(testUUID, 0, testHash)); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
-	rec, ok, err := store.Verify(ctx, hash)
+	rec, match, err := store.Verify(ctx, testUUID, 0, testHash)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if !ok {
-		t.Fatal("Verify: expected found=true")
+	if rec == nil {
+		t.Fatal("expected non-nil record")
+	}
+	if !match {
+		t.Error("expected match=true for correct hash")
 	}
 	if rec.TableName != "payroll_q1" {
-		t.Errorf("TableName = %q, want payroll_q1", rec.TableName)
-	}
-	if rec.PacketVersion != "1.4" {
-		t.Errorf("PacketVersion = %q, want 1.4", rec.PacketVersion)
+		t.Errorf("TableName = %q", rec.TableName)
 	}
 }
 
-// TestVerify_NotFound: unknown hash returns false, no error.
-func TestVerify_NotFound(t *testing.T) {
+// TestVerify_HashMismatch: correct UUID+part but wrong hash → registered:true, match:false.
+// This is the tampered-packet scenario.
+func TestVerify_HashMismatch(t *testing.T) {
 	store, _ := newTestStore(t, time.Minute)
 	ctx := context.Background()
 
-	rec, ok, err := store.Verify(ctx, "0000000000000000000000000000dead")
+	store.Register(ctx, sampleRecord(testUUID, 0, testHash))
+
+	fakeHash := "ffffffffffffffffffffffffffffffff"
+	rec, match, err := store.Verify(ctx, testUUID, 0, fakeHash)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ok || rec != nil {
-		t.Error("expected ok=false, rec=nil for unknown hash")
+	if rec == nil {
+		t.Fatal("expected non-nil record (UUID+part found)")
+	}
+	if match {
+		t.Error("expected match=false for mismatched hash")
 	}
 }
 
-// TestRegister_AlreadyRegistered: second Register with same hash is blocked.
-func TestRegister_AlreadyRegistered(t *testing.T) {
+// TestVerify_NotFound: unknown UUID+part returns nil, false.
+func TestVerify_NotFound(t *testing.T) {
+	store, _ := newTestStore(t, time.Minute)
+
+	rec, match, err := store.Verify(context.Background(), "unknown-uuid", 0, testHash)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec != nil || match {
+		t.Error("expected nil record and match=false for unknown slot")
+	}
+}
+
+// TestRegister_AlreadyRegistered_Blocked: second Register for same UUID+part fails.
+// This is the core anti-replay property.
+func TestRegister_AlreadyRegistered_Blocked(t *testing.T) {
 	store, _ := newTestStore(t, time.Minute)
 	ctx := context.Background()
-	hash := "ffffffffffffffffffffffffffffffff"
 
-	if err := store.Register(ctx, sampleRecord(hash)); err != nil {
+	if err := store.Register(ctx, sampleRecord(testUUID, 0, testHash)); err != nil {
 		t.Fatalf("first Register: %v", err)
 	}
-	err := store.Register(ctx, sampleRecord(hash))
+
+	// Attacker tries to register a different hash for the same slot
+	err := store.Register(ctx, sampleRecord(testUUID, 0, "ffffffffffffffffffffffffffffffff"))
 	if !errors.Is(err, hashstore.ErrHashAlreadyRegistered) {
 		t.Errorf("expected ErrHashAlreadyRegistered, got %v", err)
 	}
+
+	// Original hash must still verify correctly
+	_, match, _ := store.Verify(ctx, testUUID, 0, testHash)
+	if !match {
+		t.Error("original hash should still verify after blocked re-registration attempt")
+	}
 }
 
-// TestVerify_Survives_MultipleReads: hash is NOT destroyed on Verify (unlike BurnOnRead).
-func TestVerify_Survives_MultipleReads(t *testing.T) {
+// TestRegister_DifferentParts: same UUID, different parts → independent slots.
+func TestRegister_DifferentParts(t *testing.T) {
 	store, _ := newTestStore(t, time.Minute)
 	ctx := context.Background()
-	hash := "1234567890abcdef1234567890abcdef"
 
-	store.Register(ctx, sampleRecord(hash))
+	hash1 := "11111111111111111111111111111111"
+	hash2 := "22222222222222222222222222222222"
+
+	store.Register(ctx, sampleRecord(testUUID, 1, hash1))
+	store.Register(ctx, sampleRecord(testUUID, 2, hash2))
+
+	_, m1, _ := store.Verify(ctx, testUUID, 1, hash1)
+	_, m2, _ := store.Verify(ctx, testUUID, 2, hash2)
+
+	if !m1 || !m2 {
+		t.Error("both parts should verify independently")
+	}
+
+	// Cross-check: part 1 hash does not match part 2 slot
+	_, cross, _ := store.Verify(ctx, testUUID, 2, hash1)
+	if cross {
+		t.Error("hash from part 1 must not match part 2 slot")
+	}
+}
+
+// TestVerify_SurvivesMultipleReads: hash NOT destroyed on Verify (unlike BurnOnRead).
+func TestVerify_SurvivesMultipleReads(t *testing.T) {
+	store, _ := newTestStore(t, time.Minute)
+	ctx := context.Background()
+
+	store.Register(ctx, sampleRecord(testUUID, 0, testHash))
 
 	for i := range 5 {
-		_, ok, err := store.Verify(ctx, hash)
-		if err != nil || !ok {
-			t.Fatalf("read %d: ok=%v err=%v (hash must persist across reads)", i+1, ok, err)
+		_, match, err := store.Verify(ctx, testUUID, 0, testHash)
+		if err != nil || !match {
+			t.Fatalf("read %d: match=%v err=%v (hash must persist)", i+1, match, err)
 		}
 	}
 }
 
-// TestRevoke: hash disappears after Revoke.
-func TestRevoke(t *testing.T) {
+// TestRevoke_ThenVerify: revoked slot returns not-found.
+func TestRevoke_ThenVerify(t *testing.T) {
 	store, _ := newTestStore(t, time.Minute)
 	ctx := context.Background()
-	hash := "deadbeefdeadbeefdeadbeefdeadbeef"
 
-	store.Register(ctx, sampleRecord(hash))
+	store.Register(ctx, sampleRecord(testUUID, 0, testHash))
 
-	if err := store.Revoke(ctx, hash); err != nil {
+	if err := store.Revoke(ctx, testUUID, 0); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	_, ok, _ := store.Verify(ctx, hash)
-	if ok {
-		t.Error("hash still present after Revoke")
+
+	rec, match, _ := store.Verify(ctx, testUUID, 0, testHash)
+	if rec != nil || match {
+		t.Error("slot should be gone after Revoke")
 	}
 }
 
-// TestRevoke_NotFound: Revoke on unknown hash returns ErrHashNotFound.
+// TestRevoke_NotFound: Revoke on unknown slot returns ErrHashNotFound.
 func TestRevoke_NotFound(t *testing.T) {
 	store, _ := newTestStore(t, time.Minute)
-	err := store.Revoke(context.Background(), "nonexistent0000000000000000000000")
+	err := store.Revoke(context.Background(), "ghost-uuid", 0)
 	if !errors.Is(err, hashstore.ErrHashNotFound) {
 		t.Errorf("expected ErrHashNotFound, got %v", err)
 	}
 }
 
-// TestTTLExpiry: hash expires after TTL (via miniredis FastForward).
+// TestTTLExpiry: slot expires after TTL (miniredis FastForward).
 func TestTTLExpiry(t *testing.T) {
 	store, mr := newTestStore(t, 2*time.Second)
 	ctx := context.Background()
-	hash := "expiremeexpiremeexpiremeexpireme"
 
-	store.Register(ctx, sampleRecord(hash))
+	store.Register(ctx, sampleRecord(testUUID, 0, testHash))
 
-	_, ok, _ := store.Verify(ctx, hash)
+	_, ok, _ := store.Verify(ctx, testUUID, 0, testHash)
 	if !ok {
-		t.Fatal("hash should exist before TTL")
+		t.Fatal("should exist before TTL")
 	}
 
-	mr.FastForward(3 * time.Second) // advance miniredis clock past TTL
+	mr.FastForward(3 * time.Second)
 
-	_, ok, _ = store.Verify(ctx, hash)
-	if ok {
-		t.Error("hash should be gone after TTL expiry")
+	rec, match, _ := store.Verify(ctx, testUUID, 0, testHash)
+	if rec != nil || match {
+		t.Error("slot should be gone after TTL expiry")
 	}
 }
 
-// TestTTLRemaining: returns positive duration while hash is alive.
+// TestTTLRemaining: positive duration while alive.
 func TestTTLRemaining(t *testing.T) {
 	store, _ := newTestStore(t, time.Hour)
 	ctx := context.Background()
-	hash := "ttlcheckttlcheckttlcheckttlcheck"
 
-	store.Register(ctx, sampleRecord(hash))
+	store.Register(ctx, sampleRecord(testUUID, 0, testHash))
 
-	d, err := store.TTLRemaining(ctx, hash)
+	d, err := store.TTLRemaining(ctx, testUUID, 0)
 	if err != nil {
 		t.Fatalf("TTLRemaining: %v", err)
 	}
@@ -169,11 +222,22 @@ func TestTTLRemaining(t *testing.T) {
 	}
 }
 
-// TestRegister_EmptyHash: rejected with error.
-func TestRegister_EmptyHash(t *testing.T) {
+// TestRegister_ValidationErrors: empty UUID or bad hash rejected.
+func TestRegister_ValidationErrors(t *testing.T) {
 	store, _ := newTestStore(t, time.Minute)
-	err := store.Register(context.Background(), hashstore.HashRecord{TableName: "x"})
-	if err == nil {
-		t.Error("expected error for empty hash")
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		rec  hashstore.HashRecord
+	}{
+		{"empty UUID", hashstore.HashRecord{XXH3: testHash, PacketVersion: "1.4"}},
+		{"empty XXH3", hashstore.HashRecord{UUID: testUUID, PacketVersion: "1.4"}},
+		{"short XXH3", hashstore.HashRecord{UUID: testUUID, XXH3: "short", PacketVersion: "1.4"}},
+	}
+	for _, c := range cases {
+		if err := store.Register(ctx, c.rec); err == nil {
+			t.Errorf("%s: expected error, got nil", c.name)
+		}
 	}
 }
