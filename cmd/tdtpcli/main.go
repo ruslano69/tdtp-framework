@@ -135,6 +135,9 @@ func routeCommand(
 				CompactTail:    *flags.CompactTail,
 				StorageCfg:     exportStorageCfg,
 				StorageKey:     exportStorageKey,
+				IntegrityV14:  *flags.Integrity,
+				MercuryURL:    *flags.MercuryURL,
+				MercuryCaller: *flags.MercuryCaller,
 			})
 		})
 
