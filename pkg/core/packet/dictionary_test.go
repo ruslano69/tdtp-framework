@@ -157,6 +157,59 @@ func TestRoundTrip_PacketWithDictionary(t *testing.T) {
 	}
 }
 
+// TestDictExpander_ZeroValue verifies the no-dictionary fast path.
+func TestDictExpander_ZeroValue(t *testing.T) {
+	exp := NewDictExpander(nil)
+	s := "@W3|label|42"
+	if got := exp.ExpandRow(s); got != s {
+		t.Errorf("nil dict: expected unchanged %q, got %q", s, got)
+	}
+}
+
+// TestDictExpander_NoAt verifies the no-'@'-byte fast path.
+func TestDictExpander_NoAt(t *testing.T) {
+	d := &Dictionary{Entries: []DictEntry{{Short: "@W3", Full: "http://www.w3.org/2000/svg"}}}
+	exp := NewDictExpander(d)
+	s := "plain|row|without|tokens"
+	if got := exp.ExpandRow(s); got != s {
+		t.Errorf("no-@ fast path: expected unchanged %q, got %q", s, got)
+	}
+}
+
+// TestDictExpander_Expand verifies token expansion in a pipe-delimited row.
+func TestDictExpander_Expand(t *testing.T) {
+	d := &Dictionary{Entries: []DictEntry{
+		{Short: "@W3", Full: "http://www.w3.org/2000/svg"},
+		{Short: "@inks", Full: "http://www.inkscape.org/namespaces/inkscape"},
+	}}
+	exp := NewDictExpander(d)
+	cases := []struct{ in, want string }{
+		{"@W3|label|42", "http://www.w3.org/2000/svg|label|42"},
+		{"id|@inks|value", "id|http://www.inkscape.org/namespaces/inkscape|value"},
+		{"@W3|@inks|plain", "http://www.w3.org/2000/svg|http://www.inkscape.org/namespaces/inkscape|plain"},
+		{"no_token|here", "no_token|here"},           // no expansion — no alloc path
+		{"@@double|skip", "@@double|skip"},            // @@ not a token
+		{"prefix@W3|x", "prefix@W3|x"},               // substring — not whole-cell
+	}
+	for _, c := range cases {
+		if got := exp.ExpandRow(c.in); got != c.want {
+			t.Errorf("ExpandRow(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestDictExpander_NoChangeNoAlloc verifies that a row with '@' but no
+// matching token returns the original string pointer (no allocation).
+func TestDictExpander_NoChangeNoAlloc(t *testing.T) {
+	d := &Dictionary{Entries: []DictEntry{{Short: "@W3", Full: "http://www.w3.org/2000/svg"}}}
+	exp := NewDictExpander(d)
+	s := "@Unknown|cell"
+	got := exp.ExpandRow(s)
+	if got != s {
+		t.Errorf("unmatched token: expected unchanged %q, got %q", s, got)
+	}
+}
+
 // TestDowngrade verifies that a v1.4 packet is correctly converted to v1.3.1:
 // all token cells are expanded, Dictionary is removed, version is downgraded.
 func TestDowngrade(t *testing.T) {
