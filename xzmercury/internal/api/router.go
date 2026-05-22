@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/ruslano69/xzmercury/internal/acl"
+	"github.com/ruslano69/xzmercury/internal/hashstore"
 	"github.com/ruslano69/xzmercury/internal/infra"
 	"github.com/ruslano69/xzmercury/internal/keystore"
 	"github.com/ruslano69/xzmercury/internal/quota"
@@ -34,6 +35,12 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL) http.Hand
 		tracker: request.New(inf.PipelineRedis),
 	}
 
+	// hashesHandler uses MercuryRedis (same RAM-only store as keys).
+	// HashTTL default 24h — hashes persist across multiple Verify calls (not burn-on-read).
+	hh := &hashesHandler{
+		store: hashstore.New(inf.MercuryRedis, cfg.HashTTL),
+	}
+
 	r.Get("/healthz", handleHealthz)
 	r.Get("/readyz", handleReadyz(inf))
 	r.Get("/metrics", promhttp.Handler().ServeHTTP)
@@ -41,6 +48,16 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL) http.Hand
 	r.Route("/api/keys", func(r chi.Router) {
 		r.Post("/bind", h.Bind)
 		r.Post("/retrieve", h.Retrieve)
+	})
+
+	// Hash registry — v1.4 packet integrity verification.
+	// POST   /api/hashes        — register (producer, X-Caller required)
+	// GET    /api/hashes/{hash} — verify   (consumer, no auth)
+	// DELETE /api/hashes/{hash} — revoke   (admin,    X-Caller required)
+	r.Route("/api/hashes", func(r chi.Router) {
+		r.Post("/", hh.Register)
+		r.Get("/{hash}", hh.Verify)
+		r.Delete("/{hash}", hh.Revoke)
 	})
 
 	r.Get("/api/requests/{id}", handleGetRequest(inf))
