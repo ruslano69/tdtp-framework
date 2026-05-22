@@ -10,10 +10,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// tokenElevation mirrors the Windows TOKEN_ELEVATION struct (one DWORD).
+// golang.org/x/sys/windows does not export this struct directly.
+type tokenElevation struct {
+	TokenIsElevated uint32
+}
+
 func checkPrivileges() error {
 	token := windows.GetCurrentProcessToken()
 
-	var elevation windows.TOKEN_ELEVATION
+	var elevation tokenElevation
 	var size uint32
 	err := windows.GetTokenInformation(
 		token,
