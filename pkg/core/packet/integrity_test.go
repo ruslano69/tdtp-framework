@@ -198,32 +198,68 @@ func TestHasIntegrity(t *testing.T) {
 	}
 }
 
-// TestIntegrity_DifferentData verifies that different data produces different hashes.
+// TestIntegrity_DifferentData verifies that mutating row data on the same packet
+// (same UUID) changes DataXXH3 and PacketXXH3 but not SchemaXXH3.
 func TestIntegrity_DifferentData(t *testing.T) {
 	gen := NewGenerator()
 	schema := Schema{Fields: []Field{{Name: "v", Type: "TEXT"}}}
+	pkts, _ := gen.GenerateReference("t", schema, [][]string{{"hello"}})
+	pkt := pkts[0]
 
-	pkts1, _ := gen.GenerateReference("t", schema, [][]string{{"hello"}})
-	pkts2, _ := gen.GenerateReference("t", schema, [][]string{{"world"}})
+	ComputeIntegrity(pkt)
+	schemaHash := pkt.Schema.XXH3
+	dataHash1 := pkt.Data.XXH3
+	packet1 := pkt.XXH3
+
+	// Mutate rows — same UUID, same schema, different data
+	pkt.Data.Rows[0].Value = "world"
+	ComputeIntegrity(pkt)
+
+	if pkt.Data.XXH3 == dataHash1 {
+		t.Error("different data produced same DataXXH3")
+	}
+	if pkt.XXH3 == packet1 {
+		t.Error("different data produced same PacketXXH3")
+	}
+	// Schema unchanged, UUID unchanged → SchemaXXH3 must be identical
+	if pkt.Schema.XXH3 != schemaHash {
+		t.Errorf("schema unchanged but SchemaXXH3 changed: %s → %s",
+			schemaHash, pkt.Schema.XXH3)
+	}
+}
+
+// TestIntegrity_UUIDSalt verifies that two packets with identical schema and data
+// but different MessageIDs (UUIDs) produce different hashes — salt is effective.
+func TestIntegrity_UUIDSalt(t *testing.T) {
+	gen := NewGenerator()
+	schema := Schema{Fields: []Field{{Name: "v", Type: "TEXT"}}}
+	rows := [][]string{{"hello"}}
+
+	pkts1, _ := gen.GenerateReference("t", schema, rows)
+	pkts2, _ := gen.GenerateReference("t", schema, rows)
+
+	// GenerateReference assigns a fresh UUID each time — verify they differ
+	if pkts1[0].Header.MessageID == pkts2[0].Header.MessageID {
+		t.Skip("UUIDs happened to match (astronomically unlikely)")
+	}
 
 	r1, _ := ComputeIntegrity(pkts1[0])
 	r2, _ := ComputeIntegrity(pkts2[0])
 
+	if r1.SchemaXXH3 == r2.SchemaXXH3 {
+		t.Error("UUID salt ineffective: same SchemaXXH3 for different message IDs")
+	}
 	if r1.DataXXH3 == r2.DataXXH3 {
-		t.Error("different data produced same DataXXH3")
+		t.Error("UUID salt ineffective: same DataXXH3 for different message IDs")
 	}
 	if r1.PacketXXH3 == r2.PacketXXH3 {
-		t.Error("different data produced same PacketXXH3")
-	}
-	// Schema is the same → SchemaXXH3 must be identical
-	if r1.SchemaXXH3 != r2.SchemaXXH3 {
-		t.Errorf("same schema produced different SchemaXXH3: %s vs %s",
-			r1.SchemaXXH3, r2.SchemaXXH3)
+		t.Error("UUID salt ineffective: same PacketXXH3 for different message IDs")
 	}
 }
 
-// TestIntegrity_DifferentSchema verifies that different schemas produce different schema hashes
-// but the same data hash when row content is equal.
+// TestIntegrity_DifferentSchema verifies that different schemas produce different schema hashes.
+// With UUID salt, DataXXH3 also differs (different MessageIDs) — that's correct and expected.
+// The key property: SchemaXXH3 must differ when field definitions differ.
 func TestIntegrity_DifferentSchema(t *testing.T) {
 	gen := NewGenerator()
 	rows := [][]string{{"42"}}
@@ -240,9 +276,19 @@ func TestIntegrity_DifferentSchema(t *testing.T) {
 	if r1.SchemaXXH3 == r2.SchemaXXH3 {
 		t.Error("different schemas produced same SchemaXXH3")
 	}
-	// Same row content → same DataXXH3
-	if r1.DataXXH3 != r2.DataXXH3 {
-		t.Errorf("same rows produced different DataXXH3: %s vs %s",
-			r1.DataXXH3, r2.DataXXH3)
+
+	// Same packet, mutate only the schema → schema hash must change, data hash must not
+	pkt := pkts1[0]
+	ComputeIntegrity(pkt)
+	hashBefore := pkt.Data.XXH3
+
+	pkt.Schema.Fields[0].Name = "renamed"
+	ComputeIntegrity(pkt) // same UUID, same rows, different schema
+
+	if pkt.Schema.XXH3 == r1.SchemaXXH3 {
+		t.Error("schema hash did not change after field rename")
+	}
+	if pkt.Data.XXH3 != hashBefore {
+		t.Error("data hash changed when only schema was modified (UUID and rows unchanged)")
 	}
 }

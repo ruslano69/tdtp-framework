@@ -96,24 +96,39 @@ func HasIntegrity(pkt *DataPacket) bool {
 }
 
 // computeHashes does the actual hashing without modifying pkt.
+//
+// Salt strategy: the packet's MessageID (UUID) is written as the first
+// bytes of every hash input. This means:
+//   - Two packets with identical schema+data get different hashes.
+//   - A captured hash cannot be replayed against a different packet.
+//   - The salt is not secret — it lives in the plaintext Header.
+//
 // The Schema is copied and its XXH3 attr zeroed before marshaling
 // to avoid circular dependency.
 func computeHashes(pkt *DataPacket) (*IntegrityResult, error) {
+	salt := []byte(pkt.Header.MessageID) // UUID, e.g. "550e8400-e29b-41d4-a716-446655440000"
+
 	// ── 1. Schema hash ──────────────────────────────────────────────────────
-	// Marshal Schema without the xxh3 attr (zero it in the copy).
+	// Layout: [UUID bytes][canonical Schema XML bytes]
+	// Schema is marshaled without its own xxh3 attr to avoid circularity.
 	schemaCopy := pkt.Schema
 	schemaCopy.XXH3 = ""
 	schemaBytes, err := xml.Marshal(schemaCopy)
 	if err != nil {
 		return nil, fmt.Errorf("integrity: marshal schema: %w", err)
 	}
-	schemaHash := xxh3.Hash128(schemaBytes)
+	var schemaBuf bytes.Buffer
+	schemaBuf.Grow(len(salt) + len(schemaBytes))
+	schemaBuf.Write(salt)
+	schemaBuf.Write(schemaBytes)
+	schemaHash := xxh3.Hash128(schemaBuf.Bytes())
 	schemaHex := uint128Hex(schemaHash)
 
 	// ── 2. Data hash ────────────────────────────────────────────────────────
-	// Stream all row values through xxh3_128.
-	// Each row value is followed by '\n' as a deterministic separator.
+	// Layout: [UUID bytes][row₀\n][row₁\n]...[rowN\n]
+	// Computed on raw row values before compression.
 	var rowsBuf bytes.Buffer
+	rowsBuf.Write(salt)
 	for _, row := range pkt.Data.Rows {
 		rowsBuf.WriteString(row.Value)
 		rowsBuf.WriteByte('\n')
@@ -123,7 +138,8 @@ func computeHashes(pkt *DataPacket) (*IntegrityResult, error) {
 
 	// ── 3. Packet fingerprint ───────────────────────────────────────────────
 	// xxh3_128 of the two component hashes joined by "|".
-	// Readable in logs: "<32hex>|<32hex>" is unambiguous.
+	// The UUID salt is already baked into both component hashes,
+	// so the fingerprint is implicitly salted without redundancy.
 	combined := schemaHex + "|" + dataHex
 	packetHash := xxh3.Hash128([]byte(combined))
 	packetHex := uint128Hex(packetHash)
