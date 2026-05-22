@@ -135,6 +135,15 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
+		if pkt.Schema.Dictionary != nil && len(pkt.Schema.Dictionary.Entries) > 0 {
+			fmt.Printf("  Expanding Dictionary (v1.4, %d entries)...\n", len(pkt.Schema.Dictionary.Entries))
+			exp := packet.NewDictExpander(pkt.Schema.Dictionary)
+			for i, row := range pkt.Data.Rows {
+				pkt.Data.Rows[i].Value = exp.ExpandRow(row.Value)
+			}
+			pkt.Schema.Dictionary = nil // словарь раскрыт, больше не нужен
+		}
+
 		if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
 			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
 				return fmt.Errorf("processor failed: %w", err)
