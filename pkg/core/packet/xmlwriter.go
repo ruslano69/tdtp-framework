@@ -33,6 +33,9 @@ func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
 	w.WriteString(`<DataPacket`)
 	writeXMLAttr(w, "protocol", packet.Protocol)
 	writeXMLAttr(w, "version", packet.Version)
+	if packet.XXH3 != "" {
+		writeXMLAttr(w, "xxh3", packet.XXH3)
+	}
 	w.WriteByte('>')
 
 	// Header — маленький, xml.Marshal дешёв
@@ -66,6 +69,9 @@ func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
 	}
 	if packet.Data.Checksum != "" {
 		writeXMLAttr(w, "checksum", packet.Data.Checksum)
+	}
+	if packet.Data.XXH3 != "" {
+		writeXMLAttr(w, "xxh3", packet.Data.XXH3)
 	}
 	if packet.Data.Compact {
 		w.WriteString(` compact="true"`)
