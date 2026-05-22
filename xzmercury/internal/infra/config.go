@@ -19,7 +19,8 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	LDAP     ldap.Config    `yaml:"ldap"`
 	Quota    QuotaConfig    `yaml:"quota"`
-	KeyTTL   time.Duration  `yaml:"key_ttl"` // how long a bound key lives; default 5m
+	KeyTTL  time.Duration `yaml:"key_ttl"`  // how long a bound key lives; default 5m
+	HashTTL time.Duration `yaml:"hash_ttl"` // how long a registered hash lives; default 24h
 }
 
 // ServerConfig controls the HTTP listener.
@@ -59,6 +60,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Security.RateLimit = 100
 	cfg.Quota.DefaultHourly = 1000
 	cfg.KeyTTL = 5 * time.Minute
+	cfg.HashTTL = 24 * time.Hour
 
 	data, err := os.ReadFile(path)
 	if err != nil {

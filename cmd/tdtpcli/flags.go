@@ -106,6 +106,11 @@ type Flags struct {
 	// Encryption (xZMercury UUID-binding флоу)
 	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
 
+	// v1.4 Integrity (TDTP v1.4 xxh3 hashes + Mercury hash registration)
+	Integrity     *bool   // --integrity: compute Schema+Data+Packet xxh3_128 hashes and stamp the packet
+	MercuryURL    *string // --mercury-url: xzMercury base URL for hash registration (optional; local integrity if empty)
+	MercuryCaller *string // --mercury-caller: X-Caller identity sent to Mercury (default: "tdtpcli")
+
 	// Incremental Sync
 	TrackingField  *string
 	CheckpointFile *string
@@ -212,6 +217,11 @@ func ParseFlags() *Flags {
 
 	// Encryption
 	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")
+
+	// v1.4 Integrity
+	f.Integrity = flag.Bool("integrity", false, "Stamp packet with TDTP v1.4 xxh3_128 integrity hashes (Schema + Data + Packet fingerprint). Optionally register in xzMercury with --mercury-url.")
+	f.MercuryURL = flag.String("mercury-url", "", "xzMercury base URL for hash registration (e.g. http://mercury:3000). Used with --integrity to register the packet fingerprint.")
+	f.MercuryCaller = flag.String("mercury-caller", "tdtpcli", "Caller identity sent to xzMercury as X-Caller header (use service account name, e.g. svc-exporter)")
 
 	// Incremental Sync Options
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")

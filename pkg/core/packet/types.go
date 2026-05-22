@@ -41,6 +41,7 @@ type PipelineVar struct {
 type DataPacket struct {
 	Protocol        string           `xml:"protocol,attr"`
 	Version         string           `xml:"version,attr"`
+	XXH3            string           `xml:"xxh3,attr,omitempty"` // v1.4: packet fingerprint = xxh3_128(schema_xxh3|data_xxh3)
 	Header          Header           `xml:"Header"`
 	Query           *Query           `xml:"Query,omitempty"`
 	QueryContext    *QueryContext    `xml:"QueryContext,omitempty"`
@@ -77,9 +78,13 @@ type Header struct {
 // ontology prefixes и т.п.). Хранится как opaque metadata: core НЕ
 // разворачивает токены автоматически, это делает domain-консьюмер.
 // См. ExpandDictionary / ContractDictionary в этом пакете.
+//
+// XXH3 (since TDTP v1.4) — xxh3_128 fingerprint of the canonical Schema
+// bytes (excluding the xxh3 attribute itself). Computed by ComputeIntegrity.
 type Schema struct {
 	Fields     []Field     `xml:"Field"`
 	Dictionary *Dictionary `xml:"Dictionary,omitempty"`
+	XXH3       string      `xml:"xxh3,attr,omitempty"` // v1.4: xxh3_128 of Schema content
 }
 
 // Dictionary — обёртка над []DictEntry, чтобы encoding/xml корректно
@@ -135,7 +140,8 @@ type MarkerValue struct {
 // Data содержит табличные данные
 type Data struct {
 	Compression string `xml:"compression,attr,omitempty"` // Алгоритм сжатия: "zstd" или пусто
-	Checksum    string `xml:"checksum,attr,omitempty"`    // XXH3 хеш сжатых данных (hex)
+	Checksum    string `xml:"checksum,attr,omitempty"`    // XXH3-64 хеш сжатых данных (hex); backward compat
+	XXH3        string `xml:"xxh3,attr,omitempty"`        // v1.4: xxh3_128 of raw row values (before compression)
 	Compact     bool   `xml:"compact,attr,omitempty"`     // v1.3.1: compact format (пропуски для fixed полей)
 	Tail        bool   `xml:"tail,attr,omitempty"`        // v1.3.1: последняя строка явно повторяет все fixed-поля — для потокового восстановления и валидации
 	Carry       string `xml:"carry,attr,omitempty"`       // v1.3.1: начальное carry-состояние чанка (pipe-разделённые значения полей); позволяет декодировать чанки независимо друг от друга

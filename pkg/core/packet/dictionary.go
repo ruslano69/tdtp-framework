@@ -3,6 +3,7 @@ package packet
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // Dictionary limits — keep small enough that a malicious or buggy
@@ -83,4 +84,82 @@ func ContractDictionary(entries []DictEntry, cell string) string {
 		}
 	}
 	return cell
+}
+
+// DictExpander is a precompiled, read-only expander built once from a
+// Dictionary and reused across all rows of a packet. The zero value
+// (empty intern map) is safe: ExpandRow returns the input unchanged.
+//
+// Usage:
+//
+//	exp := NewDictExpander(pkt.Schema.Dictionary)
+//	for _, row := range pkt.Data.Rows {
+//	    expanded := exp.ExpandRow(row.Value)
+//	}
+type DictExpander struct {
+	intern  map[string]string // short → full, nil when no dictionary
+	hasAt   bool              // any entry starts with '@' — always true by spec
+}
+
+// NewDictExpander builds a DictExpander from a packet Dictionary.
+// Nil or empty Dictionary produces a zero-cost no-op expander.
+func NewDictExpander(d *Dictionary) *DictExpander {
+	if d == nil || len(d.Entries) == 0 {
+		return &DictExpander{}
+	}
+	m := make(map[string]string, len(d.Entries))
+	for _, e := range d.Entries {
+		m[e.Short] = e.Full
+	}
+	return &DictExpander{intern: m, hasAt: true}
+}
+
+// ExpandRow expands all whole-cell dictionary tokens in a pipe-delimited
+// TDTP row value. Cells that are not tokens pass through without allocation.
+//
+// Fast paths (zero allocation):
+//   - No dictionary loaded → return s unchanged
+//   - No '@' byte in s    → return s unchanged
+//   - Tokens found but no expansion matched → return s unchanged
+func (e *DictExpander) ExpandRow(s string) string {
+	if !e.hasAt || len(e.intern) == 0 {
+		return s // zero-cost: no dictionary
+	}
+	// Quick scan: skip strings with no '@' at all.
+	if strings.IndexByte(s, '@') < 0 {
+		return s
+	}
+	cells := strings.Split(s, "|")
+	changed := false
+	for i, c := range cells {
+		// Token must start with '@' followed by ASCII letter (spec).
+		if len(c) < 2 || c[0] != '@' || c[1] == '@' {
+			continue
+		}
+		if full, ok := e.intern[c]; ok {
+			cells[i] = full
+			changed = true
+		}
+	}
+	if !changed {
+		return s // no allocation if nothing matched
+	}
+	return strings.Join(cells, "|")
+}
+
+// Downgrade converts a v1.4 packet with a Dictionary into a v1.3.1
+// compatible packet by expanding all token cells inline and removing
+// the Dictionary. The original packet is modified in place.
+// No-op if the packet has no Dictionary or is already v1.3.1.
+func Downgrade(pkt *DataPacket) {
+	if pkt.Schema.Dictionary == nil || len(pkt.Schema.Dictionary.Entries) == 0 {
+		return
+	}
+	exp := NewDictExpander(pkt.Schema.Dictionary)
+	pkt.MaterializeRows()
+	for i, row := range pkt.Data.Rows {
+		pkt.Data.Rows[i].Value = exp.ExpandRow(row.Value)
+	}
+	pkt.Schema.Dictionary = nil
+	pkt.Version = "1.3.1"
 }

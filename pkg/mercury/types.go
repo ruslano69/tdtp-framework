@@ -1,6 +1,9 @@
 package mercury
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // Коды ошибок шифрования — используются в error-пакете (поле error_code).
 const (
@@ -36,6 +39,55 @@ type RetrieveKeyRequest struct {
 	PackageUUID string `json:"package_uuid"`
 	Credentials string `json:"credentials"`
 }
+
+// ─── Hash registry types (v1.4 only) ─────────────────────────────────────────
+
+// HashRecord is the metadata returned by VerifyHash when a hash is registered.
+// Mirrors xzmercury/internal/hashstore.HashRecord.
+type HashRecord struct {
+	UUID             string    `json:"uuid"`
+	Part             int       `json:"part"`
+	StoredXXH3       string    `json:"stored_xxh3"`
+	TableName        string    `json:"table"`
+	Sender           string    `json:"sender"`
+	PacketVersion    string    `json:"packet_version"`
+	RegisteredAt     time.Time `json:"registered_at"`
+	ExpiresInSeconds int64     `json:"expires_in_seconds"`
+}
+
+// RegisterHashRequest is the body sent to POST /api/hashes.
+type RegisterHashRequest struct {
+	UUID          string `json:"uuid"`
+	Part          int    `json:"part"`
+	XXH3          string `json:"xxh3"`
+	TableName     string `json:"table"`
+	Sender        string `json:"sender"`
+	PacketVersion string `json:"packet_version"`
+}
+
+// Hash-registry error codes and sentinels.
+const (
+	ErrCodeHashNotRegistered  = "HASH_NOT_REGISTERED"  // slot unknown → BLOCK
+	ErrCodeHashTampered       = "HASH_TAMPERED"        // slot found, hash mismatch → BLOCK
+	ErrCodeHashRegisterFailed = "HASH_REGISTER_FAILED" // POST /api/hashes failed
+)
+
+var (
+	// ErrHashNotRegistered is returned by VerifyHash when Mercury has no record
+	// for this UUID+part — packet was never registered by an authenticated producer.
+	ErrHashNotRegistered = errors.New(ErrCodeHashNotRegistered)
+
+	// ErrHashTampered is returned by VerifyHash when the slot exists but the
+	// presented xxh3 does not match what the producer registered — packet was
+	// modified after registration.
+	ErrHashTampered = errors.New(ErrCodeHashTampered)
+
+	// ErrHashRegisterFailed is returned when POST /api/hashes fails (including
+	// 409 Conflict when the slot is already taken by a different registration).
+	ErrHashRegisterFailed = errors.New(ErrCodeHashRegisterFailed)
+)
+
+// ─── Pipeline status ──────────────────────────────────────────────────────────
 
 // PipelineStatus — статус pipeline, публикуемый в resultlog.
 type PipelineStatus string

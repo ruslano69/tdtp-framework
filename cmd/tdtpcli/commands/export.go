@@ -15,6 +15,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
@@ -38,6 +39,13 @@ type ExportOptions struct {
 	Compact     bool     // Enable compact format output
 	FixedFields []string // Explicit fixed field names; nil = auto-detect from _prefix
 	CompactTail bool     // Write tail row with all fixed fields explicit
+
+	// v1.4 integrity — xxh3_128 hashes (Schema + Data + Packet fingerprint).
+	// Computed BEFORE compression so hashes cover plain-text rows.
+	// Consumer must decompress first, then call pipeline.VerifyAndPrepare.
+	IntegrityV14  bool   // Stamp packet with v1.4 xxh3_128 hashes
+	MercuryURL    string // Optional: register hash in xzMercury (empty = local integrity only)
+	MercuryCaller string // X-Caller header for Mercury registration (default: "tdtpcli")
 
 	// Object storage (S3/SeaweedFS). Non-nil → stream to object storage instead of local file.
 	StorageCfg *storage.Config // storage driver config with bucket
@@ -72,6 +80,84 @@ type compressProc struct {
 func (p *compressProc) Name() string { return "compress" }
 func (p *compressProc) ProcessPacket(_ context.Context, pkt *packet.DataPacket) error {
 	return compressPacketData(pkt, p.level, p.algo, p.checksum)
+}
+
+// integrityProc computes TDTP v1.4 xxh3_128 integrity hashes and optionally
+// registers the packet fingerprint in xzMercury as the authoritative hash record.
+//
+// MUST run BEFORE compressProc — hashes cover plain-text rows.
+// The compressed packet carries the integrity attributes intact; the consumer
+// decompresses first, then calls pipeline.VerifyAndPrepare to verify.
+type integrityProc struct {
+	mercuryClient *mercury.Client // nil = local integrity only (no Mercury registration)
+	mercuryURL    string          // embedded in Dictionary as @MRC for consumer pre-flight
+	caller        string
+}
+
+func (p *integrityProc) Name() string { return "integrity" }
+
+func (p *integrityProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error {
+	// Integrity stamping is a v1.4 feature — upgrade packet version so the consumer
+	// pipeline (VerifyAndPrepare) recognises this packet as v1.4 and runs the
+	// 3-step pre-flight (Mercury → local xxh3 → Dictionary expansion).
+	// Without this, consumer treats packet as pre-v1.4 and skips all integrity checks.
+	pkt.Version = "1.4"
+
+	if _, err := packet.ComputeIntegrity(pkt); err != nil {
+		return fmt.Errorf("integrity: %w", err)
+	}
+	// Print abbreviated fingerprints (first 8 hex chars = 32 bits) for operator visibility.
+	schemaShort, dataShort, pktShort := pkt.Schema.XXH3, pkt.Data.XXH3, pkt.XXH3
+	if len(schemaShort) > 8 {
+		schemaShort = schemaShort[:8]
+	}
+	if len(dataShort) > 8 {
+		dataShort = dataShort[:8]
+	}
+	if len(pktShort) > 8 {
+		pktShort = pktShort[:8]
+	}
+	fmt.Printf("  → Integrity: schema=%s… data=%s… packet=%s…\n", schemaShort, dataShort, pktShort)
+
+	if p.mercuryClient == nil {
+		return nil
+	}
+
+	// Embed Mercury base URL in Dictionary as @MRC so the consumer knows
+	// where to call GET /api/hashes/{uuid}/{part}?xxh3=... for pre-flight.
+	// Only added when Mercury registration is active — no URL = no entry.
+	if p.mercuryURL != "" {
+		if pkt.Schema.Dictionary == nil {
+			pkt.Schema.Dictionary = &packet.Dictionary{}
+		}
+		// Avoid duplicate @MRC if packet already carries one (e.g. from data export).
+		hasMRC := false
+		for _, e := range pkt.Schema.Dictionary.Entries {
+			if e.Short == "@MRC" {
+				hasMRC = true
+				break
+			}
+		}
+		if !hasMRC {
+			pkt.Schema.Dictionary.Entries = append(pkt.Schema.Dictionary.Entries,
+				packet.DictEntry{Short: "@MRC", Full: p.mercuryURL},
+			)
+		}
+	}
+
+	caller := p.caller
+	if caller == "" {
+		caller = "tdtpcli"
+	}
+	if err := p.mercuryClient.RegisterHash(ctx,
+		pkt.Header.MessageID, pkt.Header.PartNumber,
+		pkt.XXH3, pkt.Header.TableName, caller, pkt.Version,
+	); err != nil {
+		return fmt.Errorf("mercury RegisterHash: %w", err)
+	}
+	fmt.Printf("  → Registered in Mercury: uuid=%s part=%d\n",
+		pkt.Header.MessageID, pkt.Header.PartNumber)
+	return nil
 }
 
 // ExportTable exports a table to TDTP XML file
@@ -160,6 +246,23 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		}
 	}
 
+	// v1.4 integrity: runs BEFORE compression so hashes cover plain-text rows.
+	if opts.IntegrityV14 {
+		caller := opts.MercuryCaller
+		if caller == "" {
+			caller = "tdtpcli"
+		}
+		var mclient *mercury.Client
+		if opts.MercuryURL != "" {
+			mclient = mercury.NewClient(opts.MercuryURL, 5000)
+			fmt.Printf("v1.4 integrity + Mercury registration (%s, caller=%s)...\n",
+				opts.MercuryURL, caller)
+		} else {
+			fmt.Printf("v1.4 integrity (local hashes only, no Mercury registration)...\n")
+		}
+		chain.Add(&integrityProc{mercuryClient: mclient, mercuryURL: opts.MercuryURL, caller: caller})
+	}
+
 	if opts.Compress {
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
 		chain.Add(&compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel, checksum: opts.EnableChecksum})
@@ -197,6 +300,13 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 
 	if opts.EnableChecksum {
 		fmt.Printf("✓ Checksums generated (xxh3)\n")
+	}
+	if opts.IntegrityV14 {
+		if opts.MercuryURL != "" {
+			fmt.Printf("✓ v1.4 integrity hashes stamped + registered in Mercury\n")
+		} else {
+			fmt.Printf("✓ v1.4 integrity hashes stamped (local only)\n")
+		}
 	}
 
 	return nil
