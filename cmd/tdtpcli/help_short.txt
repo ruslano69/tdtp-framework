@@ -29,6 +29,7 @@ COMMANDS:
     --import-xlsx <xlsx-file>  XLSX → Database (direct)
 
   Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed+Production
+           Queue/topic is config-only (no CLI override) — prevents packet redirection
     --export-broker <table>    Export to message broker (parallel compress, single-roundtrip send)
     --import-broker            Import from message broker to DB (parallel decompress)
     --import-broker --output   Save to TDTP files (base_part_N_of_Total.tdtp.xml)

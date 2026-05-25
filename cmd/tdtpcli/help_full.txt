@@ -48,6 +48,11 @@ COMMANDS:
                                Listens to Kafka topic and imports data as stream parts arrive.
                                Requires stable channel (99.99%+ uptime). NOT for RabbitMQ/MSMQ.
 
+    Security note: queue/topic name is always taken from the config file, never
+    from the command line. This prevents CLI users from redirecting exports to
+    an arbitrary queue and intercepting sensitive packets. The operator controls
+    the destination; the user controls what data to export (--export-broker <table>).
+
     Broker tiers:
       MSMQ     — Legacy     (Windows-only, no ordering guarantees, batch mode only)
       RabbitMQ — Stability  (reliable delivery, batch mode)

@@ -384,6 +384,10 @@ func routeCommand(
 
 		// Broker commands
 	} else if *flags.ExportBroker != "" {
+		// Security: queue/topic is taken exclusively from config, never from CLI flags.
+		// This prevents a CLI user from redirecting exports to an attacker-controlled
+		// queue and intercepting sensitive packets. The operator owns the destination;
+		// the user owns only the table name (what to export).
 		brokerCfg := buildBrokerConfig(config)
 
 		// Merge compression settings: flag takes precedence, then config
