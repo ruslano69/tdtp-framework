@@ -126,7 +126,7 @@ func routeCommand(
 				Compress:         compress,
 				CompressLevel:    compressLevel,
 				CompressAlgo:     compressAlgo,
-				EnableChecksum:   *flags.Hash && compress, // Checksum requires compression
+				EnableChecksum:   compress, // Checksum always enabled with compression (--hash is no-op, kept for compat)
 				ReadOnlyFields:   *flags.ReadOnlyFields,
 				Fast:             *flags.Fast,
 				FallbackRowLimit: *flags.FallbackRowLimit,
@@ -142,6 +142,9 @@ func routeCommand(
 		})
 
 	} else if *flags.Import != "" {
+		// Design: target table name comes from the packet header (pkt.Header.TableName).
+		// By default the packet overwrites the same table it was exported from — symmetric
+		// round-trip by design. --table overrides only for staging, rename, or backup.
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
 		if stratErr != nil {
 			return stratErr
@@ -384,6 +387,10 @@ func routeCommand(
 
 		// Broker commands
 	} else if *flags.ExportBroker != "" {
+		// Security: queue/topic is taken exclusively from config, never from CLI flags.
+		// This prevents a CLI user from redirecting exports to an attacker-controlled
+		// queue and intercepting sensitive packets. The operator owns the destination;
+		// the user owns only the table name (what to export).
 		brokerCfg := buildBrokerConfig(config)
 
 		// Merge compression settings: flag takes precedence, then config
@@ -418,6 +425,10 @@ func routeCommand(
 		})
 
 	} else if *flags.ImportBroker {
+		// Design: target table name comes from the packet header (pkt.Header.TableName),
+		// which was set at export time. By default the packet overwrites the same table
+		// it was exported from — this is intentional (symmetric round-trip).
+		// --table overrides only when explicitly needed: staging, rename, backup, etc.
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
 		if stratErr != nil {
 			return stratErr

@@ -89,7 +89,7 @@ type Flags struct {
 	Table          *string // Target table name (overrides name from XML during import)
 	Sheet          *string
 	Strategy       *string
-	Batch          *int
+	Batch          *int // [deprecated, no-op] alias kept for backward compat; use --batch-size
 	ReadOnlyFields *bool // Include read-only fields (timestamp, computed, identity) in export
 
 	// Compression
@@ -198,7 +198,7 @@ func ParseFlags() *Flags {
 	flag.Var(&f.Where, "w", "TDTQL WHERE shorthand (alias for --where)")
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
 	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
-	flag.IntVar(f.Limit, "n", 0, "Row limit shorthand (alias for --limit), e.g. -n=10")
+	flag.IntVar(f.Limit, "l", 0, "Row limit shorthand (alias for --limit), e.g. -l=10")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")
 	f.Fields = flag.String("fields", "", "Column projection: comma-separated list of columns to select/import (e.g. 'id,email,status')")
 
@@ -208,7 +208,7 @@ func ParseFlags() *Flags {
 	f.Table = flag.String("table", "", "Target table name (overrides name from XML during import)")
 	f.Sheet = flag.String("sheet", "Sheet1", "Excel sheet name for XLSX operations")
 	f.Strategy = flag.String("strategy", "replace", "Import strategy: replace, ignore, fail, copy")
-	f.Batch = flag.Int("batch", 1000, "Batch size for bulk operations")
+	f.Batch = flag.Int("batch", 1000, "[deprecated, no-op] use --batch-size")
 	f.ReadOnlyFields = flag.Bool("readonly-fields", false, "Include read-only fields (timestamp, computed, identity) in export")
 
 	// Compression
@@ -216,7 +216,7 @@ func ParseFlags() *Flags {
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1-19 (zstd) or 6-7 (kanzi)")
 	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
 	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
-	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
+	f.Hash = flag.Bool("hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	f.Fast = flag.Bool("fast", false, "Skip SpecialValues detection for maximum export speed (no NULL/NaN/Inf schema markers)")
 	f.FallbackRowLimit = flag.Int64("fallback-row-limit", 1_000_000, "Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited). Protects prod DBs from full-table scans on broken queries")
 

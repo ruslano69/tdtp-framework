@@ -68,7 +68,17 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		return fmt.Errorf("failed to parse TDTP packet: %w", err)
 	}
 
-	// ── Security gate ──────────────────────────────────────────────────────────
+	// Decompress first — integrity hashes (v1.4) are computed on plain-text rows
+	// BEFORE compression on the producer side. Consumer must decompress before
+	// calling VerifyAndPrepare so that VerifyIntegrity hashes the same bytes.
+	if pkt.Data.Compression != "" {
+		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
+		if err := decompressPacketData(pkt); err != nil {
+			return fmt.Errorf("decompression failed: %w", err)
+		}
+	}
+
+	// ── Security gate (after decompression) ───────────────────────────────────
 	if pkt.Version == "1.4" {
 		fmt.Printf("  v1.4 packet — running security pre-flight...\n")
 
@@ -94,14 +104,6 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		}
 	}
 
-	// Decompress if needed
-	if pkt.Data.Compression != "" {
-		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
-		if err := decompressPacketData(pkt); err != nil {
-			return fmt.Errorf("decompression failed: %w", err)
-		}
-	}
-
 	// Expand compact v1.3.1 format (carry-forward fixed fields)
 	if pkt.Data.Compact {
 		fmt.Printf("  Expanding compact format (v1.3.1)...\n")
@@ -122,6 +124,35 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		}
 		pkt.SetRows(execResult.FilteredRows)
 		fmt.Printf("✓ Filtered: %d row(s) matched\n", len(execResult.FilteredRows))
+	}
+
+	// Resolve column projection from --fields.
+	// query.Fields drives SQL pushdown for DB exports; for in-memory packet
+	// conversion we apply projection here against the packet schema.
+	schemaFields := pkt.Schema.Fields
+	colIndices := make([]int, len(schemaFields)) // identity: all columns
+	for i := range schemaFields {
+		colIndices[i] = i
+	}
+	if opts.Query != nil && len(opts.Query.Fields) > 0 {
+		// Build a name→index map for fast lookup (case-insensitive).
+		nameIdx := make(map[string]int, len(schemaFields))
+		for i, f := range schemaFields {
+			nameIdx[strings.ToLower(f.Name)] = i
+		}
+		var projIndices []int
+		var projFields []packet.Field
+		for _, name := range opts.Query.Fields {
+			idx, ok := nameIdx[strings.ToLower(name)]
+			if !ok {
+				return fmt.Errorf("--fields: column %q not found in schema", name)
+			}
+			projIndices = append(projIndices, idx)
+			projFields = append(projFields, schemaFields[idx])
+		}
+		colIndices = projIndices
+		schemaFields = projFields
+		fmt.Printf("✓ Projection: %d column(s) selected\n", len(schemaFields))
 	}
 
 	// Open output writer
@@ -146,20 +177,31 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 	w := csv.NewWriter(out)
 	w.Comma = delim
 
-	// Header: field names from schema
-	headers := make([]string, len(pkt.Schema.Fields))
-	for i, f := range pkt.Schema.Fields {
+	// Header: projected field names
+	headers := make([]string, len(schemaFields))
+	for i, f := range schemaFields {
 		headers[i] = f.Name
 	}
 	if err := w.Write(headers); err != nil {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	// Data rows — pkt.GetRows() calls parser.GetRowValues() internally.
-	// Handles pipe-delimited format, escape sequences, and rawRows fast-path.
+	// Data rows — apply column projection when needed.
 	rows := pkt.GetRows()
+	projected := len(colIndices) < len(pkt.Schema.Fields)
 	for _, values := range rows {
-		if err := w.Write(values); err != nil {
+		var record []string
+		if projected {
+			record = make([]string, len(colIndices))
+			for i, idx := range colIndices {
+				if idx < len(values) {
+					record[i] = values[idx]
+				}
+			}
+		} else {
+			record = values
+		}
+		if err := w.Write(record); err != nil {
 			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
 	}

@@ -99,7 +99,7 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 		go func(i int, pkt *packet.DataPacket) {
 			defer wg.Done()
 			if compress {
-				if err := compressPacketData(pkt, compressLevel, compressAlgo, false); err != nil {
+				if err := compressPacketData(pkt, compressLevel, compressAlgo, true); err != nil { // checksum always enabled with compression
 					errs[i] = fmt.Errorf("packet %d compress: %w", i+1, err)
 					return
 				}

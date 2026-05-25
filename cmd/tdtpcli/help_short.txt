@@ -14,10 +14,13 @@ COMMANDS:
     --inspect-table <table>    Inspect live DB table: native types, FKs, row count, sample row
 
   File:
+    --test <file>              Dry-run: decompress, verify checksum, count rows (no DB needed)
     --inspect <file>           Print YAML metadata summary (no config needed)
+    --to-csv <file>            Convert TDTP file to CSV
+    --to-html <file>           Convert TDTP to HTML viewer
     --diff <file-a> <file-b>   Compare two TDTP files
     --merge <files>            Merge multiple TDTP files
-    --to-html <file>           Convert TDTP to HTML viewer
+    --to-compact <file>        Convert TDTP file to compact v1.3.1 format
 
   XLSX:
     --to-xlsx <tdtp-file>      TDTP → XLSX
@@ -26,6 +29,7 @@ COMMANDS:
     --import-xlsx <xlsx-file>  XLSX → Database (direct)
 
   Broker:  MSMQ=Legacy | RabbitMQ=Stability | Kafka=Speed+Production
+           Queue/topic is config-only (no CLI override) — prevents packet redirection
     --export-broker <table>    Export to message broker (parallel compress, single-roundtrip send)
     --import-broker            Import from message broker to DB (parallel decompress)
     --import-broker --output   Save to TDTP files (base_part_N_of_Total.tdtp.xml)
@@ -48,25 +52,41 @@ OPTIONS:
   General:
     --config <file>            Config file (default: config.yaml)
     --output <file>            Output file path
-    --table <name>             Target table name
+    --table <name>             Override target table on import (default: name from packet header)
     --strategy <name>          Import strategy: replace, ignore, fail, copy
-    --batch <size>             Batch size (default: 1000)
     --readonly-fields          Include read-only fields
 
   Compression:
-    --compress                 Enable compression for exported data
+    --compress                 Enable compression; XXH3 checksum added automatically
     --compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× vs raw, 30% denser than zstd)
     --compress-level <n>       Level: 1-19 (zstd) or 6-7 (kanzi), default: 3
-    --hash                     Add XXH3 checksum for integrity (requires --compress)
+    --packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)
     --fast                     Skip NULL/NaN/Inf detection for maximum throughput
+
+  v1.4 Integrity:
+    --integrity                Stamp packet with v1.4 xxh3_128 hashes (Schema + Data + Packet)
+    --mercury-url <url>        Register hash in xzMercury (e.g. http://mercury:3000)
+    --mercury-caller <name>    Caller identity for Mercury (default: "tdtpcli")
+
+  Compact Format (v1.3.1):
+    --compact                  Enable compact format on export (fixed fields written once/group)
+    --fixed-fields <fields>    Fixed field names (comma-separated, or '_' to auto-detect)
+    --compact-tail             Write tail row with all fixed fields explicit
+
+  CSV Options (--to-csv):
+    --delimiter <sep>          Field separator: ',' (default), ';', '\t'
+    -d <sep>                   Shorthand for --delimiter
+    --cp <encoding>            Output encoding: utf8 (default), 1251, 866
+    --bom                      Prepend UTF-8 BOM (helps Excel auto-detect encoding)
 
   TDTQL Filters:
     --where <condition>        WHERE clause; bracket-quoted names for spaces/special chars:
                                --where '[Termination Date] = "1753-01-01"'
+    -w <condition>             Shorthand for --where (repeatable)
     --order-by <fields>        ORDER BY clause
-    --limit <n>                Rows: +N = first N, -N = last N (tail)
+    --limit <n>                Rows: +N = first N, -N = last N (tail); alias: -l
     --offset <n>               Skip N rows
-    --fields <col1,col2>       Column projection: export/import only listed columns
+    --fields <col1,col2>       Column projection: export/import/to-csv only listed columns
                                Bracket-quoted for names with spaces: [Birth Date],[First, Last]
 
   HTML Viewer:
@@ -75,6 +95,11 @@ OPTIONS:
 
   XLSX:
     --sheet <name>             Sheet name (default: Sheet1)
+
+  Incremental Sync:
+    --tracking-field <field>   Field to track changes (default: updated_at)
+    --checkpoint-file <file>   Checkpoint file (default: checkpoint.yaml)
+    --batch-size <size>        Batch size for sync (default: 1000)
 
   Diff/Merge:
     --key-fields <fields>      Key fields (comma-separated)
@@ -89,6 +114,11 @@ OPTIONS:
     --translit                 Transliterate non-ASCII field names to ASCII
                                Cyrillic/European: "Имя" → "Imia", "Österreich" → "Osterreich"
                                Original names saved as DB column comments (PG/MySQL)
+
+  ETL / Pipeline:
+    --unsafe                   Enable unsafe mode (allows all SQL, requires admin)
+    --fallback-row-limit <n>   Max rows for in-memory fallback when SQL pushdown fails
+                               (default: 1000000; 0 = unlimited)
 
   Data Processors:
     --mask <fields>            Mask sensitive fields

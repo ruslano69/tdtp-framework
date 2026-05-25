@@ -1,0 +1,9 @@
+ID,Name,Email,City,Balance,IsActive,CreatedAt
+1,John Doe,john@example.com,Moscow,1500,1,2025-01-15T10:00:00Z
+2,Jane Smith,jane@example.com,SPb,2000,1,2025-02-20T11:00:00Z
+3,Bob Johnson,bob@example.com,Omsk,500,0,2025-03-10T12:00:00Z
+4,Alice Brown,alice@example.com,Kazan,2500,1,2025-01-05T09:00:00Z
+5,Charlie Davis,charlie@example.com,SPb,800,1,2025-04-12T13:00:00Z
+6,Emma Wilson,emma@example.com,Moscow,3000,1,2024-12-20T10:00:00Z
+7,Frank Miller,frank@example.com,Omsk,100,0,2025-05-05T14:00:00Z
+8,Grace Lee,grace@example.com,SPb,1800,1,2025-02-28T15:00:00Z

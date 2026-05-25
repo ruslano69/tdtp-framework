@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const version = "1.9.3"
+const version = "1.9.5"
 
 //go:embed help_short.txt
 var helpShortText string
