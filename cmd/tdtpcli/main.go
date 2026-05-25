@@ -232,9 +232,14 @@ func routeCommand(
 			"cp":        *flags.CSVCP,
 		}
 
-		// Parse delimiter: accept single char or named escapes (\t)
+		// Parse delimiter: strip wrapping single quotes (e.g. ';' → ;),
+		// then accept single char or named escapes (\t).
 		delim := rune(',')
 		if d := *flags.CSVDelimiter; d != "" && d != "," {
+			// Strip single quotes: ';' → ;
+			if len(d) == 3 && d[0] == '\'' && d[2] == '\'' {
+				d = string(d[1])
+			}
 			switch d {
 			case "\\t", "\t":
 				delim = '\t'
