@@ -932,179 +932,26 @@ go build -o tdtpcli ./cmd/tdtpcli
 
 ### CLI Usage Examples
 
+See the [User Guide](docs/USER_GUIDE.md#cli-usage-examples) for the full command reference.
+
 ```bash
-# List tables
-tdtpcli --list --config pg.yaml
+# Discover → verify → load
+tdtpcli --inspect delivery.xml
+tdtpcli --test    delivery.xml
+tdtpcli --import  delivery.xml
 
-# Export table
-tdtpcli --export users --output users.xml
-
-# Inspect TDTP file metadata (no database connection needed)
-tdtpcli --inspect users.xml
-
-# Test file integrity before import (checksum, row count, multi-part)
-tdtpcli --test users.xml
-
-# Recommended pre-import workflow:
-tdtpcli --inspect delivery.xml   # understand structure
-tdtpcli --test    delivery.xml   # verify integrity
-tdtpcli --import  delivery.xml   # load to DB
-
-# Export only specific columns (column projection)
-tdtpcli --export clients --fields id,email,status --output clients_slim.xml
-
-# Export with bracket-quoted field names (spaces/special chars)
-tdtpcli --export orders --where "[Termination Date] = '1753-01-01'"
-tdtpcli --export orders --fields "id,[Birth Date],status"
-
-# Export with column projection + filter + compression
-tdtpcli --export orders --fields order_id,amount,status --where 'status = active' --compress
-
-# Export with kanzi compression (4× denser than raw, ideal for large text)
-tdtpcli --export operations_log --compress --compress-algo kanzi --compress-level 6 --output ops.xml
-
-# Export with compression + XXH3 integrity checksum
-tdtpcli --export orders --compress --hash --output orders.xml
-
-# Archive-quality: kanzi max + checksum + large packet for broker
-tdtpcli --export payroll --compress --compress-algo kanzi --compress-level 7 --hash --packet-size 8 --output archive.xml
-
-# Encrypt export (AES-256-GCM, burn-on-read key via xZMercury)
+# Export with encryption (AES-256-GCM, burn-on-read)
 tdtpcli --export financials --enc --output financials.tdtp.xml
-# → writes financials.tdtp.enc
+tdtpcli --import financials.tdtp.enc   # auto-decrypted
 
-# Import encrypted file (auto-detected by .tdtp.enc extension)
-tdtpcli --import financials.tdtp.enc
-
-# Convert encrypted file to Excel or HTML
-tdtpcli --to-xlsx financials.tdtp.enc --output financials.xlsx
-tdtpcli --to-html financials.tdtp.enc --open
-
-# Import only specific columns from a wide TDTP file
-tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
-
-# Import Access export with exotic field names (%, spaces, #, etc.)
-tdtpcli --import access_export.xml --clear --strategy replace
-
-# Import ERP export with Cyrillic field names — transliterate + clean
-tdtpcli --import erp_orders.xml --translit --clear --strategy replace
-
-# Export with filters and compression
-tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
-
-# Filter by list of values (IN operator)
-tdtpcli --export staff --where 'dept_id IN (10,11,12)'
-
-# Multiple --where flags combined with AND
-tdtpcli --export staff --where 'dept_id IN (10,11,12)' --where 'employment_type IN (1,2)'
-
-# Export last 50 rows (tail mode)
-tdtpcli --export logs --order-by 'created_at DESC' --limit -50
-
-# View data in browser
-tdtpcli --to-html customers.xml --open
-
-# View rows 100-500
-tdtpcli --to-html data.xml --row 100-500 --open
-
-# View last 20 rows from range
-tdtpcli --to-html data.xml --row 100-500 --limit -20 --open
-
-# Export directly to Excel
-tdtpcli --export-xlsx orders --output orders.xlsx
-
-# Convert TDTP to Excel with sheet name
-tdtpcli --to-xlsx orders.xml --output orders.xlsx --sheet Orders
-
-# Convert Excel to TDTP
-tdtpcli --from-xlsx orders.xlsx --output orders.xml
-
-# Import Excel to database
-tdtpcli --import-xlsx orders.xlsx --strategy replace
-
-# Compare two TDTP files
-tdtpcli --diff users-old.xml users-new.xml
-
-# Compare with key fields and ignore fields
-tdtpcli --diff old.xml new.xml --key-fields user_id --ignore-fields updated_at
-
-# Merge multiple files (union strategy)
-tdtpcli --merge file1.xml,file2.xml,file3.xml --output merged.xml
-
-# Merge with conflict resolution
-tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy right --show-conflicts
-
-# Incremental synchronization
-tdtpcli --sync-incremental orders --tracking-field updated_at --checkpoint-file orders.yaml
-
-# Export with PII masking
-tdtpcli --export customers --mask email,phone
-
-# ETL pipeline (safe mode)
-tdtpcli --pipeline pipeline.yaml
-
-# ETL pipeline (unsafe mode, requires admin)
-sudo tdtpcli --pipeline pipeline.yaml --unsafe
-
-# Create configuration file
-tdtpcli --create-config-pg > config.yaml
-tdtpcli --create-config-mysql > mysql.yaml
-
-# --- Broker Operations ---
-
-# Export to Kafka with kanzi compression (parallel compress + SendBatch)
-tdtpcli --export-broker users --compress --compress-algo kanzi --compress-level 6 --config kafka.yaml
-
-# Import from RabbitMQ / Kafka to database (atomic by default)
-tdtpcli --import-broker --config rabbitmq.yaml
-tdtpcli --import-broker --config kafka.yaml --strategy replace
-
-# Import from broker — save as TDTP files instead of importing to DB
-tdtpcli --import-broker --output users.xml --config kafka.yaml
-
-# Import from broker — save raw bytes (no parse/decompress)
-tdtpcli --import-broker --raw --output users.bin --config kafka.yaml
-
-# Streaming consumer daemon — Kafka only (production-ready)
-tdtpcli --listen --config kafka.yaml --strategy replace
-
-# --- Object Storage (S3 / SeaweedFS / MinIO) ---
-
-# Export table to S3 (multi-part automatic)
-tdtpcli --export users --output s3://my-bucket/exports/users.tdtp.xml
-
-# Export with compression + filter → S3
+# Export with compression + filter + checksum
 tdtpcli --export orders \
-  --where "status = active" --where "amount > 1000" \
-  --compress --compress-level 3 \
-  --output s3://my-bucket/exports/orders_active.tdtp.xml
+  --where 'status = active' --compress --compress-algo kanzi --hash \
+  --output orders.xml
 
-# Export with checksum integrity
-tdtpcli --export users --compress --hash \
-  --output s3://my-bucket/exports/users.tdtp.xml
-
-# Import from S3 (all _part_N_of_M files discovered automatically)
-tdtpcli --import s3://my-bucket/exports/users.tdtp.xml --strategy replace
-
-# Import only selected columns from S3
-tdtpcli --import s3://my-bucket/exports/users.tdtp.xml \
-  --fields "id,email,balance" --table users_slim
-
-# Inspect a packet in S3 without downloading full data
-tdtpcli --inspect s3://my-bucket/exports/users.tdtp_part_1_of_6.xml
-
-# Test a file in S3 before import
-tdtpcli --test s3://my-bucket/exports/users.tdtp.xml
-
-# Export table directly to XLSX in S3
-tdtpcli --export-xlsx users --output s3://my-bucket/reports/users.xlsx
-
-# Convert local TDTP to XLSX and upload to S3
-tdtpcli --to-xlsx users.tdtp.xml --output s3://my-bucket/reports/users.xlsx
-
-# S3 → S3: convert compressed TDTP in S3 to XLSX in S3
-tdtpcli --to-xlsx s3://my-bucket/exports/users.tdtp_part_1_of_6.xml \
-  --output s3://my-bucket/reports/users_part1.xlsx
+# Export to Excel / S3
+tdtpcli --export-xlsx orders --output orders.xlsx
+tdtpcli --export users --output s3://my-bucket/exports/users.tdtp.xml
 ```
 
 ### Using in Code
