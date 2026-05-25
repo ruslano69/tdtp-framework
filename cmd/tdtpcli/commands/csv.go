@@ -16,14 +16,12 @@ import (
 	"golang.org/x/text/transform"
 )
 
-// strings используется только в csvEncodingWriter.
-
 // CSVOptions holds options for TDTP → CSV conversion.
 type CSVOptions struct {
 	InputFile  string
 	OutputFile string // "" or "-" → stdout
 	Delimiter  rune   // field separator; default ','
-	Encoding   string // "utf-8" (default) | "windows-1251" | "cp1251"
+	CP         string // code page: "utf8" (default), "1251", "866"
 	BOM        bool   // prepend UTF-8 BOM (helps Excel auto-detect)
 	Query      *packet.Query
 
@@ -53,12 +51,10 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		outLabel = "stdout"
 	}
 	fmt.Printf("Output:    %s\n", outLabel)
-	fmt.Printf("Delimiter: %q\n", string(delim))
-	enc := opts.Encoding
-	if enc == "" {
-		enc = "utf-8"
+	fmt.Printf("Delimiter: %s\n", string(delim))
+	if cp := opts.CP; cp != "" && cp != "utf8" {
+		fmt.Printf("CP:        %s\n", cp)
 	}
-	fmt.Printf("Encoding:  %s\n", enc)
 
 	// Parse TDTP file
 	data, err := os.ReadFile(opts.InputFile)
@@ -141,7 +137,7 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		base = f
 	}
 
-	out, err := csvEncodingWriter(base, opts.Encoding, opts.BOM)
+	out, err := csvEncodingWriter(base, opts.CP, opts.BOM)
 	if err != nil {
 		return err
 	}
@@ -159,7 +155,7 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	// Data rows — use pkt.GetRows() which calls parser.GetRowValues() internally.
+	// Data rows — pkt.GetRows() calls parser.GetRowValues() internally.
 	// Handles pipe-delimited format, escape sequences, and rawRows fast-path.
 	rows := pkt.GetRows()
 	for _, values := range rows {
@@ -178,11 +174,15 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 	return nil
 }
 
-// csvEncodingWriter wraps w with the requested output encoding.
-// Supported: "utf-8" / "" (default), "windows-1251", "cp1251".
-// BOM=true prepends a UTF-8 BOM (useful for Excel auto-detect on Windows).
-func csvEncodingWriter(w io.Writer, encoding string, bom bool) (io.Writer, error) {
-	norm := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(encoding, "-", ""), "_", ""))
+// csvEncodingWriter wraps w with the requested output code page.
+//
+// Accepted values (case-insensitive, hyphens/underscores ignored):
+//
+//	utf8, utf-8, ""  → UTF-8 (default); BOM=true prepends EF BB BF
+//	1251, cp1251, windows1251, win1251  → Windows-1251 (Cyrillic Windows)
+//	866,  cp866,  ibm866               → CP866 (Cyrillic DOS)
+func csvEncodingWriter(w io.Writer, cp string, bom bool) (io.Writer, error) {
+	norm := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(cp))
 	switch norm {
 	case "", "utf8":
 		if bom {
@@ -191,10 +191,11 @@ func csvEncodingWriter(w io.Writer, encoding string, bom bool) (io.Writer, error
 			}
 		}
 		return w, nil
-	case "windows1251", "cp1251", "win1251":
+	case "1251", "cp1251", "windows1251", "win1251":
 		return transform.NewWriter(w, charmap.Windows1251.NewEncoder()), nil
+	case "866", "cp866", "ibm866":
+		return transform.NewWriter(w, charmap.CodePage866.NewEncoder()), nil
 	default:
-		return nil, fmt.Errorf("unsupported encoding %q — supported: utf-8, windows-1251", encoding)
+		return nil, fmt.Errorf("unknown code page %q — use: utf8, 1251, 866", cp)
 	}
 }
-

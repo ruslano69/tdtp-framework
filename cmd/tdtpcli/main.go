@@ -229,7 +229,7 @@ func routeCommand(
 			"input":     *flags.ToCSV,
 			"output":    csvOutputFile,
 			"delimiter": *flags.CSVDelimiter,
-			"encoding":  *flags.CSVEncoding,
+			"cp":        *flags.CSVCP,
 		}
 
 		// Parse delimiter: accept single char or named escapes (\t)
@@ -251,7 +251,7 @@ func routeCommand(
 				InputFile:  *flags.ToCSV,
 				OutputFile: csvOutputFile,
 				Delimiter:  delim,
-				Encoding:   *flags.CSVEncoding,
+				CP:         *flags.CSVCP,
 				BOM:        *flags.CSVBOM,
 				Query:      query,
 				MercuryURL: *flags.MercuryURL,
