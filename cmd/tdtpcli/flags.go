@@ -59,10 +59,10 @@ type Flags struct {
 	ToHTML         *string
 	OpenBrowser    *bool
 	Row            *string // Row range for HTML viewer (e.g., "100-150")
-	ToCSV        *string // --to-csv: convert TDTP file to CSV
-	CSVDelimiter *string // --delimiter / -d: field separator (default ",")
-	CSVCP        *string // --cp: output code page (utf8, 1251, 866, …)
-	CSVBOM       *bool   // --bom: prepend UTF-8 BOM (for Excel)
+	ToCSV          *string // --to-csv: convert TDTP file to CSV
+	CSVDelimiter   *string // --delimiter / -d: field separator (default ",")
+	CSVCP          *string // --cp: output code page (utf8, 1251, 866, …)
+	CSVBOM         *bool   // --bom: prepend UTF-8 BOM (for Excel)
 	ToXLSX         *string
 	FromXLSX       *string
 	ExportXLSX     *string
@@ -93,13 +93,13 @@ type Flags struct {
 	ReadOnlyFields *bool // Include read-only fields (timestamp, computed, identity) in export
 
 	// Compression
-	Compress      *bool
-	CompressLevel *int
-	CompressAlgo  *string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
-	Hash          *bool   // Add XXH3 checksum for data integrity verification
-	PacketSize    *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
-	Fast             *bool  // Skip SpecialValues detection (no NULL/NaN/Inf markers) for maximum export speed
-	FallbackRowLimit *int64 // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
+	Compress         *bool
+	CompressLevel    *int
+	CompressAlgo     *string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
+	Hash             *bool   // Add XXH3 checksum for data integrity verification
+	PacketSize       *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
+	Fast             *bool   // Skip SpecialValues detection (no NULL/NaN/Inf markers) for maximum export speed
+	FallbackRowLimit *int64  // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
 	// Compact format (v1.3.1)
 	Compact     *bool   // Enable compact format on export (fixed fields written once per group)
