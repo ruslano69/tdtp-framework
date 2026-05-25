@@ -2,6 +2,54 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.5] — 2026-05-25
+
+### Added
+
+- **`--to-csv`** (`cmd/tdtpcli/commands/csv.go`): конвертер TDTP → CSV с security gate.
+
+  TDTP остаётся транспортом с полными гарантиями; CSV — адаптер последней мили для
+  легаси-систем (1С, SAP, bulk load в БД). Разделитель, кодировка и integrity-проверка
+  настраиваются независимо.
+
+  ```bash
+  tdtpcli --to-csv report.tdtp.xml -d=';' --cp=1251          # легаси Windows
+  tdtpcli --to-csv report.tdtp.xml --bom                      # Excel UTF-8
+  tdtpcli --to-csv report.tdtp.xml -d=';' -w 'Balance > 0' -n=100
+  ```
+
+  - **Security gate**: `v1.0` — pass-through без проверок; `v1.4` — `VerifyAndPrepare`
+    (Mercury + локальный xxh3) перед записью. Нарушение integrity → файл не создаётся.
+  - **Разделитель** `-d=';'` — одинарные кавычки работают в PowerShell и bash;
+    `encoding/csv` автоматически квотирует поля содержащие разделитель (RFC 4180).
+  - **Кодировки** `--cp`: `utf8` (по умолчанию), `1251` (Windows Cyrillic), `866` (DOS Cyrillic).
+  - **`--bom`**: UTF-8 BOM для корректного открытия в Excel без смены кодировки.
+  - Строки через `pkt.GetRows()` → `parser.GetRowValues()` из ядра (pipe-формат,
+    эскейпинг, rawRows fast-path). Собственный парсер строк отсутствует.
+  - TDTQL-фильтры (`--where`, `--order-by`, `--limit`, `--fields`) работают как для
+    всех остальных команд.
+
+- **TDTQL шортхэнды `-n` и `-w`** (`cmd/tdtpcli/flags.go`):
+
+  Глобальные алиасы для самых частых операций — работают со всеми командами.
+
+  ```bash
+  -n=10         # alias для --limit=10
+  -w 'X > 1'   # alias для --where 'X > 1' (повторяемый, AND-цепочка)
+  ```
+
+- **TDTP v1.4 integrity + xzMercury hash notary** (`cmd/tdtpcli/`, `pkg/pipeline/`,
+  `xzmercury/`): флаг `--integrity` stampует пакет тремя xxh3_128-хешами
+  (Schema / Data / Packet, UUID-соль). `--mercury-url` регистрирует fingerprint
+  в xzMercury (`SET NX`). Потребитель верифицирует через `VerifyAndPrepare`.
+
+  ```bash
+  tdtpcli --export payroll --integrity --mercury-url http://mercury:3000 --compress
+  ```
+
+  Подробнее: [`docs/xZMercury-TDTP-TZ-v1.2.md`](docs/xZMercury-TDTP-TZ-v1.2.md),
+  [`xzmercury/README.md`](xzmercury/README.md).
+
 ## [1.9.4] — 2026-05-20
 
 ### Added
