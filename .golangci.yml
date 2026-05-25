@@ -25,6 +25,7 @@ linters:
       - cmd/tdtpcli/commands/inspect\.go
       - cmd/tdtpcli/commands/process_request\.go
       - tests/integration/kafka_perf
+      - scripts
     rules:
       - linters:
           - errcheck
@@ -51,7 +52,3 @@ run:
   modules-download-mode: readonly
 
 issues: {}
-
-exclude-dirs:
-  - tests/integration/kafka_perf
-  - scripts
