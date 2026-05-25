@@ -138,6 +138,7 @@ func routeCommand(
 				IntegrityV14:     *flags.Integrity,
 				MercuryURL:       *flags.MercuryURL,
 				MercuryCaller:    *flags.MercuryCaller,
+				Encrypt:          *flags.Encrypt,
 			})
 		})
 

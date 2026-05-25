@@ -54,8 +54,8 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		fmt.Printf("CP:        %s\n", cp)
 	}
 
-	// Parse TDTP file
-	data, err := os.ReadFile(opts.InputFile)
+	// Read input — decrypt if .tdtp.enc (AES-256-GCM, xZMercury burn-on-read).
+	data, err := DecryptEncFile(ctx, opts.InputFile, opts.MercuryURL)
 	if err != nil {
 		return fmt.Errorf("failed to read TDTP file: %w", err)
 	}

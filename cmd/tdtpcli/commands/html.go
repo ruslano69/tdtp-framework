@@ -41,8 +41,8 @@ type HTMLOptions struct {
 //     MercuryURL empty → local integrity only (FallbackDegrade).
 //   - Any security failure → error returned, nothing written.
 func ConvertTDTPToHTML(ctx context.Context, opts HTMLOptions) error {
-	// Read input file
-	data, err := os.ReadFile(opts.InputFile)
+	// Read input — decrypt if .tdtp.enc (AES-256-GCM, xZMercury burn-on-read).
+	data, err := DecryptEncFile(ctx, opts.InputFile, opts.MercuryURL)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}

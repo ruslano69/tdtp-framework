@@ -77,8 +77,8 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		inputFile = tmp.Name()
 	}
 
-	// Read TDTP file
-	data, err := os.ReadFile(inputFile)
+	// Read input — decrypt if .tdtp.enc (AES-256-GCM, xZMercury burn-on-read).
+	data, err := DecryptEncFile(ctx, inputFile, opts.MercuryURL)
 	if err != nil {
 		return fmt.Errorf("failed to read TDTP file: %w", err)
 	}

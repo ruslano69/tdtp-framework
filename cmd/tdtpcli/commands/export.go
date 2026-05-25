@@ -47,6 +47,12 @@ type ExportOptions struct {
 	MercuryURL    string // Optional: register hash in xzMercury (empty = local integrity only)
 	MercuryCaller string // X-Caller header for Mercury registration (default: "tdtpcli")
 
+	// Encryption (--enc tier). Requires MercuryURL.
+	// Each exported part gets its own UUID; key is bound in xZMercury (burn-on-read).
+	// Output file: <name>.tdtp.enc (binary AES-256-GCM blob).
+	// Consumer reads with: --import file.tdtp.enc --mercury-url http://...
+	Encrypt bool // AES-256-GCM via xZMercury BindKey/RetrieveKey
+
 	// Object storage (S3/SeaweedFS). Non-nil → stream to object storage instead of local file.
 	StorageCfg *storage.Config // storage driver config with bucket
 	StorageKey string          // object key within the bucket
@@ -308,6 +314,10 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			fmt.Printf("✓ v1.4 integrity hashes stamped (local only)\n")
 		}
 	}
+	if opts.Encrypt {
+		fmt.Printf("✓ AES-256-GCM encrypted (keys stored in xZMercury, burn-on-read)\n")
+		fmt.Printf("  Decrypt with: --import <file>.tdtp.enc --mercury-url %s\n", opts.MercuryURL)
+	}
 
 	return nil
 }
@@ -372,8 +382,30 @@ func parallelProcessAndWrite(
 }
 
 // writePacket writes a single packet to the configured destination (S3, stdout, or local file).
+// When opts.Encrypt is true the packet is first serialized to XML, then encrypted via xZMercury
+// (AES-256-GCM, UUID-binding); the binary blob is written with a ".tdtp.enc" extension.
 func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts ExportOptions, store storage.ObjectStorage) error {
 	switch {
+	case store != nil && opts.Encrypt:
+		// Encrypt → upload binary blob to S3.
+		key := opts.StorageKey
+		if total > 1 {
+			key = generatePacketFilename(opts.StorageKey, n, total)
+		}
+		key = encOutputKey(key)
+		blob, uuid, err := EncryptPacket(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+		if err != nil {
+			return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+		}
+		if err := uploadBlobToStorage(ctx, store, blob, key, uuid, pkt); err != nil {
+			return err
+		}
+		if total == 1 {
+			fmt.Printf("✓ Encrypted+uploaded: s3://%s/%s (uuid=%s)\n", opts.StorageCfg.S3.Bucket, key, uuid)
+		} else {
+			fmt.Printf("✓ Encrypted+uploaded packet %d/%d: s3://%s/%s (uuid=%s)\n", n, total, opts.StorageCfg.S3.Bucket, key, uuid)
+		}
+
 	case store != nil:
 		key := opts.StorageKey
 		if total > 1 {
@@ -389,6 +421,9 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 		}
 
 	case opts.OutputFile == "" || opts.OutputFile == "-":
+		if opts.Encrypt {
+			return fmt.Errorf("--enc cannot be used with stdout output; specify --output file.tdtp.enc")
+		}
 		generator := packet.NewGenerator()
 		xml, err := generator.ToXML(pkt, true)
 		if err != nil {
@@ -401,14 +436,88 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 		if total > 1 {
 			filename = generatePacketFilename(opts.OutputFile, n, total)
 		}
-		if err := writePacketToFile(pkt, filename); err != nil {
-			return err
-		}
-		if total == 1 {
-			fmt.Printf("✓ Written to: %s\n", filename)
+		if opts.Encrypt {
+			filename = encOutputKey(filename)
+			blob, uuid, err := EncryptPacket(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+			if err != nil {
+				return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+			}
+			if err := writeEncryptedBlobToFile(blob, filename); err != nil {
+				return err
+			}
+			if total == 1 {
+				fmt.Printf("✓ Encrypted: %s (uuid=%s)\n", filename, uuid)
+			} else {
+				fmt.Printf("✓ Encrypted packet %d/%d: %s (uuid=%s)\n", n, total, filename, uuid)
+			}
 		} else {
-			fmt.Printf("✓ Written packet %d/%d to: %s\n", n, total, filename)
+			if err := writePacketToFile(pkt, filename); err != nil {
+				return err
+			}
+			if total == 1 {
+				fmt.Printf("✓ Written to: %s\n", filename)
+			} else {
+				fmt.Printf("✓ Written packet %d/%d to: %s\n", n, total, filename)
+			}
 		}
+	}
+	return nil
+}
+
+// encOutputKey returns path/key with ".tdtp.enc" extension.
+// If it already ends with ".tdtp.enc", returns as-is.
+func encOutputKey(path string) string {
+	lower := strings.ToLower(path)
+	if strings.HasSuffix(lower, ".tdtp.enc") {
+		return path
+	}
+	// Strip known TDTP extensions before appending.
+	for _, suf := range []string{".tdtp.xml", ".tdtp", ".xml"} {
+		if strings.HasSuffix(lower, suf) {
+			return path[:len(path)-len(suf)] + ".tdtp.enc"
+		}
+	}
+	return path + ".tdtp.enc"
+}
+
+// writeEncryptedBlobToFile writes a binary encrypted blob to path.
+func writeEncryptedBlobToFile(blob []byte, path string) error {
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
+	if err := os.WriteFile(path, blob, 0o600); err != nil {
+		return fmt.Errorf("failed to write encrypted file: %w", err)
+	}
+	return nil
+}
+
+// uploadBlobToStorage uploads a binary blob (encrypted packet) to object storage.
+func uploadBlobToStorage(ctx context.Context, store storage.ObjectStorage, blob []byte, key, packageUUID string, pkt *packet.DataPacket) error {
+	meta := map[string]string{
+		"table":        pkt.Header.TableName,
+		"protocol":     "TDTP-ENC 1.0",
+		"rows":         strconv.Itoa(pkt.Header.RecordsInPart),
+		"package_uuid": packageUUID,
+	}
+
+	pr, pw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.Put(ctx, key, pr, meta)
+	}()
+
+	if _, err := io.Copy(pw, bytes.NewReader(blob)); err != nil {
+		pw.CloseWithError(err)
+		<-errCh
+		return fmt.Errorf("failed to write to storage pipe: %w", err)
+	}
+	_ = pw.Close()
+
+	if err := <-errCh; err != nil {
+		return fmt.Errorf("storage Put failed: %w", err)
 	}
 	return nil
 }

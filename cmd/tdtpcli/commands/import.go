@@ -119,6 +119,18 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
+		// ── Decrypt encrypted blob before parse ─────────────────────────────────
+		// Auto-detect .tdtp.enc (binary AES-256-GCM blob produced by --enc tier).
+		// Requires --mercury-url for burn-on-read key retrieval from xZMercury.
+		if IsEncryptedFile(src.label) {
+			fmt.Printf("  Encrypted file — decrypting via xZMercury (%s)...\n", opts.MercuryURL)
+			var decErr error
+			data, decErr = DecryptEncBlob(ctx, data, opts.MercuryURL)
+			if decErr != nil {
+				return fmt.Errorf("failed to decrypt '%s': %w", src.label, decErr)
+			}
+		}
+
 		pkt, err := p.ParseBytes(data)
 		data = nil // release raw bytes immediately after parse
 		if err != nil {
