@@ -2,8 +2,8 @@
 
 **tdtpcli** - утилита командной строки для работы с TDTP (Table Data Transfer Protocol).
 
-**Версия:** 1.8.0-beta
-**Дата:** 02.04.2026
+**Версия:** 1.9.5
+**Дата:** 25.05.2026
 
 ---
 
@@ -19,7 +19,7 @@
    - [--export-broker](#--export-broker) · [--import-broker](#--import-broker) · [--listen](#--listen-beta)
    - [--sync-incremental](#--sync-incremental)
    - [--diff](#--diff) · [--merge](#--merge)
-   - [--to-compact](#--to-compact) · [--to-html](#--to-html)
+   - [--to-compact](#--to-compact) · [--to-csv](#--to-csv) · [--to-html](#--to-html)
    - [--pipeline](#--pipeline) · [--process-request](#--process-request)
 5. [Рабочий процесс: --inspect → --test → --import](#рабочий-процесс-inspect--test--import)
 6. [Compact Format (v1.3.1)](#compact-format-v131)
@@ -385,6 +385,81 @@ tdtpcli --test delivery.tdtp.xml && tdtpcli --import delivery.tdtp.xml
 **Exit codes:**
 - `0` — файл прошёл все проверки
 - `1` — файл повреждён, отсутствуют части, или контрольная сумма не совпала
+
+---
+
+### --to-csv
+
+Конвертировать TDTP-файл в CSV без подключения к БД. Поддерживает сжатые файлы (zstd, kanzi), compact v1.3.1 и v1.4-integrity пакеты. Все TDTQL-фильтры применяются **в памяти** до записи CSV.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-csv <file> [--output <file>]
+        [--delimiter <sep>] [-d <sep>]
+        [--cp <encoding>] [--bom]
+        [--where <condition>] [-w <condition>]
+        [--order-by <fields>]
+        [--limit <n>] [-n <n>]
+        [--offset <n>]
+        [--fields <col1,col2,...>]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--to-csv <file>` | Входной TDTP-файл |
+| `--output <file>` | Выходной CSV (по умолчанию — то же имя с `.csv`) |
+| `--delimiter <sep>` / `-d` | Разделитель: `,` (по умолчанию), `;`, `\t` |
+| `--cp <encoding>` | Кодировка вывода: `utf8` (по умолчанию), `1251`, `866` |
+| `--bom` | Добавить UTF-8 BOM (нужен для автоопределения кодировки в Excel) |
+| `--where` / `-w` | Фильтр строк (TDTQL, повторяемый — объединяется через AND) |
+| `--order-by` | Сортировка строк |
+| `--limit` / `-n` | Первые N строк (`+N`) или последние N строк (`-N`, tail-режим) |
+| `--offset` | Пропустить N строк |
+| `--fields` | Только перечисленные колонки; пробелы в именах — в квадратных скобках |
+
+**Примеры:**
+```bash
+# Базовая конвертация
+tdtpcli --to-csv users.tdtp.xml
+
+# С указанием выходного файла
+tdtpcli --to-csv users.tdtp.xml --output users_export.csv
+
+# Разделитель точка с запятой + BOM для Excel
+tdtpcli --to-csv orders.tdtp.xml --delimiter ';' --bom --output orders.csv
+
+# Табуляция + кодировка Windows-1251 (для старых 1С/Excel)
+tdtpcli --to-csv report.tdtp.xml -d '\t' --cp 1251 --bom
+
+# Только нужные колонки
+tdtpcli --to-csv users.tdtp.xml --fields 'id,email,balance'
+
+# Колонки с пробелами в именах
+tdtpcli --to-csv staff.tdtp.xml --fields '[Last Name],[First Name],[Birth Date]'
+
+# Фильтрация + сортировка + лимит
+tdtpcli --to-csv orders.tdtp.xml \
+  --where 'status = completed' \
+  --order-by 'total DESC' \
+  --limit 50
+
+# Сжатый файл (распаковывается автоматически)
+tdtpcli --to-csv archive.tdtp.xml --where 'amount > 1000'
+
+# v1.4 integrity пакет (хэши верифицируются до вывода)
+tdtpcli --to-csv secure.tdtp.xml --fields 'id,name,amount'
+
+# Последние 100 строк (tail-режим)
+tdtpcli --to-csv events.tdtp.xml --limit -100 --order-by 'created_at ASC'
+
+# Пагинация из TDTP-архива
+tdtpcli --to-csv big_table.tdtp.xml --limit 100 --offset 500
+```
+
+> **Без конфига:** `--to-csv` не требует подключения к БД — работает с любым TDTP-файлом,
+> включая сжатые, compact и v1.4 пакеты с integrity-хешами.
 
 ---
 
@@ -1319,6 +1394,65 @@ tdtpcli --export leads --where '[Is Active?] = 1'
 ./tdtpcli -config config.postgres.yaml --export-broker users \
   --where "is_active = 1" \
   --limit 1000
+```
+
+### Фильтрация при конвертации в CSV (`--to-csv`)
+
+`--to-csv` поддерживает **все те же TDTQL-фильтры**, что и `--export`. Фильтры применяются
+в памяти после чтения и декомпрессии пакета — без подключения к БД.
+
+**Совместимость:**
+- Обычные TDTP-файлы ✓
+- Сжатые (zstd / kanzi) ✓ — декомпрессия до фильтрации
+- Compact v1.3.1 ✓
+- v1.4 integrity-пакеты ✓ — хэши верифицируются до фильтрации
+
+**Только нужные колонки (`--fields`):**
+```bash
+# Простые имена
+tdtpcli --to-csv users.tdtp.xml --fields 'id,email,balance'
+
+# Имена с пробелами — квадратные скобки
+tdtpcli --to-csv staff.tdtp.xml --fields '[Last Name],[Birth Date],salary'
+```
+
+**Фильтрация строк (`--where`):**
+```bash
+# Числовое условие
+tdtpcli --to-csv orders.tdtp.xml --where 'total > 1000'
+
+# Текстовое условие
+tdtpcli --to-csv users.tdtp.xml --where "status = 'active'"
+
+# Несколько условий (AND)
+tdtpcli --to-csv orders.tdtp.xml \
+  --where 'total > 500' \
+  --where "status = 'completed'"
+```
+
+**Сортировка и лимит:**
+```bash
+# Топ-10 по сумме
+tdtpcli --to-csv orders.tdtp.xml \
+  --order-by 'total DESC' \
+  --limit 10
+
+# Последние 100 событий (tail-режим)
+tdtpcli --to-csv events.tdtp.xml \
+  --order-by 'created_at ASC' \
+  --limit -100
+```
+
+**Комбинированный запрос:**
+```bash
+tdtpcli --to-csv orders.tdtp.xml \
+  --fields 'id,customer_id,total,status' \
+  --where "status = 'completed'" \
+  --where 'total >= 1000' \
+  --order-by 'total DESC' \
+  --limit 50 \
+  --delimiter ';' --bom \
+  --output top_orders.csv
 ```
 
 ---

@@ -82,6 +82,48 @@ tdtpcli --create-config-mysql  > mysql.yaml
 tdtpcli --create-config-mssql  > mssql.yaml
 ```
 
+### --to-csv (конвертация без БД + фильтрация)
+
+`--to-csv` не требует конфига БД — работает с любым TDTP-файлом, включая сжатые и v1.4.
+Все TDTQL-фильтры применяются **в памяти** после декомпрессии.
+
+```bash
+# Базовая конвертация
+tdtpcli --to-csv users.tdtp.xml
+
+# Разделитель + кодировка + BOM для Excel/1С
+tdtpcli --to-csv report.tdtp.xml --delimiter ';' --bom --output report.csv
+tdtpcli --to-csv report.tdtp.xml -d '\t' --cp 1251 --bom    # Windows-1251 для старых систем
+
+# Только нужные колонки (без пересоздания таблицы!)
+tdtpcli --to-csv users.tdtp.xml --fields 'id,email,balance'
+tdtpcli --to-csv staff.tdtp.xml --fields '[Last Name],[First Name],[Birth Date]'
+
+# Фильтрация строк (как --export --where, но из файла)
+tdtpcli --to-csv orders.tdtp.xml --where 'total > 1000'
+tdtpcli --to-csv users.tdtp.xml --where 'status = active' --where 'balance > 0'
+
+# Сортировка + лимит
+tdtpcli --to-csv orders.tdtp.xml --order-by 'total DESC' --limit 10
+tdtpcli --to-csv events.tdtp.xml --order-by 'created_at ASC' --limit -100  # последние 100
+
+# Пагинация
+tdtpcli --to-csv big_table.tdtp.xml --limit 100 --offset 500
+
+# Полный запрос: проекция + фильтр + сортировка + CSV-настройки
+tdtpcli --to-csv orders.tdtp.xml \
+  --fields 'id,customer_id,total,status' \
+  --where 'status = completed' \
+  --where 'total >= 1000' \
+  --order-by 'total DESC' \
+  --limit 50 \
+  --delimiter ';' --bom \
+  --output top_orders.csv
+```
+
+> Сжатые файлы (zstd/kanzi), compact v1.3.1 и v1.4 integrity-пакеты обрабатываются
+> автоматически. БД не нужна.
+
 ### Сравнение и слияние
 
 ```bash
