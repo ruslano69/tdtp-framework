@@ -59,6 +59,10 @@ type Flags struct {
 	ToHTML         *string
 	OpenBrowser    *bool
 	Row            *string // Row range for HTML viewer (e.g., "100-150")
+	ToCSV          *string // --to-csv: convert TDTP file to CSV
+	CSVDelimiter   *string // --delimiter / -d: field separator (default ",")
+	CSVEncoding    *string // --encoding: output encoding (utf-8, windows-1251)
+	CSVBOM         *bool   // --bom: prepend UTF-8 BOM (for Excel)
 	ToXLSX         *string
 	FromXLSX       *string
 	ExportXLSX     *string
@@ -171,6 +175,11 @@ func ParseFlags() *Flags {
 	f.ToHTML = flag.String("to-html", "", "Convert TDTP XML file to HTML for browser viewing (input TDTP file)")
 	f.OpenBrowser = flag.Bool("open", false, "Open generated HTML file in default browser (use with --to-html)")
 	f.Row = flag.String("row", "", "Row range to display in HTML viewer, e.g. 100-150 (use with --to-html)")
+	f.ToCSV = flag.String("to-csv", "", "Convert TDTP file to CSV (input TDTP file). v1.4 packets require security pre-flight.")
+	f.CSVDelimiter = flag.String("delimiter", ",", "CSV field separator (use with --to-csv), e.g. --delimiter \";\"")
+	flag.StringVar(f.CSVDelimiter, "d", ",", "CSV field separator shorthand (alias for --delimiter)")
+	f.CSVEncoding = flag.String("encoding", "utf-8", "Output encoding for CSV: utf-8 (default) or windows-1251")
+	f.CSVBOM = flag.Bool("bom", false, "Prepend UTF-8 BOM to CSV output (helps Excel detect encoding automatically)")
 	f.ToXLSX = flag.String("to-xlsx", "", "Convert TDTP XML file to XLSX (input TDTP file)")
 	f.FromXLSX = flag.String("from-xlsx", "", "Convert XLSX file to TDTP XML (input XLSX file)")
 	f.ExportXLSX = flag.String("export-xlsx", "", "Export table directly to XLSX (table name)")
