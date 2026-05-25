@@ -195,8 +195,10 @@ func ParseFlags() *Flags {
 
 	// TDTQL Filters
 	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")
+	flag.Var(&f.Where, "w", "TDTQL WHERE shorthand (alias for --where)")
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
 	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
+	flag.IntVar(f.Limit, "n", 0, "Row limit shorthand (alias for --limit), e.g. -n=10")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")
 	f.Fields = flag.String("fields", "", "Column projection: comma-separated list of columns to select/import (e.g. 'id,email,status')")
 
