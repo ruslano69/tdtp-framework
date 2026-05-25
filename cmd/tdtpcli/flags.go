@@ -59,6 +59,10 @@ type Flags struct {
 	ToHTML         *string
 	OpenBrowser    *bool
 	Row            *string // Row range for HTML viewer (e.g., "100-150")
+	ToCSV        *string // --to-csv: convert TDTP file to CSV
+	CSVDelimiter *string // --delimiter / -d: field separator (default ",")
+	CSVCP        *string // --cp: output code page (utf8, 1251, 866, …)
+	CSVBOM       *bool   // --bom: prepend UTF-8 BOM (for Excel)
 	ToXLSX         *string
 	FromXLSX       *string
 	ExportXLSX     *string
@@ -171,6 +175,11 @@ func ParseFlags() *Flags {
 	f.ToHTML = flag.String("to-html", "", "Convert TDTP XML file to HTML for browser viewing (input TDTP file)")
 	f.OpenBrowser = flag.Bool("open", false, "Open generated HTML file in default browser (use with --to-html)")
 	f.Row = flag.String("row", "", "Row range to display in HTML viewer, e.g. 100-150 (use with --to-html)")
+	f.ToCSV = flag.String("to-csv", "", "Convert TDTP file to CSV (input TDTP file). v1.4 packets require security pre-flight.")
+	f.CSVDelimiter = flag.String("delimiter", ",", "CSV field separator, e.g. -d=';' or -d=\\t")
+	flag.StringVar(f.CSVDelimiter, "d", ",", "CSV field separator shorthand (alias for --delimiter), e.g. -d=';'")
+	f.CSVCP = flag.String("cp", "utf8", "Output code page: utf8 (default), 1251 (Windows Cyrillic), 866 (DOS Cyrillic)")
+	f.CSVBOM = flag.Bool("bom", false, "Prepend UTF-8 BOM (helps Excel detect UTF-8 automatically)")
 	f.ToXLSX = flag.String("to-xlsx", "", "Convert TDTP XML file to XLSX (input TDTP file)")
 	f.FromXLSX = flag.String("from-xlsx", "", "Convert XLSX file to TDTP XML (input XLSX file)")
 	f.ExportXLSX = flag.String("export-xlsx", "", "Export table directly to XLSX (table name)")
@@ -186,8 +195,10 @@ func ParseFlags() *Flags {
 
 	// TDTQL Filters
 	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")
+	flag.Var(&f.Where, "w", "TDTQL WHERE shorthand (alias for --where)")
 	f.OrderBy = flag.String("order-by", "", "ORDER BY clause (e.g., 'name ASC, age DESC')")
 	f.Limit = flag.Int("limit", 0, "LIMIT rows: positive = first N rows, negative = last N rows (like tail -n)")
+	flag.IntVar(f.Limit, "n", 0, "Row limit shorthand (alias for --limit), e.g. -n=10")
 	f.Offset = flag.Int("offset", 0, "OFFSET number of rows to skip")
 	f.Fields = flag.String("fields", "", "Column projection: comma-separated list of columns to select/import (e.g. 'id,email,status')")
 

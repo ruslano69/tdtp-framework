@@ -220,6 +220,49 @@ func routeCommand(
 			})
 		})
 
+		// CSV conversion
+	} else if *flags.ToCSV != "" {
+		csvOutputFile := determineOutputFile(*flags.Output, *flags.ToCSV, "csv")
+		operation = audit.OpTransform
+		metadata = map[string]string{
+			"command":   "to-csv",
+			"input":     *flags.ToCSV,
+			"output":    csvOutputFile,
+			"delimiter": *flags.CSVDelimiter,
+			"cp":        *flags.CSVCP,
+		}
+
+		// Parse delimiter: strip wrapping single quotes (e.g. ';' → ;),
+		// then accept single char or named escapes (\t).
+		delim := rune(',')
+		if d := *flags.CSVDelimiter; d != "" && d != "," {
+			// Strip single quotes: ';' → ;
+			if len(d) == 3 && d[0] == '\'' && d[2] == '\'' {
+				d = string(d[1])
+			}
+			switch d {
+			case "\\t", "\t":
+				delim = '\t'
+			default:
+				runes := []rune(d)
+				if len(runes) == 1 {
+					delim = runes[0]
+				}
+			}
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-csv", func() error {
+			return commands.ConvertTDTPToCSV(ctx, commands.CSVOptions{
+				InputFile:  *flags.ToCSV,
+				OutputFile: csvOutputFile,
+				Delimiter:  delim,
+				CP:         *flags.CSVCP,
+				BOM:        *flags.CSVBOM,
+				Query:      query,
+				MercuryURL: *flags.MercuryURL,
+			})
+		})
+
 		// XLSX commands
 	} else if *flags.ToXLSX != "" {
 		xlsxOutputFile := determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx")
@@ -663,6 +706,7 @@ func main() {
 		*flags.Diff != "" ||
 		*flags.Merge != "" ||
 		*flags.ToHTML != "" ||
+		*flags.ToCSV != "" ||
 		*flags.ToCompact != "" ||
 		(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
 		(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
@@ -814,6 +858,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Import != "" ||
 		*flags.ToCompact != "" ||
 		*flags.ToHTML != "" ||
+		*flags.ToCSV != "" ||
 		*flags.ToXLSX != "" ||
 		*flags.FromXLSX != "" ||
 		*flags.ExportXLSX != "" ||
