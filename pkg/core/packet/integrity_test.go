@@ -38,9 +38,9 @@ func TestComputeIntegrity_Stamps(t *testing.T) {
 	}
 
 	for name, v := range map[string]string{
-		"SchemaXXH3":    result.SchemaXXH3,
-		"DataXXH3":      result.DataXXH3,
-		"PacketXXH3":    result.PacketXXH3,
+		"SchemaXXH3":      result.SchemaXXH3,
+		"DataXXH3":        result.DataXXH3,
+		"PacketXXH3":      result.PacketXXH3,
 		"pkt.Schema.XXH3": pkt.Schema.XXH3,
 		"pkt.Data.XXH3":   pkt.Data.XXH3,
 		"pkt.XXH3":        pkt.XXH3,

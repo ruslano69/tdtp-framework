@@ -275,10 +275,10 @@ func BenchmarkSendParallel(b *testing.B) {
 // ─── Test cases ───────────────────────────────────────────────────────────────
 
 type benchCase struct {
-	name     string
-	packets  int // число пакетов (частей одной таблицы)
-	rowsPer  int // строк в пакете
-	sizeKB   int // целевой размер пакета в КБ
+	name    string
+	packets int // число пакетов (частей одной таблицы)
+	rowsPer int // строк в пакете
+	sizeKB  int // целевой размер пакета в КБ
 }
 
 func packetCases() []benchCase {

@@ -22,18 +22,18 @@ import (
 
 // ExportOptions holds options for export operations
 type ExportOptions struct {
-	TableName      string
-	OutputFile     string
-	Query          *packet.Query
-	Fields         []string // Column projection: nil/empty = all columns
-	ProcessorMgr   ProcessorManager
-	Compress       bool
-	CompressLevel  int
-	CompressAlgo   string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
-	EnableChecksum bool   // Add XXH3 checksum for data integrity verification
-	ReadOnlyFields bool   // Include read-only fields (timestamp, computed, identity)
-	Fast             bool  // Skip SpecialValues detection for maximum export speed
-	FallbackRowLimit int64 // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
+	TableName        string
+	OutputFile       string
+	Query            *packet.Query
+	Fields           []string // Column projection: nil/empty = all columns
+	ProcessorMgr     ProcessorManager
+	Compress         bool
+	CompressLevel    int
+	CompressAlgo     string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
+	EnableChecksum   bool   // Add XXH3 checksum for data integrity verification
+	ReadOnlyFields   bool   // Include read-only fields (timestamp, computed, identity)
+	Fast             bool   // Skip SpecialValues detection for maximum export speed
+	FallbackRowLimit int64  // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
 	// v1.3.1 compact format
 	Compact     bool     // Enable compact format output
