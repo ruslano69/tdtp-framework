@@ -216,7 +216,7 @@ func ParseFlags() *Flags {
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1-19 (zstd) or 6-7 (kanzi)")
 	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
 	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
-	f.Hash = flag.Bool("hash", false, "Add XXH3 checksum for data integrity (requires --compress)")
+	f.Hash = flag.Bool("hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	f.Fast = flag.Bool("fast", false, "Skip SpecialValues detection for maximum export speed (no NULL/NaN/Inf schema markers)")
 	f.FallbackRowLimit = flag.Int64("fallback-row-limit", 1_000_000, "Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited). Protects prod DBs from full-table scans on broken queries")
 

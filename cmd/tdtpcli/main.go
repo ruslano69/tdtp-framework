@@ -126,7 +126,7 @@ func routeCommand(
 				Compress:         compress,
 				CompressLevel:    compressLevel,
 				CompressAlgo:     compressAlgo,
-				EnableChecksum:   *flags.Hash && compress, // Checksum requires compression
+				EnableChecksum:   compress, // Checksum always enabled with compression (--hash is no-op, kept for compat)
 				ReadOnlyFields:   *flags.ReadOnlyFields,
 				Fast:             *flags.Fast,
 				FallbackRowLimit: *flags.FallbackRowLimit,

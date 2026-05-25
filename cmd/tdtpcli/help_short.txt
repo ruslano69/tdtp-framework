@@ -57,10 +57,9 @@ OPTIONS:
     --readonly-fields          Include read-only fields
 
   Compression:
-    --compress                 Enable compression for exported data
+    --compress                 Enable compression; XXH3 checksum added automatically
     --compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× vs raw, 30% denser than zstd)
     --compress-level <n>       Level: 1-19 (zstd) or 6-7 (kanzi), default: 3
-    --hash                     Add XXH3 checksum for integrity (requires --compress)
     --packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)
     --fast                     Skip NULL/NaN/Inf detection for maximum throughput
 

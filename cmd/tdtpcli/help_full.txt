@@ -75,11 +75,10 @@ OPTIONS:
     --readonly-fields          Include read-only fields (timestamp, computed, identity)
 
   Compression:
-    --compress                 Enable compression for exported data
+    --compress                 Enable compression. XXH3-64 checksum of the compressed blob is added
+                               automatically and verified on --test, --import, --to-csv, --to-html.
     --compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× denser than raw, 30% denser than zstd)
     --compress-level <n>       Compression level: 1-19 (zstd) or 6-7 (kanzi), default: 3
-    --hash                     Add XXH3-64 checksum of compressed blob (requires --compress)
-                               Verified automatically on --test, --import, --to-csv, --to-html
     --packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)
     --fast                     Skip NULL/NaN/Inf detection for maximum throughput (no schema markers)
     --fallback-row-limit <n>   Max rows loaded into memory when SQL pushdown fails (default: 1000000)
@@ -88,7 +87,7 @@ OPTIONS:
   v1.4 Integrity:
     --integrity                Stamp packet with TDTP v1.4 xxh3_128 hashes: Schema + Data + Packet
                                fingerprint. Hash covers plain-text rows BEFORE compression.
-                               Upgrades packet version to 1.4. Use with --hash for full protection.
+                               Upgrades packet version to 1.4. Combine with --compress for full protection.
     --mercury-url <url>        Register packet fingerprint in xzMercury after export
                                (e.g. http://mercury:3000). Empty = local integrity only.
     --mercury-caller <name>    X-Caller identity sent to xzMercury (default: "tdtpcli")
@@ -233,20 +232,20 @@ EXAMPLES:
   # Export with kanzi (30% denser than zstd, large text tables)
   tdtpcli --export operations_log --compress --compress-algo kanzi --compress-level 6 --output ops.tdtp.xml
 
-  # Export with compression + XXH3 integrity checksum
-  tdtpcli --export orders --compress --hash --output orders.tdtp.xml
+  # Export with compression (XXH3 checksum added automatically)
+  tdtpcli --export orders --compress --output orders.tdtp.xml
 
-  # Export archive-quality: kanzi max + checksum + large packet for broker
-  tdtpcli --export kadrovye_prikazy --compress --compress-algo kanzi --compress-level 7 --hash --packet-size 8 --output archive.tdtp.xml
+  # Export archive-quality: kanzi max + large packet for broker (checksum automatic)
+  tdtpcli --export kadrovye_prikazy --compress --compress-algo kanzi --compress-level 7 --packet-size 8 --output archive.tdtp.xml
 
   # Export with read-only fields (timestamp, computed, identity)
   tdtpcli --export employees --readonly-fields --output employees.tdtp.xml
 
   # Export with v1.4 integrity hashes (xxh3_128 on Schema + Data + Packet)
-  tdtpcli --export users --compress --integrity --hash --output users_v14.tdtp.xml
+  tdtpcli --export users --compress --integrity --output users_v14.tdtp.xml
 
   # Export v1.4 + register fingerprint in xzMercury
-  tdtpcli --export orders --compress --integrity --hash \
+  tdtpcli --export orders --compress --integrity \
     --mercury-url http://mercury:3000 --mercury-caller svc-exporter --output orders_v14.tdtp.xml
 
   # Export compact v1.3.1 (fixed fields written once per group)
@@ -321,7 +320,7 @@ EXAMPLES:
   tdtpcli --import-xlsx orders.xlsx --strategy replace
 
   # Check file BEFORE import: integrity + row count + checksum
-  #   --test: decompresses in memory, verifies XXH3 checksum (if --hash was used),
+  #   --test: decompresses in memory, verifies XXH3 checksum (automatic when --compress was used),
   #           counts rows vs header, checks all multi-part siblings present.
   #   WHAT YOU LEARN: 'is this file intact and complete?'
   tdtpcli --test users.tdtp.xml
@@ -506,7 +505,7 @@ FEATURES:
   ✅ File Operations: Diff & Merge, CSV/HTML/XLSX conversion, Compact format
   ✅ CSV Export: --to-csv with delimiter, code page (utf8/1251/866), BOM, column projection
   ✅ XLSX Converter: Database ↔ Excel bidirectional
-  ✅ Compression: zstd (1-19) + kanzi (6-7, 30% denser) + XXH3 checksum (--compress --compress-algo --hash)
+  ✅ Compression: zstd (1-19) + kanzi (6-7, 30% denser) + XXH3 checksum automatic with --compress
   ✅ v1.4 Integrity: xxh3_128 Schema+Data+Packet hashes + optional xzMercury registration (--integrity)
   ✅ Circuit Breaker: Protection from cascading failures
   ✅ Audit Logger: GDPR/HIPAA compliance
