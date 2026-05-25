@@ -168,15 +168,6 @@ func buildAttrs(row SVGRow) []xml.Attr {
 	return out
 }
 
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
-}
-
 func lastIndexByte(s string, c byte) int {
 	for i := len(s) - 1; i >= 0; i-- {
 		if s[i] == c {
