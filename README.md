@@ -1469,36 +1469,6 @@ MIT
 
 ---
 
-## Features
-
-✅ **Self-Documenting Packets**: every TDTP.xml contains its schema inside — no external documentation needed  
-✅ **Database Adapters**: PostgreSQL, MS SQL, SQLite, MySQL, Access (.mdb/.accdb, Windows)  
-✅ **Message Brokers**:  
-&nbsp;&nbsp;&nbsp;&nbsp;- MSMQ — Legacy (Windows-only, batch mode)  
-&nbsp;&nbsp;&nbsp;&nbsp;- RabbitMQ — Stability (reliable delivery, batch mode)  
-&nbsp;&nbsp;&nbsp;&nbsp;- Kafka — Speed (ordered partitions, batch + streaming; production-ready)  
-✅ **Broker Export**: parallel compress+serialize, single-roundtrip SendBatch  
-✅ **Broker Import**: parallel decompression, in-order processing  
-✅ **Raw Broker Save**: `--raw` flag captures queue messages verbatim (no parse/decompress)  
-✅ **Streaming Consumer**: `--listen` (Kafka only) — stable channels only  
-✅ **File Operations**: Diff & Merge with conflict resolution  
-✅ **XLSX Converter**: Database ↔ Excel bidirectional  
-✅ **CSV Converter**: TDTP → CSV for data tool interoperability  
-✅ **SVG Support**: SVG ↔ TDTP tabular round-trip (namespace-aware)  
-✅ **Compression**: zstd (1-19) + kanzi (6-7, **4×** denser) + XXH3 checksum  
-✅ **Encryption**: `--enc` AES-256-GCM with xZMercury burn-on-read keys  
-✅ **Integrity Gate**: v1.4 XXH3-128 row-level verification on all consumer commands  
-✅ **Circuit Breaker**: Protection from cascading failures  
-✅ **Audit Logger**: GDPR/HIPAA compliance  
-✅ **Retry Mechanism**: Exponential backoff with jitter  
-✅ **Incremental Sync**: Checkpoint-based synchronization  
-✅ **Data Processors**: Masking, validation, normalization  
-✅ **TDTQL**: SQL-like query language for filtering  
-✅ **Field Sanitization**: `--translit` / `--clear` for exotic field names (Access, ERP)  
-✅ **Bracket-Quoted Identifiers**: `[Field Name]` syntax for MSSQL/Access  
-
----
-
 ## Contacts
 
 - **GitHub**: https://github.com/ruslano69/tdtp-framework
