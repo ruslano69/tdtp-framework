@@ -68,7 +68,17 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		return fmt.Errorf("failed to parse TDTP packet: %w", err)
 	}
 
-	// ── Security gate ──────────────────────────────────────────────────────────
+	// Decompress first — integrity hashes (v1.4) are computed on plain-text rows
+	// BEFORE compression on the producer side. Consumer must decompress before
+	// calling VerifyAndPrepare so that VerifyIntegrity hashes the same bytes.
+	if pkt.Data.Compression != "" {
+		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
+		if err := decompressPacketData(pkt); err != nil {
+			return fmt.Errorf("decompression failed: %w", err)
+		}
+	}
+
+	// ── Security gate (after decompression) ───────────────────────────────────
 	if pkt.Version == "1.4" {
 		fmt.Printf("  v1.4 packet — running security pre-flight...\n")
 
@@ -91,14 +101,6 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 			fmt.Printf("  ✓ Mercury: hash verified (sender=%s)\n", result.MercuryRecord.Sender)
 		default:
 			fmt.Printf("  ✓ Local integrity: OK\n")
-		}
-	}
-
-	// Decompress if needed
-	if pkt.Data.Compression != "" {
-		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
-		if err := decompressPacketData(pkt); err != nil {
-			return fmt.Errorf("decompression failed: %w", err)
 		}
 	}
 
