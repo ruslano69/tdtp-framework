@@ -1,63 +1,63 @@
 # TDTP Framework
 
-**Table Data Transfer Protocol** — фреймворк для универсального обмена табличными данными через базы данных и message brokers.
+**Table Data Transfer Protocol** — a framework for universal tabular data exchange across databases and message brokers.
 
 ---
 
-## Зачем это нужно
+## Why TDTP?
 
-### Для AI-агентов и инженеров данных:
+### For AI agents and data engineers:
 
-**Исследуй любую БД за минуты — без документации:**
+**Explore any database in minutes — no documentation needed:**
 
 ```bash
-# 1. Какие таблицы есть?
+# 1. What tables exist?
 tdtpcli --list --config my-db.yaml
 
-# 2. Как устроена таблица? (типы, ключи, FK)
+# 2. What is the table structure? (types, keys, FKs)
 tdtpcli --inspect-table orders
 
-# 3. Как выглядят данные? (последняя запись)
+# 3. What does the data look like? (latest record)
 tdtpcli --export orders --limit -1
 ```
 
-**Результат:** AI понимает структуру ЛЮБОЙ базы (Navision 2003, MSSQL, PostgreSQL, Access...) и может построить ETL автоматически.
+**Result:** AI understands the structure of ANY database (Navision 2003, MSSQL, PostgreSQL, Access...) and can build ETL automatically.
 
 ---
 
-### Для enterprise интеграций:
+### For enterprise integrations:
 
-**Полный цикл: исследование → ETL → синхронизация → шифрование**
+**Full cycle: discovery → ETL → synchronization → encryption**
 
-| Уровень | Что делает | Команда |
-|---------|-----------|---------|
-| Исследование | Понять структуру любой БД | `--list`, `--inspect-table` |
-| Перекачка | Extract → Transform → Load | `--pipeline etl.yaml` |
-| Синхронизация | Event-driven distributed sync | `--export-broker` / `--import-broker` |
-| Защита | Zero Trust encryption (burn-on-read keys) | xzmercury + AES-256-GCM |
+| Layer | What it does | Command |
+|-------|-------------|---------|
+| Discovery | Understand any DB structure | `--list`, `--inspect-table` |
+| Transfer | Extract → Transform → Load | `--pipeline etl.yaml` |
+| Sync | Event-driven distributed sync | `--export-broker` / `--import-broker` |
+| Protection | Zero Trust encryption (burn-on-read keys) | `--enc` + xZMercury + AES-256-GCM |
 
 ---
 
-## Быстрый старт
+## Quick Start
 
-### 1. Установи и попробуй
+### 1. Install and try
 
 ```bash
-# Скачай бинарник для своей ОС
+# Download binary for your OS
 # Windows: tdtpcli.exe
 # Linux/Mac: tdtpcli
 
-# Создай конфиг для своей БД
+# Create config for your database
 tdtpcli --create-config-pg > config.yaml
-# или для MSSQL, MySQL, SQLite, Access
+# or for MSSQL, MySQL, SQLite, Access
 
-# Попробуй
+# Try it
 tdtpcli --list --config config.yaml
 ```
 
-### 2. Что внутри TDTP файла
+### 2. What is inside a TDTP file
 
-Каждый TDTP.xml — **самодостаточный пакет** со всей информацией внутри:
+Every TDTP.xml is a **self-contained packet** with all information inside:
 
 ```xml
 <QueryContext>
@@ -82,32 +82,28 @@ tdtpcli --list --config config.yaml
 </Data>
 ```
 
-**Никакой внешней документации не нужно** — schema внутри пакета.
+**No external documentation needed** — schema is inside the packet.
 
-### 3. Производительность
+### 3. Performance
 
-| Сценарий | Время | Скорость |
-|----------|-------|----------|
-| Экспорт 100K rows → kanzi | 0.7 сек | ~70 MB/s |
-| 50K rows через Kafka → PostgreSQL | 7 сек | ~7K rows/s |
-| Сжатие kanzi level 6 | — | **4×** плотнее raw |
+| Scenario | Time | Speed |
+|----------|------|-------|
+| Export 100K rows → kanzi | 0.7 s | ~70 MB/s |
+| 50K rows via Kafka → PostgreSQL | 7 s | ~7K rows/s |
+| kanzi level 6 compression | — | **4×** denser than raw |
 
-### 4. Реальные примеры
+### 4. Real-world examples
 
-**Travel Agency** — 3 узла, event-driven синхронизация:
-- Central → Branch: страны, туры, гиды
-- Branch → Central: клиенты, продажи
-- Airline → Central: рейсы, брони
+**Travel Agency** — 3 nodes, event-driven sync:
+- Central → Branch: countries, tours, guides
+- Branch → Central: clients, sales
+- Airline → Central: flights, bookings
 
-```python
-# coordinator.py → RabbitMQ → consumer.py → staging → merge
-```
-
-[Примеры в examples/](/examples)
+[Examples in examples/](/examples)
 
 ---
 
-## What's Implemented (v1.9.1)
+## What's Implemented (v1.9.6)
 
 ### Core Modules
 
@@ -338,6 +334,24 @@ tdtpcli --list --config config.yaml
 
 ---
 
+### CSV Converter (`pkg/csv`)
+
+- TDTP → CSV conversion for interoperability with data tools and pipelines
+- Encrypted input (`.tdtp.enc`) auto-decrypted before conversion
+- v1.4 integrity gate applied automatically
+
+---
+
+### SVG Support (`pkg/svg`)
+
+- SVG → TDTP: parse SVG into tabular rows (element tag, attributes, hierarchy)
+- TDTP → SVG: reconstruct SVG from rows with full round-trip fidelity
+- Namespace-aware: `xlink:href`, `inkscape:label` and other URI-namespaced attributes
+  preserved correctly across encode/decode cycles
+- Designed for SVG data pipelines, diff, and batch transformations
+
+---
+
 ### Diff & Merge (`pkg/diff`)
 
 - Compare two TDTP files (added / modified / deleted)
@@ -489,52 +503,60 @@ drop the `aws-sdk-go-v2` dependency for minimal builds.
 
 **Philosophy:** nothing to protect if data disappears immediately after delivery.
 
+#### Standalone `--enc` tier (v1.9.6)
+
+Encrypt any export and auto-decrypt on any consumer command — no pipeline required.
+
+**Producer:**
+```bash
+# Export encrypted — output renamed to .tdtp.enc automatically
+tdtpcli --export financials --enc --output financials.tdtp.xml
+# → writes financials.tdtp.enc (AES-256-GCM, burn-on-read key via xZMercury)
+```
+
+**Consumer (auto-detect by `.tdtp.enc` extension):**
+```bash
+tdtpcli --import      financials.tdtp.enc     # decrypt → parse → load to DB
+tdtpcli --to-csv      financials.tdtp.enc     # decrypt → CSV
+tdtpcli --to-xlsx     financials.tdtp.enc     # decrypt → Excel
+tdtpcli --to-html     financials.tdtp.enc     # decrypt → HTML viewer
+```
+
+**Zero Trust properties:**
+- Keys are never stored on disk — RAM only (Redis via xZMercury)
+- **Burn-on-read**: key physically destroyed after first retrieval (Redis `GETDEL`)
+- **One shot** — key lives from bind to retrieve, typically ~300 ms
+- **HMAC-SHA256** — binding signature prevents key substitution in transit
+- **UUID isolation** — each packet gets a unique key; one compromised key reveals nothing else
+
+**xZMercury key lifecycle:**
+
+```
+Producer               xZMercury (Redis)            Consumer
+────────               ─────────────────            ────────
+GenerateUUID ────────► POST /api/keys/bind
+                            ├─ AES-256 key in RAM
+                            ├─ Bound to packet UUID
+                            └─ HMAC-SHA256 signature
+Encrypt(key, data) ◄── {key_b64, hmac}
+
+                                                ExtractUUID(blob)
+                                                POST /api/keys/retrieve
+                            ├─ Credential check
+                            └─ GETDEL → key destroyed ──► key_b64
+
+                                                Decrypt(key, blob)
+```
+
 #### AES-256-GCM (`pkg/crypto`)
 - Authenticated encryption (AEAD) — data cannot be tampered with undetected
 - Unique nonce from `crypto/rand` per packet (replay attacks impossible)
 - Binary format: `[2B version][1B algo][16B UUID][12B nonce][ciphertext + 16B GCM tag]`
 - Packet UUID embedded in header — recipient retrieves key without decrypting body
 
-#### Key lifecycle (`pkg/mercury` + xZMercury)
+#### Pipeline encryption (`pkg/mercury` + xZMercury)
 
-```
-Sender                xZMercury (Redis)            Recipient
-──────                ─────────────────            ─────────
-GenerateUUID ───────► POST /api/keys/bind
-                           ├─ AES-256 key in RAM
-                           ├─ Bound to packet UUID
-                           └─ HMAC-SHA256 signature
-Encrypt(key, data) ◄── {key_b64, hmac}
-
-                                               ExtractUUID(blob)
-                                               POST /api/keys/retrieve
-                           ├─ Credential check
-                           └─ GETDEL → key destroyed ──► key_b64
-
-                                               Decrypt(key, blob)
-```
-
-**Zero Trust properties:**
-- Keys are never stored on disk — RAM only (Redis)
-- **Burn-on-read**: key is physically destroyed after first retrieval (Redis `GETDEL`)
-- **One shot** — key lives from inhale (bind) to exhale (retrieve), typically ~300 ms
-- **HMAC-SHA256** — binding signature prevents key substitution in transit
-- **UUID isolation** — each packet gets a unique key; one compromised key reveals nothing else
-
-**Graceful degradation when xZMercury is unavailable:**
-
-If the key service is unreachable — data does not leak unencrypted. Instead of panic:
-
-```
-Mercury unavailable
-  → business data discarded
-  → error packet (MERCURY_UNAVAILABLE) written to tdtp_errors
-  → pipeline completes normally (exit 0)
-```
-
-The error sits on the "organized junk yard" — queryable with a plain SELECT.
-
-**Configuration:**
+For ETL pipelines, encryption is configured in YAML:
 
 ```yaml
 output:
@@ -544,8 +566,17 @@ output:
 security:
   mercury_url: "http://mercury:3000"
   recipient_resource: "ETL_RESULTS"
-  key_ttl_seconds: 86400       # Key TTL in Redis (failsafe expiry)
-  mercury_timeout_ms: 5000     # Timeout — triggers degradation, not hang
+  key_ttl_seconds: 86400
+  mercury_timeout_ms: 5000
+```
+
+**Graceful degradation when xZMercury is unavailable:**
+
+```
+Mercury unavailable
+  → business data discarded
+  → error packet (MERCURY_UNAVAILABLE) written to tdtp_errors
+  → pipeline completes normally (exit 0)
 ```
 
 **Error codes in `tdtp_errors`:**
@@ -556,6 +587,24 @@ security:
 | `MERCURY_ERROR` | HTTP 5xx from xZMercury |
 | `HMAC_VERIFICATION_FAILED` | key signature mismatch (substitution attempt?) |
 | `KEY_BIND_REJECTED` | quota exceeded or ACL denied |
+
+---
+
+### v1.4 Integrity Gate (Security)
+
+All consumer commands apply a security gate after decompression.
+
+**For v1.4 packets** (produced with `--integrity`):
+- XXH3-128 row-level hashes verified against the packet header
+- Optional full executor verification via xZMercury (`--mercury-url`)
+- Policy: `FallbackDegrade` — integrity failure blocks the packet, not the pipeline
+
+**For pre-v1.4 packets** (v1.0, v1.3.x):
+- Gate is a no-op — backward compatibility preserved
+- Old packets pass through all commands unchanged
+
+**Commands with the gate applied:**
+`--import`, `--import-broker`, `--listen`, `--to-csv`, `--to-xlsx`, `--to-html`
 
 ---
 
@@ -579,6 +628,7 @@ security:
 --diff <file-a> <file-b>   Compare two TDTP files
 --merge <files>            Merge multiple TDTP files
 --to-html <file>           Convert TDTP to HTML viewer
+--to-csv <file>            Convert TDTP to CSV
 ```
 
 **Object Storage (S3):**
@@ -636,6 +686,16 @@ security:
 --fast                     Skip NULL/NaN/Inf detection for maximum throughput
 ```
 
+**Encryption:**
+```
+--enc                      Encrypt output with AES-256-GCM via xZMercury (burn-on-read keys)
+                           Output file renamed: .tdtp.xml → .tdtp.enc
+                           Consumer commands (--import, --to-csv, --to-xlsx, --to-html)
+                           auto-detect .tdtp.enc and decrypt transparently.
+--mercury-url <url>        xZMercury server URL (overrides config); enables full executor
+                           verification for v1.4 integrity packets
+```
+
 **Field Name Sanitization (--import only):**
 ```
 --clear                    Replace special chars in field names with safe SQL identifiers
@@ -644,7 +704,7 @@ security:
                                        ! → _bang, ^ → _hat, < → _lt, > → _gt,
                                        space . , - / \ ` : | ; → _
 --translit                 Transliterate non-ASCII field names to ASCII (go-unidecode)
-                           Cyrillic: "Имя" → "Imia", "Дата рождения" → "Data_rozhdeniia"
+                           Cyrillic: "Name" → "Imia", "Date" → "Data_rozhdeniia"
                            European: "Österreich" → "Osterreich", "Ñoño" → "Nono"
                            Original names preserved as DB column comments (PG/MySQL)
 ```
@@ -801,6 +861,10 @@ tdtp-framework/
 ├─ pkg/xlsx/             Excel integration
 │  └─ converter.go       TDTP ↔ XLSX converter
 │
+├─ pkg/svg/              SVG integration
+│  ├─ parser.go          SVG → tabular rows (namespace-aware)
+│  └─ writer.go          Tabular rows → SVG (full round-trip)
+│
 ├─ pkg/brokers/
 │  ├─ broker.go          Broker interface
 │  ├─ rabbitmq.go        RabbitMQ integration
@@ -813,12 +877,17 @@ tdtp-framework/
 │  └─ s3/                S3 driver (aws-sdk-go-v2, UsePathStyle)
 │                        Compatible: AWS S3, SeaweedFS, MinIO, Ceph RGW
 │
+├─ xzmercury/            Zero Trust key server (embedded)
+│  └─ internal/          API, hashstore, quota, metrics
+│
 ├─ cmd/tdtpcli/          CLI utility
 │  ├─ main.go            Entry point
 │  ├─ help.go            Help information
 │  ├─ config.go          YAML configuration
 │  ├─ processors.go      Processor integration
 │  └─ commands/          Command handlers
+│     ├─ security.go     v1.4 integrity gate (applyV14SecurityGate)
+│     └─ encrypt.go      --enc tier (EncryptPacket / DecryptEncFile)
 │
 ├─ docs/                 Documentation
 │  ├─ SPECIFICATION.md   TDTP v1.0 specification
@@ -885,7 +954,7 @@ tdtpcli --import  delivery.xml   # load to DB
 tdtpcli --export clients --fields id,email,status --output clients_slim.xml
 
 # Export with bracket-quoted field names (spaces/special chars)
-tdtpcli --export '[ZTR$Employee]' --where "[Termination Date] = '1753-01-01'"
+tdtpcli --export orders --where "[Termination Date] = '1753-01-01'"
 tdtpcli --export orders --fields "id,[Birth Date],status"
 
 # Export with column projection + filter + compression
@@ -898,19 +967,27 @@ tdtpcli --export operations_log --compress --compress-algo kanzi --compress-leve
 tdtpcli --export orders --compress --hash --output orders.xml
 
 # Archive-quality: kanzi max + checksum + large packet for broker
-tdtpcli --export kadrovye_prikazy --compress --compress-algo kanzi --compress-level 7 --hash --packet-size 8 --output archive.xml
+tdtpcli --export payroll --compress --compress-algo kanzi --compress-level 7 --hash --packet-size 8 --output archive.xml
+
+# Encrypt export (AES-256-GCM, burn-on-read key via xZMercury)
+tdtpcli --export financials --enc --output financials.tdtp.xml
+# → writes financials.tdtp.enc
+
+# Import encrypted file (auto-detected by .tdtp.enc extension)
+tdtpcli --import financials.tdtp.enc
+
+# Convert encrypted file to Excel or HTML
+tdtpcli --to-xlsx financials.tdtp.enc --output financials.xlsx
+tdtpcli --to-html financials.tdtp.enc --open
 
 # Import only specific columns from a wide TDTP file
 tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
 
-# Import MS Access export with exotic field names (%, spaces, #, etc.)
+# Import Access export with exotic field names (%, spaces, #, etc.)
 tdtpcli --import access_export.xml --clear --strategy replace
 
-# Import Russian ERP export (Cyrillic field names) — transliterate + clean
+# Import ERP export with Cyrillic field names — transliterate + clean
 tdtpcli --import erp_orders.xml --translit --clear --strategy replace
-
-# Import European data (diacritics only, no special symbols)
-tdtpcli --import eu_data.xml --translit --strategy replace
 
 # Export with filters and compression
 tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
@@ -1210,7 +1287,7 @@ go test -v ./pkg/core/packet/
   - Python/pandas binding: markers applied before `astype()` to prevent `ValueError` crashes
   - XLSX adapter: full trap matrix for all 5 markers (see XLSX Converter section)
 
-### v1.6.0
+### v1.6.0 (completed)
 - HTML Viewer (`--to-html`, `--open`, `--row`)
 - Diff & Merge (`--diff`, `--merge`, `--merge-strategy`, `--show-conflicts`)
 - Extended XLSX commands (`--from-xlsx`, `--export-xlsx`, `--import-xlsx`)
@@ -1220,7 +1297,7 @@ go test -v ./pkg/core/packet/
 - `--batch`, `--readonly-fields` options
 - Zero Trust encryption: AES-256-GCM + xZMercury (burn-on-read keys, graceful degradation)
 
-### v1.7.1-beta (completed)
+### v1.7.1 (completed)
 - `--where` conditions for SQL filtering on export (repeatable flag, `IN (...)` support)
 - `--fields` column projection: export only specified columns
 - `--inspect` command: display TDTP file structure and metadata without full parse
@@ -1242,7 +1319,7 @@ go test -v ./pkg/core/packet/
 - **`compress_algo`** YAML config field — set default algorithm in config file
 - **CLI integration tests** — `tests/cli/test_sqlite.py` (31 tests), `tests/cli/test_postgres.py` (32 tests)
 
-### v1.8.1-beta (completed)
+### v1.8.1 (completed)
 - **Field Name Sanitizer** (`--translit`, `--clear`) — `pkg/sanitize`
   - `--clear`: symbol map replacement (`%` → `_pct`, `$` → `_usd`, `&` → `_and_`, etc.)
   - `--translit`: non-ASCII transliteration via go-unidecode (Cyrillic, European diacritics)
@@ -1263,7 +1340,7 @@ go test -v ./pkg/core/packet/
 - **Help refactor**: ~100 `fmt.Println` → embedded text files via `//go:embed`
 - **Pre-commit hook**: `gofmt`, `golint`, `go vet` on staged `.go` files
 
-### v1.9.0 (current)
+### v1.9.0 (completed)
 - **Kafka production-ready** — removed `[BETA]` label
 - **Parallel compress + serialize** on export: concurrent goroutines, per-goroutine generators
 - **`SendBatch`**: all packets sent in a single network roundtrip
@@ -1277,20 +1354,28 @@ go test -v ./pkg/core/packet/
 - **`BatchBytes`** raised to 100 MB, `BatchTimeout` lowered to 5ms
 - **Performance** (50k rows, 5 packets, localhost): kanzi 6 → 3.6s export, 3.9s import, 1.8 MB traffic (4× reduction)
 
+### v1.9.6 (current)
+- **`--enc` tier** — standalone AES-256-GCM encryption for any export
+  - `--export --enc` → output renamed `.tdtp.enc` automatically
+  - Auto-decrypt on `--import`, `--to-csv`, `--to-xlsx`, `--to-html` (detected by extension)
+  - Burn-on-read key via xZMercury: key destroyed after first retrieve
+  - S3 output for encrypted blobs: `--enc --output s3://bucket/key.tdtp.enc`
+- **v1.4 integrity gate** — `applyV14SecurityGate` applied to all consumer commands
+  - XXH3-128 row-level hash verification for v1.4 packets
+  - Optional full executor verification via `--mercury-url`
+  - Pre-v1.4 packets (v1.0, v1.3.x) pass through as no-op — backward compatible
+- **MercuryURL propagation** — `--mercury-url` wired through all import/listen/broker commands
+- **SVG namespace fix** — `xlink:href`, `inkscape:label` and other URI-namespaced attributes
+  round-trip correctly through `pkg/svg` (last-colon split instead of first-colon)
+
 ### v2.0 (planned)
 - Streaming export/import (TotalParts=0, "TCP for tables")
-  - ✅ Код готов: `pkg/core/packet/streaming.go` — `StreamingGenerator` с channel-based API
-  - ❌ Не подключён к CLI (нет `--export-stream` / `--import-stream`)
+  - Code ready: `pkg/core/packet/streaming.go` — `StreamingGenerator` with channel-based API
+  - Not connected to CLI yet (`--export-stream` / `--import-stream`)
 - Parallel import workers
-- **Docker** (multi-stage build)
-  - ✅ `docker-compose.yml` для тестового окружения (RabbitMQ, MSSQL, PostgreSQL, MySQL, Adminer)
-  - ❌ Нет Dockerfile для сборки tdtpcli
+- **Docker** multi-stage build (Dockerfile for tdtpcli)
 - Monitoring & metrics (Prometheus exporter)
-  - ❌ Нет встроенного Prometheus exporter
-  - ✅ Внутренние метрики есть в xzmercury (`xzmercury/internal/quota/metrics.go`)
-- Schema migration (ALTER TABLE)
-  - ⚠️ Частично: `ALTER TABLE RENAME TO` используется в StrategyReplace
-  - ❌ Полноценная миграция схем (добавление/удаление колонок, изменение типов) не реализована
+- Schema migration (ALTER TABLE — add/drop columns, type changes)
 
 ---
 
@@ -1386,27 +1471,31 @@ MIT
 
 ## Features
 
-✅ **Self-Documenting Packets**: каждый TDTP.xml содержит схему внутри — никакой документации не нужно
-✅ **Database Adapters**: PostgreSQL, MS SQL, SQLite, MySQL, Access (.mdb/.accdb, Windows)
-✅ **Message Brokers**:
-    - MSMQ — Legacy (Windows-only, batch mode)
-    - RabbitMQ — Stability (reliable delivery, batch mode)
-    - Kafka — Speed (ordered partitions, batch + streaming; production-ready)
-✅ **Broker Export**: parallel compress+serialize, single-roundtrip SendBatch
-✅ **Broker Import**: parallel decompression, in-order processing
-✅ **Raw Broker Save**: `--raw` flag captures queue messages verbatim (no parse/decompress)
-✅ **Streaming Consumer**: `--listen` (Kafka only) — stable channels only
-✅ **File Operations**: Diff & Merge with conflict resolution
-✅ **XLSX Converter**: Database ↔ Excel bidirectional
-✅ **Compression**: zstd (1-19) + kanzi (6-7, **4×** denser) + XXH3 checksum (`--compress --compress-algo --hash`)
-✅ **Circuit Breaker**: Protection from cascading failures
-✅ **Audit Logger**: GDPR/HIPAA compliance
-✅ **Retry Mechanism**: Exponential backoff with jitter
-✅ **Incremental Sync**: Checkpoint-based synchronization
-✅ **Data Processors**: Masking, validation, normalization
-✅ **TDTQL**: SQL-like query language for filtering
-✅ **Field Sanitization**: `--translit` / `--clear` for exotic field names (Access, 1C, ERP)
-✅ **Bracket-Quoted Identifiers**: `[Field Name]` syntax for MSSQL/Access
+✅ **Self-Documenting Packets**: every TDTP.xml contains its schema inside — no external documentation needed  
+✅ **Database Adapters**: PostgreSQL, MS SQL, SQLite, MySQL, Access (.mdb/.accdb, Windows)  
+✅ **Message Brokers**:  
+&nbsp;&nbsp;&nbsp;&nbsp;- MSMQ — Legacy (Windows-only, batch mode)  
+&nbsp;&nbsp;&nbsp;&nbsp;- RabbitMQ — Stability (reliable delivery, batch mode)  
+&nbsp;&nbsp;&nbsp;&nbsp;- Kafka — Speed (ordered partitions, batch + streaming; production-ready)  
+✅ **Broker Export**: parallel compress+serialize, single-roundtrip SendBatch  
+✅ **Broker Import**: parallel decompression, in-order processing  
+✅ **Raw Broker Save**: `--raw` flag captures queue messages verbatim (no parse/decompress)  
+✅ **Streaming Consumer**: `--listen` (Kafka only) — stable channels only  
+✅ **File Operations**: Diff & Merge with conflict resolution  
+✅ **XLSX Converter**: Database ↔ Excel bidirectional  
+✅ **CSV Converter**: TDTP → CSV for data tool interoperability  
+✅ **SVG Support**: SVG ↔ TDTP tabular round-trip (namespace-aware)  
+✅ **Compression**: zstd (1-19) + kanzi (6-7, **4×** denser) + XXH3 checksum  
+✅ **Encryption**: `--enc` AES-256-GCM with xZMercury burn-on-read keys  
+✅ **Integrity Gate**: v1.4 XXH3-128 row-level verification on all consumer commands  
+✅ **Circuit Breaker**: Protection from cascading failures  
+✅ **Audit Logger**: GDPR/HIPAA compliance  
+✅ **Retry Mechanism**: Exponential backoff with jitter  
+✅ **Incremental Sync**: Checkpoint-based synchronization  
+✅ **Data Processors**: Masking, validation, normalization  
+✅ **TDTQL**: SQL-like query language for filtering  
+✅ **Field Sanitization**: `--translit` / `--clear` for exotic field names (Access, ERP)  
+✅ **Bracket-Quoted Identifiers**: `[Field Name]` syntax for MSSQL/Access  
 
 ---
 
@@ -1417,5 +1506,3 @@ MIT
 - **Email**: ruslano69@gmail.com
 
 ---
-
-*Version: v1.9.1 | Last updated: 07.04.2026*
