@@ -170,6 +170,10 @@ type ImportBrokerOptions struct {
 
 	// PipelineContext precondition check (v1.4): --expect-var name=value.
 	ExpectVars map[string]string
+
+	// MercuryURL enables full executor verification for v1.4 packets.
+	// Empty → local xxh3 integrity check only (FallbackDegrade policy).
+	MercuryURL string
 }
 
 // ImportFromBroker imports one complete export batch from the broker queue.
@@ -328,6 +332,13 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 	}
 
+	// ── Security gate (v1.4) — applied to every packet before any write ─────
+	for i, pkt := range parsedPackets {
+		if err := applyV14SecurityGate(ctx, pkt, opts.MercuryURL); err != nil {
+			return fmt.Errorf("packet %d/%d: %w", i+1, actualParts, err)
+		}
+	}
+
 	switch {
 	case opts.OutputFile != "":
 		// File-save mode: write each part to disk.
@@ -433,6 +444,10 @@ func importBrokerKeep(ctx context.Context, broker brokers.MessageBroker, adapter
 		batchID, totalParts, opts.IdleTimeout, opts.Strategy)
 
 	importOne := func(pkt *packet.DataPacket, n int) error {
+		// ── Security gate (v1.4) ─────────────────────────────────────────────
+		if err := applyV14SecurityGate(ctx, pkt, opts.MercuryURL); err != nil {
+			return fmt.Errorf("part %d: %w", n, err)
+		}
 		fmt.Printf("  Part %d/%d — table '%s' (%d row(s))\n",
 			pkt.Header.PartNumber, totalParts, pkt.Header.TableName, len(pkt.Data.Rows))
 		if err := adapter.ImportPacket(ctx, pkt, opts.Strategy); err != nil {

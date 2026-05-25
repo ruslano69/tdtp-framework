@@ -26,6 +26,10 @@ type XLSXOptions struct {
 	// S3 output: non-nil → write to temp file, upload to S3, delete temp.
 	StorageCfg *storage.Config
 	StorageKey string // object key for output
+
+	// MercuryURL enables full executor verification for v1.4 packets.
+	// Empty → local xxh3 integrity check only (FallbackDegrade policy).
+	MercuryURL string
 }
 
 // ConvertTDTPToXLSX converts a TDTP XML file to XLSX
@@ -86,12 +90,18 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		return fmt.Errorf("failed to parse TDTP packet: %w", err)
 	}
 
-	// Decompress if needed
+	// Decompress first — integrity hashes (v1.4) are computed on plain-text rows
+	// BEFORE compression on the producer side, so decompress before VerifyAndPrepare.
 	if pkt.Data.Compression != "" {
 		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
 		if err := decompressPacketData(pkt); err != nil {
 			return fmt.Errorf("decompression failed: %w", err)
 		}
+	}
+
+	// ── Security gate (after decompression) ───────────────────────────────────
+	if err := applyV14SecurityGate(ctx, pkt, opts.MercuryURL); err != nil {
+		return err
 	}
 
 	// Expand compact v1.3.1 format (carry-forward fixed fields) before XLSX conversion

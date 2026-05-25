@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"database/sql"
 	"encoding/xml"
 	"testing"
 	"time"
@@ -293,27 +294,46 @@ func TestQueueParametersMatching(t *testing.T) {
 // Helper functions
 
 func createTestTable(ctx context.Context, adapter adapters.Adapter, tableName string) error {
-	// Простая тестовая таблица
-	// TODO: Implement table creation for integration tests
-	/*
-		CREATE TABLE tableName (
-			ID INT PRIMARY KEY,
-			Name NVARCHAR(100),
-			Email NVARCHAR(100),
-			Balance DECIMAL(10,2),
+	const dsn = "sqlserver://sa:YourStrong!Passw0rd@localhost:1433?database=master"
+	db, err := sql.Open("mssql", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// Drop if exists (clean state)
+	_, _ = db.ExecContext(ctx, "IF OBJECT_ID('dbo."+tableName+"', 'U') IS NOT NULL DROP TABLE dbo."+tableName)
+
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE dbo.`+tableName+` (
+			ID       INT          PRIMARY KEY,
+			Name     NVARCHAR(100),
+			Email    NVARCHAR(100),
+			Balance  DECIMAL(10,2),
 			IsActive BIT,
 			CreatedAt DATETIME2,
 			UpdatedAt DATETIME2
-		);
-	*/
+		)`)
+	if err != nil {
+		return err
+	}
 
-	// Для MS SQL выполняем через raw query (если есть такой метод)
-	// Иначе нужно использовать database/sql напрямую
-	// Это упрощенный вариант для демонстрации
-	return nil
+	// Insert a few rows so ExportTable has something to return
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO dbo.`+tableName+` (ID, Name, Email, Balance, IsActive, CreatedAt, UpdatedAt) VALUES
+		(1, N'Alice', N'alice@example.com', 100.50, 1, GETDATE(), GETDATE()),
+		(2, N'Bob',   N'bob@example.com',   200.75, 1, GETDATE(), GETDATE()),
+		(3, N'Carol', N'carol@example.com',   0.00, 0, GETDATE(), GETDATE())`)
+	return err
 }
 
 func dropTestTable(ctx context.Context, adapter adapters.Adapter, tableName string) error {
-	// DROP TABLE если существует
-	return nil
+	const dsn = "sqlserver://sa:YourStrong!Passw0rd@localhost:1433?database=master"
+	db, err := sql.Open("mssql", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, "IF OBJECT_ID('dbo."+tableName+"', 'U') IS NOT NULL DROP TABLE dbo."+tableName)
+	return err
 }

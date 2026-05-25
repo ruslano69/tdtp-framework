@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"os"
@@ -23,12 +24,23 @@ type HTMLOptions struct {
 	RowStart    int           // first row to render, 1-indexed (0 = from beginning)
 	RowEnd      int           // last row to render, 1-indexed inclusive (0 = to end)
 	Query       *packet.Query // TDTQL query for WHERE/ORDER-BY/LIMIT/OFFSET filtering
+
+	// MercuryURL enables full executor verification for v1.4 packets.
+	// Empty → local xxh3 integrity check only (FallbackDegrade policy).
+	MercuryURL string
 }
 
 // ConvertTDTPToHTML converts a TDTP XML file to a beautiful standalone HTML page.
 // Export is significantly faster than CSV because TDTP carries schema metadata,
 // so the viewer renders correct column types without guessing.
-func ConvertTDTPToHTML(opts HTMLOptions) error {
+//
+// Security gate:
+//   - v1.0 packets: pass-through, no security requirements.
+//   - v1.4 packets: VerifyAndPrepare (Mercury + local xxh3).
+//     MercuryURL set → full executor check, FallbackDegrade on timeout.
+//     MercuryURL empty → local integrity only (FallbackDegrade).
+//   - Any security failure → error returned, nothing written.
+func ConvertTDTPToHTML(ctx context.Context, opts HTMLOptions) error {
 	// Read input file
 	data, err := os.ReadFile(opts.InputFile)
 	if err != nil {
@@ -42,12 +54,18 @@ func ConvertTDTPToHTML(opts HTMLOptions) error {
 		return fmt.Errorf("failed to parse TDTP packet: %w", err)
 	}
 
-	// Decompress if needed
+	// Decompress first — integrity hashes (v1.4) are computed on plain-text rows
+	// BEFORE compression on the producer side, so decompress before VerifyAndPrepare.
 	if pkt.Data.Compression != "" {
 		fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
 		if err := decompressPacketData(pkt); err != nil {
 			return fmt.Errorf("decompression failed: %w", err)
 		}
+	}
+
+	// ── Security gate (after decompression) ───────────────────────────────────
+	if err := applyV14SecurityGate(ctx, pkt, opts.MercuryURL); err != nil {
+		return err
 	}
 
 	// Expand compact v1.3.1 format (carry-forward fixed fields) before rendering

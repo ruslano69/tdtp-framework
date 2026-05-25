@@ -139,7 +139,11 @@ quota:
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	mercuryURL := "http://" + addr
 
-	writeFile(t, cfgPath, strings.ReplaceAll(xzmercuryConfig, "__ADDR__", addr))
+	// Windows paths contain backslashes; in YAML double-quoted strings \U is a
+	// Unicode escape → replace with forward slashes before embedding into YAML.
+	yamlSafe := strings.ReplaceAll(xzmercuryConfig, "__ADDR__", addr)
+	yamlSafe = strings.ReplaceAll(yamlSafe, `\`, `/`)
+	writeFile(t, cfgPath, yamlSafe)
 
 	t.Logf("starting xzmercury --dev on %s", addr)
 	xzmCmd := exec.Command(
@@ -177,6 +181,9 @@ quota:
 	t.Logf("xzmercury ready at %s", mercuryURL)
 
 	// ── 3. Pipeline config ────────────────────────────────────────────────
+	// Use forward slashes in YAML strings: on Windows, backslashes are
+	// interpreted as YAML escape sequences (e.g. \U = 8-hex Unicode escape).
+	outFileYAML := filepath.ToSlash(outFile)
 	pipelinePath := filepath.Join(tmp, "pipeline.yaml")
 	writeFile(t, pipelinePath, fmt.Sprintf(`
 name: "dept-salary-encrypted"
@@ -225,7 +232,7 @@ security:
 
 error_handling:
   on_source_error: "fail"
-`, outFile, mercuryURL))
+`, outFileYAML, mercuryURL))
 
 	// ── 4. Вызываем tdtpcli --pipeline ───────────────────────────────────
 	t.Log("running tdtpcli --pipeline")
@@ -266,11 +273,12 @@ error_handling:
 	// Запускаем pipeline второй раз — xzmercury выдаст новый ключ для нового UUID,
 	// поэтому вместо этого проверяем через прямой HTTP-запрос к xzmercury.
 	outFile2 := filepath.Join(tmp, "dept_report_encrypted_2.tdtp")
+	outFile2YAML := filepath.ToSlash(outFile2)
 	writeFile(t, filepath.Join(tmp, "pipeline2.yaml"), strings.ReplaceAll(
 		strings.ReplaceAll(
 			mustReadFile(t, pipelinePath),
-			outFile,
-			outFile2,
+			outFileYAML,  // pipeline was written with forward slashes
+			outFile2YAML,
 		),
 		"dept-salary-encrypted",
 		"dept-salary-encrypted-2",

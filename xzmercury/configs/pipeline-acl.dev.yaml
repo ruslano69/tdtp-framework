@@ -1,0 +1,20 @@
+# pipeline-acl.dev.yaml — ACL для dev/test окружения
+# Все пайплайны доступны без ограничений группы (mock LDAP всех пускает).
+
+default_group: "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+default_cost: 1
+
+pipelines:
+  # Тестовые пайплайны
+  dept-salary-encrypted:
+    group: "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+    cost: 1
+
+  test-pipeline:
+    group: "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+    cost: 1
+
+  # travel-agency примеры
+  travel-export:
+    group: "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+    cost: 1

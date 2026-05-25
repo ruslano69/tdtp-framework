@@ -10,8 +10,6 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
-	"github.com/ruslano69/tdtp-framework/pkg/mercury"
-	"github.com/ruslano69/tdtp-framework/pkg/pipeline"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/transform"
 )
@@ -79,29 +77,8 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 	}
 
 	// ── Security gate (after decompression) ───────────────────────────────────
-	if pkt.Version == "1.4" {
-		fmt.Printf("  v1.4 packet — running security pre-flight...\n")
-
-		var verifier pipeline.HashVerifier
-		if opts.MercuryURL != "" {
-			verifier = mercury.NewClient(opts.MercuryURL, 5000)
-			fmt.Printf("  Mercury: %s\n", opts.MercuryURL)
-		} else {
-			fmt.Printf("  Mercury: not configured — local integrity only\n")
-		}
-
-		result, verErr := pipeline.VerifyAndPrepare(ctx, pkt, verifier, pipeline.FallbackDegrade)
-		if verErr != nil {
-			return fmt.Errorf("security check failed — export blocked: %w", verErr)
-		}
-		switch {
-		case result.Degraded:
-			fmt.Printf("  ⚠ Degraded mode: %s\n", result.DegradedReason)
-		case result.MercuryRecord != nil:
-			fmt.Printf("  ✓ Mercury: hash verified (sender=%s)\n", result.MercuryRecord.Sender)
-		default:
-			fmt.Printf("  ✓ Local integrity: OK\n")
-		}
+	if err := applyV14SecurityGate(ctx, pkt, opts.MercuryURL); err != nil {
+		return err
 	}
 
 	// Expand compact v1.3.1 format (carry-forward fixed fields)

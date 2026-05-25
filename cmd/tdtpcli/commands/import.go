@@ -40,6 +40,10 @@ type ImportOptions struct {
 	// PipelineContext precondition check (v1.4): --expect-var name=value.
 	// Import fails before any DB writes if packet variables don't match.
 	ExpectVars map[string]string
+
+	// MercuryURL enables full executor verification for v1.4 packets.
+	// Empty → local xxh3 integrity check only (FallbackDegrade policy).
+	MercuryURL string
 }
 
 // ImportFile imports a TDTP XML file (or multi-part set) to database.
@@ -128,6 +132,13 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
+		// ── Security gate (after decompression) ─────────────────────────────────
+		// For v1.4: verifies Mercury hash registry + local xxh3 + expands Dictionary.
+		// Pre-v1.4: no-op.
+		if err := applyV14SecurityGate(ctx, pkt, opts.MercuryURL); err != nil {
+			return err
+		}
+
 		if pkt.Data.Compact {
 			fmt.Printf("  Expanding compact format (v1.3.1)...\n")
 			if err := packet.ExpandCompactRows(pkt); err != nil {
@@ -135,13 +146,15 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			}
 		}
 
+		// Dictionary expansion: handled by VerifyAndPrepare for v1.4 (via applyV14SecurityGate).
+		// This block is a safety net for any pre-v1.4 packets that carry a Dictionary.
 		if pkt.Schema.Dictionary != nil && len(pkt.Schema.Dictionary.Entries) > 0 {
-			fmt.Printf("  Expanding Dictionary (v1.4, %d entries)...\n", len(pkt.Schema.Dictionary.Entries))
+			fmt.Printf("  Expanding Dictionary (%d entries)...\n", len(pkt.Schema.Dictionary.Entries))
 			exp := packet.NewDictExpander(pkt.Schema.Dictionary)
 			for i, row := range pkt.Data.Rows {
 				pkt.Data.Rows[i].Value = exp.ExpandRow(row.Value)
 			}
-			pkt.Schema.Dictionary = nil // словарь раскрыт, больше не нужен
+			pkt.Schema.Dictionary = nil
 		}
 
 		if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {

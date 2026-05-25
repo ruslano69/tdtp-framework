@@ -1,0 +1,45 @@
+# xzmercury — DEV configuration
+# Запуск: xzmercury.exe --dev --config configs/xzmercury.dev.yaml
+#
+# --dev включает:
+#   - in-process miniredis (два экземпляра, Redis не нужен)
+#   - mock LDAP (все пользователи из cn=tdtp-pipeline-users)
+#   - предупреждение вместо отказа при запуске от Administrator
+
+server:
+  addr: ":3000"
+  read_timeout: 30s
+  write_timeout: 30s
+
+# В --dev режиме Redis-адреса игнорируются — miniredis стартует in-process.
+mercury:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+
+pipeline:
+  addr: "localhost:6380"
+  password: ""
+  db: 0
+
+security:
+  # HMAC-секрет для подписи bind-ответов.
+  # В production — переменная окружения MERCURY_SERVER_SECRET.
+  server_secret: "dev-secret-change-in-production-32ch"
+  rate_limit: 0   # без лимита в dev
+
+key_ttl: 15m      # TTL ключей
+
+ldap:
+  # В --dev режиме игнорируется, используется mock LDAP
+  addr: ""
+  bind_dn: ""
+  bind_password: ""
+  base_dn: ""
+  cache_ttl: 120s
+  mock_users_file: "configs/ldap-users.dev.json"
+  acl_file: "configs/pipeline-acl.dev.yaml"
+
+quota:
+  default_hourly: 100000  # большой лимит для тестов
+  acl_file: "configs/pipeline-acl.dev.yaml"

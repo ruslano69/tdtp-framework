@@ -186,6 +186,7 @@ func routeCommand(
 				SanitizeClear:    *flags.Clear,
 				SanitizeTranslit: *flags.Translit,
 				ExpectVars:       flags.ExpectVars,
+				MercuryURL:       *flags.MercuryURL,
 			})
 		})
 
@@ -212,7 +213,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-html", func() error {
-			return commands.ConvertTDTPToHTML(commands.HTMLOptions{
+			return commands.ConvertTDTPToHTML(ctx, commands.HTMLOptions{
 				InputFile:   *flags.ToHTML,
 				OutputFile:  outputHTML,
 				OpenBrowser: *flags.OpenBrowser,
@@ -220,6 +221,7 @@ func routeCommand(
 				RowStart:    rowStart,
 				RowEnd:      rowEnd,
 				Query:       query,
+				MercuryURL:  *flags.MercuryURL,
 			})
 		})
 
@@ -309,6 +311,7 @@ func routeCommand(
 				Query:      query,
 				StorageCfg: xlsxStorageCfg,
 				StorageKey: xlsxStorageKey,
+				MercuryURL: *flags.MercuryURL,
 			})
 		})
 
@@ -452,6 +455,7 @@ func routeCommand(
 				Raw:         *flags.RawBroker,
 				Keep:        *flags.KeepBroker,
 				ExpectVars:  flags.ExpectVars,
+				MercuryURL:  *flags.MercuryURL,
 			})
 		})
 
@@ -647,8 +651,9 @@ func routeCommand(
 
 		// Listen runs until SIGTERM — bypass resilience wrapper (it's an infinite loop)
 		err = commands.ListenKafkaStream(ctx, adapterConfig, commands.ListenConfig{
-			BrokerCfg: &brokerCfg,
-			Strategy:  strategy,
+			BrokerCfg:  &brokerCfg,
+			Strategy:   strategy,
+			MercuryURL: *flags.MercuryURL,
 		})
 	}
 

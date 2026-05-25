@@ -1,0 +1,30 @@
+[
+  {
+    "username": "svc_tdtp",
+    "groups": [
+      "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local",
+      "cn=tdtp-admins,ou=groups,dc=corp,dc=local"
+    ]
+  },
+  {
+    "username": "analyst1",
+    "groups": [
+      "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local"
+    ]
+  },
+  {
+    "username": "finance_svc",
+    "groups": [
+      "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local",
+      "cn=tdtp-finance,ou=groups,dc=corp,dc=local"
+    ]
+  },
+  {
+    "username": "admin",
+    "groups": [
+      "cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local",
+      "cn=tdtp-admins,ou=groups,dc=corp,dc=local",
+      "cn=tdtp-finance,ou=groups,dc=corp,dc=local"
+    ]
+  }
+]

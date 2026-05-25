@@ -39,8 +39,9 @@ import (
 
 // ListenConfig holds configuration for the streaming consumer daemon.
 type ListenConfig struct {
-	BrokerCfg *BrokerConfig
-	Strategy  adapters.ImportStrategy
+	BrokerCfg  *BrokerConfig
+	Strategy   adapters.ImportStrategy
+	MercuryURL string // v1.4 security gate; empty → local integrity only
 }
 
 // streamSession tracks an active streaming session by MessageID base.
@@ -158,6 +159,17 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 			}
 			sessions[sessionKey] = sess
 			fmt.Printf("[listen] new session  : %s → table '%s'\n", sessionKey, h.TableName)
+		}
+
+		// ── Security gate (v1.4) ────────────────────────────────────────────────
+		if err := applyV14SecurityGate(listenCtx, pkt, cfg.MercuryURL); err != nil {
+			fmt.Printf("[listen] security gate blocked packet (session %s, part %d): %v\n",
+				sessionKey, h.PartNumber, err)
+			// Nack without requeue — tampered packets must not re-enter the queue.
+			if nacker, ok := broker.(interface{ NackLast(requeue bool) error }); ok {
+				_ = nacker.NackLast(false)
+			}
+			continue
 		}
 
 		// Import rows immediately (Variant A)
