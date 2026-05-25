@@ -97,8 +97,8 @@ func ContractDictionary(entries []DictEntry, cell string) string {
 //	    expanded := exp.ExpandRow(row.Value)
 //	}
 type DictExpander struct {
-	intern  map[string]string // short → full, nil when no dictionary
-	hasAt   bool              // any entry starts with '@' — always true by spec
+	intern map[string]string // short → full, nil when no dictionary
+	hasAt  bool              // any entry starts with '@' — always true by spec
 }
 
 // NewDictExpander builds a DictExpander from a packet Dictionary.

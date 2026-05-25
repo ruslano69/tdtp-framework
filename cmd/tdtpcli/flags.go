@@ -89,7 +89,7 @@ type Flags struct {
 	Table          *string // Target table name (overrides name from XML during import)
 	Sheet          *string
 	Strategy       *string
-	Batch          *int // [deprecated, no-op] alias kept for backward compat; use --batch-size
+	Batch          *int  // [deprecated, no-op] alias kept for backward compat; use --batch-size
 	ReadOnlyFields *bool // Include read-only fields (timestamp, computed, identity) in export
 
 	// Compression

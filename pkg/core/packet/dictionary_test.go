@@ -15,11 +15,11 @@ func TestIsDictToken(t *testing.T) {
 		{"@xlink", true},
 		{"@a", true},
 		{"@a_b_2", true},
-		{"@1bad", false},   // must start with letter after @
-		{"@", false},       // no body
-		{"W3", false},      // no @
-		{"@W3 ", false},    // trailing space
-		{"@W3-x", false},   // dash not allowed
+		{"@1bad", false},        // must start with letter after @
+		{"@", false},            // no body
+		{"W3", false},           // no @
+		{"@W3 ", false},         // trailing space
+		{"@W3-x", false},        // dash not allowed
 		{"text @W3 mid", false}, // substring rejected
 		{"", false},
 	}
@@ -187,9 +187,9 @@ func TestDictExpander_Expand(t *testing.T) {
 		{"@W3|label|42", "http://www.w3.org/2000/svg|label|42"},
 		{"id|@inks|value", "id|http://www.inkscape.org/namespaces/inkscape|value"},
 		{"@W3|@inks|plain", "http://www.w3.org/2000/svg|http://www.inkscape.org/namespaces/inkscape|plain"},
-		{"no_token|here", "no_token|here"},           // no expansion — no alloc path
-		{"@@double|skip", "@@double|skip"},            // @@ not a token
-		{"prefix@W3|x", "prefix@W3|x"},               // substring — not whole-cell
+		{"no_token|here", "no_token|here"}, // no expansion — no alloc path
+		{"@@double|skip", "@@double|skip"}, // @@ not a token
+		{"prefix@W3|x", "prefix@W3|x"},     // substring — not whole-cell
 	}
 	for _, c := range cases {
 		if got := exp.ExpandRow(c.in); got != c.want {

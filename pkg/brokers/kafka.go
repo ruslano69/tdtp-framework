@@ -67,8 +67,8 @@ func (k *Kafka) ensureReader() {
 		Topic:             k.config.Topic,
 		MinBytes:          1,
 		MaxBytes:          10e6,
-		CommitInterval:    0,                      // Manual commit
-		StartOffset:       kafka.FirstOffset,      // earliest
+		CommitInterval:    0,                 // Manual commit
+		StartOffset:       kafka.FirstOffset, // earliest
 		MaxWait:           1 * time.Second,
 		ReadBackoffMin:    100 * time.Millisecond,
 		ReadBackoffMax:    1 * time.Second,
