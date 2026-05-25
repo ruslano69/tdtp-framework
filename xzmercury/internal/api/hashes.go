@@ -22,10 +22,11 @@ import (
 // Redis key: mercury:hash:{uuid}:{part}  (SET NX — one registration per slot, ever)
 //
 // Why UUID+part as key (not the hash):
-//   The producer registers the hash for a specific packet identity (UUID+part).
-//   Consumer presents its pkt.XXH3; Mercury compares against what the producer
-//   stored. Attacker cannot re-register a forged hash for the same slot (NX)
-//   and cannot use a different UUID (UUIDs are globally unique, new per packet).
+//
+//	The producer registers the hash for a specific packet identity (UUID+part).
+//	Consumer presents its pkt.XXH3; Mercury compares against what the producer
+//	stored. Attacker cannot re-register a forged hash for the same slot (NX)
+//	and cannot use a different UUID (UUIDs are globally unique, new per packet).
 type hashesHandler struct {
 	store *hashstore.Store
 }
@@ -133,7 +134,7 @@ func (h *hashesHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 type verifyHashResponse struct {
 	Registered       bool      `json:"registered"`
-	Match            bool      `json:"match"`             // presented xxh3 == stored xxh3
+	Match            bool      `json:"match"` // presented xxh3 == stored xxh3
 	UUID             string    `json:"uuid,omitempty"`
 	Part             int       `json:"part,omitempty"`
 	StoredXXH3       string    `json:"stored_xxh3,omitempty"`

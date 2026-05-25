@@ -8,13 +8,13 @@
 // Composite key: mercury:hash:{uuid}:{part}
 //
 // Using UUID+PartNumber (not the hash itself) as the Redis key means:
-//   1. SET NX prevents re-registration of the same packet slot — ever.
-//   2. The stored value is the xxh3_128 fingerprint the PRODUCER registered.
-//      Consumer compares it against pkt.XXH3: mismatch → tampered.
-//   3. After TTL expiry the slot is freed, but UUID is globally unique (v4),
-//      so a new packet always carries a new UUID — no slot collision possible.
-//   4. Attacker who modifies a packet and updates pkt.XXH3 still cannot
-//      update Mercury (requires auth + slot already taken by producer).
+//  1. SET NX prevents re-registration of the same packet slot — ever.
+//  2. The stored value is the xxh3_128 fingerprint the PRODUCER registered.
+//     Consumer compares it against pkt.XXH3: mismatch → tampered.
+//  3. After TTL expiry the slot is freed, but UUID is globally unique (v4),
+//     so a new packet always carries a new UUID — no slot collision possible.
+//  4. Attacker who modifies a packet and updates pkt.XXH3 still cannot
+//     update Mercury (requires auth + slot already taken by producer).
 package hashstore
 
 import (

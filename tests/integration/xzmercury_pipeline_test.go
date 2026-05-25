@@ -277,7 +277,7 @@ error_handling:
 	writeFile(t, filepath.Join(tmp, "pipeline2.yaml"), strings.ReplaceAll(
 		strings.ReplaceAll(
 			mustReadFile(t, pipelinePath),
-			outFileYAML,  // pipeline was written with forward slashes
+			outFileYAML, // pipeline was written with forward slashes
 			outFile2YAML,
 		),
 		"dept-salary-encrypted",

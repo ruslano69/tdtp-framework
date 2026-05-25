@@ -19,8 +19,8 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	LDAP     ldap.Config    `yaml:"ldap"`
 	Quota    QuotaConfig    `yaml:"quota"`
-	KeyTTL  time.Duration `yaml:"key_ttl"`  // how long a bound key lives; default 5m
-	HashTTL time.Duration `yaml:"hash_ttl"` // how long a registered hash lives; default 24h
+	KeyTTL   time.Duration  `yaml:"key_ttl"`  // how long a bound key lives; default 5m
+	HashTTL  time.Duration  `yaml:"hash_ttl"` // how long a registered hash lives; default 24h
 }
 
 // ServerConfig controls the HTTP listener.
