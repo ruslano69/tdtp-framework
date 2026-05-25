@@ -232,6 +232,12 @@ func ResolveFixedFields(schema Schema, explicit []string) []string {
 // помечает поля fixedFieldNames как fixed в схеме, стрипает _ prefix из имён,
 // перекодирует строки в compact-формат, устанавливает версию 1.3.1.
 func ApplyCompact(pkt *DataPacket, fixedFieldNames []string, tail bool) error {
+	// Ensure rawRows (GenerateReference fast-path) are flushed into Data.Rows
+	// before we read them. Without this, GetRowValues below sees an empty slice
+	// and RowsToCompactData produces zero rows, while ToXML still uses rawRows
+	// (uncompacted original data) via the fast-path branch.
+	pkt.MaterializeRows()
+
 	fixedSet := make(map[string]bool, len(fixedFieldNames))
 	for _, f := range fixedFieldNames {
 		fixedSet[f] = true

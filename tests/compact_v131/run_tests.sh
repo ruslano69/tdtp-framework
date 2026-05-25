@@ -73,20 +73,21 @@ info "Все строки Data:"
 grep '<R>' $DIR/dept_emp_compact.xml | cat -n
 
 # Группа dept 10 (5 сотрудников): 1 header + 4 carry строки
-GROUP10_HEADER=$(grep '<R>10|' $DIR/dept_emp_compact.xml | wc -l)
+# XML однострочный → grep -o считает вхождения, не строки
+GROUP10_HEADER=$(grep -o '<R>10|' $DIR/dept_emp_compact.xml | wc -l)
 info "Строк с dept_id=10 (header группы): $GROUP10_HEADER (ожидается 1)"
 [ "$GROUP10_HEADER" -eq 1 ] && ok "dept 10 header row" || fail "Ожидалось 1, получено $GROUP10_HEADER"
 
-GROUP20_HEADER=$(grep '<R>20|' $DIR/dept_emp_compact.xml | wc -l)
+GROUP20_HEADER=$(grep -o '<R>20|' $DIR/dept_emp_compact.xml | wc -l)
 info "Строк с dept_id=20 (header группы): $GROUP20_HEADER (ожидается 1)"
 [ "$GROUP20_HEADER" -eq 1 ] && ok "dept 20 header row" || fail "Ожидалось 1, получено $GROUP20_HEADER"
 
-GROUP30_HEADER=$(grep '<R>30|' $DIR/dept_emp_compact.xml | wc -l)
+GROUP30_HEADER=$(grep -o '<R>30|' $DIR/dept_emp_compact.xml | wc -l)
 info "Строк с dept_id=30 (header группы): $GROUP30_HEADER (ожидается 1)"
 [ "$GROUP30_HEADER" -eq 1 ] && ok "dept 30 header row" || fail "Ожидалось 1, получено $GROUP30_HEADER"
 
 # 12 carry-строк (по 4 на каждый отдел из 5 сотрудников)
-CARRY=$(grep '<R>|||' $DIR/dept_emp_compact.xml | wc -l)
+CARRY=$(grep -o '<R>|||' $DIR/dept_emp_compact.xml | wc -l)
 info "Carry-forward строк (|||...): $CARRY (ожидается 12)"
 [ "$CARRY" -eq 12 ] && ok "12 carry-forward строк" || fail "Ожидалось 12, получено $CARRY"
 
@@ -97,12 +98,12 @@ grep -q '<R>30|HR|Kazan|301|George Orlov'                 $DIR/dept_emp_compact.
 
 # ── 3. Проверка структуры compact-строк ───────────────────────────────────────
 hdr "3. Проверка compact-структуры (пропуски в fixed полях)"
-ROWS=$(grep '<R>' $DIR/dept_emp_compact.xml | wc -l)
+ROWS=$(grep -o '<R>' $DIR/dept_emp_compact.xml | wc -l)
 info "Строк в Data: $ROWS (ожидается 15)"
 [ "$ROWS" -eq 15 ] && ok "15 строк" || fail "Ожидалось 15 строк, получено $ROWS"
 
 # В compact-формате строки 2+ в каждой группе начинаются с || (пропуски fixed полей)
-EMPTY_FIXED=$(grep '<R>||' $DIR/dept_emp_compact.xml | wc -l)
+EMPTY_FIXED=$(grep -o '<R>||' $DIR/dept_emp_compact.xml | wc -l)
 info "Строк с пропусками fixed полей (начинаются ||): $EMPTY_FIXED (ожидается 12)"
 [ "$EMPTY_FIXED" -eq 12 ] && ok "12 строк с carry-forward пропусками" || fail "Ожидалось 12, получено $EMPTY_FIXED"
 
