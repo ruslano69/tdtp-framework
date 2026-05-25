@@ -13,10 +13,15 @@ COMMANDS:
     --inspect-table <table>    Inspect live DB table: native types, FKs, row count, sample row
 
   File Operations:
+    --test <tdtp-file>         Dry-run integrity check: decompress in memory, verify XXH3 checksum,
+                               validate XML, count rows vs header (no DB connection needed)
     --inspect <tdtp-file>      Print YAML metadata summary (no config needed)
+    --to-csv <tdtp-file>       Convert TDTP file to CSV. Handles compressed (zstd/kanzi),
+                               compact v1.3.1, and v1.4 integrity packets.
+    --to-html <tdtp-file>      Convert TDTP to HTML viewer (fast preview)
     --diff <file-a> <file-b>   Compare two TDTP files and show differences
     --merge <files>            Merge multiple TDTP files into one
-    --to-html <tdtp-file>      Convert TDTP to HTML viewer (fast preview)
+    --to-compact <tdtp-file>   Convert existing TDTP v1.x file to compact v1.3.1 format
 
   XLSX Operations:
     --to-xlsx <tdtp-file>      Convert TDTP XML to XLSX
@@ -73,9 +78,41 @@ OPTIONS:
     --compress                 Enable compression for exported data
     --compress-algo <algo>     Algorithm: zstd (default) or kanzi (4× denser than raw, 30% denser than zstd)
     --compress-level <n>       Compression level: 1-19 (zstd) or 6-7 (kanzi), default: 3
-    --hash                     Add XXH3 checksum for integrity verification (requires --compress)
+    --hash                     Add XXH3-64 checksum of compressed blob (requires --compress)
+                               Verified automatically on --test, --import, --to-csv, --to-html
     --packet-size <MB>         Max broker packet size in MB (default 0 = ~1.9MB; use 8 for kanzi)
     --fast                     Skip NULL/NaN/Inf detection for maximum throughput (no schema markers)
+    --fallback-row-limit <n>   Max rows loaded into memory when SQL pushdown fails (default: 1000000)
+                               Protects production DBs from accidental full-table scans; 0 = unlimited
+
+  v1.4 Integrity:
+    --integrity                Stamp packet with TDTP v1.4 xxh3_128 hashes: Schema + Data + Packet
+                               fingerprint. Hash covers plain-text rows BEFORE compression.
+                               Upgrades packet version to 1.4. Use with --hash for full protection.
+    --mercury-url <url>        Register packet fingerprint in xzMercury after export
+                               (e.g. http://mercury:3000). Empty = local integrity only.
+    --mercury-caller <name>    X-Caller identity sent to xzMercury (default: "tdtpcli")
+                               Use service-account name, e.g. svc-exporter, etl-prod-1
+
+  Compact Format (v1.3.1):
+    --compact                  Enable compact format on export: fixed fields written once per group,
+                               repeated rows carry only changing values (significant size reduction
+                               for wide tables with many repeated values, e.g. denormalized joins)
+    --fixed-fields <fields>    Comma-separated fixed field names, or '_' to auto-detect from
+                               _prefix columns (e.g. _dept_id, _dept_name → auto-fixed)
+    --compact-tail             Write an explicit tail row with all fixed fields for stream validation
+                               and carry-state handoff between parts
+    --to-compact <file>        Convert an existing TDTP v1.x file to compact v1.3.1 format in-place
+                               (output file name set with --output)
+
+  CSV Options (--to-csv):
+    --delimiter <sep>          Field separator character (default: ',')
+                               Examples: --delimiter ';'  --delimiter '\t'  --delimiter '|'
+    -d <sep>                   Shorthand for --delimiter
+    --cp <encoding>            Output code page: utf8 (default), 1251 (Windows Cyrillic), 866 (DOS)
+    --bom                      Prepend UTF-8 BOM byte sequence (EF BB BF) — helps Excel
+                               auto-detect UTF-8 encoding without manual import wizard
+    --mercury-url <url>        xzMercury URL for v1.4 packet pre-flight verification (optional)
 
   TDTQL Filters:
     --where <condition>        WHERE clause (e.g., 'age > 18 AND status = active')
@@ -83,11 +120,16 @@ OPTIONS:
                                (MSSQL/Access style): --where '[Termination Date] = "1753-01-01"'
                                Brackets are stripped and the name is properly quoted per dialect:
                                  MSSQL → [Termination Date]  PG/MySQL → "Termination Date"
+                               Repeatable: --where 'age > 18' --where 'status = active' (AND)
+    -w <condition>             Shorthand for --where (repeatable)
     --order-by <fields>        ORDER BY clause (e.g., 'name ASC, age DESC')
     --limit <n>                LIMIT rows: positive = first N, negative = last N (like tail -n)
+    -n <n>                     Shorthand for --limit
     --offset <n>               OFFSET number of rows to skip
-    --fields <col1,col2,...>   Column projection: export only listed columns (e.g. 'id,email,status')
+    --fields <col1,col2,...>   Column projection: export/import/to-csv only listed columns
+                               (e.g. 'id,email,status')
                                For --import: whitelist — only these columns are written to DB
+                               For --to-csv: only listed columns appear in output CSV
                                For --sync-incremental: tracking field is always included automatically
                                Bracket-quoted names for fields with spaces or commas:
                                  --fields "id,[Birth Date],status"
@@ -105,6 +147,8 @@ OPTIONS:
     --unsafe                   Enable unsafe mode (allows all SQL, requires admin)
     --expect-var <name=value>  Require PipelineContext variable to match before import (repeatable)
                                Fails fast before any DB writes on mismatch or missing variable
+    --enc                      Encrypt output via xZMercury (AES-256-GCM, UUID-binding)
+                               Requires security.mercury_url in pipeline YAML
 
   Pipeline Variable Substitution (@name=value):
     SQL string context:        WHERE col = '@dept'       → WHERE col = '97-256'
@@ -198,8 +242,59 @@ EXAMPLES:
   # Export with read-only fields (timestamp, computed, identity)
   tdtpcli --export employees --readonly-fields --output employees.tdtp.xml
 
+  # Export with v1.4 integrity hashes (xxh3_128 on Schema + Data + Packet)
+  tdtpcli --export users --compress --integrity --hash --output users_v14.tdtp.xml
+
+  # Export v1.4 + register fingerprint in xzMercury
+  tdtpcli --export orders --compress --integrity --hash \
+    --mercury-url http://mercury:3000 --mercury-caller svc-exporter --output orders_v14.tdtp.xml
+
+  # Export compact v1.3.1 (fixed fields written once per group)
+  tdtpcli --export dept_emp --compact --fixed-fields dept_id,dept_name --output dept_emp.tdtp.xml
+
+  # Auto-detect fixed fields by _prefix convention
+  tdtpcli --export staffing_report --compact --fixed-fields _ --output staffing.tdtp.xml
+
+  # Convert existing file to compact format
+  tdtpcli --to-compact large.tdtp.xml --output large_compact.tdtp.xml
+
   # NOTE: export uses parallel packet processing — packet ORDER in multi-part
   #       files is not guaranteed. Use --test to verify integrity before import.
+
+  # Convert TDTP to CSV (stdout)
+  tdtpcli --to-csv users.tdtp.xml
+
+  # Convert to CSV with output file
+  tdtpcli --to-csv users.tdtp.xml --output users.csv
+
+  # Convert with semicolon separator (Excel European locale)
+  tdtpcli --to-csv orders.tdtp.xml --delimiter ';' --output orders_eu.csv
+
+  # Convert with tab separator (TSV)
+  tdtpcli --to-csv data.tdtp.xml -d '\t' --output data.tsv
+
+  # Convert with UTF-8 BOM (required for Excel to open without import wizard)
+  tdtpcli --to-csv users.tdtp.xml --bom --output users_excel.csv
+
+  # Convert Cyrillic data to Windows-1251 (legacy tools)
+  tdtpcli --to-csv erp.tdtp.xml --cp 1251 --output erp_win.csv
+
+  # Convert compressed TDTP to CSV (auto-decompresses)
+  tdtpcli --to-csv users_zstd3.tdtp.xml --output users.csv
+
+  # Convert v1.4 integrity packet to CSV (runs security pre-flight first)
+  tdtpcli --to-csv users_v14.tdtp.xml --output users.csv
+  tdtpcli --to-csv users_v14.tdtp.xml --mercury-url http://mercury:3000 --output users.csv
+
+  # Convert with column projection (select only needed fields)
+  tdtpcli --to-csv orders.tdtp.xml --fields id,status,total --output orders_slim.csv
+
+  # Convert with TDTQL filters
+  tdtpcli --to-csv users.tdtp.xml --where 'balance > 1000' --order-by 'balance DESC' --output top_users.csv
+
+  # Combine filters + projection + encoding
+  tdtpcli --to-csv users.tdtp.xml --where 'is_active = 1' --fields id,name,email \
+    --delimiter ';' --bom --output active_users.csv
 
   # Preview TDTP file in browser (HTML viewer)
   tdtpcli --to-html customers.tdtp.xml --open
@@ -408,9 +503,11 @@ FEATURES:
   ✅ Broker Import: parallel decompression, in-order processing
   ✅ Raw Broker Save: --raw flag captures queue messages verbatim (no parse/decompress)
   ✅ Streaming Consumer: --listen (Kafka only) — stable channels only
-  ✅ File Operations: Diff & Merge with conflict resolution
+  ✅ File Operations: Diff & Merge, CSV/HTML/XLSX conversion, Compact format
+  ✅ CSV Export: --to-csv with delimiter, code page (utf8/1251/866), BOM, column projection
   ✅ XLSX Converter: Database ↔ Excel bidirectional
   ✅ Compression: zstd (1-19) + kanzi (6-7, 30% denser) + XXH3 checksum (--compress --compress-algo --hash)
+  ✅ v1.4 Integrity: xxh3_128 Schema+Data+Packet hashes + optional xzMercury registration (--integrity)
   ✅ Circuit Breaker: Protection from cascading failures
   ✅ Audit Logger: GDPR/HIPAA compliance
   ✅ Retry Mechanism: Exponential backoff with jitter
