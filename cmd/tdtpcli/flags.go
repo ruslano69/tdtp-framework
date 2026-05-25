@@ -89,7 +89,7 @@ type Flags struct {
 	Table          *string // Target table name (overrides name from XML during import)
 	Sheet          *string
 	Strategy       *string
-	Batch          *int
+	Batch          *int // [deprecated, no-op] alias kept for backward compat; use --batch-size
 	ReadOnlyFields *bool // Include read-only fields (timestamp, computed, identity) in export
 
 	// Compression
@@ -208,7 +208,7 @@ func ParseFlags() *Flags {
 	f.Table = flag.String("table", "", "Target table name (overrides name from XML during import)")
 	f.Sheet = flag.String("sheet", "Sheet1", "Excel sheet name for XLSX operations")
 	f.Strategy = flag.String("strategy", "replace", "Import strategy: replace, ignore, fail, copy")
-	f.Batch = flag.Int("batch", 1000, "Batch size for bulk operations")
+	f.Batch = flag.Int("batch", 1000, "[deprecated, no-op] use --batch-size")
 	f.ReadOnlyFields = flag.Bool("readonly-fields", false, "Include read-only fields (timestamp, computed, identity) in export")
 
 	// Compression

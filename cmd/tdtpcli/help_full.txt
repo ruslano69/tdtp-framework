@@ -77,7 +77,6 @@ OPTIONS:
     --table <name>             Override target table name on import (default: table name from
                                packet header — the same table it was exported from)
     --strategy <name>          Import strategy: replace, ignore, fail, copy
-    --batch <size>             Batch size for bulk operations (default: 1000)
     --readonly-fields          Include read-only fields (timestamp, computed, identity)
 
   Compression:
