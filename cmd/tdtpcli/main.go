@@ -142,6 +142,9 @@ func routeCommand(
 		})
 
 	} else if *flags.Import != "" {
+		// Design: target table name comes from the packet header (pkt.Header.TableName).
+		// By default the packet overwrites the same table it was exported from — symmetric
+		// round-trip by design. --table overrides only for staging, rename, or backup.
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
 		if stratErr != nil {
 			return stratErr
@@ -422,6 +425,10 @@ func routeCommand(
 		})
 
 	} else if *flags.ImportBroker {
+		// Design: target table name comes from the packet header (pkt.Header.TableName),
+		// which was set at export time. By default the packet overwrites the same table
+		// it was exported from — this is intentional (symmetric round-trip).
+		// --table overrides only when explicitly needed: staging, rename, backup, etc.
 		strategy, stratErr := commands.ParseImportStrategy(*flags.Strategy)
 		if stratErr != nil {
 			return stratErr

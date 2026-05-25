@@ -52,7 +52,7 @@ OPTIONS:
   General:
     --config <file>            Config file (default: config.yaml)
     --output <file>            Output file path
-    --table <name>             Target table name
+    --table <name>             Override target table on import (default: name from packet header)
     --strategy <name>          Import strategy: replace, ignore, fail, copy
     --batch <size>             Batch size (default: 1000)
     --readonly-fields          Include read-only fields

@@ -74,7 +74,8 @@ OPTIONS:
   General:
     --config <file>            Configuration file (default: config.yaml)
     --output <file>            Output file path
-    --table <name>             Target table name (overrides name from XML during import)
+    --table <name>             Override target table name on import (default: table name from
+                               packet header — the same table it was exported from)
     --strategy <name>          Import strategy: replace, ignore, fail, copy
     --batch <size>             Batch size for bulk operations (default: 1000)
     --readonly-fields          Include read-only fields (timestamp, computed, identity)
