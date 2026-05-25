@@ -33,8 +33,9 @@ import (
 
 // newMercuryEncMock returns an httptest.Server that implements the minimal subset
 // of the xZMercury API used by the --enc tier:
-//   POST /api/keys/bind     → stores key, returns KeyBinding
-//   POST /api/keys/retrieve → returns key and deletes it (burn-on-read)
+//
+//	POST /api/keys/bind     → stores key, returns KeyBinding
+//	POST /api/keys/retrieve → returns key and deletes it (burn-on-read)
 func newMercuryEncMock(t *testing.T) *httptest.Server {
 	t.Helper()
 	type store struct {

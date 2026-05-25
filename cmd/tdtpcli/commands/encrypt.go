@@ -27,8 +27,8 @@ import (
 	"os"
 	"strings"
 
-	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
