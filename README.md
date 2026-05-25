@@ -433,7 +433,7 @@ output:
     compress: true
 ```
 
-Documentation: [`docs/ETL_PIPELINE_GUIDE.md`](docs/ETL_PIPELINE_GUIDE.md)
+Documentation: [`docs/ETL_PIPELINE.md`](docs/ETL_PIPELINE.md)
 
 ---
 
@@ -1071,17 +1071,13 @@ Examples documentation: [`examples/README.md`](examples/README.md)
 ## Documentation
 
 ### Guides
-- [Installation Guide](docs/INSTALLATION.md) — installation, configuration, quick start
-- [User Guide](docs/USER_GUIDE.md) — complete CLI utility guide
-- [ETL Pipeline Guide](docs/ETL_PIPELINE_GUIDE.md) — ETL pipeline guide
-- [Documentation Index](docs/INDEX.md) — full documentation catalog
+- [User Guide](docs/USER_GUIDE.md) — complete CLI utility guide with all command examples
+- [ETL Pipeline Guide](docs/ETL_PIPELINE.md) — ETL pipeline configuration and usage
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) — internals, extending the framework
+- [Access Adapter](docs/ACCESS_ADAPTER.md) — MS Access specifics (ODBC + ADOX)
 
 ### Technical Specifications
-- [TDTP Specification](docs/SPECIFICATION.md) — TDTP v1.0 protocol specification
-- [Packet Module](docs/PACKET_MODULE.md) — packet parsing and generation
-- [Schema Module](docs/SCHEMA_MODULE.md) — type and schema validation
-- [TDTQL Translator](docs/TDTQL_TRANSLATOR.md) — query language
-- [SQLite Adapter](docs/SQLITE_ADAPTER.md) — SQLite integration
+- [TDTP Specification](docs/SPECIFICATION.md) — TDTP protocol specification (v1.0 – v1.4)
 
 ### Package READMEs
 - [Circuit Breaker](pkg/resilience/README.md) — protection against cascading failures
