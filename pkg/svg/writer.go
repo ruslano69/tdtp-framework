@@ -145,8 +145,14 @@ func buildAttrs(row SVGRow) []xml.Attr {
 		if kv[0] == "xmlns" || (len(kv[0]) >= 6 && kv[0][:6] == "xmlns:") {
 			continue
 		}
-		// Qualified key "uri:local" → split back into Space + Local.
-		if idx := indexByte(kv[0], ':'); idx > 0 {
+		// Qualified key "namespace-URI:local" → split on the LAST colon.
+		// The parser stores a.Name.Space (full URI, e.g.
+		// "http://www.w3.org/1999/xlink") concatenated with ":"
+		// and a.Name.Local. XML local names never contain ":", so
+		// splitting on the last ":" always recovers the correct URI
+		// and local name. Splitting on the first ":" would break any
+		// URI that contains a scheme colon (http://, urn:, etc.).
+		if idx := lastIndexByte(kv[0], ':'); idx > 0 {
 			out = append(out, xml.Attr{
 				Name:  xml.Name{Space: kv[0][:idx], Local: kv[0][idx+1:]},
 				Value: kv[1],
@@ -164,6 +170,15 @@ func buildAttrs(row SVGRow) []xml.Attr {
 
 func indexByte(s string, c byte) int {
 	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func lastIndexByte(s string, c byte) int {
+	for i := len(s) - 1; i >= 0; i-- {
 		if s[i] == c {
 			return i
 		}

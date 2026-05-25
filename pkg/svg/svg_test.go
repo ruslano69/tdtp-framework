@@ -173,6 +173,75 @@ func TestRoundTrip_ThroughTDTP(t *testing.T) {
 	}
 }
 
+// TestRoundTrip_NamespacedAttrs verifies that attributes whose namespace is a
+// full URI (e.g. xlink:href, inkscape:label) survive a Parse→Write→Parse
+// round-trip without corruption.  The bug was that buildAttrs split the stored
+// key "http://www.w3.org/1999/xlink:href" on the *first* colon, producing
+// Space="http" instead of the full URI.
+func TestRoundTrip_NamespacedAttrs(t *testing.T) {
+	const src = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     width="100" height="100">
+  <use xlink:href="#icon" inkscape:label="my-icon"/>
+</svg>`
+
+	rows, err := Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var buf strings.Builder
+	if err := Write(&buf, rows); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	rows2, err := Parse(strings.NewReader(buf.String()))
+	if err != nil {
+		t.Fatalf("Parse after Write: %v", err)
+	}
+
+	// Find the <use> element.
+	var useRow *SVGRow
+	for i := range rows2 {
+		if rows2[i].Tag == "use" {
+			useRow = &rows2[i]
+			break
+		}
+	}
+	if useRow == nil {
+		t.Fatal("lost <use> element after round-trip")
+	}
+
+	// attrs_json must contain the original namespaced keys, not mangled ones.
+	if useRow.AttrsJSON == "" {
+		t.Fatal("AttrsJSON is empty — namespaced attrs were lost")
+	}
+	for _, bad := range []string{`"http"`, `"//www`} {
+		if contains(useRow.AttrsJSON, bad) {
+			t.Errorf("AttrsJSON contains mangled namespace %q — first-colon split bug not fixed:\n  %s",
+				bad, useRow.AttrsJSON)
+		}
+	}
+	for _, want := range []string{"xlink", "inkscape"} {
+		if !contains(useRow.AttrsJSON, want) {
+			t.Errorf("AttrsJSON missing %q after round-trip:\n  %s", want, useRow.AttrsJSON)
+		}
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && func() bool {
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+		return false
+	}())
+}
+
 func tagsOf(rows []SVGRow) []string {
 	out := make([]string, len(rows))
 	for i, r := range rows {
