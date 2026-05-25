@@ -118,26 +118,26 @@ func routeCommand(
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
 			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
-				TableName:      *flags.Export,
-				OutputFile:     outputFile,
-				Query:          query,
-				Fields:         splitCommaSeparated(*flags.Fields),
-				ProcessorMgr:   procMgr,
-				Compress:       compress,
-				CompressLevel:  compressLevel,
-				CompressAlgo:   compressAlgo,
-				EnableChecksum: *flags.Hash && compress, // Checksum requires compression
+				TableName:        *flags.Export,
+				OutputFile:       outputFile,
+				Query:            query,
+				Fields:           splitCommaSeparated(*flags.Fields),
+				ProcessorMgr:     procMgr,
+				Compress:         compress,
+				CompressLevel:    compressLevel,
+				CompressAlgo:     compressAlgo,
+				EnableChecksum:   *flags.Hash && compress, // Checksum requires compression
 				ReadOnlyFields:   *flags.ReadOnlyFields,
 				Fast:             *flags.Fast,
 				FallbackRowLimit: *flags.FallbackRowLimit,
 				Compact:          *flags.Compact,
-				FixedFields:    splitCommaSeparated(*flags.FixedFields),
-				CompactTail:    *flags.CompactTail,
-				StorageCfg:     exportStorageCfg,
-				StorageKey:     exportStorageKey,
-				IntegrityV14:  *flags.Integrity,
-				MercuryURL:    *flags.MercuryURL,
-				MercuryCaller: *flags.MercuryCaller,
+				FixedFields:      splitCommaSeparated(*flags.FixedFields),
+				CompactTail:      *flags.CompactTail,
+				StorageCfg:       exportStorageCfg,
+				StorageKey:       exportStorageKey,
+				IntegrityV14:     *flags.Integrity,
+				MercuryURL:       *flags.MercuryURL,
+				MercuryCaller:    *flags.MercuryCaller,
 			})
 		})
 
