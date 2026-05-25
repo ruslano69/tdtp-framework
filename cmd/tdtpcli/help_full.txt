@@ -128,7 +128,7 @@ OPTIONS:
     -w <condition>             Shorthand for --where (repeatable)
     --order-by <fields>        ORDER BY clause (e.g., 'name ASC, age DESC')
     --limit <n>                LIMIT rows: positive = first N, negative = last N (like tail -n)
-    -n <n>                     Shorthand for --limit
+    -l <n>                     Shorthand for --limit
     --offset <n>               OFFSET number of rows to skip
     --fields <col1,col2,...>   Column projection: export/import/to-csv only listed columns
                                (e.g. 'id,email,status')

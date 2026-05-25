@@ -84,7 +84,7 @@ OPTIONS:
                                --where '[Termination Date] = "1753-01-01"'
     -w <condition>             Shorthand for --where (repeatable)
     --order-by <fields>        ORDER BY clause
-    --limit <n>                Rows: +N = first N, -N = last N (tail); alias: -n
+    --limit <n>                Rows: +N = first N, -N = last N (tail); alias: -l
     --offset <n>               Skip N rows
     --fields <col1,col2>       Column projection: export/import/to-csv only listed columns
                                Bracket-quoted for names with spaces: [Birth Date],[First, Last]
