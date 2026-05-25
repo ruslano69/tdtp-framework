@@ -2,6 +2,90 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.6] — 2026-05-25
+
+### Added
+
+- **`--enc` tier — standalone AES-256-GCM encryption** (`cmd/tdtpcli/commands/encrypt.go`):
+
+  Шифрование через xZMercury теперь доступно для всех standalone-команд — не только
+  для `--pipeline`. Каждая часть получает собственный UUID; ключ привязывается в
+  xZMercury и удаляется после первого чтения получателем (burn-on-read).
+
+  ```bash
+  # Producer
+  tdtpcli --export payroll --enc --mercury-url http://mercury:3000 --output payroll.tdtp.xml
+  # → payroll.tdtp.enc  (binary AES-256-GCM blob)
+
+  # Consumer — import в БД
+  tdtpcli --import payroll.tdtp.enc --mercury-url http://mercury:3000
+
+  # Consumer — конвертация
+  tdtpcli --to-csv  payroll.tdtp.enc --mercury-url http://mercury:3000
+  tdtpcli --to-xlsx payroll.tdtp.enc --mercury-url http://mercury:3000
+  tdtpcli --to-html payroll.tdtp.enc --mercury-url http://mercury:3000
+  ```
+
+  - **Auto-detect**: расширение `.tdtp.enc` / `.enc` детектируется автоматически во
+    всех consumer-командах (`--import`, `--to-csv`, `--to-xlsx`, `--to-html`).
+    Передавать дополнительный флаг не требуется.
+  - **`encOutputKey`**: выход именуется автоматически — `.tdtp.xml` / `.xml` / `.tdtp`
+    → `.tdtp.enc`; уже корректное расширение не меняется.
+  - **Burn-on-read**: `POST /api/keys/retrieve` удаляет ключ из Mercury; повторный
+    `--import` одного и того же файла провалится с «key not found».
+  - **`MERCURY_SERVER_SECRET`**: если задана env-переменная — выполняется HMAC-верификация
+    ответа Mercury. Пустое значение → пропускается (dev / internal-only).
+  - **stdout guard**: `--enc` с stdout (`--output -`) возвращает ошибку — бинарный блоб
+    нельзя пайпить в текстовый поток.
+  - **S3 support**: зашифрованный блоб загружается в S3 с метаданными
+    `package_uuid`, `protocol: TDTP-ENC 1.0`.
+  - Тесты: 10 unit-тестов (`commands/enc_tier_test.go`) — детект расширения,
+    round-trip, burn-on-read, все три конвертера с `.tdtp.enc` входом.
+
+- **v1.4 security gate — все пути импорта** (`cmd/tdtpcli/commands/`):
+
+  Единый helper `applyV14SecurityGate` (`commands/security.go`) применяется теперь
+  ко всем командам, записывающим данные в БД:
+
+  | Команда | Файл | Поведение при сбое |
+  |---------|------|--------------------|
+  | `--import` | `import.go` | ошибка, файл не импортируется |
+  | `--listen` (Kafka) | `listen.go` | `NackLast(false)` — пакет не возвращается в очередь |
+  | `--import-broker` | `broker.go` | ошибка до первой записи |
+  | `--import-broker --keep` | `broker.go` | ошибка внутри `importOne` |
+
+  Ранее gate присутствовал только в `--to-csv`; `--to-xlsx` и `--to-html` были
+  без защиты. Теперь все конвертеры и все пути импорта защищены одним кодом.
+
+  - `MercuryURL string` добавлен в `ImportOptions`, `ListenConfig`,
+    `ImportBrokerOptions`; wired через `main.go`.
+  - Политика: `FallbackDegrade` — Mercury недоступен → локальный xxh3; hash
+    не зарегистрирован или подделан → `BLOCK`.
+  - Тесты: 20 unit-тестов (`commands/v14_security_test.go`) — CSV, XLSX, HTML
+    × v1.0 pass-through / v1.4 valid / tampered / Mercury OK / not-registered / tampered.
+
+- **xZMercury dev-конфиги** (`xzmercury/configs/`):
+
+  ```
+  xzmercury.dev.yaml      — dev-сервер: порт 3000, key_ttl 15m, rate_limit 0
+  ldap-users.dev.json     — mock-пользователи с полными DN-группами
+  pipeline-acl.dev.yaml   — ACL для тестовых пайплайнов
+  ```
+
+  LDAP mock требует точного совпадения строк — группы указаны как полные DN
+  (`cn=tdtp-pipeline-users,ou=groups,dc=corp,dc=local`).
+
+### Fixed
+
+- **Windows backslash в YAML** (`tests/integration/xzmercury_pipeline_test.go`):
+  пути вида `C:\Users\...` в YAML double-quoted строках парсились как Unicode-эскейпы
+  (`\U` = 8-hex). Исправлено через `strings.ReplaceAll(yaml, `\`, `/`)` и
+  `filepath.ToSlash()` для всех путей в конфигах пайплайна.
+
+- **`TestEndToEndExportImport`** (`tests/integration/broker_test.go`):
+  `createTestTable` была заглушкой → реализована через `database/sql` с настоящим
+  DDL и 3 тестовыми строками.
+
 ## [1.9.5] — 2026-05-25
 
 ### Added
