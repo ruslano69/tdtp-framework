@@ -60,29 +60,46 @@ tdtpcli --list --config config.yaml
 Every TDTP.xml is a **self-contained packet** with all information inside:
 
 ```xml
-<QueryContext>
-  <OriginalQuery>SELECT * FROM orders WHERE status = active</OriginalQuery>
-  <ExecutionResults>
-    <TotalRecordsInTable>10000</TotalRecordsInTable>
-    <RecordsReturned>1000</RecordsReturned>
-  </ExecutionResults>
-</QueryContext>
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
 
-<Schema>
-  <Field name="order_id" type="INTEGER" key="true"/>
-  <Field name="customer_id" type="INTEGER"/>
-  <Field name="total_amount" type="DECIMAL" precision="12" scale="2"/>
-  <Field name="status" type="TEXT" subtype="varchar" length="20"/>
-  <Field name="created_at" type="TIMESTAMP"/>
-</Schema>
+  <Header>
+    <Type>reference</Type>
+    <TableName>orders</TableName>
+    <MessageID>REF-2026-a1b2c3d4-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>2</RecordsInPart>
+    <Timestamp>2026-04-07T10:30:00Z</Timestamp>
+    <Sender>erp-prod</Sender>
+    <Recipient>analytics</Recipient>
+  </Header>
 
-<Data>
-  <R>1|42|1299.99|active|2026-04-07T10:30:00Z</R>
-  <R>2|18|  550.00|pending|2026-04-07T11:45:00Z</R>
-</Data>
+  <Query language="TDTQL" version="1.0">
+    <Filters>
+      <Filter field="status" operator="eq" value="active"/>
+    </Filters>
+    <OrderBy field="created_at" direction="DESC"/>
+    <Limit>1000</Limit>
+  </Query>
+
+  <Schema>
+    <Field name="order_id"     type="INTEGER"  key="true"/>
+    <Field name="customer_id"  type="INTEGER"/>
+    <Field name="total_amount" type="REAL"/>
+    <Field name="status"       type="TEXT"     length="20"/>
+    <Field name="created_at"   type="DATETIME"/>
+  </Schema>
+
+  <Data>
+    <R>1|42|1299.99|active|2026-04-07T10:30:00Z</R>
+    <R>2|18|550.00|active|2026-04-07T11:45:00Z</R>
+  </Data>
+
+</DataPacket>
 ```
 
-**No external documentation needed** — schema is inside the packet.
+**No external documentation needed** — schema, query context and metadata are all inside the packet.
 
 ### 3. Performance
 
