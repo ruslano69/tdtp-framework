@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Travel Agency Data Consumer — per-node
-Подписывается на Redis pub/sub tdtp:travel:notify,
-запускает tdtpcli --import-broker (named queue → staging),
-вызывает merge-процедуру, пишет метку в S3 (журнал).
+Travel Agency Data Consumer вЂ” per-node
+РџРѕРґРїРёСЃС‹РІР°РµС‚СЃСЏ РЅР° Redis pub/sub tdtp:travel:notify,
+Р·Р°РїСѓСЃРєР°РµС‚ tdtpcli --import-broker (named queue в†’ staging),
+РІС‹Р·С‹РІР°РµС‚ merge-РїСЂРѕС†РµРґСѓСЂСѓ, РїРёС€РµС‚ РјРµС‚РєСѓ РІ S3 (Р¶СѓСЂРЅР°Р»).
 
 Usage:
     python consumer.py --node branch
@@ -30,7 +30,7 @@ from colorama import Fore, Style, init
 
 init(autoreset=True)
 
-# ─── Config ───────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Config в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 REDIS_PREFIX    = "tdtp:travel"
 NOTIFY_CHANNEL  = f"{REDIS_PREFIX}:notify"
@@ -45,83 +45,83 @@ S3_SECRET_KEY = "tdtp_secret"
 DSN_CENTRAL = "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp"
 DSN_BRANCH  = "host=localhost port=5433 dbname=tdtp_branch user=tdtp password=tdtp"
 
-CFG_BRANCH   = str(TRAVEL_DIR / "config_branch.yaml")
-CFG_CENTRAL  = str(TRAVEL_DIR / "config_central.yaml")
+CFG_BRANCH   = str(TRAVEL_DIR / "configs/config_branch.yaml")
+CFG_CENTRAL  = str(TRAVEL_DIR / "configs/config_central.yaml")
 
-# ─── Queue → handler mapping ──────────────────────────────────────────────────
-# dst_cfg     — tdtpcli config (database = destination + broker source queue)
-# staging     — staging table name for --import-broker --table
-# merge_proc  — PostgreSQL stored procedure (CALL proc())
-# dsn         — psycopg2 DSN for merge call
-# s3_prefix   — S3 prefix for audit log entry
-# label       — human-readable name
+# в”Ђв”Ђв”Ђ Queue в†’ handler mapping в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# dst_cfg     вЂ” tdtpcli config (database = destination + broker source queue)
+# staging     вЂ” staging table name for --import-broker --table
+# merge_proc  вЂ” PostgreSQL stored procedure (CALL proc())
+# dsn         вЂ” psycopg2 DSN for merge call
+# s3_prefix   вЂ” S3 prefix for audit log entry
+# label       вЂ” human-readable name
 
 QUEUE_HANDLERS = {
-    # ── Branch receives from Central/Airline ─────────────────────────────────
+    # в”Ђв”Ђ Branch receives from Central/Airline в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     "tdtp.sync.countries": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_countries.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_countries.yaml"),
         "staging":    "countries_cache_staging",
         "merge_proc": "merge_countries_cache",
         "dsn":        DSN_BRANCH,
         "s3_prefix":  "archive/countries",
-        "label":      "countries → branch",
+        "label":      "countries в†’ branch",
     },
     "tdtp.sync.guides": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_guides.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_guides.yaml"),
         "staging":    "guides_cache_staging",
         "merge_proc": "merge_guides_cache",
         "dsn":        DSN_BRANCH,
         "s3_prefix":  "archive/guides",
-        "label":      "guides → branch",
+        "label":      "guides в†’ branch",
     },
     "tdtp.sync.tours": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_tours.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_tours.yaml"),
         "staging":    "tours_cache_staging",
         "merge_proc": "merge_tours_cache",
         "dsn":        DSN_BRANCH,
         "s3_prefix":  "archive/tours",
-        "label":      "tours → branch",
+        "label":      "tours в†’ branch",
     },
     "tdtp.sync.schedule": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_schedule.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_schedule.yaml"),
         "staging":    "schedule_cache_staging",
         "merge_proc": "merge_schedule_cache",
         "dsn":        DSN_BRANCH,
         "s3_prefix":  "archive/schedule",
-        "label":      "schedule → branch",
+        "label":      "schedule в†’ branch",
     },
-    # ── Central receives from Airline/Branch ─────────────────────────────────
+    # в”Ђв”Ђ Central receives from Airline/Branch в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     "tdtp.sync.flights": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_flights.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_flights.yaml"),
         "staging":    "flights_staging",
         "merge_proc": "merge_flights",
         "dsn":        DSN_CENTRAL,
         "s3_prefix":  "archive/flights",
-        "label":      "flights → central",
+        "label":      "flights в†’ central",
     },
     "tdtp.sync.reservations": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_reservations.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_reservations.yaml"),
         "staging":    "flight_reservations_staging",
         "merge_proc": "merge_flight_reservations",
         "dsn":        DSN_CENTRAL,
         "s3_prefix":  "archive/reservations",
-        "label":      "reservations → central",
+        "label":      "reservations в†’ central",
     },
     "tdtp.sync.branch.customers": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_branch_customers.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_branch_customers.yaml"),
         "staging":    "branch_customers_inbox_staging",
         "merge_proc": "merge_branch_customers_inbox",
         "dsn":        DSN_CENTRAL,
         "s3_prefix":  "archive/branch/customers",
-        "label":      "customers → central",
+        "label":      "customers в†’ central",
     },
     "tdtp.sync.branch.sales": {
-        "dst_cfg":    str(TRAVEL_DIR / "config_dst_tdtp_sync_branch_sales.yaml"),
+        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_branch_sales.yaml"),
         "staging":    "branch_sales_inbox_staging",
         "merge_proc": "merge_branch_sales_inbox",
         "dsn":        DSN_CENTRAL,
         "s3_prefix":  "archive/branch/sales",
-        "label":      "sales → central",
+        "label":      "sales в†’ central",
     },
 }
 
@@ -140,18 +140,18 @@ NODE_QUEUES = {
     ],
 }
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Logging в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def _ts():
     return datetime.now().strftime("%H:%M:%S")
 
-def log_ok(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.GREEN}✓ {tag:<36}{Style.RESET_ALL} {msg}")
-def log_err(tag, msg):  print(f"{Fore.WHITE}[{_ts()}] {Fore.RED}✗ {tag:<36}{Style.RESET_ALL} {msg}")
+def log_ok(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.GREEN}вњ“ {tag:<36}{Style.RESET_ALL} {msg}")
+def log_err(tag, msg):  print(f"{Fore.WHITE}[{_ts()}] {Fore.RED}вњ— {tag:<36}{Style.RESET_ALL} {msg}")
 def log_info(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.CYAN}  {tag:<36}{Style.RESET_ALL} {msg}")
-def log_mq(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.MAGENTA}⇢ {tag:<36}{Style.RESET_ALL} {msg}")
-def log_skip(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.WHITE}· {tag:<36}{Style.RESET_ALL} {msg}")
+def log_mq(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.MAGENTA}в‡ў {tag:<36}{Style.RESET_ALL} {msg}")
+def log_skip(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.WHITE}В· {tag:<36}{Style.RESET_ALL} {msg}")
 
-# ─── S3 archive ───────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ S3 archive в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def get_s3():
     return boto3.client(
@@ -175,10 +175,10 @@ def archive_marker(s3_prefix: str, sync_ts: str, rows: int, elapsed: float):
         log_err("S3 archive", f"failed: {exc}")
 
 
-# ─── Import + merge ───────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Import + merge в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def run_import_broker(tdtpcli: str, dst_cfg: str, table: str) -> tuple[bool, str, int]:
-    """tdtpcli --import-broker → staging table."""
+    """tdtpcli --import-broker в†’ staging table."""
     t0 = time.time()
     try:
         result = subprocess.run(
@@ -225,7 +225,7 @@ def set_state(r: redis.Redis, queue: str, state: dict):
     r.set(f"{REDIS_PREFIX}:consumer:{key}", json.dumps(state), ex=86400)
 
 
-# ─── Notification handler ─────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Notification handler в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def handle_notify(r: redis.Redis, tdtpcli: str, my_queues: set,
                   raw: str):
@@ -248,9 +248,9 @@ def handle_notify(r: redis.Redis, tdtpcli: str, my_queues: set,
         log_err("HANDLER", f"no handler for {queue}")
         return
 
-    log_mq(label, f"notify received → {queue}")
+    log_mq(label, f"notify received в†’ {queue}")
 
-    # ── 1. Import from broker queue into staging ──────────────────────────────
+    # в”Ђв”Ђ 1. Import from broker queue into staging в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     ok, out, rows = run_import_broker(tdtpcli, handler["dst_cfg"], handler["staging"])
     if not ok:
         log_err(f"{label}/import", f"FAILED\n{out[:1500]}")
@@ -258,9 +258,9 @@ def handle_notify(r: redis.Redis, tdtpcli: str, my_queues: set,
                              "ts": datetime.now().isoformat()})
         return
     elapsed_str = out.split("\n")[0]
-    log_ok(f"{label}/import", f"{rows} rows → {handler['staging']}  {elapsed_str}")
+    log_ok(f"{label}/import", f"{rows} rows в†’ {handler['staging']}  {elapsed_str}")
 
-    # ── 2. Call merge procedure ───────────────────────────────────────────────
+    # в”Ђв”Ђ 2. Call merge procedure в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     ok, merge_out = run_merge(handler["dsn"], handler["merge_proc"])
     if not ok:
         log_err(f"{label}/merge", f"FAILED: {merge_out}")
@@ -269,14 +269,14 @@ def handle_notify(r: redis.Redis, tdtpcli: str, my_queues: set,
         return
     log_ok(f"{label}/merge", f"{handler['merge_proc']}()  {merge_out}")
 
-    # ── 3. S3 audit marker (fire-and-forget) ──────────────────────────────────
+    # в”Ђв”Ђ 3. S3 audit marker (fire-and-forget) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     try:
         elapsed_s = float(elapsed_str.rstrip("s").split("rows")[0].strip())
     except Exception:
         elapsed_s = 0.0
     archive_marker(handler["s3_prefix"], sync_ts, rows, elapsed_s)
 
-    # ── 4. Update state ───────────────────────────────────────────────────────
+    # в”Ђв”Ђ 4. Update state в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     set_state(r, queue, {
         "status": "ok", "rows": rows, "sync_ts": sync_ts,
         "ts": datetime.now().isoformat(),
@@ -284,7 +284,7 @@ def handle_notify(r: redis.Redis, tdtpcli: str, my_queues: set,
     r.set(f"{REDIS_PREFIX}:consumer:alive", datetime.now().isoformat(), ex=90)
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Main в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def main():
     parser = argparse.ArgumentParser(description="Travel Agency Data Consumer")
@@ -310,13 +310,13 @@ def main():
     pubsub = r.pubsub()
     pubsub.subscribe(NOTIFY_CHANNEL)
 
-    print(f"\n{Fore.GREEN}Travel Agency Consumer — {args.node.upper()}{Style.RESET_ALL}")
+    print(f"\n{Fore.GREEN}Travel Agency Consumer вЂ” {args.node.upper()}{Style.RESET_ALL}")
     print(f"  tdtpcli : {args.tdtpcli}")
     print(f"  redis   : {args.redis}  channel: {NOTIFY_CHANNEL}")
     print(f"\n  Listening queues:")
     for q in sorted(my_queues):
         h = QUEUE_HANDLERS[q]
-        print(f"    {q:<35} → {h['staging']} → CALL {h['merge_proc']}()")
+        print(f"    {q:<35} в†’ {h['staging']} в†’ CALL {h['merge_proc']}()")
     print(f"\n  Waiting for notifications... Ctrl+C to stop\n")
 
     r.set(f"{REDIS_PREFIX}:consumer:alive", datetime.now().isoformat(), ex=90)

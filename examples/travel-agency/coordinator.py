@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Travel Agency Coordinator — Event-Driven
-Слушает topic exchange RabbitMQ (события от activity.py),
-запускает tdtpcli --export-broker (source DB → named queue),
-публикует уведомление в Redis pub/sub.
+Travel Agency Coordinator вЂ” Event-Driven
+РЎР»СѓС€Р°РµС‚ topic exchange RabbitMQ (СЃРѕР±С‹С‚РёСЏ РѕС‚ activity.py),
+Р·Р°РїСѓСЃРєР°РµС‚ tdtpcli --export-broker (source DB в†’ named queue),
+РїСѓР±Р»РёРєСѓРµС‚ СѓРІРµРґРѕРјР»РµРЅРёРµ РІ Redis pub/sub.
 
-Импорт данных — задача consumer.py.
+РРјРїРѕСЂС‚ РґР°РЅРЅС‹С… вЂ” Р·Р°РґР°С‡Р° consumer.py.
 
 Dependencies:
     pip install pika redis colorama
@@ -26,7 +26,7 @@ from colorama import Fore, Style, init
 
 init(autoreset=True)
 
-# ─── Config ───────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Config в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 REDIS_PREFIX    = "tdtp:travel"
 NOTIFY_CHANNEL  = f"{REDIS_PREFIX}:notify"
@@ -37,13 +37,13 @@ TDTPCLI_DEFAULT = str(Path(__file__).parents[2] / "tdtpcli.exe")
 DEBOUNCE_TTL    = 10
 DEFAULT_CURSOR  = "2020-01-01 00:00:00"
 
-# ─── Routing table ────────────────────────────────────────────────────────────
-# table       — имя таблицы или VIEW в source DB
-# fields      — колонки для --fields (None = все)
-# incremental — поле для курсора инкрементала (None = полная выгрузка)
-# src_cfg     — имя config файла (в TRAVEL_DIR) с source DB + broker settings
-# queue       — named RabbitMQ queue
-# label       — читаемое название
+# в”Ђв”Ђв”Ђ Routing table в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# table       вЂ” РёРјСЏ С‚Р°Р±Р»РёС†С‹ РёР»Рё VIEW РІ source DB
+# fields      вЂ” РєРѕР»РѕРЅРєРё РґР»СЏ --fields (None = РІСЃРµ)
+# incremental вЂ” РїРѕР»Рµ РґР»СЏ РєСѓСЂСЃРѕСЂР° РёРЅРєСЂРµРјРµРЅС‚Р°Р»Р° (None = РїРѕР»РЅР°СЏ РІС‹РіСЂСѓР·РєР°)
+# src_cfg     вЂ” РёРјСЏ config С„Р°Р№Р»Р° (РІ TRAVEL_DIR) СЃ source DB + broker settings
+# queue       вЂ” named RabbitMQ queue
+# label       вЂ” С‡РёС‚Р°РµРјРѕРµ РЅР°Р·РІР°РЅРёРµ
 
 ROUTE_MAP: dict[str, list[dict]] = {
     "airline.flights.updated": [
@@ -51,9 +51,9 @@ ROUTE_MAP: dict[str, list[dict]] = {
             "table":       "v_flights",
             "fields":      None,
             "incremental": "last_updated",
-            "src_cfg":     "config_src_tdtp_sync_flights.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_flights.yaml",
             "queue":       "tdtp.sync.flights",
-            "label":       "Airline → Central: flights",
+            "label":       "Airline в†’ Central: flights",
         },
     ],
     "airline.reservations.updated": [
@@ -61,9 +61,9 @@ ROUTE_MAP: dict[str, list[dict]] = {
             "table":       "flight_reservations",
             "fields":      "reservation_id,flight_id,booking_ref_external,passenger_name,seat_class,price_paid,status,agency_id,last_updated",
             "incremental": "last_updated",
-            "src_cfg":     "config_src_tdtp_sync_reservations.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_reservations.yaml",
             "queue":       "tdtp.sync.reservations",
-            "label":       "Airline → Central: reservations",
+            "label":       "Airline в†’ Central: reservations",
         },
     ],
     "central.catalog.updated": [
@@ -71,33 +71,33 @@ ROUTE_MAP: dict[str, list[dict]] = {
             "table":       "countries",
             "fields":      "country_id,country_code,country_name,continent,currency_code,is_visa_required",
             "incremental": None,
-            "src_cfg":     "config_src_tdtp_sync_countries.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_countries.yaml",
             "queue":       "tdtp.sync.countries",
-            "label":       "Central → Branch: countries",
+            "label":       "Central в†’ Branch: countries",
         },
         {
             "table":       "guides",
             "fields":      "guide_id,first_name,last_name,specialization,rating,languages,is_active",
             "incremental": "last_updated",
-            "src_cfg":     "config_src_tdtp_sync_guides.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_guides.yaml",
             "queue":       "tdtp.sync.guides",
-            "label":       "Central → Branch: guides",
+            "label":       "Central в†’ Branch: guides",
         },
         {
             "table":       "tours",
             "fields":      "tour_id,tour_code,tour_name,description,destination_country_id,duration_days,difficulty_level,max_group_size,base_price,is_active",
             "incremental": None,
-            "src_cfg":     "config_src_tdtp_sync_tours.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_tours.yaml",
             "queue":       "tdtp.sync.tours",
-            "label":       "Central → Branch: tours",
+            "label":       "Central в†’ Branch: tours",
         },
         {
             "table":       "tour_schedule",
             "fields":      "schedule_id,tour_id,guide_id,start_date,end_date,available_slots,booked_slots,price_modifier,status",
             "incremental": "last_updated",
-            "src_cfg":     "config_src_tdtp_sync_schedule.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_schedule.yaml",
             "queue":       "tdtp.sync.schedule",
-            "label":       "Central → Branch: schedule",
+            "label":       "Central в†’ Branch: schedule",
         },
     ],
     "branch.customers.registered": [
@@ -105,9 +105,9 @@ ROUTE_MAP: dict[str, list[dict]] = {
             "table":       "v_local_customers",
             "fields":      None,
             "incremental": "last_updated",
-            "src_cfg":     "config_src_tdtp_sync_branch_customers.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_branch_customers.yaml",
             "queue":       "tdtp.sync.branch.customers",
-            "label":       "Branch → Central: customers",
+            "label":       "Branch в†’ Central: customers",
         },
     ],
     "branch.sales.created": [
@@ -115,27 +115,27 @@ ROUTE_MAP: dict[str, list[dict]] = {
             "table":       "v_local_sales",
             "fields":      None,
             "incremental": "last_updated",
-            "src_cfg":     "config_src_tdtp_sync_branch_sales.yaml",
+            "src_cfg":     "configs/config_src_tdtp_sync_branch_sales.yaml",
             "queue":       "tdtp.sync.branch.sales",
-            "label":       "Branch → Central: sales",
+            "label":       "Branch в†’ Central: sales",
         },
     ],
     "central.sales.changed":  [],
     "central.customers.new":  [],
 }
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Logging в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def _ts():
     return datetime.now().strftime("%H:%M:%S")
 
-def log_ok(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.GREEN}✓ {tag:<34}{Style.RESET_ALL} {msg}")
-def log_err(tag, msg):  print(f"{Fore.WHITE}[{_ts()}] {Fore.RED}✗ {tag:<34}{Style.RESET_ALL} {msg}")
+def log_ok(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.GREEN}вњ“ {tag:<34}{Style.RESET_ALL} {msg}")
+def log_err(tag, msg):  print(f"{Fore.WHITE}[{_ts()}] {Fore.RED}вњ— {tag:<34}{Style.RESET_ALL} {msg}")
 def log_info(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.CYAN}  {tag:<34}{Style.RESET_ALL} {msg}")
-def log_skip(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.WHITE}· {tag:<34}{Style.RESET_ALL} {msg}")
-def log_mq(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.MAGENTA}⇢ {tag:<34}{Style.RESET_ALL} {msg}")
+def log_skip(tag, msg): print(f"{Fore.WHITE}[{_ts()}] {Fore.WHITE}В· {tag:<34}{Style.RESET_ALL} {msg}")
+def log_mq(tag, msg):   print(f"{Fore.WHITE}[{_ts()}] {Fore.MAGENTA}в‡ў {tag:<34}{Style.RESET_ALL} {msg}")
 
-# ─── Redis helpers ────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Redis helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def get_cursor(r: redis.Redis, key: str) -> str:
     v = r.get(f"{REDIS_PREFIX}:cursor:{key}")
@@ -155,7 +155,7 @@ def set_state(r: redis.Redis, key: str, state: dict):
     r.set(f"{REDIS_PREFIX}:coord:{key}", json.dumps(state), ex=86400)
 
 
-# ─── Export runner ────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Export runner в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def run_export_broker(tdtpcli: str, entry: dict, cursor: str) -> tuple[bool, int]:
     """Run tdtpcli --export-broker. Returns (ok, rows)."""
@@ -178,7 +178,7 @@ def run_export_broker(tdtpcli: str, entry: dict, cursor: str) -> tuple[bool, int
             m = re.search(r"Exported\s+(\d+)\s+packet", out, re.IGNORECASE)
         if m:
             rows = int(m.group(1))
-        # parse "Exported N packet(s)" → actual rows from import will tell us
+        # parse "Exported N packet(s)" в†’ actual rows from import will tell us
         # but for now estimate from output
         ok = result.returncode == 0
         return ok, elapsed, out, rows
@@ -188,14 +188,14 @@ def run_export_broker(tdtpcli: str, entry: dict, cursor: str) -> tuple[bool, int
         return False, 0, f"tdtpcli not found: {tdtpcli}", 0
 
 
-# ─── Core sync logic ──────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Core sync logic в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def sync_route(r: redis.Redis, tdtpcli: str, routing_key: str, entry: dict) -> bool:
     label      = entry["label"]
     cursor_key = routing_key.replace(".", "_") + "__" + entry["table"]
     cursor     = get_cursor(r, cursor_key)
 
-    log_info(label, f"cursor={cursor}  →  {entry['queue']}")
+    log_info(label, f"cursor={cursor}  в†’  {entry['queue']}")
 
     ok, elapsed, out, rows = run_export_broker(tdtpcli, entry, cursor)
 
@@ -204,7 +204,7 @@ def sync_route(r: redis.Redis, tdtpcli: str, routing_key: str, entry: dict) -> b
         set_state(r, cursor_key, {"status": "error", "error": out[:2000], "ts": datetime.now().isoformat()})
         return False
 
-    log_ok(label, f"{elapsed}s → {entry['queue']}")
+    log_ok(label, f"{elapsed}s в†’ {entry['queue']}")
     new_cursor = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     set_cursor(r, cursor_key, new_cursor)
 
@@ -222,7 +222,7 @@ def sync_route(r: redis.Redis, tdtpcli: str, routing_key: str, entry: dict) -> b
     return True
 
 
-# ─── Message handler ──────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Message handler в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def handle_message(channel, method, _properties, body, r: redis.Redis, tdtpcli: str):
     routing_key = method.routing_key
@@ -261,7 +261,7 @@ def handle_message(channel, method, _properties, body, r: redis.Redis, tdtpcli: 
     channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђ Main в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def main():
     import argparse
@@ -307,7 +307,7 @@ def main():
     for rk, entries in ROUTE_MAP.items():
         for e in entries:
             inc = f"  [incr: {e['incremental']}]" if e.get("incremental") else "  [full]"
-            print(f"    {rk:<42} → {e['queue']}{inc}")
+            print(f"    {rk:<42} в†’ {e['queue']}{inc}")
         if not entries:
             print(f"    {rk:<42}   (local only)")
     print(f"\n  Waiting for events... Ctrl+C to stop\n")
