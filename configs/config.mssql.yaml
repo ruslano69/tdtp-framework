@@ -1,20 +1,25 @@
 # MSSQL Configuration for TDTP CLI
-# Экспорт из ZTR-Live
 #
-# Использование:
-#   tdtpcli --export ZTR$Employee --output data.tdtp.xml --config config.mssql.yaml
+# Usage:
+#   tdtpcli --export MyTable --output data.tdtp.xml --config config.mssql.yaml
+#
+# Copy this file and fill in your connection details.
+# Never commit the filled-in copy to version control.
 
 database:
   type: mssql
-  host: sql-srv1
+  host: YOUR_SQL_SERVER     # e.g. sql-server.internal or 192.168.1.10
   port: 1433
-  database: ZTR-Live
+  database: YOUR_DATABASE   # e.g. ProductionDB
   schema: dbo
-  windows_auth: true    # Windows Authentication (SSPI / trusted_connection)
-  sslmode: disable      # encrypt=disable — локальный SQL Server без TLS
+  windows_auth: true        # Windows Authentication (SSPI / trusted_connection)
+  # user: sa               # SQL auth — uncomment if not using windows_auth
+  # password: ""           # use env var TDTP_DB_PASSWORD instead
+  sslmode: disable          # encrypt=disable for local SQL Server without TLS
 
 export:
-  compress: false       # без сжатия для тестирования
+  compress: true
+  compress_level: 3
 
 resilience:
   circuit_breaker:

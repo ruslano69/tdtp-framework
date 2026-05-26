@@ -81,10 +81,8 @@ relations_output.csv
 relations_utf8.csv
 DELO19_schema*
 
-# SeaweedFS local dev server (local only)
-weed/data/
-weed/weed.log
-weed/s3.json
+# SeaweedFS local dev server (local only — never commit production configs)
+weed/
 filerldb2/
 sqlite.test
 postgres.test
