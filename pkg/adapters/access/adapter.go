@@ -146,8 +146,11 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 
 // GetTableNames returns all user table names (excludes MSys* system tables).
 func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
-	// MSysObjects: Type=1 are tables, Flags=0 are user tables
-	query := `SELECT Name FROM MSysObjects WHERE Type=1 AND Flags=0 ORDER BY Name`
+	// MSysObjects: Type=1 are tables.
+	// Flags=0 are normal local tables; Flags=NULL occurs in Jet 2.x databases where
+	// the field was not always populated. Exclude MSys*/~TMPCLP* system names explicitly.
+	// Do NOT filter by Flags=0 alone — that misses ~half the tables in old .mdb files.
+	query := `SELECT Name FROM MSysObjects WHERE Type=1 AND (Flags=0 OR IsNull(Flags)) AND Left(Name,4)<>'MSys' AND Left(Name,7)<>'~TMPCLP' ORDER BY Name`
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
 		// Fallback: MSysObjects might be restricted; try INFORMATION_SCHEMA-like query
@@ -177,7 +180,7 @@ func (a *Adapter) getTableNamesFallback(ctx context.Context) ([]string, error) {
 
 // GetViewNames returns views — Access calls them queries.
 func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error) {
-	query := `SELECT Name FROM MSysObjects WHERE Type=5 AND Flags=0 ORDER BY Name`
+	query := `SELECT Name FROM MSysObjects WHERE Type=5 AND (Flags=0 OR IsNull(Flags)) AND Left(Name,4)<>'MSys' ORDER BY Name`
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, nil // views not accessible
