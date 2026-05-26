@@ -193,11 +193,11 @@ description: "Integration test: ETL pipeline + xzmercury"
 sources:
   - name: employees
     type: tdtp
-    dsn: "examples/encryption-test/employees.tdtp.xml"
+    dsn: "tests/integration/testdata/employees.tdtp.xml"
 
   - name: departments
     type: tdtp
-    dsn: "examples/encryption-test/departments.tdtp.xml"
+    dsn: "tests/integration/testdata/departments.tdtp.xml"
 
 workspace:
   type: sqlite
