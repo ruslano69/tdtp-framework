@@ -1,0 +1,98 @@
+#!/bin/sh
+# TDTP Framework — pre-commit secrets detection hook
+# Blocks commits containing DSNs, passwords, or production server names.
+#
+# Install: scripts/install-hooks.sh  (or copy manually to .git/hooks/pre-commit)
+# Skip:    SKIP_SECRETS_CHECK=1 git commit  (emergency only, document why)
+
+set -e
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+if [ "${SKIP_SECRETS_CHECK}" = "1" ]; then
+    echo "${YELLOW}[secrets] WARNING: secrets check skipped (SKIP_SECRETS_CHECK=1)${NC}"
+    exit 0
+fi
+
+# ── 1. Try gitleaks (preferred) ──────────────────────────────────────────────
+if command -v gitleaks >/dev/null 2>&1; then
+    echo "[secrets] Running gitleaks..."
+    if gitleaks protect --staged --config .gitleaks.toml --redact 2>&1; then
+        echo "${GREEN}[secrets] gitleaks: OK${NC}"
+        exit 0
+    else
+        echo "${RED}[secrets] gitleaks detected secrets — commit blocked.${NC}"
+        echo "  Fix the issue or use: SKIP_SECRETS_CHECK=1 git commit (document why!)"
+        exit 1
+    fi
+fi
+
+# ── 2. Fallback: grep-based check (no external tools required) ───────────────
+echo "[secrets] gitleaks not found, running basic pattern check..."
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+FOUND=0
+
+check_pattern() {
+    local desc="$1"
+    local pattern="$2"
+    local exclude="$3"
+
+    matches=$(git diff --cached -U0 | grep "^+" | grep -v "^+++" | \
+              grep -iE "$pattern" | \
+              grep -viE "$exclude" || true)
+
+    if [ -n "$matches" ]; then
+        echo "${RED}[secrets] BLOCKED — $desc:${NC}"
+        echo "$matches" | head -5 | sed 's/^/  /'
+        FOUND=1
+    fi
+}
+
+# MSSQL/ODBC production patterns
+check_pattern \
+    "MSSQL DSN with non-localhost server" \
+    "sqlserver://[^[:space:]]+:[0-9]+" \
+    "localhost|127\.0\.0\.1|YOUR_SQL_SERVER|Tdtp_Pass_123"
+
+check_pattern \
+    "ODBC DSN with credentials" \
+    "(DBQ|UID|PWD)=[^;\"[:space:]]+" \
+    "YOUR_|example|PLACEHOLDER|newadmin|newsipkey"
+
+check_pattern \
+    "Production database name pattern" \
+    "database=(ZTR-Live|ZTR_Live|DELO[0-9]+|[A-Z]+-Live|[A-Z]+-Prod)" \
+    "YOUR_DATABASE"
+
+check_pattern \
+    "Plaintext password in config" \
+    "password:[[:space:]]+['\"]?[a-zA-Z0-9!@#\$%^&*]{8,}['\"]?" \
+    "tdtp_dev|tdtp_test|tdtp_pass|dev-secret-change|YOUR_|example|guest|\"\"$|''$"
+
+check_pattern \
+    "Private IP / internal hostname in DSN" \
+    "(host|server|Host):[[:space:]]*(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)" \
+    "YOUR_|example"
+
+if [ "$FOUND" -eq 1 ]; then
+    echo ""
+    echo "${RED}Commit blocked: potential secrets detected.${NC}"
+    echo "  1. Remove sensitive data from the staged files"
+    echo "  2. Use placeholder: YOUR_SERVER, YOUR_DATABASE, YOUR_PASSWORD"
+    echo "  3. Store real configs outside the repo or in env vars"
+    echo ""
+    echo "  Emergency bypass (document why!): SKIP_SECRETS_CHECK=1 git commit"
+    exit 1
+fi
+
+echo "${GREEN}[secrets] basic check: OK${NC}"
+exit 0

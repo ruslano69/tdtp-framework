@@ -1,0 +1,76 @@
+# Gitleaks configuration for tdtp-framework
+# https://github.com/gitleaks/gitleaks
+#
+# Run manually:  gitleaks detect --source . --config .gitleaks.toml
+# Pre-commit:    installed automatically via scripts/install-hooks.sh
+
+title = "tdtp-framework secrets detection"
+
+[extend]
+# Extend the default ruleset
+useDefault = true
+
+# ── Custom rules ────────────────────────────────────────────────────────────
+
+[[rules]]
+id          = "mssql-dsn-real-server"
+description = "MSSQL DSN with non-localhost server (potential production)"
+regex       = '''sqlserver://[^@\s]*@?[a-zA-Z][a-zA-Z0-9\-]+:[0-9]+\?database=[^&\s"']+'''
+tags        = ["mssql", "dsn", "production"]
+# Allow localhost and example hostnames
+[rules.allowlist]
+regexes     = [
+    '''sqlserver://[^@\s]*@?localhost''',
+    '''sqlserver://[^@\s]*@?127\.0\.0\.1''',
+    '''sqlserver://sa:Tdtp_Pass_123''',       # example password from 02b example
+    '''sqlserver://[^@\s]*@?YOUR_SQL_SERVER''',
+]
+
+[[rules]]
+id          = "odbc-dsn"
+description = "ODBC connection string with real credentials"
+regex       = '''(DBQ|Driver)=[^;]+;[^"'\n]*(UID|PWD)=[^;"\n]+'''
+tags        = ["odbc", "access", "credentials"]
+[rules.allowlist]
+regexes     = [
+    '''YOUR_''',
+    '''example''',
+    '''<YOUR''',
+]
+
+[[rules]]
+id          = "mssql-real-database"
+description = "Connection to known production database patterns"
+regex       = '''database=(ZTR-Live|ZTR_Live|DELO[0-9]+|[A-Z]{2,}-Live|[A-Z]{2,}-Prod)'''
+tags        = ["production", "database"]
+
+# ── Global allowlist ─────────────────────────────────────────────────────────
+
+[allowlist]
+description = "Global allowlist"
+paths       = [
+    # Test fixtures — known safe test data
+    '''tests/integration/testdata/''',
+    # Example placeholder configs
+    '''configs/config\..*\.yaml''',
+    # This config file itself
+    '''\.gitleaks\.toml''',
+    # Go test files with hardcoded test credentials
+    '''_test\.go''',
+]
+regexes = [
+    # Dev/test credentials explicitly named as such
+    '''tdtp_dev_pass_2025''',
+    '''tdtp_dev_2025''',
+    '''tdtp_test_password''',
+    '''tdtp_pass_123''',
+    # SeaweedFS dev credentials
+    '''tdtp_access''',
+    '''tdtp_secret''',
+    # Placeholder markers
+    '''YOUR_''',
+    '''<YOUR''',
+    '''example\.com''',
+    # xzmercury dev secret (clearly labeled)
+    '''dev-secret-change-in-production''',
+]
