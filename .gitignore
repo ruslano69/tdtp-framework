@@ -44,6 +44,9 @@ dist/
 *.zip
 # Test data files (generated / large samples)
 *.tdtp.xml
+# Exception: checked-in test fixtures
+!tests/integration/testdata/*.tdtp.xml
+!examples/*/output/*.tdtp.xml
 *.xlsx
 benchmark_*.db
 audit.log
