@@ -1,18 +1,23 @@
-﻿# Travel Agency: Event-Driven Data Synchronization Example
+# Travel Agency: Event-Driven Data Synchronization
 
-Р­С‚РѕС‚ РїСЂРёРјРµСЂ РґРµРјРѕРЅСЃС‚СЂРёСЂСѓРµС‚ РїРѕСЃС‚СЂРѕРµРЅРёРµ СЂР°СЃРїСЂРµРґРµР»РµРЅРЅРѕР№ СЃРёСЃС‚РµРјС‹ РѕР±РјРµРЅР° РґР°РЅРЅС‹РјРё РјРµР¶РґСѓ С‚СЂРµРјСЏ РЅРµР·Р°РІРёСЃРёРјС‹РјРё СѓР·Р»Р°РјРё (**Central**, **Branch**, **Airline**) СЃ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµРј **TDTP Framework**. 
+A reference example of a distributed data synchronization system built on **TDTP Framework**.  
+Three independent nodes — **Central**, **Branch**, **Airline** — exchange data through RabbitMQ  
+using **Event-Driven Architecture (EDA)**: database changes trigger high-throughput sync pipelines.
 
-РЎРёСЃС‚РµРјР° РїРѕСЃС‚СЂРѕРµРЅР° РЅР° РїСЂРёРЅС†РёРїР°С… **Event-Driven Architecture (EDA)**: РёР·РјРµРЅРµРЅРёСЏ РІ Р±Р°Р·Р°С… РґР°РЅРЅС‹С… РёРЅРёС†РёРёСЂСѓСЋС‚ РїСЂРѕС†РµСЃСЃС‹ РІС‹СЃРѕРєРѕРїСЂРѕРёР·РІРѕРґРёС‚РµР»СЊРЅРѕР№ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё С‡РµСЂРµР· RabbitMQ.
+---
 
-## рџЏ— РђСЂС…РёС‚РµРєС‚СѓСЂР° СЃРёСЃС‚РµРјС‹
+## Architecture
 
-РЎРёСЃС‚РµРјР° СЃРѕСЃС‚РѕРёС‚ РёР· С‚СЂРµС… Р»РѕРіРёС‡РµСЃРєРёС… СѓР·Р»РѕРІ, РєР°Р¶РґС‹Р№ РёР· РєРѕС‚РѕСЂС‹С… РёРјРµРµС‚ СЃРІРѕСЋ Р±Р°Р·Сѓ РґР°РЅРЅС‹С… PostgreSQL:
+Three nodes, each with its own PostgreSQL database:
 
-1.  **Central Office (РџРѕСЂС‚ 5432):** Р¦РµРЅС‚СЂР°Р»СЊРЅС‹Р№ СѓР·РµР». РҐСЂР°РЅРёС‚ РјР°СЃС‚РµСЂ-РєР°С‚Р°Р»РѕРіРё (С‚СѓСЂС‹, СЃС‚СЂР°РЅС‹, РіРёРґС‹) Рё Р°РіСЂРµРіРёСЂСѓРµС‚ РґР°РЅРЅС‹Рµ Рѕ РїСЂРѕРґР°Р¶Р°С… СЃРѕ РІСЃРµС… С„РёР»РёР°Р»РѕРІ.
-2.  **Branch Office (РџРѕСЂС‚ 5433):** Р РµРіРёРѕРЅР°Р»СЊРЅС‹Р№ С„РёР»РёР°Р». Р Р°Р±РѕС‚Р°РµС‚ СЃ РєР»РёРµРЅС‚Р°РјРё, РѕС„РѕСЂРјР»СЏРµС‚ РїСЂРѕРґР°Р¶Рё, РїРѕР»СѓС‡Р°РµС‚ РѕР±РЅРѕРІР»РµРЅРёСЏ РєР°С‚Р°Р»РѕРіРѕРІ РёР· С†РµРЅС‚СЂР°.
-3.  **Airline Partner (РџРѕСЂС‚ 5434):** Р’РЅРµС€РЅРёР№ РїРѕСЃС‚Р°РІС‰РёРє (Р°РІРёР°РєРѕРјРїР°РЅРёСЏ). РџРµСЂРµРґР°РµС‚ РґР°РЅРЅС‹Рµ Рѕ СЂРµР№СЃР°С… Рё Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏС… РІ С†РµРЅС‚СЂР°Р»СЊРЅС‹Р№ РѕС„РёСЃ.
+| Node | Port | Role |
+|------|------|------|
+| **Central Office** | 5432 | Master catalogs (tours, countries, guides); aggregates sales from all branches |
+| **Branch Office** | 5433 | Regional office: manages clients, processes sales, receives catalog updates from Central |
+| **Airline Partner** | 5434 | External supplier: pushes flight and booking data to Central |
 
-### РЎС…РµРјР° РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёСЏ
+### Data Flow
+
 ```mermaid
 graph TD
     A[activity.py] -- "1. DB Change & Event" --> MQ[RabbitMQ Exchange: travel]
@@ -25,105 +30,144 @@ graph TD
     CS -- "8. Log" --> S3[MinIO / S3 Audit]
 ```
 
-## рџ§© РћСЃРЅРѕРІРЅС‹Рµ РєРѕРјРїРѕРЅРµРЅС‚С‹
+### Sync Map
 
-### 1. РЎРёРјСѓР»СЏС‚РѕСЂ Р°РєС‚РёРІРЅРѕСЃС‚Рё (`activity.py`)
-Р­РјСѓР»РёСЂСѓРµС‚ СЂРµР°Р»СЊРЅСѓСЋ СЂР°Р±РѕС‚Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РІ СѓР·Р»Р°С…:
-*   Р РµРіРёСЃС‚СЂРёСЂСѓРµС‚ РЅРѕРІС‹С… РєР»РёРµРЅС‚РѕРІ Рё РїСЂРѕРґР°Р¶Рё РІ **Branch**.
-*   РћР±РЅРѕРІР»СЏРµС‚ РєР°С‚Р°Р»РѕРіРё (С†РµРЅС‹, СЃС‚Р°С‚СѓСЃС‹ РіРёРґРѕРІ) РІ **Central**.
-*   РњРµРЅСЏРµС‚ СЃС‚Р°С‚СѓСЃС‹ СЂРµР№СЃРѕРІ Рё СЃРѕР·РґР°РµС‚ Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ РІ **Airline**.
-*   **Р”РµР№СЃС‚РІРёРµ:** РџРѕСЃР»Рµ Р·Р°РїРёСЃРё РІ Р‘Р” РѕС‚РїСЂР°РІР»СЏРµС‚ РєРѕСЂРѕС‚РєРѕРµ JSON-СЃРѕРѕР±С‰РµРЅРёРµ РІ RabbitMQ exchange `travel` СЃ СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓСЋС‰РёРј routing key (РЅР°РїСЂРёРјРµСЂ, `branch.sales.created`).
+| Direction | Entities | Sync Type |
+|-----------|----------|-----------|
+| **Airline → Central** | Flights, Bookings | Incremental (`last_updated`) |
+| **Central → Branch** | Countries, Tours, Guides, Schedule | Mixed (Full / Incremental) |
+| **Branch → Central** | Clients, Sales | Incremental |
 
-### 2. РљРѕРѕСЂРґРёРЅР°С‚РѕСЂ СЌРєСЃРїРѕСЂС‚Р° (`coordinator.py`)
-РЎР»СѓР¶РёС‚ В«РјРѕСЃС‚РѕРјВ» РјРµР¶РґСѓ СЃРѕР±С‹С‚РёСЏРјРё Рё РґР°РЅРЅС‹РјРё:
-*   РЎР»СѓС€Р°РµС‚ exchange `travel`.
-*   РџСЂРё РїРѕР»СѓС‡РµРЅРёРё СЃРѕР±С‹С‚РёСЏ РѕРїСЂРµРґРµР»СЏРµС‚, РєР°РєРёРµ РґР°РЅРЅС‹Рµ РЅСѓР¶РЅРѕ РїРµСЂРµРґР°С‚СЊ (СЃРѕРіР»Р°СЃРЅРѕ `ROUTE_MAP`).
-*   Р—Р°РїСѓСЃРєР°РµС‚ `tdtpcli.exe --export-broker`, РєРѕС‚РѕСЂС‹Р№ РІС‹С‡РёС‚С‹РІР°РµС‚ РёР·РјРµРЅРµРЅРЅС‹Рµ Р·Р°РїРёСЃРё (РёСЃРїРѕР»СЊР·СѓСЏ РёРЅРєСЂРµРјРµРЅС‚Р°Р»СЊРЅС‹Рµ РїРѕР»СЏ, С‚Р°РєРёРµ РєР°Рє `last_updated`) Рё РѕС‚РїСЂР°РІР»СЏРµС‚ РёС… РІ СЃР¶Р°С‚РѕРј РІРёРґРµ РІ С†РµР»РµРІСѓСЋ РѕС‡РµСЂРµРґСЊ RabbitMQ.
-*   РџСѓР±Р»РёРєСѓРµС‚ СЃРёРіРЅР°Р» Рѕ РіРѕС‚РѕРІРЅРѕСЃС‚Рё РґР°РЅРЅС‹С… РІ Redis.
+---
 
-### 3. РљРѕРЅСЃСЊСЋРјРµСЂ РёРјРїРѕСЂС‚Р° (`consumer.py`)
-РћР±РµСЃРїРµС‡РёРІР°РµС‚ РґРѕСЃС‚Р°РІРєСѓ Рё РёРЅС‚РµРіСЂР°С†РёСЋ РґР°РЅРЅС‹С…:
-*   РЎР»СѓС€Р°РµС‚ РєР°РЅР°Р» СѓРІРµРґРѕРјР»РµРЅРёР№ РІ Redis.
-*   Р—Р°РїСѓСЃРєР°РµС‚ `tdtpcli.exe --import-broker` РґР»СЏ РІС‹С‡РёС‚РєРё РґР°РЅРЅС‹С… РёР· РѕС‡РµСЂРµРґРё RabbitMQ РІРѕ РІСЂРµРјРµРЅРЅС‹Рµ (staging) С‚Р°Р±Р»РёС†С‹ С†РµР»РµРІРѕР№ Р‘Р”.
-*   Р’С‹Р·С‹РІР°РµС‚ SQL-РїСЂРѕС†РµРґСѓСЂС‹ `merge_...` РґР»СЏ Р°С‚РѕРјР°СЂРЅРѕРіРѕ РѕР±РЅРѕРІР»РµРЅРёСЏ РѕСЃРЅРѕРІРЅС‹С… С‚Р°Р±Р»РёС† РёР· staging.
-*   РЎРѕС…СЂР°РЅСЏРµС‚ Р·Р°РїРёСЃСЊ Рѕ С‚СЂР°РЅР·Р°РєС†РёРё (Р°СѓРґРёС‚) РІ S3-РєРѕСЂР·РёРЅСѓ `travel-agency`.
+## Components
 
-## рџ”„ РџРѕС‚РѕРєРё РґР°РЅРЅС‹С… (Sync Map)
+### `activity.py` — Traffic Simulator
+Emulates real user activity across all nodes:
+- Registers new clients and sales in **Branch**
+- Updates catalogs (prices, guide statuses) in **Central**
+- Changes flight statuses and creates bookings in **Airline**
+- After each DB write: publishes a short JSON event to RabbitMQ exchange `travel`  
+  with a routing key (e.g. `branch.sales.created`)
 
-| РќР°РїСЂР°РІР»РµРЅРёРµ | РЎСѓС‰РЅРѕСЃС‚СЊ | РўРёРї СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё |
-| :--- | :--- | :--- |
-| **Airline в†’ Central** | Р РµР№СЃС‹, Р‘СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ | РРЅРєСЂРµРјРµРЅС‚Р°Р»СЊРЅР°СЏ (last\_updated) |
-| **Central в†’ Branch** | РЎС‚СЂР°РЅС‹, РўСѓСЂС‹, Р“РёРґС‹, Р Р°СЃРїРёСЃР°РЅРёРµ | РЎРјРµС€Р°РЅРЅР°СЏ (Full / Incremental) |
-| **Branch в†’ Central** | РљР»РёРµРЅС‚С‹, РџСЂРѕРґР°Р¶Рё | РРЅРєСЂРµРјРµРЅС‚Р°Р»СЊРЅР°СЏ |
+### `coordinator.py` — Export Coordinator
+Bridge between events and data:
+- Listens to RabbitMQ exchange `travel`
+- On event: determines which data to transfer (via `ROUTE_MAP`)
+- Runs `tdtpcli --export-broker` — reads changed records (using incremental fields like `last_updated`),  
+  compresses and sends to the target RabbitMQ queue
+- Publishes a readiness signal to Redis Pub/Sub
 
-## рџљЂ Р—Р°РїСѓСЃРє РїСЂРёРјРµСЂР°
+### `consumer.py` — Import Consumer
+Handles delivery and integration:
+- Listens to Redis notification channel
+- Runs `tdtpcli --import-broker` — reads from RabbitMQ queue into staging tables
+- Calls `merge_...` SQL procedures for atomic upsert from staging to main tables
+- Writes audit record (transaction log) to S3 bucket `travel-agency`
 
-### РЁР°Рі 1: РРЅС„СЂР°СЃС‚СЂСѓРєС‚СѓСЂР°
-РЈР±РµРґРёС‚РµСЃСЊ, С‡С‚Рѕ Р·Р°РїСѓС‰РµРЅС‹:
-*   **PostgreSQL** (3 РёРЅСЃС‚Р°РЅСЃР° РёР»Рё 3 Р‘Р” РЅР° РїРѕСЂС‚Р°С… 5432, 5433, 5434).
-*   **RabbitMQ** (СЃ РґРѕСЃС‚СѓРїРѕРј `tdtp:tdtp`).
-*   **Redis** (РїРѕСЂС‚ 6379).
-*   **MinIO** (S3 РЅР° РїРѕСЂС‚Сѓ 8333).
+---
 
-### РЁР°Рі 2: РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ Р‘Р”
-Р’С‹РїРѕР»РЅРёС‚Рµ SQL-СЃРєСЂРёРїС‚С‹ РґР»СЏ РїРѕРґРіРѕС‚РѕРІРєРё СЃС…РµРј Рё РЅР°С‡Р°Р»СЊРЅС‹С… РґР°РЅРЅС‹С…:
-1.  `setup/setup_database_postgres.sql` (Central)
-2.  `setup/setup_branch_postgres.sql` (Branch)
-3.  `setup/setup_airline_postgres.sql` (Airline)
-4.  `setup/seed_central_postgres.sql` (РќР°С‡Р°Р»СЊРЅС‹Рµ СЃРїСЂР°РІРѕС‡РЅРёРєРё)
+## Quick Start
 
-### РЁР°Рі 3: Р—Р°РїСѓСЃРє СЃРµСЂРІРёСЃРѕРІ
-Р’ СЂР°Р·РЅС‹С… С‚РµСЂРјРёРЅР°Р»Р°С… Р·Р°РїСѓСЃС‚РёС‚Рµ:
+### Step 1: Infrastructure
 
-1.  **РљРѕРѕСЂРґРёРЅР°С‚РѕСЂ:**
-    ```bash
-    python coordinator.py
-    ```
+Ensure the following are running:
 
-2.  **РљРѕРЅСЃСЊСЋРјРµСЂС‹ (РґР»СЏ РєР°Р¶РґРѕРіРѕ СѓР·Р»Р°):**
-    ```bash
-    python consumer.py --node central
-    python consumer.py --node branch
-    ```
+```
+PostgreSQL   — 3 instances on ports 5432, 5433, 5434
+RabbitMQ     — credentials: tdtp / tdtp
+Redis        — port 6379
+MinIO        — S3 on port 8333
+```
 
-3.  **РЎРёРјСѓР»СЏС‚РѕСЂС‹ (РіРµРЅРµСЂР°С†РёСЏ С‚СЂР°С„РёРєР°):**
-    ```bash
-    python activity.py --node airline --interval 5
-    python activity.py --node branch --interval 3
-    python activity.py --node central --interval 10
-    ```
+### Step 2: Initialize Databases
 
-## рџ›  РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ TDTP
-Р’СЃРµ РЅР°СЃС‚СЂРѕР№РєРё TDTP (СЃР¶Р°С‚РёРµ, СЂРµС‚СЂР°Рё, circuit breaker) РІС‹РЅРµСЃРµРЅС‹ РІ YAML-С„Р°Р№Р»С‹:
-*   `configs/config_src_...`: РќР°СЃС‚СЂРѕР№РєРё РёСЃС‚РѕС‡РЅРёРєР° РґР»СЏ `coordinator.py`.
-*   `configs/config_dst_...`: РќР°СЃС‚СЂРѕР№РєРё РїСЂРёРµРјРЅРёРєР° РґР»СЏ `consumer.py`.
-*   РЎР¶Р°С‚РёРµ: `compress: true`, СѓСЂРѕРІРµРЅСЊ 3.
-*   РћС‚РєР°Р·РѕСѓСЃС‚РѕР№С‡РёРІРѕСЃС‚СЊ: СЌРєСЃРїРѕРЅРµРЅС†РёР°Р»СЊРЅС‹Рµ РїРѕРІС‚РѕСЂС‹ РїСЂРё СЃР±РѕСЏС… Р±СЂРѕРєРµСЂР° РёР»Рё Р‘Р”.
+Run SQL scripts from `setup/` in order:
 
-## рџ“‹ Р—Р°РјРµС‚РєРё РїРѕ СЃС…РµРјРµ
+```bash
+psql -p 5432 -f setup/setup_database_postgres.sql    # Central
+psql -p 5433 -f setup/setup_branch_postgres.sql      # Branch
+psql -p 5434 -f setup/setup_airline_postgres.sql     # Airline
+psql -p 5432 -f setup/setup_central_additions.sql    # Central additions
+psql -p 5432 -f setup/setup_staging_central.sql      # Central staging tables
+psql -p 5433 -f setup/setup_staging_branch.sql       # Branch staging tables
+psql -p 5432 -f setup/seed_central_postgres.sql      # Seed reference data
+```
 
-### Staging-С‚Р°Р±Р»РёС†С‹ Рё С‚РёРїС‹ РґР°РЅРЅС‹С…
+Or use the populate scripts:
 
-**РџСЂР°РІРёР»Рѕ:** С‚РёРї РєРѕР»РѕРЅРєРё РІ staging-С‚Р°Р±Р»РёС†Рµ РґРѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ СЃ С‚РёРїРѕРј РІ РёСЃС‚РѕС‡РЅРёРєРµ.
-TDTP СЃРѕС…СЂР°РЅСЏРµС‚ NULL РєР°Рє РјР°СЂРєРµСЂ `[NULL]` РІ С‚РµР»Рµ РїР°РєРµС‚Р° Рё РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РµРіРѕ РІ `nil`
-РїСЂРё РёРјРїРѕСЂС‚Рµ вЂ” РЅРѕ С‚РѕР»СЊРєРѕ РµСЃР»Рё С‚РёРї РєРѕР»РѕРЅРєРё РЅР°Р·РЅР°С‡РµРЅРёСЏ РґРѕРїСѓСЃРєР°РµС‚ СЌС‚Рѕ (РЅРµ `TEXT`).
+```bash
+python setup/populate_data_postgres.py
+```
 
-РџСЂРёРјРµСЂ: `cancellation_date` РІ `branch_sales_inbox_staging` РѕР±СЉСЏРІР»РµРЅР° РєР°Рє
-`TIMESTAMP NULL` (РЅРµ `TEXT`), С…РѕС‚СЏ Р·РЅР°С‡РµРЅРёРµ РјРѕР¶РµС‚ РѕС‚СЃСѓС‚СЃС‚РІРѕРІР°С‚СЊ:
+### Step 3: Start Services
+
+Run each in a separate terminal:
+
+```bash
+# Export coordinator
+python coordinator.py
+
+# Import consumers
+python consumer.py --node central
+python consumer.py --node branch
+
+# Traffic simulators
+python activity.py --node airline --interval 5
+python activity.py --node branch  --interval 3
+python activity.py --node central --interval 10
+```
+
+---
+
+## Configuration
+
+All TDTP settings (compression, retries, circuit breaker) are in `configs/`:
+
+| File pattern | Used by | Purpose |
+|---|---|---|
+| `configs/config_central.yaml` | `consumer.py` | Central DB connection |
+| `configs/config_branch.yaml` | `consumer.py` | Branch DB connection |
+| `configs/config_src_tdtp_sync_*.yaml` | `coordinator.py` | Source configs per entity |
+| `configs/config_dst_tdtp_sync_*.yaml` | `consumer.py` | Destination configs per entity |
+| `configs/config_broker_*.yaml` | both | RabbitMQ broker settings |
+
+Default settings:
+- Compression: `compress: true`, level 3 (zstd)
+- Resilience: exponential retry on broker or DB failure
+
+---
+
+## Notes
+
+### Staging Tables and Data Types
+
+**Rule:** column type in the staging table must match the source type.  
+TDTP stores NULL as marker `[NULL]` in the packet body and restores it to `nil` on import —  
+but only if the destination column type allows it (not `TEXT`).
 
 ```sql
--- РџСЂР°РІРёР»СЊРЅРѕ: TIMESTAMP NULL вЂ” TDTP СЃР°Рј РѕР±СЂР°Р±РѕС‚Р°РµС‚ [NULL] в†’ NULL
+-- Correct: TIMESTAMP NULL — TDTP handles [NULL] → NULL automatically
 cancellation_date  TIMESTAMP NULL,
 
--- РќРµРїСЂР°РІРёР»СЊРЅРѕ: TEXT РІС‹Р·РѕРІРµС‚ РѕС€РёР±РєСѓ pgx "unable to encode time.Time into text"
+-- Wrong: TEXT causes pgx error "unable to encode time.Time into text"
 -- cancellation_date  TEXT,
 ```
 
-Merge-РїСЂРѕС†РµРґСѓСЂР° РїРѕР»СѓС‡Р°РµС‚ `NULL` РЅР°РїСЂСЏРјСѓСЋ Рё РЅРµ С‚СЂРµР±СѓРµС‚ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹С… РєР°СЃС‚РѕРІ:
+The merge procedure receives `NULL` directly — no additional casting needed:
+
 ```sql
--- РџСЂР°РІРёР»СЊРЅРѕ (РїРѕСЃР»Рµ РёСЃРїСЂР°РІР»РµРЅРёСЏ):
+-- Correct (after fix):
 cancellation_date,
 
--- РќРµ РЅСѓР¶РЅРѕ (СЃС‚Р°СЂС‹Р№ РѕР±С…РѕРґРЅРѕР№ РІР°СЂРёР°РЅС‚):
+-- Not needed (old workaround):
 -- NULLIF(NULLIF(cancellation_date, ''), '[NULL]')::TIMESTAMP
 ```
+
+### Pipeline YAMLs
+
+The `pipelines/` directory contains `--pipeline` configs for multi-source ETL:
+- `extract_*.yaml` — pull data from MSSQL source into S3
+- `load_*.yaml` — load from S3 into PostgreSQL destination
+
+These use the `--pipeline` command and are independent of the broker-based sync above.
