@@ -130,30 +130,38 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 	// SQL Server datetime does not accept ISO 8601 'Z' suffix; strip it.
 	sql = isoDatetimeZ.ReplaceAllString(sql, "'$1'")
 
-	// Заменяем LIMIT/OFFSET на SQL Server синтаксис (SQL Server 2012+)
-	if query != nil && (query.Limit > 0 || query.Offset > 0) {
-		// Убираем LIMIT N и OFFSET N из стандартного SQL
+	// Apply LIMIT/OFFSET for SQL Server.
+	//
+	// Two strategies:
+	//   TOP N        — limit-only, no offset. Works on all SQL Server versions (2000+).
+	//   OFFSET/FETCH — limit+offset, requires SQL Server 2012+ (compat level 110+).
+	//
+	// Using TOP when possible avoids failures on older compat levels (80, 90, 100).
+	if query != nil && query.Limit > 0 && query.Offset == 0 {
+		// TOP N: inject after SELECT (handles SELECT DISTINCT too)
+		limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
+		sql = strings.Replace(sql, limitPattern, "", 1)
+		sql = strings.Replace(sql, "SELECT DISTINCT ", fmt.Sprintf("SELECT DISTINCT TOP %d ", query.Limit), 1)
+		if !strings.Contains(sql, fmt.Sprintf("TOP %d", query.Limit)) {
+			sql = strings.Replace(sql, "SELECT ", fmt.Sprintf("SELECT TOP %d ", query.Limit), 1)
+		}
+	} else if query != nil && (query.Limit > 0 || query.Offset > 0) {
+		// OFFSET/FETCH: SQL Server 2012+ only (compat level 110+)
 		limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
 		offsetPattern := fmt.Sprintf(" OFFSET %d", query.Offset)
 		sql = strings.Replace(sql, limitPattern, "", 1)
 		sql = strings.Replace(sql, offsetPattern, "", 1)
 
-		// SQL Server требует ORDER BY для OFFSET/FETCH
-		hasOrderBy := strings.Contains(sql, "ORDER BY")
-		if !hasOrderBy && len(schema.Fields) > 0 {
-			// Добавляем ORDER BY по первому полю (обязательно для OFFSET/FETCH)
+		// ORDER BY is mandatory for OFFSET/FETCH
+		if !strings.Contains(sql, "ORDER BY") && len(schema.Fields) > 0 {
 			sql += fmt.Sprintf(" ORDER BY [%s]", schema.Fields[0].Name)
 		}
 
-		// OFFSET ... ROWS
 		if query.Offset > 0 {
 			sql += fmt.Sprintf(" OFFSET %d ROWS", query.Offset)
 		} else {
-			// OFFSET 0 ROWS обязателен если есть FETCH
 			sql += " OFFSET 0 ROWS"
 		}
-
-		// FETCH NEXT ... ROWS ONLY
 		if query.Limit > 0 {
 			sql += fmt.Sprintf(" FETCH NEXT %d ROWS ONLY", query.Limit)
 		}
