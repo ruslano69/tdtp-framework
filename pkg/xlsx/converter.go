@@ -219,18 +219,12 @@ func FromXLSX(filePath, sheetName string) (*packet.DataPacket, error) {
 	}
 
 	// Create packet
-	pkt := &packet.DataPacket{
-		Protocol: "TDTP",
-		Version:  "1.0",
-		Header: packet.Header{
-			Type:          packet.TypeReference,
-			TableName:     sheetName,
-			Timestamp:     time.Now().UTC(),
-			RecordsInPart: len(rows) - 1,
-		},
-		Schema: packet.Schema{Fields: fields},
-		Data:   packet.Data{Rows: make([]packet.Row, 0, len(rows)-1)},
-	}
+	pkt := packet.NewDataPacket(packet.TypeReference, sheetName)
+	pkt.Header.RecordsInPart = len(rows) - 1
+	pkt.Header.PartNumber = 1
+	pkt.Header.TotalParts = 1
+	pkt.Schema = packet.Schema{Fields: fields}
+	pkt.Data = packet.Data{Rows: make([]packet.Row, 0, len(rows)-1)}
 
 	// Parse data rows
 	for rowIdx := 1; rowIdx < len(rows); rowIdx++ {
