@@ -225,6 +225,28 @@ def _configure_d_symbols(lib: ctypes.CDLL) -> None:
     lib.D_FreeMaskConfig.argtypes = [ctypes.POINTER(D_MaskConfig)]
     lib.D_FreeMaskConfig.restype = None
 
+    # --- Arrow columnar bridge ---------------------------------------------
+    # D_ColumnFloat64(*D_Packet, c_int) → *double  (len = row_count; NaN = null)
+    lib.D_ColumnFloat64.argtypes = [ctypes.POINTER(D_Packet), ctypes.c_int]
+    lib.D_ColumnFloat64.restype = ctypes.POINTER(ctypes.c_double)
+
+    # D_ColumnInt64(*D_Packet, c_int) → *longlong  (len = row_count; 0 = null)
+    lib.D_ColumnInt64.argtypes = [ctypes.POINTER(D_Packet), ctypes.c_int]
+    lib.D_ColumnInt64.restype = ctypes.POINTER(ctypes.c_longlong)
+
+    # D_ColumnUTF8(*D_Packet, c_int, **int32 offsets, *int32 nbytes) → *char data
+    lib.D_ColumnUTF8.argtypes = [
+        ctypes.POINTER(D_Packet),
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+        ctypes.POINTER(ctypes.c_int),
+    ]
+    lib.D_ColumnUTF8.restype = ctypes.c_void_p
+
+    # D_FreeBuffer(void*) → void
+    lib.D_FreeBuffer.argtypes = [ctypes.c_void_p]
+    lib.D_FreeBuffer.restype = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers used by both api_j and api_d

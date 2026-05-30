@@ -158,5 +158,31 @@ class Tdtp:
         """Write a DataFrame to a ``.tdtp`` file."""
         self._j.write_pandas(df, path, table_name=table_name)
 
+    # -- Arrow columnar bridge (optional) ------------------------------------
+
+    def read_arrow(self, path: str) -> "Any":
+        """Read a ``.tdtp`` file into a ``pyarrow.Table`` via the columnar bridge.
+
+        Each column is extracted as a typed buffer in Go (one pass per column)
+        rather than row-by-row in Python — far faster on large datasets, and the
+        Arrow table feeds pandas, polars and DuckDB directly.
+
+        Requires ``pip install tdtp[arrow]``.
+
+        Example::
+
+            import duckdb
+            tbl = db.read_arrow("orders.tdtp.xml")
+            duckdb.query("SELECT region, sum(total) FROM tbl GROUP BY region").df()
+        """
+        from tdtp.arrow_ext import packet_to_arrow
+        with self.direct.D_read_ctx(path) as handle:
+            return packet_to_arrow(handle)
+
+    def to_arrow(self, handle: "Any") -> "Any":
+        """Convert a Direct ``PacketHandle`` to a ``pyarrow.Table`` (columnar)."""
+        from tdtp.arrow_ext import packet_to_arrow
+        return packet_to_arrow(handle)
+
     def __repr__(self) -> str:
         return f"<Tdtp version={self.version!r}>"
