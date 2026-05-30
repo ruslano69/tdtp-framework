@@ -2,6 +2,111 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.7] — 2026-05-30
+
+### Added
+
+- **Python bindings — Phase 3: Arrow columnar write bridge** (`pkg/python/libtdtp/exports_j_columnar.go`, `bindings/python/tdtp/arrow_ext.py`):
+
+  Обратный путь Phase 3: `pyarrow.Table → TDTP файл` через numpy-векторизованное извлечение
+  столбцов и новую Go-функцию `J_WriteColumnar`, которая транспонирует column-major массивы
+  в row-major внутри Go — без Python-цикла `itertuples` и без per-cell `_serialize`.
+
+  ```python
+  db = Tdtp()
+
+  # write_arrow: Arrow → TDTP напрямую (быстрый путь)
+  tbl = pa.table({"ID": [1, 2, 3], "Score": [9.5, 8.0, None]})
+  db.write_arrow(tbl, "scores.tdtp.xml", table_name="scores")
+
+  # from_arrow: Arrow → data dict (для последующей фильтрации/подписи перед записью)
+  data = db.from_arrow(tbl)
+  data = db.filter(data, "Score > 5")
+  db.stamp(data, "signed.tdtp.xml")
+
+  # Полный roundtrip: read_arrow → write_arrow
+  src = db.read_arrow("orders.tdtp.xml")
+  db.write_arrow(src, "orders_copy.tdtp.xml")
+  ```
+
+  | Путь | 10k строк | Ускорение |
+  |------|-----------|-----------|
+  | `itertuples` + `J_WriteFile` (старый) | ~82 ms | 1× |
+  | `write_arrow` / `J_WriteColumnar` (новый) | ~40 ms | **×2.1** |
+  | `from_arrow` (dict only, no I/O) | ~27 ms | **×3.1** |
+
+  - **Go `J_WriteColumnar`**: принимает `{schema, header, columns: [[col0], [col1], ...]}`;
+    транспозиция и запись — одна аллокация в Go.
+  - **`_arrow_col_to_strings`**: numpy `astype(str)` для INT/FLOAT (векторизованно);
+    null/NaN/±Inf → `""` (TDTP null); `to_pylist()` для строк.
+  - **`Tdtp.from_arrow(table)`** — возвращает data dict, совместимый с `J_WriteFile`.
+  - **`Tdtp.write_arrow(table, path)`** — пишет TDTP файл напрямую.
+  - 13 новых тестов в `TestArrowWrite` (схема, null-handling, int/float/str roundtrip,
+    пустая таблица, `read_arrow → write_arrow` цикл).
+
+- **Python bindings — Phase 0–2: унификация, CLI parity, ergonomics**
+  (`bindings/python/tdtp/`, `pkg/python/libtdtp/`):
+
+  Полная модернизация Python-библиотеки в четыре итерации:
+
+  **Phase 0 — Unified versioning & packaging**
+  - Единый источник версии: `pkg/core/version/version.go` → `J_GetVersion()` →
+    Python `__version__` (синхронизируется при сборке).
+  - `py.typed` marker (PEP 561) — inline type annotations.
+  - Стабильные коды ошибок в JSON-envelope: `PARSE_ERROR`, `FILTER_ERROR`,
+    `WRITE_ERROR`, `PROCESSOR_ERROR`, `DIFF_ERROR`, `INVALID_INPUT`, `INTERNAL_ERROR`.
+  - `tdtp[arrow]`, `tdtp[pandas]` packaging extras в `pyproject.toml`.
+  - `GOWORK=off` в `make build-lib` / `make build-lib-full` (fix: go.work мешал сборке libtdtp).
+
+  **Phase 1 — CLI parity in-process**
+  - `J_Inspect` (`exports_j_inspect.go`) — метаданные пакета без распаковки данных;
+    использует `ParseBytes` (сохраняет флаг compact, в отличие от `ParseFile`).
+  - `J_Test` (`exports_j_integrity.go`, бывший `_test.go` — исправлен баг cgo):
+    dry-run проверка целостности с разбором по частям.
+  - `J_Sort` (`exports_j_transform.go`) — сортировка по одному или нескольким полям.
+  - `J_Merge` (`exports_j_transform.go`) — объединение датасетов (union/intersection/left/right/append).
+  - `J_ReadMultipart` (`exports_j_multipart.go`) — сборка `_part_N_of_M` батча в один датасет.
+  - `J_ExportAll` расширен: compact (`fixed_fields`, `compact_tail`) + compress + checksum
+    в одном вызове. Исправлен баг `rawRows` fast-path в `compressAndSign`.
+
+  **Phase 2 — Ergonomics**
+  - `Tdtp` facade (`bindings/python/tdtp/facade.py`) — plain-verb API без `J_`-префиксов
+    и ручного управления памятью.
+  - `J_Stamp` / `J_Verify` (`exports_j_verify.go`) — вычисление и проверка XXH3 хешей v1.4.
+  - Agent recipe examples: `agent_pipeline.py`, `agent_diff_merge.py`, `agent_analytics.py`.
+  - Smoke-тесты примеров (`tests/test_examples.py`).
+  - `TDTPClientJSON` extended: `J_inspect`, `J_test`, `J_sort`, `J_merge`,
+    `J_read_multipart`, `J_stamp`, `J_verify`.
+
+  **Phase 3 — Arrow columnar read bridge**
+  - `D_ColumnInt64` / `D_ColumnFloat64` / `D_ColumnUTF8` / `D_FreeBuffer`
+    (`exports_d_arrow.go`) — Go extractors: один проход на столбец, C-буфер.
+  - `packet_to_arrow(handle)` (`arrow_ext.py`) — `PacketHandle → pyarrow.Table`;
+    строки через Arrow binary buffers (no per-element Python).
+  - `Tdtp.read_arrow(path)` — файл → Arrow table в один вызов.
+  - `Tdtp.to_arrow(handle)` — прямая конвертация PacketHandle.
+
+### Fixed
+
+- **`J_Test` символ не экспортировался** (`pkg/python/libtdtp/`): cgo исключает файлы
+  `*_test.go` из c-shared сборки. Файл переименован в `exports_j_integrity.go`.
+
+- **`J_Inspect` compact флаг всегда `false`**: `ParseFile` автоматически разворачивает
+  compact-строки (`Data.Compact = false`). Исправлено: `ParseBytes(os.ReadFile(path))`
+  сохраняет флаги на диске.
+
+- **`J_Sort` направление сортировки**: `Sorter.compareRows` проверяет `"DESC"` (uppercase);
+  `normalizeDirection` возвращала lowercase. Исправлено: возвращает `"ASC"` / `"DESC"`.
+
+### Tests
+
+- `bindings/python/tests/test_api_j.py` — расширен тестами для J_Inspect, J_Test,
+  J_Sort, J_Merge, J_ReadMultipart, J_Stamp, J_Verify.
+- `bindings/python/tests/test_facade.py` — 13 тестов Tdtp facade.
+- `bindings/python/tests/test_arrow.py` — 24 теста (read + write roundtrips).
+- `bindings/python/tests/test_examples.py` — smoke-тесты трёх agent recipes.
+- `bindings/python/tests/test_bench.py` — write benchmarks: itertuples vs columnar.
+
 ## [1.9.6] — 2026-05-30
 
 ### Added
