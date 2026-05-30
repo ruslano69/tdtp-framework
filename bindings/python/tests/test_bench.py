@@ -262,3 +262,69 @@ def test_bench_pipeline_d(benchmark, d, sample_path):
                 return out.get_rows()
 
     benchmark(_op)
+
+
+# ---------------------------------------------------------------------------
+# Arrow write path benchmark: itertuples vs columnar (Phase 3)
+#
+# Build a 10 000-row table with INT + FLOAT + TEXT columns, then write it to
+# a temporary TDTP file using two approaches:
+#   - "row"  path: pandas itertuples + _serialize per cell (J_WriteFile)
+#   - "col"  path: numpy vectorized column extraction + J_WriteColumnar
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def large_arrow_table():
+    """10 000-row Arrow table: INTEGER + REAL + TEXT."""
+    pa = pytest.importorskip("pyarrow")
+    np = pytest.importorskip("numpy")
+    rng = np.random.default_rng(42)
+    n = 10_000
+    ids    = pa.array(rng.integers(1, 100_000, n), type=pa.int64())
+    scores = pa.array(rng.uniform(0.0, 1000.0, n), type=pa.float64())
+    tags   = pa.array([f"tag_{i % 100}" for i in range(n)], type=pa.string())
+    return pa.table({"ID": ids, "Score": scores, "Tag": tags})
+
+
+@pytest.fixture(scope="module")
+def large_pandas_df(large_arrow_table):
+    """Same data as a pandas DataFrame (for the itertuples baseline)."""
+    return large_arrow_table.to_pandas()
+
+
+@pytest.mark.benchmark(group="write_10k")
+def test_bench_write_row_itertuples(benchmark, j, tmp_path, large_pandas_df):
+    """Write 10 000 rows — row-major itertuples path (pandas_to_data → J_WriteFile)."""
+    pytest.importorskip("pyarrow")
+    from tdtp.pandas_ext import pandas_to_data
+
+    out = str(tmp_path / "bench_row.tdtp.xml")
+
+    def _op():
+        data = pandas_to_data(large_pandas_df, table_name="bench")
+        j.J_write(data, out)
+
+    benchmark(_op)
+
+
+@pytest.mark.benchmark(group="write_10k")
+def test_bench_write_col_arrow(benchmark, tmp_path, large_arrow_table):
+    """Write 10 000 rows — columnar Arrow path (write_arrow / J_WriteColumnar)."""
+    pytest.importorskip("pyarrow")
+    from tdtp.arrow_ext import write_arrow
+
+    out = str(tmp_path / "bench_col.tdtp.xml")
+
+    def _op():
+        write_arrow(large_arrow_table, out, table_name="bench")
+
+    benchmark(_op)
+
+
+@pytest.mark.benchmark(group="write_10k")
+def test_bench_write_from_arrow_to_dict(benchmark, large_arrow_table):
+    """Convert 10 000-row Arrow table → data dict only (no file I/O)."""
+    pytest.importorskip("pyarrow")
+    from tdtp.arrow_ext import arrow_to_data
+
+    benchmark(arrow_to_data, large_arrow_table, table_name="bench")

@@ -184,5 +184,56 @@ class Tdtp:
         from tdtp.arrow_ext import packet_to_arrow
         return packet_to_arrow(handle)
 
+    def from_arrow(
+        self,
+        table: "Any",
+        table_name: str = "data",
+        message_id: str = "",
+    ) -> dict:
+        """Convert a ``pyarrow.Table`` to a TDTP data dict.
+
+        Uses numpy vectorized column extraction for numeric types rather than
+        the row-by-row ``itertuples`` path — significantly faster on large
+        tables with many integer or float columns.
+
+        Requires ``pip install tdtp[arrow]``.
+
+        Args:
+            table:      ``pyarrow.Table`` to convert.
+            table_name: Value written into the TDTP packet header.
+            message_id: TDTP ``MessageID``; auto-generated UUID4 when empty.
+
+        Returns:
+            dict with ``"schema"``, ``"header"``, and ``"data"`` keys, ready
+            for :meth:`write`.
+        """
+        from tdtp.arrow_ext import arrow_to_data
+        return arrow_to_data(table, table_name=table_name, message_id=message_id)
+
+    def write_arrow(
+        self,
+        table: "Any",
+        path: str,
+        table_name: str = "data",
+        message_id: str = "",
+    ) -> None:
+        """Write a ``pyarrow.Table`` directly to a ``.tdtp`` file.
+
+        Combines columnar extraction (numpy-vectorized for numeric types) with
+        the ``J_WriteColumnar`` Go function — faster than building a row-major
+        Python dict and calling :meth:`write`, especially for large numeric
+        datasets.
+
+        Requires ``pip install tdtp[arrow]``.
+
+        Example::
+
+            import pyarrow as pa
+            tbl = pa.table({"ID": [1, 2, 3], "Score": [9.5, 8.0, 7.2]})
+            db.write_arrow(tbl, "scores.tdtp.xml", table_name="scores")
+        """
+        from tdtp.arrow_ext import write_arrow
+        write_arrow(table, path, table_name=table_name, message_id=message_id)
+
     def __repr__(self) -> str:
         return f"<Tdtp version={self.version!r}>"
