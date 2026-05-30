@@ -161,6 +161,11 @@ func jRunCompress(jp jPacket, params map[string]any) *C.char {
 // compressAndSign applies compression and optional XXH3 checksum
 // to a packet's Data section — mirrors compressPacketData() in export.go.
 func compressAndSign(pkt *packet.DataPacket, algo string, level int, enableChecksum bool) error {
+	// GenerateReference stores rows in rawRows (fast-path), leaving Data.Rows
+	// empty. Without this flush the function would early-return and silently
+	// produce an uncompressed, unchecksummed packet.
+	pkt.MaterializeRows()
+
 	if len(pkt.Data.Rows) == 0 {
 		return nil
 	}

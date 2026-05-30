@@ -678,3 +678,69 @@ class TestJExportCompact:
         # empty field: "<R>|Bob</R>". Group headers keep the value: "<R>Sales|Ann</R>".
         assert "<R>|Bob</R>" in raw
         assert "<R>Sales|Ann</R>" in raw
+
+
+# ---------------------------------------------------------------------------
+# J_Test — integrity check (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJTest:
+    def test_plain_file_ok(self, j_client, sample_tdtp_path) -> None:
+        r = j_client.J_test(str(sample_tdtp_path))
+        assert r["ok"] is True
+        assert r["total_rows"] == SAMPLE_TOTAL_ROWS
+        assert r["total_parts"] == 1
+        assert r["errors"] == []
+
+    def test_compressed_checksummed_ok(self, j_client, sample_data_j, tmp_path) -> None:
+        out = tmp_path / "h.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True, checksum=True)
+        r = j_client.J_test(res["files"][0])
+        assert r["ok"] is True
+        assert r["parts"][0]["compression"] == "zstd"
+        assert r["parts"][0]["checksum"] == "ok"
+
+    def test_corrupt_checksum_detected(self, j_client, sample_data_j, tmp_path) -> None:
+        out = tmp_path / "h.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True, checksum=True)
+        f = res["files"][0]
+        raw = open(f).read()
+        i = raw.index("<R>") + 4
+        open(f, "w").write(raw[:i] + chr((ord(raw[i]) + 1) % 120 or 65) + raw[i + 1:])
+        r = j_client.J_test(f)
+        assert r["ok"] is False
+        assert r["parts"][0]["checksum"] == "invalid"
+        assert len(r["errors"]) == 1
+
+    def test_missing_part_raises(self, j_client, sample_data_j, tmp_path) -> None:
+        import copy
+        p1 = copy.deepcopy(sample_data_j)
+        p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        f1 = tmp_path / "T_part_1_of_2.tdtp.xml"
+        j_client.J_write(p1, str(f1))
+        with pytest.raises(TDTPParseError):
+            j_client.J_test(str(f1))
+
+
+# ---------------------------------------------------------------------------
+# Regression: J_ExportAll compress must actually compress (rawRows fast-path bug)
+# ---------------------------------------------------------------------------
+
+class TestExportCompressRegression:
+    def test_compress_actually_compresses(self, j_client, sample_data_j, tmp_path) -> None:
+        """compress=True must yield a zstd packet — not silently uncompressed.
+
+        Regression for the rawRows fast-path bug: compressAndSign read the empty
+        Data.Rows (rows were in rawRows) and returned early, producing a plain file.
+        """
+        out = tmp_path / "c.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True, checksum=True)
+        meta = j_client.J_inspect(res["files"][0])
+        assert meta["compression"] == "zstd"
+        assert meta["checksum"] != "none"
+
+    def test_compressed_export_roundtrips(self, j_client, sample_data_j, tmp_path) -> None:
+        out = tmp_path / "c.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True)
+        back = j_client.J_read(res["files"][0])
+        assert back["data"] == sample_data_j["data"]

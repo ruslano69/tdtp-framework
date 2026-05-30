@@ -112,6 +112,10 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_ReadMultipart.argtypes = [ctypes.c_char_p]
     lib.J_ReadMultipart.restype = ctypes.c_void_p
 
+    # J_Test(*char) → *char  (dry-run integrity check, no DB)
+    lib.J_Test.argtypes = [ctypes.c_char_p]
+    lib.J_Test.restype = ctypes.c_void_p
+
     # J_WriteFile(*char, *char) → *char
     lib.J_WriteFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_WriteFile.restype = ctypes.c_void_p

@@ -164,6 +164,40 @@ class TDTPClientJSON:
         """
         return _call(lib.J_Inspect, path.encode())
 
+    def J_test(self, path: str) -> dict:
+        """Dry-run integrity check of a TDTP file or multi-part batch (no DB).
+
+        In-process equivalent of ``tdtpcli --test``. Verifies that all parts are
+        present, each parses, compressed parts pass XXH3 checksum + decompression,
+        and the header row count matches the actual rows.
+
+        Args:
+            path: path to a ``.tdtp`` file or any part of a ``_part_N_of_M`` batch.
+
+        Returns::
+
+            {
+                "ok": <bool>,                 # overall verdict
+                "total_parts": <int>,
+                "total_rows": <int>,
+                "parts": [{"file": ..., "rows": <int>,
+                           "compression": ..., "checksum": "ok"|"none"|"invalid",
+                           "row_count": "ok"|"mismatch: ...", "ok": <bool>}, ...],
+                "errors": [<str>, ...],       # human-readable per-part failures
+            }
+
+        Raises:
+            TDTPParseError: if a part is missing (the batch is structurally
+                            incomplete and cannot be verified).
+
+        Example::
+
+            report = client.J_test("export/Users_part_1_of_4.tdtp.xml")
+            if not report["ok"]:
+                raise SystemExit("corrupt: " + "; ".join(report["errors"]))
+        """
+        return _call(lib.J_Test, path.encode())
+
     def J_read_multipart(self, path: str) -> dict:
         """Read a multi-part TDTP batch and assemble it into one dataset.
 
