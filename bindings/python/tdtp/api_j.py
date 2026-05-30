@@ -373,7 +373,7 @@ class TDTPClientJSON:
         data = self.J_from_pandas(df, table_name=table_name)
         self.J_write(data, path)
 
-    def J_to_pandas(self, data: dict):
+    def J_to_pandas(self, data: dict) -> "pd.DataFrame":
         """Convert a J_read result dict to a pandas DataFrame.
 
         Delegates to :func:`tdtp.pandas_ext.data_to_pandas`.
@@ -399,7 +399,7 @@ class TDTPClientJSON:
         from tdtp.pandas_ext import data_to_pandas
         return data_to_pandas(data)
 
-    def J_from_pandas(self, df, table_name: str = "data", message_id: str = "") -> dict:
+    def J_from_pandas(self, df: "pd.DataFrame", table_name: str = "data", message_id: str = "") -> dict:
         """Convert a pandas DataFrame to a TDTP data dict.
 
         The returned dict can be passed directly to :meth:`J_write`.

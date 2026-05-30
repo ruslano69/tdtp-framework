@@ -1,6 +1,8 @@
 [project]
 name = "tdtp"
-version = "0.1.0"
+# Kept in sync with pkg/core/version/version.go via `make sync-version`.
+# The authoritative runtime version is tdtp.__version__ (read from J_GetVersion).
+version = "1.9.6"
 description = "Python bindings for the TDTP framework (JSON + Direct ctypes APIs)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -19,8 +21,10 @@ include = ["tdtp*"]
 
 # libtdtp.so must be present in the tdtp/ directory at install time.
 # For development: run `make build-lib` in this directory first.
+# py.typed marks the package as typed (PEP 561) so the inline annotations
+# are visible to type checkers and agent tooling.
 [tool.setuptools.package-data]
-tdtp = ["*.so", "*.dll", "*.dylib"]
+tdtp = ["*.so", "*.dll", "*.dylib", "py.typed"]
 
 [build-system]
 requires = ["setuptools>=61"]

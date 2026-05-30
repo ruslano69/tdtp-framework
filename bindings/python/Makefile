@@ -22,7 +22,7 @@ else ifeq ($(GOOS),darwin)
     LIB_OUT := $(CURDIR)/tdtp/libtdtp.dylib
 endif
 
-.PHONY: all build-lib build-lib-full install-dev test bench clean help
+.PHONY: all build-lib build-lib-full install-dev test bench clean help sync-version
 
 all: build-lib install-dev
 
@@ -31,7 +31,7 @@ all: build-lib install-dev
 build-lib:
 	@echo "→ Building $(LIB_OUT) basic (GOOS=$(GOOS) GOARCH=$(GOARCH))"
 	cd $(LIB_SRC) && \
-	go build \
+	GOWORK=off go build \
 		-buildmode=c-shared \
 		-o $(LIB_OUT) .
 	@if [ -f $(LIB_SRC)/libtdtp.h ]; then mv $(LIB_SRC)/libtdtp.h $(HEADER_OUT); fi
@@ -43,12 +43,20 @@ build-lib:
 build-lib-full:
 	@echo "→ Building $(LIB_OUT) full (GOOS=$(GOOS) GOARCH=$(GOARCH))"
 	cd $(LIB_SRC) && \
-	go build \
+	GOWORK=off go build \
 		-tags compress \
 		-buildmode=c-shared \
 		-o $(LIB_OUT) .
 	@if [ -f $(LIB_SRC)/libtdtp.h ]; then mv $(LIB_SRC)/libtdtp.h $(HEADER_OUT); fi
 	@echo "✓ $(LIB_OUT) [full]"
+
+## sync-version: copy version from pkg/core/version/version.go into pyproject.toml
+##               Single source of truth lives in Go; this keeps build metadata in sync.
+sync-version:
+	@ver=$$(grep -oE 'Version = "[0-9]+\.[0-9]+\.[0-9]+[^"]*"' $(REPO_ROOT)/pkg/core/version/version.go | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^"]*'); \
+	if [ -z "$$ver" ]; then echo "✗ could not read version from Go source"; exit 1; fi; \
+	sed -i.bak -E 's/^version = "[^"]*"/version = "'$$ver'"/' pyproject.toml && rm -f pyproject.toml.bak; \
+	echo "✓ pyproject.toml version → $$ver (from pkg/core/version)"
 
 ## install-dev: install package in editable mode (requires build-lib first)
 install-dev:
