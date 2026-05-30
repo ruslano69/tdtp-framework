@@ -24,7 +24,7 @@ import (
 // On success the function prints a one-line status to stdout so the user
 // can see whether Mercury or local integrity was used.
 func applyV14SecurityGate(ctx context.Context, pkt *packet.DataPacket, mercuryURL string) error {
-	if pkt.Version != "1.4" {
+	if packet.NeedsRowCountCheck(pkt.Version) {
 		return nil
 	}
 

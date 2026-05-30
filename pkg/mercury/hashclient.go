@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // ─── Hash registry client ─────────────────────────────────────────────────────
@@ -24,7 +26,7 @@ import (
 // UUID+part; the slot is occupied by the producer's registration and NX blocks
 // any subsequent writes.
 //
-// Version guard: both methods are no-ops for packets with version != "1.4".
+// Version guard: both methods are no-ops for pre-v1.4 packets (no hash registry).
 
 // RegisterHash registers the packet's xxh3_128 fingerprint in xzMercury.
 // Must be called by the PRODUCER after ComputeIntegrity, before queueing.
@@ -45,7 +47,7 @@ func (c *Client) RegisterHash(
 	uuid string, part int,
 	xxh3, tableName, sender, packetVersion string,
 ) error {
-	if packetVersion != "1.4" {
+	if packet.NeedsRowCountCheck(packetVersion) {
 		return nil // pre-1.4: no hash registry
 	}
 	if xxh3 == "" {
@@ -114,7 +116,7 @@ func (c *Client) VerifyHash(
 	uuid string, part int,
 	xxh3, packetVersion string,
 ) (*HashRecord, error) {
-	if packetVersion != "1.4" {
+	if packet.NeedsRowCountCheck(packetVersion) {
 		return nil, nil // pre-1.4: pass-through
 	}
 	if xxh3 == "" {

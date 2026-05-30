@@ -73,9 +73,12 @@ func (h *hashesHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "xxh3 must be 32-char hex (xxh3_128)")
 		return
 	}
-	if req.PacketVersion != "1.4" {
+	// Accept v1.4 and later (all carry XXH3). Reject only pre-1.4 (legacy
+	// checksum only). String compare matches the framework's NeedsRowCountCheck
+	// predicate; duplicated here because xzmercury is a standalone module.
+	if req.PacketVersion <= "1.3.1" {
 		writeError(w, http.StatusBadRequest,
-			"hash registration requires packet_version=1.4 (pre-1.4 packets use legacy checksum only)")
+			"hash registration requires packet_version >= 1.4 (pre-1.4 packets use legacy checksum only)")
 		return
 	}
 

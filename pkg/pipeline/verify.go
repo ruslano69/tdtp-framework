@@ -91,8 +91,10 @@ func VerifyAndPrepare(
 		VerifiedAt: time.Now().UTC(),
 	}
 
-	// ── Pre-v1.4: legacy pass-through ────────────────────────────────────────
-	if pkt.Version != "1.4" {
+	// ── Pre-v1.4: legacy pass-through (no integrity hashes to verify) ─────────
+	// v1.4+ carry XXH3 — use the shared predicate so future versions (1.5, …)
+	// are verified automatically instead of silently bypassing the gate.
+	if packet.NeedsRowCountCheck(pkt.Version) {
 		return result, nil
 	}
 
