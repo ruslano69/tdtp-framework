@@ -131,6 +131,15 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 		return fmt.Errorf("schema is required when data is present")
 	}
 
+	// RecordsInPart должен точно совпадать с числом <R> строк.
+	// Для сжатых пакетов строки упакованы в blob — проверка невозможна без декомпрессии.
+	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" {
+		if actual := len(packet.Data.Rows); actual != packet.Header.RecordsInPart {
+			return fmt.Errorf("RecordsInPart mismatch: header declares %d rows, <Data> contains %d",
+				packet.Header.RecordsInPart, actual)
+		}
+	}
+
 	return nil
 }
 

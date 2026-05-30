@@ -1,7 +1,6 @@
 package packet
 
 import (
-	"encoding/xml"
 	"reflect"
 	"testing"
 )
@@ -186,10 +185,10 @@ func TestRoundTrip_EscapeUnescape(t *testing.T) {
 				t.Fatalf("GenerateReference failed: %v", err)
 			}
 
-			// 3. Сериализуем в XML
-			xmlData, err := xml.Marshal(packets[0])
+			// 3. Сериализуем в XML через внутренний writer (xml.Marshal не видит rawRows)
+			xmlData, err := packetToBytes(packets[0])
 			if err != nil {
-				t.Fatalf("XML marshal failed: %v", err)
+				t.Fatalf("packetToBytes failed: %v", err)
 			}
 
 			// 4. Парсим обратно

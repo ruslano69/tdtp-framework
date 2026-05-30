@@ -673,6 +673,12 @@ func decompressPacketData(pkt *packet.DataPacket) error {
 		pkt.Data.Rows[i] = packet.Row{Value: row}
 	}
 
+	// Integrity: RecordsInPart must match actual decompressed row count.
+	if declared := pkt.Header.RecordsInPart; declared > 0 && declared != len(rows) {
+		return fmt.Errorf("RecordsInPart mismatch after decompression: header declares %d rows, got %d (data may be truncated or corrupt)",
+			declared, len(rows))
+	}
+
 	return nil
 }
 
