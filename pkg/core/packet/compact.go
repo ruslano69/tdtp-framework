@@ -78,6 +78,7 @@ func ExpandCompactRows(packet *DataPacket) error {
 	}
 
 	newRows := make([]Row, len(packet.Data.Rows))
+	var sb strings.Builder
 	for rowIdx, row := range packet.Data.Rows {
 		values := parser.GetRowValues(row)
 
@@ -97,12 +98,15 @@ func ExpandCompactRows(packet *DataPacket) error {
 			}
 		}
 
-		// Сериализуем значения обратно в Row (с экранированием)
-		escaped := make([]string, len(values))
+		// Сериализуем значения в Row без промежуточного []string.
+		sb.Reset()
 		for i, v := range values {
-			escaped[i] = escapeValue(v)
+			if i > 0 {
+				sb.WriteByte('|')
+			}
+			sb.WriteString(escapeValue(v))
 		}
-		newRows[rowIdx] = Row{Value: strings.Join(escaped, "|")}
+		newRows[rowIdx] = Row{Value: sb.String()}
 	}
 
 	packet.Data.Rows = newRows
@@ -166,11 +170,11 @@ func RowsToCompactData(rows [][]string, schema Schema, tail bool) Data {
 
 	// lastFixed хранит последнее записанное значение fixed поля (для детектирования смены)
 	lastFixed := make([]string, nFields)
+	parts := make([]string, nFields) // reused across rows; strings.Join copies, not aliases
 	firstRow := true
 	lastIdx := len(rows) - 1
 
 	for rowIdx, row := range rows {
-		parts := make([]string, nFields)
 
 		// Tail-строка: все fixed поля пишутся явно, независимо от carry.
 		// Это делает последнюю строку самодостаточной carry-снэпшотом.
