@@ -116,6 +116,14 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_Test.argtypes = [ctypes.c_char_p]
     lib.J_Test.restype = ctypes.c_void_p
 
+    # J_Verify(*char) → *char  (v1.4 XXH3 integrity verification, no Mercury)
+    lib.J_Verify.argtypes = [ctypes.c_char_p]
+    lib.J_Verify.restype = ctypes.c_void_p
+
+    # J_Stamp(*char, *char) → *char  (compute XXH3 hashes, write v1.4 file)
+    lib.J_Stamp.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_Stamp.restype = ctypes.c_void_p
+
     # J_WriteFile(*char, *char) → *char
     lib.J_WriteFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_WriteFile.restype = ctypes.c_void_p

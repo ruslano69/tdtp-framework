@@ -198,6 +198,61 @@ class TDTPClientJSON:
         """
         return _call(lib.J_Test, path.encode())
 
+    def J_verify(self, path: str) -> dict:
+        """Verify a packet's v1.4 XXH3 integrity hashes (local, no Mercury).
+
+        Use before trusting an externally-sourced packet: confirms the schema,
+        data, and packet fingerprints match — i.e. the bytes were not tampered.
+
+        Args:
+            path: path to the ``.tdtp`` file.
+
+        Returns::
+
+            {
+                "ok": <bool>,             # True if hashes match OR packet is unstamped
+                "has_integrity": <bool>,  # whether v1.4 hashes are present at all
+                "packet_xxh3": <hex>,     # the packet fingerprint (when stamped)
+                "detail": <str>,          # mismatch description when ok is False
+            }
+
+        Raises:
+            TDTPParseError: if the file cannot be parsed or decompressed.
+
+        Example::
+
+            v = client.J_verify("incoming.tdtp.xml")
+            if v["has_integrity"] and not v["ok"]:
+                raise SystemExit("tampered packet: " + v["detail"])
+        """
+        return _call(lib.J_Verify, path.encode())
+
+    def J_stamp(self, data: dict, path: str) -> dict:
+        """Compute v1.4 XXH3 integrity hashes and write a stamped TDTP file.
+
+        Producer side of :meth:`J_verify` — analog of ``tdtpcli --export
+        --integrity`` without Mercury. Returns the three fingerprints so they can
+        be recorded or transmitted out of band.
+
+        Args:
+            data: dict in the shape returned by :meth:`J_read`.
+            path: destination ``.tdtp`` file path.
+
+        Returns::
+
+            {"ok": True, "path": ..., "packet_xxh3": <hex>,
+             "schema_xxh3": <hex>, "data_xxh3": <hex>}
+
+        Raises:
+            TDTPWriteError: if hashing or writing fails.
+
+        Example::
+
+            r = client.J_stamp(data, "signed.tdtp.xml")
+            print("fingerprint:", r["packet_xxh3"])
+        """
+        return _call(lib.J_Stamp, json.dumps(data).encode(), path.encode())
+
     def J_read_multipart(self, path: str) -> dict:
         """Read a multi-part TDTP batch and assemble it into one dataset.
 

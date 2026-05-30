@@ -744,3 +744,48 @@ class TestExportCompressRegression:
         res = j_client.J_export_all(sample_data_j, str(out), compress=True)
         back = j_client.J_read(res["files"][0])
         assert back["data"] == sample_data_j["data"]
+
+
+# ---------------------------------------------------------------------------
+# J_Stamp / J_Verify — v1.4 integrity (Phase 2)
+# ---------------------------------------------------------------------------
+
+class TestJIntegrity:
+    def test_stamp_returns_fingerprints(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        r = j_client.J_stamp(sample_data_j, str(f))
+        assert r["ok"] is True
+        assert len(r["packet_xxh3"]) == 32   # xxh3_128 = 32 hex chars
+        assert len(r["schema_xxh3"]) == 32
+        assert len(r["data_xxh3"]) == 32
+        assert f.exists()
+
+    def test_verify_clean_packet(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        j_client.J_stamp(sample_data_j, str(f))
+        v = j_client.J_verify(str(f))
+        assert v["ok"] is True
+        assert v["has_integrity"] is True
+        assert len(v["packet_xxh3"]) == 32
+
+    def test_verify_detects_tamper(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        j_client.J_stamp(sample_data_j, str(f))
+        raw = open(f).read()
+        open(f, "w").write(raw.replace("Moscow", "Madrid", 1))
+        v = j_client.J_verify(str(f))
+        assert v["ok"] is False
+        assert v["has_integrity"] is True
+        assert "mismatch" in v["detail"]
+
+    def test_verify_unstamped_is_ok(self, j_client, sample_tdtp_path) -> None:
+        """A packet without v1.4 hashes is not an error — just has_integrity=False."""
+        v = j_client.J_verify(str(sample_tdtp_path))
+        assert v["ok"] is True
+        assert v["has_integrity"] is False
+
+    def test_stamp_verify_roundtrip_data(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        j_client.J_stamp(sample_data_j, str(f))
+        back = j_client.J_read(str(f))
+        assert back["data"] == sample_data_j["data"]
