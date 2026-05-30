@@ -116,6 +116,42 @@ str ver = TdtpAxapta.Tdtp::GetVersion();
 info(ver);
 ```
 
+### Инспекция и целостность (v1.9.7)
+
+```xpp
+// Метаданные без распаковки данных (схема, число строк, сжатие)
+str meta = TdtpAxapta.Tdtp::Inspect(@"C:\data\export.tdtp.xml");
+
+// Dry-run проверка: все части на месте, контрольная сумма, распаковка
+str check = TdtpAxapta.Tdtp::Test(@"C:\data\export.tdtp.xml");
+
+// Подписать v1.4 (XXH3) и проверить
+str stamp = TdtpAxapta.Tdtp::Stamp(dataJson, @"C:\data\signed.tdtp.xml");
+str ok    = TdtpAxapta.Tdtp::Verify(@"C:\data\signed.tdtp.xml");
+
+// Собрать многочастный набор (передать любую часть)
+str whole = TdtpAxapta.Tdtp::ReadMultipart(@"C:\data\Users_part_1_of_5.tdtp.xml");
+```
+
+### Сортировка и слияние (v1.9.7)
+
+```xpp
+// Сортировка: по одному полю или по нескольким ключам
+str sorted = TdtpAxapta.Tdtp::Sort(dataJson, "Balance");
+str multi  = TdtpAxapta.Tdtp::Sort(dataJson,
+    '[{"field":"City","direction":"ASC"},{"field":"Balance","direction":"DESC"}]');
+
+// Слияние нескольких датасетов (union по умолчанию)
+str merged = TdtpAxapta.Tdtp::Merge(
+    '[' + dataJsonA + ',' + dataJsonB + ']',
+    '{"strategy":"union","key_fields":["ID"]}');
+
+// Колоночная запись (быстрее построчной на больших числовых наборах)
+str res = TdtpAxapta.Tdtp::WriteColumnar(
+    '{"schema":{...},"header":{...},"columns":[["1","2"],["Alice","Bob"]]}',
+    @"C:\data\out.tdtp.xml");
+```
+
 ---
 
 ## Проверка после сборки

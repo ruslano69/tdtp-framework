@@ -2,6 +2,47 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.9.7] — 2026-05-30
+
+Модернизация Python-библиотеки: facade-API, CLI-parity in-process и Arrow-мост (read + write).
+
+### Added
+
+- **Arrow columnar bridge** (`exports_d_arrow.go`, `exports_j_columnar.go`, `arrow_ext.py`):
+  чтение и запись `pyarrow.Table ↔ TDTP` через типизированные C-буферы и
+  векторизованную обработку столбцов. Write-путь (`J_WriteColumnar`) транспонирует
+  column-major в row-major внутри Go — **×2.1** к старому `itertuples` на 10k строк.
+  API: `Tdtp.read_arrow` / `to_arrow` / `from_arrow` / `write_arrow`.
+
+- **`Tdtp` facade** (`facade.py`): plain-verb API без `J_`-префиксов и ручного
+  управления памятью (`read`/`write`/`filter`/`sort`/`merge`/`stamp`/`verify`/…).
+
+- **CLI parity in-process**: `J_Inspect`, `J_Test`, `J_Sort`, `J_Merge`,
+  `J_ReadMultipart`, `J_Stamp`, `J_Verify`; `J_ExportAll` расширен compact + compress
+  + checksum в одном вызове.
+
+- **Packaging & versioning**: единый источник версии (`pkg/core/version`), `py.typed`
+  (PEP 561), стабильные коды ошибок в JSON-envelope, extras `tdtp[arrow]` / `tdtp[pandas]`.
+  Lockstep `.so` ↔ пакет: `build-lib` запускает `sync-version` (build-time), импорт
+  сверяет `J_GetVersion` с метаданными пакета и предупреждает при рассинхроне (runtime).
+
+- **C# обёртка (`libcs/`) — паритет с новыми экспортами**: в `TdtpWrapper.cs`
+  добавлены P/Invoke-объявления и публичные методы `Inspect`, `Test`, `Verify`,
+  `Stamp`, `ReadMultipart`, `Sort`, `Merge`, `WriteColumnar`. Версия по-прежнему
+  берётся в рантайме через `GetVersion()` — без зашитых констант, всегда в лок-степе
+  с ядром. `BUILD.md` дополнен X++-примерами.
+
+### Fixed
+
+- `J_Test` не экспортировался — cgo исключает `*_test.go` (переименован в `exports_j_integrity.go`).
+- `J_Inspect` терял флаг compact — `ParseBytes` вместо авто-разворачивающего `ParseFile`.
+- `J_Sort` игнорировал направление — `normalizeDirection` теперь возвращает `"ASC"`/`"DESC"`.
+
+### Tests
+
+- `test_arrow.py` (24, read+write roundtrips), `test_facade.py` (13), `test_examples.py`
+  (smoke трёх agent recipes), расширен `test_api_j.py`, write-benchmarks в `test_bench.py`.
+
 ## [1.9.6] — 2026-05-30
 
 ### Added

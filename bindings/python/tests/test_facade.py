@@ -90,3 +90,40 @@ class TestFacadeIntegrity:
         raw = open(f).read()
         open(f, "w").write(raw.replace("Moscow", "Madrid", 1))
         assert db.verify(str(f))["ok"] is False
+
+
+class TestVersionLockstep:
+    """The .so (J_GetVersion) and the package metadata must stay in lockstep."""
+
+    def test_no_warning_when_in_sync(self, monkeypatch) -> None:
+        import importlib.metadata as meta
+        import warnings
+        import tdtp
+
+        orig = meta.version
+        monkeypatch.setattr(
+            meta, "version",
+            lambda name: tdtp.__version__ if name == "tdtp" else orig(name),
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            tdtp._check_version_lockstep()
+        assert not [w for w in caught if "version mismatch" in str(w.message)]
+
+    def test_warns_on_mismatch(self, monkeypatch) -> None:
+        import importlib.metadata as meta
+        import warnings
+        import tdtp
+
+        orig = meta.version
+        monkeypatch.setattr(
+            meta, "version",
+            lambda name: "0.0.0" if name == "tdtp" else orig(name),
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            tdtp._check_version_lockstep()
+        assert any(
+            "version mismatch" in str(w.message) and issubclass(w.category, RuntimeWarning)
+            for w in caught
+        )
