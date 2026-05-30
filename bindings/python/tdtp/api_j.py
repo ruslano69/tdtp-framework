@@ -209,6 +209,9 @@ class TDTPClientJSON:
         algo: str = "zstd",
         level: int = 3,
         checksum: bool = True,
+        compact: bool = False,
+        fixed_fields: list[str] | None = None,
+        compact_tail: bool = False,
     ) -> dict:
         """Partition data and write all parts using the framework's native byte-size logic.
 
@@ -226,6 +229,13 @@ class TDTPClientJSON:
                        (higher ratio, ~10× slower, optimal for cold archiving).
             level:     Compression level (default 3). zstd: 1–19; kanzi: 1–9.
             checksum:  Compute XXH3 checksum when compressing (default True).
+            compact:   Encode each part in compact v1.3.1 format — fixed (group)
+                       fields are written once per group with carry-forward gaps,
+                       shrinking grouped datasets before compression.
+            fixed_fields: explicit list of group fields. When omitted, fields with
+                       a leading underscore (``_dept``) are auto-detected.
+            compact_tail: also write the last row with all fixed fields explicit
+                       (self-contained carry snapshot for streaming consumers).
 
         Returns:
             ``{"files": [...], "total_parts": N}``
@@ -252,7 +262,12 @@ class TDTPClientJSON:
             )
             print(result["total_parts"], "files written")
         """
-        opts = {"compress": compress, "algo": algo, "level": level, "checksum": checksum}
+        opts = {
+            "compress": compress, "algo": algo, "level": level, "checksum": checksum,
+            "compact": compact, "compact_tail": compact_tail,
+        }
+        if fixed_fields:
+            opts["fixed_fields"] = fixed_fields
         return _call(
             lib.J_ExportAll,
             json.dumps(data).encode(),

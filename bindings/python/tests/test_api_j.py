@@ -635,3 +635,46 @@ class TestJReadMultipart:
         with pytest.raises(TDTPParseError) as exc_info:
             j_client.J_read_multipart(str(f1))
         assert exc_info.value.code == "PARSE_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# J_ExportAll compact option (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJExportCompact:
+    GROUPED = {
+        "schema": {"Fields": [{"Name": "_dept", "Type": "TEXT"},
+                              {"Name": "emp", "Type": "TEXT"}]},
+        "header": {"type": "reference", "table_name": "staff",
+                   "message_id": "m1", "timestamp": "2026-01-01T00:00:00Z"},
+        "data": [["Sales", "Ann"], ["Sales", "Bob"], ["Sales", "Cara"],
+                 ["IT", "Dan"], ["IT", "Eve"]],
+    }
+
+    def test_export_sets_compact_flag(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        meta = j_client.J_inspect(res["files"][0])
+        assert meta["compact"] is True
+
+    def test_export_autodetects_underscore_fixed(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        meta = j_client.J_inspect(res["files"][0])
+        fixed = [f["Name"] for f in meta["schema"]["Fields"] if f.get("Fixed")]
+        assert fixed == ["dept"]  # _dept stripped + marked fixed
+
+    def test_compact_roundtrip_preserves_data(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        back = j_client.J_read_multipart(res["files"][0])
+        assert back["data"] == self.GROUPED["data"]
+
+    def test_compact_on_disk_has_carry_gaps(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        raw = open(res["files"][0]).read()
+        # One fixed field at index 0 → carry-forward rows start with a leading
+        # empty field: "<R>|Bob</R>". Group headers keep the value: "<R>Sales|Ann</R>".
+        assert "<R>|Bob</R>" in raw
+        assert "<R>Sales|Ann</R>" in raw

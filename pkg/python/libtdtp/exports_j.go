@@ -352,6 +352,24 @@ func jExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char
 		withChecksum = v
 	}
 
+	// Compact v1.3.1 options: carry-forward for fixed (group) fields.
+	compact := false
+	if v, ok := opts["compact"].(bool); ok {
+		compact = v
+	}
+	compactTail := false
+	if v, ok := opts["compact_tail"].(bool); ok {
+		compactTail = v
+	}
+	var explicitFixed []string
+	if raw, ok := opts["fixed_fields"].([]any); ok {
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				explicitFixed = append(explicitFixed, s)
+			}
+		}
+	}
+
 	// Partition by byte size — identical logic to tdtpcli GenerateReference
 	gen := packet.NewGenerator()
 	packets, err := gen.GenerateReference(jp.Header.TableName, jp.Schema, jp.Data)
@@ -363,6 +381,17 @@ func jExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char
 	written := make([]string, 0, len(packets))
 
 	for i, pkt := range packets {
+		// Compact must run before compression: it rewrites Data.Rows with
+		// carry-forward gaps for fixed fields. Applied per-part so each part
+		// stays independently decodable (carry-forward resets per packet).
+		if compact {
+			fixed := packet.ResolveFixedFields(pkt.Schema, explicitFixed)
+			if len(fixed) > 0 {
+				if err := packet.ApplyCompact(pkt, fixed, compactTail); err != nil {
+					return jErr(fmt.Sprintf("compress part %d: %v", i+1, err))
+				}
+			}
+		}
 		if compress {
 			if err := compressAndSign(pkt, algo, level, withChecksum); err != nil {
 				return jErr(fmt.Sprintf("compress part %d: %v", i+1, err))
