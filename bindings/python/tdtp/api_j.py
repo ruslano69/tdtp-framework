@@ -500,3 +500,79 @@ class TDTPClientJSON:
             json.dumps(old).encode(),
             json.dumps(new).encode(),
         )
+
+    # -----------------------------------------------------------------------
+    # Sort / Merge (Phase 1)
+    # -----------------------------------------------------------------------
+
+    def J_sort(self, data: dict, order_by: list[dict] | str) -> dict:
+        """Sort data rows by one or more fields.
+
+        Args:
+            data:     dict in the shape returned by :meth:`J_read`.
+            order_by: either a single field name (str, ascending) or a list of
+                      sort keys::
+
+                          [{"field": "Balance", "direction": "desc"},
+                           {"field": "Name"}]   # direction defaults to "asc"
+
+        Returns:
+            Same ``schema`` / ``header`` / ``data`` shape as :meth:`J_read`,
+            with rows sorted.
+
+        Raises:
+            TDTPFilterError: if a sort field is not found in the schema.
+
+        Example::
+
+            data   = client.J_read("users.tdtp.xml")
+            sorted = client.J_sort(data, [{"field": "Balance", "direction": "desc"}])
+        """
+        if isinstance(order_by, str):
+            order_by = [{"field": order_by, "direction": "asc"}]
+        return _call(
+            lib.J_Sort,
+            json.dumps(data).encode(),
+            json.dumps(order_by).encode(),
+        )
+
+    def J_merge(
+        self,
+        packets: list[dict],
+        strategy: str = "union",
+        key_fields: list[str] | None = None,
+    ) -> dict:
+        """Merge multiple TDTP datasets into one.
+
+        Args:
+            packets:    list of dataset dicts (each in :meth:`J_read` shape).
+            strategy:   ``"union"`` (default, dedup by key) | ``"intersection"`` |
+                        ``"left"`` | ``"right"`` | ``"append"`` (no dedup).
+            key_fields: fields identifying a row; defaults to the schema's key
+                        fields when omitted.
+
+        Returns:
+            dict with merged ``schema`` / ``header`` / ``data`` plus a ``stats``
+            object::
+
+                {"total_packets": N, "total_rows_in": N, "total_rows_out": N,
+                 "duplicates": N, "conflicts": N}
+
+        Raises:
+            TDTPError: if the merge fails (e.g. incompatible schemas).
+
+        Example::
+
+            a = client.J_read("monday.tdtp.xml")
+            b = client.J_read("tuesday.tdtp.xml")
+            merged = client.J_merge([a, b], strategy="union", key_fields=["ID"])
+            print(merged["stats"]["duplicates"], "duplicates removed")
+        """
+        opts = {"strategy": strategy}
+        if key_fields:
+            opts["key_fields"] = key_fields
+        return _call(
+            lib.J_Merge,
+            json.dumps(packets).encode(),
+            json.dumps(opts).encode(),
+        )

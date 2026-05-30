@@ -534,3 +534,63 @@ class TestJInspect:
         with pytest.raises(TDTPParseError) as exc_info:
             j_client.J_inspect("/no/such/file.tdtp.xml")
         assert exc_info.value.code == "PARSE_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# J_Sort — order-by (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJSort:
+    def _balance_idx(self, data) -> int:
+        return [f["Name"] for f in data["schema"]["Fields"]].index("Balance")
+
+    def test_sort_desc(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, [{"field": "Balance", "direction": "desc"}])
+        idx = self._balance_idx(out)
+        bals = [int(r[idx]) for r in out["data"]]
+        assert bals == sorted(bals, reverse=True)
+
+    def test_sort_asc_default(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, [{"field": "Balance"}])
+        idx = self._balance_idx(out)
+        bals = [int(r[idx]) for r in out["data"]]
+        assert bals == sorted(bals)
+
+    def test_sort_string_shorthand(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, "Balance")
+        idx = self._balance_idx(out)
+        bals = [int(r[idx]) for r in out["data"]]
+        assert bals == sorted(bals)
+
+    def test_sort_preserves_row_count(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, "Name")
+        assert len(out["data"]) == SAMPLE_TOTAL_ROWS
+
+    def test_sort_unknown_field_raises(self, j_client, sample_data_j) -> None:
+        with pytest.raises(TDTPFilterError):
+            j_client.J_sort(sample_data_j, "NoSuchField")
+
+
+# ---------------------------------------------------------------------------
+# J_Merge — combine datasets (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJMerge:
+    def test_union_dedup(self, j_client, sample_data_j) -> None:
+        out = j_client.J_merge([sample_data_j, sample_data_j], strategy="union", key_fields=["ID"])
+        assert out["stats"]["total_rows_out"] == SAMPLE_TOTAL_ROWS
+        assert out["stats"]["duplicates"] == SAMPLE_TOTAL_ROWS
+        assert len(out["data"]) == SAMPLE_TOTAL_ROWS
+
+    def test_append_no_dedup(self, j_client, sample_data_j) -> None:
+        out = j_client.J_merge([sample_data_j, sample_data_j], strategy="append")
+        assert out["stats"]["total_rows_out"] == 2 * SAMPLE_TOTAL_ROWS
+
+    def test_stats_total_packets(self, j_client, sample_data_j) -> None:
+        out = j_client.J_merge([sample_data_j, sample_data_j], strategy="append")
+        assert out["stats"]["total_packets"] == 2
+
+    def test_unknown_strategy_raises(self, j_client, sample_data_j) -> None:
+        from tdtp.exceptions import TDTPError
+        with pytest.raises(TDTPError):
+            j_client.J_merge([sample_data_j], strategy="bogus")

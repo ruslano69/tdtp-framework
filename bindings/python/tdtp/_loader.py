@@ -141,6 +141,14 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_Diff.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_Diff.restype = ctypes.c_void_p
 
+    # J_Sort(*char, *char) → *char  (data, order-by spec)
+    lib.J_Sort.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_Sort.restype = ctypes.c_void_p
+
+    # J_Merge(*char, *char) → *char  (packets array, options)
+    lib.J_Merge.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_Merge.restype = ctypes.c_void_p
+
     # J_SerializeValue(*char, *char) → *char
     # Single source of truth for type serialization in Python adapters.
     # tdtpType: "BLOB" | "TIMESTAMP" | "DATETIME" | "JSON" | "JSONB" | …
