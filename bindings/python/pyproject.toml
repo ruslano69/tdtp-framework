@@ -2,7 +2,7 @@
 name = "tdtp"
 # Kept in sync with pkg/core/version/version.go via `make sync-version`.
 # The authoritative runtime version is tdtp.__version__ (read from J_GetVersion).
-version = "1.9.6"
+version = "1.9.7"
 description = "Python bindings for the TDTP framework (JSON + Direct ctypes APIs)"
 readme = "README.md"
 requires-python = ">=3.9"
