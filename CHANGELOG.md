@@ -2,9 +2,31 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
-## [1.9.6] — 2026-05-25
+## [1.9.6] — 2026-05-30
 
 ### Added
+
+- **`--to-csv`** (`cmd/tdtpcli/commands/csv.go`): конвертер TDTP → CSV с security gate.
+
+  TDTP остаётся транспортом с полными гарантиями; CSV — адаптер последней мили для
+  легаси-систем (1С, SAP, bulk load в БД). Разделитель, кодировка и integrity-проверка
+  настраиваются независимо.
+
+  ```bash
+  tdtpcli --to-csv report.tdtp.xml -d=';' --cp=1251          # легаси Windows
+  tdtpcli --to-csv report.tdtp.xml --bom                      # Excel UTF-8
+  tdtpcli --to-csv report.tdtp.xml -d=';' -w 'Balance > 0' -l=100
+  ```
+
+  - **Security gate**: `v1.0` — pass-through; `v1.4` — `VerifyAndPrepare` перед записью.
+  - **Разделитель** `-d=';'`: работает в PowerShell и bash; RFC 4180 auto-quoting.
+  - **Кодировки** `--cp`: `utf8`, `1251`, `866`.
+  - **`--bom`**: UTF-8 BOM для Excel.
+  - TDTQL-фильтры (`--where`, `--order-by`, `--limit`, `--fields`) работают как для всех команд.
+  - **43 интеграционных теста** (`tests/cli/test_csv.py`).
+
+- **TDTQL алиас `-l`** (`cmd/tdtpcli/flags.go`): `-l=10` как сокращение `--limit=10`
+  (читается как «lines», аналогично `tail -n`). Алиас `-w` для `--where` сохранён.
 
 - **`--enc` tier — standalone AES-256-GCM encryption** (`cmd/tdtpcli/commands/encrypt.go`):
 
@@ -77,14 +99,59 @@ All notable changes to tdtp-framework are documented in this file.
 
 ### Fixed
 
+- **`--from-xlsx` пустой MessageID** (`pkg/xlsx/converter.go`): XLSX-конвертер создавал
+  пакет вручную (`DataPacket{}`), пропуская генерацию UUID. Исправлено переходом на
+  `packet.NewDataPacket()`.
+
+- **`--limit` на MSSQL compat level 80/90/100** (`pkg/adapters/base/sql_adapter.go`):
+  `OFFSET/FETCH NEXT` требует SQL Server 2012+. Для `--limit` без `--offset` теперь
+  генерируется `SELECT TOP N` (работает с SQL Server 2000+). `OFFSET/FETCH` остаётся
+  только при пагинации с `--offset`.
+
+- **`exportToTDTP` и `exportToKafkaSpool` теряли строки** (`pkg/etl/exporter.go`):
+  вызов `packet.ParseRows(dataPacket.Data.Rows, ...)` возвращал 0 строк когда данные
+  хранились в `rawRows` (fast-path). Исправлено на `dataPacket.GetRows()`.
+
 - **Windows backslash в YAML** (`tests/integration/xzmercury_pipeline_test.go`):
-  пути вида `C:\Users\...` в YAML double-quoted строках парсились как Unicode-эскейпы
-  (`\U` = 8-hex). Исправлено через `strings.ReplaceAll(yaml, `\`, `/`)` и
-  `filepath.ToSlash()` для всех путей в конфигах пайплайна.
+  пути вида `C:\Users\...` парсились как Unicode-эскейпы. Исправлено через
+  `filepath.ToSlash()`.
 
 - **`TestEndToEndExportImport`** (`tests/integration/broker_test.go`):
-  `createTestTable` была заглушкой → реализована через `database/sql` с настоящим
-  DDL и 3 тестовыми строками.
+  `createTestTable` была заглушкой → реализована через `database/sql`.
+
+### Performance
+
+- **In-memory фильтр (`pkg/core/tdtql/`)** — два исправления горячего пути:
+
+  | Что | Было | Стало |
+  |-----|------|-------|
+  | LIKE regexp (10k строк) | 51 ms · 440k allocs | **5.4 ms · 20k allocs** (9.5×) |
+  | Поиск поля в схеме | O(fields) на строку | O(1) map, один раз на вызов |
+
+  `comparator.go`: кеш regexp через `sync.Map`. `filter.go`: `map[string]int` и
+  `map[string]FieldDef` строятся один раз в `ApplyFilters`, `FieldDef` не аллоцируется
+  на каждой строке.
+
+- **Compact encode/decode (`pkg/core/packet/compact.go`)**:
+
+  | Benchmark (10k строк) | Было | Стало |
+  |-----------------------|------|-------|
+  | Encode `RowsToCompactData` | 2 594 ms · 2 087 KB | **1 274 ms · 807 KB** (2×) |
+  | Decode `ExpandCompactRows` | 7 163 ms · 5 755 KB | **5 755 ms · 4 476 KB** (1.24×) |
+
+  Per-row `[]string` заменены на `[]byte buf` с `buf[:0]` — буфер сохраняет ёмкость
+  между строками. `strings.Builder.Reset()` не использован (он сбрасывает `buf = nil`).
+
+### Refactoring
+
+- **`packetOverheadSize = 5000`** (`pkg/core/packet/generator.go`, `streaming.go`):
+  магическая константа из трёх мест вынесена в `packetOverheadSize`.
+
+### Tests
+
+- `tests/cli/test_csv.py` — 43 интеграционных теста для `--to-csv`.
+- `pkg/core/tdtql/filter_bench_test.go` — бенчмарки LIKE и field lookup old/new.
+- `pkg/core/packet/compact_bench_test.go` — бенчмарки compact encode/decode old/new.
 
 ## [1.9.5] — 2026-05-25
 
@@ -92,30 +159,7 @@ All notable changes to tdtp-framework are documented in this file.
 
 - **`--to-csv`** (`cmd/tdtpcli/commands/csv.go`): конвертер TDTP → CSV с security gate.
 
-  TDTP остаётся транспортом с полными гарантиями; CSV — адаптер последней мили для
-  легаси-систем (1С, SAP, bulk load в БД). Разделитель, кодировка и integrity-проверка
-  настраиваются независимо.
-
-  ```bash
-  tdtpcli --to-csv report.tdtp.xml -d=';' --cp=1251          # легаси Windows
-  tdtpcli --to-csv report.tdtp.xml --bom                      # Excel UTF-8
-  tdtpcli --to-csv report.tdtp.xml -d=';' -w 'Balance > 0' -n=100
-  ```
-
-  - **Security gate**: `v1.0` — pass-through без проверок; `v1.4` — `VerifyAndPrepare`
-    (Mercury + локальный xxh3) перед записью. Нарушение integrity → файл не создаётся.
-  - **Разделитель** `-d=';'` — одинарные кавычки работают в PowerShell и bash;
-    `encoding/csv` автоматически квотирует поля содержащие разделитель (RFC 4180).
-  - **Кодировки** `--cp`: `utf8` (по умолчанию), `1251` (Windows Cyrillic), `866` (DOS Cyrillic).
-  - **`--bom`**: UTF-8 BOM для корректного открытия в Excel без смены кодировки.
-  - Строки через `pkt.GetRows()` → `parser.GetRowValues()` из ядра (pipe-формат,
-    эскейпинг, rawRows fast-path). Собственный парсер строк отсутствует.
-  - TDTQL-фильтры (`--where`, `--order-by`, `--limit`, `--fields`) работают как для
-    всех остальных команд.
-
 - **TDTQL шортхэнды `-n` и `-w`** (`cmd/tdtpcli/flags.go`):
-
-  Глобальные алиасы для самых частых операций — работают со всеми командами.
 
   ```bash
   -n=10         # alias для --limit=10
@@ -651,6 +695,8 @@ its contribution entirely at 5 packets.
 
 | Version | Highlights |
 |---------|-----------|
+| 1.9.6 | `--to-csv`, `-l` alias, MSSQL TOP N fix, xlsx MessageID fix, rawRows data-loss fix, filter 9.5×, compact 2×, `--enc` tier |
+| 1.9.5 | `--to-csv` (prev), TDTQL `-n`/`-w`, v1.4 integrity + xzMercury |
 | 1.9.4 | TDTP v1.4 Dictionary, tdtp-svg (SVG↔TDTP), MSSQL 17GB fix, --fallback-row-limit |
 | 1.9.3 | PipelineContext + --expect-var, pipeline variables @name=value |
 | 1.9.1 | PostgreSQL TIME type fix, test data reproducibility (seed=42), 35/35 tests pass |

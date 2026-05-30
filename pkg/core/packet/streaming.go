@@ -88,8 +88,6 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 
 		currentPartRows := [][]string{}
 		currentSize := 0
-		overheadSize := 5000 // Примерный размер служебной информации
-
 		for {
 			select {
 			case <-ctx.Done():
@@ -139,7 +137,7 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 				rowSize := estimateRowSize(row)
 
 				// Проверяем нужно ли начать новую часть
-				if currentSize+rowSize+overheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
+				if currentSize+rowSize+packetOverheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
 					// Генерируем текущую часть
 					packet := sg.createPart(
 						messageIDBase,
@@ -223,7 +221,6 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 
 		currentPartRows := [][]string{}
 		currentSize := 0
-		overheadSize := 5000
 
 		for {
 			select {
@@ -275,7 +272,7 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 
 				rowSize := estimateRowSize(row)
 
-				if currentSize+rowSize+overheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
+				if currentSize+rowSize+packetOverheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
 					packet := sg.createPartWithSender(
 						messageIDBase,
 						partNum,

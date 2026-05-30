@@ -78,6 +78,7 @@ func ExpandCompactRows(packet *DataPacket) error {
 	}
 
 	newRows := make([]Row, len(packet.Data.Rows))
+	buf := make([]byte, 0, nFields*16) // reused across rows; string(buf) copies, buf stays
 	for rowIdx, row := range packet.Data.Rows {
 		values := parser.GetRowValues(row)
 
@@ -97,12 +98,16 @@ func ExpandCompactRows(packet *DataPacket) error {
 			}
 		}
 
-		// Сериализуем значения обратно в Row (с экранированием)
-		escaped := make([]string, len(values))
+		// Сериализуем значения в Row без промежуточного []string.
+		// buf[:0] обнуляет длину без освобождения памяти (в отличие от strings.Builder.Reset).
+		buf = buf[:0]
 		for i, v := range values {
-			escaped[i] = escapeValue(v)
+			if i > 0 {
+				buf = append(buf, '|')
+			}
+			buf = append(buf, escapeValue(v)...)
 		}
-		newRows[rowIdx] = Row{Value: strings.Join(escaped, "|")}
+		newRows[rowIdx] = Row{Value: string(buf)}
 	}
 
 	packet.Data.Rows = newRows
@@ -166,37 +171,39 @@ func RowsToCompactData(rows [][]string, schema Schema, tail bool) Data {
 
 	// lastFixed хранит последнее записанное значение fixed поля (для детектирования смены)
 	lastFixed := make([]string, nFields)
+	buf := make([]byte, 0, nFields*16) // reused across rows; string(buf) copies, buf stays
 	firstRow := true
 	lastIdx := len(rows) - 1
 
 	for rowIdx, row := range rows {
-		parts := make([]string, nFields)
 
 		// Tail-строка: все fixed поля пишутся явно, независимо от carry.
 		// Это делает последнюю строку самодостаточной carry-снэпшотом.
 		isTailRow := tail && rowIdx == lastIdx
 
+		buf = buf[:0]
 		for i := 0; i < nFields; i++ {
 			var val string
 			if i < len(row) {
 				val = row[i]
 			}
 
+			if i > 0 {
+				buf = append(buf, '|')
+			}
+
 			if i < len(fixedPos) && fixedPos[i] {
 				if firstRow || val != lastFixed[i] || isTailRow {
-					// Первая строка, смена значения, или tail-строка — пишем явно
-					parts[i] = escapeValue(val)
+					buf = append(buf, escapeValue(val)...)
 					lastFixed[i] = val
-				} else {
-					// Значение не изменилось — пропуск
-					parts[i] = ""
 				}
+				// Значение не изменилось — пропуск (пустая позиция между |)
 			} else {
-				parts[i] = escapeValue(val)
+				buf = append(buf, escapeValue(val)...)
 			}
 		}
 
-		data.Rows[rowIdx] = Row{Value: strings.Join(parts, "|")}
+		data.Rows[rowIdx] = Row{Value: string(buf)}
 		firstRow = false
 	}
 

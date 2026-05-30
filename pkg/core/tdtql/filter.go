@@ -31,8 +31,26 @@ func (f *FilterEngine) ApplyFilters(
 	stats := make(map[string]int)
 	result := [][]string{}
 
+	// Build name→index and name→FieldDef maps once (O(fields)) instead of per-row linear scan.
+	fieldIdx := make(map[string]int, len(schemaObj.Fields))
+	fieldDefs := make(map[string]schema.FieldDef, len(schemaObj.Fields))
+	for i, sf := range schemaObj.Fields {
+		key := strings.ToLower(sf.Name)
+		fieldIdx[key] = i
+		fieldDefs[key] = schema.FieldDef{
+			Name:      sf.Name,
+			Type:      schema.DataType(sf.Type),
+			Length:    sf.Length,
+			Precision: sf.Precision,
+			Scale:     sf.Scale,
+			Timezone:  sf.Timezone,
+			Key:       sf.Key,
+			Nullable:  true,
+		}
+	}
+
 	for _, row := range rows {
-		match, err := f.evaluateFilters(filters, row, schemaObj, converter, stats)
+		match, err := f.evaluateFilters(filters, row, converter, stats, fieldIdx, fieldDefs)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -49,9 +67,10 @@ func (f *FilterEngine) ApplyFilters(
 func (f *FilterEngine) evaluateFilters(
 	filters *packet.Filters,
 	row []string,
-	schemaObj packet.Schema,
 	converter *schema.Converter,
 	stats map[string]int,
+	fieldIdx map[string]int,
+	fieldDefs map[string]schema.FieldDef,
 ) (bool, error) {
 
 	if filters == nil {
@@ -60,12 +79,12 @@ func (f *FilterEngine) evaluateFilters(
 
 	// Проверяем And группу
 	if filters.And != nil {
-		return f.evaluateLogicalGroup(filters.And, "AND", row, schemaObj, converter, stats)
+		return f.evaluateLogicalGroup(filters.And, "AND", row, converter, stats, fieldIdx, fieldDefs)
 	}
 
 	// Проверяем Or группу
 	if filters.Or != nil {
-		return f.evaluateLogicalGroup(filters.Or, "OR", row, schemaObj, converter, stats)
+		return f.evaluateLogicalGroup(filters.Or, "OR", row, converter, stats, fieldIdx, fieldDefs)
 	}
 
 	return true, nil
@@ -76,9 +95,10 @@ func (f *FilterEngine) evaluateLogicalGroup(
 	group *packet.LogicalGroup,
 	operator string,
 	row []string,
-	schemaObj packet.Schema,
 	converter *schema.Converter,
 	stats map[string]int,
+	fieldIdx map[string]int,
+	fieldDefs map[string]schema.FieldDef,
 ) (bool, error) {
 
 	if operator == "AND" {
@@ -86,7 +106,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем фильтры
 		for _, filter := range group.Filters {
-			match, err := f.evaluateFilter(&filter, row, schemaObj, converter)
+			match, err := f.evaluateFilter(&filter, row, converter, fieldIdx, fieldDefs)
 			if err != nil {
 				return false, err
 			}
@@ -102,7 +122,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные And группы
 		for _, andGroup := range group.And {
-			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, schemaObj, converter, stats)
+			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, converter, stats, fieldIdx, fieldDefs)
 			if err != nil {
 				return false, err
 			}
@@ -113,7 +133,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные Or группы
 		for _, orGroup := range group.Or {
-			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, schemaObj, converter, stats)
+			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, converter, stats, fieldIdx, fieldDefs)
 			if err != nil {
 				return false, err
 			}
@@ -129,7 +149,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем фильтры
 		for _, filter := range group.Filters {
-			match, err := f.evaluateFilter(&filter, row, schemaObj, converter)
+			match, err := f.evaluateFilter(&filter, row, converter, fieldIdx, fieldDefs)
 			if err != nil {
 				return false, err
 			}
@@ -142,7 +162,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные And группы
 		for _, andGroup := range group.And {
-			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, schemaObj, converter, stats)
+			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, converter, stats, fieldIdx, fieldDefs)
 			if err != nil {
 				return false, err
 			}
@@ -153,7 +173,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные Or группы
 		for _, orGroup := range group.Or {
-			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, schemaObj, converter, stats)
+			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, converter, stats, fieldIdx, fieldDefs)
 			if err != nil {
 				return false, err
 			}
@@ -170,22 +190,14 @@ func (f *FilterEngine) evaluateLogicalGroup(
 func (f *FilterEngine) evaluateFilter(
 	filter *packet.Filter,
 	row []string,
-	schemaObj packet.Schema,
 	converter *schema.Converter,
+	fieldIdx map[string]int,
+	fieldDefs map[string]schema.FieldDef,
 ) (bool, error) {
 
-	// Находим поле в схеме
-	fieldIndex := -1
-	var field packet.Field
-	for i, f := range schemaObj.Fields {
-		if strings.EqualFold(f.Name, filter.Field) {
-			fieldIndex = i
-			field = f
-			break
-		}
-	}
-
-	if fieldIndex == -1 {
+	key := strings.ToLower(filter.Field)
+	fieldIndex, ok := fieldIdx[key]
+	if !ok {
 		return false, fmt.Errorf("field '%s' not found in schema", filter.Field)
 	}
 
@@ -193,20 +205,8 @@ func (f *FilterEngine) evaluateFilter(
 		return false, fmt.Errorf("row has fewer fields than schema")
 	}
 
-	// Получаем значение из строки
 	rowValue := row[fieldIndex]
-
-	// Создаем FieldDef для конвертации
-	fieldDef := schema.FieldDef{
-		Name:      field.Name,
-		Type:      schema.DataType(field.Type),
-		Length:    field.Length,
-		Precision: field.Precision,
-		Scale:     field.Scale,
-		Timezone:  field.Timezone,
-		Key:       field.Key,
-		Nullable:  true,
-	}
+	fieldDef := fieldDefs[key]
 
 	// Применяем оператор
 	switch filter.Operator {

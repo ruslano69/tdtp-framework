@@ -4,9 +4,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
+
+var likeRegexpCache sync.Map // pattern string → *regexp.Regexp
 
 // Comparator выполняет операции сравнения
 type Comparator struct{}
@@ -222,13 +225,20 @@ func (c *Comparator) Between(rowValue, lowValue, highValue string, field schema.
 
 // Like проверяет соответствие шаблону
 func (c *Comparator) Like(rowValue, pattern string) (bool, error) {
-	// Конвертируем SQL LIKE в regexp
-	// % -> .*
-	// _ -> .
 	regexPattern := "^" + regexp.QuoteMeta(pattern) + "$"
 	regexPattern = strings.ReplaceAll(regexPattern, "%", ".*")
 	regexPattern = strings.ReplaceAll(regexPattern, "_", ".")
 
-	matched, err := regexp.MatchString(regexPattern, rowValue)
-	return matched, err
+	var re *regexp.Regexp
+	if v, ok := likeRegexpCache.Load(regexPattern); ok {
+		re = v.(*regexp.Regexp)
+	} else {
+		compiled, err := regexp.Compile(regexPattern)
+		if err != nil {
+			return false, err
+		}
+		likeRegexpCache.Store(regexPattern, compiled)
+		re = compiled
+	}
+	return re.MatchString(rowValue), nil
 }

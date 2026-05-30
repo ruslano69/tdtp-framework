@@ -239,7 +239,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 
 	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
 	generator := packet.NewGenerator()
-	rows := packet.ParseRows(dataPacket.Data.Rows, packet.NewParser())
+	rows := dataPacket.GetRows()
 	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
 	if err != nil {
 		return fmt.Errorf("failed to generate parts: %w", err)
@@ -542,7 +542,7 @@ func (e *Exporter) exportToKafkaSpool(ctx context.Context, dataPacket *packet.Da
 
 	generator := packet.NewGenerator()
 	generator.SetMaxMessageSize(partSizeBytes)
-	rows := packet.ParseRows(dataPacket.Data.Rows, packet.NewParser())
+	rows := dataPacket.GetRows()
 	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
 	if err != nil {
 		return fmt.Errorf("failed to split packets: %w", err)
