@@ -665,7 +665,7 @@ finally:
 
 | Версия | Изменение |
 |---|---|
-| 1.9.6 | Единая версия (CLI/lib/Python); `error_code` в конверте ошибок; `J_Inspect`, `J_Test`, `J_Sort`, `J_Merge`, `J_ReadMultipart`; compact-опции в `J_ExportAll`; `J_Stamp`/`J_Verify` (v1.4 XXH3 без Mercury); Python-фасад `Tdtp`; фикс молчаливо-несжатого экспорта (rawRows) |
+| 1.9.6 | Единая версия (CLI/lib/Python); `error_code` в конверте ошибок; `J_Inspect`, `J_Test`, `J_Sort`, `J_Merge`, `J_ReadMultipart`; compact-опции в `J_ExportAll`; `J_Stamp`/`J_Verify` (v1.4 XXH3 без Mercury); Python-фасад `Tdtp`; Arrow-мост `D_ColumnInt64/Float64/UTF8` → `read_arrow` (DuckDB/polars/numpy); фикс молчаливо-несжатого экспорта (rawRows) |
 | 1.6.0 | `J_SerializeValue` — Go как единый источник правды для сериализации |
 | 1.5.x | `J_FilterRowsPage` — пагинация с `query_context` |
 | 1.4.x | `J_ExportAll` — партиционирование + опциональный zstd |
