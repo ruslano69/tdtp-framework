@@ -88,8 +88,8 @@ func decompressTDTPPacket(pkt *packet.DataPacket) error {
 	}
 
 	// Integrity: RecordsInPart must match actual decompressed row count.
-	// v1.4 packets carry XXH3 — that is the authoritative integrity check.
-	if declared := pkt.Header.RecordsInPart; declared > 0 && pkt.Version != "1.4" && declared != len(rows) {
+	// v1.4+ packets carry XXH3 — that is the authoritative integrity check.
+	if declared := pkt.Header.RecordsInPart; declared > 0 && packet.NeedsRowCountCheck(pkt.Version) && declared != len(rows) {
 		return fmt.Errorf("RecordsInPart mismatch after decompression: header declares %d rows, got %d (data may be truncated or corrupt)",
 			declared, len(rows))
 	}
