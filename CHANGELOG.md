@@ -86,7 +86,7 @@ All notable changes to tdtp-framework are documented in this file.
   `createTestTable` была заглушкой → реализована через `database/sql` с настоящим
   DDL и 3 тестовыми строками.
 
-## [1.9.5] — 2026-05-25
+## [1.9.5] — 2026-05-30
 
 ### Added
 
@@ -99,7 +99,7 @@ All notable changes to tdtp-framework are documented in this file.
   ```bash
   tdtpcli --to-csv report.tdtp.xml -d=';' --cp=1251          # легаси Windows
   tdtpcli --to-csv report.tdtp.xml --bom                      # Excel UTF-8
-  tdtpcli --to-csv report.tdtp.xml -d=';' -w 'Balance > 0' -n=100
+  tdtpcli --to-csv report.tdtp.xml -d=';' -w 'Balance > 0' -l=100
   ```
 
   - **Security gate**: `v1.0` — pass-through без проверок; `v1.4` — `VerifyAndPrepare`
@@ -112,13 +112,16 @@ All notable changes to tdtp-framework are documented in this file.
     эскейпинг, rawRows fast-path). Собственный парсер строк отсутствует.
   - TDTQL-фильтры (`--where`, `--order-by`, `--limit`, `--fields`) работают как для
     всех остальных команд.
+  - **43 интеграционных теста** (`tests/cli/test_csv.py`): разделители, BOM, кодировки,
+    проекция полей, WHERE/ORDER BY/LIMIT/OFFSET, zstd, compact v1.3.1, v1.4 integrity,
+    алиас `-l`, вывод в файл, обработка ошибок.
 
-- **TDTQL шортхэнды `-n` и `-w`** (`cmd/tdtpcli/flags.go`):
+- **TDTQL шортхэнды `-l` и `-w`** (`cmd/tdtpcli/flags.go`):
 
   Глобальные алиасы для самых частых операций — работают со всеми командами.
 
   ```bash
-  -n=10         # alias для --limit=10
+  -l=10         # alias для --limit=10  (l как в «lines»)
   -w 'X > 1'   # alias для --where 'X > 1' (повторяемый, AND-цепочка)
   ```
 
@@ -133,6 +136,65 @@ All notable changes to tdtp-framework are documented in this file.
 
   Подробнее: [`docs/xZMercury-TDTP-TZ-v1.2.md`](docs/xZMercury-TDTP-TZ-v1.2.md),
   [`xzmercury/README.md`](xzmercury/README.md).
+
+### Fixed
+
+- **`--from-xlsx` пустой MessageID** (`pkg/xlsx/converter.go`): XLSX-конвертер создавал
+  пакет вручную (`DataPacket{}`), пропуская генерацию UUID. Исправлено переходом на
+  `packet.NewDataPacket()` — тот же путь что и у всех остальных команд.
+
+- **`--limit` на MSSQL compat level 80/90/100** (`pkg/adapters/base/sql_adapter.go`):
+  `OFFSET N ROWS FETCH NEXT N ROWS ONLY` требует SQL Server 2012+ (compat 110+).
+  Для `--limit` без `--offset` теперь генерируется `SELECT TOP N` — работает на всех
+  версиях начиная с SQL Server 2000. `OFFSET/FETCH` остаётся только при пагинации.
+
+- **`exportToTDTP` и `exportToKafkaSpool` теряли строки** (`pkg/etl/exporter.go`):
+  оба метода вызывали `packet.ParseRows(dataPacket.Data.Rows, ...)` напрямую. Если
+  данные хранились в `rawRows` (fast-path `GenerateReference`), `Data.Rows` был пуст
+  и в `GenerateReference` передавалось 0 строк. Исправлено на `dataPacket.GetRows()`,
+  корректно обрабатывающий оба пути.
+
+### Performance
+
+- **In-memory фильтр (`pkg/core/tdtql/`)** — два исправления горячего пути:
+
+  | Что | Было | Стало |
+  |-----|------|-------|
+  | LIKE regexp (10k строк) | 51 ms, 440k allocs | **5.4 ms, 20k allocs** (9.5×) |
+  | Поиск поля в схеме (10k строк, 20 полей) | O(fields) на каждую строку | O(1) map, один раз на вызов |
+
+  - `comparator.go`: кеш скомпилированных regexp для LIKE через `sync.Map`; первый
+    вызов компилирует паттерн, все последующие читают из кеша.
+  - `filter.go`: `map[string]int` (имя→индекс) и `map[string]FieldDef` строятся один
+    раз в `ApplyFilters` и передаются вниз по стеку вместо линейного сканирования схемы
+    и аллокации `FieldDef` на каждой строке.
+
+- **Compact encode/decode (`pkg/core/packet/compact.go`)** — устранены per-row аллокации:
+
+  | Benchmark (10k строк) | Было | Стало |
+  |-----------------------|------|-------|
+  | `RowsToCompactData` (encode) | 2 594 ms, 2 087 KB, 20 003 allocs | **1 274 ms, 807 KB, 10 004 allocs** |
+  | `ExpandCompactRows` (decode) | 7 163 ms, 5 755 KB, 50 006 allocs | **5 755 ms, 4 476 KB, 40 008 allocs** |
+
+  - Encode: `parts []string` вынесен за пределы цикла строк; `strings.Join` заменён
+    на `[]byte buf` с `buf[:0]` (сохраняет ёмкость буфера, не освобождает).
+  - Decode: `escaped []string` per row заменён на тот же `[]byte buf` с `buf[:0]`.
+    `strings.Builder.Reset()` намеренно не использован — он устанавливает `buf = nil`
+    и вызывает реаллокацию на каждой строке.
+
+### Refactoring
+
+- **`packetOverheadSize = 5000`** (`pkg/core/packet/generator.go`, `streaming.go`):
+  магическая константа, дублировавшаяся в трёх местах, вынесена в именованную
+  package-level константу `packetOverheadSize`.
+
+### Tests
+
+- `tests/cli/test_csv.py` — 43 интеграционных теста для `--to-csv` (см. раздел Added).
+- `pkg/core/tdtql/filter_bench_test.go` — бенчмарки фильтра: LIKE old/new,
+  field lookup old/new, combined (10k строк, 5 итераций).
+- `pkg/core/packet/compact_bench_test.go` — бенчмарки compact encode/decode old/new
+  (100 групп × 100 строк, 8 полей, 5 итераций).
 
 ## [1.9.4] — 2026-05-20
 
@@ -651,6 +713,7 @@ its contribution entirely at 5 packets.
 
 | Version | Highlights |
 |---------|-----------|
+| 1.9.5 | `--to-csv`, `-l` alias, MSSQL TOP N fix, xlsx MessageID fix, rawRows data-loss fix, filter 9.5×, compact 2× |
 | 1.9.4 | TDTP v1.4 Dictionary, tdtp-svg (SVG↔TDTP), MSSQL 17GB fix, --fallback-row-limit |
 | 1.9.3 | PipelineContext + --expect-var, pipeline variables @name=value |
 | 1.9.1 | PostgreSQL TIME type fix, test data reproducibility (seed=42), 35/35 tests pass |
