@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 from tdtp import TDTPClientDirect, TDTPClientJSON
-from tests.conftest import SAMPLE_FILE
+from conftest import SAMPLE_FILE
 
 
 # ---------------------------------------------------------------------------

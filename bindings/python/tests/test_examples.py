@@ -7,6 +7,7 @@ package and TDTP_LIB_PATH at the compiled .so, and must exit 0.
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +16,16 @@ import pytest
 
 _BINDINGS = Path(__file__).resolve().parents[1]          # bindings/python
 _EXAMPLES = _BINDINGS.parents[1] / "examples" / "python"  # repo/examples/python
-_LIB = _BINDINGS / "tdtp" / "libtdtp.so"
+
+def _lib_name() -> str:
+    s = platform.system()
+    if s == "Windows":
+        return "libtdtp.dll"
+    if s == "Darwin":
+        return "libtdtp.dylib"
+    return "libtdtp.so"
+
+_LIB = _BINDINGS / "tdtp" / _lib_name()
 
 EXAMPLES = ["agent_pipeline.py", "agent_diff_merge.py"]
 # Examples needing extra optional deps → (script, required module)
@@ -27,10 +37,11 @@ def test_example_runs(script: str) -> None:
     path = _EXAMPLES / script
     if not path.exists():
         pytest.skip(f"{script} not present")
-    env = dict(os.environ, PYTHONPATH=str(_BINDINGS), TDTP_LIB_PATH=str(_LIB))
+    env = dict(os.environ, PYTHONPATH=str(_BINDINGS), TDTP_LIB_PATH=str(_LIB),
+               PYTHONIOENCODING="utf-8")
     result = subprocess.run(
         [sys.executable, str(path)],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", env=env, timeout=60,
     )
     assert result.returncode == 0, f"{script} failed:\n{result.stderr}"
     assert result.stdout.strip()
@@ -42,10 +53,11 @@ def test_arrow_example_runs(script: str, dep: str) -> None:
     path = _EXAMPLES / script
     if not path.exists():
         pytest.skip(f"{script} not present")
-    env = dict(os.environ, PYTHONPATH=str(_BINDINGS), TDTP_LIB_PATH=str(_LIB))
+    env = dict(os.environ, PYTHONPATH=str(_BINDINGS), TDTP_LIB_PATH=str(_LIB),
+               PYTHONIOENCODING="utf-8")
     result = subprocess.run(
         [sys.executable, str(path)],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", env=env, timeout=60,
     )
     assert result.returncode == 0, f"{script} failed:\n{result.stderr}"
     assert result.stdout.strip()  # produced some output

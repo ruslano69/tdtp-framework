@@ -10,7 +10,7 @@ import pytest
 
 from tdtp import TDTPClientDirect, PacketHandle
 from tdtp.exceptions import TDTPFilterError, TDTPParseError, TDTPProcessorError
-from tests.conftest import (
+from conftest import (
     SAMPLE_FIELD_NAMES,
     SAMPLE_TOTAL_ROWS,
     SAMPLE_BALANCE_GT_1000_COUNT,
