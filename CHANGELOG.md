@@ -26,6 +26,12 @@ All notable changes to tdtp-framework are documented in this file.
   Lockstep `.so` ↔ пакет: `build-lib` запускает `sync-version` (build-time), импорт
   сверяет `J_GetVersion` с метаданными пакета и предупреждает при рассинхроне (runtime).
 
+- **C# обёртка (`libcs/`) — паритет с новыми экспортами**: в `TdtpWrapper.cs`
+  добавлены P/Invoke-объявления и публичные методы `Inspect`, `Test`, `Verify`,
+  `Stamp`, `ReadMultipart`, `Sort`, `Merge`, `WriteColumnar`. Версия по-прежнему
+  берётся в рантайме через `GetVersion()` — без зашитых констант, всегда в лок-степе
+  с ядром. `BUILD.md` дополнен X++-примерами.
+
 ### Fixed
 
 - `J_Test` не экспортировался — cgo исключает `*_test.go` (переименован в `exports_j_integrity.go`).

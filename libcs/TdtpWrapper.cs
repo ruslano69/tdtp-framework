@@ -63,6 +63,32 @@ namespace TdtpAxapta
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         private static extern IntPtr J_SerializeValue(string tdtpType, string value);
 
+        // --- v1.9.7: инспекция, целостность, трансформации ----------------
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_Inspect(string path);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_Test(string path);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_Verify(string path);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_Stamp(string dataJSON, string path);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_ReadMultipart(string path);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_Sort(string dataJSON, string orderByJSON);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_Merge(string packetsJSON, string optionsJSON);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern IntPtr J_WriteColumnar(string columnarJSON, string outPath);
+
         // ----------------------------------------------------------------
         // Вспомогательный метод: IntPtr → string + освободить память Go
         // ----------------------------------------------------------------
@@ -192,6 +218,108 @@ namespace TdtpAxapta
         public static string SerializeValue(string tdtpType, string value)
         {
             return MarshalAndFree(J_SerializeValue(tdtpType, value));
+        }
+
+        // ----------------------------------------------------------------
+        // v1.9.7: инспекция, целостность, трансформации
+        // ----------------------------------------------------------------
+
+        /// <summary>
+        /// Возвращает метаданные пакета (схема, заголовок, число строк, сжатие,
+        /// compact-флаг) без распаковки секции данных.
+        /// </summary>
+        /// <param name="path">Путь к .tdtp.xml файлу</param>
+        /// <returns>JSON с метаданными или {"error":"..."}</returns>
+        public static string Inspect(string path)
+        {
+            return MarshalAndFree(J_Inspect(path));
+        }
+
+        /// <summary>
+        /// Dry-run проверка целостности: наличие всех частей, контрольная сумма,
+        /// распаковка и подсчёт строк. Файл не импортируется.
+        /// </summary>
+        /// <param name="path">Путь к .tdtp.xml файлу (или одной из частей)</param>
+        /// <returns>{"ok":true,"total_parts":N,"total_rows":M,...} или {"error":"..."}</returns>
+        public static string Test(string path)
+        {
+            return MarshalAndFree(J_Test(path));
+        }
+
+        /// <summary>
+        /// Проверяет XXH3-хеши целостности v1.4 локально (без Mercury).
+        /// </summary>
+        /// <param name="path">Путь к подписанному .tdtp.xml файлу</param>
+        /// <returns>{"ok":bool,"has_integrity":bool,"packet_xxh3":"...","detail":"..."}</returns>
+        public static string Verify(string path)
+        {
+            return MarshalAndFree(J_Verify(path));
+        }
+
+        /// <summary>
+        /// Вычисляет XXH3-хеши и записывает подписанный файл v1.4.
+        /// Продьюсер-сторона <see cref="Verify"/>.
+        /// </summary>
+        /// <param name="dataJSON">JSON (schema + header + data)</param>
+        /// <param name="path">Путь для записи подписанного файла</param>
+        /// <returns>{"ok":true,"path":"...","packet_xxh3":"...","schema_xxh3":"...","data_xxh3":"..."}</returns>
+        public static string Stamp(string dataJSON, string path)
+        {
+            return MarshalAndFree(J_Stamp(dataJSON, path));
+        }
+
+        /// <summary>
+        /// Собирает многочастный набор (_part_N_of_M) в один датасет.
+        /// Можно передать путь к любой из частей.
+        /// </summary>
+        /// <param name="path">Путь к одной из частей набора</param>
+        /// <returns>JSON со склеенным датасетом или {"error":"..."}</returns>
+        public static string ReadMultipart(string path)
+        {
+            return MarshalAndFree(J_ReadMultipart(path));
+        }
+
+        /// <summary>
+        /// Сортирует строки по одному или нескольким полям.
+        /// </summary>
+        /// <param name="dataJSON">JSON (schema + header + data)</param>
+        /// <param name="orderByJSON">
+        /// Имя поля строкой ("Balance") или массив ключей
+        /// (например [{"field":"City","direction":"ASC"},{"field":"Balance","direction":"DESC"}]).
+        /// </param>
+        /// <returns>JSON с отсортированными строками или {"error":"..."}</returns>
+        public static string Sort(string dataJSON, string orderByJSON)
+        {
+            return MarshalAndFree(J_Sort(dataJSON, orderByJSON));
+        }
+
+        /// <summary>
+        /// Объединяет несколько датасетов в один.
+        /// </summary>
+        /// <param name="packetsJSON">JSON-массив датасетов: [{schema,header,data}, ...]</param>
+        /// <param name="optionsJSON">
+        /// {"strategy":"union|intersection|left|right|append","key_fields":["ID",...]}
+        /// (можно передать null / пустую строку — по умолчанию union).
+        /// </param>
+        /// <returns>JSON со склеенным датасетом и статистикой слияния или {"error":"..."}</returns>
+        public static string Merge(string packetsJSON, string optionsJSON)
+        {
+            return MarshalAndFree(J_Merge(packetsJSON, optionsJSON));
+        }
+
+        /// <summary>
+        /// Записывает TDTP-файл из column-major данных (по столбцу на массив).
+        /// Быстрее построчного <see cref="WriteFile"/> на больших числовых наборах:
+        /// транспонирование column→row выполняется внутри Go одной аллокацией.
+        /// </summary>
+        /// <param name="columnarJSON">
+        /// {"schema":{...},"header":{...},"columns":[["1","2","3"],["Alice","Bob","Carol"], ...]}
+        /// </param>
+        /// <param name="outPath">Путь для записи</param>
+        /// <returns>{"ok":true} или {"error":"..."}</returns>
+        public static string WriteColumnar(string columnarJSON, string outPath)
+        {
+            return MarshalAndFree(J_WriteColumnar(columnarJSON, outPath));
         }
     }
 }
