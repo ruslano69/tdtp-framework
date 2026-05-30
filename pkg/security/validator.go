@@ -43,8 +43,9 @@ func (v *SQLValidator) Validate(sql string) error {
 		return nil
 	}
 
-	// Нормализуем SQL для проверки
-	normalized := strings.ToUpper(strings.TrimSpace(sql))
+	// Нормализуем SQL: upper-case + схлопываем любой whitespace (\t,\n,\r,…) в пробел.
+	// strings.TrimSpace убирает только края — без Fields внутренний \t/\n обходит паттерны.
+	normalized := strings.Join(strings.Fields(strings.ToUpper(sql)), " ")
 
 	// 1. Разрешены только SELECT и WITH (CTE - Common Table Expressions)
 	if !strings.HasPrefix(normalized, "SELECT") && !strings.HasPrefix(normalized, "WITH") {

@@ -258,11 +258,11 @@ func IsPostgreSQLReservedWord(word string) bool {
 	return reserved[strings.ToLower(word)]
 }
 
-// QuoteIdentifier заключает идентификатор в кавычки если нужно
+// QuoteIdentifier всегда заключает идентификатор в двойные кавычки,
+// дублируя внутренние кавычки по правилам PostgreSQL/SQLite (RFC-совместимо).
+// Условное квотирование было уязвимо: нижнерегистровый незарезервированный
+// идентификатор возвращался без кавычек, допуская SQL-инъекцию через TableName.
 func QuoteIdentifier(identifier string) string {
-	// Если содержит uppercase или зарезервированное слово - кавычки обязательны
-	if identifier != strings.ToLower(identifier) || IsPostgreSQLReservedWord(identifier) {
-		return fmt.Sprintf(`"%s"`, identifier) //nolint:gocritic // SQL identifier quoting, not Go string quoting
-	}
-	return identifier
+	escaped := strings.ReplaceAll(identifier, `"`, `""`)
+	return `"` + escaped + `"` //nolint:gocritic // SQL identifier quoting, not Go string quoting
 }

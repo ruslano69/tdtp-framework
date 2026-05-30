@@ -131,7 +131,8 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 
 	// Строим запросы для полного батча и неполного последнего батча.
 	fullBatchValues := strings.Repeat(rowPH+", ", batchSize-1) + rowPH
-	fullBatchQuery := fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, tableName, columnList, fullBatchValues)
+	quotedTable := fmt.Sprintf("\"%s\"", strings.ReplaceAll(tableName, `"`, `""`)) //nolint:gocritic // SQL identifier quoting
+	fullBatchQuery := fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, quotedTable, columnList, fullBatchValues)
 
 	// Prepare полного батча один раз — SQLite не будет парсить запрос повторно.
 	fullStmt, err := a.db.PrepareContext(ctx, fullBatchQuery)
@@ -168,7 +169,7 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, pkgSchema pa
 		} else {
 			// Последний неполный батч — строим и выполняем отдельно.
 			partValues := strings.Repeat(rowPH+", ", len(batch)-1) + rowPH
-			partQuery := fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, tableName, columnList, partValues)
+			partQuery := fmt.Sprintf("%s INTO %s (%s) VALUES %s", insertCmd, quotedTable, columnList, partValues)
 			if _, err := a.db.ExecContext(ctx, partQuery, args[:len(batch)*numFields]...); err != nil {
 				return fmt.Errorf("failed to insert last batch at row %d: %w", i, err)
 			}

@@ -3,6 +3,7 @@ package security
 
 import (
 	"os"
+	"os/user"
 	"runtime"
 )
 
@@ -43,14 +44,19 @@ func isWindowsAdmin() bool {
 	return true
 }
 
-// GetCurrentUser возвращает имя текущего пользователя
+// GetCurrentUser возвращает имя текущего пользователя.
+// Использует os/user.Current() — читает реальный UID процесса, не env-переменную.
+// Env-переменная USER/USERNAME тривиально подменяется, что позволяло спуфить аудит.
 func GetCurrentUser() string {
-	// Пытаемся получить из переменных окружения
-	if user := os.Getenv("USER"); user != "" {
-		return user
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
 	}
-	if user := os.Getenv("USERNAME"); user != "" {
-		return user
+	// Fallback на env только если os/user недоступен (редкие минимальные окружения).
+	if u := os.Getenv("USER"); u != "" {
+		return u
+	}
+	if u := os.Getenv("USERNAME"); u != "" {
+		return u
 	}
 	return "unknown"
 }

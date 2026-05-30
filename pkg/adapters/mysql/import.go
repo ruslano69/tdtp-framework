@@ -54,7 +54,8 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 		columns = append(columns, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(pkColumns, ", ")))
 	}
 
-	createSQL := fmt.Sprintf("CREATE TABLE `%s` (%s)", tableName, strings.Join(columns, ", "))
+	quotedTable := "`" + strings.ReplaceAll(tableName, "`", "``") + "`"
+	createSQL := fmt.Sprintf("CREATE TABLE %s (%s)", quotedTable, strings.Join(columns, ", "))
 
 	_, err := a.db.ExecContext(ctx, createSQL)
 	if err != nil {
@@ -66,7 +67,7 @@ func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema pack
 
 // DropTable удаляет таблицу
 func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
-	_, err := a.db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName))
+	_, err := a.db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", strings.ReplaceAll(tableName, "`", "``")))
 	return err
 }
 
@@ -153,20 +154,22 @@ func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packe
 
 // buildInsertPrefix возвращает "INSERT INTO `table` (`col1`, `col2`, ...)" без VALUES
 func (a *Adapter) buildInsertPrefix(tableName string, schema packet.Schema) string {
+	quotedTable := "`" + strings.ReplaceAll(tableName, "`", "``") + "`"
 	columns := make([]string, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
 	}
-	return fmt.Sprintf("INSERT INTO `%s` (%s)", tableName, strings.Join(columns, ", "))
+	return fmt.Sprintf("INSERT INTO %s (%s)", quotedTable, strings.Join(columns, ", "))
 }
 
 // buildInsertIgnorePrefix возвращает "INSERT IGNORE INTO `table` (`col1`, ...)" без VALUES
 func (a *Adapter) buildInsertIgnorePrefix(tableName string, schema packet.Schema) string {
+	quotedTable := "`" + strings.ReplaceAll(tableName, "`", "``") + "`"
 	columns := make([]string, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
 		columns = append(columns, fmt.Sprintf("`%s`", field.Name))
 	}
-	return fmt.Sprintf("INSERT IGNORE INTO `%s` (%s)", tableName, strings.Join(columns, ", "))
+	return fmt.Sprintf("INSERT IGNORE INTO %s (%s)", quotedTable, strings.Join(columns, ", "))
 }
 
 // buildOnDuplicateKeySuffix возвращает "ON DUPLICATE KEY UPDATE `col` = VALUES(`col`), ..."
