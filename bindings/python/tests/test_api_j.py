@@ -594,3 +594,44 @@ class TestJMerge:
         from tdtp.exceptions import TDTPError
         with pytest.raises(TDTPError):
             j_client.J_merge([sample_data_j], strategy="bogus")
+
+
+# ---------------------------------------------------------------------------
+# J_ReadMultipart — assemble _part_N_of_M batches (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJReadMultipart:
+    def test_single_file_passthrough(self, j_client, sample_tdtp_path) -> None:
+        data = j_client.J_read_multipart(str(sample_tdtp_path))
+        assert len(data["data"]) == SAMPLE_TOTAL_ROWS
+
+    def test_two_part_assembly(self, j_client, sample_data_j, tmp_path) -> None:
+        import copy
+        n = len(sample_data_j["data"])
+        half = n // 2
+        p1 = copy.deepcopy(sample_data_j)
+        p1["data"] = sample_data_j["data"][:half]
+        p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        p2 = copy.deepcopy(sample_data_j)
+        p2["data"] = sample_data_j["data"][half:]
+        p2["header"]["part_number"], p2["header"]["total_parts"] = 2, 2
+        f1 = tmp_path / "U_part_1_of_2.tdtp.xml"
+        f2 = tmp_path / "U_part_2_of_2.tdtp.xml"
+        j_client.J_write(p1, str(f1))
+        j_client.J_write(p2, str(f2))
+
+        asm = j_client.J_read_multipart(str(f1))
+        assert len(asm["data"]) == n
+        assert asm["data"] == sample_data_j["data"]          # order preserved
+        assert asm["header"]["part_number"] == 1
+        assert asm["header"]["total_parts"] == 1
+
+    def test_missing_part_raises(self, j_client, sample_data_j, tmp_path) -> None:
+        import copy
+        p1 = copy.deepcopy(sample_data_j)
+        p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        f1 = tmp_path / "M_part_1_of_2.tdtp.xml"
+        j_client.J_write(p1, str(f1))  # part 2 never written
+        with pytest.raises(TDTPParseError) as exc_info:
+            j_client.J_read_multipart(str(f1))
+        assert exc_info.value.code == "PARSE_ERROR"

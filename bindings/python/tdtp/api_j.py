@@ -164,6 +164,31 @@ class TDTPClientJSON:
         """
         return _call(lib.J_Inspect, path.encode())
 
+    def J_read_multipart(self, path: str) -> dict:
+        """Read a multi-part TDTP batch and assemble it into one dataset.
+
+        Pass the path to any single part (or a plain non-part file); siblings are
+        auto-discovered via the ``_part_N_of_M`` naming convention and their rows
+        concatenated. Compressed and compact parts are handled transparently.
+
+        Args:
+            path: path to any part, e.g. ``"Users_part_1_of_3.tdtp.xml"``, or a
+                  plain ``.tdtp`` file.
+
+        Returns:
+            Same ``schema`` / ``header`` / ``data`` shape as :meth:`J_read`, with
+            ``header.part_number`` / ``total_parts`` reset to 1 and all rows merged.
+
+        Raises:
+            TDTPParseError: if a part is missing or cannot be parsed.
+
+        Example::
+
+            data = client.J_read_multipart("export/Users_part_1_of_4.tdtp.xml")
+            print(len(data["data"]), "rows across all parts")
+        """
+        return _call(lib.J_ReadMultipart, path.encode())
+
     def J_write(self, data: dict, path: str) -> None:
         """Generate a .tdtp file from a data dict and write it to path.
 
