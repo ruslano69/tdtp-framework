@@ -30,7 +30,19 @@ from tdtp.exceptions import (
     TDTPWriteError,
 )
 
-# Map error message prefixes → specific exception types
+# Map the Go error_code (single source of truth, see exports_j.go errorCodeFor)
+# → specific exception type. This is the primary, stable mapping.
+_ERROR_CODE_MAP: dict[str, type[TDTPError]] = {
+    "PARSE_ERROR":     TDTPParseError,
+    "FILTER_ERROR":    TDTPFilterError,
+    "WRITE_ERROR":     TDTPWriteError,
+    "PROCESSOR_ERROR": TDTPProcessorError,
+    "INVALID_INPUT":   TDTPError,
+    "DIFF_ERROR":      TDTPError,
+    "INTERNAL_ERROR":  TDTPError,
+}
+
+# Legacy fallback: prefix matching for libraries built before error_code existed.
 _ERROR_MAP: list[tuple[str, type[TDTPError]]] = [
     ("parse error",          TDTPParseError),
     ("decompress error",     TDTPParseError),
@@ -65,12 +77,17 @@ def _call(fn, *args) -> dict:
 
     err_msg = result.get("error", "")
     if err_msg:
-        exc_type = TDTPError
-        for prefix, exc_cls in _ERROR_MAP:
-            if err_msg.lower().startswith(prefix.lower()):
-                exc_type = exc_cls
-                break
-        raise exc_type(err_msg)
+        # Prefer the stable machine-readable error_code (Go-owned taxonomy).
+        code = result.get("error_code", "")
+        exc_type = _ERROR_CODE_MAP.get(code)
+        if exc_type is None:
+            # Fallback: legacy prefix matching for older libtdtp builds.
+            exc_type = TDTPError
+            for prefix, exc_cls in _ERROR_MAP:
+                if err_msg.lower().startswith(prefix.lower()):
+                    exc_type = exc_cls
+                    break
+        raise exc_type(err_msg, code=code)
 
     return result
 
@@ -120,6 +137,147 @@ class TDTPClientJSON:
         """
         return _call(lib.J_ReadFile, path.encode())
 
+    def J_inspect(self, path: str) -> dict:
+        """Return structured metadata for a TDTP file without decompressing it.
+
+        Fast in-process equivalent of ``tdtpcli --inspect`` — no subprocess, no
+        YAML parsing. Reads only the header and schema, so it works even on
+        compressed files built without the ``compress`` tag.
+
+        Args:
+            path: path to the ``.tdtp`` (XML) file.
+
+        Returns::
+
+            {
+                "table": ..., "type": ..., "protocol": ..., "version": ...,
+                "timestamp": ..., "message_id": ...,
+                "fields_count": <int>, "schema": {"fields": [...]},
+                "total_rows": <int>, "part_number": <int>, "total_parts": <int>,
+                "compression": "none"|"zstd"|..., "checksum": "none"|<hex>,
+                "compact": <bool>,
+                "pipeline": {"name": ..., "version": ..., "variables": {...}}  # optional
+            }
+
+        Raises:
+            TDTPParseError: if the file cannot be parsed.
+        """
+        return _call(lib.J_Inspect, path.encode())
+
+    def J_test(self, path: str) -> dict:
+        """Dry-run integrity check of a TDTP file or multi-part batch (no DB).
+
+        In-process equivalent of ``tdtpcli --test``. Verifies that all parts are
+        present, each parses, compressed parts pass XXH3 checksum + decompression,
+        and the header row count matches the actual rows.
+
+        Args:
+            path: path to a ``.tdtp`` file or any part of a ``_part_N_of_M`` batch.
+
+        Returns::
+
+            {
+                "ok": <bool>,                 # overall verdict
+                "total_parts": <int>,
+                "total_rows": <int>,
+                "parts": [{"file": ..., "rows": <int>,
+                           "compression": ..., "checksum": "ok"|"none"|"invalid",
+                           "row_count": "ok"|"mismatch: ...", "ok": <bool>}, ...],
+                "errors": [<str>, ...],       # human-readable per-part failures
+            }
+
+        Raises:
+            TDTPParseError: if a part is missing (the batch is structurally
+                            incomplete and cannot be verified).
+
+        Example::
+
+            report = client.J_test("export/Users_part_1_of_4.tdtp.xml")
+            if not report["ok"]:
+                raise SystemExit("corrupt: " + "; ".join(report["errors"]))
+        """
+        return _call(lib.J_Test, path.encode())
+
+    def J_verify(self, path: str) -> dict:
+        """Verify a packet's v1.4 XXH3 integrity hashes (local, no Mercury).
+
+        Use before trusting an externally-sourced packet: confirms the schema,
+        data, and packet fingerprints match — i.e. the bytes were not tampered.
+
+        Args:
+            path: path to the ``.tdtp`` file.
+
+        Returns::
+
+            {
+                "ok": <bool>,             # True if hashes match OR packet is unstamped
+                "has_integrity": <bool>,  # whether v1.4 hashes are present at all
+                "packet_xxh3": <hex>,     # the packet fingerprint (when stamped)
+                "detail": <str>,          # mismatch description when ok is False
+            }
+
+        Raises:
+            TDTPParseError: if the file cannot be parsed or decompressed.
+
+        Example::
+
+            v = client.J_verify("incoming.tdtp.xml")
+            if v["has_integrity"] and not v["ok"]:
+                raise SystemExit("tampered packet: " + v["detail"])
+        """
+        return _call(lib.J_Verify, path.encode())
+
+    def J_stamp(self, data: dict, path: str) -> dict:
+        """Compute v1.4 XXH3 integrity hashes and write a stamped TDTP file.
+
+        Producer side of :meth:`J_verify` — analog of ``tdtpcli --export
+        --integrity`` without Mercury. Returns the three fingerprints so they can
+        be recorded or transmitted out of band.
+
+        Args:
+            data: dict in the shape returned by :meth:`J_read`.
+            path: destination ``.tdtp`` file path.
+
+        Returns::
+
+            {"ok": True, "path": ..., "packet_xxh3": <hex>,
+             "schema_xxh3": <hex>, "data_xxh3": <hex>}
+
+        Raises:
+            TDTPWriteError: if hashing or writing fails.
+
+        Example::
+
+            r = client.J_stamp(data, "signed.tdtp.xml")
+            print("fingerprint:", r["packet_xxh3"])
+        """
+        return _call(lib.J_Stamp, json.dumps(data).encode(), path.encode())
+
+    def J_read_multipart(self, path: str) -> dict:
+        """Read a multi-part TDTP batch and assemble it into one dataset.
+
+        Pass the path to any single part (or a plain non-part file); siblings are
+        auto-discovered via the ``_part_N_of_M`` naming convention and their rows
+        concatenated. Compressed and compact parts are handled transparently.
+
+        Args:
+            path: path to any part, e.g. ``"Users_part_1_of_3.tdtp.xml"``, or a
+                  plain ``.tdtp`` file.
+
+        Returns:
+            Same ``schema`` / ``header`` / ``data`` shape as :meth:`J_read`, with
+            ``header.part_number`` / ``total_parts`` reset to 1 and all rows merged.
+
+        Raises:
+            TDTPParseError: if a part is missing or cannot be parsed.
+
+        Example::
+
+            data = client.J_read_multipart("export/Users_part_1_of_4.tdtp.xml")
+            print(len(data["data"]), "rows across all parts")
+        """
+        return _call(lib.J_ReadMultipart, path.encode())
+
     def J_write(self, data: dict, path: str) -> None:
         """Generate a .tdtp file from a data dict and write it to path.
 
@@ -140,6 +298,9 @@ class TDTPClientJSON:
         algo: str = "zstd",
         level: int = 3,
         checksum: bool = True,
+        compact: bool = False,
+        fixed_fields: list[str] | None = None,
+        compact_tail: bool = False,
     ) -> dict:
         """Partition data and write all parts using the framework's native byte-size logic.
 
@@ -157,6 +318,13 @@ class TDTPClientJSON:
                        (higher ratio, ~10× slower, optimal for cold archiving).
             level:     Compression level (default 3). zstd: 1–19; kanzi: 1–9.
             checksum:  Compute XXH3 checksum when compressing (default True).
+            compact:   Encode each part in compact v1.3.1 format — fixed (group)
+                       fields are written once per group with carry-forward gaps,
+                       shrinking grouped datasets before compression.
+            fixed_fields: explicit list of group fields. When omitted, fields with
+                       a leading underscore (``_dept``) are auto-detected.
+            compact_tail: also write the last row with all fixed fields explicit
+                       (self-contained carry snapshot for streaming consumers).
 
         Returns:
             ``{"files": [...], "total_parts": N}``
@@ -183,7 +351,12 @@ class TDTPClientJSON:
             )
             print(result["total_parts"], "files written")
         """
-        opts = {"compress": compress, "algo": algo, "level": level, "checksum": checksum}
+        opts = {
+            "compress": compress, "algo": algo, "level": level, "checksum": checksum,
+            "compact": compact, "compact_tail": compact_tail,
+        }
+        if fixed_fields:
+            opts["fixed_fields"] = fixed_fields
         return _call(
             lib.J_ExportAll,
             json.dumps(data).encode(),
@@ -373,7 +546,7 @@ class TDTPClientJSON:
         data = self.J_from_pandas(df, table_name=table_name)
         self.J_write(data, path)
 
-    def J_to_pandas(self, data: dict):
+    def J_to_pandas(self, data: dict) -> "pd.DataFrame":
         """Convert a J_read result dict to a pandas DataFrame.
 
         Delegates to :func:`tdtp.pandas_ext.data_to_pandas`.
@@ -399,7 +572,7 @@ class TDTPClientJSON:
         from tdtp.pandas_ext import data_to_pandas
         return data_to_pandas(data)
 
-    def J_from_pandas(self, df, table_name: str = "data", message_id: str = "") -> dict:
+    def J_from_pandas(self, df: "pd.DataFrame", table_name: str = "data", message_id: str = "") -> dict:
         """Convert a pandas DataFrame to a TDTP data dict.
 
         The returned dict can be passed directly to :meth:`J_write`.
@@ -455,4 +628,80 @@ class TDTPClientJSON:
             lib.J_Diff,
             json.dumps(old).encode(),
             json.dumps(new).encode(),
+        )
+
+    # -----------------------------------------------------------------------
+    # Sort / Merge (Phase 1)
+    # -----------------------------------------------------------------------
+
+    def J_sort(self, data: dict, order_by: list[dict] | str) -> dict:
+        """Sort data rows by one or more fields.
+
+        Args:
+            data:     dict in the shape returned by :meth:`J_read`.
+            order_by: either a single field name (str, ascending) or a list of
+                      sort keys::
+
+                          [{"field": "Balance", "direction": "desc"},
+                           {"field": "Name"}]   # direction defaults to "asc"
+
+        Returns:
+            Same ``schema`` / ``header`` / ``data`` shape as :meth:`J_read`,
+            with rows sorted.
+
+        Raises:
+            TDTPFilterError: if a sort field is not found in the schema.
+
+        Example::
+
+            data   = client.J_read("users.tdtp.xml")
+            sorted = client.J_sort(data, [{"field": "Balance", "direction": "desc"}])
+        """
+        if isinstance(order_by, str):
+            order_by = [{"field": order_by, "direction": "asc"}]
+        return _call(
+            lib.J_Sort,
+            json.dumps(data).encode(),
+            json.dumps(order_by).encode(),
+        )
+
+    def J_merge(
+        self,
+        packets: list[dict],
+        strategy: str = "union",
+        key_fields: list[str] | None = None,
+    ) -> dict:
+        """Merge multiple TDTP datasets into one.
+
+        Args:
+            packets:    list of dataset dicts (each in :meth:`J_read` shape).
+            strategy:   ``"union"`` (default, dedup by key) | ``"intersection"`` |
+                        ``"left"`` | ``"right"`` | ``"append"`` (no dedup).
+            key_fields: fields identifying a row; defaults to the schema's key
+                        fields when omitted.
+
+        Returns:
+            dict with merged ``schema`` / ``header`` / ``data`` plus a ``stats``
+            object::
+
+                {"total_packets": N, "total_rows_in": N, "total_rows_out": N,
+                 "duplicates": N, "conflicts": N}
+
+        Raises:
+            TDTPError: if the merge fails (e.g. incompatible schemas).
+
+        Example::
+
+            a = client.J_read("monday.tdtp.xml")
+            b = client.J_read("tuesday.tdtp.xml")
+            merged = client.J_merge([a, b], strategy="union", key_fields=["ID"])
+            print(merged["stats"]["duplicates"], "duplicates removed")
+        """
+        opts = {"strategy": strategy}
+        if key_fields:
+            opts["key_fields"] = key_fields
+        return _call(
+            lib.J_Merge,
+            json.dumps(packets).encode(),
+            json.dumps(opts).encode(),
         )

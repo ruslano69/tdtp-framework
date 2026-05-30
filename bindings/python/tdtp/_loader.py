@@ -104,6 +104,26 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_ReadFile.argtypes = [ctypes.c_char_p]
     lib.J_ReadFile.restype = ctypes.c_void_p
 
+    # J_Inspect(*char) → *char  (structured metadata, no decompression)
+    lib.J_Inspect.argtypes = [ctypes.c_char_p]
+    lib.J_Inspect.restype = ctypes.c_void_p
+
+    # J_ReadMultipart(*char) → *char  (assemble _part_N_of_M batch into one dataset)
+    lib.J_ReadMultipart.argtypes = [ctypes.c_char_p]
+    lib.J_ReadMultipart.restype = ctypes.c_void_p
+
+    # J_Test(*char) → *char  (dry-run integrity check, no DB)
+    lib.J_Test.argtypes = [ctypes.c_char_p]
+    lib.J_Test.restype = ctypes.c_void_p
+
+    # J_Verify(*char) → *char  (v1.4 XXH3 integrity verification, no Mercury)
+    lib.J_Verify.argtypes = [ctypes.c_char_p]
+    lib.J_Verify.restype = ctypes.c_void_p
+
+    # J_Stamp(*char, *char) → *char  (compute XXH3 hashes, write v1.4 file)
+    lib.J_Stamp.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_Stamp.restype = ctypes.c_void_p
+
     # J_WriteFile(*char, *char) → *char
     lib.J_WriteFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_WriteFile.restype = ctypes.c_void_p
@@ -136,6 +156,14 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     # J_Diff(*char, *char) → *char
     lib.J_Diff.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_Diff.restype = ctypes.c_void_p
+
+    # J_Sort(*char, *char) → *char  (data, order-by spec)
+    lib.J_Sort.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_Sort.restype = ctypes.c_void_p
+
+    # J_Merge(*char, *char) → *char  (packets array, options)
+    lib.J_Merge.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_Merge.restype = ctypes.c_void_p
 
     # J_SerializeValue(*char, *char) → *char
     # Single source of truth for type serialization in Python adapters.
@@ -197,6 +225,28 @@ def _configure_d_symbols(lib: ctypes.CDLL) -> None:
     lib.D_FreeMaskConfig.argtypes = [ctypes.POINTER(D_MaskConfig)]
     lib.D_FreeMaskConfig.restype = None
 
+    # --- Arrow columnar bridge ---------------------------------------------
+    # D_ColumnFloat64(*D_Packet, c_int) → *double  (len = row_count; NaN = null)
+    lib.D_ColumnFloat64.argtypes = [ctypes.POINTER(D_Packet), ctypes.c_int]
+    lib.D_ColumnFloat64.restype = ctypes.POINTER(ctypes.c_double)
+
+    # D_ColumnInt64(*D_Packet, c_int) → *longlong  (len = row_count; 0 = null)
+    lib.D_ColumnInt64.argtypes = [ctypes.POINTER(D_Packet), ctypes.c_int]
+    lib.D_ColumnInt64.restype = ctypes.POINTER(ctypes.c_longlong)
+
+    # D_ColumnUTF8(*D_Packet, c_int, **int32 offsets, *int32 nbytes) → *char data
+    lib.D_ColumnUTF8.argtypes = [
+        ctypes.POINTER(D_Packet),
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+        ctypes.POINTER(ctypes.c_int),
+    ]
+    lib.D_ColumnUTF8.restype = ctypes.c_void_p
+
+    # D_FreeBuffer(void*) → void
+    lib.D_FreeBuffer.argtypes = [ctypes.c_void_p]
+    lib.D_FreeBuffer.restype = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers used by both api_j and api_d
@@ -210,6 +260,19 @@ def free_string(ptr: int | None) -> None:
     """
     if ptr:
         lib.J_FreeString(ptr)
+
+
+def get_lib_version() -> str:
+    """Return the native library version reported by J_GetVersion().
+
+    This is the single source of truth (pkg/core/version.Version in Go),
+    so the Python package version always matches the compiled core.
+    """
+    ptr = lib.J_GetVersion()
+    try:
+        return ctypes.string_at(ptr).decode("utf-8")
+    finally:
+        free_string(ptr)
 
 
 # ---------------------------------------------------------------------------

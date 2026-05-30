@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"unsafe"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/core/version"
 	"github.com/ruslano69/tdtp-framework/pkg/diff"
 )
 
@@ -104,8 +106,63 @@ func jOK(v any) *C.char {
 	return C.CString(string(b))
 }
 
+// Stable, machine-readable error codes. This is the single source of truth for
+// the error taxonomy — Python (and any other binding) maps error_code → exception
+// instead of fragile prefix matching on the human-readable message.
+const (
+	errCodeParse     = "PARSE_ERROR"     // parse/decompress/checksum/compact decode
+	errCodeFilter    = "FILTER_ERROR"    // invalid WHERE clause or evaluation failure
+	errCodeWrite     = "WRITE_ERROR"     // write/partition/serialize failure
+	errCodeProcessor = "PROCESSOR_ERROR" // processor or compression chain failure
+	errCodeInvalid   = "INVALID_INPUT"   // malformed JSON / options / config input
+	errCodeDiff      = "DIFF_ERROR"      // diff computation failure
+	errCodeInternal  = "INTERNAL_ERROR"  // uncategorized
+)
+
+// errorCodeFor derives a stable error code from a message prefix. Centralizing
+// this in Go means bindings never have to re-implement the prefix table.
+func errorCodeFor(msg string) string {
+	prefixes := []struct {
+		prefix string
+		code   string
+	}{
+		{"parse error", errCodeParse},
+		{"decompress error", errCodeParse},
+		{"checksum validation failed", errCodeParse},
+		{"no compressed data", errCodeParse},
+		{"compact expand error", errCodeParse},
+		{"invalid where clause", errCodeFilter},
+		{"filter error", errCodeFilter},
+		{"write error", errCodeWrite},
+		{"write part", errCodeWrite},
+		{"partition error", errCodeWrite},
+		{"compress part", errCodeWrite},
+		{"processor error", errCodeProcessor},
+		{"process error", errCodeProcessor},
+		{"chain", errCodeProcessor},
+		{"compression error", errCodeProcessor},
+		{"invalid data json", errCodeInvalid},
+		{"invalid options", errCodeInvalid},
+		{"invalid config", errCodeInvalid},
+		{"invalid chain", errCodeInvalid},
+		{"diff error", errCodeDiff},
+		{"old data error", errCodeDiff},
+		{"new data error", errCodeDiff},
+	}
+	lower := strings.ToLower(msg)
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p.prefix) {
+			return p.code
+		}
+	}
+	return errCodeInternal
+}
+
 func jErr(msg string) *C.char {
-	b, _ := json.Marshal(map[string]string{"error": msg})
+	b, _ := json.Marshal(map[string]string{
+		"error":      msg,
+		"error_code": errorCodeFor(msg),
+	})
 	return C.CString(string(b))
 }
 
@@ -172,7 +229,7 @@ func J_FreeString(s *C.char) {
 //
 //export J_GetVersion
 func J_GetVersion() *C.char {
-	return C.CString("1.6.0")
+	return C.CString(version.Version)
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +352,24 @@ func jExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char
 		withChecksum = v
 	}
 
+	// Compact v1.3.1 options: carry-forward for fixed (group) fields.
+	compact := false
+	if v, ok := opts["compact"].(bool); ok {
+		compact = v
+	}
+	compactTail := false
+	if v, ok := opts["compact_tail"].(bool); ok {
+		compactTail = v
+	}
+	var explicitFixed []string
+	if raw, ok := opts["fixed_fields"].([]any); ok {
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				explicitFixed = append(explicitFixed, s)
+			}
+		}
+	}
+
 	// Partition by byte size — identical logic to tdtpcli GenerateReference
 	gen := packet.NewGenerator()
 	packets, err := gen.GenerateReference(jp.Header.TableName, jp.Schema, jp.Data)
@@ -306,6 +381,17 @@ func jExportAll(dataJSON *C.char, basePath *C.char, optionsJSON *C.char) *C.char
 	written := make([]string, 0, len(packets))
 
 	for i, pkt := range packets {
+		// Compact must run before compression: it rewrites Data.Rows with
+		// carry-forward gaps for fixed fields. Applied per-part so each part
+		// stays independently decodable (carry-forward resets per packet).
+		if compact {
+			fixed := packet.ResolveFixedFields(pkt.Schema, explicitFixed)
+			if len(fixed) > 0 {
+				if err := packet.ApplyCompact(pkt, fixed, compactTail); err != nil {
+					return jErr(fmt.Sprintf("compress part %d: %v", i+1, err))
+				}
+			}
+		}
 		if compress {
 			if err := compressAndSign(pkt, algo, level, withChecksum); err != nil {
 				return jErr(fmt.Sprintf("compress part %d: %v", i+1, err))

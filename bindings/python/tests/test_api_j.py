@@ -51,6 +51,13 @@ class TestJGetVersion:
     def test_semver_format(self, j_client: TDTPClientJSON) -> None:
         assert re.match(r"\d+\.\d+\.\d+", j_client.J_get_version())
 
+    def test_single_source_of_truth(self, j_client: TDTPClientJSON) -> None:
+        """Package __version__ must equal the native J_GetVersion() (one source)."""
+        import tdtp
+        assert tdtp.__version__ == j_client.J_get_version()
+        # The old hardcoded placeholders must be gone.
+        assert tdtp.__version__ not in ("0.1.0", "1.6.0", "unknown")
+
 
 # ---------------------------------------------------------------------------
 # I/O — J_ReadFile
@@ -77,6 +84,17 @@ class TestJRead:
     def test_nonexistent_file_raises(self, j_client) -> None:
         with pytest.raises(TDTPParseError):
             j_client.J_read("/no/such/file.tdtp.xml")
+
+    def test_error_carries_machine_code(self, j_client) -> None:
+        """Exceptions expose the stable Go error_code (PARSE_ERROR, etc.)."""
+        with pytest.raises(TDTPParseError) as exc_info:
+            j_client.J_read("/no/such/file.tdtp.xml")
+        assert exc_info.value.code == "PARSE_ERROR"
+
+    def test_filter_error_code(self, j_client, sample_data_j) -> None:
+        with pytest.raises(TDTPFilterError) as exc_info:
+            j_client.J_filter(sample_data_j, "NoSuchField >>> garbage")
+        assert exc_info.value.code == "FILTER_ERROR"
 
     def test_compressed_file(self, j_client, compressed_tdtp_path) -> None:
         """J_read transparently decompresses zstd-compressed data blocks."""
@@ -481,3 +499,293 @@ class TestJCompactPagination:
         # row at offset 2 = E3/Carol → Sales; row at offset 3 = E4/Dave → IT
         assert page["data"][0][dname_idx] == "Sales"
         assert page["data"][1][dname_idx] == "IT"
+
+
+# ---------------------------------------------------------------------------
+# J_Inspect — structured metadata (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJInspect:
+    def test_basic_metadata(self, j_client, sample_tdtp_path) -> None:
+        meta = j_client.J_inspect(str(sample_tdtp_path))
+        assert meta["table"] == "users"
+        assert meta["fields_count"] == len(SAMPLE_FIELD_NAMES)
+        assert meta["total_rows"] == SAMPLE_TOTAL_ROWS
+        assert meta["compression"] == "none"
+
+    def test_schema_fields_present(self, j_client, sample_tdtp_path) -> None:
+        # Schema uses the same packet.Schema shape as J_read (PascalCase keys).
+        meta = j_client.J_inspect(str(sample_tdtp_path))
+        names = [f["Name"] for f in meta["schema"]["Fields"]]
+        assert names == SAMPLE_FIELD_NAMES
+
+    def test_compressed_metadata_without_decompress(self, j_client, compressed_tdtp_path) -> None:
+        """Inspect reads row count from the header — no decompression needed."""
+        meta = j_client.J_inspect(str(compressed_tdtp_path))
+        assert meta["compression"] == "zstd"
+        assert meta["total_rows"] == COMPRESSED_TOTAL_ROWS
+        assert meta["table"] == COMPRESSED_TABLE_NAME
+
+    def test_compact_flag(self, j_client, compact_tdtp_path) -> None:
+        meta = j_client.J_inspect(str(compact_tdtp_path))
+        assert meta["compact"] is True
+
+    def test_nonexistent_raises(self, j_client) -> None:
+        with pytest.raises(TDTPParseError) as exc_info:
+            j_client.J_inspect("/no/such/file.tdtp.xml")
+        assert exc_info.value.code == "PARSE_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# J_Sort — order-by (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJSort:
+    def _balance_idx(self, data) -> int:
+        return [f["Name"] for f in data["schema"]["Fields"]].index("Balance")
+
+    def test_sort_desc(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, [{"field": "Balance", "direction": "desc"}])
+        idx = self._balance_idx(out)
+        bals = [int(r[idx]) for r in out["data"]]
+        assert bals == sorted(bals, reverse=True)
+
+    def test_sort_asc_default(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, [{"field": "Balance"}])
+        idx = self._balance_idx(out)
+        bals = [int(r[idx]) for r in out["data"]]
+        assert bals == sorted(bals)
+
+    def test_sort_string_shorthand(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, "Balance")
+        idx = self._balance_idx(out)
+        bals = [int(r[idx]) for r in out["data"]]
+        assert bals == sorted(bals)
+
+    def test_sort_preserves_row_count(self, j_client, sample_data_j) -> None:
+        out = j_client.J_sort(sample_data_j, "Name")
+        assert len(out["data"]) == SAMPLE_TOTAL_ROWS
+
+    def test_sort_unknown_field_raises(self, j_client, sample_data_j) -> None:
+        with pytest.raises(TDTPFilterError):
+            j_client.J_sort(sample_data_j, "NoSuchField")
+
+
+# ---------------------------------------------------------------------------
+# J_Merge — combine datasets (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJMerge:
+    def test_union_dedup(self, j_client, sample_data_j) -> None:
+        out = j_client.J_merge([sample_data_j, sample_data_j], strategy="union", key_fields=["ID"])
+        assert out["stats"]["total_rows_out"] == SAMPLE_TOTAL_ROWS
+        assert out["stats"]["duplicates"] == SAMPLE_TOTAL_ROWS
+        assert len(out["data"]) == SAMPLE_TOTAL_ROWS
+
+    def test_append_no_dedup(self, j_client, sample_data_j) -> None:
+        out = j_client.J_merge([sample_data_j, sample_data_j], strategy="append")
+        assert out["stats"]["total_rows_out"] == 2 * SAMPLE_TOTAL_ROWS
+
+    def test_stats_total_packets(self, j_client, sample_data_j) -> None:
+        out = j_client.J_merge([sample_data_j, sample_data_j], strategy="append")
+        assert out["stats"]["total_packets"] == 2
+
+    def test_unknown_strategy_raises(self, j_client, sample_data_j) -> None:
+        from tdtp.exceptions import TDTPError
+        with pytest.raises(TDTPError):
+            j_client.J_merge([sample_data_j], strategy="bogus")
+
+
+# ---------------------------------------------------------------------------
+# J_ReadMultipart — assemble _part_N_of_M batches (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJReadMultipart:
+    def test_single_file_passthrough(self, j_client, sample_tdtp_path) -> None:
+        data = j_client.J_read_multipart(str(sample_tdtp_path))
+        assert len(data["data"]) == SAMPLE_TOTAL_ROWS
+
+    def test_two_part_assembly(self, j_client, sample_data_j, tmp_path) -> None:
+        import copy
+        n = len(sample_data_j["data"])
+        half = n // 2
+        p1 = copy.deepcopy(sample_data_j)
+        p1["data"] = sample_data_j["data"][:half]
+        p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        p2 = copy.deepcopy(sample_data_j)
+        p2["data"] = sample_data_j["data"][half:]
+        p2["header"]["part_number"], p2["header"]["total_parts"] = 2, 2
+        f1 = tmp_path / "U_part_1_of_2.tdtp.xml"
+        f2 = tmp_path / "U_part_2_of_2.tdtp.xml"
+        j_client.J_write(p1, str(f1))
+        j_client.J_write(p2, str(f2))
+
+        asm = j_client.J_read_multipart(str(f1))
+        assert len(asm["data"]) == n
+        assert asm["data"] == sample_data_j["data"]          # order preserved
+        assert asm["header"]["part_number"] == 1
+        assert asm["header"]["total_parts"] == 1
+
+    def test_missing_part_raises(self, j_client, sample_data_j, tmp_path) -> None:
+        import copy
+        p1 = copy.deepcopy(sample_data_j)
+        p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        f1 = tmp_path / "M_part_1_of_2.tdtp.xml"
+        j_client.J_write(p1, str(f1))  # part 2 never written
+        with pytest.raises(TDTPParseError) as exc_info:
+            j_client.J_read_multipart(str(f1))
+        assert exc_info.value.code == "PARSE_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# J_ExportAll compact option (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJExportCompact:
+    GROUPED = {
+        "schema": {"Fields": [{"Name": "_dept", "Type": "TEXT"},
+                              {"Name": "emp", "Type": "TEXT"}]},
+        "header": {"type": "reference", "table_name": "staff",
+                   "message_id": "m1", "timestamp": "2026-01-01T00:00:00Z"},
+        "data": [["Sales", "Ann"], ["Sales", "Bob"], ["Sales", "Cara"],
+                 ["IT", "Dan"], ["IT", "Eve"]],
+    }
+
+    def test_export_sets_compact_flag(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        meta = j_client.J_inspect(res["files"][0])
+        assert meta["compact"] is True
+
+    def test_export_autodetects_underscore_fixed(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        meta = j_client.J_inspect(res["files"][0])
+        fixed = [f["Name"] for f in meta["schema"]["Fields"] if f.get("Fixed")]
+        assert fixed == ["dept"]  # _dept stripped + marked fixed
+
+    def test_compact_roundtrip_preserves_data(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        back = j_client.J_read_multipart(res["files"][0])
+        assert back["data"] == self.GROUPED["data"]
+
+    def test_compact_on_disk_has_carry_gaps(self, j_client, tmp_path) -> None:
+        out = tmp_path / "staff.tdtp.xml"
+        res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
+        raw = open(res["files"][0]).read()
+        # One fixed field at index 0 → carry-forward rows start with a leading
+        # empty field: "<R>|Bob</R>". Group headers keep the value: "<R>Sales|Ann</R>".
+        assert "<R>|Bob</R>" in raw
+        assert "<R>Sales|Ann</R>" in raw
+
+
+# ---------------------------------------------------------------------------
+# J_Test — integrity check (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJTest:
+    def test_plain_file_ok(self, j_client, sample_tdtp_path) -> None:
+        r = j_client.J_test(str(sample_tdtp_path))
+        assert r["ok"] is True
+        assert r["total_rows"] == SAMPLE_TOTAL_ROWS
+        assert r["total_parts"] == 1
+        assert r["errors"] == []
+
+    def test_compressed_checksummed_ok(self, j_client, sample_data_j, tmp_path) -> None:
+        out = tmp_path / "h.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True, checksum=True)
+        r = j_client.J_test(res["files"][0])
+        assert r["ok"] is True
+        assert r["parts"][0]["compression"] == "zstd"
+        assert r["parts"][0]["checksum"] == "ok"
+
+    def test_corrupt_checksum_detected(self, j_client, sample_data_j, tmp_path) -> None:
+        out = tmp_path / "h.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True, checksum=True)
+        f = res["files"][0]
+        raw = open(f).read()
+        i = raw.index("<R>") + 4
+        open(f, "w").write(raw[:i] + chr((ord(raw[i]) + 1) % 120 or 65) + raw[i + 1:])
+        r = j_client.J_test(f)
+        assert r["ok"] is False
+        assert r["parts"][0]["checksum"] == "invalid"
+        assert len(r["errors"]) == 1
+
+    def test_missing_part_raises(self, j_client, sample_data_j, tmp_path) -> None:
+        import copy
+        p1 = copy.deepcopy(sample_data_j)
+        p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        f1 = tmp_path / "T_part_1_of_2.tdtp.xml"
+        j_client.J_write(p1, str(f1))
+        with pytest.raises(TDTPParseError):
+            j_client.J_test(str(f1))
+
+
+# ---------------------------------------------------------------------------
+# Regression: J_ExportAll compress must actually compress (rawRows fast-path bug)
+# ---------------------------------------------------------------------------
+
+class TestExportCompressRegression:
+    def test_compress_actually_compresses(self, j_client, sample_data_j, tmp_path) -> None:
+        """compress=True must yield a zstd packet — not silently uncompressed.
+
+        Regression for the rawRows fast-path bug: compressAndSign read the empty
+        Data.Rows (rows were in rawRows) and returned early, producing a plain file.
+        """
+        out = tmp_path / "c.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True, checksum=True)
+        meta = j_client.J_inspect(res["files"][0])
+        assert meta["compression"] == "zstd"
+        assert meta["checksum"] != "none"
+
+    def test_compressed_export_roundtrips(self, j_client, sample_data_j, tmp_path) -> None:
+        out = tmp_path / "c.tdtp.xml"
+        res = j_client.J_export_all(sample_data_j, str(out), compress=True)
+        back = j_client.J_read(res["files"][0])
+        assert back["data"] == sample_data_j["data"]
+
+
+# ---------------------------------------------------------------------------
+# J_Stamp / J_Verify — v1.4 integrity (Phase 2)
+# ---------------------------------------------------------------------------
+
+class TestJIntegrity:
+    def test_stamp_returns_fingerprints(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        r = j_client.J_stamp(sample_data_j, str(f))
+        assert r["ok"] is True
+        assert len(r["packet_xxh3"]) == 32   # xxh3_128 = 32 hex chars
+        assert len(r["schema_xxh3"]) == 32
+        assert len(r["data_xxh3"]) == 32
+        assert f.exists()
+
+    def test_verify_clean_packet(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        j_client.J_stamp(sample_data_j, str(f))
+        v = j_client.J_verify(str(f))
+        assert v["ok"] is True
+        assert v["has_integrity"] is True
+        assert len(v["packet_xxh3"]) == 32
+
+    def test_verify_detects_tamper(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        j_client.J_stamp(sample_data_j, str(f))
+        raw = open(f).read()
+        open(f, "w").write(raw.replace("Moscow", "Madrid", 1))
+        v = j_client.J_verify(str(f))
+        assert v["ok"] is False
+        assert v["has_integrity"] is True
+        assert "mismatch" in v["detail"]
+
+    def test_verify_unstamped_is_ok(self, j_client, sample_tdtp_path) -> None:
+        """A packet without v1.4 hashes is not an error — just has_integrity=False."""
+        v = j_client.J_verify(str(sample_tdtp_path))
+        assert v["ok"] is True
+        assert v["has_integrity"] is False
+
+    def test_stamp_verify_roundtrip_data(self, j_client, sample_data_j, tmp_path) -> None:
+        f = tmp_path / "signed.tdtp.xml"
+        j_client.J_stamp(sample_data_j, str(f))
+        back = j_client.J_read(str(f))
+        assert back["data"] == sample_data_j["data"]

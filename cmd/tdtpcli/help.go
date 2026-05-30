@@ -4,9 +4,12 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+
+	versionpkg "github.com/ruslano69/tdtp-framework/pkg/core/version"
 )
 
-const version = "1.9.6"
+// version is the framework version, sourced from pkg/core/version (single source of truth).
+const version = versionpkg.Version
 
 //go:embed help_short.txt
 var helpShortText string

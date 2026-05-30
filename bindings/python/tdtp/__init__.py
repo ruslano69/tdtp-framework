@@ -1,7 +1,17 @@
 """
 tdtp — Python bindings for the TDTP framework.
 
-Two API families, same Go core:
+Recommended entry point — the Tdtp facade (plain verbs, no manual free):
+    from tdtp import Tdtp
+    db   = Tdtp()
+    data = db.read("users.tdtp")
+    hot  = db.filter(data, "Balance > 1000", limit=100)
+    db.write(hot, "rich.tdtp")
+
+    db.stamp(data, "signed.tdtp")           # write a v1.4 integrity packet
+    assert db.verify("signed.tdtp")["ok"]   # confirm it was not tampered
+
+Underlying it are two API families over the same Go core:
 
     J_* (JSON boundary)   — TDTPClientJSON
         Data serialized as JSON at the language boundary.
@@ -25,6 +35,7 @@ Quick start — Direct API:
 """
 from tdtp.api_d import TDTPClientDirect, PacketHandle
 from tdtp.api_j import TDTPClientJSON
+from tdtp.facade import Tdtp
 from tdtp.exceptions import (
     TDTPError,
     TDTPFilterError,
@@ -41,8 +52,17 @@ try:
 except ImportError:
     _PANDAS_AVAILABLE = False
 
-__version__ = "0.1.0"
+# Version is sourced from the native library (J_GetVersion → pkg/core/version.Version),
+# keeping the Python package version in lockstep with the compiled Go core.
+# Falls back to "unknown" if the library cannot be queried at import time.
+try:
+    from tdtp._loader import get_lib_version as _get_lib_version
+    __version__ = _get_lib_version()
+except Exception:  # pragma: no cover - library load failure path
+    __version__ = "unknown"
+
 __all__ = [
+    "Tdtp",
     "TDTPClientJSON",
     "TDTPClientDirect",
     "PacketHandle",

@@ -2,7 +2,16 @@
 
 
 class TDTPError(Exception):
-    """Base exception for all TDTP errors."""
+    """Base exception for all TDTP errors.
+
+    Carries the machine-readable ``code`` from the native error taxonomy
+    (e.g. ``"PARSE_ERROR"``, ``"FILTER_ERROR"``) when available, so agents can
+    branch on a stable identifier rather than the human-readable message.
+    """
+
+    def __init__(self, message: str = "", code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class TDTPParseError(TDTPError):
