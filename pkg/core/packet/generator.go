@@ -31,6 +31,11 @@ func DefaultCompressionOptions() CompressionOptions {
 // т.к. размер строк считается в UTF-16 единицах (MSMQ/COM-совместимость).
 const DefaultMaxMessageSize = 3_800_000
 
+// packetOverheadSize is a conservative estimate of XML envelope bytes
+// (Schema, Header, attributes) subtracted from the part-size budget
+// when splitting rows into partitions.
+const packetOverheadSize = 5000
+
 // Generator отвечает за генерацию TDTP пакетов
 type Generator struct {
 	maxMessageSize    int                // в байтах
@@ -283,13 +288,10 @@ func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
 	currentPartition := [][]string{}
 	currentSize := 0
 
-	// Примерный размер служебной информации
-	overheadSize := 5000
-
 	for _, row := range rows {
 		rowSize := estimateRowSize(row)
 
-		if currentSize+rowSize+overheadSize > g.maxMessageSize && len(currentPartition) > 0 {
+		if currentSize+rowSize+packetOverheadSize > g.maxMessageSize && len(currentPartition) > 0 {
 			partitions = append(partitions, currentPartition)
 			currentPartition = [][]string{}
 			currentSize = 0
