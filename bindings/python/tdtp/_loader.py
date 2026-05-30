@@ -104,6 +104,10 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_ReadFile.argtypes = [ctypes.c_char_p]
     lib.J_ReadFile.restype = ctypes.c_void_p
 
+    # J_Inspect(*char) → *char  (structured metadata, no decompression)
+    lib.J_Inspect.argtypes = [ctypes.c_char_p]
+    lib.J_Inspect.restype = ctypes.c_void_p
+
     # J_WriteFile(*char, *char) → *char
     lib.J_WriteFile.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     lib.J_WriteFile.restype = ctypes.c_void_p

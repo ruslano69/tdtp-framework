@@ -137,6 +137,33 @@ class TDTPClientJSON:
         """
         return _call(lib.J_ReadFile, path.encode())
 
+    def J_inspect(self, path: str) -> dict:
+        """Return structured metadata for a TDTP file without decompressing it.
+
+        Fast in-process equivalent of ``tdtpcli --inspect`` — no subprocess, no
+        YAML parsing. Reads only the header and schema, so it works even on
+        compressed files built without the ``compress`` tag.
+
+        Args:
+            path: path to the ``.tdtp`` (XML) file.
+
+        Returns::
+
+            {
+                "table": ..., "type": ..., "protocol": ..., "version": ...,
+                "timestamp": ..., "message_id": ...,
+                "fields_count": <int>, "schema": {"fields": [...]},
+                "total_rows": <int>, "part_number": <int>, "total_parts": <int>,
+                "compression": "none"|"zstd"|..., "checksum": "none"|<hex>,
+                "compact": <bool>,
+                "pipeline": {"name": ..., "version": ..., "variables": {...}}  # optional
+            }
+
+        Raises:
+            TDTPParseError: if the file cannot be parsed.
+        """
+        return _call(lib.J_Inspect, path.encode())
+
     def J_write(self, data: dict, path: str) -> None:
         """Generate a .tdtp file from a data dict and write it to path.
 

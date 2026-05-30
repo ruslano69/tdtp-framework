@@ -499,3 +499,38 @@ class TestJCompactPagination:
         # row at offset 2 = E3/Carol → Sales; row at offset 3 = E4/Dave → IT
         assert page["data"][0][dname_idx] == "Sales"
         assert page["data"][1][dname_idx] == "IT"
+
+
+# ---------------------------------------------------------------------------
+# J_Inspect — structured metadata (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestJInspect:
+    def test_basic_metadata(self, j_client, sample_tdtp_path) -> None:
+        meta = j_client.J_inspect(str(sample_tdtp_path))
+        assert meta["table"] == "users"
+        assert meta["fields_count"] == len(SAMPLE_FIELD_NAMES)
+        assert meta["total_rows"] == SAMPLE_TOTAL_ROWS
+        assert meta["compression"] == "none"
+
+    def test_schema_fields_present(self, j_client, sample_tdtp_path) -> None:
+        # Schema uses the same packet.Schema shape as J_read (PascalCase keys).
+        meta = j_client.J_inspect(str(sample_tdtp_path))
+        names = [f["Name"] for f in meta["schema"]["Fields"]]
+        assert names == SAMPLE_FIELD_NAMES
+
+    def test_compressed_metadata_without_decompress(self, j_client, compressed_tdtp_path) -> None:
+        """Inspect reads row count from the header — no decompression needed."""
+        meta = j_client.J_inspect(str(compressed_tdtp_path))
+        assert meta["compression"] == "zstd"
+        assert meta["total_rows"] == COMPRESSED_TOTAL_ROWS
+        assert meta["table"] == COMPRESSED_TABLE_NAME
+
+    def test_compact_flag(self, j_client, compact_tdtp_path) -> None:
+        meta = j_client.J_inspect(str(compact_tdtp_path))
+        assert meta["compact"] is True
+
+    def test_nonexistent_raises(self, j_client) -> None:
+        with pytest.raises(TDTPParseError) as exc_info:
+            j_client.J_inspect("/no/such/file.tdtp.xml")
+        assert exc_info.value.code == "PARSE_ERROR"
