@@ -133,7 +133,8 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 
 	// RecordsInPart должен точно совпадать с числом <R> строк.
 	// Для сжатых пакетов строки упакованы в blob — проверка невозможна без декомпрессии.
-	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" {
+	// v1.4 пакеты защищены XXH3 — RecordsInPart там вспомогательный, проверять не нужно.
+	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" && packet.Version != "1.4" {
 		if actual := len(packet.Data.Rows); actual != packet.Header.RecordsInPart {
 			return fmt.Errorf("RecordsInPart mismatch: header declares %d rows, <Data> contains %d",
 				packet.Header.RecordsInPart, actual)
