@@ -41,7 +41,15 @@ try:
 except ImportError:
     _PANDAS_AVAILABLE = False
 
-__version__ = "0.1.0"
+# Version is sourced from the native library (J_GetVersion → pkg/core/version.Version),
+# keeping the Python package version in lockstep with the compiled Go core.
+# Falls back to "unknown" if the library cannot be queried at import time.
+try:
+    from tdtp._loader import get_lib_version as _get_lib_version
+    __version__ = _get_lib_version()
+except Exception:  # pragma: no cover - library load failure path
+    __version__ = "unknown"
+
 __all__ = [
     "TDTPClientJSON",
     "TDTPClientDirect",

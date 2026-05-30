@@ -51,6 +51,13 @@ class TestJGetVersion:
     def test_semver_format(self, j_client: TDTPClientJSON) -> None:
         assert re.match(r"\d+\.\d+\.\d+", j_client.J_get_version())
 
+    def test_single_source_of_truth(self, j_client: TDTPClientJSON) -> None:
+        """Package __version__ must equal the native J_GetVersion() (one source)."""
+        import tdtp
+        assert tdtp.__version__ == j_client.J_get_version()
+        # The old hardcoded placeholders must be gone.
+        assert tdtp.__version__ not in ("0.1.0", "1.6.0", "unknown")
+
 
 # ---------------------------------------------------------------------------
 # I/O — J_ReadFile

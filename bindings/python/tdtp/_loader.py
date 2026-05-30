@@ -212,6 +212,19 @@ def free_string(ptr: int | None) -> None:
         lib.J_FreeString(ptr)
 
 
+def get_lib_version() -> str:
+    """Return the native library version reported by J_GetVersion().
+
+    This is the single source of truth (pkg/core/version.Version in Go),
+    so the Python package version always matches the compiled core.
+    """
+    ptr = lib.J_GetVersion()
+    try:
+        return ctypes.string_at(ptr).decode("utf-8")
+    finally:
+        free_string(ptr)
+
+
 # ---------------------------------------------------------------------------
 # Module-level singleton — lazy load on first import
 # ---------------------------------------------------------------------------

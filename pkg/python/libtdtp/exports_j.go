@@ -12,6 +12,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
+	"github.com/ruslano69/tdtp-framework/pkg/core/version"
 	"github.com/ruslano69/tdtp-framework/pkg/diff"
 )
 
@@ -172,7 +173,7 @@ func J_FreeString(s *C.char) {
 //
 //export J_GetVersion
 func J_GetVersion() *C.char {
-	return C.CString("1.6.0")
+	return C.CString(version.Version)
 }
 
 // ---------------------------------------------------------------------------
