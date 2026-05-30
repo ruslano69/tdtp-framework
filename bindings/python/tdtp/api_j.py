@@ -30,7 +30,19 @@ from tdtp.exceptions import (
     TDTPWriteError,
 )
 
-# Map error message prefixes → specific exception types
+# Map the Go error_code (single source of truth, see exports_j.go errorCodeFor)
+# → specific exception type. This is the primary, stable mapping.
+_ERROR_CODE_MAP: dict[str, type[TDTPError]] = {
+    "PARSE_ERROR":     TDTPParseError,
+    "FILTER_ERROR":    TDTPFilterError,
+    "WRITE_ERROR":     TDTPWriteError,
+    "PROCESSOR_ERROR": TDTPProcessorError,
+    "INVALID_INPUT":   TDTPError,
+    "DIFF_ERROR":      TDTPError,
+    "INTERNAL_ERROR":  TDTPError,
+}
+
+# Legacy fallback: prefix matching for libraries built before error_code existed.
 _ERROR_MAP: list[tuple[str, type[TDTPError]]] = [
     ("parse error",          TDTPParseError),
     ("decompress error",     TDTPParseError),
@@ -65,12 +77,17 @@ def _call(fn, *args) -> dict:
 
     err_msg = result.get("error", "")
     if err_msg:
-        exc_type = TDTPError
-        for prefix, exc_cls in _ERROR_MAP:
-            if err_msg.lower().startswith(prefix.lower()):
-                exc_type = exc_cls
-                break
-        raise exc_type(err_msg)
+        # Prefer the stable machine-readable error_code (Go-owned taxonomy).
+        code = result.get("error_code", "")
+        exc_type = _ERROR_CODE_MAP.get(code)
+        if exc_type is None:
+            # Fallback: legacy prefix matching for older libtdtp builds.
+            exc_type = TDTPError
+            for prefix, exc_cls in _ERROR_MAP:
+                if err_msg.lower().startswith(prefix.lower()):
+                    exc_type = exc_cls
+                    break
+        raise exc_type(err_msg, code=code)
 
     return result
 

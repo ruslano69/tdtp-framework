@@ -85,6 +85,17 @@ class TestJRead:
         with pytest.raises(TDTPParseError):
             j_client.J_read("/no/such/file.tdtp.xml")
 
+    def test_error_carries_machine_code(self, j_client) -> None:
+        """Exceptions expose the stable Go error_code (PARSE_ERROR, etc.)."""
+        with pytest.raises(TDTPParseError) as exc_info:
+            j_client.J_read("/no/such/file.tdtp.xml")
+        assert exc_info.value.code == "PARSE_ERROR"
+
+    def test_filter_error_code(self, j_client, sample_data_j) -> None:
+        with pytest.raises(TDTPFilterError) as exc_info:
+            j_client.J_filter(sample_data_j, "NoSuchField >>> garbage")
+        assert exc_info.value.code == "FILTER_ERROR"
+
     def test_compressed_file(self, j_client, compressed_tdtp_path) -> None:
         """J_read transparently decompresses zstd-compressed data blocks."""
         data = j_client.J_read(str(compressed_tdtp_path))

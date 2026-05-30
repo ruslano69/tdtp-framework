@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"unsafe"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -105,8 +106,63 @@ func jOK(v any) *C.char {
 	return C.CString(string(b))
 }
 
+// Stable, machine-readable error codes. This is the single source of truth for
+// the error taxonomy — Python (and any other binding) maps error_code → exception
+// instead of fragile prefix matching on the human-readable message.
+const (
+	errCodeParse     = "PARSE_ERROR"     // parse/decompress/checksum/compact decode
+	errCodeFilter    = "FILTER_ERROR"    // invalid WHERE clause or evaluation failure
+	errCodeWrite     = "WRITE_ERROR"     // write/partition/serialize failure
+	errCodeProcessor = "PROCESSOR_ERROR" // processor or compression chain failure
+	errCodeInvalid   = "INVALID_INPUT"   // malformed JSON / options / config input
+	errCodeDiff      = "DIFF_ERROR"      // diff computation failure
+	errCodeInternal  = "INTERNAL_ERROR"  // uncategorized
+)
+
+// errorCodeFor derives a stable error code from a message prefix. Centralizing
+// this in Go means bindings never have to re-implement the prefix table.
+func errorCodeFor(msg string) string {
+	prefixes := []struct {
+		prefix string
+		code   string
+	}{
+		{"parse error", errCodeParse},
+		{"decompress error", errCodeParse},
+		{"checksum validation failed", errCodeParse},
+		{"no compressed data", errCodeParse},
+		{"compact expand error", errCodeParse},
+		{"invalid where clause", errCodeFilter},
+		{"filter error", errCodeFilter},
+		{"write error", errCodeWrite},
+		{"write part", errCodeWrite},
+		{"partition error", errCodeWrite},
+		{"compress part", errCodeWrite},
+		{"processor error", errCodeProcessor},
+		{"process error", errCodeProcessor},
+		{"chain", errCodeProcessor},
+		{"compression error", errCodeProcessor},
+		{"invalid data json", errCodeInvalid},
+		{"invalid options", errCodeInvalid},
+		{"invalid config", errCodeInvalid},
+		{"invalid chain", errCodeInvalid},
+		{"diff error", errCodeDiff},
+		{"old data error", errCodeDiff},
+		{"new data error", errCodeDiff},
+	}
+	lower := strings.ToLower(msg)
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p.prefix) {
+			return p.code
+		}
+	}
+	return errCodeInternal
+}
+
 func jErr(msg string) *C.char {
-	b, _ := json.Marshal(map[string]string{"error": msg})
+	b, _ := json.Marshal(map[string]string{
+		"error":      msg,
+		"error_code": errorCodeFor(msg),
+	})
 	return C.CString(string(b))
 }
 
