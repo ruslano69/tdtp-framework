@@ -23,6 +23,8 @@ All notable changes to tdtp-framework are documented in this file.
 
 - **Packaging & versioning**: единый источник версии (`pkg/core/version`), `py.typed`
   (PEP 561), стабильные коды ошибок в JSON-envelope, extras `tdtp[arrow]` / `tdtp[pandas]`.
+  Lockstep `.so` ↔ пакет: `build-lib` запускает `sync-version` (build-time), импорт
+  сверяет `J_GetVersion` с метаданными пакета и предупреждает при рассинхроне (runtime).
 
 ### Fixed
 

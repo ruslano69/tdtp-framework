@@ -61,6 +61,40 @@ try:
 except Exception:  # pragma: no cover - library load failure path
     __version__ = "unknown"
 
+
+def _check_version_lockstep() -> None:
+    """Warn if the loaded .so and the installed package metadata disagree.
+
+    The native library is the runtime source of truth (J_GetVersion), but the
+    wheel/sdist also carries a static version in its metadata (from
+    pyproject.toml). They can drift if a stale .so ships with a newer package
+    or vice versa. ``make build-lib`` runs ``sync-version`` to prevent this at
+    build time; this guard catches a mismatch that slipped through at runtime.
+    """
+    if __version__ == "unknown":
+        return
+    try:
+        from importlib.metadata import PackageNotFoundError, version as _pkg_version
+    except ImportError:  # pragma: no cover - Python < 3.8
+        return
+    try:
+        pkg_ver = _pkg_version("tdtp")
+    except PackageNotFoundError:  # pragma: no cover - running from source, not installed
+        return
+    if pkg_ver != __version__:
+        import warnings
+        warnings.warn(
+            f"tdtp version mismatch: native library reports {__version__!r} but "
+            f"the installed package metadata is {pkg_ver!r}. The compiled "
+            f"libtdtp is out of sync with the package — rebuild it with "
+            f"`make build-lib` (or `make build-lib-full`).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
+_check_version_lockstep()
+
 __all__ = [
     "Tdtp",
     "TDTPClientJSON",

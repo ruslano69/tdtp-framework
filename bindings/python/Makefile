@@ -28,7 +28,8 @@ all: build-lib install-dev
 
 ## build-lib: compile without zstd/processors (no extra deps needed)
 ##            Supports: J_ReadFile (plain), J_WriteFile, J_FilterRows, J_Diff
-build-lib:
+##            Runs sync-version first so the .so and pyproject.toml never drift.
+build-lib: sync-version
 	@echo "→ Building $(LIB_OUT) basic (GOOS=$(GOOS) GOARCH=$(GOARCH))"
 	cd $(LIB_SRC) && \
 	GOWORK=off go build \
@@ -40,7 +41,8 @@ build-lib:
 ## build-lib-full: compile with zstd + processors support (-tags compress)
 ##                 Requires: go mod download (needs internet on first run)
 ##                 Supports all J_* functions including compress/decompress/processors
-build-lib-full:
+##                 Runs sync-version first so the .so and pyproject.toml never drift.
+build-lib-full: sync-version
 	@echo "→ Building $(LIB_OUT) full (GOOS=$(GOOS) GOARCH=$(GOARCH))"
 	cd $(LIB_SRC) && \
 	GOWORK=off go build \
