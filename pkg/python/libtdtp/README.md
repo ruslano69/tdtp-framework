@@ -187,9 +187,12 @@ if "error" in result:
 
 ```python
 ptr = lib.J_GetVersion()
-version = ctypes.string_at(ptr).decode()   # "1.6.0"
+version = ctypes.string_at(ptr).decode()   # e.g. "1.9.6"
 lib.J_FreeString(ptr)
 ```
+
+Версия — единый источник правды (`pkg/core/version.Version`); совпадает с
+`tdtpcli --version` и Python `tdtp.__version__`.
 
 ---
 
@@ -354,6 +357,30 @@ ptr = lib.J_ApplyChain(payload, chain)
   }
 }
 ```
+
+---
+
+### Метаданные, целостность, трансформации (1.9.6)
+
+Функции in-process паритета с `tdtpcli` — агенту не нужно спавнить процесс
+и парсить stdout/YAML.
+
+| Функция | Назначение | Возврат |
+|---|---|---|
+| `J_Inspect(path)` | Метаданные пакета без декомпрессии (как `--inspect`) | `{table, version, fields_count, schema, total_rows, compression, checksum, compact, pipeline?}` |
+| `J_InspectBytes(data, len)` | То же из памяти | то же |
+| `J_Test(path)` | Dry-run проверка целостности (как `--test`): части, checksum, decompress, row-count | `{ok, total_parts, total_rows, parts:[...], errors:[...]}` |
+| `J_Sort(data, orderBy)` | Сортировка по полям; `[{"field","direction"}]` | jPacket с отсортированными строками |
+| `J_Merge(packets, options)` | Объединение пакетов (union/intersection/left/right/append) | `{schema, header, data, stats}` |
+| `J_ReadMultipart(path)` | Сборка набора `_part_N_of_M` в один датасет | jPacket (части склеены, header сброшен в 1/1) |
+
+`J_ExportAll` дополнительно принимает `compact` / `fixed_fields` / `compact_tail`
+для compact v1.3.1.
+
+Ошибки всех функций несут стабильный `error_code`
+(`PARSE_ERROR`, `FILTER_ERROR`, `WRITE_ERROR`, `PROCESSOR_ERROR`,
+`INVALID_INPUT`, `DIFF_ERROR`, `INTERNAL_ERROR`) — биндинги маппят его на
+типы исключений вместо матчинга по тексту.
 
 ---
 
@@ -638,6 +665,7 @@ finally:
 
 | Версия | Изменение |
 |---|---|
+| 1.9.6 | Единая версия (CLS/lib/Python); `error_code` в конверте ошибок; `J_Inspect`, `J_Test`, `J_Sort`, `J_Merge`, `J_ReadMultipart`; compact-опции в `J_ExportAll`; фикс молчаливо-несжатого экспорта (rawRows) |
 | 1.6.0 | `J_SerializeValue` — Go как единый источник правды для сериализации |
 | 1.5.x | `J_FilterRowsPage` — пагинация с `query_context` |
 | 1.4.x | `J_ExportAll` — партиционирование + опциональный zstd |
