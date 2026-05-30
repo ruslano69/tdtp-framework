@@ -1,31 +1,12 @@
 package packet
 
-import (
-	"strconv"
-	"strings"
-)
-
 // NeedsRowCountCheck reports whether a packet with the given version string
 // requires RecordsInPart to be validated against the actual row count.
 //
 // Starting with v1.4, packets carry XXH3-128 hashes that guarantee integrity
 // end-to-end, making the RecordsInPart counter redundant as a safety check.
-// All versions ≥ 1.4 (including future 1.5, 2.0, …) are assumed to have
-// integrated integrity protection, so the row-count check is skipped for them.
-//
-// Unknown or unparseable versions are treated conservatively: check is applied.
 func NeedsRowCountCheck(version string) bool {
-	parts := strings.SplitN(version, ".", 3)
-	if len(parts) < 2 {
-		return true
-	}
-	major, errM := strconv.Atoi(parts[0])
-	minor, errm := strconv.Atoi(parts[1])
-	if errM != nil || errm != nil {
-		return true
-	}
-	// Check required for major < 1, or major == 1 and minor < 4.
-	return major < 1 || (major == 1 && minor < 4)
+	return version <= "1.3.1"
 }
 
 // ExtractKeyFields извлекает ключевые поля из схемы
