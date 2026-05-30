@@ -78,7 +78,7 @@ func ExpandCompactRows(packet *DataPacket) error {
 	}
 
 	newRows := make([]Row, len(packet.Data.Rows))
-	var sb strings.Builder
+	buf := make([]byte, 0, nFields*16) // reused across rows; string(buf) copies, buf stays
 	for rowIdx, row := range packet.Data.Rows {
 		values := parser.GetRowValues(row)
 
@@ -99,14 +99,15 @@ func ExpandCompactRows(packet *DataPacket) error {
 		}
 
 		// Сериализуем значения в Row без промежуточного []string.
-		sb.Reset()
+		// buf[:0] обнуляет длину без освобождения памяти (в отличие от strings.Builder.Reset).
+		buf = buf[:0]
 		for i, v := range values {
 			if i > 0 {
-				sb.WriteByte('|')
+				buf = append(buf, '|')
 			}
-			sb.WriteString(escapeValue(v))
+			buf = append(buf, escapeValue(v)...)
 		}
-		newRows[rowIdx] = Row{Value: sb.String()}
+		newRows[rowIdx] = Row{Value: string(buf)}
 	}
 
 	packet.Data.Rows = newRows
