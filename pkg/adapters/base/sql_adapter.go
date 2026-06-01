@@ -132,9 +132,12 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 
 	// Apply LIMIT/OFFSET for SQL Server.
 	//
-	// Two strategies:
+	// Three strategies:
 	//   TOP N        — limit-only, no offset. Works on all SQL Server versions (2000+).
 	//   OFFSET/FETCH — limit+offset, requires SQL Server 2012+ (compat level 110+).
+	//   Tail mode    — negative limit (--limit -N), "last N rows". Uses TOP N inside
+	//                  a subquery (when ORDER BY is present) or just TOP N (no ORDER BY).
+	//                  The outer ORDER BY in the subquery pattern preserves original order.
 	//
 	// Using TOP when possible avoids failures on older compat levels (80, 90, 100).
 	if query != nil && query.Limit > 0 && query.Offset == 0 {
@@ -152,9 +155,18 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 		sql = strings.Replace(sql, limitPattern, "", 1)
 		sql = strings.Replace(sql, offsetPattern, "", 1)
 
-		// ORDER BY is mandatory for OFFSET/FETCH
-		if !strings.Contains(sql, "ORDER BY") && len(schema.Fields) > 0 {
-			sql += fmt.Sprintf(" ORDER BY [%s]", schema.Fields[0].Name)
+		// ORDER BY is mandatory for OFFSET/FETCH.
+		// Use the first *projected* column (from the SQL itself) so that the ORDER BY
+		// key is always in the SELECT list — schema.Fields[0] may not be projected
+		// when --fields restricts the column list.
+		// For "SELECT *" (no --fields), fall back to the first non-read-only schema field
+		// so we never ORDER BY timestamp/rowversion (which is cut by PostProcessRows).
+		if !strings.Contains(sql, "ORDER BY") {
+			if col := firstProjectedColumn(sql); col != "" {
+				sql += " ORDER BY " + col
+			} else if col := firstWritableColumn(schema); col != "" {
+				sql += " ORDER BY " + col
+			}
 		}
 
 		if query.Offset > 0 {
@@ -165,6 +177,62 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 		if query.Limit > 0 {
 			sql += fmt.Sprintf(" FETCH NEXT %d ROWS ONLY", query.Limit)
 		}
+	} else if query != nil && query.Limit < 0 {
+		// Tail mode: --limit -N means "last N rows" (like tail -n).
+		// sql_generator emits LIMIT N (where N = abs(query.Limit)).
+		// Two sub-cases depending on whether ORDER BY was requested:
+		//
+		//   With ORDER BY: sql_generator wraps the query in a subquery:
+		//     SELECT * FROM (SELECT ... ORDER BY col DESC LIMIT N) AS _tail ORDER BY col ASC
+		//   → SQL Server:
+		//     SELECT * FROM (SELECT TOP N ... ORDER BY col DESC) AS _tail ORDER BY col ASC
+		//
+		//   Without ORDER BY: build a subquery using the first schema field as fallback key.
+		//     SELECT ... FROM [table] WHERE ... LIMIT N
+		//   → SQL Server:
+		//     SELECT * FROM (SELECT TOP N ... FROM [table] WHERE ... ORDER BY [col] DESC) AS _tail ORDER BY [col] ASC
+		//
+		//   The fallback key is the first schema field — same heuristic used by OFFSET/FETCH.
+		//   For correct tail semantics, callers should specify --order-by explicitly.
+		n := -query.Limit
+		limitPattern := fmt.Sprintf(" LIMIT %d", n)
+		if strings.Contains(sql, "AS _tail") {
+			// Subquery tail pattern (ORDER BY was specified): inject TOP N into the inner SELECT.
+			sql = strings.Replace(sql, limitPattern, "", 1)
+			sql = strings.Replace(sql, "(SELECT DISTINCT ", fmt.Sprintf("(SELECT DISTINCT TOP %d ", n), 1)
+			if !strings.Contains(sql, fmt.Sprintf("TOP %d", n)) {
+				sql = strings.Replace(sql, "(SELECT ", fmt.Sprintf("(SELECT TOP %d ", n), 1)
+			}
+		} else {
+			// No ORDER BY and no subquery pattern yet.
+			// Build a subquery using the first *projected* column (from the SQL itself) as
+			// the sort key — schema.Fields[0] must NOT be used here because it refers to
+			// the full table schema, which may differ from the --fields projection.
+			// Using firstProjectedColumn guarantees the ORDER BY key is in the SELECT list.
+			sql = strings.Replace(sql, limitPattern, "", 1)
+			orderCol := firstProjectedColumn(sql)
+			if orderCol == "" {
+				// "SELECT *" or unparseable projection: use first non-read-only schema field.
+				// This skips timestamp/rowversion which is cut by PostProcessRows anyway.
+				orderCol = firstWritableColumn(schema)
+			}
+			if orderCol != "" {
+				// Subquery: SELECT TOP N ... ORDER BY col DESC → wrap → ORDER BY col ASC
+				inner := strings.TrimRight(sql, " ")
+				inner = strings.Replace(inner, "SELECT DISTINCT ", fmt.Sprintf("SELECT DISTINCT TOP %d ", n), 1)
+				if !strings.Contains(inner, fmt.Sprintf("TOP %d", n)) {
+					inner = strings.Replace(inner, "SELECT ", fmt.Sprintf("SELECT TOP %d ", n), 1)
+				}
+				inner += fmt.Sprintf(" ORDER BY %s DESC", orderCol)
+				sql = fmt.Sprintf("SELECT * FROM (%s) AS _tail ORDER BY %s ASC", inner, orderCol)
+			} else {
+				// Degenerate (no schema, SELECT *): TOP N only, order undefined.
+				sql = strings.Replace(sql, "SELECT DISTINCT ", fmt.Sprintf("SELECT DISTINCT TOP %d ", n), 1)
+				if !strings.Contains(sql, fmt.Sprintf("TOP %d", n)) {
+					sql = strings.Replace(sql, "SELECT ", fmt.Sprintf("SELECT TOP %d ", n), 1)
+				}
+			}
+		}
 	}
 
 	return sql
@@ -173,4 +241,58 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 // QuoteIdentifier квотирует идентификатор для SQL Server
 func (a *MSSQLAdapter) QuoteIdentifier(identifier string) string {
 	return fmt.Sprintf("[%s]", identifier)
+}
+
+// firstWritableColumn returns the first non-read-only field from schema, bracket-quoted.
+// Used as ORDER BY fallback for "SELECT *" queries (no --fields projection) so that
+// we never ORDER BY timestamp/rowversion or computed columns — those are cut by
+// PostProcessRows and cannot be reliably ordered in a subquery context.
+// Returns "" when schema has no writable fields.
+func firstWritableColumn(schema packet.Schema) string {
+	for _, f := range schema.Fields {
+		if !f.ReadOnly {
+			return fmt.Sprintf("[%s]", f.Name)
+		}
+	}
+	return ""
+}
+
+// firstProjectedColumn extracts the first column name from an already-adapted SQL SELECT
+// statement. Field names are expected to be bracket-quoted ([name]) at this point.
+//
+// This is used as a fallback ORDER BY key for tail mode and OFFSET/FETCH when no
+// ORDER BY was specified. Reading from the SQL itself (rather than schema.Fields[0])
+// ensures the chosen column is always part of the projection, even when --fields
+// restricts the SELECT list.
+//
+// Returns "" if the projection is "*" or cannot be determined.
+func firstProjectedColumn(sql string) string {
+	upper := strings.ToUpper(sql)
+	selIdx := strings.Index(upper, "SELECT ")
+	fromIdx := strings.Index(upper, " FROM ")
+	if selIdx < 0 || fromIdx <= selIdx+7 {
+		return ""
+	}
+	projection := strings.TrimSpace(sql[selIdx+7 : fromIdx])
+
+	// Skip "TOP N " injected earlier (e.g. "TOP 10 [Field1], ...").
+	if strings.HasPrefix(strings.ToUpper(projection), "TOP ") {
+		parts := strings.SplitN(projection, " ", 3)
+		if len(parts) == 3 {
+			projection = parts[2]
+		}
+	}
+
+	// Wildcard: no safe column to pick.
+	if projection == "*" || projection == "" {
+		return ""
+	}
+
+	// First column: everything before the first top-level comma.
+	// For bracket-quoted names like [Calendar Date] commas are only separators.
+	first := projection
+	if commaIdx := strings.Index(first, ","); commaIdx >= 0 {
+		first = strings.TrimSpace(first[:commaIdx])
+	}
+	return first
 }

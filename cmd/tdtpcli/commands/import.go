@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/sanitize"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
@@ -127,6 +129,21 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			var decErr error
 			data, decErr = DecryptEncBlob(ctx, data, opts.MercuryURL)
 			if decErr != nil {
+				// On key failure: write a TDTP error packet next to the input file
+				// so the pipeline receives a structured receipt instead of silence.
+				// The receiving side can import it as a valid tdtp.xml.
+				errCode := mercury.ErrorCode(decErr)
+				errPktPath := errorPacketPath(src.label)
+				if writeErr := WriteErrorPacket(errCode, decErr.Error(), "", "", errPktPath); writeErr != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: could not write error packet to %s: %v\n", errPktPath, writeErr)
+				} else {
+					fmt.Fprintf(os.Stderr, "Error packet written: %s\n", errPktPath)
+					if errors.Is(decErr, mercury.ErrKeyAlreadyConsumed) {
+						fmt.Fprintf(os.Stderr,
+							"⚠  SECURITY WARNING: key for this package was already consumed.\n"+
+								"   Possible interception — check Mercury audit logs.\n")
+					}
+				}
 				return fmt.Errorf("failed to decrypt '%s': %w", src.label, decErr)
 			}
 		}
@@ -422,6 +439,20 @@ func extractBatchID(messageID string) string {
 
 	// No "-P" found, return full MessageID (single-part export)
 	return messageID
+}
+
+// errorPacketPath returns the path where the error packet should be written
+// for a given encrypted input file. Strips ".tdtp.enc"/".enc" and appends "_error.tdtp.xml".
+// Example: "data/employees.tdtp.enc" → "data/employees_error.tdtp.xml"
+func errorPacketPath(encPath string) string {
+	base := encPath
+	for _, suffix := range []string{".tdtp.enc", ".enc"} {
+		if strings.HasSuffix(strings.ToLower(base), suffix) {
+			base = base[:len(base)-len(suffix)]
+			break
+		}
+	}
+	return base + "_error.tdtp.xml"
 }
 
 // CheckPipelineVars verifies PipelineContext variables in a packet against expected values.

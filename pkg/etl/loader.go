@@ -175,7 +175,9 @@ func loadEncryptedTDTPFile(ctx context.Context, source SourceConfig) (*packet.Da
 		timeout = 5000
 	}
 	mc := mercury.NewClient(source.MercuryURL, timeout)
-	keyB64, err := mc.RetrieveKey(ctx, packageUUID)
+	// Caller identity for Mercury audit trail. Pipeline loaders run as a service
+	// without an interactive caller; the pipeline name is the closest approximation.
+	keyB64, err := mc.RetrieveKey(ctx, packageUUID, source.Name)
 	if err != nil {
 		return nil, fmt.Errorf("retrieve key (uuid=%s): %w", packageUUID, err)
 	}

@@ -65,6 +65,50 @@ recipient ─ POST /api/keys/retrieve>│── GETDEL ────────�
            [AES-256-GCM decrypt]   │                     │
 ```
 
+### Key-not-found: error receipt instead of silent failure
+
+When `tdtpcli` cannot retrieve a key (HTTP 404 — burned or expired), it does **not**
+simply exit with an error code and leave the pipeline with nothing. Instead it writes
+a valid TDTP error packet next to the input file:
+
+```
+Input:   data/payroll.tdtp.enc        ← encrypted blob (untouched)
+Output:  data/payroll_error.tdtp.xml  ← error receipt (auto-generated)
+```
+
+The error packet is a valid TDTP XML with `Type="error"` and zero data rows:
+
+```xml
+<DataPacket protocol="TDTP" version="1.4">
+  <Header>
+    <Type>error</Type>
+    <TableName></TableName>
+    <MessageID>…uuid…</MessageID>
+    <Timestamp>2026-06-01T12:11:00Z</Timestamp>
+  </Header>
+  <Schema/>
+  <Data/>
+  <AlarmDetails>
+    <Severity>error</Severity>
+    <Code>KEY_ALREADY_CONSUMED</Code>
+    <Message>retrieve key from Mercury (uuid=abc…): KEY_ALREADY_CONSUMED: uuid=abc…</Message>
+  </AlarmDetails>
+</DataPacket>
+```
+
+The receiving side imports this packet the same way it would import data — the
+pipeline always gets a receipt, never silence. Error codes match `pkg/mercury`:
+
+| HTTP status | `Code` in error packet | Meaning |
+|-------------|------------------------|---------|
+| 404 | `KEY_ALREADY_CONSUMED` | Key burned (possibly by attacker) or TTL expired |
+| 5xx | `MERCURY_ERROR` | Mercury internal error |
+| timeout | `MERCURY_UNAVAILABLE` | Mercury unreachable |
+
+`KEY_ALREADY_CONSUMED` additionally prints a security warning to stderr and should
+be treated as a security event: cross-reference with Mercury audit (`consumed_by`,
+`consumed_at`) to determine whether the burn was legitimate.
+
 ### Hash notary flow (v1.4 integrity)
 
 ```
@@ -236,10 +280,39 @@ Full reference: [docs/configuration.md](docs/configuration.md)
 
 ## Security
 
+### Key consumption audit
+
+Every successful `POST /api/keys/retrieve` is recorded in Pipeline Redis with full identity:
+
+| Field | Source | Description |
+|-------|--------|-------------|
+| `consumed_by` | `caller` field in request body | Consumer identity (sAMAccountName, service name) |
+| `consumed_at` | server-side `time.Now().UTC()` | Exact burn timestamp |
+| `state` | state machine | `approved` → `consumed` |
+
+`caller` is optional but strongly recommended — anonymous burns (`caller=""`) are
+distinguishable from TTL expiry (no record at all) but cannot be attributed to a
+specific principal.
+
+Three observable states after a key is bound:
+
+| Pipeline Redis state | Meaning |
+|---|---|
+| `state=consumed, consumed_by=svc_foo` | Legitimate retrieval by `svc_foo` |
+| `state=consumed, consumed_by=""` | Anonymous burn — investigate |
+| Key record absent (Redis TTL expired) | Key was never retrieved; consumer never ran |
+
+**`tdtpcli` sends its caller identity** via the `TDTPCLI_CALLER` environment variable:
+```bash
+TDTPCLI_CALLER=svc_tdtp_branch tdtpcli --import data.tdtp.enc --mercury-url http://mercury:3000
+```
+Pipeline loaders send `source.name` as caller automatically.
+
 ### Key store guarantees
 - **Privilege guard**: refuses to start as `root` (Linux) or elevated Administrator (Windows)
 - **Burn-on-read**: `GETDEL` — key exists in Redis for at most one retrieval
 - **HMAC**: every bind response is signed with `HMAC-SHA256(uuid, SERVER_SECRET)`
+- **Consumption audit**: every retrieve is stamped with `consumed_by` + `consumed_at` — distinguishes legitimate burn from theft from TTL expiry
 - **LDAP cache**: membership results cached 120 s in Pipeline Redis to avoid DC overload
 - **TTL**: unread keys auto-expire (`key_ttl`, default 5 min)
 
@@ -308,7 +381,9 @@ for local development only.
 - ✅ **v1.0**: AES-256-GCM key bind + burn-on-read retrieve
 - ✅ **v1.1**: quota system, AD/LDAP integration, two-Redis split
 - ✅ **v1.2 (current)**: hash notary (`mercury:hash:*`), `pkg/pipeline/VerifyAndPrepare`
-- ⬜ **v1.3 (planned)**: hash registration quotas (`mercury:hash-quota:*`),
+- ✅ **v1.3**: key consumption audit (`consumed_by`, `consumed_at`), `ErrKeyAlreadyConsumed`
+  sentinel, TDTP error receipt on failed decrypt (`*_error.tdtp.xml`)
+- ⬜ **v1.4 (planned)**: hash registration quotas (`mercury:hash-quota:*`),
   Dictionary pre-flight (`@SHA`, `@LOCK`, `@TTL` consumer support), SIEM connector
 - ⬜ **chiptdtp (separate product)**: proprietary L3 tier with Ed25519 signatures,
   License Authority, ephemeral configs, smart-card auth (see v1.2 §15)

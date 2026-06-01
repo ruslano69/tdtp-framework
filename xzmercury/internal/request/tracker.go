@@ -42,10 +42,12 @@ type Request struct {
 	ID           string    `json:"id"`
 	PackageUUID  string    `json:"package_uuid"`
 	PipelineName string    `json:"pipeline_name"`
-	Caller       string    `json:"caller"`
+	Caller       string    `json:"caller"`       // identity that bound the key (from Bind)
+	ConsumedBy   string    `json:"consumed_by,omitempty"` // identity that burned the key (from Retrieve)
 	State        State     `json:"state"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	ConsumedAt   time.Time `json:"consumed_at,omitempty"` // UTC timestamp of burn-on-read
 }
 
 // Event is the Pub/Sub message published on state changes.
@@ -115,9 +117,11 @@ func (t *Tracker) Reject(ctx context.Context, packageUUID, pipelineName, caller 
 	return req, nil
 }
 
-// MarkConsumed transitions an existing request to StateConsumed.
+// MarkConsumed transitions an existing request to StateConsumed and records
+// who burned the key. consumedBy is the caller identity from the Retrieve
+// request (empty string if the consumer did not identify itself).
 // Called from the retrieve handler after a successful GETDEL.
-func (t *Tracker) MarkConsumed(ctx context.Context, requestID string) error {
+func (t *Tracker) MarkConsumed(ctx context.Context, requestID, consumedBy string) error {
 	key := keyPrefix + requestID
 	data, err := t.rdb.Get(ctx, key).Bytes()
 	if err != nil {
@@ -127,8 +131,11 @@ func (t *Tracker) MarkConsumed(ctx context.Context, requestID string) error {
 	if err := json.Unmarshal(data, &req); err != nil {
 		return fmt.Errorf("request: unmarshal: %w", err)
 	}
+	now := time.Now().UTC()
 	req.State = StateConsumed
-	req.UpdatedAt = time.Now().UTC()
+	req.ConsumedBy = consumedBy
+	req.ConsumedAt = now
+	req.UpdatedAt = now
 	if err := t.save(ctx, &req); err != nil {
 		return err
 	}

@@ -131,6 +131,7 @@ func (h *keysHandler) Bind(w http.ResponseWriter, r *http.Request) {
 type retrieveRequest struct {
 	PackageUUID string `json:"package_uuid"`
 	RequestID   string `json:"request_id,omitempty"` // optional; used to update tracker state
+	Caller      string `json:"caller,omitempty"`     // consumer identity for audit trail
 }
 
 type retrieveResponse struct {
@@ -162,14 +163,20 @@ func (h *keysHandler) Retrieve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update request state to consumed (best-effort)
+	// Update request state to consumed (best-effort).
+	// consumedBy is recorded even when empty — distinguishes "anonymous burn"
+	// from "legitimate owner burn" in the audit trail.
 	if req.RequestID != "" {
-		if err := h.tracker.MarkConsumed(ctx, req.RequestID); err != nil {
+		if err := h.tracker.MarkConsumed(ctx, req.RequestID, req.Caller); err != nil {
 			log.Warn().Err(err).Str("request_id", req.RequestID).Msg("failed to mark consumed")
 		}
 	}
 
-	log.Info().Str("uuid", req.PackageUUID).Msg("key retrieved (burned)")
+	log.Info().
+		Str("uuid", req.PackageUUID).
+		Str("caller", req.Caller).
+		Str("request_id", req.RequestID).
+		Msg("key retrieved (burned)")
 	writeJSON(w, http.StatusOK, retrieveResponse{KeyB64: keyB64})
 }
 

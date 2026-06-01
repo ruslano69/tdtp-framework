@@ -125,9 +125,9 @@ func TestMarkConsumed_TransitionsToConsumed(t *testing.T) {
 	tracker := newTestTracker(t)
 	ctx := context.Background()
 
-	req, _ := tracker.Create(ctx, "uuid-1", "pipeline", "caller")
+	req, _ := tracker.Create(ctx, "uuid-1", "pipeline", "binder")
 
-	if err := tracker.MarkConsumed(ctx, req.ID); err != nil {
+	if err := tracker.MarkConsumed(ctx, req.ID, "consumer"); err != nil {
 		t.Fatalf("MarkConsumed() error = %v", err)
 	}
 
@@ -138,6 +138,35 @@ func TestMarkConsumed_TransitionsToConsumed(t *testing.T) {
 	if got.State != StateConsumed {
 		t.Errorf("после MarkConsumed() State = %q, want %q", got.State, StateConsumed)
 	}
+	// Audit: ConsumedBy and ConsumedAt must be populated.
+	if got.ConsumedBy != "consumer" {
+		t.Errorf("ConsumedBy = %q, want %q", got.ConsumedBy, "consumer")
+	}
+	if got.ConsumedAt.IsZero() {
+		t.Error("ConsumedAt must be set after MarkConsumed")
+	}
+}
+
+func TestMarkConsumed_AnonymousBurn(t *testing.T) {
+	// consumedBy="" is valid: caller chose not to identify itself.
+	// ConsumedBy stays empty, ConsumedAt is still set — distinguishes
+	// "anonymous burn" from "key expired by TTL" in the audit trail.
+	tracker := newTestTracker(t)
+	ctx := context.Background()
+
+	req, _ := tracker.Create(ctx, "uuid-anon", "pipeline", "binder")
+	_ = tracker.MarkConsumed(ctx, req.ID, "")
+
+	got, _ := tracker.Get(ctx, req.ID)
+	if got.State != StateConsumed {
+		t.Errorf("State = %q, want consumed", got.State)
+	}
+	if got.ConsumedBy != "" {
+		t.Errorf("ConsumedBy should be empty for anonymous burn, got %q", got.ConsumedBy)
+	}
+	if got.ConsumedAt.IsZero() {
+		t.Error("ConsumedAt must be set even for anonymous burn")
+	}
 }
 
 func TestMarkConsumed_UpdatedAtAdvances(t *testing.T) {
@@ -147,7 +176,7 @@ func TestMarkConsumed_UpdatedAtAdvances(t *testing.T) {
 	req, _ := tracker.Create(ctx, "uuid-1", "pipeline", "caller")
 	time.Sleep(time.Millisecond) // гарантируем что время изменится
 
-	_ = tracker.MarkConsumed(ctx, req.ID)
+	_ = tracker.MarkConsumed(ctx, req.ID, "consumer")
 
 	got, _ := tracker.Get(ctx, req.ID)
 	if !got.UpdatedAt.After(req.CreatedAt) {
@@ -158,7 +187,7 @@ func TestMarkConsumed_UpdatedAtAdvances(t *testing.T) {
 func TestMarkConsumed_NotFound(t *testing.T) {
 	tracker := newTestTracker(t)
 
-	err := tracker.MarkConsumed(context.Background(), "nonexistent-id")
+	err := tracker.MarkConsumed(context.Background(), "nonexistent-id", "consumer")
 	if err == nil {
 		t.Error("MarkConsumed() expected error для несуществующего ID")
 	}
@@ -177,9 +206,12 @@ func TestLifecycle_ApprovedToConsumed(t *testing.T) {
 	}
 
 	// consumed
-	_ = tracker.MarkConsumed(ctx, req.ID)
+	_ = tracker.MarkConsumed(ctx, req.ID, "svc_consumer")
 	got, _ := tracker.Get(ctx, req.ID)
 	if got.State != StateConsumed {
 		t.Errorf("State после MarkConsumed = %q, want consumed", got.State)
+	}
+	if got.ConsumedBy != "svc_consumer" {
+		t.Errorf("ConsumedBy = %q, want svc_consumer", got.ConsumedBy)
 	}
 }

@@ -11,6 +11,7 @@ const (
 	ErrCodeMercuryError           = "MERCURY_ERROR"            // xZMercury вернул HTTP 5xx
 	ErrCodeHMACVerificationFailed = "HMAC_VERIFICATION_FAILED" // HMAC ключа не прошёл верификацию
 	ErrCodeKeyBindRejected        = "KEY_BIND_REJECTED"        // xZMercury отклонил binding (квота, ACL, невалидный pipeline)
+	ErrCodeKeyAlreadyConsumed     = "KEY_ALREADY_CONSUMED"     // ключ уже был сожжён — возможна кража пакета
 )
 
 // Sentinel errors — используются для определения типа отказа в EncryptionProcessor.
@@ -19,6 +20,11 @@ var (
 	ErrMercuryError           = errors.New(ErrCodeMercuryError)
 	ErrHMACVerificationFailed = errors.New(ErrCodeHMACVerificationFailed)
 	ErrKeyBindRejected        = errors.New(ErrCodeKeyBindRejected)
+	// ErrKeyAlreadyConsumed is returned by RetrieveKey when Mercury responds 404.
+	// This means either the key expired (TTL) or it was already burned — possibly
+	// by an attacker who intercepted the encrypted package.
+	// Callers should treat this as a security event, not a routine error.
+	ErrKeyAlreadyConsumed = errors.New(ErrCodeKeyAlreadyConsumed)
 )
 
 // KeyBinding — ответ xZMercury на POST /api/keys/bind.
@@ -37,7 +43,8 @@ type BindKeyRequest struct {
 // RetrieveKeyRequest — тело запроса POST /api/keys/retrieve (burn-on-read, вызывается получателем).
 type RetrieveKeyRequest struct {
 	PackageUUID string `json:"package_uuid"`
-	Credentials string `json:"credentials"`
+	RequestID   string `json:"request_id,omitempty"` // optional; links retrieve to the bind request for audit
+	Caller      string `json:"caller,omitempty"`     // consumer identity — recorded in Mercury audit trail
 }
 
 // ─── Hash registry types (v1.4 only) ─────────────────────────────────────────

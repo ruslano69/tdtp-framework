@@ -87,8 +87,17 @@ func (c *Client) BindKey(ctx context.Context, packageUUID, pipelineName string) 
 // RetrieveKey забирает ключ по UUID пакета (burn-on-read).
 // POST /api/keys/retrieve → {key_b64}
 // Вызывается получателем зашифрованного пакета — ключ удаляется после первого чтения.
-func (c *Client) RetrieveKey(ctx context.Context, packageUUID string) (string, error) {
-	reqBody := RetrieveKeyRequest{PackageUUID: packageUUID}
+//
+// caller — идентификатор потребителя (sAMAccountName, имя сервиса и т.п.), записывается
+// в audit trail Mercury. Пустая строка допустима, но рекомендуется передавать.
+//
+// Возвращает ErrKeyAlreadyConsumed при HTTP 404 — это security event:
+// ключ либо истёк по TTL, либо был уже сожжён (возможно, чужим).
+func (c *Client) RetrieveKey(ctx context.Context, packageUUID, caller string) (string, error) {
+	reqBody := RetrieveKeyRequest{
+		PackageUUID: packageUUID,
+		Caller:      caller,
+	}
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -108,9 +117,9 @@ func (c *Client) RetrieveKey(ctx context.Context, packageUUID string) (string, e
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		body, readErr := io.ReadAll(resp.Body)
-		_ = readErr
-		return "", fmt.Errorf("key not found or already consumed (uuid=%s): %s", packageUUID, string(body))
+		// KEY_ALREADY_CONSUMED: either TTL expiry or burn-on-read by another party.
+		// Treat as a security event — the caller should log/alert.
+		return "", fmt.Errorf("%w: uuid=%s", ErrKeyAlreadyConsumed, packageUUID)
 	}
 	if resp.StatusCode >= 500 {
 		return "", fmt.Errorf("%w: HTTP %d", ErrMercuryError, resp.StatusCode)
@@ -161,12 +170,14 @@ func ErrorCode(err error) string {
 	switch {
 	case isErr(err, ErrMercuryUnavailable):
 		return ErrCodeMercuryUnavailable
-	case isErr(err, ErrMercuryError):
-		return ErrCodeMercuryError
+	case isErr(err, ErrKeyAlreadyConsumed):
+		return ErrCodeKeyAlreadyConsumed
 	case isErr(err, ErrHMACVerificationFailed):
 		return ErrCodeHMACVerificationFailed
 	case isErr(err, ErrKeyBindRejected):
 		return ErrCodeKeyBindRejected
+	case isErr(err, ErrMercuryError):
+		return ErrCodeMercuryError
 	default:
 		return ErrCodeMercuryError
 	}

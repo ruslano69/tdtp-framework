@@ -154,6 +154,7 @@ func TestRetrieveKey_Success(t *testing.T) {
 	got, err := newTestClient(server).RetrieveKey(
 		context.Background(),
 		"e6de8dd5-4e9a-4c6b-8f3a-1234567890ab",
+		"svc_test",
 	)
 	if err != nil {
 		t.Fatalf("RetrieveKey() error = %v", err)
@@ -163,22 +164,26 @@ func TestRetrieveKey_Success(t *testing.T) {
 	}
 }
 
-func TestRetrieveKey_NotFound404(t *testing.T) {
-	// Ключ уже потреблён (burn-on-read) — второй вызов получит 404
+func TestRetrieveKey_NotFound404_IsKeyAlreadyConsumed(t *testing.T) {
+	// 404 = burn-on-read: ключ уже потреблён или истёк.
+	// Должен возвращать ErrKeyAlreadyConsumed (security sentinel), а не generic error.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "key not found or already consumed", http.StatusNotFound)
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(server).RetrieveKey(context.Background(), "uuid")
+	_, err := newTestClient(server).RetrieveKey(context.Background(), "uuid", "svc_test")
 	if err == nil {
-		t.Fatal("RetrieveKey() expected error on 404 (key already consumed)")
+		t.Fatal("RetrieveKey() expected error on 404")
+	}
+	if !errors.Is(err, ErrKeyAlreadyConsumed) {
+		t.Errorf("RetrieveKey() on 404 must return ErrKeyAlreadyConsumed, got: %v", err)
 	}
 }
 
 func TestRetrieveKey_MercuryUnavailable(t *testing.T) {
 	client := NewClient("http://127.0.0.1:1", 200)
-	_, err := client.RetrieveKey(context.Background(), "uuid")
+	_, err := client.RetrieveKey(context.Background(), "uuid", "")
 	if err == nil {
 		t.Fatal("RetrieveKey() expected error when server unavailable")
 	}
@@ -193,7 +198,7 @@ func TestRetrieveKey_ServerError503(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(server).RetrieveKey(context.Background(), "uuid")
+	_, err := newTestClient(server).RetrieveKey(context.Background(), "uuid", "")
 	if err == nil {
 		t.Fatal("RetrieveKey() expected error on 503")
 	}
@@ -209,7 +214,7 @@ func TestRetrieveKey_EmptyKeyInResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(server).RetrieveKey(context.Background(), "uuid")
+	_, err := newTestClient(server).RetrieveKey(context.Background(), "uuid", "")
 	if err == nil {
 		t.Fatal("RetrieveKey() expected error for empty key in response")
 	}

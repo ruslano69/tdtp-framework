@@ -23,6 +23,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -61,8 +62,19 @@ func DecryptEncBlob(ctx context.Context, blob []byte, mercuryURL string) ([]byte
 
 	// Retrieve key from xZMercury (burn-on-read).
 	mc := mercury.NewClient(mercuryURL, 5000)
-	keyB64, err := mc.RetrieveKey(ctx, packageUUID)
+	caller := os.Getenv("TDTPCLI_CALLER") // optional consumer identity for Mercury audit trail
+	keyB64, err := mc.RetrieveKey(ctx, packageUUID, caller)
 	if err != nil {
+		if errors.Is(err, mercury.ErrKeyAlreadyConsumed) {
+			// 404 from Mercury: key was already burned — this may indicate
+			// that an attacker retrieved the key before the legitimate consumer.
+			// Print a prominent warning so operators can investigate.
+			fmt.Fprintf(os.Stderr,
+				"\n⚠  SECURITY WARNING: key for package %s was already consumed or expired.\n"+
+					"   If you did not retrieve this package before, the encrypted file may have been\n"+
+					"   intercepted. Contact your security team and check Mercury audit logs.\n\n",
+				packageUUID)
+		}
 		return nil, fmt.Errorf("retrieve key from Mercury (uuid=%s): %w", packageUUID, err)
 	}
 
@@ -93,6 +105,24 @@ func DecryptEncFile(ctx context.Context, path, mercuryURL string) ([]byte, error
 		return DecryptEncBlob(ctx, data, mercuryURL)
 	}
 	return data, nil
+}
+
+// WriteErrorPacket serializes a TDTP error packet to path.
+// Used to produce a "receipt" when decryption fails so the pipeline receives
+// a structured error instead of a missing output file.
+// If path is empty or "-", writes to stdout.
+func WriteErrorPacket(code, message, table, inReplyTo, path string) error {
+	pkt := packet.NewErrorPacket(code, message, table, inReplyTo)
+	gen := packet.NewGenerator()
+	xmlData, err := gen.ToXML(pkt, false)
+	if err != nil {
+		return fmt.Errorf("serialize error packet: %w", err)
+	}
+	if path == "" || path == "-" {
+		_, err = os.Stdout.Write(xmlData)
+		return err
+	}
+	return os.WriteFile(path, xmlData, 0o644)
 }
 
 // EncryptPacket serializes pkt to TDTP XML, then encrypts it via xZMercury BindKey.
