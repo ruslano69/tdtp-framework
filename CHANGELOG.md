@@ -2,6 +2,104 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.10.0] — 2026-06-01
+
+Три незалежні напрямки: виправлення `--limit -N` на MSSQL, повний security-стек xZMercury
+(burn marker + mode-in-HMAC + error receipt), та нова інфраструктура виконання сценаріїв
+(CA-сервер `tdtp-ca` + `orchestrator`).
+
+### Fixed
+
+- **Bug #3 — `--limit -N` на SQL Server** (`pkg/adapters/base/sql_adapter.go`):
+
+  Три ітерації виправлення:
+  1. `LIMIT N` → `SELECT TOP N` (SQL-синтаксис більше не падає).
+  2. `SELECT TOP N` → підзапит `SELECT * FROM (SELECT TOP N … ORDER BY col DESC) AS _tail ORDER BY col ASC`
+     (семантика «останніх N рядків» замість перших).
+  3. `--fields` + `--limit -N` → `Invalid column name` на колонці поза проєкцією виправлено:
+     - `firstProjectedColumn(sql)` — ORDER BY береться з SELECT-списку SQL, а не зі схеми.
+     - `firstWritableColumn(schema)` — пропускає `ReadOnly`-поля (`timestamp`/rowversion)
+       для `SELECT *`, щоб ORDER BY не посилався на відсічену колонку.
+  - Той самий фікс для `OFFSET/FETCH` fallback ORDER BY.
+  - 5 нових тестів: `NoOrderBy`, `WithFields`, `WithOrderBy`, `SelectStar`, regression.
+
+### Added — xZMercury security stack
+
+- **Аудит споживання ключів** (`xzmercury/internal/request/`):
+  `Request.ConsumedBy` + `ConsumedAt` фіксують хто і коли спалив ключ.
+  `retrieveRequest.Caller` → audit trail Mercury. Три розрізнювані стани:
+  named burn / anonymous burn / TTL expiry.
+
+- **Mode у HMAC** (`xzmercury/internal/keystore/`):
+  `HMAC = HMAC-SHA256(uuid + ":" + mode, secret)` — `mode` ("dev"/"prod") у підписі,
+  не self-reported label. Dev-binding криптографічно ≠ prod-binding.
+
+- **Обов'язковий `serverSecret`** (`pkg/processors/encryption.go`):
+  Порожній `MERCURY_SERVER_SECRET` → `ErrHMACVerificationFailed` (раніше — тихий bypass).
+  Dev opt-out: явний sentinel `"dev-mode"`.
+
+- **Burn marker** (`xzmercury/internal/keystore/store.go`):
+  Lua-скрипт: атомарний `GETDEL` + `SET mercury:burned:{uuid} {mode, burned_at}` (TTL=24h).
+  Три розрізнювані стани на retrieve:
+  - `GETDEL → value` → легітимне спалення цим викликом.
+  - `nil + burned marker` → `ErrKeyBurnedByOther` (*KeyBurnedError з mode + BurnedAt).
+  - `nil + no marker` → `ErrKeyExpired` (TTL або UUID ніколи не існував).
+  HTTP: 410 Gone (burned) / 404 Not Found (expired).
+
+- **`ServerMode` в error-пакеті** (`pkg/core/packet/types.go`, `cmd/tdtpcli/commands/`):
+  `AlarmDetails.ServerMode` = "dev" | "prod" з burn marker.
+  `mode=dev` → dev-failover при відмові Redis-кластера (не тривога).
+  `mode=prod` → спалення невідомою стороною у проді (розслідувати).
+  `*_error.tdtp.xml` пишеться поруч із `.tdtp.enc` при будь-якій помилці decrypt.
+
+- **CA-сервер `tdtp-ca`** (`xzmercury/cmd/tdtp-ca/`, `xzmercury/internal/ca/`):
+  Окремий бінарник (11 MB, SQLite backend).
+  - `POST /api/env/enroll` + `/confirm` — двокроковий enrollment з challenge-response.
+  - `POST /api/env/authorize` + `/confirm` — re-auth; implicit renewal cert.not_after += 24h.
+  - `GET /hello` — DDoS-гейт: 2s затримка, single-use token (TTL=30s).
+    `X-Hello-Token` обов'язковий для step-1 enroll/authorize. Max 3 паралельних /hello на IP.
+  - `DELETE /api/env/certs/{id}` / `/licenses/{hash}` — revocation.
+  - DB schema: `licenses` (hash·permissions·seat_limit·status·paid_until) +
+    `certs` (cert_id·license_hash·env_id_pub·not_after·status·last_seen·signature).
+  - **Cert TTL = 24h** (не = paid_until). Authorize = implicit renewal → rolling 24h window.
+    CA бачить `last_seen` щодня → точний підрахунок активних середовищ.
+  - Seat-count enforcement: `COUNT(active certs) >= seat_limit` → 409.
+  - Ідемпотентний enrollment: той самий (license_hash, env_id_pub) → той самий cert.
+
+- **envkey** (`xzmercury/internal/envkey/`):
+  Ed25519 env-keypair (TPM-stub: 0600 file, той самий інтерфейс що real TPM).
+
+- **caClient** (`xzmercury/internal/caClient/`):
+  xzmercury → CA HTTP client. `Enroll()` + `Authorize()` з challenge-response.
+  `AutoRenew()` goroutine: fires за `CertTTL - RenewalThreshold` (12h до expiry),
+  retry щогодини при недоступному CA.
+
+### Added — Orchestrator
+
+- **`orchestrator`** (`cmd/orchestrator/`):
+  Тонка HTTP-обгортка над `tdtpcli --pipeline`. Нічого в tdtpcli не змінено.
+
+  - **Scenario files** = існуючий pipeline YAML + опціональний `orchestrator:` блок
+    (tdtpcli ігнорує невідомі yaml-ключі — backward compatible).
+    `text/template` підставляє `{{.period}}` перед запуском.
+  - **Schedule storage: SQLite** (не в YAML):
+    YAML-файли = seed тільки (idempotent upsert при старті).
+    DB = source of truth: `enabled`, `last_run_at`, `last_status`, `next_run_at`.
+    Runtime management через API без restart.
+  - **DB schema**: `schedules` + `jobs` (schedule_id=NULL для ручних запусків).
+  - **Magic params**: `{{current_month}}`, `{{current_date}}`, `{{yesterday}}`.
+  - **API**: `GET/POST /scenarios`, `POST /scenarios/{name}/run`,
+    `GET /jobs`, `GET /jobs/{id}`,
+    `GET/POST /schedules`, `PATCH /schedules/{id}/enable|disable`, `DELETE /schedules/{id}`.
+
+### Security
+
+- `TDTPCLI_CALLER` env var → `Caller` у Mercury audit trail.
+- `ErrKeyBurnedByOther` / `ErrKeyExpired` замість generic 404.
+- `pkg/etl/loader.go` передає `source.Name` як caller при pipeline decrypt.
+
+---
+
 ## [1.9.7] — 2026-05-30
 
 Модернизация Python-библиотеки: facade-API, CLI-parity in-process и Arrow-мост (read + write).
