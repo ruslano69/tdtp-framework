@@ -18,7 +18,9 @@ import (
 )
 
 // NewRouter wires all dependencies and returns the chi router.
-func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL) http.Handler {
+// dev=true selects keystore.ModeDev, embedding it in every HMAC — dev-bound
+// keys cannot pass HMAC verification on a prod consumer even if the secret leaked.
+func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL, dev bool) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(zerologMiddleware)
@@ -27,8 +29,12 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL) http.Hand
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(rateLimitMiddleware(cfg.Security.RateLimit))
 
+	ksMode := keystore.ModeProd
+	if dev {
+		ksMode = keystore.ModeDev
+	}
 	h := &keysHandler{
-		store:   keystore.New(inf.MercuryRedis, cfg.Security.ServerSecret, cfg.KeyTTL),
+		store:   keystore.New(inf.MercuryRedis, cfg.Security.ServerSecret, cfg.KeyTTL, ksMode),
 		quota:   quota.New(inf.PipelineRedis, cfg.Quota.DefaultHourly),
 		ldap:    inf.LDAP,
 		acl:     aclRules,

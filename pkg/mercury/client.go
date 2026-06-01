@@ -142,13 +142,15 @@ func (c *Client) RetrieveKey(ctx context.Context, packageUUID, caller string) (s
 	return result.KeyB64, nil
 }
 
-// VerifyHMAC проверяет HMAC-SHA256(packageUUID, serverSecret).
-// serverSecret — значение переменной окружения MERCURY_SERVER_SECRET,
-// которое совпадает с SERVER_SECRET на стороне xZMercury.
-// Возвращает false если подпись не совпадает.
-func VerifyHMAC(packageUUID, receivedHMAC, serverSecret string) bool {
+// VerifyHMAC проверяет HMAC-SHA256(packageUUID+":"+mode, serverSecret).
+// mode должен совпадать с режимом сервера ("dev" или "prod") — он включён
+// в подпись, поэтому dev-binding не пройдёт верификацию на prod-консьюмере
+// даже при утечке секрета.
+// serverSecret — значение MERCURY_SERVER_SECRET, идентичное SERVER_SECRET xZMercury.
+// Возвращает false если подпись или mode не совпадают.
+func VerifyHMAC(packageUUID, receivedHMAC, serverSecret, mode string) bool {
 	mac := hmac.New(sha256.New, []byte(serverSecret))
-	mac.Write([]byte(packageUUID))
+	mac.Write([]byte(packageUUID + ":" + mode))
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(receivedHMAC))
 }

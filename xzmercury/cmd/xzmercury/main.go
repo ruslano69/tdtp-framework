@@ -83,7 +83,7 @@ func main() {
 	}
 
 	// Build router
-	router := api.NewRouter(cfg, inf, aclRules)
+	router := api.NewRouter(cfg, inf, aclRules, *dev)
 
 	// HTTP server
 	srv := &http.Server{

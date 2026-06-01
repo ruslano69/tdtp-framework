@@ -36,7 +36,7 @@ func newTestHandler(t *testing.T) *keysHandler {
 	}
 
 	return &keysHandler{
-		store:   keystore.New(rdb, "test-secret", time.Hour),
+		store:   keystore.New(rdb, "test-secret", time.Hour, keystore.ModeProd),
 		quota:   quota.New(rdb, 100),
 		ldap:    mockLDAP,
 		acl:     defaultACL,
@@ -54,7 +54,7 @@ func newHandlerWithQuota(t *testing.T, hourly int) *keysHandler {
 	defaultACL, _ := acl.Load("")
 
 	return &keysHandler{
-		store:   keystore.New(rdb, "test-secret", time.Hour),
+		store:   keystore.New(rdb, "test-secret", time.Hour, keystore.ModeProd),
 		quota:   quota.New(rdb, hourly),
 		ldap:    mockLDAP,
 		acl:     defaultACL,

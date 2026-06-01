@@ -18,13 +18,13 @@ func newTestStore(t *testing.T, secret string, ttl time.Duration) (*Store, *mini
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	return New(rdb, secret, ttl), mr
+	return New(rdb, secret, ttl, ModeProd), mr
 }
 
-// hmacHex вычисляет HMAC-SHA256 для проверки подписи в тестах.
-func hmacHex(uuid, secret string) string {
+// hmacHex вычисляет HMAC-SHA256(uuid+":"+mode, secret) для проверки подписи в тестах.
+func hmacHex(uuid, secret, mode string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(uuid))
+	mac.Write([]byte(uuid + ":" + mode))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -72,8 +72,11 @@ func TestBind_HMACVerifiable(t *testing.T) {
 		t.Fatalf("Bind() error = %v", err)
 	}
 
-	if result.HMAC != hmacHex(uuid, secret) {
-		t.Errorf("Bind() HMAC не совпадает с ожидаемым HMAC-SHA256(uuid, secret)")
+	if result.HMAC != hmacHex(uuid, secret, "prod") {
+		t.Errorf("Bind() HMAC не совпадает с ожидаемым HMAC-SHA256(uuid+:+mode, secret)")
+	}
+	if result.Mode != ModeProd {
+		t.Errorf("Bind() Mode = %q, want %q", result.Mode, ModeProd)
 	}
 }
 

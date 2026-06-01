@@ -23,8 +23,12 @@ func newTestClient(server *httptest.Server) *Client {
 
 // computeHMAC повторяет логику VerifyHMAC для генерации эталонного значения в тестах.
 func computeHMAC(uuid, secret string) string {
+	return computeHMACWithMode(uuid, secret, "prod")
+}
+
+func computeHMACWithMode(uuid, secret, mode string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(uuid))
+	mac.Write([]byte(uuid + ":" + mode))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -228,9 +232,9 @@ func TestRetrieveKey_EmptyKeyInResponse(t *testing.T) {
 func TestVerifyHMAC_Valid(t *testing.T) {
 	uuid := "e6de8dd5-4e9a-4c6b-8f3a-1234567890ab"
 	secret := "SERVER_SECRET_1234"
-	validHMAC := computeHMAC(uuid, secret)
+	validHMAC := computeHMACWithMode(uuid, secret, "prod")
 
-	if !VerifyHMAC(uuid, validHMAC, secret) {
+	if !VerifyHMAC(uuid, validHMAC, secret, "prod") {
 		t.Error("VerifyHMAC() returned false for valid HMAC")
 	}
 }
@@ -245,13 +249,14 @@ func TestVerifyHMAC_Invalid(t *testing.T) {
 	}{
 		{"wrong HMAC", "deadbeef0000000000000000000000000000000000000000000000000000dead"},
 		{"empty HMAC", ""},
-		{"HMAC for different secret", computeHMAC(uuid, "other_secret")},
-		{"HMAC for different UUID", computeHMAC("ffffffff-ffff-ffff-ffff-ffffffffffff", secret)},
+		{"HMAC for different secret", computeHMACWithMode(uuid, "other_secret", "prod")},
+		{"HMAC for different UUID", computeHMACWithMode("ffffffff-ffff-ffff-ffff-ffffffffffff", secret, "prod")},
+		{"dev HMAC rejected by prod", computeHMACWithMode(uuid, secret, "dev")},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if VerifyHMAC(uuid, tt.receivedMAC, secret) {
+			if VerifyHMAC(uuid, tt.receivedMAC, secret, "prod") {
 				t.Errorf("VerifyHMAC() returned true for invalid HMAC %q", tt.receivedMAC)
 			}
 		})

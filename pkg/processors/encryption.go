@@ -60,11 +60,23 @@ func (f *FileEncryptor) Encrypt(ctx context.Context, plaintext []byte) (*Encrypt
 		return nil, mercury.ErrorCode(err), fmt.Errorf("bind key: %w", err)
 	}
 
-	// 2. Верифицируем HMAC (в dev-режиме DevClient возвращает фиктивный HMAC — он не верифицируется)
-	if f.serverSecret != "" && f.serverSecret != "dev-mode" {
-		if !mercury.VerifyHMAC(f.packageUUID, binding.HMAC, f.serverSecret) {
+	// 2. Верифицируем HMAC.
+	// serverSecret пустой — ошибка конфигурации: молчаливый bypass недопустим в проде.
+	// Для dev-режима нужно явно передать "dev-mode" (DevClient / тестовый сервер).
+	if f.serverSecret == "" {
+		return nil, mercury.ErrCodeHMACVerificationFailed,
+			fmt.Errorf("%w: MERCURY_SERVER_SECRET not set — "+
+				"HMAC verification is mandatory; use serverSecret=\"dev-mode\" to opt out explicitly",
+				mercury.ErrHMACVerificationFailed)
+	}
+	if f.serverSecret != "dev-mode" {
+		// mode берём из ответа сервера — он включён в HMAC, поэтому подделать нельзя.
+		// dev-binding (mode="dev") не пройдёт верификацию с prod-secret даже при утечке:
+		// разные секреты + разная строка в подписи.
+		if !mercury.VerifyHMAC(f.packageUUID, binding.HMAC, f.serverSecret, binding.Mode) {
 			return nil, mercury.ErrCodeHMACVerificationFailed,
-				fmt.Errorf("%w: uuid=%s", mercury.ErrHMACVerificationFailed, f.packageUUID)
+				fmt.Errorf("%w: uuid=%s mode=%s", mercury.ErrHMACVerificationFailed,
+					f.packageUUID, binding.Mode)
 		}
 	}
 

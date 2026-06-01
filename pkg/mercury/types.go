@@ -28,10 +28,13 @@ var (
 )
 
 // KeyBinding — ответ xZMercury на POST /api/keys/bind.
-// KeyB64 — AES-256 ключ в base64 (32 байта). HMAC — HMAC-SHA256(uuid, SERVER_SECRET).
+// KeyB64 — AES-256 ключ в base64 (32 байта).
+// HMAC — HMAC-SHA256(uuid+":"+mode, SERVER_SECRET) — mode включён в подпись.
+// Mode — "dev" или "prod"; значение аттестовано HMAC, не self-reported.
 type KeyBinding struct {
 	KeyB64 string `json:"key_b64"`
 	HMAC   string `json:"hmac"`
+	Mode   string `json:"mode"` // "dev" | "prod" — attested by HMAC
 }
 
 // BindKeyRequest — тело запроса POST /api/keys/bind.
