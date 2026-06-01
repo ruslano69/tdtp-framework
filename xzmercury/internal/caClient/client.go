@@ -49,14 +49,47 @@ type EnrollResult struct {
 	Permissions  []string         `json:"permissions"`
 }
 
+// hello calls GET /hello (waits 2s on server) and returns the single-use token.
+// Must be called before every step-1 request (enroll or authorize).
+func (c *Client) hello(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/hello", nil)
+	if err != nil {
+		return "", fmt.Errorf("caClient: hello request: %w", err)
+	}
+	// Timeout must be > HelloDelay (2s) + network overhead.
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("caClient: hello: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("caClient: hello: HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		HelloToken string `json:"hello_token"`
+	}
+	if err := jsonDecode(resp, &body); err != nil {
+		return "", fmt.Errorf("caClient: hello decode: %w", err)
+	}
+	return body.HelloToken, nil
+}
+
 // Enroll performs the two-step enrollment flow:
-//  1. POST /api/env/enroll       → challenge nonce
+//  0. GET  /hello                  → 2s wait → single-use token
+//  1. POST /api/env/enroll         → challenge nonce
 //  2. POST /api/env/enroll/confirm → cert + session_token
 //
 // licenseKey is the raw license key (hashed on CA side, never stored by CA).
 // On repeat enrollment of the same env, CA returns the existing cert (idempotent).
 func (c *Client) Enroll(ctx context.Context, licenseKey string) (*EnrollResult, error) {
 	envIDPub := c.identity.PublicKey()
+
+	// Step 0: get hello token (2s gate).
+	helloToken, err := c.hello(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("caClient: enroll hello: %w", err)
+	}
 
 	// Step 1: send license_key + env_id_pub, receive challenge nonce.
 	step1Req := map[string]any{
@@ -67,11 +100,12 @@ func (c *Client) Enroll(ctx context.Context, licenseKey string) (*EnrollResult, 
 		ChallengeID string `json:"challenge_id"`
 		Nonce       []byte `json:"nonce"`
 	}{}
-	if err := c.post(ctx, "/api/env/enroll", step1Req, &step1Resp); err != nil {
+	if err := c.postWithToken(ctx, "/api/env/enroll", helloToken, step1Req, &step1Resp); err != nil {
 		return nil, fmt.Errorf("caClient: enroll step1: %w", err)
 	}
 
 	// Step 2: sign the nonce with env private key, send signature.
+	// No hello token needed for confirm — it's keyed to challenge_id from step 1.
 	sig, err := c.identity.Sign(step1Resp.Nonce)
 	if err != nil {
 		return nil, fmt.Errorf("caClient: sign challenge: %w", err)
@@ -96,18 +130,25 @@ type AuthorizeResult struct {
 }
 
 // Authorize performs the two-step re-authorization for an existing cert:
-//  1. POST /api/env/authorize         → challenge nonce
-//  2. POST /api/env/authorize/confirm → fresh session_token
+//  0. GET  /hello                      → 2s wait → single-use token
+//  1. POST /api/env/authorize           → challenge nonce
+//  2. POST /api/env/authorize/confirm   → fresh session_token
 //
 // cert is the EnvCert issued at enrollment, stored locally by Mercury.
 func (c *Client) Authorize(ctx context.Context, cert *ca.EnvCert) (*AuthorizeResult, error) {
+	// Step 0: get hello token (2s gate).
+	helloToken, err := c.hello(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("caClient: authorize hello: %w", err)
+	}
+
 	// Step 1: present cert, receive challenge.
 	step1Req := map[string]any{"cert": cert}
 	step1Resp := struct {
 		ChallengeID string `json:"challenge_id"`
 		Nonce       []byte `json:"nonce"`
 	}{}
-	if err := c.post(ctx, "/api/env/authorize", step1Req, &step1Resp); err != nil {
+	if err := c.postWithToken(ctx, "/api/env/authorize", helloToken, step1Req, &step1Resp); err != nil {
 		return nil, fmt.Errorf("caClient: authorize step1: %w", err)
 	}
 
@@ -129,20 +170,38 @@ func (c *Client) Authorize(ctx context.Context, cert *ca.EnvCert) (*AuthorizeRes
 	return &result, nil
 }
 
-// post is a helper for JSON POST requests.
-func (c *Client) post(ctx context.Context, path string, req, resp any) error {
+// postWithToken sends a JSON POST with the hello token in X-Hello-Token header.
+func (c *Client) postWithToken(ctx context.Context, path, helloToken string, req, resp any) error {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("new request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Hello-Token", helloToken)
+	return c.do(httpReq, resp)
+}
 
+// post sends a plain JSON POST (no hello token — used for step-2 confirm).
+func (c *Client) post(ctx context.Context, path string, req, resp any) error {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("new request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	return c.do(httpReq, resp)
+}
+
+func (c *Client) do(httpReq *http.Request, resp any) error {
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("http: %w", err)
@@ -154,7 +213,7 @@ func (c *Client) post(ctx context.Context, path string, req, resp any) error {
 	if httpResp.StatusCode >= 400 {
 		var e struct{ Error string `json:"error"` }
 		_ = json.Unmarshal(respBody, &e)
-		return fmt.Errorf("CA %s: HTTP %d: %s", path, httpResp.StatusCode, e.Error)
+		return fmt.Errorf("CA %s: HTTP %d: %s", httpReq.URL.Path, httpResp.StatusCode, e.Error)
 	}
 
 	if resp != nil {
@@ -163,4 +222,12 @@ func (c *Client) post(ctx context.Context, path string, req, resp any) error {
 		}
 	}
 	return nil
+}
+
+func jsonDecode(resp *http.Response, v any) error {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, v)
 }

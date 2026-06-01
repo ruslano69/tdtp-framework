@@ -62,17 +62,25 @@ func main() {
 	// Wire handlers.
 	enrollH    := ca.NewEnrollHandler(db, caPriv, caPub)
 	authorizeH := ca.NewAuthorizeHandler(db, caPub)
+	helloH     := ca.NewHelloHandler()
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
+	// DDoS gate: client must call /hello (2s wait) to receive a single-use
+	// hello token. Token is required in X-Hello-Token header for step-1 of
+	// enroll and authorize. After use, a new /hello is required.
+	// This limits flood rate to ~30 requests/min per IP connection.
+	r.Get("/hello", helloH.ServeHTTP)
+
 	// Enrollment (first run).
-	r.Post("/api/env/enroll",         enrollH.Step1)
+	// Step 1 requires X-Hello-Token; step 2 only needs the challenge_id from step 1.
+	r.Post("/api/env/enroll",         helloH.Middleware(enrollH.Step1))
 	r.Post("/api/env/enroll/confirm", enrollH.Step2)
 
 	// Re-authorization (subsequent runs).
-	r.Post("/api/env/authorize",         authorizeH.Step1)
+	r.Post("/api/env/authorize",         helloH.Middleware(authorizeH.Step1))
 	r.Post("/api/env/authorize/confirm", authorizeH.Step2)
 
 	// CA public key endpoint (Mercury embeds this at build time or fetches on first run).
