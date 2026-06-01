@@ -2,6 +2,7 @@ package mercury
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -11,7 +12,9 @@ const (
 	ErrCodeMercuryError           = "MERCURY_ERROR"            // xZMercury вернул HTTP 5xx
 	ErrCodeHMACVerificationFailed = "HMAC_VERIFICATION_FAILED" // HMAC ключа не прошёл верификацию
 	ErrCodeKeyBindRejected        = "KEY_BIND_REJECTED"        // xZMercury отклонил binding (квота, ACL, невалидный pipeline)
-	ErrCodeKeyAlreadyConsumed     = "KEY_ALREADY_CONSUMED"     // ключ уже был сожжён — возможна кража пакета
+	ErrCodeKeyAlreadyConsumed     = "KEY_ALREADY_CONSUMED"     // устаревший код; используй ErrCodeKeyBurnedByOther / ErrCodeKeyExpired
+	ErrCodeKeyBurnedByOther       = "KEY_BURNED_BY_OTHER"      // ключ сожжён другим потребителем (410) — кража или dev-failover
+	ErrCodeKeyExpired             = "KEY_EXPIRED"              // ключ истёк по TTL или UUID не существовал (404)
 )
 
 // Sentinel errors — используются для определения типа отказа в EncryptionProcessor.
@@ -20,12 +23,30 @@ var (
 	ErrMercuryError           = errors.New(ErrCodeMercuryError)
 	ErrHMACVerificationFailed = errors.New(ErrCodeHMACVerificationFailed)
 	ErrKeyBindRejected        = errors.New(ErrCodeKeyBindRejected)
-	// ErrKeyAlreadyConsumed is returned by RetrieveKey when Mercury responds 404.
-	// This means either the key expired (TTL) or it was already burned — possibly
-	// by an attacker who intercepted the encrypted package.
-	// Callers should treat this as a security event, not a routine error.
-	ErrKeyAlreadyConsumed = errors.New(ErrCodeKeyAlreadyConsumed)
+	ErrKeyAlreadyConsumed     = errors.New(ErrCodeKeyAlreadyConsumed) // backward compat
+	ErrKeyBurnedByOther       = errors.New(ErrCodeKeyBurnedByOther)
+	ErrKeyExpired             = errors.New(ErrCodeKeyExpired)
 )
+
+// KeyBurnedError is returned by RetrieveKey when Mercury responds 410 Gone.
+// It carries the mode of the server that burned the key ("dev"/"prod") and the
+// timestamp, so the receiver can distinguish dev-failover burns (expected during
+// Redis cluster failure) from prod-theft events (requires investigation).
+type KeyBurnedError struct {
+	UUID     string
+	Mode     string    // "dev" | "prod" from the burn marker
+	BurnedAt time.Time // UTC timestamp of the burn
+}
+
+func (e *KeyBurnedError) Error() string {
+	return fmt.Sprintf("%s: uuid=%s mode=%s burned_at=%s",
+		ErrCodeKeyBurnedByOther, e.UUID, e.Mode, e.BurnedAt.Format(time.RFC3339))
+}
+
+// Is satisfies errors.Is so callers can match with ErrKeyBurnedByOther sentinel.
+func (e *KeyBurnedError) Is(target error) bool {
+	return target == ErrKeyBurnedByOther
+}
 
 // KeyBinding — ответ xZMercury на POST /api/keys/bind.
 // KeyB64 — AES-256 ключ в base64 (32 байта).

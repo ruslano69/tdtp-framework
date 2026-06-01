@@ -223,10 +223,10 @@ func TestRetrieve_SecondCall_Returns404(t *testing.T) {
 	_, _ = h.store.Bind(ctx, uuid, "pipeline")
 
 	postJSON(h.Retrieve, map[string]string{"package_uuid": uuid})       // первый — успех
-	rw := postJSON(h.Retrieve, map[string]string{"package_uuid": uuid}) // второй — 404
+	rw := postJSON(h.Retrieve, map[string]string{"package_uuid": uuid}) // второй — 410 (burn marker)
 
-	if rw.Code != http.StatusNotFound {
-		t.Errorf("второй Retrieve() status = %d, want 404", rw.Code)
+	if rw.Code != http.StatusGone {
+		t.Errorf("второй Retrieve() status = %d, want 410 Gone (burned by first call)", rw.Code)
 	}
 }
 
@@ -293,9 +293,9 @@ func TestFullCycle_BindThenRetrieve(t *testing.T) {
 		t.Error("Retrieve() вернул ключ, отличный от Bind()")
 	}
 
-	// 3. Повторный Retrieve → 404 (burn-on-read)
+	// 3. Повторный Retrieve → 410 Gone (burn marker exists from first call)
 	rw := postJSON(h.Retrieve, map[string]string{"package_uuid": uuid})
-	if rw.Code != http.StatusNotFound {
-		t.Errorf("повторный Retrieve() status = %d, want 404", rw.Code)
+	if rw.Code != http.StatusGone {
+		t.Errorf("повторный Retrieve() status = %d, want 410 Gone (burned by first call)", rw.Code)
 	}
 }

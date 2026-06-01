@@ -154,8 +154,30 @@ func (h *keysHandler) Retrieve(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	keyB64, err := h.store.BurnOnRead(ctx, req.PackageUUID)
 	if err != nil {
+		var burnedErr *keystore.KeyBurnedError
+		if errors.As(err, &burnedErr) {
+			// 410 Gone: key existed but was already burned by another party.
+			// mode tells the consumer whether this was a dev-failover burn or a prod theft.
+			log.Warn().
+				Str("uuid", req.PackageUUID).
+				Str("mode", string(burnedErr.Mode)).
+				Time("burned_at", burnedErr.BurnedAt).
+				Str("caller", req.Caller).
+				Msg("KEY_BURNED_BY_OTHER — possible interception or dev-failover burn")
+			writeJSON(w, http.StatusGone, map[string]any{
+				"error":      "key already burned by another consumer",
+				"code":       "KEY_BURNED_BY_OTHER",
+				"mode":       burnedErr.Mode,
+				"burned_at":  burnedErr.BurnedAt,
+			})
+			return
+		}
 		if errors.Is(err, keystore.ErrKeyNotFound) {
-			writeError(w, http.StatusNotFound, "key not found or already consumed")
+			// 404: key absent with no burn marker — TTL expiry or UUID never existed.
+			writeJSON(w, http.StatusNotFound, map[string]any{
+				"error": "key not found — TTL expired or UUID never existed",
+				"code":  "KEY_EXPIRED",
+			})
 			return
 		}
 		log.Error().Err(err).Str("uuid", req.PackageUUID).Msg("burn-on-read failed")

@@ -11,19 +11,23 @@ import "time"
 // sees the structured error rather than a missing file / silent failure.
 //
 // Fields:
-//   - code     — machine-readable error code (e.g. "KEY_ALREADY_CONSUMED")
-//   - message  — human-readable description
-//   - table    — table name the operation was attempted on (may be empty)
-//   - inReplyTo — original MessageID of the request (may be empty)
-func NewErrorPacket(code, message, table, inReplyTo string) *DataPacket {
+//   - code       — machine-readable error code (e.g. "KEY_BURNED_BY_OTHER")
+//   - message    — human-readable description
+//   - table      — table name the operation was attempted on (may be empty)
+//   - inReplyTo  — original MessageID of the request (may be empty)
+//   - serverMode — xZMercury mode ("dev"/"prod") from burn marker; empty if not applicable.
+//     "dev" = dev-failover burn (expected during Redis outage, not a theft alert).
+//     "prod" = prod burn by unknown party (requires investigation).
+func NewErrorPacket(code, message, table, inReplyTo, serverMode string) *DataPacket {
 	pkt := NewDataPacket(TypeError, table)
 	pkt.Version = "1.4"
 	pkt.Header.InReplyTo = inReplyTo
 	pkt.Header.Timestamp = time.Now().UTC()
 	pkt.AlarmDetails = &AlarmDetails{
-		Severity: "error",
-		Code:     code,
-		Message:  message,
+		Severity:   "error",
+		Code:       code,
+		Message:    message,
+		ServerMode: serverMode,
 	}
 	// Empty schema and data — error packets carry no rows.
 	pkt.Schema = Schema{}

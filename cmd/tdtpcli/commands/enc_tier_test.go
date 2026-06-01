@@ -60,7 +60,7 @@ func newMercuryEncMock(t *testing.T) *httptest.Server {
 		s.keys[req.PackageUUID] = keyB64
 		s.mu.Unlock()
 
-		resp := mercury.KeyBinding{KeyB64: keyB64, HMAC: "test-hmac"}
+		resp := mercury.KeyBinding{KeyB64: keyB64, HMAC: "test-hmac", Mode: "dev"}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	})
@@ -157,6 +157,8 @@ func TestEncOutputKey(t *testing.T) {
 // ── EncryptPacket + DecryptEncBlob round-trip ─────────────────────────────────
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
+	// "dev-mode" sentinel skips HMAC verification — correct for tests with mock Mercury.
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
 	srv := newMercuryEncMock(t)
 	defer srv.Close()
 
@@ -230,6 +232,7 @@ func TestDecryptEncFile_PlainPassthrough(t *testing.T) {
 // ── ConvertTDTPToCSV with .tdtp.enc input ────────────────────────────────────
 
 func TestConvertTDTPToCSV_EncryptedInput(t *testing.T) {
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
 	srv := newMercuryEncMock(t)
 	defer srv.Close()
 
@@ -273,6 +276,7 @@ func TestConvertTDTPToCSV_EncryptedInput(t *testing.T) {
 // ── ConvertTDTPToXLSX with .tdtp.enc input ───────────────────────────────────
 
 func TestConvertTDTPToXLSX_EncryptedInput(t *testing.T) {
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
 	srv := newMercuryEncMock(t)
 	defer srv.Close()
 
@@ -312,6 +316,7 @@ func TestConvertTDTPToXLSX_EncryptedInput(t *testing.T) {
 // ── ConvertTDTPToHTML with .tdtp.enc input ───────────────────────────────────
 
 func TestConvertTDTPToHTML_EncryptedInput(t *testing.T) {
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
 	srv := newMercuryEncMock(t)
 	defer srv.Close()
 
@@ -355,6 +360,7 @@ func TestConvertTDTPToHTML_EncryptedInput(t *testing.T) {
 // ── writeEncryptedBlobToFile + encOutputKey integration ──────────────────────
 
 func TestEncOutputKey_WriteFile(t *testing.T) {
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
 	srv := newMercuryEncMock(t)
 	defer srv.Close()
 
@@ -401,6 +407,7 @@ func TestEncOutputKey_WriteFile(t *testing.T) {
 // ── Burn-on-read: second retrieve must fail ───────────────────────────────────
 
 func TestDecryptEncBlob_BurnOnRead(t *testing.T) {
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
 	srv := newMercuryEncMock(t)
 	defer srv.Close()
 

@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
@@ -65,14 +66,25 @@ func DecryptEncBlob(ctx context.Context, blob []byte, mercuryURL string) ([]byte
 	caller := os.Getenv("TDTPCLI_CALLER") // optional consumer identity for Mercury audit trail
 	keyB64, err := mc.RetrieveKey(ctx, packageUUID, caller)
 	if err != nil {
-		if errors.Is(err, mercury.ErrKeyAlreadyConsumed) {
-			// 404 from Mercury: key was already burned — this may indicate
-			// that an attacker retrieved the key before the legitimate consumer.
-			// Print a prominent warning so operators can investigate.
+		var burnedErr *mercury.KeyBurnedError
+		if errors.As(err, &burnedErr) {
+			if burnedErr.Mode == "dev" {
+				fmt.Fprintf(os.Stderr,
+					"\n⚠  DEV-FAILOVER BURN: key for package %s was burned by a dev-mode Mercury instance.\n"+
+						"   This is expected during Redis cluster outage failover — not a theft alert.\n"+
+						"   ServerMode: dev  BurnedAt: %s\n\n",
+					packageUUID, burnedErr.BurnedAt.Format(time.RFC3339))
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"\n🚨 SECURITY ALERT: key for package %s was already burned in PROD mode.\n"+
+						"   The encrypted file may have been intercepted by another party.\n"+
+						"   ServerMode: %s  BurnedAt: %s\n"+
+						"   Check Mercury audit logs immediately.\n\n",
+					packageUUID, burnedErr.Mode, burnedErr.BurnedAt.Format(time.RFC3339))
+			}
+		} else if errors.Is(err, mercury.ErrKeyExpired) {
 			fmt.Fprintf(os.Stderr,
-				"\n⚠  SECURITY WARNING: key for package %s was already consumed or expired.\n"+
-					"   If you did not retrieve this package before, the encrypted file may have been\n"+
-					"   intercepted. Contact your security team and check Mercury audit logs.\n\n",
+				"\n⚠  KEY EXPIRED: key for package %s not found (TTL expired or UUID never existed).\n\n",
 				packageUUID)
 		}
 		return nil, fmt.Errorf("retrieve key from Mercury (uuid=%s): %w", packageUUID, err)
@@ -110,9 +122,12 @@ func DecryptEncFile(ctx context.Context, path, mercuryURL string) ([]byte, error
 // WriteErrorPacket serializes a TDTP error packet to path.
 // Used to produce a "receipt" when decryption fails so the pipeline receives
 // a structured error instead of a missing output file.
+// serverMode is the xZMercury server mode ("dev"/"prod") from the burn marker —
+// empty string when not applicable. It populates AlarmDetails.ServerMode so that
+// monitoring can filter dev-failover burns from prod-theft events.
 // If path is empty or "-", writes to stdout.
-func WriteErrorPacket(code, message, table, inReplyTo, path string) error {
-	pkt := packet.NewErrorPacket(code, message, table, inReplyTo)
+func WriteErrorPacket(code, message, table, inReplyTo, serverMode, path string) error {
+	pkt := packet.NewErrorPacket(code, message, table, inReplyTo, serverMode)
 	gen := packet.NewGenerator()
 	xmlData, err := gen.ToXML(pkt, false)
 	if err != nil {

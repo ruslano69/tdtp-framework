@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -116,10 +117,19 @@ func (c *Client) RetrieveKey(ctx context.Context, packageUUID, caller string) (s
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusGone {
+		// 410: key existed but was burned by another party (theft or dev-failover).
+		// Body carries mode ("dev"/"prod") and burned_at from the burn marker.
+		var body struct {
+			Mode     string    `json:"mode"`
+			BurnedAt time.Time `json:"burned_at"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		return "", &KeyBurnedError{UUID: packageUUID, Mode: body.Mode, BurnedAt: body.BurnedAt}
+	}
 	if resp.StatusCode == http.StatusNotFound {
-		// KEY_ALREADY_CONSUMED: either TTL expiry or burn-on-read by another party.
-		// Treat as a security event — the caller should log/alert.
-		return "", fmt.Errorf("%w: uuid=%s", ErrKeyAlreadyConsumed, packageUUID)
+		// 404: no burn marker — key expired by TTL or UUID never existed.
+		return "", fmt.Errorf("%w: uuid=%s", ErrKeyExpired, packageUUID)
 	}
 	if resp.StatusCode >= 500 {
 		return "", fmt.Errorf("%w: HTTP %d", ErrMercuryError, resp.StatusCode)
@@ -169,11 +179,17 @@ func DecodeKey(keyB64 string) ([]byte, error) {
 
 // ErrorCode преобразует sentinel error в строковый код для error-пакета.
 func ErrorCode(err error) string {
+	var burned *KeyBurnedError
+	if errors.As(err, &burned) {
+		return ErrCodeKeyBurnedByOther
+	}
 	switch {
 	case isErr(err, ErrMercuryUnavailable):
 		return ErrCodeMercuryUnavailable
+	case isErr(err, ErrKeyExpired):
+		return ErrCodeKeyExpired
 	case isErr(err, ErrKeyAlreadyConsumed):
-		return ErrCodeKeyAlreadyConsumed
+		return ErrCodeKeyAlreadyConsumed // backward compat
 	case isErr(err, ErrHMACVerificationFailed):
 		return ErrCodeHMACVerificationFailed
 	case isErr(err, ErrKeyBindRejected):

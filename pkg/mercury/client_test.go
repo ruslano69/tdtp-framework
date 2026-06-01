@@ -168,11 +168,12 @@ func TestRetrieveKey_Success(t *testing.T) {
 	}
 }
 
-func TestRetrieveKey_NotFound404_IsKeyAlreadyConsumed(t *testing.T) {
-	// 404 = burn-on-read: ключ уже потреблён или истёк.
-	// Должен возвращать ErrKeyAlreadyConsumed (security sentinel), а не generic error.
+func TestRetrieveKey_NotFound404_IsKeyExpired(t *testing.T) {
+	// 404 = no burn marker — key expired by TTL or UUID never existed.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "key not found or already consumed", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":"KEY_EXPIRED","error":"key not found"}`))
 	}))
 	defer server.Close()
 
@@ -180,8 +181,37 @@ func TestRetrieveKey_NotFound404_IsKeyAlreadyConsumed(t *testing.T) {
 	if err == nil {
 		t.Fatal("RetrieveKey() expected error on 404")
 	}
-	if !errors.Is(err, ErrKeyAlreadyConsumed) {
-		t.Errorf("RetrieveKey() on 404 must return ErrKeyAlreadyConsumed, got: %v", err)
+	if !errors.Is(err, ErrKeyExpired) {
+		t.Errorf("RetrieveKey() on 404 must return ErrKeyExpired, got: %v", err)
+	}
+}
+
+func TestRetrieveKey_Gone410_IsKeyBurnedByOther(t *testing.T) {
+	// 410 = burn marker exists — key was burned by another party.
+	// KeyBurnedError must carry mode and burned_at.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"code":"KEY_BURNED_BY_OTHER","mode":"dev","burned_at":"2026-06-01T09:00:00Z"}`))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(server).RetrieveKey(context.Background(), "uuid", "svc_test")
+	if err == nil {
+		t.Fatal("RetrieveKey() expected error on 410")
+	}
+	if !errors.Is(err, ErrKeyBurnedByOther) {
+		t.Errorf("RetrieveKey() on 410 must return ErrKeyBurnedByOther, got: %v", err)
+	}
+	var burnedErr *KeyBurnedError
+	if !errors.As(err, &burnedErr) {
+		t.Fatalf("error must be *KeyBurnedError, got %T", err)
+	}
+	if burnedErr.Mode != "dev" {
+		t.Errorf("KeyBurnedError.Mode = %q, want %q", burnedErr.Mode, "dev")
+	}
+	if burnedErr.BurnedAt.IsZero() {
+		t.Error("KeyBurnedError.BurnedAt must be set")
 	}
 }
 

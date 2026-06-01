@@ -129,20 +129,25 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			var decErr error
 			data, decErr = DecryptEncBlob(ctx, data, opts.MercuryURL)
 			if decErr != nil {
-				// On key failure: write a TDTP error packet next to the input file
-				// so the pipeline receives a structured receipt instead of silence.
-				// The receiving side can import it as a valid tdtp.xml.
+				// On key failure: write a TDTP error packet next to the input file.
+				// The receiving side imports it as a valid tdtp.xml — receipt, not silence.
 				errCode := mercury.ErrorCode(decErr)
 				errPktPath := errorPacketPath(src.label)
-				if writeErr := WriteErrorPacket(errCode, decErr.Error(), "", "", errPktPath); writeErr != nil {
+
+				// Extract serverMode from KeyBurnedError so the error packet carries
+				// the mode of the Mercury instance that burned the key.
+				// mode="dev" → dev-failover burn (filter as expected)
+				// mode="prod" → prod burn by unknown party (investigate)
+				var serverMode string
+				var burnedErr *mercury.KeyBurnedError
+				if errors.As(decErr, &burnedErr) {
+					serverMode = burnedErr.Mode
+				}
+
+				if writeErr := WriteErrorPacket(errCode, decErr.Error(), "", "", serverMode, errPktPath); writeErr != nil {
 					fmt.Fprintf(os.Stderr, "WARNING: could not write error packet to %s: %v\n", errPktPath, writeErr)
 				} else {
-					fmt.Fprintf(os.Stderr, "Error packet written: %s\n", errPktPath)
-					if errors.Is(decErr, mercury.ErrKeyAlreadyConsumed) {
-						fmt.Fprintf(os.Stderr,
-							"⚠  SECURITY WARNING: key for this package was already consumed.\n"+
-								"   Possible interception — check Mercury audit logs.\n")
-					}
+					fmt.Fprintf(os.Stderr, "Error packet written: %s (ServerMode=%q)\n", errPktPath, serverMode)
 				}
 				return fmt.Errorf("failed to decrypt '%s': %w", src.label, decErr)
 			}

@@ -129,10 +129,21 @@ func TestBurnOnRead_KeyConsumedAfterFirstRead(t *testing.T) {
 		t.Fatalf("первый BurnOnRead() error = %v", err)
 	}
 
-	// Второе чтение — ключ уже уничтожен
+	// Второе чтение — ключ уже сожжён первым вызовом; burn marker должен быть виден.
 	_, err := store.BurnOnRead(ctx, uuid)
-	if !errors.Is(err, ErrKeyNotFound) {
-		t.Errorf("второй BurnOnRead() = %v, want ErrKeyNotFound", err)
+	if !errors.Is(err, ErrKeyBurnedByOther) {
+		t.Errorf("второй BurnOnRead() = %v, want ErrKeyBurnedByOther", err)
+	}
+	var burnedErr *KeyBurnedError
+	if !errors.As(err, &burnedErr) {
+		t.Errorf("второй BurnOnRead() должен возвращать *KeyBurnedError, got %T", err)
+	} else {
+		if burnedErr.Mode != ModeProd {
+			t.Errorf("KeyBurnedError.Mode = %q, want %q", burnedErr.Mode, ModeProd)
+		}
+		if burnedErr.BurnedAt.IsZero() {
+			t.Error("KeyBurnedError.BurnedAt must be set")
+		}
 	}
 }
 
