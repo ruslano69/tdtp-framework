@@ -137,6 +137,9 @@ type authStep2Request struct {
 type authStep2Response struct {
 	SessionToken *SessionToken `json:"session_token"`
 	Permissions  []string      `json:"permissions"`
+	// CertNotAfter is the new cert expiry after implicit renewal (+24h from now).
+	// Mercury must schedule next renewal before this time - RenewalThreshold.
+	CertNotAfter time.Time `json:"cert_not_after"`
 }
 
 // Step2 verifies the liveness signature and returns a fresh session token.
@@ -184,8 +187,17 @@ func (h *AuthorizeHandler) Step2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update last_seen.
-	_ = h.db.TouchLastSeen(ch.certID)
+	// Implicit renewal: extend cert.not_after by CertTTL from now.
+	// This is how daily active-user tracking works: every successful authorize
+	// resets the clock. If Mercury stops contacting CA for > CertTTL, cert
+	// expires and the environment disappears from the active-user count.
+	newNotAfter, err := h.db.RenewCert(ch.certID)
+	if err != nil {
+		// Non-fatal: session token still works; log and continue.
+		log.Warn().Err(err).Str("cert_id", ch.certID).Msg("authorize: cert renewal failed (non-fatal)")
+		_ = h.db.TouchLastSeen(ch.certID)
+		newNotAfter = dbCert.NotAfter // keep current expiry on DB error
+	}
 
 	token, err := NewSessionToken(lic.Permissions, sessionTokenTTL)
 	if err != nil {
@@ -195,12 +207,14 @@ func (h *AuthorizeHandler) Step2(w http.ResponseWriter, r *http.Request) {
 
 	log.Info().
 		Str("cert_id", ch.certID).
+		Time("cert_not_after", newNotAfter).
 		Strs("permissions", lic.Permissions).
-		Msg("authorize step2: session token issued")
+		Msg("authorize step2: session token issued, cert renewed")
 
 	writeCAJSON(w, http.StatusOK, authStep2Response{
 		SessionToken: token,
 		Permissions:  lic.Permissions,
+		CertNotAfter: newNotAfter,
 	})
 }
 

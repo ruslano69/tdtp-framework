@@ -21,6 +21,19 @@ import (
 	"time"
 )
 
+const (
+	// CertTTL is the lifetime of an EnvCert.
+	// Short enough for daily active-user tracking; long enough to survive
+	// an overnight CA downtime. Mercury renews via Authorize 12h before expiry.
+	// If Mercury stops > CertTTL without renewal → re-enroll required.
+	CertTTL = 24 * time.Hour
+
+	// RenewalThreshold is how far before cert expiry Mercury triggers renewal.
+	// At CertTTL=24h and RenewalThreshold=12h: Mercury renews at the 12h mark,
+	// giving a 12h window to retry if CA is temporarily unavailable.
+	RenewalThreshold = 12 * time.Hour
+)
+
 // CertStatus represents the lifecycle state of an EnvCert.
 type CertStatus string
 

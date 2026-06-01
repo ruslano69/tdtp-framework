@@ -160,6 +160,18 @@ func (d *DB) TouchLastSeen(certID string) error {
 	return err
 }
 
+// RenewCert extends not_after by CertTTL from now and updates last_seen.
+// Called on every successful Authorize — implicit rolling renewal.
+// The cert_id stays the same; only the validity window shifts forward.
+func (d *DB) RenewCert(certID string) (time.Time, error) {
+	newNotAfter := time.Now().UTC().Add(CertTTL)
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := d.db.Exec(
+		`UPDATE certs SET not_after = ?, last_seen = ? WHERE cert_id = ?`,
+		newNotAfter.Format(time.RFC3339), now, certID)
+	return newNotAfter, err
+}
+
 // RevokeCert marks a cert as revoked. Subsequent authorize calls will fail.
 func (d *DB) RevokeCert(certID string) error {
 	_, err := d.db.Exec(

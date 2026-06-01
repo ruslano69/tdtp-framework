@@ -22,6 +22,8 @@ import (
 	"github.com/ruslano69/xzmercury/internal/envkey"
 )
 
+// Ensure ca.RenewalThreshold is accessible — imported above.
+
 // Client talks to the CA server on behalf of xZMercury.
 type Client struct {
 	baseURL    string
@@ -127,6 +129,9 @@ func (c *Client) Enroll(ctx context.Context, licenseKey string) (*EnrollResult, 
 type AuthorizeResult struct {
 	SessionToken *ca.SessionToken `json:"session_token"`
 	Permissions  []string         `json:"permissions"`
+	// CertNotAfter is the new cert expiry after implicit renewal.
+	// Schedule next renewal at CertNotAfter - ca.RenewalThreshold.
+	CertNotAfter time.Time `json:"cert_not_after"`
 }
 
 // Authorize performs the two-step re-authorization for an existing cert:
@@ -168,6 +173,58 @@ func (c *Client) Authorize(ctx context.Context, cert *ca.EnvCert) (*AuthorizeRes
 	}
 
 	return &result, nil
+}
+
+// AutoRenew starts a background goroutine that keeps the cert alive by calling
+// Authorize before it expires. Each successful Authorize implicitly extends
+// cert.not_after by CertTTL (24h) on the CA side.
+//
+// Renewal fires ca.RenewalThreshold (12h) before cert expiry, giving a 12h
+// retry window if CA is temporarily unavailable. On failure, retries every hour.
+//
+// onRenew is called after each successful renewal with the fresh result —
+// use it to update session_token and permissions in the running Mercury instance.
+//
+// The goroutine exits when ctx is cancelled (typically on server shutdown).
+func (c *Client) AutoRenew(ctx context.Context, cert *ca.EnvCert, initialNotAfter time.Time,
+	onRenew func(*AuthorizeResult)) {
+
+	go func() {
+		certNotAfter := initialNotAfter
+		for {
+			// Schedule renewal RenewalThreshold before current expiry.
+			renewAt := certNotAfter.Add(-ca.RenewalThreshold)
+			wait := time.Until(renewAt)
+			if wait < 0 {
+				wait = 0 // already past threshold — renew immediately
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+
+			// Retry loop: keep trying every hour until success or ctx cancelled.
+			for {
+				result, err := c.Authorize(ctx, cert)
+				if err == nil {
+					certNotAfter = result.CertNotAfter
+					onRenew(result)
+					break // success — go back to outer loop to reschedule
+				}
+
+				// Log and retry.
+				// Don't log the full error chain to avoid noise; caller sees 503.
+				retryIn := time.Hour
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(retryIn):
+				}
+			}
+		}
+	}()
 }
 
 // postWithToken sends a JSON POST with the hello token in X-Hello-Token header.

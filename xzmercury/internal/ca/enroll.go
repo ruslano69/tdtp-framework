@@ -217,13 +217,18 @@ func (h *EnrollHandler) Step2(w http.ResponseWriter, r *http.Request) {
 		}
 
 		certID := uuid.New().String()
+		now := time.Now().UTC()
 		payload := &CertPayload{
 			CertID:      certID,
 			LicenseHash: ch.licenseHash,
 			EnvIDPub:    ch.envIDPub,
 			Permissions: lic.Permissions,
-			IssuedAt:    time.Now().UTC(),
-			NotAfter:    lic.PaidUntil.UTC(),
+			IssuedAt:    now,
+			// CertTTL=24h — decoupled from license period (paid_until).
+			// Authorize implicitly renews by extending not_after another 24h.
+			// If Mercury stops for > 24h, cert expires → re-enroll needed.
+			// CA sees last_seen daily → real active-user count.
+			NotAfter: now.Add(CertTTL),
 		}
 		sig, err := Sign(payload, h.caPriv)
 		if err != nil {
