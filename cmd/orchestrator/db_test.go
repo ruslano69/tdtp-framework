@@ -13,12 +13,12 @@ func TestScheduleRecordTimezone(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	r := &ScheduleRecord{
-		ID:       "tz-sched-1",
-		Scenario: "export-payroll",
-		CronExpr: "0 6 * * *",
-		Params:   map[string]string{"period": "{{current_month}}"},
-		Timezone: "Europe/Kyiv",
-		Enabled:  true,
+		ID:         "tz-sched-1",
+		Scenario:   "export-payroll",
+		CronExpr:   "0 6 * * *",
+		Params:     map[string]string{"period": "{{current_month}}"},
+		Timezone:   "Europe/Kyiv",
+		Enabled:    true,
 		CreatedAt:  time.Now().UTC(),
 		ModifiedAt: time.Now().UTC(),
 	}
