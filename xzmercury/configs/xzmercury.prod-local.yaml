@@ -1,0 +1,45 @@
+# xzmercury PROD config for LOCAL reproduction (no Docker, no AD, no Redis daemon).
+#
+# This runs the FULL prod code path:
+#   - real Redis over TCP (via tdtp-redis, an in-memory Redis-compatible server)
+#   - CA bootstrap (enroll/authorize against tdtp-ca)
+#   - prod-mode HMAC (mode=prod baked into key bindings)
+#   - caGuard on /api/keys/* (503 without a live CA session)
+#
+# The ONLY substitutions vs a true production deployment:
+#   - tdtp-redis instead of a Redis daemon (state in memory, lost on exit)
+#   - mock LDAP instead of Active Directory (enabled by ldap.mock_users_file)
+#
+# See docs/LOCAL_PROD.md for the step-by-step launch sequence.
+
+server:
+  addr: ":3088"
+
+# Point at tdtp-redis instances (started with --password redispw).
+mercury:
+  addr: "127.0.0.1:7379"
+  password: "redispw"
+pipeline:
+  addr: "127.0.0.1:7380"
+  password: "redispw"
+
+security:
+  server_secret: "prod-secret-32-chars-long-aaaaaa"  # 32 chars; or MERCURY_SERVER_SECRET
+  rate_limit: 0
+
+# A non-empty mock_users_file opts into mock LDAP even in prod mode.
+# Leave EMPTY in a real deployment to use Active Directory.
+ldap:
+  mock_users_file: "xzmercury/configs/ldap-users.dev.json"
+  acl_file: "xzmercury/configs/pipeline-acl.dev.yaml"
+
+quota:
+  default_hourly: 1000
+  acl_file: "xzmercury/configs/pipeline-acl.dev.yaml"
+
+# CA authorization — required in prod. License key issued by tdtp-certify.
+ca:
+  url: "http://127.0.0.1:8466"
+  license_key: ""              # paste the TDTP-XXXXX key, or set TDTPCA_LICENSE_KEY
+  env_key_dir: "./envkey"      # Ed25519 env keypair (TPM stub)
+  cert_path: "./env.cert"      # persisted EnvCert (re-auth on restart)

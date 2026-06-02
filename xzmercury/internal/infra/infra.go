@@ -65,11 +65,24 @@ func Setup(cfg *Config, dev bool) (*Infra, error) {
 			DB:       cfg.Pipeline.DB,
 		})
 
-		real, err := ldap.NewRealClient(cfg.LDAP)
-		if err != nil {
-			return nil, fmt.Errorf("infra: ldap connect: %w", err)
+		// LDAP: a configured mock_users_file opts into the mock client even in
+		// prod mode. This enables local prod reproduction (real Redis via
+		// tdtp-redis + CA bootstrap + prod HMAC) on machines with no AD/LDAP.
+		// A real deployment leaves mock_users_file empty → real LDAP.
+		if cfg.LDAP.MockUsersFile != "" {
+			mock, err := ldap.NewMockClient(cfg.LDAP.MockUsersFile)
+			if err != nil {
+				return nil, fmt.Errorf("infra: mock ldap: %w", err)
+			}
+			inf.LDAP = ldap.NewCachingClient(mock, inf.PipelineRedis, cfg.LDAP.CacheTTL)
+			log.Warn().Msg("prod: using MOCK LDAP (mock_users_file is set) — local reproduction only")
+		} else {
+			real, err := ldap.NewRealClient(cfg.LDAP)
+			if err != nil {
+				return nil, fmt.Errorf("infra: ldap connect: %w", err)
+			}
+			inf.LDAP = ldap.NewCachingClient(real, inf.PipelineRedis, cfg.LDAP.CacheTTL)
 		}
-		inf.LDAP = ldap.NewCachingClient(real, inf.PipelineRedis, cfg.LDAP.CacheTTL)
 	}
 
 	// Verify both Redis connections are alive.

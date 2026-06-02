@@ -397,6 +397,20 @@ tdtp-certify revoke-license --db ca.db --license-key <key>        # kills all ce
 The license key travels on the wire only at enrollment (under TLS); the CA stores
 only `SHA-256(key)`. A leaked hash is useless without the paired TPM env key.
 
+## Local prod reproduction (no Docker / Redis / AD)
+
+Production needs a real Redis (×2) and Active Directory. On an air-gapped machine
+or CI, run the full prod code path using **`tdtp-redis`** (in-memory Redis-compatible
+TCP server) plus mock LDAP — only the storage and directory backends are substituted;
+CA bootstrap, prod HMAC, burn marker and the caGuard all run for real.
+
+```bash
+tdtp-redis --mercury 127.0.0.1:7379 --pipeline 127.0.0.1:7380 --password redispw
+xzmercury --config configs/xzmercury.prod-local.yaml   # dev=false, real Redis
+```
+
+Full step-by-step: [docs/LOCAL_PROD.md](docs/LOCAL_PROD.md).
+
 ## Repository layout
 
 ```

@@ -2,6 +2,71 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.11.0] — 2026-06-02
+
+Замкнено повний ланцюг довіри: апаратний якір (CA/TPM) → онлайн-авторизація
+середовища (xZMercury) → офлайн-ліцензія CLI (tdtp.lic) → оркестрація сценаріїв
+з подвійним gate. Усе enforced у бінарі.
+
+### Added — CA wiring (Priority 1)
+
+- **xZMercury → CA при старті** (`xzmercury/internal/infra/ca_bootstrap.go`):
+  prod Mercury авторизується в CA перед видачею ключів. `BootstrapCA`:
+  envkey.Load → enroll/authorize → AutoRenew (12h до expiry) на server-ctx.
+- **`infra.CASession`** + **`api.caGuardMiddleware`**: невалідна CA-сесія → 503
+  на `/api/keys/*`. `CAGuard` інтерфейс розв'язує api від infra.
+- **`CAConfig`** у конфізі (`url`, `license_key`, `env_key_dir`, `cert_path`),
+  `TDTPCA_LICENSE_KEY` env fallback; dev пропускає CA повністю.
+- `ca.NewRouter` винесено — shared між бінарником і тестами.
+
+### Added — CA admin tool (Priority 2)
+
+- **`tdtp-certify`** (`xzmercury/cmd/tdtp-certify/`): vendor-only CLI керування CA.
+  `keygen` · `issue-license` · `revoke-cert` · `revoke-license` ·
+  `list-licenses` · `list-active` · `list-certs`.
+  `issue-license` генерує `TDTP-XXXXX-…`, показує раз; CA тримає лише SHA-256.
+  `list-active` рахує середовища за `last_seen` у вікні — реальна активність.
+- DB-методи: `ListLicenses`, `ListActiveCerts(since)`, `ListAllCerts`.
+
+### Added — Offline license (Priority 3)
+
+- **`pkg/license/`**: Ed25519-signed tdtp.lic, повністю офлайн (вшитий vendor key).
+  `License`/`Limits`/`Tier`, `Load`/`Verify`/`VerifyWith`/`Sign`/`New`,
+  `Community()` floor (sqlite only, 50k rows). Accessors: `AllowsAdapter`/
+  `AllowsFeature`/`RowLimit`/`PipelineLimit`.
+- **`cmd/tdtpcli`**: `--license` flag; резолвинг flag → `TDTP_LICENSE` →
+  `./tdtp.lic` → community. Tampered/expired = fatal. Gate адаптера, `--enc`, `--unsafe`.
+- **`cmd/tdtp-license`**: vendor signer (`keygen`/`issue`/`verify`), окремий від CA-ключа.
+
+### Added — Orchestrator trust integration (Priority 4)
+
+- **Mercury `/status`** → `{mode, dev, ca_authorized, permissions}`.
+  `CAGuard.Permissions()` додано; `infra.CASession` реалізує.
+- **`cmd/orchestrator/preflight.go` — `TrustGate`**:
+  OFFLINE верифікація власної tdtp.lic + ONLINE preflight Mercury.
+  `--require-prod` відмовляє проти dev/не-CA-authorized Mercury.
+  `GateScenario`: scenario.permissions ⊆ (license ∩ Mercury). `CheckPipelineLimit`.
+- Gate у run-handler (403 permission, 429 limit) і в cron-задачах scheduler.
+
+### Architecture
+
+Дві незалежні гілки довіри, обидві enforced у бінарі:
+- **ONLINE** (CA → Mercury): авторизація середовища виконання. TPM challenge,
+  24h rolling cert, seat-count, /hello DDoS gate, mode-в-HMAC.
+- **OFFLINE** (tdtp.lic): можливості CLI без мережі. Air-gapped tdtpcli поважає ліцензію.
+
+### Binaries
+
+`tdtpcli` (27M, license-gate) · `xzmercury` (23M, CA-guard + /status) ·
+`tdtp-ca` (11M) · `tdtp-certify` (8.9M) · `tdtp-license` (3.4M) · `orchestrator` (14M).
+
+### Tests
+
+~34 нових: `ca/integration_test.go` (5), `infra/ca_bootstrap_test.go` (3),
+`ca/db_listing_test.go` (3), `cmd/tdtp-certify/main_test.go` (4),
+`pkg/license/license_test.go` (9), `orchestrator/preflight_test.go` (8),
+`api/status_test.go` (3). Усі CA-тести проганяють реальний 2s /hello gate.
+
 ## [1.10.0] — 2026-06-01
 
 Три незалежні напрямки: виправлення `--limit -N` на MSSQL, повний security-стек xZMercury
