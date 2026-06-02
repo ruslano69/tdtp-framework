@@ -109,7 +109,7 @@ func TestResolveMagicParams(t *testing.T) {
 	out := resolveMagicParams(map[string]string{
 		"period": "{{current_month}}",
 		"static": "fixed",
-	})
+	}, "")
 	if out["static"] != "fixed" {
 		t.Errorf("static param mutated: %q", out["static"])
 	}

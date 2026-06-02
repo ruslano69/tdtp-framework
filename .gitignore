@@ -8,9 +8,9 @@
 /cmd/tdtpcli/tdtpcli.exe
 /cmd/tdtpserve/tdtpserve
 /cmd/tdtpserve/tdtpserve.exe
-tdtpcli
-tdtpserve
-orchestrator
+/tdtpcli
+/tdtpserve
+/orchestrator
 
 # Test databases
 *.db

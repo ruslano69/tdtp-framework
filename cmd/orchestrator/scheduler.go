@@ -18,6 +18,7 @@ type ScheduleDef struct {
 	Scenario string            `yaml:"scenario"`
 	Schedule string            `yaml:"schedule"` // cron expression
 	Params   map[string]string `yaml:"params"`
+	Timezone string            `yaml:"timezone"` // IANA timezone name (e.g. "Europe/Moscow"); empty = UTC
 }
 
 type scheduleFile struct {
@@ -69,6 +70,7 @@ func (s *Scheduler) SeedFromDir(dir string) error {
 				Scenario: def.Scenario,
 				CronExpr: def.Schedule,
 				Params:   def.Params,
+				Timezone: def.Timezone,
 				Enabled:  true,
 			}
 			if err := s.db.UpsertSchedule(rec); err != nil {
@@ -102,9 +104,10 @@ func (s *Scheduler) register(r *ScheduleRecord) error {
 	}
 	schedID := r.ID
 	params := r.Params
+	tz := r.Timezone
 
 	entryID, err := s.c.AddFunc(r.CronExpr, func() {
-		resolved := resolveMagicParams(params)
+		resolved := resolveMagicParams(params, tz)
 		resolvedParams, valErr := scene.ValidateParams(resolved)
 		status := "running"
 		switch {
@@ -180,9 +183,16 @@ func (s *Scheduler) Start() { s.c.Start() }
 func (s *Scheduler) Stop()  { s.c.Stop() }
 
 // resolveMagicParams replaces special tokens in schedule params.
-func resolveMagicParams(params map[string]string) map[string]string {
+// tz is an IANA timezone name; empty or invalid falls back to UTC.
+func resolveMagicParams(params map[string]string, tz string) map[string]string {
+	loc := time.UTC
+	if tz != "" {
+		if l, err := time.LoadLocation(tz); err == nil {
+			loc = l
+		}
+	}
 	out := make(map[string]string, len(params))
-	now := time.Now().UTC()
+	now := time.Now().In(loc)
 	for k, v := range params {
 		v = strings.ReplaceAll(v, "{{current_month}}", now.Format("2006-01"))
 		v = strings.ReplaceAll(v, "{{current_date}}", now.Format("2006-01-02"))

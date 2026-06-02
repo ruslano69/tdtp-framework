@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -87,7 +88,23 @@ func OpenOrchestratorDB(path string) (*OrchestratorDB, error) {
 	if _, err := db.Exec(orchSchema); err != nil {
 		return nil, fmt.Errorf("orchestrator db: schema: %w", err)
 	}
+	// Idempotent migration: add timezone column if it doesn't exist yet.
+	if _, err := db.Exec(`ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT ''`); err != nil {
+		// SQLite returns "duplicate column name" when the column already exists — ignore it.
+		if !isDuplicateColumnErr(err) {
+			return nil, fmt.Errorf("orchestrator db: migrate timezone: %w", err)
+		}
+	}
 	return &OrchestratorDB{db: db}, nil
+}
+
+// isDuplicateColumnErr returns true when SQLite rejects an ALTER TABLE ADD COLUMN
+// because the column already exists (error message contains "duplicate column name").
+func isDuplicateColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "duplicate column name")
 }
 
 func (d *OrchestratorDB) Close() error { return d.db.Close() }
@@ -100,6 +117,7 @@ type ScheduleRecord struct {
 	Scenario   string
 	CronExpr   string
 	Params     map[string]string
+	Timezone   string
 	Enabled    bool
 	CreatedAt  time.Time
 	ModifiedAt time.Time
@@ -120,15 +138,16 @@ func (d *OrchestratorDB) UpsertSchedule(r *ScheduleRecord) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = d.db.Exec(`
-		INSERT INTO schedules(id, scenario, cron_expr, params, enabled, created_at, modified_at)
-		VALUES(?,?,?,?,?,?,?)
+		INSERT INTO schedules(id, scenario, cron_expr, params, timezone, enabled, created_at, modified_at)
+		VALUES(?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			scenario=excluded.scenario,
 			cron_expr=excluded.cron_expr,
 			params=excluded.params,
+			timezone=excluded.timezone,
 			enabled=excluded.enabled,
 			modified_at=excluded.modified_at`,
-		r.ID, r.Scenario, r.CronExpr, string(params), enabled, now, now,
+		r.ID, r.Scenario, r.CronExpr, string(params), r.Timezone, enabled, now, now,
 	)
 	return err
 }
@@ -136,7 +155,7 @@ func (d *OrchestratorDB) UpsertSchedule(r *ScheduleRecord) error {
 // ListSchedules returns all schedule records.
 func (d *OrchestratorDB) ListSchedules() ([]*ScheduleRecord, error) {
 	rows, err := d.db.Query(`
-		SELECT id, scenario, cron_expr, params, enabled,
+		SELECT id, scenario, cron_expr, params, timezone, enabled,
 		       created_at, modified_at, last_run_at, last_status, next_run_at
 		FROM schedules ORDER BY created_at`)
 	if err != nil {
@@ -157,7 +176,7 @@ func (d *OrchestratorDB) ListSchedules() ([]*ScheduleRecord, error) {
 // GetSchedule returns one schedule by ID.
 func (d *OrchestratorDB) GetSchedule(id string) (*ScheduleRecord, error) {
 	row := d.db.QueryRow(`
-		SELECT id, scenario, cron_expr, params, enabled,
+		SELECT id, scenario, cron_expr, params, timezone, enabled,
 		       created_at, modified_at, last_run_at, last_status, next_run_at
 		FROM schedules WHERE id=?`, id)
 	r, err := scanSchedule(row)
@@ -525,7 +544,7 @@ func scanSchedule(row scannable) (*ScheduleRecord, error) {
 	var lastRunAt, nextRunAt, lastStatus sql.NullString
 
 	err := row.Scan(
-		&r.ID, &r.Scenario, &r.CronExpr, &paramsJSON, &enabled,
+		&r.ID, &r.Scenario, &r.CronExpr, &paramsJSON, &r.Timezone, &enabled,
 		&createdAt, &modifiedAt, &lastRunAt, &lastStatus, &nextRunAt,
 	)
 	if err != nil {
