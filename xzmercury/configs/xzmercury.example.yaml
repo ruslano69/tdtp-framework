@@ -40,3 +40,12 @@ ldap:
 quota:
   default_hourly: 1000        # credits granted to a new group each hour
   acl_file: "configs/pipeline-acl.yaml"  # override per-pipeline costs and groups
+
+# CA authorization — PROD ONLY (ignored in --dev mode).
+# In prod, xZMercury enrolls/authorizes with the CA before serving keys.
+# Without a live CA session, /api/keys/bind and /retrieve return 503.
+ca:
+  url: "https://ca.tdtp.io:8443"  # CA server base URL (required in prod)
+  license_key: ""                 # raw license key; override via TDTPCA_LICENSE_KEY
+  env_key_dir: "./envkey"         # Ed25519 env keypair dir (TPM-sealed in prod)
+  cert_path: "env.cert"           # persisted EnvCert (re-auth on restart)

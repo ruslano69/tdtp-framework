@@ -76,6 +76,24 @@ func main() {
 		log.Warn().Msg("──────────────────────────────────────────────────────")
 	}
 
+	// Long-lived server context — governs CA AutoRenew and graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// CA authorization — prod only.
+	// In prod, xZMercury must enroll/authorize with the CA before serving keys.
+	// The session guards key operations: invalid session → 503.
+	// AutoRenew runs on ctx (until shutdown). In dev, CA is skipped (caGuard=nil).
+	var caGuard api.CAGuard
+	if !*dev {
+		session, err := infra.BootstrapCA(ctx, cfg.CA)
+		if err != nil {
+			log.Fatal().Err(err).Msg("CA bootstrap failed — refusing to start without authorization")
+		}
+		caGuard = session
+		log.Info().Msg("CA authorization active — key operations enabled")
+	}
+
 	// Load ACL rules
 	aclRules, err := acl.Load(cfg.Quota.ACLFile)
 	if err != nil {
@@ -83,7 +101,7 @@ func main() {
 	}
 
 	// Build router
-	router := api.NewRouter(cfg, inf, aclRules, *dev)
+	router := api.NewRouter(cfg, inf, aclRules, *dev, caGuard)
 
 	// HTTP server
 	srv := &http.Server{
@@ -93,10 +111,6 @@ func main() {
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  60 * time.Second,
 	}
-
-	// Graceful shutdown on SIGINT/SIGTERM
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		log.Info().

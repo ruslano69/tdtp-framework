@@ -19,8 +19,19 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	LDAP     ldap.Config    `yaml:"ldap"`
 	Quota    QuotaConfig    `yaml:"quota"`
+	CA       CAConfig       `yaml:"ca"`       // CA authorization (prod only)
 	KeyTTL   time.Duration  `yaml:"key_ttl"`  // how long a bound key lives; default 5m
 	HashTTL  time.Duration  `yaml:"hash_ttl"` // how long a registered hash lives; default 24h
+}
+
+// CAConfig controls CA authorization at prod startup.
+// Empty URL → CA authorization skipped (only valid in --dev mode).
+type CAConfig struct {
+	URL        string `yaml:"url"`         // CA server base URL, e.g. "https://ca.tdtp.io:8443"
+	LicenseKey string `yaml:"license_key"` // raw license key; override via TDTPCA_LICENSE_KEY
+	EnvKeyDir  string `yaml:"env_key_dir"` // directory for Ed25519 env keypair (TPM stub)
+	CertPath   string `yaml:"cert_path"`   // path to persisted EnvCert (sealed in TPM mode)
+	CAPubKey   string `yaml:"ca_pub_key"`  // path to CA Ed25519 public key PEM (for cert verification)
 }
 
 // ServerConfig controls the HTTP listener.
@@ -61,6 +72,8 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Quota.DefaultHourly = 1000
 	cfg.KeyTTL = 5 * time.Minute
 	cfg.HashTTL = 24 * time.Hour
+	cfg.CA.EnvKeyDir = "./envkey"
+	cfg.CA.CertPath = "env.cert"
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -76,6 +89,13 @@ func LoadConfig(path string) (*Config, error) {
 			cfg.Security.ServerSecret = s
 		} else {
 			return nil, fmt.Errorf("config: security.server_secret is required (or set MERCURY_SERVER_SECRET)")
+		}
+	}
+
+	// LICENSE_KEY: config file takes precedence; env var is the fallback.
+	if cfg.CA.LicenseKey == "" {
+		if s := os.Getenv("TDTPCA_LICENSE_KEY"); s != "" {
+			cfg.CA.LicenseKey = s
 		}
 	}
 	return cfg, nil

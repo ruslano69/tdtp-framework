@@ -20,7 +20,10 @@ import (
 // NewRouter wires all dependencies and returns the chi router.
 // dev=true selects keystore.ModeDev, embedding it in every HMAC — dev-bound
 // keys cannot pass HMAC verification on a prod consumer even if the secret leaked.
-func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL, dev bool) http.Handler {
+//
+// caGuard guards key operations: when its session is invalid (CA unreachable or
+// authorization expired) key bind/retrieve return 503. Pass nil in --dev mode.
+func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL, dev bool, caGuard CAGuard) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(zerologMiddleware)
@@ -51,7 +54,10 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL, dev bool)
 	r.Get("/readyz", handleReadyz(inf))
 	r.Get("/metrics", promhttp.Handler().ServeHTTP)
 
+	// Key operations are gated by the CA session: in prod, no bind/retrieve is
+	// served unless the CA authorization is live. In dev (caGuard=nil) it's a no-op.
 	r.Route("/api/keys", func(r chi.Router) {
+		r.Use(caGuardMiddleware(caGuard))
 		r.Post("/bind", h.Bind)
 		r.Post("/retrieve", h.Retrieve)
 	})

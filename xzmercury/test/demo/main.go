@@ -49,7 +49,7 @@ func main() {
 	aclRules, err := acl.Load("") // пустой путь = permissive defaults
 	must(err, "acl load")
 
-	router := api.NewRouter(cfg, inf, aclRules, true /* dev */)
+	router := api.NewRouter(cfg, inf, aclRules, true /* dev */, nil /* no CA guard in dev */)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	must(err, "listen")

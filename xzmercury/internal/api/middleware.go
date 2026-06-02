@@ -66,6 +66,34 @@ func rateLimitMiddleware(rateLimit int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler { return next }
 }
 
+// CAGuard reports whether the CA session is currently valid.
+// Implemented by infra.CASession. nil in --dev mode (guard is a no-op).
+type CAGuard interface {
+	Valid() bool
+}
+
+// caGuardMiddleware returns 503 Service Unavailable when the CA session is invalid.
+// In prod, key bind/retrieve must not be served without a live CA authorization.
+// If guard is nil (--dev mode), it is a pass-through.
+func caGuardMiddleware(guard CAGuard) func(http.Handler) http.Handler {
+	if guard == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !guard.Valid() {
+				log.Warn().Str("path", r.URL.Path).
+					Msg("CA session invalid — refusing key operation (503)")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"CA authorization expired or unavailable; key operations suspended"}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // prometheusMiddleware records HTTP request counts and latency.
 func prometheusMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

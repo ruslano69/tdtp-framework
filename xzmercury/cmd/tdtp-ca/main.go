@@ -28,8 +28,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -59,75 +57,12 @@ func main() {
 	defer func() { _ = db.Close() }()
 	log.Info().Str("db", *dbPath).Msg("CA database ready")
 
-	// Wire handlers.
-	enrollH    := ca.NewEnrollHandler(db, caPriv, caPub)
-	authorizeH := ca.NewAuthorizeHandler(db, caPub)
-	helloH     := ca.NewHelloHandler()
-
-	r := chi.NewRouter()
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
-
-	// DDoS gate: client must call /hello (2s wait) to receive a single-use
-	// hello token. Token is required in X-Hello-Token header for step-1 of
-	// enroll and authorize. After use, a new /hello is required.
-	// This limits flood rate to ~30 requests/min per IP connection.
-	r.Get("/hello", helloH.ServeHTTP)
-
-	// Enrollment (first run).
-	// Step 1 requires X-Hello-Token; step 2 only needs the challenge_id from step 1.
-	r.Post("/api/env/enroll",         helloH.Middleware(enrollH.Step1))
-	r.Post("/api/env/enroll/confirm", enrollH.Step2)
-
-	// Re-authorization (subsequent runs).
-	r.Post("/api/env/authorize",         helloH.Middleware(authorizeH.Step1))
-	r.Post("/api/env/authorize/confirm", authorizeH.Step2)
-
-	// CA public key endpoint (Mercury embeds this at build time or fetches on first run).
-	r.Get("/api/env/pubkey", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pub_key":"` + pemEncodePublicKey(caPub) + `"}`))
-	})
-
-	// Admin: revoke cert or license.
-	r.Delete("/api/env/certs/{cert_id}",        handleRevokeCert(db))
-	r.Delete("/api/env/licenses/{license_hash}", handleRevokeLicense(db))
-
-	// Health.
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	// All handler wiring lives in ca.NewRouter (shared with integration tests).
+	router := ca.NewRouter(db, caPriv, caPub)
 
 	log.Info().Str("addr", *addr).Msg("tdtp-ca started")
-	if err := http.ListenAndServe(*addr, r); err != nil {
+	if err := http.ListenAndServe(*addr, router); err != nil {
 		log.Fatal().Err(err).Msg("server error")
-	}
-}
-
-// ─── Admin handlers ───────────────────────────────────────────────────────────
-
-func handleRevokeCert(db *ca.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		certID := chi.URLParam(r, "cert_id")
-		if err := db.RevokeCert(certID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		log.Warn().Str("cert_id", certID).Msg("cert REVOKED by admin")
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func handleRevokeLicense(db *ca.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		hash := chi.URLParam(r, "license_hash")
-		if err := db.RevokeLicense(hash); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		log.Warn().Str("license_hash", hash).Msg("license + all certs REVOKED by admin")
-		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -145,9 +80,4 @@ func loadCAKey(path string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
 	priv := ed25519.PrivateKey(block.Bytes)
 	pub := priv.Public().(ed25519.PublicKey)
 	return priv, pub, nil
-}
-
-func pemEncodePublicKey(pub ed25519.PublicKey) string {
-	block := pem.EncodeToMemory(&pem.Block{Type: "ED25519 PUBLIC KEY", Bytes: pub})
-	return string(block)
 }
