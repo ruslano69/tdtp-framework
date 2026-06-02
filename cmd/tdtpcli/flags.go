@@ -85,6 +85,7 @@ type Flags struct {
 
 	// Options
 	Config         *string
+	License        *string // Path to tdtp.lic (empty = community floor)
 	Output         *string
 	Table          *string // Target table name (overrides name from XML during import)
 	Sheet          *string
@@ -204,6 +205,7 @@ func ParseFlags() *Flags {
 
 	// Options
 	f.Config = flag.String("config", "config.yaml", "Configuration file path")
+	f.License = flag.String("license", "", "Path to tdtp.lic license file (default: TDTP_LICENSE env, then ./tdtp.lic, else community mode)")
 	f.Output = flag.String("output", "", "Output file path (default: stdout or auto-generated)")
 	f.Table = flag.String("table", "", "Target table name (overrides name from XML during import)")
 	f.Sheet = flag.String("sheet", "Sheet1", "Excel sheet name for XLSX operations")

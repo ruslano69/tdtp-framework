@@ -40,30 +40,27 @@
 
 ## Priority 3 — `pkg/license/`: offline перевірка tdtp.lic у tdtpcli
 
-**Що**: tdtpcli перевіряє `tdtp.lic` перед виконанням операцій.
-Без ліцензії = community mode (SQLite only, no --unsafe, no --enc).
+**Статус: ✅ DONE.**
 
-**Структура ліцензії** (Ed25519-signed JSON):
-```json
-{
-  "licensee":  "Contoso GmbH",
-  "issued":    "2026-06-01",
-  "expires":   "2027-06-01",
-  "tier":      "professional",
-  "adapters":  ["postgres", "mssql", "mysql"],
-  "features":  ["etl", "enc", "s3"],
-  "limits":    {"rows_per_export": 1000000, "pipelines": 10},
-  "signature": "<Ed25519 base64>"
-}
-```
+Виконано:
+- `pkg/license/` — `License`/`Limits`/`Tier`, `Load`/`Verify`/`VerifyWith`/`Sign`/`New`,
+  accessors (`AllowsAdapter`/`AllowsFeature`/`RowLimit`/…), `Community()` floor.
+- `pkg/license/pubkey.go` — вшитий vendor Ed25519 public key (PKIX PEM), `VendorPublicKey()`.
+- `cmd/tdtpcli/commands/license_gate.go` — `ResolveLicense` (flag → `TDTP_LICENSE` →
+  `./tdtp.lic` → community), `GateAdapter`/`GateFeature`/`GateRowCount`.
+- `cmd/tdtpcli/main.go` — `--license` flag; резолвинг при старті (tampered/expired = fatal);
+  gate адаптера (config.Database.Type), `--enc` (feature enc), `--unsafe` (feature unsafe).
+- `cmd/tdtp-license/` — vendor tool: `keygen` / `issue` / `verify` (Ed25519, окремий від CA-ключа).
+- Тести: `pkg/license/license_test.go` (9) — sign/verify roundtrip, tampered, wrong key,
+  expired, file load, community floor, embedded-key parse.
+- Живо перевірено: community блокує mssql/enc; ліцензія пропускає; `TDTP_LICENSE` env;
+  tampered (professional→enterprise) = fatal; community sqlite import працює.
 
-**Файли**: `pkg/license/license.go`, `pkg/license/pubkey.go`
-**Gate points**:
-- `pkg/adapters/factory.go` → адаптер дозволений?
-- `cmd/tdtpcli/commands/encrypt.go` → `features["enc"]`?
-- `cmd/tdtpcli/commands/export.go` → `limits.rows_per_export`?
+**Backward compat дотримано**: відсутній `tdtp.lic` → community mode, не помилка.
 
-**Backward compat**: відсутній `tdtp.lic` → community mode, не помилка.
+**Дві гілки довіри тепер обидві в бінарі:**
+- ONLINE (CA/Mercury) — авторизація середовища виконання.
+- OFFLINE (tdtp.lic) — можливості CLI без мережі. Air-gapped tdtpcli поважає ліцензію.
 
 ---
 

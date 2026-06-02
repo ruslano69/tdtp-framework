@@ -715,6 +715,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolve and verify the license (offline). A present-but-invalid license
+	// is fatal; absent license → community floor (sqlite only, no enc/unsafe).
+	lic, err := commands.ResolveLicense(*flags.License)
+	if err != nil {
+		fatal("%v", err)
+	}
+	if !lic.IsCommunity() {
+		fmt.Printf("License: %s\n", lic.Summary())
+	}
+
+	// Feature gates: refuse licensed-only flags up front (before any DB work).
+	if *flags.Encrypt {
+		if err := commands.GateFeature("enc"); err != nil {
+			fatal("%v", err)
+		}
+	}
+	if *flags.Unsafe {
+		if err := commands.GateFeature("unsafe"); err != nil {
+			fatal("%v", err)
+		}
+	}
+
 	// Commands that operate on files only and never connect to a database
 	// can run without a config file — skip loading entirely.
 	noDBRequired := *flags.Pipeline != "" ||
@@ -777,6 +799,14 @@ func main() {
 		Type:    config.Database.Type,
 		DSN:     config.Database.BuildDSN(),
 		Charset: config.Database.Charset,
+	}
+
+	// License gate: the configured DB adapter must be permitted.
+	// Empty type (file-only commands without a real DB) is not gated here.
+	if config.Database.Type != "" {
+		if err := commands.GateAdapter(config.Database.Type); err != nil {
+			fatal("%v", err)
+		}
 	}
 
 	// Build TDTQL query from flags

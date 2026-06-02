@@ -73,6 +73,7 @@ OPTIONS:
 
   General:
     --config <file>            Configuration file (default: config.yaml)
+    --license <file>           tdtp.lic license (default: TDTP_LICENSE env, ./tdtp.lic, else community)
     --output <file>            Output file path
     --table <name>             Override target table name on import (default: table name from
                                packet header — the same table it was exported from)
