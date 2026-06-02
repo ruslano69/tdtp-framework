@@ -372,7 +372,10 @@ func (e *Exporter) exportEncrypted(ctx context.Context, generator *packet.Genera
 		binder = mercury.NewClient(e.security.MercuryURL, e.security.MercuryTimeoutMs)
 	}
 
-	serverSecret := os.Getenv("MERCURY_SERVER_SECRET")
+	serverSecret := e.security.ServerSecret
+	if serverSecret == "" {
+		serverSecret = os.Getenv("MERCURY_SERVER_SECRET")
+	}
 	encryptor := processors.NewFileEncryptor(binder, serverSecret, e.packageUUID, e.pipelineName)
 
 	result, errCode, encErr := encryptor.Encrypt(ctx, xmlData)

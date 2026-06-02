@@ -227,12 +227,13 @@ output:
 
 security:
   mercury_url: "%s"
+  server_secret: "%s"
   key_ttl_seconds: 300
   mercury_timeout_ms: 10000
 
 error_handling:
   on_source_error: "fail"
-`, outFileYAML, mercuryURL))
+`, outFileYAML, mercuryURL, mercurySecret))
 
 	// ── 4. Вызываем tdtpcli --pipeline ───────────────────────────────────
 	t.Log("running tdtpcli --pipeline")

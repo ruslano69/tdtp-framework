@@ -35,6 +35,7 @@ type SecurityConfig struct {
 	RecipientResource string `yaml:"recipient_resource"` // Имя ресурса/очереди получателя
 	KeyTTLSeconds     int    `yaml:"key_ttl_seconds"`    // TTL ключа в Mercury Redis (по умолчанию 86400)
 	MercuryTimeoutMs  int    `yaml:"mercury_timeout_ms"` // Таймаут обращения к xZMercury (по умолчанию 5000)
+	ServerSecret      string `yaml:"server_secret"`      // HMAC-ключ xZMercury; fallback: $MERCURY_SERVER_SECRET
 }
 
 // ResultLogConfig определяет параметры публикации результата выполнения пайплайна
