@@ -127,9 +127,9 @@ func TestMSSQLAdapter_AdaptSQL_NegativeLimit_WithFields(t *testing.T) {
 	// Полная схема таблицы — первое поле "timestamp" НЕ входит в --fields.
 	schema := packet.Schema{
 		Fields: []packet.Field{
-			{Name: "timestamp"},      // системное поле, не запрошено через --fields
-			{Name: "Calendar Date"},  // запрошено
-			{Name: "Hours"},          // запрошено
+			{Name: "timestamp"},     // системное поле, не запрошено через --fields
+			{Name: "Calendar Date"}, // запрошено
+			{Name: "Hours"},         // запрошено
 		},
 	}
 
@@ -200,7 +200,7 @@ func TestMSSQLAdapter_AdaptSQL_NegativeLimit_SelectStar(t *testing.T) {
 	schema := packet.Schema{
 		Fields: []packet.Field{
 			{Name: "timestamp", ReadOnly: true},  // rowversion — отсекается PostProcessRows
-			{Name: "Entry No_", ReadOnly: false},  // первый writable — должен стать ORDER BY
+			{Name: "Entry No_", ReadOnly: false}, // первый writable — должен стать ORDER BY
 			{Name: "Posting Date", ReadOnly: false},
 		},
 	}

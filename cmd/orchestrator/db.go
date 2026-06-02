@@ -142,7 +142,7 @@ func (d *OrchestratorDB) ListSchedules() ([]*ScheduleRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*ScheduleRecord
 	for rows.Next() {
 		r, err := scanSchedule(rows)
@@ -257,7 +257,7 @@ func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Job
 	for rows.Next() {
 		j, err := scanJobRow(rows)
@@ -279,7 +279,7 @@ func (d *OrchestratorDB) ListJobsByScenario(scenario string, limit int) ([]*Job,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Job
 	for rows.Next() {
 		j, err := scanJobRow(rows)
@@ -295,11 +295,11 @@ func (d *OrchestratorDB) ListJobsByScenario(scenario string, limit int) ([]*Job,
 
 // TokenRecord is a row in the tokens table (never carries the raw token).
 type TokenRecord struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Role       string    `json:"role"`
-	Scenarios  []string  `json:"scenarios"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Role       string     `json:"role"`
+	Scenarios  []string   `json:"scenarios"`
+	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
@@ -355,7 +355,7 @@ func (d *OrchestratorDB) ListTokens() ([]*TokenRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*TokenRecord
 	for rows.Next() {
 		var r TokenRecord
@@ -462,7 +462,7 @@ func (d *OrchestratorDB) ListRequests(status RequestStatus, submitterID string, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*ProjectRequest
 	for rows.Next() {
 		r, err := scanRequest(rows)
