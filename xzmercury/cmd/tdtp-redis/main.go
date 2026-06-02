@@ -26,9 +26,9 @@ import (
 )
 
 func main() {
-	mercuryAddr  := flag.String("mercury", "127.0.0.1:6379", "listen address for the Mercury (keys) Redis")
+	mercuryAddr := flag.String("mercury", "127.0.0.1:6379", "listen address for the Mercury (keys) Redis")
 	pipelineAddr := flag.String("pipeline", "127.0.0.1:6380", "listen address for the Pipeline (state) Redis")
-	password     := flag.String("password", "", "require this password on both instances (empty = no auth)")
+	password := flag.String("password", "", "require this password on both instances (empty = no auth)")
 	flag.Parse()
 
 	mercury := miniredis.NewMiniRedis()

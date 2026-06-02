@@ -13,8 +13,9 @@ import (
 )
 
 // AuthorizeHandler handles two-step re-authorization for an existing cert:
-//   Step 1: POST /api/env/authorize       → { cert }         → returns challenge nonce
-//   Step 2: POST /api/env/authorize/confirm → { challenge_id, sig } → returns SessionToken
+//
+//	Step 1: POST /api/env/authorize       → { cert }         → returns challenge nonce
+//	Step 2: POST /api/env/authorize/confirm → { challenge_id, sig } → returns SessionToken
 //
 // Critical: the cert alone is not proof — it's a signed blob that can be copied.
 // Proof comes from the live challenge-response: only the original hardware with the

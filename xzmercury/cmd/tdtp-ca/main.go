@@ -35,9 +35,9 @@ import (
 )
 
 func main() {
-	dbPath  := flag.String("db",   "ca.db",            "SQLite CA database path")
-	keyPath := flag.String("key",  "ca.ed25519.priv",  "CA Ed25519 private key PEM")
-	addr    := flag.String("addr", ":8443",             "listen address")
+	dbPath := flag.String("db", "ca.db", "SQLite CA database path")
+	keyPath := flag.String("key", "ca.ed25519.priv", "CA Ed25519 private key PEM")
+	addr := flag.String("addr", ":8443", "listen address")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})

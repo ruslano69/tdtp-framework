@@ -268,7 +268,9 @@ func (c *Client) do(httpReq *http.Request, resp any) error {
 	respBody, _ := io.ReadAll(httpResp.Body)
 
 	if httpResp.StatusCode >= 400 {
-		var e struct{ Error string `json:"error"` }
+		var e struct {
+			Error string `json:"error"`
+		}
 		_ = json.Unmarshal(respBody, &e)
 		return fmt.Errorf("CA %s: HTTP %d: %s", httpReq.URL.Path, httpResp.StatusCode, e.Error)
 	}

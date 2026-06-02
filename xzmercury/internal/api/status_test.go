@@ -13,8 +13,8 @@ type fakeGuard struct {
 	perms []string
 }
 
-func (f *fakeGuard) Valid() bool            { return f.valid }
-func (f *fakeGuard) Permissions() []string  { return f.perms }
+func (f *fakeGuard) Valid() bool           { return f.valid }
+func (f *fakeGuard) Permissions() []string { return f.perms }
 
 func decodeStatus(t *testing.T, h http.HandlerFunc) map[string]any {
 	t.Helper()

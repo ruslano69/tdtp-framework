@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	sessionTokenTTL = 4 * time.Hour  // short-lived operational token
+	sessionTokenTTL = 4 * time.Hour   // short-lived operational token
 	challengeTTL    = 2 * time.Minute // pending challenge window
 )
 
@@ -28,14 +28,15 @@ type pendingChallenge struct {
 }
 
 // EnrollHandler handles two-step enrollment:
-//   Step 1: POST /api/env/enroll  → { license_key, env_id_pub }  → returns challenge nonce
-//   Step 2: POST /api/env/enroll/confirm → { challenge_id, sig } → returns EnvCert + SessionToken
+//
+//	Step 1: POST /api/env/enroll  → { license_key, env_id_pub }  → returns challenge nonce
+//	Step 2: POST /api/env/enroll/confirm → { challenge_id, sig } → returns EnvCert + SessionToken
 type EnrollHandler struct {
-	db       *DB
-	caPriv   ed25519.PrivateKey
-	caPub    ed25519.PublicKey
-	mu       sync.Mutex
-	pending  map[string]*pendingChallenge // challenge_id → pendingChallenge
+	db      *DB
+	caPriv  ed25519.PrivateKey
+	caPub   ed25519.PublicKey
+	mu      sync.Mutex
+	pending map[string]*pendingChallenge // challenge_id → pendingChallenge
 }
 
 // NewEnrollHandler creates the enrollment handler.
@@ -59,7 +60,7 @@ type enrollStep1Request struct {
 
 type enrollStep1Response struct {
 	ChallengeID string `json:"challenge_id"` // reference for step 2
-	Nonce       []byte `json:"nonce"`         // sign this with env private key
+	Nonce       []byte `json:"nonce"`        // sign this with env private key
 }
 
 // Step1 validates the license and issues a challenge nonce.
