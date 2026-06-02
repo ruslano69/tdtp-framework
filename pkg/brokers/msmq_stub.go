@@ -55,11 +55,9 @@ func (m *MSMQ) GetBrokerType() string {
 }
 
 // SendBatch отправляет несколько сообщений последовательно (stub).
-func (m *MSMQ) SendBatch(ctx context.Context, messages [][]byte) error {
-	for i, msg := range messages {
-		if err := m.Send(ctx, msg); err != nil {
-			return fmt.Errorf("SendBatch: message %d/%d: %w", i+1, len(messages), err)
-		}
+func (m *MSMQ) SendBatch(_ context.Context, messages [][]byte) error {
+	if len(messages) == 0 {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("MSMQ is only supported on Windows (current OS: %s)", runtime.GOOS)
 }

@@ -18,10 +18,10 @@ import (
 type JobStatus string
 
 const (
-	JobPending  JobStatus = "pending"
-	JobRunning  JobStatus = "running"
-	JobDone     JobStatus = "done"
-	JobFailed   JobStatus = "failed"
+	JobPending JobStatus = "pending"
+	JobRunning JobStatus = "running"
+	JobDone    JobStatus = "done"
+	JobFailed  JobStatus = "failed"
 )
 
 // Job tracks one scenario execution.
@@ -95,7 +95,7 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 	}
 
 	go func() {
-		defer os.Remove(tmpFile)
+		defer func() { _ = os.Remove(tmpFile) }()
 
 		_ = e.db.UpdateJobStatus(job.ID, JobRunning)
 

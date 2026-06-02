@@ -41,14 +41,14 @@ import (
 func main() {
 	scenariosDir := flag.String("scenarios", "./scenarios", "directory with scenario YAML files")
 	schedulesDir := flag.String("schedules-seed", "./schedules", "directory with schedule seed YAML files")
-	dbPath       := flag.String("db", "orchestrator.db", "SQLite database path")
-	tdtpcliPath  := flag.String("tdtpcli", "./tdtpcli", "path to tdtpcli binary")
-	tmpDir       := flag.String("tmp", os.TempDir(), "directory for rendered pipeline YAMLs")
-	addr         := flag.String("addr", ":8080", "listen address")
-	licensePath  := flag.String("license", "", "path to tdtp.lic (default: TDTP_LICENSE env, ./tdtp.lic, else community)")
-	mercuryURL   := flag.String("mercury-url", "", "xZMercury base URL for online preflight (empty = skip)")
-	requireProd  := flag.Bool("require-prod", false, "refuse to start if Mercury is in dev mode or not CA-authorized")
-	noAuth       := flag.Bool("no-auth", false, "disable token authentication (local dev only — every request is admin)")
+	dbPath := flag.String("db", "orchestrator.db", "SQLite database path")
+	tdtpcliPath := flag.String("tdtpcli", "./tdtpcli", "path to tdtpcli binary")
+	tmpDir := flag.String("tmp", os.TempDir(), "directory for rendered pipeline YAMLs")
+	addr := flag.String("addr", ":8080", "listen address")
+	licensePath := flag.String("license", "", "path to tdtp.lic (default: TDTP_LICENSE env, ./tdtp.lic, else community)")
+	mercuryURL := flag.String("mercury-url", "", "xZMercury base URL for online preflight (empty = skip)")
+	requireProd := flag.Bool("require-prod", false, "refuse to start if Mercury is in dev mode or not CA-authorized")
+	noAuth := flag.Bool("no-auth", false, "disable token authentication (local dev only — every request is admin)")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
@@ -78,17 +78,16 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("open orchestrator db")
 	}
-	defer func() { _ = db.Close() }()
-
 	// Load scenarios from directory.
 	scenes, err := LoadScenariosDir(*scenariosDir)
 	if err != nil {
+		_ = db.Close()
 		log.Fatal().Err(err).Str("dir", *scenariosDir).Msg("load scenarios")
 	}
 	log.Info().Int("count", len(scenes)).Str("dir", *scenariosDir).Msg("scenarios loaded")
 
 	// Wire executor and scheduler.
-	executor  := NewExecutor(*tdtpcliPath, filepath.Join(*tmpDir, "orch-pipelines"), db)
+	executor := NewExecutor(*tdtpcliPath, filepath.Join(*tmpDir, "orch-pipelines"), db)
 	scheduler := NewScheduler(executor, scenes, db, gate)
 
 	// Seed schedules from YAML → DB (idempotent: ON CONFLICT DO UPDATE).
@@ -98,17 +97,18 @@ func main() {
 
 	// Load all enabled schedules from DB and register with cron.
 	if err := scheduler.LoadFromDB(); err != nil {
+		_ = db.Close()
 		log.Fatal().Err(err).Msg("load schedules from db")
 	}
-	scheduler.Start()
-	defer scheduler.Stop()
 
+	// All fatal-risk init done — register cleanup defers.
 	// Authentication: token-based with roles. Bootstrap an admin token on first run.
 	auth := NewAuthenticator(db, !*noAuth)
 	if *noAuth {
 		log.Warn().Msg("AUTH DISABLED (--no-auth) — every request is treated as admin")
 	} else {
 		if raw, err := auth.BootstrapAdminToken(); err != nil {
+			_ = db.Close()
 			log.Fatal().Err(err).Msg("bootstrap admin token")
 		} else if raw != "" {
 			log.Warn().Msg("──────────────────────────────────────────────────────────────")
@@ -116,6 +116,11 @@ func main() {
 			log.Warn().Msg("──────────────────────────────────────────────────────────────")
 		}
 	}
+
+	// All fatal-risk init done — register cleanup defers.
+	defer func() { _ = db.Close() }()
+	scheduler.Start()
+	defer scheduler.Stop()
 
 	// HTTP API.
 	r := chi.NewRouter()
@@ -131,237 +136,237 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware)
 
-	// ── Scenarios ──────────────────────────────────────────────────────────────
-	r.Get("/scenarios", RequireRole(RoleConsumer, func(w http.ResponseWriter, _ *http.Request) {
-		type item struct {
-			Name        string     `json:"name"`
-			Description string     `json:"description"`
-			Params      []ParamDef `json:"params,omitempty"`
-			Permissions []string   `json:"permissions,omitempty"`
-		}
-		out := make([]item, 0, len(scenes))
-		for _, s := range scenes {
-			out = append(out, item{
-				Name:        s.Orchestrator.Name,
-				Description: s.Orchestrator.Description,
-				Params:      s.Orchestrator.Params,
-				Permissions: s.Orchestrator.Permissions,
-			})
-		}
-		writeJSON(w, http.StatusOK, out)
-	}))
+		// ── Scenarios ──────────────────────────────────────────────────────────────
+		r.Get("/scenarios", RequireRole(RoleConsumer, func(w http.ResponseWriter, _ *http.Request) {
+			type item struct {
+				Name        string     `json:"name"`
+				Description string     `json:"description"`
+				Params      []ParamDef `json:"params,omitempty"`
+				Permissions []string   `json:"permissions,omitempty"`
+			}
+			out := make([]item, 0, len(scenes))
+			for _, s := range scenes {
+				out = append(out, item{
+					Name:        s.Orchestrator.Name,
+					Description: s.Orchestrator.Description,
+					Params:      s.Orchestrator.Params,
+					Permissions: s.Orchestrator.Permissions,
+				})
+			}
+			writeJSON(w, http.StatusOK, out)
+		}))
 
-	r.Get("/scenarios/{name}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-		name := chi.URLParam(r, "name")
-		s, ok := scenes[name]
-		if !ok {
-			writeError(w, http.StatusNotFound, "scenario not found")
-			return
-		}
-		writeJSON(w, http.StatusOK, s.Orchestrator)
-	}))
-
-	r.Post("/scenarios/{name}/run", RequireRole(RoleActivator, func(w http.ResponseWriter, r *http.Request) {
-		name := chi.URLParam(r, "name")
-		s, ok := scenes[name]
-		if !ok {
-			writeError(w, http.StatusNotFound, "scenario not found")
-			return
-		}
-
-		// Per-token scenario allowlist: an activator may be scoped to specific scenarios.
-		if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(name) {
-			writeError(w, http.StatusForbidden, "token not authorized for scenario "+name)
-			return
-		}
-
-		// Parse params from request body.
-		var body struct {
-			Params map[string]string `json:"params"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
-			return
-		}
-
-		params, err := s.ValidateParams(body.Params)
-		if err != nil {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-
-		// Trust gate: scenario permissions must be covered by license + Mercury env.
-		if err := gate.GateScenario(s); err != nil {
-			writeError(w, http.StatusForbidden, err.Error())
-			return
-		}
-		// Pipeline limit: refuse if too many jobs are already active.
-		if active, err := db.CountActiveJobs(); err == nil {
-			if err := gate.CheckPipelineLimit(active); err != nil {
-				writeError(w, http.StatusTooManyRequests, err.Error())
+		r.Get("/scenarios/{name}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+			name := chi.URLParam(r, "name")
+			s, ok := scenes[name]
+			if !ok {
+				writeError(w, http.StatusNotFound, "scenario not found")
 				return
 			}
-		}
+			writeJSON(w, http.StatusOK, s.Orchestrator)
+		}))
 
-		job, err := executor.Submit(r.Context(), s, params, "" /* manual run */)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"job_id": job.ID})
-	}))
+		r.Post("/scenarios/{name}/run", RequireRole(RoleActivator, func(w http.ResponseWriter, r *http.Request) {
+			name := chi.URLParam(r, "name")
+			s, ok := scenes[name]
+			if !ok {
+				writeError(w, http.StatusNotFound, "scenario not found")
+				return
+			}
 
-	// ── Jobs ───────────────────────────────────────────────────────────────────
-	r.Get("/jobs", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-		jobs, err := db.ListJobs(100)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, jobs)
-	}))
+			// Per-token scenario allowlist: an activator may be scoped to specific scenarios.
+			if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(name) {
+				writeError(w, http.StatusForbidden, "token not authorized for scenario "+name)
+				return
+			}
 
-	r.Get("/jobs/{id}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-		job, err := db.GetJob(chi.URLParam(r, "id"))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if job == nil {
-			writeError(w, http.StatusNotFound, "job not found")
-			return
-		}
-		writeJSON(w, http.StatusOK, job)
-	}))
+			// Parse params from request body.
+			var body struct {
+				Params map[string]string `json:"params"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+				return
+			}
 
-	// ── Results (consumer view) ─────────────────────────────────────────────────
-	// Recent jobs for a scenario, scoped by the token's scenario allowlist.
-	r.Get("/results/{scenario}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-		scenario := chi.URLParam(r, "scenario")
-		if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(scenario) {
-			writeError(w, http.StatusForbidden, "token not authorized for scenario "+scenario)
-			return
-		}
-		jobs, err := db.ListJobsByScenario(scenario, 50)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, jobs)
-	}))
+			params, err := s.ValidateParams(body.Params)
+			if err != nil {
+				writeError(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
 
-	// ── Schedules (admin) ───────────────────────────────────────────────────────
-	r.Get("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		schedules, err := db.ListSchedules()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, schedules)
-	}))
+			// Trust gate: scenario permissions must be covered by license + Mercury env.
+			if err := gate.GateScenario(s); err != nil {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			// Pipeline limit: refuse if too many jobs are already active.
+			if active, err := db.CountActiveJobs(); err == nil {
+				if err := gate.CheckPipelineLimit(active); err != nil {
+					writeError(w, http.StatusTooManyRequests, err.Error())
+					return
+				}
+			}
 
-	r.Post("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		var rec ScheduleRecord
-		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
-			return
-		}
-		if rec.ID == "" || rec.Scenario == "" || rec.CronExpr == "" {
-			writeError(w, http.StatusBadRequest, "id, scenario and cron_expr required")
-			return
-		}
-		rec.Enabled = true
-		if err := scheduler.Add(&rec); err != nil {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusCreated, rec)
-	}))
+			job, err := executor.Submit(r.Context(), s, params, "" /* manual run */)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusAccepted, map[string]string{"job_id": job.ID})
+		}))
 
-	r.Patch("/schedules/{id}/enable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		if err := scheduler.Enable(chi.URLParam(r, "id")); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
+		// ── Jobs ───────────────────────────────────────────────────────────────────
+		r.Get("/jobs", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+			jobs, err := db.ListJobs(100)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, jobs)
+		}))
 
-	r.Patch("/schedules/{id}/disable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		if err := scheduler.Disable(chi.URLParam(r, "id")); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
+		r.Get("/jobs/{id}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+			job, err := db.GetJob(chi.URLParam(r, "id"))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if job == nil {
+				writeError(w, http.StatusNotFound, "job not found")
+				return
+			}
+			writeJSON(w, http.StatusOK, job)
+		}))
 
-	r.Delete("/schedules/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		if err := scheduler.Delete(chi.URLParam(r, "id")); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
+		// ── Results (consumer view) ─────────────────────────────────────────────────
+		// Recent jobs for a scenario, scoped by the token's scenario allowlist.
+		r.Get("/results/{scenario}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+			scenario := chi.URLParam(r, "scenario")
+			if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(scenario) {
+				writeError(w, http.StatusForbidden, "token not authorized for scenario "+scenario)
+				return
+			}
+			jobs, err := db.ListJobsByScenario(scenario, 50)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, jobs)
+		}))
 
-	// ── Tokens (admin) ──────────────────────────────────────────────────────────
-	r.Get("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		tokens, err := db.ListTokens()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, tokens)
-	}))
+		// ── Schedules (admin) ───────────────────────────────────────────────────────
+		r.Get("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			schedules, err := db.ListSchedules()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, schedules)
+		}))
 
-	r.Post("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Name      string   `json:"name"`
-			Role      string   `json:"role"`
-			Scenarios []string `json:"scenarios"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
-			return
-		}
-		role := Role(body.Role)
-		if _, ok := roleRank[role]; !ok || body.Name == "" {
-			writeError(w, http.StatusBadRequest, "name and valid role (admin|activator|consumer) required")
-			return
-		}
-		raw, err := auth.CreateToken(body.Name, role, body.Scenarios)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		// Raw token shown ONCE.
-		writeJSON(w, http.StatusCreated, map[string]any{
-			"token": raw, "name": body.Name, "role": body.Role,
-			"note": "store this token now — it is not retrievable later",
-		})
-	}))
+		r.Post("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			var rec ScheduleRecord
+			if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+				return
+			}
+			if rec.ID == "" || rec.Scenario == "" || rec.CronExpr == "" {
+				writeError(w, http.StatusBadRequest, "id, scenario and cron_expr required")
+				return
+			}
+			rec.Enabled = true
+			if err := scheduler.Add(&rec); err != nil {
+				writeError(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusCreated, rec)
+		}))
 
-	r.Delete("/tokens/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-		if err := db.DeleteToken(chi.URLParam(r, "id")); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
+		r.Patch("/schedules/{id}/enable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			if err := scheduler.Enable(chi.URLParam(r, "id")); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
 
-	// ── Project requests (submit / review / approve workflow) ───────────────────
-	// Clients propose runs; admins test, approve (→ execute), or reject.
-	rh := &requestHandlers{db: db, scenes: scenes, executor: executor, gate: gate}
-	r.Post("/requests", RequireRole(RoleConsumer, rh.Submit))                 // propose
-	r.Get("/requests", RequireRole(RoleConsumer, rh.List))                    // own (admin: all)
-	r.Get("/requests/{id}", RequireRole(RoleConsumer, rh.Get))               // own (admin: any)
-	r.Post("/requests/{id}/test", RequireRole(RoleAdmin, rh.Test))           // dry-run
-	r.Post("/requests/{id}/approve", RequireRole(RoleAdmin, rh.Approve))     // execute
-	r.Post("/requests/{id}/reject", RequireRole(RoleAdmin, rh.Reject))       // reject
+		r.Patch("/schedules/{id}/disable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			if err := scheduler.Disable(chi.URLParam(r, "id")); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		r.Delete("/schedules/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			if err := scheduler.Delete(chi.URLParam(r, "id")); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		// ── Tokens (admin) ──────────────────────────────────────────────────────────
+		r.Get("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			tokens, err := db.ListTokens()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, tokens)
+		}))
+
+		r.Post("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Name      string   `json:"name"`
+				Role      string   `json:"role"`
+				Scenarios []string `json:"scenarios"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+				return
+			}
+			role := Role(body.Role)
+			if _, ok := roleRank[role]; !ok || body.Name == "" {
+				writeError(w, http.StatusBadRequest, "name and valid role (admin|activator|consumer) required")
+				return
+			}
+			raw, err := auth.CreateToken(body.Name, role, body.Scenarios)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			// Raw token shown ONCE.
+			writeJSON(w, http.StatusCreated, map[string]any{
+				"token": raw, "name": body.Name, "role": body.Role,
+				"note": "store this token now — it is not retrievable later",
+			})
+		}))
+
+		r.Delete("/tokens/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			if err := db.DeleteToken(chi.URLParam(r, "id")); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		// ── Project requests (submit / review / approve workflow) ───────────────────
+		// Clients propose runs; admins test, approve (→ execute), or reject.
+		rh := &requestHandlers{db: db, scenes: scenes, executor: executor, gate: gate}
+		r.Post("/requests", RequireRole(RoleConsumer, rh.Submit))            // propose
+		r.Get("/requests", RequireRole(RoleConsumer, rh.List))               // own (admin: all)
+		r.Get("/requests/{id}", RequireRole(RoleConsumer, rh.Get))           // own (admin: any)
+		r.Post("/requests/{id}/test", RequireRole(RoleAdmin, rh.Test))       // dry-run
+		r.Post("/requests/{id}/approve", RequireRole(RoleAdmin, rh.Approve)) // execute
+		r.Post("/requests/{id}/reject", RequireRole(RoleAdmin, rh.Reject))   // reject
 
 	}) // end authenticated group
 
 	log.Info().Str("addr", *addr).Bool("auth", !*noAuth).Msg("orchestrator started")
 	if err := http.ListenAndServe(*addr, r); err != nil {
-		log.Fatal().Err(err).Msg("server error")
+		log.Error().Err(err).Msg("server error")
 	}
 }
 

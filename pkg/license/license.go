@@ -44,8 +44,8 @@ type Limits struct {
 // json.Marshal produces deterministic bytes for signing/verification.
 type payload struct {
 	Licensee string   `json:"licensee"`
-	Issued   string   `json:"issued"`   // YYYY-MM-DD
-	Expires  string   `json:"expires"`  // YYYY-MM-DD
+	Issued   string   `json:"issued"`  // YYYY-MM-DD
+	Expires  string   `json:"expires"` // YYYY-MM-DD
 	Tier     Tier     `json:"tier"`
 	Adapters []string `json:"adapters"`
 	Features []string `json:"features"`

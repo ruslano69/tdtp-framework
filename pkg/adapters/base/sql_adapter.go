@@ -140,7 +140,8 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 	//                  The outer ORDER BY in the subquery pattern preserves original order.
 	//
 	// Using TOP when possible avoids failures on older compat levels (80, 90, 100).
-	if query != nil && query.Limit > 0 && query.Offset == 0 {
+	switch {
+	case query != nil && query.Limit > 0 && query.Offset == 0:
 		// TOP N: inject after SELECT (handles SELECT DISTINCT too)
 		limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
 		sql = strings.Replace(sql, limitPattern, "", 1)
@@ -148,7 +149,7 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 		if !strings.Contains(sql, fmt.Sprintf("TOP %d", query.Limit)) {
 			sql = strings.Replace(sql, "SELECT ", fmt.Sprintf("SELECT TOP %d ", query.Limit), 1)
 		}
-	} else if query != nil && (query.Limit > 0 || query.Offset > 0) {
+	case query != nil && (query.Limit > 0 || query.Offset > 0):
 		// OFFSET/FETCH: SQL Server 2012+ only (compat level 110+)
 		limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
 		offsetPattern := fmt.Sprintf(" OFFSET %d", query.Offset)
@@ -177,7 +178,7 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 		if query.Limit > 0 {
 			sql += fmt.Sprintf(" FETCH NEXT %d ROWS ONLY", query.Limit)
 		}
-	} else if query != nil && query.Limit < 0 {
+	case query != nil && query.Limit < 0:
 		// Tail mode: --limit -N means "last N rows" (like tail -n).
 		// sql_generator emits LIMIT N (where N = abs(query.Limit)).
 		// Two sub-cases depending on whether ORDER BY was requested:

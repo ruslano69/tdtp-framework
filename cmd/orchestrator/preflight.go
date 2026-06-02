@@ -26,7 +26,7 @@ import (
 
 // MercuryStatus mirrors xZMercury's GET /status response.
 type MercuryStatus struct {
-	Mode         string   `json:"mode"`          // "dev" | "prod"
+	Mode         string   `json:"mode"` // "dev" | "prod"
 	Dev          bool     `json:"dev"`
 	CAAuthorized bool     `json:"ca_authorized"`
 	Permissions  []string `json:"permissions"`
