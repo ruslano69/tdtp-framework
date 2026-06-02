@@ -137,9 +137,9 @@ type Flags struct {
 	CreateConfigMySQL  *bool
 
 	// ETL Pipeline
-	Unsafe         *bool
-	UnsafeCert     *string           // --unsafe-cert: path to unsafe-op.cert capability certificate
-	PipelineVars   map[string]string // @name=value args passed after --pipeline flag
+	Unsafe       *bool
+	UnsafeCert   *string           // --unsafe-cert: path to unsafe-op.cert capability certificate
+	PipelineVars map[string]string // @name=value args passed after --pipeline flag
 
 	// Import precondition check (v1.4)
 	ExpectVars map[string]string // --expect-var name=value: verify PipelineContext before import
