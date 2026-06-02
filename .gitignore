@@ -10,6 +10,7 @@
 /cmd/tdtpserve/tdtpserve.exe
 tdtpcli
 tdtpserve
+orchestrator
 
 # Test databases
 *.db
