@@ -2,16 +2,29 @@
 
 ## Контекст
 
-Поточний стан (v1.10.0):
-- `tdtpcli` — production-ready ETL CLI (всі адаптери, enc, CSV, XLSX, HTML, integrity).
-- `xZMercury` — key store + hash notary + burn marker + mode-in-HMAC + CA-guard.
+Поточний стан (v1.11.0):
+- `tdtpcli` — production-ready ETL CLI + offline license-gate (адаптери, фічі, --unsafe).
+- `xZMercury` — key store + hash notary + burn marker + mode-in-HMAC + CA-guard + /status.
 - `tdtp-ca` — CA-сервер (enrollment, re-auth, 24h cert, /hello DDoS-гейт).
 - `tdtp-certify` — CLI адміна CA (keygen, issue-license, revoke, list-active).
-- `orchestrator` — scenario runner + cron scheduler (SQLite, HTTP API).
+- `tdtp-license` — vendor signer для tdtp.lic (keygen/issue/verify).
+- `tdtp-redis` — in-memory Redis для локального відтворення prod.
+- `orchestrator` — scenario runner + scheduler + token-auth (ролі) + trust-gate +
+  project-request workflow (submit → test → approve/reject).
 
-Ланцюг довіри ЗАМКНЕНО на рівні Mercury: prod Mercury авторизується в CA при старті,
-ключі не видаються без живої CA-сесії. Наступне — донести ліцензію до tdtpcli і
-додати UserApp-шар.
+Увесь ланцюг довіри замкнено end-to-end: UserApp(token) → Orchestrator(license∩Mercury) →
+tdtpcli(license) → xZMercury(CA session) → tdtp-ca(TPM+seat). Priority 1–6 виконано.
+
+### Client workflow (виконано в цій сесії)
+
+Розширення API оркестратора для клієнтської роботи:
+- `consumer` переглядає доступні сценарії, **подає заявку (project request)** з params/title.
+- `admin` **тестує** заявку (dry-run: validate + trust gate, без виконання),
+  **погоджує** (→ виконує, прив'язує job_id) або **відхиляє** з нотаткою.
+- Ізоляція: consumer бачить лише свої заявки, admin — усі (+ `?status=` фільтр).
+- Файли: `cmd/orchestrator/requests.go` + `requests_test.go` (6); DB-таблиця `requests`.
+- Живо перевірено: submit → test(would_run) → approve(job_id) → reject(note);
+  consumer 403 на approve; ізоляція між client-fin / client-hr.
 
 ---
 

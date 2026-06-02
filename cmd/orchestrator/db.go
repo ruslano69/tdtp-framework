@@ -50,6 +50,26 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash);
+
+-- Project requests: a client proposes a run; an admin tests and approves/rejects.
+CREATE TABLE IF NOT EXISTS requests (
+	id             TEXT PRIMARY KEY,
+	scenario       TEXT NOT NULL,
+	params         TEXT NOT NULL DEFAULT '{}',  -- JSON object
+	title          TEXT,                        -- optional human label for the project
+	submitter_id   TEXT NOT NULL,               -- token id of the submitter ("" in no-auth)
+	submitter_name TEXT NOT NULL,
+	status         TEXT NOT NULL DEFAULT 'pending', -- pending|approved|rejected
+	review_note    TEXT,
+	reviewed_by    TEXT,
+	job_id         TEXT,                        -- resulting job after approval+execute
+	created_at     DATETIME NOT NULL,
+	reviewed_at    DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_requests_status    ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_submitter ON requests(submitter_id);
+CREATE INDEX IF NOT EXISTS idx_requests_created   ON requests(created_at DESC);
 `
 
 // OrchestratorDB wraps the orchestrator SQLite database.
@@ -367,6 +387,128 @@ func (d *OrchestratorDB) CountTokens() (int, error) {
 	var n int
 	err := d.db.QueryRow(`SELECT COUNT(*) FROM tokens`).Scan(&n)
 	return n, err
+}
+
+// ─── Project request operations ────────────────────────────────────────────────
+
+// RequestStatus is the review state of a project request.
+type RequestStatus string
+
+const (
+	ReqPending  RequestStatus = "pending"
+	ReqApproved RequestStatus = "approved"
+	ReqRejected RequestStatus = "rejected"
+)
+
+// ProjectRequest is a client-submitted run proposal awaiting admin review.
+type ProjectRequest struct {
+	ID            string            `json:"id"`
+	Scenario      string            `json:"scenario"`
+	Params        map[string]string `json:"params"`
+	Title         string            `json:"title,omitempty"`
+	SubmitterID   string            `json:"submitter_id"`
+	SubmitterName string            `json:"submitter_name"`
+	Status        RequestStatus     `json:"status"`
+	ReviewNote    string            `json:"review_note,omitempty"`
+	ReviewedBy    string            `json:"reviewed_by,omitempty"`
+	JobID         string            `json:"job_id,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	ReviewedAt    *time.Time        `json:"reviewed_at,omitempty"`
+}
+
+// InsertRequest persists a new pending request.
+func (d *OrchestratorDB) InsertRequest(r *ProjectRequest) error {
+	params, err := json.Marshal(r.Params)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec(
+		`INSERT INTO requests(id, scenario, params, title, submitter_id, submitter_name,
+		                      status, created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		r.ID, r.Scenario, string(params), r.Title, r.SubmitterID, r.SubmitterName,
+		string(ReqPending), time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// GetRequest returns one request by ID.
+func (d *OrchestratorDB) GetRequest(id string) (*ProjectRequest, error) {
+	row := d.db.QueryRow(
+		`SELECT id, scenario, params, title, submitter_id, submitter_name,
+		        status, review_note, reviewed_by, job_id, created_at, reviewed_at
+		 FROM requests WHERE id=?`, id)
+	return scanRequest(row)
+}
+
+// ListRequests returns requests, optionally filtered by status and/or submitter.
+// submitterID="" means no submitter filter (admin view). status="" means all statuses.
+func (d *OrchestratorDB) ListRequests(status RequestStatus, submitterID string, limit int) ([]*ProjectRequest, error) {
+	q := `SELECT id, scenario, params, title, submitter_id, submitter_name,
+	             status, review_note, reviewed_by, job_id, created_at, reviewed_at
+	      FROM requests WHERE 1=1`
+	var args []any
+	if status != "" {
+		q += " AND status=?"
+		args = append(args, string(status))
+	}
+	if submitterID != "" {
+		q += " AND submitter_id=?"
+		args = append(args, submitterID)
+	}
+	q += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*ProjectRequest
+	for rows.Next() {
+		r, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ReviewRequest sets the status, reviewer, note and (for approval) the job_id.
+func (d *OrchestratorDB) ReviewRequest(id string, status RequestStatus, reviewedBy, note, jobID string) error {
+	_, err := d.db.Exec(
+		`UPDATE requests SET status=?, reviewed_by=?, review_note=?, job_id=?, reviewed_at=?
+		 WHERE id=?`,
+		string(status), reviewedBy, note, jobID,
+		time.Now().UTC().Format(time.RFC3339), id)
+	return err
+}
+
+func scanRequest(row scannable) (*ProjectRequest, error) {
+	var r ProjectRequest
+	var paramsJSON, createdAt string
+	var title, note, reviewedBy, jobID, reviewedAt sql.NullString
+	err := row.Scan(
+		&r.ID, &r.Scenario, &paramsJSON, &title, &r.SubmitterID, &r.SubmitterName,
+		&r.Status, &note, &reviewedBy, &jobID, &createdAt, &reviewedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(paramsJSON), &r.Params)
+	r.Title = title.String
+	r.ReviewNote = note.String
+	r.ReviewedBy = reviewedBy.String
+	r.JobID = jobID.String
+	r.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	if reviewedAt.Valid {
+		if t, err := time.Parse(time.RFC3339, reviewedAt.String); err == nil {
+			r.ReviewedAt = &t
+		}
+	}
+	return &r, nil
 }
 
 // ─── Scan helpers ─────────────────────────────────────────────────────────────

@@ -52,7 +52,33 @@ DELETE /schedules/{id}                admin     remove
 GET    /tokens                        admin     list tokens (no raw values)
 POST   /tokens                        admin     issue token → raw shown once
 DELETE /tokens/{id}                   admin     revoke token
+
+POST   /requests                      consumer  propose a run (project request)
+GET    /requests[?status=]            consumer  own requests (admin: all)
+GET    /requests/{id}                 consumer  one request (own; admin: any)
+POST   /requests/{id}/test            admin     dry-run: validate + trust gate
+POST   /requests/{id}/approve         admin     execute → links job_id
+POST   /requests/{id}/reject          admin     reject {note}
 ```
+
+## Two ways to run a scenario
+
+**Direct activation** — for trusted automation/users:
+`POST /scenarios/{name}/run` (activator role) runs immediately.
+
+**Project-request workflow** — for clients whose runs need approval:
+
+```
+client (consumer) → POST /requests {scenario, params, title}   status=pending
+admin             → POST /requests/{id}/test                   dry-run verdict
+admin             → POST /requests/{id}/approve                execute → job_id
+   or             → POST /requests/{id}/reject {note}          status=rejected
+```
+
+A consumer can browse scenarios, submit proposals, and see only their own
+requests. The admin reviews every pending request, can dry-run it (params +
+trust gate, nothing executed), then approves (runs it) or rejects it with a note.
+Approved requests carry the resulting `job_id` for traceability.
 
 ### Issuing a token
 

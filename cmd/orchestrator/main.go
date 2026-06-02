@@ -347,6 +347,16 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
+	// ── Project requests (submit / review / approve workflow) ───────────────────
+	// Clients propose runs; admins test, approve (→ execute), or reject.
+	rh := &requestHandlers{db: db, scenes: scenes, executor: executor, gate: gate}
+	r.Post("/requests", RequireRole(RoleConsumer, rh.Submit))                 // propose
+	r.Get("/requests", RequireRole(RoleConsumer, rh.List))                    // own (admin: all)
+	r.Get("/requests/{id}", RequireRole(RoleConsumer, rh.Get))               // own (admin: any)
+	r.Post("/requests/{id}/test", RequireRole(RoleAdmin, rh.Test))           // dry-run
+	r.Post("/requests/{id}/approve", RequireRole(RoleAdmin, rh.Approve))     // execute
+	r.Post("/requests/{id}/reject", RequireRole(RoleAdmin, rh.Reject))       // reject
+
 	}) // end authenticated group
 
 	log.Info().Str("addr", *addr).Bool("auth", !*noAuth).Msg("orchestrator started")

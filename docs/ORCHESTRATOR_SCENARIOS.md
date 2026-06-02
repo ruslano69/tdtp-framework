@@ -236,3 +236,57 @@ A run that asks for a permission missing from either side returns **403**.
 
 Activator tokens may be scoped to specific scenarios; see
 [cmd/orchestrator/README.md](../cmd/orchestrator/README.md).
+
+---
+
+## Client submit → admin approve workflow
+
+Direct `POST /scenarios/{name}/run` is for trusted activators. For clients whose
+runs must be reviewed first, use the project-request workflow.
+
+A **client** (consumer role) browses scenarios and submits a proposal:
+
+```bash
+# Browse what I'm allowed to run
+curl -H "Authorization: Bearer $CLIENT" http://localhost:8080/scenarios
+
+# Submit a project request (proposal) — not executed yet
+curl -X POST http://localhost:8080/requests \
+  -H "Authorization: Bearer $CLIENT" -H "Content-Type: application/json" \
+  -d '{"scenario":"export-payroll","title":"June payroll","params":{"period":"2026-06"}}'
+# → {"id":"…","status":"pending", …}
+
+# See my own requests (consumers see only their own)
+curl -H "Authorization: Bearer $CLIENT" http://localhost:8080/requests
+```
+
+An **admin** reviews pending requests, dry-runs them, then approves or rejects:
+
+```bash
+# All pending proposals
+curl -H "Authorization: Bearer $ADMIN" "http://localhost:8080/requests?status=pending"
+
+# Dry-run: validates params + trust gate, executes NOTHING
+curl -X POST -H "Authorization: Bearer $ADMIN" \
+  http://localhost:8080/requests/$RID/test
+# → {"would_run":true,"resolved_params":{"period":"2026-06"},"blocked_reason":""}
+
+# Approve → executes the scenario, links the resulting job
+curl -X POST -H "Authorization: Bearer $ADMIN" \
+  http://localhost:8080/requests/$RID/approve
+# → {"status":"approved","job_id":"…"}
+
+# Or reject with a note
+curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
+  -d '{"note":"need a budget code first"}' \
+  http://localhost:8080/requests/$RID/reject
+```
+
+Notes:
+
+- A proposal still passes the same trust gate at approval time (license ∩ Mercury
+  permissions, pipeline limit). `test` shows the verdict before committing.
+- Approved requests carry the resulting `job_id` — full traceability from proposal
+  to execution.
+- The scenario allowlist on a token applies to proposals too: a client can only
+  submit requests for scenarios their token permits.
