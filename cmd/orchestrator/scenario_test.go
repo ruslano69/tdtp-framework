@@ -118,3 +118,23 @@ func TestResolveMagicParams(t *testing.T) {
 		t.Errorf("current_month not resolved: %q", out["period"])
 	}
 }
+
+func TestResolveMagicParamsTimezone(t *testing.T) {
+	// Valid timezone: Europe/Moscow — function must not panic and must return YYYY-MM.
+	out := resolveMagicParams(map[string]string{"m": "{{current_month}}"}, "Europe/Moscow")
+	if len(out["m"]) != 7 || out["m"][4] != '-' {
+		t.Errorf("unexpected current_month with tz: %q", out["m"])
+	}
+
+	// Invalid timezone falls back to UTC silently.
+	out2 := resolveMagicParams(map[string]string{"m": "{{current_month}}"}, "Invalid/Zone")
+	if len(out2["m"]) != 7 {
+		t.Errorf("invalid tz should fall back to UTC, got: %q", out2["m"])
+	}
+
+	// Empty timezone = UTC.
+	out3 := resolveMagicParams(map[string]string{"d": "{{current_date}}"}, "")
+	if len(out3["d"]) != 10 {
+		t.Errorf("empty tz should give YYYY-MM-DD, got: %q", out3["d"])
+	}
+}
