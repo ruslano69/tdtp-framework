@@ -82,19 +82,32 @@
 
 ---
 
-## Priority 5 — Orchestrator: UserApp API + автентифікація
+## ✅ Priority 5 — DONE: Orchestrator автентифікація
 
-**Що**: UserApp (Activator/Consumer) потребує автентифікації.
-Поточний API — повністю відкритий.
+Виконано:
+- **Token-based auth з ролями** (`cmd/orchestrator/auth.go`):
+  - Ролі: `consumer` < `activator` < `admin` (roleRank).
+  - Токени зберігаються хешовано (SHA-256); raw показується раз при створенні.
+  - Per-token scenario allowlist (порожній = всі сценарії).
+  - `Middleware` (Bearer → Principal у ctx), `RequireRole`, `PrincipalFrom`.
+  - Bootstrap admin-токен при порожній таблиці (друкується раз у лог).
+  - `--no-auth` для локальної розробки (кожен запит = admin).
+- **DB** (`tokens` таблиця): InsertToken, GetTokenByHash, TouchToken (last_used_at),
+  ListTokens, DeleteToken, CountTokens + `ListJobsByScenario`.
+- **Role-gates на endpoints**:
+  - consumer: `GET /scenarios`, `/scenarios/{name}`, `/jobs`, `/jobs/{id}`, `/results/{scenario}`
+  - activator: `POST /scenarios/{name}/run` (+ scenario allowlist)
+  - admin: `/schedules` CRUD, `/tokens` CRUD
+  - `/healthz` — публічний (liveness probe).
+- **Новий endpoint** `GET /results/{scenario}` — недавні задачі сценарію (consumer view).
+- **Token mgmt API**: `POST /tokens` (видає raw раз), `GET /tokens`, `DELETE /tokens/{id}`.
+- Тести: `cmd/orchestrator/auth_test.go` (8): hash stability, bootstrap (одноразовість),
+  allowlist, middleware (missing/invalid/valid token), RequireRole 403, no-auth=admin.
+- Живо: bootstrap-токен → 401 без токена / 200 з admin; consumer 200 на read,
+  403 на admin-route і на run; activator 403 на сценарій поза allowlist.
 
-**Мінімальний варіант**: Bearer token у конфігурації (shared secret).
-**Правильний варіант**: LDAP через той самий механізм що xZMercury.
-
-**Новий endpoint** для Consumer:
-```
-GET /results/{scenario}/{date}  → список job_id за дату
-GET /jobs/{id}/download         → завантажити output (якщо є)
-```
+**Примітка**: LDAP-варіант (як у xZMercury) — можливе майбутнє розширення, але
+token+role вже покриває Activator/Consumer розділення з достатньою гранулярністю.
 
 ---
 

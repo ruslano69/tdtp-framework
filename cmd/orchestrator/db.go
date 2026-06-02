@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_schedule ON jobs(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status   ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_started  ON jobs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS tokens (
+	id          TEXT PRIMARY KEY,
+	token_hash  TEXT NOT NULL UNIQUE,           -- SHA-256(raw token), hex
+	name        TEXT NOT NULL,                  -- human label
+	role        TEXT NOT NULL,                  -- admin|activator|consumer
+	scenarios   TEXT NOT NULL DEFAULT '[]',     -- JSON array; empty = all scenarios
+	created_at  DATETIME NOT NULL,
+	last_used_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash);
 `
 
 // OrchestratorDB wraps the orchestrator SQLite database.
@@ -235,6 +247,126 @@ func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// ─── Job listing by scenario (consumer view) ──────────────────────────────────
+
+// ListJobsByScenario returns the N most recent jobs for one scenario.
+func (d *OrchestratorDB) ListJobsByScenario(scenario string, limit int) ([]*Job, error) {
+	rows, err := d.db.Query(`
+		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error
+		FROM jobs WHERE scenario=? ORDER BY started_at DESC LIMIT ?`, scenario, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Job
+	for rows.Next() {
+		j, err := scanJobRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// ─── Token operations ─────────────────────────────────────────────────────────
+
+// TokenRecord is a row in the tokens table (never carries the raw token).
+type TokenRecord struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Role       string    `json:"role"`
+	Scenarios  []string  `json:"scenarios"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+}
+
+// InsertToken persists a token by its hash. The raw token is never stored.
+func (d *OrchestratorDB) InsertToken(id, tokenHash, name, role string, scenarios []string) error {
+	sc, err := json.Marshal(scenarios)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec(
+		`INSERT INTO tokens(id, token_hash, name, role, scenarios, created_at)
+		 VALUES(?,?,?,?,?,?)`,
+		id, tokenHash, name, role, string(sc), time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// GetTokenByHash resolves a presented token hash to its record.
+// Returns (nil, nil) when not found.
+func (d *OrchestratorDB) GetTokenByHash(tokenHash string) (*TokenRecord, error) {
+	row := d.db.QueryRow(
+		`SELECT id, name, role, scenarios, created_at, last_used_at
+		 FROM tokens WHERE token_hash=?`, tokenHash)
+	var r TokenRecord
+	var scJSON, createdAt string
+	var lastUsed sql.NullString
+	if err := row.Scan(&r.ID, &r.Name, &r.Role, &scJSON, &createdAt, &lastUsed); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(scJSON), &r.Scenarios)
+	r.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	if lastUsed.Valid {
+		if t, err := time.Parse(time.RFC3339, lastUsed.String); err == nil {
+			r.LastUsedAt = &t
+		}
+	}
+	return &r, nil
+}
+
+// TouchToken updates last_used_at for a token.
+func (d *OrchestratorDB) TouchToken(id string) error {
+	_, err := d.db.Exec(`UPDATE tokens SET last_used_at=? WHERE id=?`,
+		time.Now().UTC().Format(time.RFC3339), id)
+	return err
+}
+
+// ListTokens returns all token records (never the raw tokens).
+func (d *OrchestratorDB) ListTokens() ([]*TokenRecord, error) {
+	rows, err := d.db.Query(
+		`SELECT id, name, role, scenarios, created_at, last_used_at FROM tokens ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*TokenRecord
+	for rows.Next() {
+		var r TokenRecord
+		var scJSON, createdAt string
+		var lastUsed sql.NullString
+		if err := rows.Scan(&r.ID, &r.Name, &r.Role, &scJSON, &createdAt, &lastUsed); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(scJSON), &r.Scenarios)
+		r.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		if lastUsed.Valid {
+			if t, err := time.Parse(time.RFC3339, lastUsed.String); err == nil {
+				r.LastUsedAt = &t
+			}
+		}
+		out = append(out, &r)
+	}
+	return out, rows.Err()
+}
+
+// DeleteToken removes a token by ID.
+func (d *OrchestratorDB) DeleteToken(id string) error {
+	_, err := d.db.Exec(`DELETE FROM tokens WHERE id=?`, id)
+	return err
+}
+
+// CountTokens returns the number of tokens (for bootstrap detection).
+func (d *OrchestratorDB) CountTokens() (int, error) {
+	var n int
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM tokens`).Scan(&n)
+	return n, err
 }
 
 // ─── Scan helpers ─────────────────────────────────────────────────────────────
