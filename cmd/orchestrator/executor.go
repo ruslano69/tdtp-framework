@@ -51,11 +51,14 @@ func execRunner(ctx context.Context, bin string, args ...string) ([]byte, error)
 	return buf.Bytes(), err
 }
 
+const maxJobLogBytes = 64 * 1024
+
 // Executor runs tdtpcli --pipeline with rendered scenario YAML.
 // Jobs are persisted to OrchestratorDB so status survives restarts.
 type Executor struct {
 	tdtpcliPath string
 	tmpDir      string
+	logDir      string
 	db          *OrchestratorDB
 	run         runnerFunc
 	// done, when non-nil, receives each job ID after its run completes.
@@ -65,7 +68,9 @@ type Executor struct {
 
 func NewExecutor(tdtpcliPath, tmpDir string, db *OrchestratorDB) *Executor {
 	_ = os.MkdirAll(tmpDir, 0o700)
-	return &Executor{tdtpcliPath: tdtpcliPath, tmpDir: tmpDir, db: db, run: execRunner}
+	logDir := filepath.Join(tmpDir, "logs")
+	_ = os.MkdirAll(logDir, 0o700)
+	return &Executor{tdtpcliPath: tdtpcliPath, tmpDir: tmpDir, logDir: logDir, db: db, run: execRunner}
 }
 
 // Submit renders the scenario with params and runs tdtpcli asynchronously.
@@ -107,7 +112,16 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 			status = JobFailed
 			errMsg = runErr.Error()
 		}
-		_ = e.db.UpdateJobDone(job.ID, status, string(out), errMsg)
+
+		logStr := string(out)
+		if len(out) > maxJobLogBytes {
+			logPath := filepath.Join(e.logDir, "job-"+job.ID+".log")
+			_ = os.WriteFile(logPath, out, 0o600)
+			tail := out[len(out)-maxJobLogBytes:]
+			logStr = "[truncated — full log: " + logPath + "]\n" + string(tail)
+		}
+
+		_ = e.db.UpdateJobDone(job.ID, status, logStr, errMsg)
 
 		if e.done != nil {
 			e.done <- job.ID

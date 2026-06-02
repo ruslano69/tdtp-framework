@@ -137,8 +137,9 @@ type Flags struct {
 	CreateConfigMySQL  *bool
 
 	// ETL Pipeline
-	Unsafe       *bool
-	PipelineVars map[string]string // @name=value args passed after --pipeline flag
+	Unsafe         *bool
+	UnsafeCert     *string           // --unsafe-cert: path to unsafe-op.cert capability certificate
+	PipelineVars   map[string]string // @name=value args passed after --pipeline flag
 
 	// Import precondition check (v1.4)
 	ExpectVars map[string]string // --expect-var name=value: verify PipelineContext before import
@@ -258,6 +259,7 @@ func ParseFlags() *Flags {
 
 	// ETL Pipeline
 	f.Unsafe = flag.Bool("unsafe", false, "Enable unsafe mode for pipeline (allows all SQL, requires admin)")
+	f.UnsafeCert = flag.String("unsafe-cert", "", "path to unsafe-op.cert capability certificate")
 
 	// Import precondition check (v1.4)
 	flag.Func("expect-var", "Require PipelineContext variable to match before import (name=value); repeatable", func(s string) error {

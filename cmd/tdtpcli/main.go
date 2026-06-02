@@ -504,10 +504,11 @@ func routeCommand(
 		}
 
 		pipelineOpts := commands.PipelineOptions{
-			Unsafe:    *flags.Unsafe,
-			Encrypt:   *flags.Encrypt,
-			EncDev:    encDev,
-			Variables: flags.PipelineVars,
+			Unsafe:         *flags.Unsafe,
+			UnsafeCertPath: *flags.UnsafeCert,
+			Encrypt:        *flags.Encrypt,
+			EncDev:         encDev,
+			Variables:      flags.PipelineVars,
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "etl-pipeline", func() error {

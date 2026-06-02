@@ -16,10 +16,11 @@ import (
 
 // PipelineOptions содержит опции выполнения ETL пайплайна.
 type PipelineOptions struct {
-	Unsafe    bool              // --unsafe: разрешить все SQL операции (требует admin)
-	Encrypt   bool              // --enc: переопределить output.tdtp.encryption: true
-	EncDev    bool              // --enc-dev: использовать DevClient вместо xZMercury (только !production сборки)
-	Variables map[string]string // @name=value аргументы из CLI
+	Unsafe         bool              // --unsafe: разрешить все SQL операции (требует admin)
+	UnsafeCertPath string            // --unsafe-cert: path to capability certificate
+	Encrypt        bool              // --enc: переопределить output.tdtp.encryption: true
+	EncDev         bool              // --enc-dev: использовать DevClient вместо xZMercury (только !production сборки)
+	Variables      map[string]string // @name=value аргументы из CLI
 }
 
 // ExecutePipeline executes an ETL pipeline from YAML configuration file.
@@ -40,10 +41,11 @@ type PipelineOptions struct {
 //   - Administrator privileges required
 //   - Use with extreme caution
 func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOptions) error {
-	// 1. Security Check: Admin privileges required for unsafe mode
-	if opts.Unsafe && !security.IsAdmin() {
-		return fmt.Errorf("unsafe mode requires administrator privileges (current user: %s)",
-			security.GetCurrentUser())
+	// 1. Security Check: unsafe mode requires either a capability cert or admin privileges
+	if opts.Unsafe {
+		if err := applyUnsafeGate(opts.UnsafeCertPath); err != nil {
+			return err
+		}
 	}
 
 	// 2. Load and validate pipeline configuration

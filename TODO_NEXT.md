@@ -1,166 +1,135 @@
-# TODO NEXT
+# TODO NEXT — Sprint план
 
-## Контекст
+## Поточний стан (v1.11.0 + sprint patches)
 
-Поточний стан (v1.11.0):
-- `tdtpcli` — production-ready ETL CLI + offline license-gate (адаптери, фічі, --unsafe).
-- `xZMercury` — key store + hash notary + burn marker + mode-in-HMAC + CA-guard + /status.
-- `tdtp-ca` — CA-сервер (enrollment, re-auth, 24h cert, /hello DDoS-гейт).
-- `tdtp-certify` — CLI адміна CA (keygen, issue-license, revoke, list-active).
-- `tdtp-license` — vendor signer для tdtp.lic (keygen/issue/verify).
-- `tdtp-redis` — in-memory Redis для локального відтворення prod.
-- `orchestrator` — scenario runner + scheduler + token-auth (ролі) + trust-gate +
-  project-request workflow (submit → test → approve/reject).
-
-Увесь ланцюг довіри замкнено end-to-end: UserApp(token) → Orchestrator(license∩Mercury) →
-tdtpcli(license) → xZMercury(CA session) → tdtp-ca(TPM+seat). Priority 1–6 виконано.
-
-### Client workflow (виконано в цій сесії)
-
-Розширення API оркестратора для клієнтської роботи:
-- `consumer` переглядає доступні сценарії, **подає заявку (project request)** з params/title.
-- `admin` **тестує** заявку (dry-run: validate + trust gate, без виконання),
-  **погоджує** (→ виконує, прив'язує job_id) або **відхиляє** з нотаткою.
-- Ізоляція: consumer бачить лише свої заявки, admin — усі (+ `?status=` фільтр).
-- Файли: `cmd/orchestrator/requests.go` + `requests_test.go` (6); DB-таблиця `requests`.
-- Живо перевірено: submit → test(would_run) → approve(job_id) → reject(note);
-  consumer 403 на approve; ізоляція між client-fin / client-hr.
+Замкнено повний ланцюг довіри. Закрито цим спринтом:
+- `unsafe-op.cert` (Tier 2 capability certificate + audit log)
+- Job log truncation (64KB cap + overflow file)
+- Schedule timezone (IANA tz у magic params)
+- Lint/gofmt/CI fixes після main merge
 
 ---
 
-## ✅ Priority 1 — DONE: xZMercury → CA при старті
+## Sprint 2 — Операційна зрілість
 
-Виконано (коміт `72c80bd`):
-- `infra.BootstrapCA` — envkey.Load → enroll/authorize → AutoRenew на server-ctx.
-- `infra.CASession.Valid()` + `api.caGuardMiddleware` → 503 на `/api/keys/*` коли сесія мертва.
-- `CAConfig` у конфізі, `TDTPCA_LICENSE_KEY` env fallback, dev пропускає CA.
-- `ca.NewRouter` винесено (shared з тестами).
-- Тести: `ca/integration_test.go` (5), `infra/ca_bootstrap_test.go` (3).
+**Мета**: зробити систему придатною до реального prod-розгортання без ручних доробок.
 
-## ✅ Priority 2 — DONE: `tdtp-certify` CLI
+### P1 — Air-gap enrollment (`tdtp-certify issue-offline-cert`)
 
-Виконано (коміт у цьому наборі):
-- `keygen` · `issue-license` · `revoke-cert` · `revoke-license` ·
-  `list-licenses` · `list-active` · `list-certs`.
-- `issue-license` генерує human-friendly ключ `TDTP-XXXXX-…`, показує раз; CA тримає лише hash.
-- `list-active` рахує середовища з `last_seen` у вікні (default 24h) — реальна активність.
-- DB-методи: `ListLicenses`, `ListActiveCerts`, `ListAllCerts`.
-- Тести: `ca/db_listing_test.go` (3), `cmd/tdtp-certify/main_test.go` (4).
-- Живий end-to-end перевірено: keygen → issue → enroll×3 → seat-limit 409 →
-  revoke-cert звільняє місце → revoke-license вбиває всі.
+**Навіщо**: клієнти на ізольованих мережах (заводи, держструктури) не можуть
+дістатися CA для challenge-response. Зараз вони взагалі не можуть отримати cert.
 
----
+**Що робити**:
+- `xzmercury/cmd/tdtp-certify/` — нова subcommand `issue-offline-cert`
+- Приймає `--env-pub <ed25519.pub>`, `--license-key`, `--not-after`, `--permissions`
+- Підписує `EnvCert` без live-challenge (CA бере відповідальність за identity)
+- Виводить cert у JSON + попередження "no live-revocation"
+- xZMercury: приймає offline-cert на `POST /api/env/authorize` без challenge
+  (новий поле `offline: true` у cert)
+- Тести: `ca/offline_cert_test.go` (sign → verify → Mercury accept)
 
-## Priority 3 — `pkg/license/`: offline перевірка tdtp.lic у tdtpcli
-
-**Статус: ✅ DONE.**
-
-Виконано:
-- `pkg/license/` — `License`/`Limits`/`Tier`, `Load`/`Verify`/`VerifyWith`/`Sign`/`New`,
-  accessors (`AllowsAdapter`/`AllowsFeature`/`RowLimit`/…), `Community()` floor.
-- `pkg/license/pubkey.go` — вшитий vendor Ed25519 public key (PKIX PEM), `VendorPublicKey()`.
-- `cmd/tdtpcli/commands/license_gate.go` — `ResolveLicense` (flag → `TDTP_LICENSE` →
-  `./tdtp.lic` → community), `GateAdapter`/`GateFeature`/`GateRowCount`.
-- `cmd/tdtpcli/main.go` — `--license` flag; резолвинг при старті (tampered/expired = fatal);
-  gate адаптера (config.Database.Type), `--enc` (feature enc), `--unsafe` (feature unsafe).
-- `cmd/tdtp-license/` — vendor tool: `keygen` / `issue` / `verify` (Ed25519, окремий від CA-ключа).
-- Тести: `pkg/license/license_test.go` (9) — sign/verify roundtrip, tampered, wrong key,
-  expired, file load, community floor, embedded-key parse.
-- Живо перевірено: community блокує mssql/enc; ліцензія пропускає; `TDTP_LICENSE` env;
-  tampered (professional→enterprise) = fatal; community sqlite import працює.
-
-**Backward compat дотримано**: відсутній `tdtp.lic` → community mode, не помилка.
-
-**Дві гілки довіри тепер обидві в бінарі:**
-- ONLINE (CA/Mercury) — авторизація середовища виконання.
-- OFFLINE (tdtp.lic) — можливості CLI без мережі. Air-gapped tdtpcli поважає ліцензію.
+**Цінність**: розблоковує air-gapped enterprise клієнтів.
 
 ---
 
-## ✅ Priority 4 — DONE: Orchestrator інтеграція з CA + ліцензією
+### P2 — Seat policy: один env + кілька ліцензій
 
-Виконано:
-- Mercury `/status` endpoint → `{mode, dev, ca_authorized, permissions}`.
-  `api.CAGuard` розширено `Permissions()`; `infra.CASession` його реалізує.
-- `cmd/orchestrator/preflight.go` — `TrustGate`:
-  - OFFLINE: резолвинг+верифікація власної tdtp.lic (pkg/license).
-  - ONLINE: `FetchMercuryStatus`; `--require-prod` відмовляє проти dev / не-CA-authorized.
-  - `GateScenario` — scenario.permissions ⊆ (license features ∩ Mercury permissions).
-  - `CheckPipelineLimit` — активні задачі < license.PipelineLimit (0 = unlimited).
-- `main.go` flags: `--license`, `--mercury-url`, `--require-prod`; gate у run-handler
-  (403 на permission, 429 на pipeline-limit). Scheduler теж gate'ить cron-задачі.
-- `db.CountActiveJobs` — підрахунок pending/running.
-- Тести: `orchestrator/preflight_test.go` (8), `api/status_test.go` (3).
-- Живо: `--require-prod` блокує dev-Mercury; community-ліцензія блокує сценарій з `etl` (403).
+**Навіщо**: зараз при `enroll` з іншим `license_hash` поведінка невизначена —
+можлива помилка або подвійне зарахування seat.
+
+**Що робити**:
+- `xzmercury/internal/ca/db.go` — при enroll перевіряти: чи існує активний cert
+  з тим самим `env_id_pub` але іншим `license_hash`
+- Рішення: **один env = одна активна ліцензія** (заблокувати re-enroll з іншим license)
+- При зміні ліцензії — спочатку `revoke-cert` старого, потім новий enroll
+- Тести: `ca/integration_test.go` — додати кейс "re-enroll same env different license → 409"
+
+**Цінність**: визначена семантика, немає витоку seats при ротації ліцензій.
 
 ---
 
-## ✅ Priority 5 — DONE: Orchestrator автентифікація
+### P3 — CA renewal з mock-clock
 
-Виконано:
-- **Token-based auth з ролями** (`cmd/orchestrator/auth.go`):
-  - Ролі: `consumer` < `activator` < `admin` (roleRank).
-  - Токени зберігаються хешовано (SHA-256); raw показується раз при створенні.
-  - Per-token scenario allowlist (порожній = всі сценарії).
-  - `Middleware` (Bearer → Principal у ctx), `RequireRole`, `PrincipalFrom`.
-  - Bootstrap admin-токен при порожній таблиці (друкується раз у лог).
-  - `--no-auth` для локальної розробки (кожен запит = admin).
-- **DB** (`tokens` таблиця): InsertToken, GetTokenByHash, TouchToken (last_used_at),
-  ListTokens, DeleteToken, CountTokens + `ListJobsByScenario`.
-- **Role-gates на endpoints**:
-  - consumer: `GET /scenarios`, `/scenarios/{name}`, `/jobs`, `/jobs/{id}`, `/results/{scenario}`
-  - activator: `POST /scenarios/{name}/run` (+ scenario allowlist)
-  - admin: `/schedules` CRUD, `/tokens` CRUD
-  - `/healthz` — публічний (liveness probe).
-- **Новий endpoint** `GET /results/{scenario}` — недавні задачі сценарію (consumer view).
-- **Token mgmt API**: `POST /tokens` (видає raw раз), `GET /tokens`, `DELETE /tokens/{id}`.
-- Тести: `cmd/orchestrator/auth_test.go` (8): hash stability, bootstrap (одноразовість),
-  allowlist, middleware (missing/invalid/valid token), RequireRole 403, no-auth=admin.
-- Живо: bootstrap-токен → 401 без токена / 200 з admin; consumer 200 на read,
-  403 на admin-route і на run; activator 403 на сценарій поза allowlist.
+**Навіщо**: `infra.AutoRenew` не покритий тестом — тестувати 24h renewal у реальному
+часі неможливо. Регресії тихо ламаються.
 
-**Примітка**: LDAP-варіант (як у xZMercury) — можливе майбутнє розширення, але
-token+role вже покриває Activator/Consumer розділення з достатньою гранулярністю.
+**Що робити**:
+- Ввести `clock interface { Now() time.Time }` у `infra.CASession`
+- `RealClock` (дефолт) vs `MockClock` (тести) — інжекція через параметр
+- `infra/ca_bootstrap_test.go` — додати тест: cert з TTL=5s, MockClock.Advance(4s+1ms),
+  перевірити що AutoRenew викликав `authorize` повторно
+- Той самий підхід у `xzmercury/internal/ca/` для 24h cert TTL логіки
+
+**Цінність**: покриття критичного шляху renewal без реальних затримок.
 
 ---
 
-## ✅ Priority 6 — DONE (частково): Тести
+### P4 — `tdtp-certify` видача `unsafe-op.cert`
 
-Виконано:
-- **CA-сервер**: повний enroll → authorize → renew цикл + idempotent + seat-limit +
-  revoke + invalid-license (`ca/integration_test.go`, 5). Bootstrap + guard
-  (`infra/ca_bootstrap_test.go`, 3).
-- **Orchestrator executor** (`executor_test.go`, 5): параметрична підстановка +
-  persistence (pending→running→done), failed-run records error, missing-param
-  fails before run, scheduled run carries schedule_id, CountActiveJobs.
-  Executor зроблено тестованим — інжектований `runnerFunc` + `done`-канал.
-- **Scenario loading** (`scenario_test.go`, 6): orchestrator-блок, fallback на
-  ім'я файлу, ValidateParams (required/pattern/default), LoadScenariosDir, magic params.
-- **Orchestrator: 26 тестів усього** (auth 8 + preflight 8 + executor 5 + scenario 5).
+**Навіщо**: `pkg/license/cert.go` вже реалізовано, але видавати cert нема чим —
+`tdtp-certify` поки не має subcommand для capability certs.
 
-Залишилось (потребує зовнішніх ресурсів, відкладено):
-- **`--limit -N`** end-to-end з реальним MSSQL — потребує живий SQL Server.
-- **CA renewal у часі** — потребує прискорення годинника або фейк-clock у AutoRenew.
+**Що робити**:
+- `xzmercury/cmd/tdtp-certify/` — subcommand `issue-unsafe-cert`
+- Flags: `--to`, `--op` (unsafe-sql/schema-write/cross-schema/drop-allowed),
+  `--tables`, `--db`, `--host`, `--ttl`, `--key`, `--out`
+- Підписує `CapabilityCert` тим самим vendor Ed25519 ключем
+- Тести: sign → `LoadCert` → `VerifyWith` roundtrip
+- Документація: `docs/UNSAFE_CERTS.md` (оператор-гайд)
 
-**Документація**: `docs/ORCHESTRATOR_SCENARIOS.md` — як додавати разові/періодичні,
-прості/шифровані YAML-сценарії на сервер оркестрації.
+**Цінність**: замикає весь unsafe workflow — від видачі до enforcement.
 
 ---
 
-## Open Questions (з design-сесії)
+## Sprint 3 — Спостережуваність і SIEM
 
-1. **Seat policy edge case**: що якщо той самий `env_id_pub` enrolls з іншим `license_hash`?
-   Заблокувати (один env = одна ліцензія) чи дозволити (env може мати кілька ліцензій)?
+### P5 — Structured audit log + syslog hook
 
-2. **Air-gap enrollment**: CA підписує offline-cert на наданий `env_id_pub` з фіксованим
-   `not_after`. Ціна — нема live-revocation. Зробити `tdtp-certify issue-offline-cert`?
+**Навіщо**: зараз `tdtp-audit.log` — plain text файл. Для enterprise SIEM (Splunk,
+ELK, QRadar) потрібен JSON або syslog.
 
-3. **Mercury ↔ Orchestrator permissions**: де перевіряти `scenario.permissions` —
-   в Orchestrator (before submit) чи Mercury відмовляє у bind якщо permissions не вистачає?
-   Рекомендація: Orchestrator перевіряє раніше (fail-fast, без round-trip до Mercury).
+**Що робити**:
+- `pkg/license/audit.go` — додати `AuditEntry` struct (JSON per line: timestamp,
+  nonce, operation, issued_to, host, tdtpcli_version)
+- `NewAuditLog(path, format)` де format = "text" | "json"
+- Опціональний syslog writer (build tag `+syslog`): `NewSyslogAuditLog(tag, facility)`
+- `TDTP_AUDIT_FORMAT` env var
+- Тести: JSON parse roundtrip
 
-4. **Job log обсяг**: поточно — весь stdout+stderr у одному TEXT полі в SQLite.
-   При великих pipeline може бути MB. Рішення: обрізати до 64KB + окремий log-файл?
+### P6 — Orchestrator: per-job result export
 
-5. **`{{current_month}}` і timezone**: поточно UTC. Для клієнтів у UTC+3 може бути неправильний
-   місяць в перші 3 години. Додати `timezone` у schedule config?
+**Навіщо**: після виконання pipeline результат є тільки у файлі на диску.
+Consumer API (`GET /results/{scenario}`) показує лише status, не дані.
+
+**Що робити**:
+- Після успішного job: читати output file → зберігати sha256 + size у jobs таблиці
+- `GET /jobs/{id}/artifact` — повертає redirect або inline до файлу
+- Або: зберігати до S3 (якщо license.AllowsFeature("s3"))
+- Тести: job done → artifact available
+
+### P7 — LDAP auth в Orchestrator (опціонально)
+
+**Навіщо**: корпоративні клієнти хочуть SSO. xZMercury вже має LDAP.
+
+**Що робити**:
+- `cmd/orchestrator/auth.go` — додати `LDAPAuthenticator` поруч з `TokenAuthenticator`
+- Config: `auth.type: ldap | token`, `auth.ldap: {url, bind_dn, base_dn, group_attr}`
+- `--auth-type` flag
+- Тести: mock LDAP (як у xZMercury)
+
+---
+
+## Open Questions (залишились з попереднього спринту)
+
+1. **Mercury ↔ Orchestrator permissions** (open q #3 закритий де-факто):
+   Orchestrator вже перевіряє permissions before submit через `GateScenario`.
+   Mercury також відмовить у bind якщо permissions не вистачає.
+   → Вважаємо закритим: fail-fast у Orchestrator + defense-in-depth у Mercury.
+
+2. **Grace period для tdtp.lic**: hard stop або 30-day read-only?
+   Зараз: expired = fatal. Для integrators під час активного проекту — проблема.
+   → Спринт 2/3: `--grace-period 30d` flag, read-only mode після expiry.
+
+3. **Host fingerprint composite**: зараз тільки hostname.
+   `hostname + MAC + CPU-ID` — більш стійко, але ламається при VM migration.
+   → Відкладено: поки hostname достатньо для більшості deployments.
