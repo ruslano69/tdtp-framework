@@ -68,6 +68,13 @@ func (h *AuthorizeHandler) Step1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Offline certs must use POST /api/env/authorize/offline instead.
+	if req.Cert.Offline {
+		writeCAError(w, http.StatusBadRequest,
+			"offline cert cannot use online authorize; use POST /api/env/authorize/offline")
+		return
+	}
+
 	// 1. Verify CA signature over the cert payload.
 	if !Verify(req.Cert, h.caPub) {
 		log.Warn().Str("cert_id", req.Cert.CertID).Msg("authorize step1: invalid CA signature")
