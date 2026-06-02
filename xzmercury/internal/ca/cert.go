@@ -5,10 +5,11 @@
 // hardware environment (env_id_pub = Ed25519 public key from TPM/envkey).
 //
 // Trust chain:
-//   CA root key (Ed25519, offline/HSM)
-//     └─ signs EnvCert { license_hash, env_id_pub, permissions, validity }
-//           └─ Mercury holds cert; proves liveness via challenge-response
-//                  with the env private key whose pub is embedded in the cert.
+//
+//	CA root key (Ed25519, offline/HSM)
+//	  └─ signs EnvCert { license_hash, env_id_pub, permissions, validity }
+//	        └─ Mercury holds cert; proves liveness via challenge-response
+//	               with the env private key whose pub is embedded in the cert.
 package ca
 
 import (
@@ -60,7 +61,7 @@ type EnvCert struct {
 	EnvIDPub    []byte     `json:"env_id_pub"`   // Ed25519 public key (env identity)
 	Permissions []string   `json:"permissions"`  // feature flags from license
 	IssuedAt    time.Time  `json:"issued_at"`
-	NotAfter    time.Time  `json:"not_after"`    // = license.paid_until
+	NotAfter    time.Time  `json:"not_after"` // = license.paid_until
 	Status      CertStatus `json:"status"`
 	// Signature is Ed25519 over SHA-256(canonical JSON of fields above).
 	Signature []byte `json:"signature"`

@@ -42,7 +42,7 @@ type Request struct {
 	ID           string    `json:"id"`
 	PackageUUID  string    `json:"package_uuid"`
 	PipelineName string    `json:"pipeline_name"`
-	Caller       string    `json:"caller"`       // identity that bound the key (from Bind)
+	Caller       string    `json:"caller"`                // identity that bound the key (from Bind)
 	ConsumedBy   string    `json:"consumed_by,omitempty"` // identity that burned the key (from Retrieve)
 	State        State     `json:"state"`
 	CreatedAt    time.Time `json:"created_at"`

@@ -155,9 +155,9 @@ type Row struct {
 
 // AlarmDetails содержит информацию о тревоге
 type AlarmDetails struct {
-	Severity        string `xml:"Severity"`
-	Code            string `xml:"Code"`
-	Message         string `xml:"Message"`
+	Severity string `xml:"Severity"`
+	Code     string `xml:"Code"`
+	Message  string `xml:"Message"`
 	// ServerMode — режим xZMercury-сервера, выпустившего или сжёгшего ключ.
 	// "dev"  → аварийная замена при отказе Redis-кластера (ложная тревога).
 	// "prod" → штатный прод; KEY_BURNED_BY_OTHER в prod — сигнал расследования.

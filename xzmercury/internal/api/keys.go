@@ -165,10 +165,10 @@ func (h *keysHandler) Retrieve(w http.ResponseWriter, r *http.Request) {
 				Str("caller", req.Caller).
 				Msg("KEY_BURNED_BY_OTHER — possible interception or dev-failover burn")
 			writeJSON(w, http.StatusGone, map[string]any{
-				"error":      "key already burned by another consumer",
-				"code":       "KEY_BURNED_BY_OTHER",
-				"mode":       burnedErr.Mode,
-				"burned_at":  burnedErr.BurnedAt,
+				"error":     "key already burned by another consumer",
+				"code":      "KEY_BURNED_BY_OTHER",
+				"mode":      burnedErr.Mode,
+				"burned_at": burnedErr.BurnedAt,
 			})
 			return
 		}
