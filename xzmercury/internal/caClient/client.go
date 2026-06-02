@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ruslano69/xzmercury/internal/ca"
@@ -24,11 +25,40 @@ import (
 
 // Ensure ca.RenewalThreshold is accessible — imported above.
 
+// clock abstracts time.Now() for testability.
+type clock interface {
+	Now() time.Time
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now().UTC() }
+
+// MockClock is an exported test clock that can be advanced.
+type MockClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+// NewMockClock creates a MockClock initialised to t.
+func NewMockClock(t time.Time) *MockClock { return &MockClock{now: t} }
+
+// Now returns the current mock time.
+func (m *MockClock) Now() time.Time { m.mu.Lock(); defer m.mu.Unlock(); return m.now }
+
+// Advance moves the mock clock forward by d.
+func (m *MockClock) Advance(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.now = m.now.Add(d)
+}
+
 // Client talks to the CA server on behalf of xZMercury.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	identity   *envkey.Identity
+	clk        clock
 }
 
 // NewClient creates a CA client.
@@ -38,11 +68,15 @@ func NewClient(baseURL string, identity *envkey.Identity) *Client {
 	return &Client{
 		baseURL:  baseURL,
 		identity: identity,
+		clk:      realClock{},
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
 	}
 }
+
+// SetClock replaces the clock used by AutoRenew. Intended for tests.
+func (c *Client) SetClock(clk clock) { c.clk = clk }
 
 // EnrollResult is returned by Enroll.
 type EnrollResult struct {
@@ -125,7 +159,7 @@ func (c *Client) Enroll(ctx context.Context, licenseKey string) (*EnrollResult, 
 	return &result, nil
 }
 
-// AuthorizeResult is returned by Authorize.
+// AuthorizeResult is returned by Authorize and AuthorizeOffline.
 type AuthorizeResult struct {
 	SessionToken *ca.SessionToken `json:"session_token"`
 	Permissions  []string         `json:"permissions"`
@@ -175,6 +209,21 @@ func (c *Client) Authorize(ctx context.Context, cert *ca.EnvCert) (*AuthorizeRes
 	return &result, nil
 }
 
+// AuthorizeOffline performs a single-step authorization for air-gapped environments.
+// It posts the cert directly to POST /api/env/authorize/offline without a
+// challenge-response. The cert must have Offline == true (issued by tdtp-certify
+// issue-offline-cert).
+//
+// CertNotAfter in the result is zero-valued since offline certs are not implicitly renewed.
+func (c *Client) AuthorizeOffline(ctx context.Context, cert *ca.EnvCert) (*AuthorizeResult, error) {
+	req := map[string]any{"cert": cert}
+	var result AuthorizeResult
+	if err := c.post(ctx, "/api/env/authorize/offline", req, &result); err != nil {
+		return nil, fmt.Errorf("caClient: authorize offline: %w", err)
+	}
+	return &result, nil
+}
+
 // AutoRenew starts a background goroutine that keeps the cert alive by calling
 // Authorize before it expires. Each successful Authorize implicitly extends
 // cert.not_after by CertTTL (24h) on the CA side.
@@ -186,6 +235,8 @@ func (c *Client) Authorize(ctx context.Context, cert *ca.EnvCert) (*AuthorizeRes
 // use it to update session_token and permissions in the running Mercury instance.
 //
 // The goroutine exits when ctx is cancelled (typically on server shutdown).
+// The polling interval is 100ms, which allows MockClock-based tests to advance
+// time without blocking.
 func (c *Client) AutoRenew(ctx context.Context, cert *ca.EnvCert, initialNotAfter time.Time,
 	onRenew func(*AuthorizeResult)) {
 
@@ -194,15 +245,18 @@ func (c *Client) AutoRenew(ctx context.Context, cert *ca.EnvCert, initialNotAfte
 		for {
 			// Schedule renewal RenewalThreshold before current expiry.
 			renewAt := certNotAfter.Add(-ca.RenewalThreshold)
-			wait := time.Until(renewAt)
-			if wait < 0 {
-				wait = 0 // already past threshold — renew immediately
-			}
 
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(wait):
+			// Poll until renewal time or context done.
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if c.clk.Now().After(renewAt) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
 			}
 
 			// Retry loop: keep trying every hour until success or ctx cancelled.
@@ -214,13 +268,17 @@ func (c *Client) AutoRenew(ctx context.Context, cert *ca.EnvCert, initialNotAfte
 					break // success — go back to outer loop to reschedule
 				}
 
-				// Log and retry.
-				// Don't log the full error chain to avoid noise; caller sees 503.
-				retryIn := time.Hour
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(retryIn):
+				retryAt := c.clk.Now().Add(time.Hour)
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					if c.clk.Now().After(retryAt) {
+						break
+					}
+					time.Sleep(100 * time.Millisecond)
 				}
 			}
 		}
@@ -243,7 +301,7 @@ func (c *Client) postWithToken(ctx context.Context, path, helloToken string, req
 	return c.do(httpReq, resp)
 }
 
-// post sends a plain JSON POST (no hello token — used for step-2 confirm).
+// post sends a plain JSON POST (no hello token — used for step-2 confirm and offline authorize).
 func (c *Client) post(ctx context.Context, path string, req, resp any) error {
 	body, err := json.Marshal(req)
 	if err != nil {

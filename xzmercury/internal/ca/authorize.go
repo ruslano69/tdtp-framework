@@ -219,6 +219,103 @@ func (h *AuthorizeHandler) Step2(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ─── Offline authorize: single-step for air-gapped environments ──────────────
+
+type offlineAuthorizeRequest struct {
+	Cert *EnvCert `json:"cert"`
+}
+
+type offlineAuthorizeResponse struct {
+	SessionToken *SessionToken `json:"session_token"`
+	Permissions  []string      `json:"permissions"`
+}
+
+// OfflineAuthorize is a single-step authorization for air-gapped environments.
+// It accepts an offline cert (Offline == true), verifies the CA signature and
+// DB status, then issues a session token without requiring a challenge-response.
+//
+// POST /api/env/authorize/offline
+// Request:  { "cert": <EnvCert JSON> }
+// Response: { "session_token": {...}, "permissions": [...] }
+func (h *AuthorizeHandler) OfflineAuthorize(w http.ResponseWriter, r *http.Request) {
+	var req offlineAuthorizeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeCAError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	if req.Cert == nil {
+		writeCAError(w, http.StatusBadRequest, "cert required")
+		return
+	}
+
+	// Only offline certs are accepted here.
+	if !req.Cert.Offline {
+		writeCAError(w, http.StatusBadRequest, "cert is not an offline cert")
+		return
+	}
+
+	// Verify CA signature over the cert payload.
+	if !Verify(req.Cert, h.caPub) {
+		log.Warn().Str("cert_id", req.Cert.CertID).Msg("offline authorize: invalid CA signature")
+		writeCAError(w, http.StatusUnauthorized, "cert signature invalid")
+		return
+	}
+
+	// Lookup in DB: must be active.
+	dbCert, err := h.db.GetCertByID(req.Cert.CertID)
+	if err != nil {
+		writeCAError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if dbCert == nil || dbCert.Status != CertActive {
+		writeCAError(w, http.StatusForbidden, "cert not found or revoked")
+		return
+	}
+
+	// Verify cert validity (not expired, status active).
+	if !dbCert.IsValid() {
+		writeCAError(w, http.StatusForbidden, "cert expired")
+		return
+	}
+
+	// Cross-check license still valid.
+	lic, err := h.db.GetLicense(dbCert.LicenseHash)
+	if err != nil || lic == nil {
+		writeCAError(w, http.StatusForbidden, "license not found")
+		return
+	}
+	if lic.Status != LicenseActive {
+		writeCAError(w, http.StatusForbidden, "license revoked")
+		return
+	}
+	if time.Now().UTC().After(lic.PaidUntil) {
+		writeCAError(w, http.StatusPaymentRequired, "license expired")
+		return
+	}
+
+	// Update last_seen.
+	if err := h.db.TouchLastSeen(dbCert.CertID); err != nil {
+		// Non-fatal: log and continue.
+		log.Warn().Err(err).Str("cert_id", dbCert.CertID).Msg("offline authorize: touch last_seen failed (non-fatal)")
+	}
+
+	token, err := NewSessionToken(lic.Permissions, sessionTokenTTL)
+	if err != nil {
+		writeCAError(w, http.StatusInternalServerError, "token generation failed")
+		return
+	}
+
+	log.Info().
+		Str("cert_id", dbCert.CertID).
+		Strs("permissions", lic.Permissions).
+		Msg("offline authorize: session token issued")
+
+	writeCAJSON(w, http.StatusOK, offlineAuthorizeResponse{
+		SessionToken: token,
+		Permissions:  lic.Permissions,
+	})
+}
+
 func (h *AuthorizeHandler) sweepExpired() {
 	ticker := time.NewTicker(challengeTTL)
 	defer ticker.Stop()

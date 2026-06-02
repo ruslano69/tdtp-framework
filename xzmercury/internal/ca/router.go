@@ -35,6 +35,9 @@ func NewRouter(db *DB, caPriv ed25519.PrivateKey, caPub ed25519.PublicKey) http.
 	r.Post("/api/env/authorize", helloH.Middleware(authorizeH.Step1))
 	r.Post("/api/env/authorize/confirm", authorizeH.Step2)
 
+	// Air-gap single-step authorization for offline certs.
+	r.Post("/api/env/authorize/offline", authorizeH.OfflineAuthorize)
+
 	// CA public key.
 	r.Get("/api/env/pubkey", func(w http.ResponseWriter, _ *http.Request) {
 		block := pem.EncodeToMemory(&pem.Block{Type: "ED25519 PUBLIC KEY", Bytes: caPub})

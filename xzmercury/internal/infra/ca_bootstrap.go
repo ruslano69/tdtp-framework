@@ -15,6 +15,15 @@ import (
 	"github.com/ruslano69/xzmercury/internal/envkey"
 )
 
+// clockIface abstracts time.Now() for testability.
+type clockIface interface {
+	Now() time.Time
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now().UTC() }
+
 // CASession holds the live CA authorization state for a prod xZMercury instance.
 // It is refreshed by an AutoRenew goroutine; the HTTP layer checks Valid() before
 // serving key operations.
@@ -23,6 +32,14 @@ type CASession struct {
 	token       string
 	permissions []string
 	expiresAt   time.Time
+	clk         clockIface
+}
+
+// SetClock replaces the clock used by Valid. Intended for tests.
+func (s *CASession) SetClock(clk clockIface) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clk = clk
 }
 
 // Valid reports whether the session token is still within its TTL.
@@ -30,7 +47,11 @@ type CASession struct {
 func (s *CASession) Valid() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.token != "" && time.Now().UTC().Before(s.expiresAt)
+	clk := s.clk
+	if clk == nil {
+		clk = realClock{}
+	}
+	return s.token != "" && clk.Now().Before(s.expiresAt)
 }
 
 // Permissions returns the current permission set (snapshot).

@@ -62,7 +62,7 @@ func main() {
 
 	log.Info().Str("addr", *addr).Msg("tdtp-ca started")
 	if err := http.ListenAndServe(*addr, router); err != nil {
-		log.Fatal().Err(err).Msg("server error")
+		log.Error().Err(err).Msg("server error")
 	}
 }
 
