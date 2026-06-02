@@ -111,11 +111,26 @@ token+role вже покриває Activator/Consumer розділення з д
 
 ---
 
-## Priority 6 — Тести
+## ✅ Priority 6 — DONE (частково): Тести
 
-**CA-сервер**: integration test повного enrollment → authorize → renewal циклу.
-**Orchestrator**: test Submit + параметрична підстановка + job persistence.
-**`--limit -N`**: end-to-end test з реальним MSSQL (якщо є доступ).
+Виконано:
+- **CA-сервер**: повний enroll → authorize → renew цикл + idempotent + seat-limit +
+  revoke + invalid-license (`ca/integration_test.go`, 5). Bootstrap + guard
+  (`infra/ca_bootstrap_test.go`, 3).
+- **Orchestrator executor** (`executor_test.go`, 5): параметрична підстановка +
+  persistence (pending→running→done), failed-run records error, missing-param
+  fails before run, scheduled run carries schedule_id, CountActiveJobs.
+  Executor зроблено тестованим — інжектований `runnerFunc` + `done`-канал.
+- **Scenario loading** (`scenario_test.go`, 6): orchestrator-блок, fallback на
+  ім'я файлу, ValidateParams (required/pattern/default), LoadScenariosDir, magic params.
+- **Orchestrator: 26 тестів усього** (auth 8 + preflight 8 + executor 5 + scenario 5).
+
+Залишилось (потребує зовнішніх ресурсів, відкладено):
+- **`--limit -N`** end-to-end з реальним MSSQL — потребує живий SQL Server.
+- **CA renewal у часі** — потребує прискорення годинника або фейк-clock у AutoRenew.
+
+**Документація**: `docs/ORCHESTRATOR_SCENARIOS.md` — як додавати разові/періодичні,
+прості/шифровані YAML-сценарії на сервер оркестрації.
 
 ---
 

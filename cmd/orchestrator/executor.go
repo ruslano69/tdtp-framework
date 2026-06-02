@@ -37,17 +37,35 @@ type Job struct {
 	Error      string            `json:"error,omitempty"`
 }
 
+// runnerFunc executes a command and returns its combined output.
+// Injectable so Submit is testable without a real tdtpcli subprocess.
+type runnerFunc func(ctx context.Context, bin string, args ...string) ([]byte, error)
+
+// execRunner is the default runner: runs the binary via os/exec.
+func execRunner(ctx context.Context, bin string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.Bytes(), err
+}
+
 // Executor runs tdtpcli --pipeline with rendered scenario YAML.
 // Jobs are persisted to OrchestratorDB so status survives restarts.
 type Executor struct {
 	tdtpcliPath string
 	tmpDir      string
 	db          *OrchestratorDB
+	run         runnerFunc
+	// done, when non-nil, receives each job ID after its run completes.
+	// Used by tests to await async completion without polling.
+	done chan string
 }
 
 func NewExecutor(tdtpcliPath, tmpDir string, db *OrchestratorDB) *Executor {
 	_ = os.MkdirAll(tmpDir, 0o700)
-	return &Executor{tdtpcliPath: tdtpcliPath, tmpDir: tmpDir, db: db}
+	return &Executor{tdtpcliPath: tdtpcliPath, tmpDir: tmpDir, db: db, run: execRunner}
 }
 
 // Submit renders the scenario with params and runs tdtpcli asynchronously.
@@ -81,12 +99,7 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 
 		_ = e.db.UpdateJobStatus(job.ID, JobRunning)
 
-		cmd := exec.CommandContext(ctx, e.tdtpcliPath, "--pipeline", tmpFile)
-		var buf bytes.Buffer
-		cmd.Stdout = &buf
-		cmd.Stderr = &buf
-
-		runErr := cmd.Run()
+		out, runErr := e.run(ctx, e.tdtpcliPath, "--pipeline", tmpFile)
 
 		status := JobDone
 		errMsg := ""
@@ -94,7 +107,11 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 			status = JobFailed
 			errMsg = runErr.Error()
 		}
-		_ = e.db.UpdateJobDone(job.ID, status, buf.String(), errMsg)
+		_ = e.db.UpdateJobDone(job.ID, status, string(out), errMsg)
+
+		if e.done != nil {
+			e.done <- job.ID
+		}
 	}()
 
 	return job, nil

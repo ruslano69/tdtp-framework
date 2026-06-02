@@ -118,3 +118,8 @@ schedules:
 ```
 
 Magic params: `{{current_month}}`, `{{current_date}}`, `{{yesterday}}`.
+
+## Adding scenarios
+
+Step-by-step guide for one-off vs periodic and plain vs encrypted scenarios:
+[docs/ORCHESTRATOR_SCENARIOS.md](../../docs/ORCHESTRATOR_SCENARIOS.md).
