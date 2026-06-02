@@ -4,74 +4,37 @@
 
 Поточний стан (v1.10.0):
 - `tdtpcli` — production-ready ETL CLI (всі адаптери, enc, CSV, XLSX, HTML, integrity).
-- `xZMercury` — key store + hash notary + burn marker + mode-in-HMAC.
+- `xZMercury` — key store + hash notary + burn marker + mode-in-HMAC + CA-guard.
 - `tdtp-ca` — CA-сервер (enrollment, re-auth, 24h cert, /hello DDoS-гейт).
+- `tdtp-certify` — CLI адміна CA (keygen, issue-license, revoke, list-active).
 - `orchestrator` — scenario runner + cron scheduler (SQLite, HTTP API).
 
-Інфраструктура виконання сценаріїв є. Наступний крок — замкнути ланцюг довіри
-(ліцензія → CA-авторизація Mercury → виконання) і додати UserApp-шар.
+Ланцюг довіри ЗАМКНЕНО на рівні Mercury: prod Mercury авторизується в CA при старті,
+ключі не видаються без живої CA-сесії. Наступне — донести ліцензію до tdtpcli і
+додати UserApp-шар.
 
 ---
 
-## Priority 1 — Замкнути ланцюг: xZMercury → CA при старті
+## ✅ Priority 1 — DONE: xZMercury → CA при старті
 
-**Що**: `xzmercury` в prod-режимі (без `--dev`) повинен авторизуватись у CA
-перед тим як почати приймати `/api/keys/bind`.
+Виконано (коміт `72c80bd`):
+- `infra.BootstrapCA` — envkey.Load → enroll/authorize → AutoRenew на server-ctx.
+- `infra.CASession.Valid()` + `api.caGuardMiddleware` → 503 на `/api/keys/*` коли сесія мертва.
+- `CAConfig` у конфізі, `TDTPCA_LICENSE_KEY` env fallback, dev пропускає CA.
+- `ca.NewRouter` винесено (shared з тестами).
+- Тести: `ca/integration_test.go` (5), `infra/ca_bootstrap_test.go` (3).
 
-**Файли**: `xzmercury/cmd/xzmercury/main.go`, `xzmercury/internal/infra/`
+## ✅ Priority 2 — DONE: `tdtp-certify` CLI
 
-**Flow**:
-```
-prod start:
-  1. envkey.Load(cfg.EnvKeyDir)       → Ed25519 keypair (TPM stub)
-  2. cert = loadCertFromDisk()        → якщо є
-     або caClient.Enroll(licenseKey)  → перший запуск
-  3. caClient.Authorize(cert)         → session_token
-  4. caClient.AutoRenew(cert, ...)    → оновлення кожні 12h
-  5. ListenAndServe()
-  503 якщо session_token відсутній або протух і CA недоступний
-```
-
-**Конфіг** (`xzmercury.yaml`):
-```yaml
-ca:
-  url: "https://ca.tdtp.io:8443"
-  license_key: ""          # або TDTPCA_LICENSE_KEY env var
-  env_key_dir: "./envkey"  # де зберігати Ed25519 keypair
-  cert_path: "env.cert"    # sealed cert
-```
-
-**Приоритет**: HIGH — без цього CA існує але Mercury ним не користується.
-
----
-
-## Priority 2 — `tdtp-certify`: CLI для адміністратора CA
-
-**Що**: standalone CLI для видачі ліцензій і управління.
-
-```bash
-# Генерація CA-ключа (one-time, offline/HSM)
-tdtp-certify keygen --out ca.ed25519.priv
-
-# Видача ліцензії
-tdtp-certify issue-license \
-  --licensee "Contoso GmbH" \
-  --tier professional \
-  --seat-limit 3 \
-  --permissions etl,enc,s3 \
-  --expires 2027-06-01 \
-  --key ca.ed25519.priv \
-  --db ca.db
-
-# Відкликання
-tdtp-certify revoke-cert   --cert-id <uuid> --db ca.db
-tdtp-certify revoke-license --hash <hex>    --db ca.db
-
-# Статус
-tdtp-certify list-active --db ca.db    # last_seen > now-24h
-```
-
-**Файли**: `xzmercury/cmd/tdtp-certify/`
+Виконано (коміт у цьому наборі):
+- `keygen` · `issue-license` · `revoke-cert` · `revoke-license` ·
+  `list-licenses` · `list-active` · `list-certs`.
+- `issue-license` генерує human-friendly ключ `TDTP-XXXXX-…`, показує раз; CA тримає лише hash.
+- `list-active` рахує середовища з `last_seen` у вікні (default 24h) — реальна активність.
+- DB-методи: `ListLicenses`, `ListActiveCerts`, `ListAllCerts`.
+- Тести: `ca/db_listing_test.go` (3), `cmd/tdtp-certify/main_test.go` (4).
+- Живий end-to-end перевірено: keygen → issue → enroll×3 → seat-limit 409 →
+  revoke-cert звільняє місце → revoke-license вбиває всі.
 
 ---
 

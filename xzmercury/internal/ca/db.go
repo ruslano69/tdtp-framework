@@ -98,7 +98,90 @@ func (d *DB) InsertLicense(l *License) error {
 	return err
 }
 
+// ListLicenses returns all license records (admin tooling).
+func (d *DB) ListLicenses() ([]*License, error) {
+	rows, err := d.db.Query(
+		`SELECT license_hash, permissions, seat_limit, status, paid_until FROM licenses`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*License
+	for rows.Next() {
+		var l License
+		var permJSON, paidUntil string
+		if err := rows.Scan(&l.Hash, &permJSON, &l.SeatLimit, &l.Status, &paidUntil); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(permJSON), &l.Permissions)
+		if t, err := time.Parse(time.RFC3339, paidUntil); err == nil {
+			l.PaidUntil = t
+		}
+		out = append(out, &l)
+	}
+	return out, rows.Err()
+}
+
 // ─── Cert operations ──────────────────────────────────────────────────────────
+
+// CertInfo is a cert summary row for admin listings.
+type CertInfo struct {
+	CertID      string
+	LicenseHash string
+	Status      CertStatus
+	IssuedAt    time.Time
+	NotAfter    time.Time
+	LastSeen    *time.Time
+}
+
+// ListActiveCerts returns active certs whose last_seen is after `since`.
+// Used by `tdtp-certify list-active` to count real active environments.
+func (d *DB) ListActiveCerts(since time.Time) ([]*CertInfo, error) {
+	rows, err := d.db.Query(
+		`SELECT cert_id, license_hash, status, issued_at, not_after, last_seen
+		 FROM certs
+		 WHERE status = 'active' AND last_seen IS NOT NULL AND last_seen > ?
+		 ORDER BY last_seen DESC`,
+		since.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCertInfos(rows)
+}
+
+// ListAllCerts returns every cert (active and revoked) for admin inspection.
+func (d *DB) ListAllCerts() ([]*CertInfo, error) {
+	rows, err := d.db.Query(
+		`SELECT cert_id, license_hash, status, issued_at, not_after, last_seen
+		 FROM certs ORDER BY issued_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCertInfos(rows)
+}
+
+func scanCertInfos(rows *sql.Rows) ([]*CertInfo, error) {
+	var out []*CertInfo
+	for rows.Next() {
+		var c CertInfo
+		var issuedAt, notAfter string
+		var lastSeen sql.NullString
+		if err := rows.Scan(&c.CertID, &c.LicenseHash, &c.Status, &issuedAt, &notAfter, &lastSeen); err != nil {
+			return nil, err
+		}
+		c.IssuedAt, _ = time.Parse(time.RFC3339, issuedAt)
+		c.NotAfter, _ = time.Parse(time.RFC3339, notAfter)
+		if lastSeen.Valid {
+			if t, err := time.Parse(time.RFC3339, lastSeen.String); err == nil {
+				c.LastSeen = &t
+			}
+		}
+		out = append(out, &c)
+	}
+	return out, rows.Err()
+}
 
 // CountActiveCerts returns the number of active certs for a license.
 func (d *DB) CountActiveCerts(licenseHash string) (int, error) {

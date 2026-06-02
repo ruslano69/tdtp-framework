@@ -326,6 +326,77 @@ Pipeline loaders send `source.name` as caller automatically.
 
 Details: [docs/security.md](docs/security.md)
 
+## CA — environment authorization (`tdtp-ca`)
+
+In production, xZMercury must authorize with the CA before serving any key.
+The CA binds a paid **license** (proof of payment) to a specific **hardware
+environment** (Ed25519 env-ID from TPM/envkey) and tracks active seats.
+
+```
+tdtp-ca (license DB)
+   ▲  enroll / authorize  (challenge-response + 2s /hello gate)
+   │
+xZMercury (prod)
+   ├─ BootstrapCA at startup → CASession
+   ├─ AutoRenew goroutine (renew 12h before cert expiry)
+   └─ caGuard: invalid session → 503 on /api/keys/*
+   ▲  bind / retrieve  (only while CA session is live)
+   │
+orchestrator / tdtpcli
+```
+
+### Two phases: enrollment → operational
+
+| Phase | When | Proof required |
+|-------|------|----------------|
+| **Enroll** | first run | `license_key` + live TPM signature of CA nonce |
+| **Authorize** | every restart + every 12h | `cert` + live TPM signature (cert alone is copyable) |
+
+The cert alone is not proof — it is a signed, copyable blob. Authorization always
+requires a fresh challenge-response signed by the env private key whose public key
+is embedded in the cert. A cloned cert on different hardware cannot sign the nonce.
+
+### Cert TTL = 24h, decoupled from license
+
+- `licenses.paid_until` — commercial period (e.g. 1 year)
+- `certs.not_after` — 24h, rolling: every Authorize extends it +24h
+- `session_token` — 4h, in-memory in Mercury
+
+`SELECT COUNT(*) FROM certs WHERE last_seen > now-24h AND status='active'`
+gives the exact number of **active** environments — not "ever purchased". A stopped
+environment disappears from the count within 24h.
+
+### `/hello` DDoS gate
+
+Every enroll/authorize step-1 requires a single-use token from `GET /hello`, which
+sleeps 2s before issuing it (max ~30 tokens/min/IP, max 3 concurrent /hello per IP).
+Failed step-1 burns the token — a new /hello is required.
+
+### CA administration — `tdtp-certify`
+
+Vendor-only tool. **Not shipped to customers.**
+
+```bash
+# One-time: generate CA root key (keep offline / HSM)
+tdtp-certify keygen --out ca.ed25519.priv
+
+# Issue a license — prints the raw key once (CA stores only its hash)
+tdtp-certify issue-license --db ca.db --licensee "Contoso GmbH" \
+    --permissions etl,enc,s3 --seat-limit 3 --expires 2027-06-01
+
+# Inspect
+tdtp-certify list-licenses --db ca.db    # seat usage per license
+tdtp-certify list-active   --db ca.db    # environments seen in last 24h
+tdtp-certify list-certs    --db ca.db    # all certs (active + revoked)
+
+# Revoke
+tdtp-certify revoke-cert    --db ca.db --cert-id <uuid>           # frees a seat
+tdtp-certify revoke-license --db ca.db --license-key <key>        # kills all certs
+```
+
+The license key travels on the wire only at enrollment (under TLS); the CA stores
+only `SHA-256(key)`. A leaked hash is useless without the paired TPM env key.
+
 ## Repository layout
 
 ```
@@ -381,9 +452,15 @@ for local development only.
 - ✅ **v1.0**: AES-256-GCM key bind + burn-on-read retrieve
 - ✅ **v1.1**: quota system, AD/LDAP integration, two-Redis split
 - ✅ **v1.2 (current)**: hash notary (`mercury:hash:*`), `pkg/pipeline/VerifyAndPrepare`
-- ✅ **v1.3**: key consumption audit (`consumed_by`, `consumed_at`), `ErrKeyAlreadyConsumed`
-  sentinel, TDTP error receipt on failed decrypt (`*_error.tdtp.xml`)
-- ⬜ **v1.4 (planned)**: hash registration quotas (`mercury:hash-quota:*`),
+- ✅ **v1.3**: key consumption audit (`consumed_by`, `consumed_at`), burn marker
+  (theft vs TTL expiry: 410 vs 404), mode-in-HMAC (dev ≠ prod), TDTP error receipt
+  on failed decrypt (`*_error.tdtp.xml` with `ServerMode`)
+- ✅ **v1.4**: CA environment authorization (`tdtp-ca`) — enroll/authorize with
+  TPM challenge-response, 24h rolling cert, seat-count, `/hello` DDoS gate;
+  CA admin tool (`tdtp-certify`); prod xZMercury gated on live CA session (503 otherwise)
+- ⬜ **v1.5 (planned)**: hash registration quotas (`mercury:hash-quota:*`),
   Dictionary pre-flight (`@SHA`, `@LOCK`, `@TTL` consumer support), SIEM connector
+- ⬜ **chiptdtp (separate product)**: proprietary L3 tier with Ed25519 signatures,
+  License Authority, ephemeral configs, smart-card auth (see v1.2 §15)
 - ⬜ **chiptdtp (separate product)**: proprietary L3 tier with Ed25519 signatures,
   License Authority, ephemeral configs, smart-card auth (see v1.2 §15)
