@@ -54,6 +54,11 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL, dev bool,
 	r.Get("/readyz", handleReadyz(inf))
 	r.Get("/metrics", promhttp.Handler().ServeHTTP)
 
+	// /status — runtime self-description for orchestrators and operators.
+	// Reports dev/prod mode, whether the CA session is live, and the licensed
+	// permissions of this environment. No auth required (read-only metadata).
+	r.Get("/status", handleStatus(dev, caGuard))
+
 	// Key operations are gated by the CA session: in prod, no bind/retrieve is
 	// served unless the CA authorization is live. In dev (caGuard=nil) it's a no-op.
 	r.Route("/api/keys", func(r chi.Router) {
@@ -81,6 +86,30 @@ func NewRouter(cfg *infra.Config, inf *infra.Infra, aclRules *acl.ACL, dev bool,
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleStatus reports mode and CA authorization state.
+// Orchestrators query this before submitting work: they can refuse to run
+// against a dev-mode Mercury, and check that the env's licensed permissions
+// cover the scenario they intend to execute.
+func handleStatus(dev bool, caGuard CAGuard) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		mode := "prod"
+		if dev {
+			mode = "dev"
+		}
+		caAuthorized := caGuard != nil && caGuard.Valid()
+		var perms []string
+		if caGuard != nil {
+			perms = caGuard.Permissions()
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"mode":          mode,
+			"dev":           dev,
+			"ca_authorized": caAuthorized,
+			"permissions":   perms,
+		})
+	}
 }
 
 // handleReadyz pings both Redis instances to confirm the service is ready.

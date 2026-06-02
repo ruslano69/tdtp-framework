@@ -64,20 +64,21 @@
 
 ---
 
-## Priority 4 — Orchestrator: інтеграція з CA + ліцензією
+## ✅ Priority 4 — DONE: Orchestrator інтеграція з CA + ліцензією
 
-**Що**: Orchestrator перевіряє що:
-1. xZMercury відповідає і має `mode=prod` (не dev).
-2. Сесія Mercury має `permissions` що покривають scenario.permissions.
-3. Ліцензія дозволяє кількість паралельних pipelines.
-
-**Файли**: `cmd/orchestrator/main.go`
-
-```go
-// При старті: перевірити Mercury + permissions
-resp, err := http.Get(mercuryURL + "/healthz")
-// Перед Submit: перевірити що permissions ∩ scenario.Permissions != ∅
-```
+Виконано:
+- Mercury `/status` endpoint → `{mode, dev, ca_authorized, permissions}`.
+  `api.CAGuard` розширено `Permissions()`; `infra.CASession` його реалізує.
+- `cmd/orchestrator/preflight.go` — `TrustGate`:
+  - OFFLINE: резолвинг+верифікація власної tdtp.lic (pkg/license).
+  - ONLINE: `FetchMercuryStatus`; `--require-prod` відмовляє проти dev / не-CA-authorized.
+  - `GateScenario` — scenario.permissions ⊆ (license features ∩ Mercury permissions).
+  - `CheckPipelineLimit` — активні задачі < license.PipelineLimit (0 = unlimited).
+- `main.go` flags: `--license`, `--mercury-url`, `--require-prod`; gate у run-handler
+  (403 на permission, 429 на pipeline-limit). Scheduler теж gate'ить cron-задачі.
+- `db.CountActiveJobs` — підрахунок pending/running.
+- Тести: `orchestrator/preflight_test.go` (8), `api/status_test.go` (3).
+- Живо: `--require-prod` блокує dev-Mercury; community-ліцензія блокує сценарій з `etl` (403).
 
 ---
 

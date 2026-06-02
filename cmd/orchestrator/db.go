@@ -200,6 +200,15 @@ func (d *OrchestratorDB) UpdateJobStatus(id string, status JobStatus) error {
 	return err
 }
 
+// CountActiveJobs returns the number of jobs currently pending or running.
+// Used to enforce the licensed concurrent-pipeline limit.
+func (d *OrchestratorDB) CountActiveJobs() (int, error) {
+	var n int
+	err := d.db.QueryRow(
+		`SELECT COUNT(*) FROM jobs WHERE status IN ('pending','running')`).Scan(&n)
+	return n, err
+}
+
 // GetJob returns one job by ID.
 func (d *OrchestratorDB) GetJob(id string) (*Job, error) {
 	row := d.db.QueryRow(`

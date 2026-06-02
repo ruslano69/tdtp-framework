@@ -24,6 +24,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"net/http"
@@ -44,9 +45,32 @@ func main() {
 	tdtpcliPath  := flag.String("tdtpcli", "./tdtpcli", "path to tdtpcli binary")
 	tmpDir       := flag.String("tmp", os.TempDir(), "directory for rendered pipeline YAMLs")
 	addr         := flag.String("addr", ":8080", "listen address")
+	licensePath  := flag.String("license", "", "path to tdtp.lic (default: TDTP_LICENSE env, ./tdtp.lic, else community)")
+	mercuryURL   := flag.String("mercury-url", "", "xZMercury base URL for online preflight (empty = skip)")
+	requireProd  := flag.Bool("require-prod", false, "refuse to start if Mercury is in dev mode or not CA-authorized")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
+	// Trust gate: verify own license (offline) and preflight Mercury (online).
+	trustCtx, trustCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	gate, err := NewTrustGate(trustCtx, *licensePath, *mercuryURL, *requireProd)
+	trustCancel()
+	if err != nil {
+		log.Fatal().Err(err).Msg("trust gate failed")
+	}
+	log.Info().
+		Str("license", gate.License.LicenseeName()).
+		Str("tier", string(gate.License.GetTier())).
+		Int("pipeline_limit", gate.License.PipelineLimit()).
+		Msg("license verified")
+	if gate.MercuryStatus != nil {
+		log.Info().
+			Str("mode", gate.MercuryStatus.Mode).
+			Bool("ca_authorized", gate.MercuryStatus.CAAuthorized).
+			Strs("permissions", gate.MercuryStatus.Permissions).
+			Msg("mercury preflight ok")
+	}
 
 	// Open DB.
 	db, err := OpenOrchestratorDB(*dbPath)
@@ -64,7 +88,7 @@ func main() {
 
 	// Wire executor and scheduler.
 	executor  := NewExecutor(*tdtpcliPath, filepath.Join(*tmpDir, "orch-pipelines"), db)
-	scheduler := NewScheduler(executor, scenes, db)
+	scheduler := NewScheduler(executor, scenes, db, gate)
 
 	// Seed schedules from YAML → DB (idempotent: ON CONFLICT DO UPDATE).
 	if err := scheduler.SeedFromDir(*schedulesDir); err != nil {
@@ -138,6 +162,19 @@ func main() {
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
+		}
+
+		// Trust gate: scenario permissions must be covered by license + Mercury env.
+		if err := gate.GateScenario(s); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		// Pipeline limit: refuse if too many jobs are already active.
+		if active, err := db.CountActiveJobs(); err == nil {
+			if err := gate.CheckPipelineLimit(active); err != nil {
+				writeError(w, http.StatusTooManyRequests, err.Error())
+				return
+			}
 		}
 
 		job, err := executor.Submit(r.Context(), s, params, "" /* manual run */)

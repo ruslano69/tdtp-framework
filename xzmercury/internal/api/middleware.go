@@ -66,10 +66,11 @@ func rateLimitMiddleware(rateLimit int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler { return next }
 }
 
-// CAGuard reports whether the CA session is currently valid.
+// CAGuard reports whether the CA session is currently valid and what it permits.
 // Implemented by infra.CASession. nil in --dev mode (guard is a no-op).
 type CAGuard interface {
 	Valid() bool
+	Permissions() []string
 }
 
 // caGuardMiddleware returns 503 Service Unavailable when the CA session is invalid.

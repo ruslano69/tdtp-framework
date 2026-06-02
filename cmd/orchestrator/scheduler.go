@@ -32,15 +32,17 @@ type Scheduler struct {
 	executor *Executor
 	scenes   map[string]*Scenario
 	db       *OrchestratorDB
+	gate     *TrustGate
 	entryIDs map[string]cron.EntryID // schedule DB id → cron entry id
 }
 
-func NewScheduler(executor *Executor, scenes map[string]*Scenario, db *OrchestratorDB) *Scheduler {
+func NewScheduler(executor *Executor, scenes map[string]*Scenario, db *OrchestratorDB, gate *TrustGate) *Scheduler {
 	return &Scheduler{
 		c:        cron.New(),
 		executor: executor,
 		scenes:   scenes,
 		db:       db,
+		gate:     gate,
 		entryIDs: make(map[string]cron.EntryID),
 	}
 }
@@ -105,9 +107,13 @@ func (s *Scheduler) register(r *ScheduleRecord) error {
 		resolved := resolveMagicParams(params)
 		resolvedParams, valErr := scene.ValidateParams(resolved)
 		status := "running"
-		if valErr != nil {
+		switch {
+		case valErr != nil:
 			status = "failed"
-		} else {
+		case s.gate != nil && s.gate.GateScenario(scene) != nil:
+			// License expired or scenario no longer permitted — skip the run.
+			status = "failed"
+		default:
 			if _, execErr := s.executor.Submit(context.Background(), scene, resolvedParams, schedID); execErr != nil {
 				status = "failed"
 			}
