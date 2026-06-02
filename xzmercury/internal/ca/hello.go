@@ -3,7 +3,6 @@ package ca
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -211,17 +210,4 @@ func (h *HelloHandler) HelloTokenStats() (tokens, ipEntries int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.tokens), len(h.ipPending)
-}
-
-// helloResponse is for JSON encoding only.
-type helloResponse struct {
-	HelloToken string    `json:"hello_token"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	Note       string    `json:"note"`
-}
-
-// MarshalJSON for json.Encoder compatibility.
-func (hr helloResponse) MarshalJSON() ([]byte, error) {
-	type plain helloResponse
-	return json.Marshal(plain(hr))
 }

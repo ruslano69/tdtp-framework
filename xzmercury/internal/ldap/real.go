@@ -19,7 +19,7 @@ func NewRealClient(cfg Config) (Client, error) {
 		return nil, fmt.Errorf("ldap dial %q: %w", cfg.Addr, err)
 	}
 	if err := conn.Bind(cfg.BindDN, cfg.BindPassword); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("ldap bind %q: %w", cfg.BindDN, err)
 	}
 	return &realClient{conn: conn, cfg: cfg}, nil
@@ -50,6 +50,5 @@ func (c *realClient) IsMember(_ context.Context, user, groupDN string) (bool, er
 }
 
 func (c *realClient) Close() error {
-	c.conn.Close()
-	return nil
+	return c.conn.Close()
 }

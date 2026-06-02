@@ -47,7 +47,8 @@ func main() {
 	}
 	if err := pipeline.StartAddr(*pipelineAddr); err != nil {
 		fmt.Fprintf(os.Stderr, "tdtp-redis: start pipeline redis on %s: %v\n", *pipelineAddr, err)
-		os.Exit(1)
+		mercury.Close()
+		os.Exit(1) //nolint:gocritic
 	}
 	defer pipeline.Close()
 

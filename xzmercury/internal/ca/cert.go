@@ -63,6 +63,7 @@ type EnvCert struct {
 	IssuedAt    time.Time  `json:"issued_at"`
 	NotAfter    time.Time  `json:"not_after"` // = license.paid_until
 	Status      CertStatus `json:"status"`
+	Offline     bool       `json:"offline,omitempty"` // true = issued without challenge-response
 	// Signature is Ed25519 over SHA-256(canonical JSON of fields above).
 	Signature []byte `json:"signature"`
 }
@@ -76,6 +77,7 @@ type CertPayload struct {
 	Permissions []string  `json:"permissions"`
 	IssuedAt    time.Time `json:"issued_at"`
 	NotAfter    time.Time `json:"not_after"`
+	Offline     bool      `json:"offline,omitempty"`
 }
 
 // License is a paid entitlement record stored in the CA database.
@@ -134,6 +136,7 @@ func Verify(cert *EnvCert, caPub ed25519.PublicKey) bool {
 		Permissions: cert.Permissions,
 		IssuedAt:    cert.IssuedAt,
 		NotAfter:    cert.NotAfter,
+		Offline:     cert.Offline,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

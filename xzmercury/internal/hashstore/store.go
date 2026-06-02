@@ -90,12 +90,16 @@ func (s *Store) Register(ctx context.Context, rec HashRecord) error {
 	}
 
 	key := redisKey(rec.UUID, rec.Part)
-	ok, err := s.rdb.SetNX(ctx, key, payload, s.ttl).Result()
-	if err != nil {
-		return fmt.Errorf("hashstore: redis setnx: %w", err)
-	}
-	if !ok {
+	_, err = s.rdb.SetArgs(ctx, key, payload, redis.SetArgs{
+		Mode: "NX",
+		TTL:  s.ttl,
+	}).Result()
+	if errors.Is(err, redis.Nil) {
+		// NX: key already exists.
 		return ErrHashAlreadyRegistered
+	}
+	if err != nil {
+		return fmt.Errorf("hashstore: redis set: %w", err)
 	}
 	return nil
 }

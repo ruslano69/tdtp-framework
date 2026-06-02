@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,5 +180,83 @@ func TestInvalidLicenseRejected(t *testing.T) {
 
 	if _, err := client.Enroll(context.Background(), "WRONG-LICENSE-KEY"); err == nil {
 		t.Fatal("enroll succeeded with an unknown license key")
+	}
+}
+
+// TestReEnrollSameEnvDifferentLicense_Conflicts verifies the P2 seat policy:
+// an env already enrolled under LICENSE-A must be rejected (HTTP 409) when it
+// tries to enroll under a different LICENSE-B.
+func TestReEnrollSameEnvDifferentLicense_Conflicts(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ca.db")
+	db, err := ca.OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	caPub, caPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate CA key: %v", err)
+	}
+
+	const licenseA = "LICENSE-A"
+	const licenseB = "LICENSE-B"
+
+	for _, lk := range []string{licenseA, licenseB} {
+		if err := db.InsertLicense(&ca.License{
+			Hash:        ca.HashLicenseKey(lk),
+			Permissions: []string{"etl", "enc"},
+			SeatLimit:   2,
+			Status:      ca.LicenseActive,
+			PaidUntil:   time.Now().UTC().Add(365 * 24 * time.Hour),
+		}); err != nil {
+			t.Fatalf("InsertLicense(%s): %v", lk, err)
+		}
+	}
+
+	srv := httptest.NewServer(ca.NewRouter(db, caPriv, caPub))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+
+	// Single client (same env keypair) for both attempts.
+	client := newEnvClient(t, srv.URL)
+
+	// Step 1: enroll with LICENSE-A — must succeed.
+	if _, err := client.Enroll(ctx, licenseA); err != nil {
+		t.Fatalf("Enroll with LICENSE-A: %v", err)
+	}
+
+	// Step 2: same env, LICENSE-B — must return HTTP 409 Conflict.
+	_, err = client.Enroll(ctx, licenseB)
+	if err == nil {
+		t.Fatal("expected HTTP 409 conflict when re-enrolling same env under a different license, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTP 409") {
+		t.Errorf("expected HTTP 409 conflict error, got: %v", err)
+	}
+}
+
+// TestReEnrollSameEnvSameLicense_Idempotent verifies that re-enrolling the same env
+// under the same license succeeds and returns the same cert (idempotent behaviour
+// must survive P2 changes).
+func TestReEnrollSameEnvSameLicense_Idempotent(t *testing.T) {
+	srv, _, licenseKey, _ := setupCA(t, 1)
+	client := newEnvClient(t, srv.URL)
+	ctx := context.Background()
+
+	first, err := client.Enroll(ctx, licenseKey)
+	if err != nil {
+		t.Fatalf("first Enroll: %v", err)
+	}
+
+	second, err := client.Enroll(ctx, licenseKey)
+	if err != nil {
+		t.Fatalf("second Enroll (same env, same license): %v", err)
+	}
+
+	if first.Cert.CertID != second.Cert.CertID {
+		t.Errorf("re-enroll issued a different cert: %s != %s",
+			first.Cert.CertID, second.Cert.CertID)
 	}
 }

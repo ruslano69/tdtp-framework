@@ -160,12 +160,13 @@ func callBind(addr, uuid, pipeline string) bindResponse {
 	})
 	resp, err := http.Post(addr+"/api/keys/bind", "application/json", bytes.NewReader(body))
 	must(err, "POST /api/keys/bind")
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
 		log.Fatalf("bind HTTP %d", resp.StatusCode)
 	}
 	var r bindResponse
 	must(json.NewDecoder(resp.Body).Decode(&r), "decode bind response")
+	_ = resp.Body.Close()
 	return r
 }
 
@@ -176,14 +177,15 @@ func callRetrieve(addr, uuid, requestID string) string {
 	})
 	resp, err := http.Post(addr+"/api/keys/retrieve", "application/json", bytes.NewReader(body))
 	must(err, "POST /api/keys/retrieve")
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
 		log.Fatalf("retrieve HTTP %d (expected 200)", resp.StatusCode)
 	}
 	var r struct {
 		KeyB64 string `json:"key_b64"`
 	}
 	must(json.NewDecoder(resp.Body).Decode(&r), "decode retrieve response")
+	_ = resp.Body.Close()
 	return r.KeyB64
 }
 
@@ -191,14 +193,14 @@ func callRetrieve404(addr, uuid string) int {
 	body, _ := json.Marshal(map[string]string{"package_uuid": uuid})
 	resp, err := http.Post(addr+"/api/keys/retrieve", "application/json", bytes.NewReader(body))
 	must(err, "POST /api/keys/retrieve (2nd)")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode
 }
 
 func callGetRequest(addr, id string) string {
 	resp, err := http.Get(addr + "/api/requests/" + id)
 	must(err, "GET /api/requests/"+id)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r struct {
 		State string `json:"state"`
 	}
@@ -210,7 +212,7 @@ func waitReady(healthURL string) {
 	for i := 0; i < 20; i++ {
 		resp, err := http.Get(healthURL)
 		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

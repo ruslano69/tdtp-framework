@@ -2,6 +2,7 @@ package ca
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -49,6 +50,12 @@ func OpenDB(path string) (*DB, error) {
 	db.SetMaxOpenConns(1) // SQLite: single writer
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("ca: init schema: %w", err)
+	}
+	// Idempotent migration: add offline column for air-gap cert support.
+	if _, err := db.Exec(`ALTER TABLE certs ADD COLUMN offline INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, fmt.Errorf("ca db: migrate offline: %w", err)
+		}
 	}
 	return &DB{db: db}, nil
 }
@@ -105,7 +112,7 @@ func (d *DB) ListLicenses() ([]*License, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*License
 	for rows.Next() {
 		var l License
@@ -146,7 +153,7 @@ func (d *DB) ListActiveCerts(since time.Time) ([]*CertInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanCertInfos(rows)
 }
 
@@ -158,7 +165,7 @@ func (d *DB) ListAllCerts() ([]*CertInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanCertInfos(rows)
 }
 
@@ -197,7 +204,7 @@ func (d *DB) CountActiveCerts(licenseHash string) (int, error) {
 func (d *DB) GetCertByEnvID(licenseHash string, envIDPub []byte) (*EnvCert, error) {
 	row := d.db.QueryRow(
 		`SELECT cert_id, license_hash, env_id_pub, permissions,
-		        issued_at, not_after, status, signature
+		        issued_at, not_after, status, offline, signature
 		 FROM certs
 		 WHERE license_hash = ? AND env_id_pub = ? AND status = 'active'
 		 LIMIT 1`,
@@ -210,8 +217,21 @@ func (d *DB) GetCertByEnvID(licenseHash string, envIDPub []byte) (*EnvCert, erro
 func (d *DB) GetCertByID(certID string) (*EnvCert, error) {
 	row := d.db.QueryRow(
 		`SELECT cert_id, license_hash, env_id_pub, permissions,
-		        issued_at, not_after, status, signature
+		        issued_at, not_after, status, offline, signature
 		 FROM certs WHERE cert_id = ?`, certID)
+	return scanCert(row)
+}
+
+// GetActiveCertByEnvID returns the active cert for this env_id_pub across ALL licenses.
+// Returns (nil, nil) if none found.
+func (d *DB) GetActiveCertByEnvID(envIDPub []byte) (*EnvCert, error) {
+	row := d.db.QueryRow(
+		`SELECT cert_id, license_hash, env_id_pub, permissions,
+		        issued_at, not_after, status, offline, signature
+		 FROM certs
+		 WHERE hex(env_id_pub) = ? AND status = 'active'
+		 LIMIT 1`,
+		strings.ToUpper(hex.EncodeToString(envIDPub)))
 	return scanCert(row)
 }
 
@@ -221,15 +241,20 @@ func (d *DB) InsertCert(c *EnvCert) error {
 	if err != nil {
 		return fmt.Errorf("ca: marshal cert permissions: %w", err)
 	}
+	offlineInt := 0
+	if c.Offline {
+		offlineInt = 1
+	}
 	_, err = d.db.Exec(
 		`INSERT INTO certs(cert_id, license_hash, env_id_pub, permissions,
-		                   issued_at, not_after, status, last_seen, signature)
-		 VALUES(?,?,?,?,?,?,?,?,?)`,
+		                   issued_at, not_after, status, last_seen, offline, signature)
+		 VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		c.CertID, c.LicenseHash, c.EnvIDPub, string(permJSON),
 		c.IssuedAt.UTC().Format(time.RFC3339),
 		c.NotAfter.UTC().Format(time.RFC3339),
 		string(c.Status),
 		time.Now().UTC().Format(time.RFC3339),
+		offlineInt,
 		c.Signature,
 	)
 	return err
@@ -281,9 +306,10 @@ func (d *DB) RevokeLicense(licenseHash string) error {
 func scanCert(row *sql.Row) (*EnvCert, error) {
 	var c EnvCert
 	var permJSON, issuedAt, notAfter string
+	var offlineInt int
 	err := row.Scan(
 		&c.CertID, &c.LicenseHash, &c.EnvIDPub, &permJSON,
-		&issuedAt, &notAfter, &c.Status, &c.Signature,
+		&issuedAt, &notAfter, &c.Status, &offlineInt, &c.Signature,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -300,24 +326,6 @@ func scanCert(row *sql.Row) (*EnvCert, error) {
 	if c.NotAfter, err = time.Parse(time.RFC3339, notAfter); err != nil {
 		return nil, err
 	}
+	c.Offline = offlineInt != 0
 	return &c, nil
-}
-
-// permissionsFromJSON is a helper for scanning JSON arrays.
-func permissionsFromJSON(s string) ([]string, error) {
-	var p []string
-	if err := json.Unmarshal([]byte(s), &p); err != nil {
-		return nil, err
-	}
-	return p, nil
-}
-
-// hasPermission checks if the permissions slice contains perm.
-func hasPermission(permissions []string, perm string) bool {
-	for _, p := range permissions {
-		if strings.EqualFold(p, perm) {
-			return true
-		}
-	}
-	return false
 }

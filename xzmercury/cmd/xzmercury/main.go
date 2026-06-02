@@ -88,7 +88,9 @@ func main() {
 	if !*dev {
 		session, err := infra.BootstrapCA(ctx, cfg.CA)
 		if err != nil {
-			log.Fatal().Err(err).Msg("CA bootstrap failed — refusing to start without authorization")
+			stop()
+			inf.Close()
+			log.Fatal().Err(err).Msg("CA bootstrap failed — refusing to start without authorization") //nolint:gocritic
 		}
 		caGuard = session
 		log.Info().Msg("CA authorization active — key operations enabled")

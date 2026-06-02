@@ -106,6 +106,24 @@ func (h *EnrollHandler) Step1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing == nil {
+		// Seat policy: one env = one active license.
+		// Check if this env_id_pub is already enrolled under a DIFFERENT license.
+		existingAny, err := h.db.GetActiveCertByEnvID(req.EnvIDPub)
+		if err != nil {
+			writeCAError(w, http.StatusInternalServerError, "db error")
+			return
+		}
+		if existingAny != nil && existingAny.LicenseHash != licenseHash {
+			log.Warn().
+				Str("license_hash", licenseHash[:8]+"...").
+				Str("existing_cert_id", existingAny.CertID).
+				Msg("enroll step1: env already enrolled under a different license")
+			writeCAError(w, http.StatusConflict,
+				fmt.Sprintf("env already enrolled under a different license (cert_id=%s); revoke it first",
+					existingAny.CertID))
+			return
+		}
+
 		// New enrollment: check seat limit.
 		count, err := h.db.CountActiveCerts(licenseHash)
 		if err != nil {
