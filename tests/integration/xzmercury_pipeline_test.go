@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -152,6 +153,10 @@ quota:
 		"--config", cfgPath,
 	)
 	xzmCmd.Dir = root
+	// Setpgid: true — помещает дочерние процессы в отдельную группу.
+	// Без этого Kill() убивает только "go run", но не скомпилированный бинарник xzmercury,
+	// который становится orphan и мешает CI (GitHub Actions сообщает о нём в конце джоба).
+	xzmCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Pipe вместо os.Stderr: при Kill() pipe закрывается сразу,
 	// иначе Go test framework ждёт WaitDelay и считает прогон неудачным.
 	xzmPipe, _ := xzmCmd.StderrPipe()
@@ -173,7 +178,11 @@ quota:
 		}
 	}()
 	t.Cleanup(func() {
-		_ = xzmCmd.Process.Kill()
+		// Убиваем всю группу процессов: и "go run" и скомпилированный xzmercury.
+		if xzmCmd.Process != nil {
+			_ = syscall.Kill(-xzmCmd.Process.Pid, syscall.SIGKILL)
+			_ = xzmCmd.Wait()
+		}
 		_ = xzmPipe.Close()
 	})
 
@@ -237,7 +246,7 @@ error_handling:
 
 	// ── 4. Вызываем tdtpcli --pipeline ───────────────────────────────────
 	t.Log("running tdtpcli --pipeline")
-	tdtpCmd := exec.Command("go", "run", "./cmd/tdtpcli/", "--pipeline", pipelinePath)
+	tdtpCmd := exec.Command("go", "run", "-tags", "nokafka", "./cmd/tdtpcli/", "--pipeline", pipelinePath)
 	tdtpCmd.Dir = root
 	tdtpCmd.Stdout = os.Stderr // пишем в stderr чтобы было видно в -v
 	tdtpCmd.Stderr = os.Stderr
@@ -284,7 +293,7 @@ error_handling:
 		"dept-salary-encrypted",
 		"dept-salary-encrypted-2",
 	))
-	tdtpCmd2 := exec.Command("go", "run", "./cmd/tdtpcli/",
+	tdtpCmd2 := exec.Command("go", "run", "-tags", "nokafka", "./cmd/tdtpcli/",
 		"--pipeline", filepath.Join(tmp, "pipeline2.yaml"))
 	tdtpCmd2.Dir = root
 	tdtpCmd2.Stdout = os.Stderr
