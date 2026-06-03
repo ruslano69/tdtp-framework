@@ -41,6 +41,7 @@ POST   /scenarios/{name}/run          activator run with {params} → {job_id}
 
 GET    /jobs                          consumer  recent jobs (100)
 GET    /jobs/{id}                     consumer  job status + log
+GET    /jobs/{id}/artifact            consumer  download output file (if any)
 GET    /results/{scenario}            consumer  recent jobs for one scenario
 
 GET    /schedules                     admin     list schedules
@@ -92,6 +93,23 @@ curl -X POST http://localhost:8080/tokens \
 
 `scenarios: []` (or omitted) grants access to all scenarios.
 
+## Job artifacts
+
+After a successful job the orchestrator records the output file path, its
+SHA-256 fingerprint, and byte size in the DB.
+
+```bash
+# Download the artifact for job abc123
+curl -OJ -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/jobs/abc123/artifact
+# → saves as the original filename (Content-Disposition: attachment)
+```
+
+`GET /jobs/{id}/artifact` returns `404` if the job produced no output file
+(e.g. import-only pipeline, or the job failed).
+
+---
+
 ## Run
 
 ```bash
@@ -106,12 +124,40 @@ orchestrator \
   --addr :8080
 ```
 
-| Flag | Purpose |
-|------|---------|
-| `--license` | tdtp.lic for offline capability gating (default: env/./tdtp.lic/community) |
-| `--mercury-url` | xZMercury base URL for online preflight (empty = skip) |
-| `--require-prod` | refuse to start against a dev-mode / non-CA-authorized Mercury |
-| `--no-auth` | disable token auth (local dev only) |
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--license` | env/./tdtp.lic/community | tdtp.lic for offline capability gating |
+| `--mercury-url` | `` | xZMercury base URL for online preflight (empty = skip) |
+| `--require-prod` | false | refuse to start against dev-mode / non-CA-authorized Mercury |
+| `--no-auth` | false | disable token auth (local dev only — every request is admin) |
+| `--auth-type` | `token` | authentication type: `token` or `ldap` |
+| `--ldap-url` | `` | LDAP server, e.g. `ldap://corp.example.com:389` (ldap mode) |
+| `--ldap-bind-dn` | `` | service account DN for user search (ldap mode) |
+| `--ldap-bind-pass` | `` | service account password (ldap mode) |
+| `--ldap-base-dn` | `` | LDAP search base DN (ldap mode) |
+
+### Token auth (default)
+
+Bootstrap admin token is printed once on first run. After that, tokens are
+managed via `POST /tokens` (admin only). In LDAP mode, `/tokens` returns 501
+— group membership drives roles instead.
+
+### LDAP auth
+
+```bash
+orchestrator \
+  --auth-type ldap \
+  --ldap-url ldap://dc.corp.local:389 \
+  --ldap-bind-dn "cn=svc_orch,ou=service,dc=corp,dc=local" \
+  --ldap-bind-pass "$LDAP_PASS" \
+  --ldap-base-dn "dc=corp,dc=local" \
+  --scenarios ./scenarios --db orchestrator.db --tdtpcli ./tdtpcli
+```
+
+Group-to-role mapping is configured via `--ldap-*` flags (see `auth.go`
+`LDAPConfig.RoleMap`). Default role when no group matches: `consumer`.
+LDAP bind happens per-request using HTTP Basic Auth (`Authorization: Basic`).
+In LDAP mode, `/tokens` endpoints are not available.
 
 ## Scenario file
 
