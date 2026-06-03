@@ -88,11 +88,21 @@ func OpenOrchestratorDB(path string) (*OrchestratorDB, error) {
 	if _, err := db.Exec(orchSchema); err != nil {
 		return nil, fmt.Errorf("orchestrator db: schema: %w", err)
 	}
-	// Idempotent migration: add timezone column if it doesn't exist yet.
-	if _, err := db.Exec(`ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT ''`); err != nil {
-		// SQLite returns "duplicate column name" when the column already exists — ignore it.
-		if !isDuplicateColumnErr(err) {
-			return nil, fmt.Errorf("orchestrator db: migrate timezone: %w", err)
+	// Idempotent migrations.
+	migrations := []struct {
+		col string
+		ddl string
+	}{
+		{"timezone", `ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT ''`},
+		{"artifact_path", `ALTER TABLE jobs ADD COLUMN artifact_path TEXT NOT NULL DEFAULT ''`},
+		{"artifact_sha256", `ALTER TABLE jobs ADD COLUMN artifact_sha256 TEXT NOT NULL DEFAULT ''`},
+		{"artifact_size", `ALTER TABLE jobs ADD COLUMN artifact_size INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m.ddl); err != nil {
+			if !isDuplicateColumnErr(err) {
+				return nil, fmt.Errorf("orchestrator db: migrate %s: %w", m.col, err)
+			}
 		}
 	}
 	return &OrchestratorDB{db: db}, nil
@@ -251,6 +261,14 @@ func (d *OrchestratorDB) UpdateJobStatus(id string, status JobStatus) error {
 	return err
 }
 
+// UpdateJobArtifact records the output file path, SHA-256, and size for a completed job.
+func (d *OrchestratorDB) UpdateJobArtifact(id, path, sha256 string, size int64) error {
+	_, err := d.db.Exec(
+		`UPDATE jobs SET artifact_path=?, artifact_sha256=?, artifact_size=? WHERE id=?`,
+		path, sha256, size, id)
+	return err
+}
+
 // CountActiveJobs returns the number of jobs currently pending or running.
 // Used to enforce the licensed concurrent-pipeline limit.
 func (d *OrchestratorDB) CountActiveJobs() (int, error) {
@@ -263,7 +281,8 @@ func (d *OrchestratorDB) CountActiveJobs() (int, error) {
 // GetJob returns one job by ID.
 func (d *OrchestratorDB) GetJob(id string) (*Job, error) {
 	row := d.db.QueryRow(`
-		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error
+		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
+		       artifact_path, artifact_sha256, artifact_size
 		FROM jobs WHERE id=?`, id)
 	return scanJob(row)
 }
@@ -271,7 +290,8 @@ func (d *OrchestratorDB) GetJob(id string) (*Job, error) {
 // ListJobs returns the N most recent jobs (all scenarios).
 func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 	rows, err := d.db.Query(`
-		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error
+		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
+		       artifact_path, artifact_sha256, artifact_size
 		FROM jobs ORDER BY started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -293,7 +313,8 @@ func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 // ListJobsByScenario returns the N most recent jobs for one scenario.
 func (d *OrchestratorDB) ListJobsByScenario(scenario string, limit int) ([]*Job, error) {
 	rows, err := d.db.Query(`
-		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error
+		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
+		       artifact_path, artifact_sha256, artifact_size
 		FROM jobs WHERE scenario=? ORDER BY started_at DESC LIMIT ?`, scenario, limit)
 	if err != nil {
 		return nil, err
@@ -581,10 +602,13 @@ func scanJobRow(row scannable) (*Job, error) {
 	var paramsJSON, startedAt string
 	var schedID, finishedAt, log, errMsg sql.NullString
 	var status string
+	var artifactPath, artifactSHA256 sql.NullString
+	var artifactSize sql.NullInt64
 
 	err := row.Scan(
 		&j.ID, &schedID, &j.Scenario, &paramsJSON, &status,
 		&startedAt, &finishedAt, &log, &errMsg,
+		&artifactPath, &artifactSHA256, &artifactSize,
 	)
 	if err != nil {
 		return nil, err
@@ -593,6 +617,9 @@ func scanJobRow(row scannable) (*Job, error) {
 	j.Status = JobStatus(status)
 	j.Log = log.String
 	j.Error = errMsg.String
+	j.ArtifactPath = artifactPath.String
+	j.ArtifactSHA256 = artifactSHA256.String
+	j.ArtifactSize = artifactSize.Int64
 	if err := json.Unmarshal([]byte(paramsJSON), &j.Params); err != nil {
 		j.Params = map[string]string{}
 	}

@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -196,6 +199,55 @@ func TestExecutor_CountActiveJobs(t *testing.T) {
 	active, _ = db.CountActiveJobs()
 	if active != 0 {
 		t.Errorf("active jobs after completion = %d, want 0", active)
+	}
+}
+
+func TestJobArtifact(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputPath := filepath.Join(tmpDir, "output.tdtp.xml")
+	fileContent := []byte("artifact content for testing 12345")
+
+	run := func(ctx context.Context, bin string, args ...string) ([]byte, error) {
+		// Write a small output file to simulate tdtpcli producing an artifact.
+		if err := os.WriteFile(outputPath, fileContent, 0o600); err != nil {
+			return nil, err
+		}
+		return []byte("export done"), nil
+	}
+	e, db := newTestExecutor(t, run)
+
+	// Build a scenario YAML that references the output path.
+	yamlSrc := "orchestrator:\n  name: artifact-test\noutput: " + outputPath + "\n"
+	s := scenarioFromYAML("artifact-test", yamlSrc)
+
+	job, err := e.Submit(context.Background(), s, nil, "")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitJob(t, e)
+
+	got, err := db.GetJob(job.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.Status != JobDone {
+		t.Errorf("status = %s, want done", got.Status)
+	}
+	if got.ArtifactSHA256 == "" {
+		t.Fatal("ArtifactSHA256 is empty — artifact not recorded")
+	}
+	if got.ArtifactSize <= 0 {
+		t.Errorf("ArtifactSize = %d, want > 0", got.ArtifactSize)
+	}
+	if got.ArtifactPath != outputPath {
+		t.Errorf("ArtifactPath = %q, want %q", got.ArtifactPath, outputPath)
+	}
+
+	// Verify SHA-256 matches the file content.
+	h := sha256.Sum256(fileContent)
+	wantSHA256 := hex.EncodeToString(h[:])
+	if got.ArtifactSHA256 != wantSHA256 {
+		t.Errorf("ArtifactSHA256 = %q, want %q", got.ArtifactSHA256, wantSHA256)
 	}
 }
 

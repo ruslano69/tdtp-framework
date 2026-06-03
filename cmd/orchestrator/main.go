@@ -15,6 +15,7 @@
 //	POST /scenarios/{name}/run        run with params → {job_id}
 //	GET  /jobs                        recent jobs (last 100)
 //	GET  /jobs/{id}                   job status + log
+//	GET  /jobs/{id}/artifact          download the job output file
 //	GET  /schedules                   list schedules
 //	POST /schedules                   add schedule
 //	PATCH /schedules/{id}/enable      resume
@@ -49,6 +50,11 @@ func main() {
 	mercuryURL := flag.String("mercury-url", "", "xZMercury base URL for online preflight (empty = skip)")
 	requireProd := flag.Bool("require-prod", false, "refuse to start if Mercury is in dev mode or not CA-authorized")
 	noAuth := flag.Bool("no-auth", false, "disable token authentication (local dev only — every request is admin)")
+	authType := flag.String("auth-type", "token", "authentication type: token|ldap")
+	ldapURL := flag.String("ldap-url", "", "LDAP server URL (ldap auth only), e.g. ldap://corp.example.com:389")
+	ldapBindDN := flag.String("ldap-bind-dn", "", "LDAP service account DN (ldap auth only)")
+	ldapBindPass := flag.String("ldap-bind-pass", "", "LDAP service account password (ldap auth only)")
+	ldapBaseDN := flag.String("ldap-base-dn", "", "LDAP search base DN (ldap auth only)")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
@@ -101,20 +107,36 @@ func main() {
 		log.Fatal().Err(err).Msg("load schedules from db")
 	}
 
-	// All fatal-risk init done — register cleanup defers.
-	// Authentication: token-based with roles. Bootstrap an admin token on first run.
-	auth := NewAuthenticator(db, !*noAuth)
-	if *noAuth {
-		log.Warn().Msg("AUTH DISABLED (--no-auth) — every request is treated as admin")
-	} else {
-		if raw, err := auth.BootstrapAdminToken(); err != nil {
-			_ = db.Close()
-			log.Fatal().Err(err).Msg("bootstrap admin token")
-		} else if raw != "" {
-			log.Warn().Msg("──────────────────────────────────────────────────────────────")
-			log.Warn().Str("admin_token", raw).Msg("BOOTSTRAP ADMIN TOKEN — store it now, shown once")
-			log.Warn().Msg("──────────────────────────────────────────────────────────────")
+	// Authentication: choose token-based or LDAP.
+	var authMiddleware func(http.Handler) http.Handler
+	var auth *Authenticator // only set for token mode (used by /tokens routes)
+	switch *authType {
+	case "ldap":
+		ldapAuth := NewLDAPAuthenticator(LDAPConfig{
+			URL:         *ldapURL,
+			BindDN:      *ldapBindDN,
+			BindPass:    *ldapBindPass,
+			BaseDN:      *ldapBaseDN,
+			GroupAttr:   "memberOf",
+			DefaultRole: RoleConsumer,
+		})
+		authMiddleware = ldapAuth.Middleware
+		log.Info().Str("url", *ldapURL).Msg("LDAP authentication enabled")
+	default: // "token"
+		auth = NewAuthenticator(db, !*noAuth)
+		if *noAuth {
+			log.Warn().Msg("AUTH DISABLED (--no-auth) — every request is treated as admin")
+		} else {
+			if raw, err := auth.BootstrapAdminToken(); err != nil {
+				_ = db.Close()
+				log.Fatal().Err(err).Msg("bootstrap admin token")
+			} else if raw != "" {
+				log.Warn().Msg("──────────────────────────────────────────────────────────────")
+				log.Warn().Str("admin_token", raw).Msg("BOOTSTRAP ADMIN TOKEN — store it now, shown once")
+				log.Warn().Msg("──────────────────────────────────────────────────────────────")
+			}
 		}
+		authMiddleware = auth.Middleware
 	}
 
 	// All fatal-risk init done — register cleanup defers.
@@ -134,7 +156,7 @@ func main() {
 
 	// All other routes require authentication.
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware)
+		r.Use(authMiddleware)
 
 		// ── Scenarios ──────────────────────────────────────────────────────────────
 		r.Get("/scenarios", RequireRole(RoleConsumer, func(w http.ResponseWriter, _ *http.Request) {
@@ -239,6 +261,25 @@ func main() {
 			writeJSON(w, http.StatusOK, job)
 		}))
 
+		r.Get("/jobs/{id}/artifact", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+			job, err := db.GetJob(chi.URLParam(r, "id"))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if job == nil {
+				writeError(w, http.StatusNotFound, "job not found")
+				return
+			}
+			if job.ArtifactPath == "" {
+				writeError(w, http.StatusNotFound, "job has no artifact")
+				return
+			}
+			w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(job.ArtifactPath)+`"`)
+			w.Header().Set("Content-Type", "application/octet-stream")
+			http.ServeFile(w, r, job.ArtifactPath)
+		}))
+
 		// ── Results (consumer view) ─────────────────────────────────────────────────
 		// Recent jobs for a scenario, scoped by the token's scenario allowlist.
 		r.Get("/results/{scenario}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +359,10 @@ func main() {
 		}))
 
 		r.Post("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+			if auth == nil {
+				writeError(w, http.StatusNotImplemented, "token management not available in ldap auth mode")
+				return
+			}
 			var body struct {
 				Name      string   `json:"name"`
 				Role      string   `json:"role"`
