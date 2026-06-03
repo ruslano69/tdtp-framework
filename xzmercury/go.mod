@@ -2,7 +2,7 @@ module github.com/ruslano69/xzmercury
 
 go 1.24.7
 
-toolchain go1.25.8
+toolchain go1.26.4
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0

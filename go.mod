@@ -2,7 +2,7 @@ module github.com/ruslano69/tdtp-framework
 
 go 1.24.7
 
-toolchain go1.25.8
+toolchain go1.26.4
 
 require (
 	github.com/alexbrainman/odbc v0.0.0-20250601004241-49e6b2bc0cf0
