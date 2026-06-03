@@ -1,0 +1,64 @@
+# tdtp/worker — orchestrator + tdtpcli
+#
+# Contains both binaries because orchestrator calls tdtpcli as a subprocess.
+# SQLite is included (modernc pure-Go) for zero-dependency deployments.
+# For PostgreSQL orchestrator DB: mount config and set --db to a pg:// URI
+# once orchestrator supports it — for now SQLite via volume is the default.
+#
+# Build:
+#   docker build -f deployments/docker/Dockerfile.worker -t tdtp/worker:latest .
+#
+# Run:
+#   docker run -v ./data:/data -v ./scenarios:/scenarios \
+#     -e TDTP_LICENSE=/data/tdtp.lic \
+#     -p 8080:8080 tdtp/worker:latest
+
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN GOPROXY=https://goproxy.io GONOSUMDB='*' go mod download
+
+COPY . .
+
+# production tag: removes --enc-dev flag (flags_dev.go build guard)
+# CGO_ENABLED=0: fully static — no libc dependency
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -tags production \
+    -ldflags='-s -w -extldflags=-static' \
+    -o /out/tdtpcli ./cmd/tdtpcli/ && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -tags production \
+    -ldflags='-s -w -extldflags=-static' \
+    -o /out/orchestrator ./cmd/orchestrator/
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+# distroless/static: no shell, no package manager, minimal attack surface.
+# Switch to debian:12-slim if you need shell access for debugging.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /out/tdtpcli      /usr/local/bin/tdtpcli
+COPY --from=builder /out/orchestrator /usr/local/bin/orchestrator
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# /data  — SQLite DB + tdtp.lic
+# /scenarios — scenario YAML files (read-only mount recommended)
+# /schedules — schedule seed YAML files
+# /tmp/orch-pipelines — rendered pipeline YAMLs (tmpfs recommended)
+VOLUME ["/data", "/scenarios", "/schedules"]
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/orchestrator"]
+CMD [ \
+    "--scenarios",      "/scenarios", \
+    "--schedules-seed", "/schedules", \
+    "--db",             "/data/orchestrator.db", \
+    "--tdtpcli",        "/usr/local/bin/tdtpcli", \
+    "--tmp",            "/tmp", \
+    "--addr",           ":8080" \
+]

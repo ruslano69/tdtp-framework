@@ -1,0 +1,53 @@
+# tdtp/mercury — xZMercury key service
+#
+# Separate Go module (xzmercury/go.mod) — built from the xzmercury/ subdirectory.
+# In prod: requires external Redis (mercury + pipeline) and CA connection.
+# In dev:  --dev flag starts miniredis in-process; no Redis or CA needed.
+#
+# Build:
+#   docker build -f deployments/docker/Dockerfile.mercury -t tdtp/mercury:latest .
+#
+# Run (dev):
+#   docker run -p 3000:3000 \
+#     -e MERCURY_SERVER_SECRET=change-me-32-chars-minimum-here!! \
+#     tdtp/mercury:latest --dev
+#
+# Run (prod):
+#   docker run -p 3000:3000 \
+#     -v ./configs/xzmercury.yaml:/config/xzmercury.yaml:ro \
+#     -v ./envkey:/envkey \
+#     -e MERCURY_SERVER_SECRET=... \
+#     -e TDTPCA_LICENSE_KEY=TDTP-XXXXXXXX \
+#     tdtp/mercury:latest --config /config/xzmercury.yaml
+
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /src/xzmercury
+COPY xzmercury/go.mod xzmercury/go.sum ./
+RUN GOPROXY=https://goproxy.io GONOSUMDB='*' go mod download
+
+COPY xzmercury/ .
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build \
+    -ldflags='-s -w -extldflags=-static' \
+    -o /out/xzmercury ./cmd/xzmercury/
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /out/xzmercury /usr/local/bin/xzmercury
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# /config  — xzmercury.yaml (optional; use --dev for zero-config)
+# /envkey  — Ed25519 env keypair (generated on first enroll, persist this volume)
+VOLUME ["/config", "/envkey"]
+
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/local/bin/xzmercury"]
+CMD ["--config", "/config/xzmercury.yaml"]

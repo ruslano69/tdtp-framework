@@ -1,0 +1,44 @@
+# xZMercury config for docker-compose.prod.yml
+# MERCURY_SERVER_SECRET and TDTPCA_LICENSE_KEY are injected via environment.
+
+server:
+  addr: ":3000"
+  read_timeout: 10s
+  write_timeout: 10s
+
+# Mercury Redis — AES keys only, RAM-only (no persistence)
+mercury:
+  addr: "redis-mercury:6379"
+  password: ""          # set here or use Redis AUTH via requirepass + REDIS_PASSWORD
+  db: 0
+
+# Pipeline Redis — quota balances, ACL cache, request state
+pipeline:
+  addr: "redis-pipeline:6379"
+  password: ""
+  db: 0
+
+key_ttl: 5m
+
+security:
+  server_secret: ""     # override via MERCURY_SERVER_SECRET env var
+  rate_limit: 100
+
+ldap:
+  addr: ""              # set to your AD/LDAP, e.g. dc.corp.local:389
+  bind_dn: ""
+  bind_password: ""
+  base_dn: ""
+  cache_ttl: 120s
+  mock_users_file: ""   # leave empty to use real LDAP
+
+quota:
+  default_hourly: 1000
+  acl_file: ""          # optional: mount pipeline-acl.yaml and set path here
+
+# CA authorization — required in prod
+ca:
+  url: "http://ca:8443"
+  license_key: ""       # override via TDTPCA_LICENSE_KEY env var
+  env_key_dir: "/envkey"
+  cert_path: "/envkey/env.cert"
