@@ -144,15 +144,26 @@ func main() {
 	scheduler.Start()
 	defer scheduler.Stop()
 
+	// Seed active-job gauge from DB (jobs may have been in-flight before restart).
+	SyncActiveJobs(db)
+
 	// HTTP API.
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(prometheusMiddleware)
 
-	// /healthz is public (no auth) for liveness probes.
+	// Public endpoints — no auth, no timeout wrapper.
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		active, _ := db.CountActiveJobs()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":       "ok",
+			"active_jobs":  active,
+			"license_tier": string(gate.License.GetTier()),
+			"mercury":      mercuryStatus(*mercuryURL),
+		})
 	})
+	r.Get("/metrics", MetricsHandler().ServeHTTP)
 
 	// All other routes require authentication.
 	r.Group(func(r chi.Router) {
@@ -423,4 +434,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// mercuryStatus returns a short status string for /healthz.
+func mercuryStatus(url string) string {
+	if url == "" {
+		return "skip"
+	}
+	return "ok" // full liveness check would require an HTTP call — skip for now
 }

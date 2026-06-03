@@ -102,6 +102,7 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 		_ = os.Remove(tmpFile)
 		return nil, fmt.Errorf("executor: persist job: %w", err)
 	}
+	RecordJobSubmit()
 
 	// Extract the --output path from the rendered YAML, if present.
 	// The pipeline YAML may contain an "output:" key that tdtpcli writes to.
@@ -130,6 +131,7 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 		}
 
 		_ = e.db.UpdateJobDone(job.ID, status, logStr, errMsg)
+		RecordJobDone(job.Scenario, string(status), job.StartedAt)
 
 		// Compute artifact metadata after a successful run.
 		if status == JobDone && outputPath != "" {

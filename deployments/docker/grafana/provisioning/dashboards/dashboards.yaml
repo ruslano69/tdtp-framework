@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: tdtp
+    folder: TDTP
+    type: file
+    options:
+      path: /etc/grafana/dashboards
