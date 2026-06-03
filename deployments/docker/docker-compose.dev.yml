@@ -1,0 +1,119 @@
+# TDTP Framework — DEV stack
+#
+# Минимальный запуск без внешних зависимостей:
+#   - xzmercury в --dev (miniredis внутри, mock LDAP, без CA)
+#   - orchestrator с --no-auth и community license
+#   - tdtpcli работает как subprocess оркестратора
+#
+# Запуск:
+#   docker compose -f deployments/docker/docker-compose.dev.yml up --build
+#
+# После запуска:
+#   http://localhost:8080/healthz   — orchestrator
+#   http://localhost:3000/healthz   — xzmercury
+
+services:
+
+  # ── xZMercury (dev mode: miniredis + mock LDAP, без CA) ───────────────────
+  mercury:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.mercury
+    image: tdtp/mercury:dev
+    command: ["--dev"]
+    environment:
+      MERCURY_SERVER_SECRET: "dev-secret-change-in-production-32ch"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Orchestrator + tdtpcli ─────────────────────────────────────────────────
+  worker:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.worker
+    image: tdtp/worker:dev
+    command:
+      - "--scenarios"
+      - "/scenarios"
+      - "--schedules-seed"
+      - "/schedules"
+      - "--db"
+      - "/data/orchestrator.db"
+      - "--tdtpcli"
+      - "/usr/local/bin/tdtpcli"
+      - "--tmp"
+      - "/tmp"
+      - "--addr"
+      - ":8080"
+      - "--no-auth"                          # dev: no auth
+      - "--mercury-url"
+      - "http://mercury:3000"
+    environment:
+      MERCURY_SERVER_SECRET: "dev-secret-change-in-production-32ch"
+      TDTP_AUDIT_FORMAT: "json"
+    volumes:
+      - ./scenarios:/scenarios:ro            # scenario YAML files
+      - ./schedules:/schedules:ro            # schedule seed YAMLs
+      - worker-data:/data                    # orchestrator.db
+    ports:
+      - "8080:8080"
+    depends_on:
+      mercury:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - worker
+      - mercury
+    restart: unless-stopped
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "tdtp-dev"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  worker-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: tdtp-dev

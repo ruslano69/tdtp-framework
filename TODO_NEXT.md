@@ -1,12 +1,17 @@
 # TODO NEXT — Sprint план
 
-## Поточний стан (v1.11.0 + sprint patches)
+## Поточний стан (v1.11.0 + sprint 2 + sprint 3)
 
-Замкнено повний ланцюг довіри. Закрито цим спринтом:
-- `unsafe-op.cert` (Tier 2 capability certificate + audit log)
-- Job log truncation (64KB cap + overflow file)
-- Schedule timezone (IANA tz у magic params)
-- Lint/gofmt/CI fixes після main merge
+Замкнено повний ланцюг довіри. Закрито Sprint 2:
+- P1: Air-gap offline cert (`issue-offline-cert` + `AuthorizeOffline` endpoint)
+- P2: Seat policy (one env = one license, HTTP 409 cross-license re-enroll)
+- P3: CA renewal з mock clock (`MockClock`, `AutoRenew` 100ms polling)
+- P4: `issue-unsafe-cert` subcommand в `tdtp-certify`
+
+Закрито Sprint 3:
+- P5: Structured audit log + syslog hook (`AuditEntry` JSON format, `TDTP_AUDIT_FORMAT` env var)
+- P6: Orchestrator per-job artifact (`GET /jobs/{id}/artifact`, SHA-256 + size в DB)
+- P7: LDAP auth в Orchestrator (`--auth-type=ldap` flags, `LDAPAuthenticator`)
 
 ---
 

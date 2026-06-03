@@ -2,6 +2,108 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.12.0] — 2026-06-03
+
+Операційна зрілість: air-gap enrollment, seat policy, structured audit log,
+per-job артефакти, LDAP auth оркестратора, Prometheus метрики та Docker deployment stack.
+
+### Added — Sprint 2: операційна зрілість CA
+
+- **Air-gap offline cert** (`xzmercury/cmd/tdtp-certify issue-offline-cert`):
+  видача `EnvCert` без live challenge-response для ізольованих мереж.
+  Cert підписується CA-ключем офлайн; `Offline: true` в payload.
+  Mercury приймає на `POST /api/env/authorize/offline` — без nonce, без мережі CA.
+  Online endpoint (`/authorize`) явно відхиляє offline cert (400).
+- **Seat policy** (`xzmercury/internal/ca/db.go`):
+  один `env_id_pub` = одна активна ліцензія. Re-enroll з іншим license → HTTP 409.
+  `GetActiveCertByEnvID` + cross-license guard в enroll handler.
+  Re-enroll під тією ж ліцензією — idempotent (200 + новий cert).
+- **Mock clock + AutoRenew тест** (`xzmercury/internal/caClient`):
+  `clock interface { Now() time.Time }`, `MockClock.Advance(d)`, `SetClock(clk)`.
+  AutoRenew polling 100ms проти `c.clk.Now()` — тестується без реального часу.
+  `TestAutoRenew_MockClock`: cert з TTL, просування clock, перевірка callback.
+- **`issue-unsafe-cert`** (`xzmercury/cmd/tdtp-certify`):
+  видача `CapabilityCert` для `--unsafe` pipeline операцій.
+  Flags: `--to`, `--op`, `--tables`, `--db`, `--host`, `--ttl`, `--key`, `--out`.
+  Roundtrip тест: sign → `LoadCert` → `VerifyWith`.
+
+### Added — Sprint 3: спостережуваність і SIEM
+
+- **Structured audit log** (`pkg/license/audit.go`):
+  `AuditEntry{Timestamp, Nonce, Operation, IssuedTo, Host, TdtpcliVersion}`.
+  `NewAuditLog(path, format)` — `format: "text" | "json"` (один JSON-об'єкт на рядок).
+  `TDTP_AUDIT_FORMAT` env var (default `"text"`).
+  `DefaultAuditLog()` читає `TDTP_AUDIT_LOG` і `TDTP_AUDIT_FORMAT`.
+  `HasNonce` розбирає обидва формати + fallback text при помилці JSON-parse.
+- **Syslog audit hook** (`pkg/license/audit_syslog.go`, build tag `syslog`):
+  `SyslogAuditLog` пише JSON-записи у syslog. `HasNonce` → завжди false
+  (replay protection потребує file-backed лога поруч).
+- **Orchestrator per-job artifact** (`cmd/orchestrator`):
+  після успішного job: `extractOutputPath` → SHA-256 + розмір → `db.UpdateJobArtifact`.
+  `GET /jobs/{id}/artifact` — скачування з `Content-Disposition: attachment`.
+  DB: три нові колонки (`artifact_path`, `artifact_sha256`, `artifact_size`) +
+  idempotent migration; timezone migration виправлено для нових DB.
+- **LDAP auth в оркестраторі** (`cmd/orchestrator/auth.go`):
+  `LDAPAuthenticator`: HTTP Basic Auth → LDAP bind → `memberOf` → `RoleMap` → `Principal`.
+  `roleForGroups` вибирає найвищий ranked role.
+  Flags: `--auth-type token|ldap`, `--ldap-url`, `--ldap-bind-dn`, `--ldap-bind-pass`, `--ldap-base-dn`.
+  В LDAP-режимі `POST /tokens` повертає 501.
+
+### Added — Моніторинг
+
+- **Prometheus метрики** (`cmd/orchestrator/metrics.go`, `GET /metrics`):
+  `orchestrator_jobs_total{scenario, status}` — лічильник завершених задач.
+  `orchestrator_job_duration_seconds{scenario, status}` — histogram (бакети 1–600s).
+  `orchestrator_jobs_active` — gauge поточної черги; seeded з DB при старті.
+  `orchestrator_schedule_last_status{id, scenario}` — `1`=ok `0`=failed `-1`=never.
+  `orchestrator_http_requests_total / _duration_seconds` — per-route (chi pattern labels).
+  `prometheusMiddleware` вбудовано у router.
+- **Розширений `/healthz`**: `{status, active_jobs, license_tier, mercury}`.
+  Готовий для K8s readiness probe.
+
+### Added — Docker deployment stack
+
+- **`deployments/docker/Dockerfile.worker`**: orchestrator + tdtpcli, `CGO_ENABLED=0`,
+  `gcr.io/distroless/static-debian12:nonroot`, ~25 MB. Build tag `production`.
+- **`deployments/docker/Dockerfile.mercury`**: xzmercury з окремого `go.mod`.
+- **`deployments/docker/Dockerfile.ca`**: tdtp-ca + tdtp-certify. CA ключ — тільки mount,
+  ніколи не в образі.
+- **`docker-compose.dev.yml`**: 4 сервіси одною командою — mercury (--dev),
+  worker (--no-auth), Prometheus (:9090), Grafana (:3001, admin/tdtp-dev).
+  Grafana дашборд **TDTP Orchestrator** — auto-provision через provisioning/.
+- **`docker-compose.prod.yml`**: CA + Redis×2 (mercury RAM-only + pipeline з persistence) +
+  xzmercury (CA enrollment при старті) + worker (--require-prod). `.env.example`.
+- **`.dockerignore`**: виключає тести, бінарники, ключі, logs з build context.
+
+### Added — Документація
+
+- **`docs/DEPLOYMENT.md`**: service map з портами та залежностями, покроковий
+  local dev → production, air-gap offline cert, порядок старту, audit log формати,
+  smoke test послідовність.
+- **`cmd/orchestrator/README.md`**: оновлено API таблицю (artifact), flags таблицю
+  (LDAP), розділи "Job artifacts" і "LDAP auth".
+
+### Fixed
+
+- **Timezone migration**: `ALTER TABLE schedules ADD COLUMN timezone` додано до
+  idempotent migration block — виправляє `TestScheduleRecordTimezone` на нових DB.
+- **Offline cert rejected at online endpoint**: явний guard на початку `Step1`
+  (`if req.Cert.Offline → 400`) — виправляє тест `TestOfflineCertOnlineEndpointRejected`.
+- **`hashstore.SetArgs` NX**: замінено deprecated `SetNX` на `SetArgs{Mode:"NX"}`;
+  detection через `errors.Is(err, redis.Nil)` замість перевірки result string.
+- **`tdtp-certify loadPrivKey`**: підтримка обох PEM типів —
+  `"PRIVATE KEY"` (PKCS8) та `"ED25519 PRIVATE KEY"` (raw); `fmt.Sscanf` для errcheck.
+
+### Tests
+
+~25 нових тестів:
+`ca/offline_cert_test.go` (4) · `ca/integration_test.go` +2 (seat policy) ·
+`infra/ca_bootstrap_test.go` +1 (MockClock AutoRenew) ·
+`tdtp-certify/unsafe_cert_test.go` (4) ·
+`pkg/license/audit_test.go` +3 (JSON format, roundtrip, env var) ·
+`orchestrator/executor_test.go` +1 (artifact) ·
+`orchestrator/auth_test.go` +5 (LDAP middleware, roleMap, basicAuth).
+
 ## [1.11.0] — 2026-06-02
 
 Замкнено повний ланцюг довіри: апаратний якір (CA/TPM) → онлайн-авторизація

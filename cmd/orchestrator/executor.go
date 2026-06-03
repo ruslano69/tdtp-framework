@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,15 +29,18 @@ const (
 
 // Job tracks one scenario execution.
 type Job struct {
-	ID         string            `json:"id"`
-	ScheduleID string            `json:"schedule_id,omitempty"` // empty = manual run
-	Scenario   string            `json:"scenario"`
-	Params     map[string]string `json:"params"`
-	Status     JobStatus         `json:"status"`
-	StartedAt  time.Time         `json:"started_at"`
-	FinishedAt *time.Time        `json:"finished_at,omitempty"`
-	Log        string            `json:"log,omitempty"`
-	Error      string            `json:"error,omitempty"`
+	ID             string            `json:"id"`
+	ScheduleID     string            `json:"schedule_id,omitempty"` // empty = manual run
+	Scenario       string            `json:"scenario"`
+	Params         map[string]string `json:"params"`
+	Status         JobStatus         `json:"status"`
+	StartedAt      time.Time         `json:"started_at"`
+	FinishedAt     *time.Time        `json:"finished_at,omitempty"`
+	Log            string            `json:"log,omitempty"`
+	Error          string            `json:"error,omitempty"`
+	ArtifactPath   string            `json:"artifact_path,omitempty"`   // local path to output file
+	ArtifactSHA256 string            `json:"artifact_sha256,omitempty"` // hex SHA-256 of file
+	ArtifactSize   int64             `json:"artifact_size,omitempty"`   // bytes
 }
 
 // runnerFunc executes a command and returns its combined output.
@@ -50,8 +56,6 @@ func execRunner(ctx context.Context, bin string, args ...string) ([]byte, error)
 	err := cmd.Run()
 	return buf.Bytes(), err
 }
-
-const maxJobLogBytes = 64 * 1024
 
 // Executor runs tdtpcli --pipeline with rendered scenario YAML.
 // Jobs are persisted to OrchestratorDB so status survives restarts.
@@ -98,6 +102,11 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 		_ = os.Remove(tmpFile)
 		return nil, fmt.Errorf("executor: persist job: %w", err)
 	}
+	RecordJobSubmit()
+
+	// Extract the --output path from the rendered YAML, if present.
+	// The pipeline YAML may contain an "output:" key that tdtpcli writes to.
+	outputPath := extractOutputPath(rendered)
 
 	go func() {
 		defer func() { _ = os.Remove(tmpFile) }()
@@ -122,6 +131,15 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 		}
 
 		_ = e.db.UpdateJobDone(job.ID, status, logStr, errMsg)
+		RecordJobDone(job.Scenario, string(status), job.StartedAt)
+
+		// Compute artifact metadata after a successful run.
+		if status == JobDone && outputPath != "" {
+			if sha256hex, size, err := fileHashAndSize(outputPath); err == nil {
+				_ = e.db.UpdateJobArtifact(job.ID, outputPath, sha256hex, size)
+			}
+			// If the file doesn't exist (e.g. dry-run), skip silently.
+		}
 
 		if e.done != nil {
 			e.done <- job.ID
@@ -129,6 +147,46 @@ func (e *Executor) Submit(ctx context.Context, s *Scenario, params map[string]st
 	}()
 
 	return job, nil
+}
+
+const maxJobLogBytes = 64 * 1024
+
+// extractOutputPath scans rendered pipeline YAML for an "output:" line and returns
+// the value. Returns "" when not found or when the value looks like an s3:// URI
+// (non-local paths are not served via the artifact endpoint).
+func extractOutputPath(yaml []byte) string {
+	for _, line := range strings.Split(string(yaml), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "output:") {
+			continue
+		}
+		val := strings.TrimSpace(strings.TrimPrefix(line, "output:"))
+		// Strip surrounding quotes if present.
+		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') {
+			val = val[1 : len(val)-1]
+		}
+		// Only keep local paths; skip s3://, http://, etc.
+		if strings.Contains(val, "://") {
+			return ""
+		}
+		return val
+	}
+	return ""
+}
+
+// fileHashAndSize opens path, computes its SHA-256, and returns (hexHash, size, error).
+func fileHashAndSize(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
 // renderTemplate substitutes {{.param}} in YAML using text/template.

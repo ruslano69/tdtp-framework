@@ -127,6 +127,7 @@ func (s *Scheduler) register(r *ScheduleRecord) error {
 			nextRun = &t
 		}
 		_ = s.db.TouchScheduleRun(schedID, status, nextRun)
+		RecordScheduleRun(schedID, scene.Orchestrator.Name, status)
 	})
 	if err != nil {
 		return err

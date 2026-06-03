@@ -1,0 +1,74 @@
+{
+  "title": "TDTP Orchestrator",
+  "uid": "tdtp-orchestrator",
+  "schemaVersion": 38,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "type": "stat", "title": "Active Jobs",
+      "targets": [{ "expr": "orchestrator_jobs_active", "legendFormat": "" }],
+      "options": { "colorMode": "background", "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "yellow", "value": 5 },
+        { "color": "red", "value": 20 }
+      ]}}
+    },
+    {
+      "id": 2, "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "type": "stat", "title": "Jobs Done (1h)",
+      "targets": [{ "expr": "increase(orchestrator_jobs_total{status='done'}[1h])", "legendFormat": "" }],
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 3, "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "type": "stat", "title": "Jobs Failed (1h)",
+      "targets": [{ "expr": "increase(orchestrator_jobs_total{status='failed'}[1h])", "legendFormat": "" }],
+      "options": { "colorMode": "background", "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "red", "value": 1 }
+      ]}}
+    },
+    {
+      "id": 4, "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "type": "stat", "title": "Failure Rate (1h)",
+      "targets": [{ "expr": "rate(orchestrator_jobs_total{status='failed'}[1h]) / (rate(orchestrator_jobs_total[1h]) > 0)", "legendFormat": "" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "yellow", "value": 0.05 },
+        { "color": "red", "value": 0.2 }
+      ]}}}
+    },
+    {
+      "id": 5, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "type": "timeseries", "title": "Jobs per minute by scenario",
+      "targets": [{ "expr": "rate(orchestrator_jobs_total[5m]) * 60", "legendFormat": "{{scenario}} / {{status}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }}
+    },
+    {
+      "id": 6, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "type": "timeseries", "title": "Job duration p95 (seconds)",
+      "targets": [{ "expr": "histogram_quantile(0.95, rate(orchestrator_job_duration_seconds_bucket[5m]))", "legendFormat": "{{scenario}}" }],
+      "fieldConfig": { "defaults": { "unit": "s" }}
+    },
+    {
+      "id": 7, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "type": "timeseries", "title": "HTTP request rate by route",
+      "targets": [{ "expr": "rate(orchestrator_http_requests_total[1m])", "legendFormat": "{{method}} {{path}} {{status}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }}
+    },
+    {
+      "id": 8, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "type": "timeseries", "title": "HTTP latency p95 (seconds)",
+      "targets": [{ "expr": "histogram_quantile(0.95, rate(orchestrator_http_request_duration_seconds_bucket[1m]))", "legendFormat": "{{path}}" }],
+      "fieldConfig": { "defaults": { "unit": "s" }}
+    },
+    {
+      "id": 9, "gridPos": { "h": 6, "w": 24, "x": 0, "y": 20 },
+      "type": "table", "title": "Schedule last run status (1 = ok, 0 = failed, -1 = never)",
+      "targets": [{ "expr": "orchestrator_schedule_last_status", "legendFormat": "", "instant": true }],
+      "transformations": [{ "id": "labelsToFields", "options": {} }]
+    }
+  ]
+}

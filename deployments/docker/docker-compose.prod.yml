@@ -1,0 +1,150 @@
+# TDTP Framework — PROD stack
+#
+# Полный production стек:
+#   - tdtp-ca          (CA сервер)
+#   - Redis x2         (mercury + pipeline — два отдельных инстанса)
+#   - xzmercury        (prod mode, CA enrollment при старте)
+#   - orchestrator     (token auth, license проверка)
+#
+# Перед запуском:
+#   1. Сгенерируй CA ключ:
+#        openssl genpkey -algorithm ed25519 -out secrets/ca.key
+#   2. Выдай лицензию:
+#        docker run --rm -v ./secrets:/secrets tdtp/ca:latest \
+#          --entrypoint /usr/local/bin/tdtp-certify \
+#          issue-license --key /secrets/ca.key --to "Acme Corp" \
+#          --tier enterprise --permissions etl,enc,s3 \
+#          --paid-until 2027-01-01 --out /secrets/acme.lic
+#   3. Скопируй acme.lic в data/worker/tdtp.lic
+#   4. Отредактируй .env (см. .env.example)
+#   5. docker compose -f deployments/docker/docker-compose.prod.yml up -d
+#
+# ВАЖНО: secrets/ca.key никогда не попадает внутрь образа —
+#        только mount read-only в tdtp-ca и tdtp-certify.
+
+services:
+
+  # ── CA сервер ─────────────────────────────────────────────────────────────
+  ca:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.ca
+    image: tdtp/ca:latest
+    volumes:
+      - ca-data:/data
+      - ./secrets/ca.key:/secrets/ca.key:ro   # CA private key (offline HSM in real prod)
+    ports:
+      - "8443:8443"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8443/healthz 2>/dev/null; test $$? -ne 7"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Redis: Mercury keys (RAM-only, no persistence) ─────────────────────────
+  redis-mercury:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", ""]
+    volumes: []                                # no persistence — intentional
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Redis: Pipeline state (quotas, ACL cache) ──────────────────────────────
+  redis-pipeline:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", "3600 1"]
+    volumes:
+      - redis-pipeline-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── xZMercury ──────────────────────────────────────────────────────────────
+  mercury:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.mercury
+    image: tdtp/mercury:latest
+    command: ["--config", "/config/xzmercury.yaml"]
+    environment:
+      MERCURY_SERVER_SECRET: "${MERCURY_SERVER_SECRET}"
+      TDTPCA_LICENSE_KEY: "${TDTPCA_LICENSE_KEY}"
+    volumes:
+      - ./configs/xzmercury.yaml:/config/xzmercury.yaml:ro
+      - mercury-envkey:/envkey                # Ed25519 env keypair (persisted)
+    ports:
+      - "3000:3000"
+    depends_on:
+      ca:
+        condition: service_healthy
+      redis-mercury:
+        condition: service_healthy
+      redis-pipeline:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Orchestrator + tdtpcli ─────────────────────────────────────────────────
+  worker:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.worker
+    image: tdtp/worker:latest
+    environment:
+      TDTP_LICENSE: "/data/tdtp.lic"
+      MERCURY_SERVER_SECRET: "${MERCURY_SERVER_SECRET}"
+      TDTP_AUDIT_FORMAT: "json"
+      TDTP_AUDIT_LOG: "/data/audit.log"
+    command:
+      - "--scenarios"
+      - "/scenarios"
+      - "--schedules-seed"
+      - "/schedules"
+      - "--db"
+      - "/data/orchestrator.db"
+      - "--tdtpcli"
+      - "/usr/local/bin/tdtpcli"
+      - "--tmp"
+      - "/tmp"
+      - "--addr"
+      - ":8080"
+      - "--mercury-url"
+      - "http://mercury:3000"
+      - "--require-prod"
+    volumes:
+      - ./scenarios:/scenarios:ro
+      - ./schedules:/schedules:ro
+      - worker-data:/data                     # orchestrator.db + audit.log
+    ports:
+      - "8080:8080"
+    depends_on:
+      mercury:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  ca-data:
+  redis-pipeline-data:
+  mercury-envkey:
+  worker-data:
+
+networks:
+  default:
+    name: tdtp-prod

@@ -43,7 +43,15 @@
    - Best Practices
    - Testing
 
-5. **[SPECIFICATION.md](./SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
+5. **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Развёртывание системы оркестрации
+   - Карта сервисов и зависимости между ними
+   - Минимальная локальная установка (dev)
+   - Продакшн-развёртывание (Redis, TLS, LDAP)
+   - Порядок запуска сервисов
+   - Air-gap / offline cert
+   - Audit log: text/JSON/syslog форматы
+
+6. **[SPECIFICATION.md](./SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
    - XML формат сообщений
    - Типы данных
    - TDTQL язык запросов
@@ -142,6 +150,10 @@
 | **Использовать CLI** | [USER_GUIDE.md](./USER_GUIDE.md) |
 | **Запустить ETL pipeline** | [ETL_PIPELINE.md](./ETL_PIPELINE.md) 🆕 |
 | **Шифрование через xZMercury** | [ETL_PIPELINE.md § Сценарий 3](./ETL_PIPELINE.md#сценарий-3-шифрованный-вывод-через-xzmercury) 🆕 |
+| **Развернуть оркестрацию** | [DEPLOYMENT.md](./DEPLOYMENT.md) |
+| **LDAP auth в оркестраторе** | [DEPLOYMENT.md § LDAP auth](./DEPLOYMENT.md#ldap-auth) |
+| **Air-gap / offline cert** | [DEPLOYMENT.md § Air-gapped](./DEPLOYMENT.md#air-gapped-environments) |
+| **Audit log JSON/syslog** | [DEPLOYMENT.md § Audit log](./DEPLOYMENT.md#audit-log-tdtpcli) |
 | **Понять TDTP формат** | [SPECIFICATION.md](./SPECIFICATION.md) |
 | **Разрабатывать с фреймворком** | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) |
 | **Настроить тестовую среду** | [DEVELOPER_GUIDE.md § Настройка тестовой среды](./DEVELOPER_GUIDE.md#настройка-тестовой-среды) |

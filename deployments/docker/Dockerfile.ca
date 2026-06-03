@@ -1,0 +1,59 @@
+# tdtp/ca — Certificate Authority + admin CLI
+#
+# Contains tdtp-ca (server) and tdtp-certify (admin CLI).
+# tdtp-ca is a long-running service; tdtp-certify is run ad-hoc for admin tasks.
+#
+# The CA private key must NEVER be inside the image — always mount it as a
+# read-only secret volume or Docker secret.
+#
+# Build:
+#   docker build -f deployments/docker/Dockerfile.ca -t tdtp/ca:latest .
+#
+# Run (server):
+#   docker run -p 8443:8443 \
+#     -v ./ca-data:/data \
+#     -v ./ca.ed25519.priv:/secrets/ca.key:ro \
+#     tdtp/ca:latest
+#
+# Admin (one-off):
+#   docker run --rm \
+#     -v ./ca.ed25519.priv:/secrets/ca.key:ro \
+#     -v ./out:/out \
+#     --entrypoint /usr/local/bin/tdtp-certify \
+#     tdtp/ca:latest \
+#     issue-license --key /secrets/ca.key --to "Acme" --tier enterprise \
+#     --permissions etl,enc --paid-until 2027-01-01 --out /out/acme.lic
+
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /src/xzmercury
+COPY xzmercury/go.mod xzmercury/go.sum ./
+RUN GOPROXY=https://goproxy.io GONOSUMDB='*' go mod download
+
+COPY xzmercury/ .
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags='-s -w -extldflags=-static' \
+    -o /out/tdtp-ca      ./cmd/tdtp-ca/ && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags='-s -w -extldflags=-static' \
+    -o /out/tdtp-certify ./cmd/tdtp-certify/
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /out/tdtp-ca      /usr/local/bin/tdtp-ca
+COPY --from=builder /out/tdtp-certify /usr/local/bin/tdtp-certify
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# /data    — ca.db (SQLite CA database, persist this volume)
+# /secrets — CA private key (mount read-only; NEVER bake into image)
+VOLUME ["/data", "/secrets"]
+
+EXPOSE 8443
+
+ENTRYPOINT ["/usr/local/bin/tdtp-ca"]
+CMD ["--db", "/data/ca.db", "--key", "/secrets/ca.key", "--addr", ":8443"]

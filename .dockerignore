@@ -1,0 +1,43 @@
+# Exclude everything not needed for Go build
+
+# Test artifacts
+**/*_test.go
+**/*.test
+testdata/
+tests/
+scripts/
+examples/
+
+# Dev databases and keys
+*.db
+*.db-shm
+*.db-wal
+envkey/
+*.cert
+*.priv
+*.pub
+secrets/
+
+# Docs
+docs/
+*.md
+!go.mod
+!go.sum
+
+# IDE / OS
+.git/
+.claude/
+.vscode/
+.idea/
+**/.DS_Store
+
+# Build outputs
+bin/
+dist/
+*.exe
+*.dll
+
+# Logs
+*.log
+filerldb2/
+/tmp/
