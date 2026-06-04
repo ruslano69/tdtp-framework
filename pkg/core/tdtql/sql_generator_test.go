@@ -499,3 +499,36 @@ func TestSQLGenerator_Fields_NilQueryFallsBackToStar(t *testing.T) {
 		t.Errorf("Expected:\n%s\nGot:\n%s", expected, result)
 	}
 }
+
+// TestSQLGenerator_BracketTableName verifies that MSSQL-style bracket-quoted table
+// names (e.g. [ZTR$Table Name]) are stripped before ANSI-quoting so that AdaptSQL
+// can correctly replace the ANSI form with [schema].[table] without double-bracketing.
+func TestSQLGenerator_BracketTableName(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	cases := []struct {
+		tableName string
+		want      string
+	}{
+		// Bracket-quoted simple name — brackets must be stripped, then ANSI-quoted
+		{"[ZTR$Table Name]", `SELECT * FROM "ZTR$Table Name"`},
+		// Bracket-quoted schema.table — brackets stripped; safe "dbo" unquoted, table ANSI-quoted
+		{"[dbo].[ZTR$Table Name]", `SELECT * FROM dbo."ZTR$Table Name"`},
+		// Already clean name — unchanged (no quoting needed)
+		{"Users", `SELECT * FROM Users`},
+		// Name with special chars but no brackets — ANSI-quoted normally
+		{"ZTR$Employee", `SELECT * FROM "ZTR$Employee"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tableName, func(t *testing.T) {
+			result, err := generator.GenerateSQL(tc.tableName, nil)
+			if err != nil {
+				t.Fatalf("GenerateSQL(%q) failed: %v", tc.tableName, err)
+			}
+			if result != tc.want {
+				t.Errorf("GenerateSQL(%q)\n  got:  %s\n  want: %s", tc.tableName, result, tc.want)
+			}
+		})
+	}
+}

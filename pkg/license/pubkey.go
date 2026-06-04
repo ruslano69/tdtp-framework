@@ -17,7 +17,7 @@ import (
 // To rotate: replace this block with a new public key and re-sign all licenses.
 // Vendor builds may override this at build time via -ldflags.
 var vendorPublicKeyPEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAb+KrfS1t9CiKHVALiYrBPFhMXqbVttTKn9dAUk3Ughs=
+MCowBQYDK2VwAyEAQN8aC7mWhGV33DFE3gri/bC9YEqfrlj3adKJ/Lc6vXQ=
 -----END PUBLIC KEY-----`
 
 var (

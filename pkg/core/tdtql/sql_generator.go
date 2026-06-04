@@ -16,8 +16,11 @@ func NewSQLGenerator() *SQLGenerator {
 }
 
 // quoteTableName quotes each part of a (schema-qualified) table name.
-// "ZTR$Employee" → `"ZTR$Employee"`;  "public.ZTR$Employee" → `"public"."ZTR$Employee"`
+// "ZTR$Employee"        → `"ZTR$Employee"`
+// "public.ZTR$Employee" → `"public"."ZTR$Employee"`
+// "[ZTR$Employee]"      → `"ZTR$Employee"`  (MSSQL brackets stripped before ANSI-quoting)
 func quoteTableName(name string) string {
+	name = StripBrackets(name) // normalise MSSQL-style [bracket] quoting before ANSI-quoting
 	parts := strings.Split(name, ".")
 	for i, p := range parts {
 		parts[i] = quoteFieldName(p)
