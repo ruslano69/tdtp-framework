@@ -690,10 +690,10 @@ func (s *Server) renderData(
 	// Data card
 	b.WriteString(`<div class="card">`)
 	if len(rows) < totalRows {
-		b.WriteString(fmt.Sprintf(`<div class="card-header">Data <span class="pill">%d of %d rows</span></div>`,
-			len(rows), totalRows))
+		fmt.Fprintf(&b, `<div class="card-header">Data <span class="pill">%d of %d rows</span></div>`,
+			len(rows), totalRows)
 	} else {
-		b.WriteString(fmt.Sprintf(`<div class="card-header">Data <span class="pill">%d rows</span></div>`, len(rows)))
+		fmt.Fprintf(&b, `<div class="card-header">Data <span class="pill">%d rows</span></div>`, len(rows))
 	}
 
 	b.WriteString(`<div class="data-wrapper"><table class="data-table"><thead><tr>`)
@@ -707,8 +707,8 @@ func (s *Server) renderData(
 		if field.Length > 0 {
 			typeLabel += fmt.Sprintf("(%d)", field.Length)
 		}
-		b.WriteString(fmt.Sprintf(`<th%s>%s<br><small>%s</small></th>`,
-			cls, html.EscapeString(field.Name), html.EscapeString(typeLabel)))
+		fmt.Fprintf(&b, `<th%s>%s<br><small>%s</small></th>`,
+			cls, html.EscapeString(field.Name), html.EscapeString(typeLabel))
 	}
 	b.WriteString(`</tr></thead><tbody>`)
 
