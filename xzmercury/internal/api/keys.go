@@ -37,6 +37,7 @@ type bindResponse struct {
 	RequestID string `json:"request_id"`
 	KeyB64    string `json:"key_b64"`
 	HMAC      string `json:"hmac"`
+	Mode      string `json:"mode"` // "dev" | "prod" — attested by HMAC; required for VerifyHMAC
 }
 
 // Bind validates the caller's AD membership and quota, then generates and stores
@@ -121,6 +122,7 @@ func (h *keysHandler) Bind(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestID,
 		KeyB64:    result.KeyB64,
 		HMAC:      result.HMAC,
+		Mode:      string(result.Mode),
 	})
 }
 

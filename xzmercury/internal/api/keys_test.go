@@ -96,6 +96,9 @@ func TestBind_Success_NoCaller(t *testing.T) {
 	if resp.HMAC == "" {
 		t.Error("Bind() response missing hmac")
 	}
+	if resp.Mode != "prod" {
+		t.Errorf("Bind() response mode = %q, want %q", resp.Mode, "prod")
+	}
 }
 
 func TestBind_Success_AuthorizedCaller(t *testing.T) {
