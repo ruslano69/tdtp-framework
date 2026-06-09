@@ -714,7 +714,7 @@ func (s *Server) renderData(
 
 	for i, vals := range rows {
 		b.WriteString(`<tr>`)
-		b.WriteString(fmt.Sprintf(`<td class="row-num">%d</td>`, i+1))
+		fmt.Fprintf(&b, `<td class="row-num">%d</td>`, i+1)
 		for ci, val := range vals {
 			if ci >= len(schema.Fields) {
 				break
@@ -751,11 +751,11 @@ func (s *Server) renderData(
 			keyCount++
 		}
 	}
-	b.WriteString(fmt.Sprintf(`<div class="stats-bar">
+	fmt.Fprintf(&b, `<div class="stats-bar">
   <span><strong>%d</strong> rows shown</span>
   <span><strong>%d</strong> columns</span>
   <span><strong>%d</strong> primary key(s)</span>
-</div>`, len(rows), len(schema.Fields), keyCount))
+</div>`, len(rows), len(schema.Fields), keyCount)
 
 	b.WriteString(`</div>`) // data card
 	b.WriteString(`<div class="footer"><a href="/">← back</a></div>`)
