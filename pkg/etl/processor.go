@@ -37,9 +37,13 @@ type Processor struct {
 
 // NewProcessor создает новый ETL процессор
 func NewProcessor(config *PipelineConfig) *Processor {
+	loader := NewLoader(config.Sources, config.ErrorHandling)
+	if config.Performance.Fast {
+		loader.SetFast(true)
+	}
 	return &Processor{
 		config: config,
-		loader: NewLoader(config.Sources, config.ErrorHandling),
+		loader: loader,
 		stats:  ProcessorStats{},
 	}
 }
@@ -134,6 +138,11 @@ func (p *Processor) initWorkspace(ctx context.Context) error {
 	p.workspace = workspace
 	p.executor = NewExecutor(workspace)
 	p.exporter = NewExporter(p.config.Output)
+
+	// Propagate performance.fast to exporter (Loader already received it in NewProcessor).
+	if p.config.Performance.Fast {
+		p.exporter.SetFast(true)
+	}
 
 	// Встраиваем метаданные pipeline в экспортер (v1.4)
 	if p.pipelineCtx != nil {
