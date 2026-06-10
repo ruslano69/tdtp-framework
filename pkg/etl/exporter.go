@@ -37,6 +37,24 @@ type Exporter struct {
 	mercuryBinder  processors.MercuryBinder   // опциональная замена mercury.Client (dev-режим, тесты)
 	preExportChain *processors.Chain          // процессоры маскирования/нормализации/валидации перед экспортом
 	cb             *resilience.CircuitBreaker // circuit breaker для primary-канала (nil = без CB)
+	fast           bool                       // performance.fast: skip DetectAndApply in GenerateReference
+}
+
+// SetFast propagates the performance.fast flag so packet generation skips
+// SpecialValues detection (DetectAndApply). Per-output TDTP.Fast takes
+// precedence; this is the global fallback from PipelineConfig.Performance.Fast.
+func (e *Exporter) SetFast(fast bool) {
+	e.fast = fast
+}
+
+// newGenerator returns a Generator configured with the effective fast flag:
+// per-output TDTP.Fast OR the global performance.fast (e.fast).
+func (e *Exporter) newGenerator() *packet.Generator {
+	g := packet.NewGenerator()
+	if e.fast || (e.config.TDTP != nil && e.config.TDTP.Fast) {
+		g.SetSkipSpecialValues(true)
+	}
+	return g
 }
 
 // NewExporter создает новый экспортер
@@ -238,7 +256,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	}
 
 	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
-	generator := packet.NewGenerator()
+	generator := e.newGenerator()
 	rows := dataPacket.GetRows()
 	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
 	if err != nil {
@@ -543,7 +561,7 @@ func (e *Exporter) exportToKafkaSpool(ctx context.Context, dataPacket *packet.Da
 		partSizeBytes = defaultPacketKB * 1024
 	}
 
-	generator := packet.NewGenerator()
+	generator := e.newGenerator()
 	generator.SetMaxMessageSize(partSizeBytes)
 	rows := dataPacket.GetRows()
 	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)

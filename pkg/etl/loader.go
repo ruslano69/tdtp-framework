@@ -334,6 +334,7 @@ type SourceData struct {
 type Loader struct {
 	sources       []SourceConfig
 	errorHandling ErrorHandlingConfig
+	fast          bool // performance.fast global override
 }
 
 // NewLoader создает новый загрузчик данных
@@ -342,6 +343,13 @@ func NewLoader(sources []SourceConfig, errorHandling ErrorHandlingConfig) *Loade
 		sources:       sources,
 		errorHandling: errorHandling,
 	}
+}
+
+// SetFast propagates the performance.fast flag so every DB source skips
+// SpecialValues detection (DetectAndApply). Per-source source.Fast takes
+// precedence; this is the global fallback from PipelineConfig.Performance.Fast.
+func (l *Loader) SetFast(fast bool) {
+	l.fast = fast
 }
 
 // LoadAll загружает данные из всех источников параллельно
@@ -488,6 +496,15 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer func() { _ = adapter.Close(timeoutCtx) }()
+
+	// --fast: skip SpecialValues detection. Per-source flag takes precedence
+	// over the global performance.fast loader flag.
+	if source.Fast || l.fast {
+		type specialValueSkipper interface{ SetSkipSpecialValues(bool) }
+		if sv, ok := adapter.(specialValueSkipper); ok {
+			sv.SetSkipSpecialValues(true)
+		}
+	}
 
 	// Проверяем соединение
 	if err := adapter.Ping(timeoutCtx); err != nil {

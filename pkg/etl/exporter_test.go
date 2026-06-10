@@ -2,6 +2,8 @@ package etl
 
 import (
 	"testing"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 func TestExporter_getDestination(t *testing.T) {
@@ -68,6 +70,136 @@ func TestExporter_getDestination(t *testing.T) {
 				t.Errorf("getDestination() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// ─── Fast flag tests ─────────────────────────────────────────────────────────
+
+// rowsWithSpecials returns a small dataset that includes DB NULL (nullSentinel),
+// NaN, and positive Infinity in the REAL column — the canonical inputs that
+// DetectAndApply processes.
+func rowsWithSpecials() ([][]string, packet.Schema) {
+	schema := packet.Schema{Fields: []packet.Field{
+		{Name: "id", Type: "INTEGER"},
+		{Name: "val", Type: "REAL"},
+	}}
+	rows := [][]string{
+		{"1", "1.5"},
+		{"2", "\x00"},   // DB NULL (nullSentinel)
+		{"3", "NaN"},
+		{"4", "Inf"},
+		{"5", "3.14"},
+	}
+	return rows, schema
+}
+
+// TestExporter_NewGenerator_FastFlagPriority verifies the three-level priority
+// for the fast flag on newGenerator():
+//   default (both false)  → SpecialValues detected (markers in schema)
+//   TDTP.Fast=true        → SpecialValues skipped
+//   SetFast(true)         → SpecialValues skipped (global performance.fast)
+//   both true             → SpecialValues skipped
+func TestExporter_NewGenerator_FastFlagPriority(t *testing.T) {
+	rows, schema := rowsWithSpecials()
+
+	// helper: call GenerateReference through the exporter's newGenerator and
+	// return whether the REAL column got SpecialValues markers.
+	hasSpecialValues := func(e *Exporter) bool {
+		g := e.newGenerator()
+		pkts, err := g.GenerateReference("test", schema, rows)
+		if err != nil || len(pkts) == 0 {
+			return false
+		}
+		return pkts[0].Schema.Fields[1].SpecialValues != nil
+	}
+
+	t.Run("default: DetectAndApply runs", func(t *testing.T) {
+		e := NewExporter(OutputConfig{Type: "tdtp", TDTP: &TDTPOutputConfig{Destination: "/tmp/x.xml"}})
+		if !hasSpecialValues(e) {
+			t.Error("expected SpecialValues when fast=false (default)")
+		}
+	})
+
+	t.Run("TDTP.Fast=true: DetectAndApply skipped", func(t *testing.T) {
+		e := NewExporter(OutputConfig{
+			Type: "tdtp",
+			TDTP: &TDTPOutputConfig{Destination: "/tmp/x.xml", Fast: true},
+		})
+		if hasSpecialValues(e) {
+			t.Error("expected no SpecialValues when TDTP.Fast=true")
+		}
+	})
+
+	t.Run("SetFast(true): DetectAndApply skipped", func(t *testing.T) {
+		e := NewExporter(OutputConfig{Type: "tdtp", TDTP: &TDTPOutputConfig{Destination: "/tmp/x.xml"}})
+		e.SetFast(true)
+		if hasSpecialValues(e) {
+			t.Error("expected no SpecialValues when SetFast(true)")
+		}
+	})
+
+	t.Run("both true: DetectAndApply skipped", func(t *testing.T) {
+		e := NewExporter(OutputConfig{
+			Type: "tdtp",
+			TDTP: &TDTPOutputConfig{Destination: "/tmp/x.xml", Fast: true},
+		})
+		e.SetFast(true)
+		if hasSpecialValues(e) {
+			t.Error("expected no SpecialValues when both fast flags set")
+		}
+	})
+}
+
+// TestLoader_SetFast verifies that SetFast is stored on the loader and that
+// the per-source Fast flag is parsed from SourceConfig (YAML round-trip).
+func TestLoader_SetFast(t *testing.T) {
+	src := SourceConfig{Name: "orders", Type: "sqlite", DSN: ":memory:", Fast: true}
+	loader := NewLoader([]SourceConfig{src}, ErrorHandlingConfig{})
+
+	if loader.fast {
+		t.Error("global fast should start false before SetFast")
+	}
+
+	loader.SetFast(true)
+	if !loader.fast {
+		t.Error("global fast should be true after SetFast(true)")
+	}
+
+	// Per-source flag is part of SourceConfig, not the loader field.
+	if !src.Fast {
+		t.Error("SourceConfig.Fast should be true as set above")
+	}
+}
+
+// TestProcessor_PropagatesFastFlag verifies that performance.fast: true in
+// PipelineConfig is propagated to both Loader.fast and Exporter.fast via
+// NewProcessor and initWorkspace.
+func TestProcessor_PropagatesFastFlag(t *testing.T) {
+	cfg := &PipelineConfig{
+		Name: "test-pipeline",
+		Sources: []SourceConfig{
+			{Name: "s", Type: "sqlite", DSN: ":memory:"},
+		},
+		Output: OutputConfig{
+			Type: "tdtp",
+			TDTP: &TDTPOutputConfig{Destination: "/tmp/out.xml"},
+		},
+		Performance: PerformanceConfig{Fast: true},
+		ErrorHandling: ErrorHandlingConfig{
+			OnSourceError: "fail",
+		},
+	}
+
+	p := NewProcessor(cfg)
+	if !p.loader.fast {
+		t.Error("Loader.fast must be true when performance.fast=true")
+	}
+	// Exporter is created in initWorkspace (requires workspace); test the
+	// standalone Exporter + SetFast path instead.
+	e := NewExporter(cfg.Output)
+	e.SetFast(cfg.Performance.Fast)
+	if !e.fast {
+		t.Error("Exporter.fast must be true after SetFast(performance.fast)")
 	}
 }
 

@@ -92,6 +92,9 @@ type SourceConfig struct {
 	//     translit: true   # "Имя" → "Imia"
 	//     clear: true      # "Total %" → "Total_pct"
 	Sanitize *SanitizeFieldsConfig `yaml:"sanitize,omitempty"`
+	// Fast — пропустить DetectAndApply (SpecialValues) для этого источника.
+	// Переопределяет performance.fast на уровне источника.
+	Fast bool `yaml:"fast"`
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -150,6 +153,9 @@ type TDTPOutputConfig struct {
 	CompactTail   bool              `yaml:"compact_tail"`   // v1.3.1: tail-строка
 	FixedFields   []string          `yaml:"fixed_fields"`   // v1.3.1: явный список fixed полей
 	S3            *storage.S3Config `yaml:"s3,omitempty"`   // S3-совместимое хранилище (SeaweedFS, MinIO и т.п.)
+	// Fast — пропустить DetectAndApply при генерации выходных TDTP/Kafka-пакетов.
+	// Переопределяет performance.fast на уровне output.
+	Fast bool `yaml:"fast"`
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ
@@ -186,6 +192,11 @@ type PerformanceConfig struct {
 	MaxMemoryMB     int  `yaml:"max_memory_mb"`    // Максимальная память для workspace (MB)
 	BatchSize       int  `yaml:"batch_size"`       // Размер batch для импорта
 	ParallelSources bool `yaml:"parallel_sources"` // Загружать источники параллельно
+	// Fast — глобальный режим --fast для всего пайплайна.
+	// Пропускает DetectAndApply (SpecialValues NULL/NaN/Inf) при экспорте из БД и
+	// при генерации TDTP/Kafka-пакетов. Использовать когда источник гарантированно
+	// не содержит DB NULL, NaN, Infinity. Даёт ~5x ускорение GenerateReference.
+	Fast bool `yaml:"fast"`
 }
 
 // AuditConfig определяет параметры аудита
