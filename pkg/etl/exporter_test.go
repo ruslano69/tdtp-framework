@@ -85,7 +85,7 @@ func rowsWithSpecials() ([][]string, packet.Schema) {
 	}}
 	rows := [][]string{
 		{"1", "1.5"},
-		{"2", "\x00"},   // DB NULL (nullSentinel)
+		{"2", "\x00"}, // DB NULL (nullSentinel)
 		{"3", "NaN"},
 		{"4", "Inf"},
 		{"5", "3.14"},
@@ -95,10 +95,11 @@ func rowsWithSpecials() ([][]string, packet.Schema) {
 
 // TestExporter_NewGenerator_FastFlagPriority verifies the three-level priority
 // for the fast flag on newGenerator():
-//   default (both false)  → SpecialValues detected (markers in schema)
-//   TDTP.Fast=true        → SpecialValues skipped
-//   SetFast(true)         → SpecialValues skipped (global performance.fast)
-//   both true             → SpecialValues skipped
+//
+//	default (both false)  → SpecialValues detected (markers in schema)
+//	TDTP.Fast=true        → SpecialValues skipped
+//	SetFast(true)         → SpecialValues skipped (global performance.fast)
+//	both true             → SpecialValues skipped
 func TestExporter_NewGenerator_FastFlagPriority(t *testing.T) {
 	rows, schema := rowsWithSpecials()
 

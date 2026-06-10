@@ -21,10 +21,6 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # Use latest stable Go for govulncheck. The toolchain directive in
-          # go.mod is pinned to the patch that fixes all known stdlib CVEs
-          # (currently go1.26.4 for GO-2026-5037, GO-2026-5039).
-          # When new stdlib CVEs appear, bump toolchain in go.mod accordingly.
           go-version: 'stable'
           cache: true
 
@@ -33,21 +29,6 @@ jobs:
 
       - name: Run govulncheck
         run: govulncheck ./...
-
-  # dependency-review:
-  #   name: Dependency Review
-  #   runs-on: ubuntu-latest
-  #   if: github.event_name == 'pull_request'
-  #
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Dependency Review
-  #       uses: actions/dependency-review-action@v4
-  #
-  # Note: Requires Dependency graph to be enabled in repository settings:
-  # https://github.com/ruslano69/tdtp-framework/settings/security_analysis
 
   nancy:
     name: Nancy Security Scan
@@ -60,12 +41,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.13'
+          go-version: 'stable'
           cache: true
 
-      - name: Write Go List to file
-        run: go list -json -m all > go.list
+      - name: Install Nancy
+        run: |
+          curl -sSL -o nancy \
+            https://github.com/sonatype-nexus-community/nancy/releases/latest/download/nancy-linux.amd64-musl
+          chmod +x nancy
+          sudo mv nancy /usr/local/bin/nancy
 
       - name: Run Nancy
-        uses: sonatype-nexus-community/nancy-github-action@main
+        run: go list -json -m all | nancy sleuth
         continue-on-error: true

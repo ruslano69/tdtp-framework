@@ -348,6 +348,54 @@ func TestFilterEngine_IsNotNull(t *testing.T) {
 	}
 }
 
+// TestFilterEngine_IsNull_Sentinel covers the fallback in-memory path where DB
+// adapters write NullSentinel ("\x00") instead of "" for SQL NULLs.
+func TestFilterEngine_IsNull_Sentinel(t *testing.T) {
+	engine := NewFilterEngine()
+	converter := schema.NewConverter()
+
+	schemaObj := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "id", Type: "INTEGER"},
+			{Name: "deleted_at", Type: "TIMESTAMP"},
+		},
+	}
+
+	// row 2: sentinel NULL from DB adapter; row 3: empty-string NULL (packet path)
+	rows := [][]string{
+		{"1", "2023-06-01 00:00:00"},
+		{"2", "\x00"},
+		{"3", ""},
+	}
+
+	nullFilter := &packet.Filters{
+		And: &packet.LogicalGroup{
+			Filters: []packet.Filter{{Field: "deleted_at", Operator: "is_null"}},
+		},
+	}
+	notNullFilter := &packet.Filters{
+		And: &packet.LogicalGroup{
+			Filters: []packet.Filter{{Field: "deleted_at", Operator: "is_not_null"}},
+		},
+	}
+
+	nullResult, _, err := engine.ApplyFilters(nullFilter, rows, schemaObj, converter)
+	if err != nil {
+		t.Fatalf("is_null: unexpected error: %v", err)
+	}
+	if len(nullResult) != 2 {
+		t.Errorf("is_null: expected 2 rows (sentinel + empty), got %d", len(nullResult))
+	}
+
+	notNullResult, _, err := engine.ApplyFilters(notNullFilter, rows, schemaObj, converter)
+	if err != nil {
+		t.Fatalf("is_not_null: unexpected error: %v", err)
+	}
+	if len(notNullResult) != 1 {
+		t.Errorf("is_not_null: expected 1 row, got %d", len(notNullResult))
+	}
+}
+
 func TestFilterEngine_NestedAndOr(t *testing.T) {
 	engine := NewFilterEngine()
 	converter := schema.NewConverter()

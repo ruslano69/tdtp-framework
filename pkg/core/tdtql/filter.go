@@ -8,6 +8,10 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
 
+// nullSentinel must match base.NullSentinel — the marker written by DB adapters
+// for SQL NULL values before DetectAndApply / GenerateReference runs.
+const nullSentinel = "\x00"
+
 // FilterEngine применяет фильтры к данным
 type FilterEngine struct {
 	comparator *Comparator
@@ -236,9 +240,9 @@ func (f *FilterEngine) evaluateFilter(
 		result, err := f.comparator.Like(rowValue, filter.Value)
 		return !result, err
 	case "is_null":
-		return rowValue == "", nil
+		return rowValue == "" || rowValue == nullSentinel, nil
 	case "is_not_null":
-		return rowValue != "", nil
+		return rowValue != "" && rowValue != nullSentinel, nil
 	default:
 		return false, fmt.Errorf("unknown operator: %s", filter.Operator)
 	}
