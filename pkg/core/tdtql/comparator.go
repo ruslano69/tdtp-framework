@@ -34,177 +34,120 @@ func NewComparator() *Comparator {
 	return &Comparator{}
 }
 
-// equalTyped compares two already-parsed TypedValues using the field's
-// normalized type. rawRow/rawFilter feed the string fallback for unrecognized
-// types, preserving the original Equals semantics exactly.
-func equalTyped(normalized schema.DataType, rowTV, filterTV *schema.TypedValue, rawRow, rawFilter string) bool {
+// compareTyped compares two already-parsed TypedValues and returns -1, 0, or 1.
+// rawRow/rawFilter feed the string fallback for unrecognized types.
+func compareTyped(normalized schema.DataType, rowTV, filterTV *schema.TypedValue, rawRow, rawFilter string) int {
 	switch normalized {
 	case schema.TypeInteger:
 		if rowTV.IntValue == nil || filterTV.IntValue == nil {
-			return false
+			return strings.Compare(rawRow, rawFilter)
 		}
-		return *rowTV.IntValue == *filterTV.IntValue
+		r, f := *rowTV.IntValue, *filterTV.IntValue
+		if r < f {
+			return -1
+		}
+		if r > f {
+			return 1
+		}
+		return 0
 
 	case schema.TypeReal, schema.TypeDecimal:
 		if rowTV.FloatValue == nil || filterTV.FloatValue == nil {
-			return false
+			return strings.Compare(rawRow, rawFilter)
 		}
-		return *rowTV.FloatValue == *filterTV.FloatValue
+		r, f := *rowTV.FloatValue, *filterTV.FloatValue
+		if r < f {
+			return -1
+		}
+		if r > f {
+			return 1
+		}
+		return 0
 
 	case schema.TypeText:
 		if rowTV.StringValue == nil || filterTV.StringValue == nil {
-			return false
+			return strings.Compare(rawRow, rawFilter)
 		}
-		return *rowTV.StringValue == *filterTV.StringValue
+		return strings.Compare(*rowTV.StringValue, *filterTV.StringValue)
 
 	case schema.TypeBoolean:
 		if rowTV.BoolValue == nil || filterTV.BoolValue == nil {
-			return false
+			return strings.Compare(rawRow, rawFilter)
 		}
-		return *rowTV.BoolValue == *filterTV.BoolValue
+		r, f := *rowTV.BoolValue, *filterTV.BoolValue
+		if r == f {
+			return 0
+		}
+		if !r {
+			return -1 // false < true
+		}
+		return 1
 
 	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
 		if rowTV.TimeValue == nil || filterTV.TimeValue == nil {
-			return false
+			return strings.Compare(rawRow, rawFilter)
 		}
-		return rowTV.TimeValue.Equal(*filterTV.TimeValue)
+		if rowTV.TimeValue.Before(*filterTV.TimeValue) {
+			return -1
+		}
+		if rowTV.TimeValue.After(*filterTV.TimeValue) {
+			return 1
+		}
+		return 0
 
 	default:
-		// Строковое сравнение как fallback
-		return rawRow == rawFilter
+		return strings.Compare(rawRow, rawFilter)
 	}
+}
+
+// equalTyped delegates to compareTyped for use in In() where values are
+// already parsed and only equality is needed.
+func equalTyped(normalized schema.DataType, rowTV, filterTV *schema.TypedValue, rawRow, rawFilter string) bool {
+	return compareTyped(normalized, rowTV, filterTV, rawRow, rawFilter) == 0
+}
+
+// parseCompare parses both values once and returns a three-way comparison
+// result (-1, 0, 1). Used by GT/GTE/LT/LTE/Equals to avoid double-parsing.
+func parseCompare(rowValue, filterValue string, field schema.FieldDef, converter *schema.Converter) (int, error) {
+	rowTV, err := converter.ParseValue(rowValue, field)
+	if err != nil {
+		return 0, err
+	}
+	filterTV, err := converter.ParseValue(filterValue, field)
+	if err != nil {
+		return 0, err
+	}
+	return compareTyped(schema.NormalizeType(field.Type), rowTV, filterTV, rowValue, filterValue), nil
 }
 
 // Equals проверяет равенство
 func (c *Comparator) Equals(rowValue, filterValue string, field schema.FieldDef, converter *schema.Converter) (bool, error) {
-	// Парсим значения
-	rowTV, err := converter.ParseValue(rowValue, field)
-	if err != nil {
-		return false, err
-	}
-
-	filterTV, err := converter.ParseValue(filterValue, field)
-	if err != nil {
-		return false, err
-	}
-
-	return equalTyped(schema.NormalizeType(field.Type), rowTV, filterTV, rowValue, filterValue), nil
+	cmp, err := parseCompare(rowValue, filterValue, field, converter)
+	return cmp == 0, err
 }
 
 // GreaterThan проверяет больше
 func (c *Comparator) GreaterThan(rowValue, filterValue string, field schema.FieldDef, converter *schema.Converter) (bool, error) {
-	normalized := schema.NormalizeType(field.Type)
-
-	switch normalized {
-	case schema.TypeInteger:
-		rowInt, err := strconv.ParseInt(rowValue, 10, 64)
-		if err != nil {
-			return false, err
-		}
-		filterInt, err := strconv.ParseInt(filterValue, 10, 64)
-		if err != nil {
-			return false, err
-		}
-		return rowInt > filterInt, nil
-
-	case schema.TypeReal, schema.TypeDecimal:
-		rowFloat, err := strconv.ParseFloat(rowValue, 64)
-		if err != nil {
-			return false, err
-		}
-		filterFloat, err := strconv.ParseFloat(filterValue, 64)
-		if err != nil {
-			return false, err
-		}
-		return rowFloat > filterFloat, nil
-
-	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
-		rowTV, err := converter.ParseValue(rowValue, field)
-		if err != nil {
-			return false, err
-		}
-		filterTV, err := converter.ParseValue(filterValue, field)
-		if err != nil {
-			return false, err
-		}
-		return rowTV.TimeValue.After(*filterTV.TimeValue), nil
-
-	default:
-		// Строковое сравнение
-		return rowValue > filterValue, nil
-	}
+	cmp, err := parseCompare(rowValue, filterValue, field, converter)
+	return cmp > 0, err
 }
 
 // GreaterThanOrEqual проверяет больше или равно
 func (c *Comparator) GreaterThanOrEqual(rowValue, filterValue string, field schema.FieldDef, converter *schema.Converter) (bool, error) {
-	gt, err := c.GreaterThan(rowValue, filterValue, field, converter)
-	if err != nil {
-		return false, err
-	}
-	if gt {
-		return true, nil
-	}
-
-	eq, err := c.Equals(rowValue, filterValue, field, converter)
-	return eq, err
+	cmp, err := parseCompare(rowValue, filterValue, field, converter)
+	return cmp >= 0, err
 }
 
 // LessThan проверяет меньше
 func (c *Comparator) LessThan(rowValue, filterValue string, field schema.FieldDef, converter *schema.Converter) (bool, error) {
-	normalized := schema.NormalizeType(field.Type)
-
-	switch normalized {
-	case schema.TypeInteger:
-		rowInt, err := strconv.ParseInt(rowValue, 10, 64)
-		if err != nil {
-			return false, err
-		}
-		filterInt, err := strconv.ParseInt(filterValue, 10, 64)
-		if err != nil {
-			return false, err
-		}
-		return rowInt < filterInt, nil
-
-	case schema.TypeReal, schema.TypeDecimal:
-		rowFloat, err := strconv.ParseFloat(rowValue, 64)
-		if err != nil {
-			return false, err
-		}
-		filterFloat, err := strconv.ParseFloat(filterValue, 64)
-		if err != nil {
-			return false, err
-		}
-		return rowFloat < filterFloat, nil
-
-	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
-		rowTV, err := converter.ParseValue(rowValue, field)
-		if err != nil {
-			return false, err
-		}
-		filterTV, err := converter.ParseValue(filterValue, field)
-		if err != nil {
-			return false, err
-		}
-		return rowTV.TimeValue.Before(*filterTV.TimeValue), nil
-
-	default:
-		// Строковое сравнение
-		return rowValue < filterValue, nil
-	}
+	cmp, err := parseCompare(rowValue, filterValue, field, converter)
+	return cmp < 0, err
 }
 
 // LessThanOrEqual проверяет меньше или равно
 func (c *Comparator) LessThanOrEqual(rowValue, filterValue string, field schema.FieldDef, converter *schema.Converter) (bool, error) {
-	lt, err := c.LessThan(rowValue, filterValue, field, converter)
-	if err != nil {
-		return false, err
-	}
-	if lt {
-		return true, nil
-	}
-
-	eq, err := c.Equals(rowValue, filterValue, field, converter)
-	return eq, err
+	cmp, err := parseCompare(rowValue, filterValue, field, converter)
+	return cmp <= 0, err
 }
 
 // inCacheKey builds a cache key that uniquely identifies an IN list for a
