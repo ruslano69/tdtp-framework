@@ -12,12 +12,6 @@ import (
 // Execute applies cfg to pkt: remaps fields for each target and upserts into the target DB.
 // When dryRun is true the transformation is performed but no data is written.
 func Execute(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, dryRun bool) error {
-	// Build source field index: name → column index
-	srcIndex := make(map[string]int, len(pkt.Schema.Fields))
-	for i, f := range pkt.Schema.Fields {
-		srcIndex[strings.ToLower(f.Name)] = i
-	}
-
 	rows := pkt.GetRows()
 
 	for _, target := range cfg.Targets {
@@ -26,7 +20,7 @@ func Execute(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, dr
 		// connection-level schema is used (default "public").
 		schemaName, tableName := splitSchemaTable(target.Table, cfg.TargetConn.Schema)
 
-		mapped, err := buildTargetPacket(target, tableName, rows, srcIndex)
+		mapped, err := buildTargetPacket(target, tableName, rows, pkt.Schema.Fields)
 		if err != nil {
 			return fmt.Errorf("build target packet for %q: %w", target.Table, err)
 		}
@@ -76,15 +70,40 @@ func splitSchemaTable(table, defaultSchema string) (schema, name string) {
 
 // buildTargetPacket creates a new DataPacket with remapped fields for the given target.
 // tableName is the bare table name (schema is applied by the adapter separately).
-func buildTargetPacket(target Target, tableName string, rows [][]string, srcIndex map[string]int) (*packet.DataPacket, error) {
-	// Build schema for the target packet
+//
+// Each target field carries over the source field's Type/Subtype/Length and
+// SpecialValues so the target adapter applies the same conversion contract as a
+// normal import — in particular the NoDate marker ("0000-00-00", Navision/MSSQL
+// "no date") is decoded to SQL NULL instead of being written verbatim into a
+// DATE column. Enum-remapped fields become free text, so their type is reset.
+func buildTargetPacket(target Target, tableName string, rows [][]string, srcFields []packet.Field) (*packet.DataPacket, error) {
+	srcIndex := make(map[string]int, len(srcFields))
+	for i, f := range srcFields {
+		srcIndex[strings.ToLower(f.Name)] = i
+	}
+
+	// Build schema for the target packet, inheriting source field metadata.
 	fields := make([]packet.Field, len(target.Fields))
 	for i, fm := range target.Fields {
-		fields[i] = packet.Field{
+		colIdx, ok := srcIndex[strings.ToLower(fm.From)]
+		if !ok {
+			return nil, fmt.Errorf("source field %q not found in packet schema", fm.From)
+		}
+		src := srcFields[colIdx]
+		f := packet.Field{
 			Name: fm.To,
-			Type: "string", // generic; adapter casts to DB type via column metadata
 			Key:  strings.EqualFold(fm.To, target.UpsertKey),
 		}
+		if len(fm.Enum) > 0 {
+			// Value is replaced by an arbitrary mapped string — source type no longer applies.
+			f.Type = "TEXT"
+		} else {
+			f.Type = src.Type
+			f.Subtype = src.Subtype
+			f.Length = src.Length
+			f.SpecialValues = src.SpecialValues
+		}
+		fields[i] = f
 	}
 
 	// Remap each row
@@ -92,10 +111,7 @@ func buildTargetPacket(target Target, tableName string, rows [][]string, srcInde
 	for _, srcRow := range rows {
 		outRow := make([]string, len(target.Fields))
 		for i, fm := range target.Fields {
-			colIdx, ok := srcIndex[strings.ToLower(fm.From)]
-			if !ok {
-				return nil, fmt.Errorf("source field %q not found in packet schema", fm.From)
-			}
+			colIdx := srcIndex[strings.ToLower(fm.From)]
 			val := ""
 			if colIdx < len(srcRow) {
 				val = srcRow[colIdx]

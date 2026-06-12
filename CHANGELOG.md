@@ -37,6 +37,20 @@ systems (e.g. ZTR-Live → EDM) without a hand-written importer.
 - Test assets: `docker/sprint4/` (PostgreSQL + Redis + `edm.edm_employees` DDL),
   `pipelines/export-single-employee.yaml`, `mappings/edm_mapping.yaml`,
   `scripts/emulate_button.py` (UI-button emulator).
+- **Field types preserved** — `buildTargetPacket` carries over each source field's
+  `Type`/`Subtype`/`Length`/`SpecialValues` instead of stringifying everything, so
+  the target adapter applies the full conversion contract (dates, NoDate, NULL
+  markers). Enum-remapped fields drop to `TEXT` since their value becomes free text.
+
+### Fixed — NoDate marker not decoded to NULL on PostgreSQL import
+
+The PostgreSQL adapter's `convertValue` honored the `SpecialValues.Null` marker
+but not `SpecialValues.NoDate` ("0000-00-00", the canonical Navision/MSSQL
+"no date" produced by `no_date_sentinels`). The raw marker reached a DATE/TIMESTAMP
+column and failed with `date/time field value out of range` (SQLSTATE 22008).
+`convertValue` now decodes NoDate → SQL NULL, matching `base/import_helper.go`.
+Affected every PostgreSQL import of Navision date sentinels (`--import` and
+`--map`), not just the new command.
 
 ### Fixed — Cyrillic double-encoding on PostgreSQL import
 

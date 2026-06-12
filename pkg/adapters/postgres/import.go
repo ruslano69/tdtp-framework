@@ -499,10 +499,17 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 // convertValue конвертирует строковое значение в правильный тип для PostgreSQL
 // Использует schema.Converter для строгой типизации и валидации
 func (a *Adapter) convertValue(value string, field packet.Field) any {
-	// Проверяем NULL-маркер TDTP до любой конвертации типа
-	if field.SpecialValues != nil && field.SpecialValues.Null != nil &&
-		value == field.SpecialValues.Null.Marker {
-		return nil
+	// Декодируем маркеры SpecialValues до любой конвертации типа.
+	// NULL и NoDate ("0000-00-00", Navision/MSSQL "нет даты") → SQL NULL.
+	// Иначе сырой маркер ушёл бы в DATE/TIMESTAMP колонку и упал бы с
+	// "date/time field value out of range" (SQLSTATE 22008).
+	if sv := field.SpecialValues; sv != nil {
+		if sv.Null != nil && value == sv.Null.Marker {
+			return nil
+		}
+		if sv.NoDate != nil && value == sv.NoDate.Marker {
+			return nil
+		}
 	}
 
 	// Для типов с subtype используем строку без дополнительной конвертации

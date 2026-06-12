@@ -37,8 +37,6 @@ func TestBuildTargetPacket_FieldRemapAndEnum(t *testing.T) {
 		{"2050", "ІВАНОВ Іван", "4"},
 	})
 
-	srcIndex := map[string]int{"employee_code": 0, "full_name": 1, "employment_type": 2}
-
 	target := Target{
 		ID: "edm", Table: "edm_employees", UpsertKey: "ext_id",
 		Fields: []FieldMapping{
@@ -50,7 +48,7 @@ func TestBuildTargetPacket_FieldRemapAndEnum(t *testing.T) {
 		},
 	}
 
-	pkt, err := buildTargetPacket(target, "edm_employees", src.GetRows(), srcIndex)
+	pkt, err := buildTargetPacket(target, "edm_employees", src.GetRows(), src.Schema.Fields)
 	if err != nil {
 		t.Fatalf("buildTargetPacket: %v", err)
 	}
@@ -78,13 +76,53 @@ func TestBuildTargetPacket_FieldRemapAndEnum(t *testing.T) {
 }
 
 func TestBuildTargetPacket_MissingSourceField(t *testing.T) {
-	srcIndex := map[string]int{"a": 0}
+	srcFields := []packet.Field{{Name: "a", Type: "TEXT"}}
 	target := Target{
 		Table: "t", UpsertKey: "x",
 		Fields: []FieldMapping{{From: "nonexistent", To: "x"}},
 	}
-	_, err := buildTargetPacket(target, "t", [][]string{{"v"}}, srcIndex)
+	_, err := buildTargetPacket(target, "t", [][]string{{"v"}}, srcFields)
 	if err == nil {
 		t.Fatal("expected error for missing source field, got nil")
+	}
+}
+
+// TestBuildTargetPacket_InheritsTypeAndSpecialValues verifies the target packet
+// carries over the source field's type and SpecialValues (so the adapter decodes
+// the NoDate "0000-00-00" marker to NULL). Enum-remapped fields drop to TEXT.
+func TestBuildTargetPacket_InheritsTypeAndSpecialValues(t *testing.T) {
+	noDate := &packet.SpecialValues{NoDate: &packet.MarkerValue{Marker: "0000-00-00"}}
+	srcFields := []packet.Field{
+		{Name: "code", Type: "TEXT"},
+		{Name: "term_date", Type: "DATETIME", Subtype: "datetime", SpecialValues: noDate},
+		{Name: "etype", Type: "INTEGER", Subtype: "int"},
+	}
+	target := Target{
+		Table: "t", UpsertKey: "code",
+		Fields: []FieldMapping{
+			{From: "code", To: "code"},
+			{From: "term_date", To: "termination_date"},
+			{From: "etype", To: "contract", Enum: map[string]string{"1": "primary"}},
+		},
+	}
+
+	pkt, err := buildTargetPacket(target, "t", [][]string{{"187", "0000-00-00", "1"}}, srcFields)
+	if err != nil {
+		t.Fatalf("buildTargetPacket: %v", err)
+	}
+
+	// Date field inherits type + NoDate marker.
+	df := pkt.Schema.Fields[1]
+	if df.Type != "DATETIME" || df.Subtype != "datetime" {
+		t.Errorf("date field type=%q subtype=%q, want DATETIME/datetime", df.Type, df.Subtype)
+	}
+	if df.SpecialValues == nil || df.SpecialValues.NoDate == nil ||
+		df.SpecialValues.NoDate.Marker != "0000-00-00" {
+		t.Error("date field did not inherit NoDate SpecialValues from source")
+	}
+	// Enum field is reset to TEXT and carries no source subtype.
+	ef := pkt.Schema.Fields[2]
+	if ef.Type != "TEXT" || ef.Subtype != "" {
+		t.Errorf("enum field type=%q subtype=%q, want TEXT/empty", ef.Type, ef.Subtype)
 	}
 }
