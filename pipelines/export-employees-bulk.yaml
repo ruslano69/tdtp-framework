@@ -1,0 +1,62 @@
+name: export-employees-bulk
+version: "1.0"
+description: "Bulk-виборка @limit активних співробітників з ZTR-Live (load test)"
+
+sources:
+  - name: emp
+    type: mssql
+    dsn: "server=sql-srv1;port=1433;database=ZTR-Live;trusted_connection=yes;encrypt=disable;TrustServerCertificate=true"
+    query: |
+      SELECT TOP @limit
+        CAST(e.[No_] AS VARCHAR(20)) AS employee_code,
+        eh.[No_]                     AS tabel_number,
+        e.[FullName]                 AS full_name,
+        eh.[Employment Date]         AS hire_date,
+        eh.[Employment Type]         AS employment_type,
+        ISNULL(cd.[Name], '')        AS position_name,
+        d.[Name]                     AS department_name
+      FROM [ZTR$Employment History] eh
+      JOIN [ZTR$Employee] e ON eh.[Employee No_] = e.[No_]
+      JOIN (
+          SELECT [Timetable No_], [Position Code], [Department Code],
+                 ROW_NUMBER() OVER (PARTITION BY [Timetable No_]
+                                    ORDER BY [Entry No_] DESC) AS rn
+          FROM [ZTR$Staff Change Log] WHERE [Log Type] = 0
+      ) scl ON CAST(eh.[No_] AS VARCHAR(20)) = CAST(scl.[Timetable No_] AS VARCHAR(20))
+            AND scl.rn = 1
+      JOIN [ZTR$Department IW] d ON scl.[Department Code] = d.[Code]
+      LEFT JOIN [ZTR$Common Directory] cd
+            ON scl.[Position Code] = CAST(cd.[Code] AS INT) AND cd.[Directory Type] = 10
+      WHERE eh.[Active] = 1
+        AND eh.[Termination Date] = '1753-01-01'
+        AND eh.[Employment Type] = 1
+    timeout: 120
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: "result"
+  timeout: 60
+  # Dedup safety net: one row per employee_code (the EDM person key).
+  # GROUP BY collapses any residual multi-position duplicates so the
+  # downstream ON CONFLICT (ext_id) never sees the same key twice in a batch.
+  sql: |
+    SELECT employee_code, tabel_number, full_name, hire_date,
+           employment_type, position_name, department_name
+    FROM emp
+    GROUP BY employee_code
+
+output:
+  type: tdtp
+  tdtp:
+    destination: "out/bulk_{{limit}}.tdtp.xml"
+
+performance:
+  timeout: 180
+  parallel_sources: false
+
+error_handling:
+  on_source_error: "fail"
+  on_transform_error: "fail"
