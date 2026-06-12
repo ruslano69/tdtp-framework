@@ -26,6 +26,14 @@ systems (e.g. ZTR-Live → EDM) without a hand-written importer.
   shared `decompressPacketData` helper before reading rows, so a compressed
   export (`output.tdtp.compression: true`) maps transparently. Round-trip test
   in `map_test.go`. (zstd lvl 3 on the 1478-employee export: 218 KB → 52 KB.)
+- **Encrypted input** — `--map --mercury-url <url>` decrypts xZMercury
+  AES-256-GCM packets (burn-on-read key retrieval) before parsing. `loadPacket`
+  now reads the file as bytes and resolves the encryption → compression →
+  compact layers in order. Encryption is detected by content (`IsEncryptedBlob`,
+  the binary header) as well as the `.enc` extension, since a pipeline may write
+  the encrypted blob to a `.tdtp.xml` destination. New `commands.IsEncryptedBlob`
+  helper; false-positive guard test in `map_test.go`. Burn-on-read means an
+  encrypted packet decrypts exactly once — a replay is blocked with `KEY_BURNED`.
 - Test assets: `docker/sprint4/` (PostgreSQL + Redis + `edm.edm_employees` DDL),
   `pipelines/export-single-employee.yaml`, `mappings/edm_mapping.yaml`,
   `scripts/emulate_button.py` (UI-button emulator).

@@ -50,6 +50,7 @@ func routeCommand(
 			MappingFile: *flags.Map,
 			InputFile:   *flags.MapInput,
 			DryRun:      *flags.MapDryRun,
+			MercuryURL:  *flags.MercuryURL,
 		})
 
 	} else if flags.List.IsSet {
@@ -758,6 +759,7 @@ func main() {
 		*flags.ToHTML != "" ||
 		*flags.ToCSV != "" ||
 		*flags.ToCompact != "" ||
+		*flags.Map != "" || // --map uses its own target DSN from mapping.yaml, not config.yaml
 		(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
 		(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
 
@@ -930,7 +932,8 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Merge != "" ||
 		*flags.Inspect != "" ||
 		*flags.InspectTable != "" ||
-		*flags.Listen
+		*flags.Listen ||
+		*flags.Map != ""
 }
 
 // fatal prints error and exits

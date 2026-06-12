@@ -1,12 +1,31 @@
 package commands
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
+
+// TestIsEncryptedBlob_NoFalsePositive guards the content-based encryption
+// detector: a plain TDTP XML packet must never be mistaken for an encrypted
+// blob (which would route it through Mercury decryption and fail).
+func TestIsEncryptedBlob_NoFalsePositive(t *testing.T) {
+	plain := []byte(`<?xml version="1.0" encoding="UTF-8"?>` +
+		`<DataPacket protocol="TDTP" version="1.0"><Header><Type>reference</Type>` +
+		`<TableName>result</TableName></Header></DataPacket>`)
+	if IsEncryptedBlob(plain) {
+		t.Error("plain TDTP XML misdetected as encrypted")
+	}
+	if IsEncryptedBlob([]byte("short")) {
+		t.Error("short blob misdetected as encrypted")
+	}
+	if IsEncryptedBlob(nil) {
+		t.Error("nil blob misdetected as encrypted")
+	}
+}
 
 // TestLoadPacket_Zstd verifies --map can read a zstd-compressed TDTP packet:
 // ParseFile leaves the data as a single compressed blob, and loadPacket must
@@ -43,7 +62,7 @@ func TestLoadPacket_Zstd(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := loadPacket(file)
+	got, err := loadPacket(context.Background(), file, "")
 	if err != nil {
 		t.Fatalf("loadPacket: %v", err)
 	}

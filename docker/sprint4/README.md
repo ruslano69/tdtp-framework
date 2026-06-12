@@ -88,6 +88,35 @@ output:
 виграш від стиснення проявляється при передачі через мережу (xzMercury) і
 зберіганні, а не при локальному map на тій самій машині.
 
+## Шифрування (--enc)
+
+Зашифрований крос-системний обмін через xZMercury (AES-256-GCM, burn-on-read).
+Потрібен запущений Mercury-сервер — для тесту достатньо dev-режиму:
+
+```bash
+# 1. Підняти xZMercury у dev (in-process miniredis, без зовнішніх залежностей)
+cd xzmercury
+go build -o xzmercury.exe ./cmd/xzmercury
+./xzmercury.exe --dev --config configs/xzmercury.dev.yaml --addr :3000
+
+# 2. Export із шифруванням (pipeline має блок security.mercury_url)
+tdtpcli --pipeline pipelines/export-single-employee.yaml @emp_code=1072 \
+        --enc --license <tdtp.lic>      # → зашифрований blob у out/emp_1072.tdtp.xml
+
+# 3. Map із розшифруванням
+tdtpcli --map mappings/edm_mapping.yaml --input out/emp_1072.tdtp.xml \
+        --mercury-url http://localhost:3000 --license <tdtp.lic>
+```
+
+`--map` детектує шифрування за вмістом (бінарний заголовок), тож працює навіть
+коли blob записано у `.tdtp.xml`. **Burn-on-read:** ключ знищується після першого
+розшифрування — повторний `--map` того ж файлу падає з `KEY_BURNED` (захист від
+перехоплення/replay). Тобто зашифрований пакет переноситься рівно один раз.
+
+`security.server_secret: "dev-mode"` у pipeline — опт-аут HMAC лише для dev;
+у проді секрет береться з `$MERCURY_SERVER_SECRET`. `--enc` ліцензований
+(потрібен enterprise tier).
+
 ## Loop Guard
 
 `--map` веде журнал у `~/.tdtp/mapping_log.json`. Повторний запуск того самого

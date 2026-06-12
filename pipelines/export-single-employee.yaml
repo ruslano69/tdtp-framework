@@ -47,6 +47,12 @@ output:
   tdtp:
     destination: "out/emp_{{emp_code}}.tdtp.xml"
 
+# xZMercury endpoint for --enc encryption (only used when --enc is passed).
+security:
+  mercury_url: "http://localhost:3000"
+  recipient_resource: "edm-sync"
+  server_secret: "dev-mode"   # dev opt-out of HMAC; use real $MERCURY_SERVER_SECRET in prod
+
 performance:
   timeout: 60
   parallel_sources: false
