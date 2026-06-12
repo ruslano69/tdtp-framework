@@ -29,7 +29,9 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	if err != nil {
 		return fmt.Errorf("--map loop guard: %w", err)
 	}
-	defer done(false) // will be overridden to true on success path
+	// Record the final status exactly once when RunMap returns.
+	success := false
+	defer func() { done(success) }()
 
 	fmt.Printf("Mapping: %s\n", cfg.ID)
 	if opts.DryRun {
@@ -51,7 +53,7 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 		return fmt.Errorf("--map execute: %w", err)
 	}
 
-	done(true) // mark as completed in loop guard log
+	success = true // deferred done(success) marks the run completed
 	return nil
 }
 

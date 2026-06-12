@@ -20,45 +20,63 @@ func Execute(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, dr
 
 	rows := pkt.GetRows()
 
-	// Open target adapter once for all targets
-	var adapter adapters.Adapter
-	if !dryRun {
-		var err error
-		adapter, err = adapters.New(ctx, adapters.Config{
-			Type: cfg.TargetConn.Type,
-			DSN:  cfg.TargetConn.DSN,
-		})
-		if err != nil {
-			return fmt.Errorf("connect to target %s: %w", cfg.TargetConn.Type, err)
-		}
-		defer func() { _ = adapter.Close(ctx) }()
-	}
-
 	for _, target := range cfg.Targets {
-		mapped, err := buildTargetPacket(target, rows, srcIndex)
+		// Resolve schema and bare table name. A dotted target table
+		// ("edm.edm_employees") is split into schema + table; otherwise the
+		// connection-level schema is used (default "public").
+		schemaName, tableName := splitSchemaTable(target.Table, cfg.TargetConn.Schema)
+
+		mapped, err := buildTargetPacket(target, tableName, rows, srcIndex)
 		if err != nil {
 			return fmt.Errorf("build target packet for %q: %w", target.Table, err)
 		}
 
 		if dryRun {
-			fmt.Printf("[dry-run] target=%q rows=%d upsert_key=%q\n",
-				target.Table, len(rows), target.UpsertKey)
+			fmt.Printf("[dry-run] target=%q schema=%q table=%q rows=%d upsert_key=%q\n",
+				target.Table, schemaName, tableName, len(rows), target.UpsertKey)
 			for i, f := range mapped.Schema.Fields {
 				fmt.Printf("  field[%d]: %s (key=%v)\n", i, f.Name, f.Key)
 			}
 			continue
 		}
 
-		if err := adapter.ImportPacket(ctx, mapped, adapters.StrategyReplace); err != nil {
-			return fmt.Errorf("import to %q: %w", target.Table, err)
+		// Open a fresh adapter per target with the resolved schema. The
+		// postgres adapter prefixes the table with this schema when != "public".
+		adapter, err := adapters.New(ctx, adapters.Config{
+			Type:   cfg.TargetConn.Type,
+			DSN:    cfg.TargetConn.DSN,
+			Schema: schemaName,
+		})
+		if err != nil {
+			return fmt.Errorf("connect to target %s: %w", cfg.TargetConn.Type, err)
 		}
-		fmt.Printf("✓ %d rows upserted → %s\n", len(rows), target.Table)
+
+		if err := adapter.ImportPacket(ctx, mapped, adapters.StrategyReplace); err != nil {
+			_ = adapter.Close(ctx)
+			return fmt.Errorf("import to %s.%s: %w", schemaName, tableName, err)
+		}
+		_ = adapter.Close(ctx)
+		fmt.Printf("✓ %d rows upserted → %s.%s\n", len(rows), schemaName, tableName)
 	}
 	return nil
 }
 
+// splitSchemaTable splits a possibly schema-qualified table name.
+// "edm.edm_employees" → ("edm", "edm_employees").
+// "edm_employees" → (defaultSchema or "public", "edm_employees").
+func splitSchemaTable(table, defaultSchema string) (schema, name string) {
+	if i := strings.IndexByte(table, '.'); i > 0 {
+		return table[:i], table[i+1:]
+	}
+	if defaultSchema == "" {
+		defaultSchema = "public"
+	}
+	return defaultSchema, table
+}
+
 // buildTargetPacket creates a new DataPacket with remapped fields for the given target.
-func buildTargetPacket(target Target, rows [][]string, srcIndex map[string]int) (*packet.DataPacket, error) {
+// tableName is the bare table name (schema is applied by the adapter separately).
+func buildTargetPacket(target Target, tableName string, rows [][]string, srcIndex map[string]int) (*packet.DataPacket, error) {
 	// Build schema for the target packet
 	fields := make([]packet.Field, len(target.Fields))
 	for i, fm := range target.Fields {
@@ -92,7 +110,7 @@ func buildTargetPacket(target Target, rows [][]string, srcIndex map[string]int) 
 		outRows = append(outRows, outRow)
 	}
 
-	pkt := packet.NewDataPacket(packet.TypeReference, target.Table)
+	pkt := packet.NewDataPacket(packet.TypeReference, tableName)
 	pkt.Schema = packet.Schema{Fields: fields}
 	pkt.SetRows(outRows)
 	return pkt, nil

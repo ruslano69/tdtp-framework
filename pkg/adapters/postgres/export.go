@@ -179,13 +179,16 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 // parseRow парсит строку данных TDTP формата (разделитель |) в срез значений
 func parseRow(rowValue string) []string {
 	var values []string
-	var current string
+	// Accumulate bytes (not string(ch)) so multi-byte UTF-8 sequences survive
+	// verbatim. string(byte) re-encodes a byte >=0x80 as the UTF-8 of rune
+	// U+00XX, which double-encodes Cyrillic and other non-ASCII text.
+	var current []byte
 	escaped := false
 
 	for i := 0; i < len(rowValue); i++ {
 		ch := rowValue[i]
 		if escaped {
-			current += string(ch)
+			current = append(current, ch)
 			escaped = false
 			continue
 		}
@@ -194,13 +197,13 @@ func parseRow(rowValue string) []string {
 			continue
 		}
 		if ch == '|' {
-			values = append(values, current)
-			current = ""
+			values = append(values, string(current))
+			current = nil
 		} else {
-			current += string(ch)
+			current = append(current, ch)
 		}
 	}
-	values = append(values, current)
+	values = append(values, string(current))
 	return values
 }
 

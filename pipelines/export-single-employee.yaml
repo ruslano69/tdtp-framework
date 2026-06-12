@@ -27,7 +27,7 @@ sources:
       JOIN [ZTR$Department IW] d ON scl.[Department Code] = d.[Code]
       LEFT JOIN [ZTR$Common Directory] cd
             ON scl.[Position Code] = CAST(cd.[Code] AS INT) AND cd.[Directory Type] = 10
-      WHERE e.[No_] = '@emp_code'
+      WHERE CAST(e.[No_] AS VARCHAR(20)) = '@emp_code'
         AND eh.[Active] = 1
         AND eh.[Termination Date] = '1753-01-01'
     timeout: 30

@@ -2,6 +2,39 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased] — feature/sprint4-map
+
+### Added — `--map` cross-system field mapping (Sprint 4, P8)
+
+New `tdtpcli --map <mapping.yaml> --input <file.tdtp.xml>` command: reads a TDTP
+packet, remaps fields and enum values per a mapping config, and upserts the rows
+into a target database via `pkg/adapters`. Enables on-demand record sync between
+systems (e.g. ZTR-Live → EDM) without a hand-written importer.
+
+- **`pkg/core/mapping`** — new package:
+  - `types.go` / `parser.go` — `MappingConfig` (id, loop_guard, target_connection,
+    targets[].fields with `from`/`to`/`enum`) parsed and validated from YAML.
+  - `executor.go` — `Execute()` builds a per-target packet (field remap + enum
+    remap), resolves schema-qualified table names (`edm.edm_employees` →
+    schema `edm` + table), and upserts via `adapter.ImportPacket(StrategyReplace)`.
+  - `loopguard.go` — Loop Guard Layers 2+4: `correlation_id` + `min_interval`
+    cooldown recorded in `~/.tdtp/mapping_log.json`; blocks rapid re-runs of the
+    same `source_system → target_system` pair to prevent recursive sync loops.
+- **`cmd/tdtpcli`** — `--map`, `--input`, `--dry-run` flags wired into routing;
+  `--map` is a no-DB-config command (target DSN comes from the mapping file).
+- Test assets: `docker/sprint4/` (PostgreSQL + Redis + `edm.edm_employees` DDL),
+  `pipelines/export-single-employee.yaml`, `mappings/edm_mapping.yaml`,
+  `scripts/emulate_button.py` (UI-button emulator).
+
+### Fixed — Cyrillic double-encoding on PostgreSQL import
+
+`parseRow` in `pkg/adapters/postgres/export.go` accumulated row values via
+`current += string(ch)` where `ch` is a byte. For any byte ≥ 0x80 this re-encodes
+the byte as the UTF-8 of rune U+00XX, double-encoding every multi-byte UTF-8
+character (Cyrillic "С" d0a1 → c390c2a1). Now accumulates into a `[]byte` and
+converts once, preserving UTF-8 verbatim. Affected all non-ASCII PostgreSQL
+imports (`--import`, `--map`). Regression test added in `parserow_test.go`.
+
 ## [1.13.0] — 2026-06-12
 
 ### Refactoring — cmd/tdtp-xray: align with framework core

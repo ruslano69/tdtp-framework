@@ -9,7 +9,7 @@ loop_guard:
 
 target_connection:
   type: postgres
-  dsn: "host=localhost port=5432 dbname=edm_test user=edm password=edm123 sslmode=disable"
+  dsn: "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp sslmode=disable"
 
 targets:
   - id: edm_employees

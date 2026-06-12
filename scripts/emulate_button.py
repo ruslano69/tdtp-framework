@@ -18,6 +18,12 @@ import sys
 import os
 import pathlib
 
+# Windows consoles often default to a legacy code page (cp1251/cp866) that can't
+# encode box-drawing or arrow glyphs. Force UTF-8 so prints never crash.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # Working directory — where tdtpcli lives alongside pipelines/ and mappings/
 WORK_DIR = pathlib.Path(__file__).parent.parent.resolve()
 
@@ -64,8 +70,8 @@ def main() -> None:
     )
 
     print(f"\n>>> Done. Employee {emp_code!r} is now in EDM.")
-    print(f"    Verify: psql -h localhost -U edm -d edm_test -c "
-          f"\"SELECT * FROM edm.edm_employees WHERE ext_id = '{emp_code}'\"")
+    print(f"    Verify (adjust -U/-d to your target DB): "
+          f"psql -c \"SELECT * FROM edm.edm_employees WHERE ext_id = '{emp_code}'\"")
 
 
 if __name__ == "__main__":
