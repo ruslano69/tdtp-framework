@@ -64,7 +64,12 @@ func loadPacket(path string) (*packet.DataPacket, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Expand compact rows if needed
+	// Decompress (zstd/kanzi) before anything reads the rows — a compressed
+	// packet stores all data as a single blob until expanded here.
+	if err := decompressPacketData(pkt); err != nil {
+		return nil, fmt.Errorf("decompress: %w", err)
+	}
+	// Expand compact rows if needed (must run after decompression).
 	if err := parser.ExpandCompactRows(pkt); err != nil {
 		return nil, fmt.Errorf("expand compact rows: %w", err)
 	}

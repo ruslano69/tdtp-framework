@@ -22,6 +22,10 @@ systems (e.g. ZTR-Live → EDM) without a hand-written importer.
     same `source_system → target_system` pair to prevent recursive sync loops.
 - **`cmd/tdtpcli`** — `--map`, `--input`, `--dry-run` flags wired into routing;
   `--map` is a no-DB-config command (target DSN comes from the mapping file).
+- **Compressed input** — `--map` auto-decompresses zstd/kanzi packets via the
+  shared `decompressPacketData` helper before reading rows, so a compressed
+  export (`output.tdtp.compression: true`) maps transparently. Round-trip test
+  in `map_test.go`. (zstd lvl 3 on the 1478-employee export: 218 KB → 52 KB.)
 - Test assets: `docker/sprint4/` (PostgreSQL + Redis + `edm.edm_employees` DDL),
   `pipelines/export-single-employee.yaml`, `mappings/edm_mapping.yaml`,
   `scripts/emulate_button.py` (UI-button emulator).
