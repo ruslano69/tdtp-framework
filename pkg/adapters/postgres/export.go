@@ -176,37 +176,6 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 	return dataRows, rows.Err()
 }
 
-// parseRow парсит строку данных TDTP формата (разделитель |) в срез значений
-func parseRow(rowValue string) []string {
-	var values []string
-	// Accumulate bytes (not string(ch)) so multi-byte UTF-8 sequences survive
-	// verbatim. string(byte) re-encodes a byte >=0x80 as the UTF-8 of rune
-	// U+00XX, which double-encodes Cyrillic and other non-ASCII text.
-	var current []byte
-	escaped := false
-
-	for i := 0; i < len(rowValue); i++ {
-		ch := rowValue[i]
-		if escaped {
-			current = append(current, ch)
-			escaped = false
-			continue
-		}
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-		if ch == '|' {
-			values = append(values, string(current))
-			current = nil
-		} else {
-			current = append(current, ch)
-		}
-	}
-	values = append(values, string(current))
-	return values
-}
-
 // pgValueToRawString конвертирует pgx значение в сырую строку для последующей обработки
 func (a *Adapter) pgValueToRawString(val any) string {
 	emptyField := packet.Field{}

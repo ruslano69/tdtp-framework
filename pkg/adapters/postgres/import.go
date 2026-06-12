@@ -15,6 +15,11 @@ import (
 // sharedSchemaConverter — синглтон без состояния, потокобезопасен.
 var sharedSchemaConverter = schema.NewConverter()
 
+// sharedRowParser — синглтон без состояния, потокобезопасен.
+// Используется для разбора TDTP-строки на значения (split по | с обработкой
+// экранирования \|, \\, \n). UTF-8-safe, в отличие от прежнего локального parseRow.
+var sharedRowParser = packet.NewParser()
+
 // ImportPacket импортирует один TDTP пакет в PostgreSQL.
 // StrategyCopy: атомарная замена таблицы через временную (temp → rename).
 // StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу.
@@ -361,7 +366,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 		args = args[:0]
 
 		for _, row := range batch {
-			values := parseRow(row.Value)
+			values := sharedRowParser.GetRowValues(row)
 			for j, val := range values {
 				args = append(args, a.convertValue(val, pkt.Schema.Fields[j]))
 			}
@@ -442,7 +447,7 @@ func (a *Adapter) importWithCopy(ctx context.Context, pkt *packet.DataPacket) er
 	// Подготавливаем данные для COPY
 	rows := make([][]any, 0, len(pkt.Data.Rows))
 	for _, row := range pkt.Data.Rows {
-		values := parseRow(row.Value)
+		values := sharedRowParser.GetRowValues(row)
 		rowData := make([]any, len(values))
 
 		for i, val := range values {
