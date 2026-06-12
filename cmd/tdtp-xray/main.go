@@ -13,9 +13,6 @@ import (
 //go:embed all:frontend/src
 var assets embed.FS
 
-//go:embed frontend/src/index.html
-var indexHTML string
-
 func main() {
 	// Create an instance of the app structure
 	app := NewApp()

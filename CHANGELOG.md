@@ -2,6 +2,57 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.13.0] — 2026-06-12
+
+### Refactoring — cmd/tdtp-xray: align with framework core
+
+`cmd/tdtp-xray` now delegates all DB and ETL operations to `pkg/adapters` and
+`pkg/etl` instead of duplicating ~600 lines of custom SQL and in-memory SQLite
+logic. Changes are transparent to the Wails frontend — public method signatures
+unchanged.
+
+- **Phase 1 — ConnectionService** (`services/connection_service.go`):
+  replace `sql.Open` + custom `INFORMATION_SCHEMA` queries with
+  `adapters.New()` + `adapter.GetTableNames()` / `adapter.GetViewNames()`.
+  Removed: `mapDriverName`, `getTablesQuery`, `getViewsQuery` (~170 lines).
+
+- **Phase 2 — MetadataService** (`services/metadata_service.go`):
+  replace per-dialect `INFORMATION_SCHEMA` column/PK queries with
+  `adapter.GetTableSchema()` → `packet.Schema` conversion.
+  Retained: `InferTDTPSchema()` (uses `pkg/core/packet` directly).
+  Removed: `getColumns`, `getColumnsQuery`, `getPrimaryKeys`, `getPrimaryKeysQuery` (~287 lines).
+
+- **Phase 3 — in-memory preview** (`app.go`):
+  replace manual `sql.Open("sqlite", ":memory:")` + hand-rolled CREATE/INSERT
+  with `etl.NewWorkspace()` + `ws.CreateTable()` + `ws.LoadData()` + `ws.ExecuteSQL()`.
+  DB sources loaded via `adapter.ExportTableWithQuery(&packet.Query{Limit: 1000})`;
+  TDTP sources via `packet.NewParser().ParseFile()`.
+  Removed: `loadSourceToMemory`, `loadDBSourceToMemory`, `loadTDTPSourceToMemory`,
+  `mapTDTPToSQLiteType`, `createAndFillTable`, `convertValue` (~150 lines).
+
+- **Phase 4 — PreviewService** (`services/preview_service.go`):
+  replace `EstimateRowCount` `sql.Open` + `COUNT(*)` with
+  `adapter.InspectTable().Stats.TotalRows`.
+  SQL drivers registered transitively via adapter `init()` — no direct imports needed.
+
+- **Phase 5 — go.mod cleanup** (`cmd/tdtp-xray/go.mod`):
+  removed direct driver dependencies
+  (`go-mssqldb`, `go-sql-driver/mysql`, `lib/pq`, `modernc.org/sqlite`) —
+  now resolved transitively through `pkg/adapters/*`.
+  Direct requires reduced to: `tdtp-framework`, `wails/v2`, `yaml.v3`.
+
+### Added — cmd/tdtp-xray: Deploy to Orchestrator
+
+- **`DeployToOrchestrator() ConfigFileResult`** (`app.go`):
+  writes the generated pipeline YAML directly to the orchestrator `--scenarios`
+  directory; orchestrator picks it up automatically without restart.
+  Filename derived from pipeline name (`My Pipeline` → `My-Pipeline.yaml`);
+  directory created if absent.
+
+- **`Settings.OrchestratorScenariosPath`** (`app.go`):
+  new settings field exposed to the Wails frontend for configuring the
+  orchestrator scenarios directory path.
+
 ## [1.12.0] — 2026-06-03
 
 Operational maturity: air-gap enrollment, seat policy, structured audit log,

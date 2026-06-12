@@ -10,10 +10,15 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/cmd/tdtp-xray/services"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/etl"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gopkg.in/yaml.v3"
-
-	_ "modernc.org/sqlite" // Pure Go SQLite driver for in-memory workspace
 )
 
 // App struct
@@ -698,9 +703,7 @@ func (a *App) GetTransform() *Transform {
 
 // runPreviewSQL executes sqlQuery on in-memory SQLite loaded with all current sources.
 func (a *App) runPreviewSQL(sqlQuery string) services.PreviewResult {
-	// Pre-flight: verify alias uniqueness before touching in-memory SQLite.
-	// Each Source.Name becomes a table name in SQLite; duplicates would cause
-	// "table already exists" and leave the combined dataset incomplete.
+	// Pre-flight: verify alias uniqueness — each Source.Name becomes a SQLite table name.
 	seenAliases := make(map[string]bool, len(a.sources))
 	for _, src := range a.sources {
 		if seenAliases[src.Name] {
@@ -712,18 +715,16 @@ func (a *App) runPreviewSQL(sqlQuery string) services.PreviewResult {
 		seenAliases[src.Name] = true
 	}
 
-	db, err := sql.Open("sqlite", ":memory:")
+	ctx := context.Background()
+	ws, err := etl.NewWorkspace(ctx)
 	if err != nil {
-		return services.PreviewResult{
-			Success: false,
-			Message: fmt.Sprintf("Failed to create in-memory database: %v", err),
-		}
+		return services.PreviewResult{Success: false, Message: fmt.Sprintf("Failed to create workspace: %v", err)}
 	}
-	defer db.Close()
+	defer func() { _ = ws.Close(ctx) }()
 
 	for _, source := range a.sources {
 		fmt.Printf("Loading source: %s (type: %s)\n", source.Name, source.Type)
-		if err := a.loadSourceToMemory(db, source); err != nil {
+		if err := a.loadSourceToWorkspace(ctx, ws, source); err != nil {
 			return services.PreviewResult{
 				Success: false,
 				Message: fmt.Sprintf("Failed to load source '%s': %v", source.Name, err),
@@ -733,51 +734,17 @@ func (a *App) runPreviewSQL(sqlQuery string) services.PreviewResult {
 
 	limitedSQL := sqlQuery
 	if !strings.Contains(strings.ToLower(sqlQuery), "limit") {
-		limitedSQL = fmt.Sprintf("%s LIMIT 10", sqlQuery)
+		limitedSQL = sqlQuery + " LIMIT 10"
 	}
 	fmt.Printf("Executing query: %s\n", limitedSQL)
 
-	rows, err := db.Query(limitedSQL)
+	result, err := ws.ExecuteSQL(ctx, limitedSQL, "result")
 	if err != nil {
-		return services.PreviewResult{
-			Success: false,
-			Message: fmt.Sprintf("Query execution failed: %v", err),
-		}
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return services.PreviewResult{
-			Success: false,
-			Message: fmt.Sprintf("Failed to get columns: %v", err),
-		}
+		return services.PreviewResult{Success: false, Message: fmt.Sprintf("Query execution failed: %v", err)}
 	}
 
-	var data []map[string]any
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range columns {
-			valuePtrs[i] = &values[i]
-		}
-		if err := rows.Scan(valuePtrs...); err != nil {
-			continue
-		}
-		row := make(map[string]any)
-		for i, col := range columns {
-			row[col] = a.convertValue(values[i])
-		}
-		data = append(data, row)
-	}
-
-	fmt.Printf("Query returned %d rows\n", len(data))
-	return services.PreviewResult{
-		Success:  true,
-		Columns:  columns,
-		Rows:     data,
-		RowCount: len(data),
-	}
+	fmt.Printf("Query returned %d rows\n", result.Header.RecordsInPart)
+	return dataPacketToPreviewResult(result)
 }
 
 // PreviewTransform executes the provided SQL against in-memory SQLite with loaded sources.
@@ -817,168 +784,106 @@ func (a *App) PreviewQueryResult() services.PreviewResult {
 	return a.runPreviewSQL(sqlQuery)
 }
 
-// loadSourceToMemory loads a source into in-memory SQLite database
-func (a *App) loadSourceToMemory(db *sql.DB, source Source) error {
+// loadSourceToWorkspace loads a source into an etl.Workspace.
+func (a *App) loadSourceToWorkspace(ctx context.Context, ws *etl.Workspace, source Source) error {
 	switch source.Type {
 	case "tdtp":
-		return a.loadTDTPSourceToMemory(db, source)
+		return a.loadTDTPToWorkspace(ctx, ws, source)
 	case "mock":
-		return a.loadMockSourceToMemory(db, source)
-	case "postgres", "postgresql", "mysql", "mssql", "sqlserver", "sqlite", "sqlite3":
-		return a.loadDBSourceToMemory(db, source)
+		return fmt.Errorf("mock source loading not yet implemented")
 	default:
-		return fmt.Errorf("unsupported source type: %s", source.Type)
+		return a.loadDBToWorkspace(ctx, ws, source)
 	}
 }
 
-// loadTDTPSourceToMemory loads TDTP XML data into in-memory SQLite
-func (a *App) loadTDTPSourceToMemory(db *sql.DB, source Source) error {
-	// Get preview data (first 1000 rows for compactness)
-	preview := a.previewService.PreviewTDTPSource(source.DSN, 1000)
-	if !preview.Success {
-		return fmt.Errorf("failed to load TDTP data: %s", preview.Message)
-	}
-
-	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.ColumnTypes, preview.Rows); err != nil {
-		return err
-	}
-
-	fmt.Printf("Loaded %d rows from TDTP source '%s' with schema types\n", len(preview.Rows), source.Name)
-	return nil
-}
-
-// loadMockSourceToMemory loads mock data into in-memory SQLite
-func (a *App) loadMockSourceToMemory(db *sql.DB, source Source) error {
-	// Mock sources are stored in mockSources map (need to retrieve)
-	// For now, return not implemented
-	return fmt.Errorf("mock source loading not yet implemented")
-}
-
-// loadDBSourceToMemory loads database table data into in-memory SQLite
-func (a *App) loadDBSourceToMemory(db *sql.DB, source Source) error {
-	// Build query; MSSQL needs bracket-quoted table name, other DBs use plain name
-	var tableRef string
-	if source.Type == "mssql" || source.Type == "sqlserver" {
-		tableRef = quoteMSSQLIdent(source.TableName)
-	} else {
-		tableRef = source.TableName
-	}
-	query := fmt.Sprintf("SELECT * FROM %s", tableRef)
-
-	// Get preview data
-	preview := a.previewService.PreviewQuery(source.Type, source.DSN, query, 1000)
-	if !preview.Success {
-		return fmt.Errorf("failed to load database data: %s", preview.Message)
-	}
-
-	// Use column types from database schema
-	if err := a.createAndFillTable(db, source.Name, preview.Columns, preview.ColumnTypes, preview.Rows); err != nil {
-		return err
-	}
-
-	fmt.Printf("Loaded %d rows from DB source '%s' with schema types\n", len(preview.Rows), source.Name)
-	return nil
-}
-
-// mapTDTPToSQLiteType maps database type (TDTP/PostgreSQL/MySQL/MSSQL) to SQLite type
-func mapTDTPToSQLiteType(dbType string) string {
-	upperType := strings.ToUpper(dbType)
-
-	// Integer types (all databases)
-	if strings.Contains(upperType, "INT") || // INT, INTEGER, BIGINT, SMALLINT, TINYINT
-		upperType == "SERIAL" || upperType == "BIGSERIAL" { // PostgreSQL auto-increment
-		return "INTEGER"
-	}
-
-	// Floating point types (all databases)
-	if strings.Contains(upperType, "FLOAT") || strings.Contains(upperType, "DOUBLE") ||
-		strings.Contains(upperType, "REAL") || strings.Contains(upperType, "NUMERIC") ||
-		strings.Contains(upperType, "DECIMAL") || upperType == "MONEY" { // MSSQL MONEY
-		return "REAL"
-	}
-
-	// Date/Time types (all databases)
-	if strings.Contains(upperType, "DATE") || strings.Contains(upperType, "TIME") ||
-		upperType == "TIMESTAMP" || upperType == "TIMESTAMPTZ" { // PostgreSQL
-		return "TEXT" // SQLite stores dates as TEXT/INTEGER/REAL
-	}
-
-	// Boolean types
-	if strings.Contains(upperType, "BOOL") || upperType == "BIT" { // BIT in MSSQL/MySQL
-		return "INTEGER" // SQLite uses 0/1 for boolean
-	}
-
-	// Binary types
-	if strings.Contains(upperType, "BLOB") || strings.Contains(upperType, "BINARY") ||
-		upperType == "BYTEA" || // PostgreSQL binary
-		strings.Contains(upperType, "IMAGE") { // MSSQL IMAGE
-		return "BLOB"
-	}
-
-	// Text types (default fallback)
-	// VARCHAR, CHAR, TEXT, NVARCHAR, NCHAR, etc.
-	return "TEXT"
-}
-
-// createAndFillTable creates SQLite table with proper types from schema and bulk-inserts rows.
-// All identifiers are double-quoted to handle names containing $, spaces, etc.
-func (a *App) createAndFillTable(db *sql.DB, tableName string, columns []string, columnTypes map[string]string, rows []map[string]any) error {
-	colDefs := make([]string, len(columns))
-	for i, col := range columns {
-		// Map TDTP type to SQLite type, fallback to TEXT
-		sqliteType := mapTDTPToSQLiteType(columnTypes[col])
-		colDefs[i] = quoteSQLiteIdent(col) + " " + sqliteType
-	}
-	createSQL := fmt.Sprintf("CREATE TABLE %s (%s)", quoteSQLiteIdent(tableName), strings.Join(colDefs, ", "))
-	if _, err := db.Exec(createSQL); err != nil {
-		return fmt.Errorf("failed to create table: %v", err)
-	}
-
-	if len(rows) == 0 {
-		return nil
-	}
-
-	quotedCols := make([]string, len(columns))
-	placeholders := make([]string, len(columns))
-	for i, col := range columns {
-		quotedCols[i] = quoteSQLiteIdent(col)
-		placeholders[i] = "?"
-	}
-	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		quoteSQLiteIdent(tableName),
-		strings.Join(quotedCols, ", "),
-		strings.Join(placeholders, ", "))
-
-	stmt, err := db.Prepare(insertSQL)
+// loadTDTPToWorkspace parses a TDTP file and loads it into the workspace.
+func (a *App) loadTDTPToWorkspace(ctx context.Context, ws *etl.Workspace, source Source) error {
+	parser := packet.NewParser()
+	pkt, err := parser.ParseFile(source.DSN)
 	if err != nil {
-		return fmt.Errorf("failed to prepare insert: %v", err)
+		return fmt.Errorf("failed to parse TDTP file: %w", err)
 	}
-	defer stmt.Close()
+	if err := ws.CreateTable(ctx, source.Name, pkt.Schema.Fields); err != nil {
+		return err
+	}
+	return ws.LoadData(ctx, source.Name, pkt)
+}
 
-	for _, row := range rows {
-		values := make([]any, len(columns))
-		for i, col := range columns {
-			values[i] = row[col]
-		}
-		if _, err := stmt.Exec(values...); err != nil {
-			fmt.Printf("failed to insert row: %v\n", err)
+// loadDBToWorkspace fetches the first 1000 rows of a DB table via pkg/adapters and loads them into the workspace.
+func (a *App) loadDBToWorkspace(ctx context.Context, ws *etl.Workspace, source Source) error {
+	adapter, err := adapters.New(ctx, adapters.Config{
+		Type: normalizeAdapterType(source.Type),
+		DSN:  source.DSN,
+	})
+	if err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+	defer func() { _ = adapter.Close(ctx) }()
+
+	schema, err := adapter.GetTableSchema(ctx, source.TableName)
+	if err != nil {
+		return fmt.Errorf("failed to get schema for '%s': %w", source.TableName, err)
+	}
+	if err := ws.CreateTable(ctx, source.Name, schema.Fields); err != nil {
+		return err
+	}
+
+	packets, err := adapter.ExportTableWithQuery(ctx, source.TableName, &packet.Query{Limit: 1000}, "", "")
+	if err != nil {
+		return fmt.Errorf("failed to export data from '%s': %w", source.TableName, err)
+	}
+
+	for _, pkt := range packets {
+		if err := ws.LoadData(ctx, source.Name, pkt); err != nil {
+			return fmt.Errorf("failed to load data chunk into workspace: %w", err)
 		}
 	}
+	fmt.Printf("Loaded source '%s' into workspace\n", source.Name)
 	return nil
 }
 
-// convertValue converts SQL value to JSON-friendly type
-func (a *App) convertValue(value any) any {
-	if value == nil {
-		return nil
+// normalizeAdapterType maps user-facing DB type aliases to canonical adapter names.
+func normalizeAdapterType(dbType string) string {
+	switch dbType {
+	case "postgresql":
+		return "postgres"
+	case "sqlserver":
+		return "mssql"
+	case "sqlite3":
+		return "sqlite"
+	default:
+		return dbType
+	}
+}
+
+// dataPacketToPreviewResult converts a DataPacket result from workspace.ExecuteSQL to PreviewResult.
+func dataPacketToPreviewResult(pkt *packet.DataPacket) services.PreviewResult {
+	fields := pkt.Schema.Fields
+	columns := make([]string, len(fields))
+	for i, f := range fields {
+		columns[i] = f.Name
 	}
 
-	// Handle byte arrays
-	if b, ok := value.([]byte); ok {
-		return string(b)
+	rows := pkt.GetRows()
+	data := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		m := make(map[string]any, len(fields))
+		for j, f := range fields {
+			if j < len(row) && row[j] != "" {
+				m[f.Name] = row[j]
+			} else {
+				m[f.Name] = nil
+			}
+		}
+		data[i] = m
 	}
 
-	return value
+	return services.PreviewResult{
+		Success:  true,
+		Columns:  columns,
+		Rows:     data,
+		RowCount: len(data),
+	}
 }
 
 // --- Step 5: Output ---
@@ -1048,11 +953,12 @@ func (a *App) GetOutput() *Output {
 
 // Settings holds performance and error handling settings
 type Settings struct {
-	Performance    Performance    `json:"performance"`
-	Workspace      Workspace      `json:"workspace"`
-	Audit          Audit          `json:"audit"`
-	ErrorHandling  ErrorHandling  `json:"errorHandling"`
-	DataProcessors DataProcessors `json:"dataProcessors"`
+	Performance               Performance    `json:"performance"`
+	Workspace                 Workspace      `json:"workspace"`
+	Audit                     Audit          `json:"audit"`
+	ErrorHandling             ErrorHandling  `json:"errorHandling"`
+	DataProcessors            DataProcessors `json:"dataProcessors"`
+	OrchestratorScenariosPath string         `json:"orchestratorScenariosPath"` // path to orchestrator scenarios dir
 }
 
 // Performance settings
@@ -1150,6 +1056,46 @@ func (a *App) GenerateYAML() (string, error) {
 	}
 
 	return string(yamlBytes), nil
+}
+
+// DeployToOrchestrator writes the current pipeline YAML to the configured
+// orchestrator scenarios directory. The file is named <pipeline-name>.yaml.
+// The orchestrator picks it up automatically on the next scan.
+func (a *App) DeployToOrchestrator() ConfigFileResult {
+	dir := strings.TrimSpace(a.settings.OrchestratorScenariosPath)
+	if dir == "" {
+		return ConfigFileResult{Success: false, Error: "Orchestrator scenarios path is not configured (Settings → Orchestrator)"}
+	}
+
+	name := strings.TrimSpace(a.pipelineInfo.Name)
+	if name == "" {
+		return ConfigFileResult{Success: false, Error: "Pipeline name is empty — set it in Step 1 before deploying"}
+	}
+
+	// Sanitize name for use as filename: replace spaces and slashes with dashes.
+	safeName := strings.NewReplacer(" ", "-", "/", "-", "\\", "-").Replace(name)
+	filename := safeName + ".yaml"
+	dest := filepath.Join(dir, filename)
+
+	yamlStr, err := a.GenerateYAML()
+	if err != nil {
+		return ConfigFileResult{Success: false, Error: fmt.Sprintf("Failed to generate YAML: %v", err)}
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return ConfigFileResult{Success: false, Error: fmt.Sprintf("Cannot create scenarios directory: %v", err)}
+	}
+
+	if err := os.WriteFile(dest, []byte(yamlStr), 0644); err != nil {
+		return ConfigFileResult{Success: false, Error: fmt.Sprintf("Failed to write scenario file: %v", err)}
+	}
+
+	return ConfigFileResult{
+		Success:  true,
+		Filename: filename,
+		Path:     dest,
+		Dir:      dir,
+	}
 }
 
 func (a *App) buildSourceConfigs() []SourceConfig {
@@ -1328,12 +1274,6 @@ type PreviewResult struct {
 	QueryTime int      `json:"queryTime"` // ms
 	Warnings  []string `json:"warnings"`
 	Error     string   `json:"error,omitempty"`
-}
-
-// Helper function for safe string extraction in debug logs
-// quoteSQLiteIdent wraps an identifier in double quotes for SQLite, escaping inner double quotes.
-func quoteSQLiteIdent(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // quoteMSSQLIdent wraps an identifier in MSSQL brackets, escaping any ] inside.
@@ -2394,16 +2334,6 @@ func (a *App) SaveConfigurationFile() ConfigFileResult {
 		Path:     path,
 		Dir:      filepath.Dir(path),
 	}
-}
-
-// getDefaultTransformSQL generates default transform SQL based on sources
-func getDefaultTransformSQL(sources []Source) string {
-	if len(sources) == 0 {
-		return "SELECT 1" // Placeholder if no sources
-	}
-	// Bracket-quote the name: works for MSSQL and in-memory SQLite;
-	// both drivers interpret $identifier as a named parameter placeholder.
-	return fmt.Sprintf("SELECT * FROM %s", quoteMSSQLIdent(sources[0].Name))
 }
 
 // ============================================================

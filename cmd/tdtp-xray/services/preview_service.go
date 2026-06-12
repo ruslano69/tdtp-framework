@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -8,6 +9,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -30,10 +36,27 @@ func NewPreviewService() *PreviewService {
 	return &PreviewService{}
 }
 
-// PreviewQuery executes a query with LIMIT and returns preview data
+// sqlOpenDriver maps a DB type alias to the registered sql.Open driver name.
+// Drivers are registered via init() in the adapter blank-import blocks above.
+func sqlOpenDriver(dbType string) string {
+	switch dbType {
+	case "postgres", "postgresql":
+		return "postgres"
+	case "mssql", "sqlserver":
+		return "sqlserver"
+	case "mysql":
+		return "mysql"
+	case "sqlite", "sqlite3":
+		return "sqlite"
+	default:
+		return ""
+	}
+}
+
+// PreviewQuery executes a raw SQL query against the source DB and returns preview data.
+// Drivers are registered via the adapter blank imports at the top of this file.
 func (ps *PreviewService) PreviewQuery(dbType, dsn, query string, limit int) PreviewResult {
-	connService := NewConnectionService()
-	driverName := connService.mapDriverName(dbType)
+	driverName := sqlOpenDriver(dbType)
 
 	if driverName == "" {
 		return PreviewResult{
@@ -300,43 +323,24 @@ func hexPreview(b []byte) string {
 	return "0x" + strings.ToUpper(hex.EncodeToString(b[start:]))
 }
 
-// EstimateRowCount attempts to estimate total row count for a table
+// EstimateRowCount returns the exact row count for a table via adapter.InspectTable.
 func (ps *PreviewService) EstimateRowCount(dbType, dsn, tableName string) int64 {
-	connService := NewConnectionService()
-	driverName := connService.mapDriverName(dbType)
-
-	if driverName == "" {
-		return -1
-	}
-
-	db, err := sql.Open(driverName, dsn)
+	ctx := context.Background()
+	cs := NewConnectionService()
+	adapter, err := adapters.New(ctx, adapters.Config{
+		Type: cs.normalizeDBType(dbType),
+		DSN:  dsn,
+	})
 	if err != nil {
 		return -1
 	}
-	defer db.Close()
+	defer func() { _ = adapter.Close(ctx) }()
 
-	if err := db.Ping(); err != nil {
-		return -1
-	}
-
-	query := ps.getCountQuery(dbType, tableName)
-	if query == "" {
-		return -1
-	}
-
-	var count int64
-	err = db.QueryRow(query).Scan(&count)
+	report, err := adapter.InspectTable(ctx, tableName)
 	if err != nil {
 		return -1
 	}
-
-	return count
-}
-
-// getCountQuery returns COUNT query for specific DB type
-func (ps *PreviewService) getCountQuery(dbType, tableName string) string {
-	// Basic COUNT query works for most databases
-	return fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	return report.Stats.TotalRows
 }
 
 // ValidateQuerySyntax performs basic query validation
