@@ -42,7 +42,17 @@ func routeCommand(
 
 	// Database commands
 	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
-	if flags.List.IsSet {
+	if *flags.Map != "" {
+		operation = audit.OpTransform
+		metadata = map[string]string{"command": "map", "mapping": *flags.Map, "input": *flags.MapInput}
+
+		err = commands.RunMap(ctx, commands.MapOptions{
+			MappingFile: *flags.Map,
+			InputFile:   *flags.MapInput,
+			DryRun:      *flags.MapDryRun,
+		})
+
+	} else if flags.List.IsSet {
 		operation = audit.OpQuery
 		metadata = map[string]string{"command": "list", "pattern": flags.List.Pattern}
 

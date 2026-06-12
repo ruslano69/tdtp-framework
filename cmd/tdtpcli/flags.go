@@ -75,6 +75,9 @@ type Flags struct {
 	Inspect        *string // Print YAML metadata summary of a TDTP file
 	InspectTable   *string // Print extended metadata of a live DB table (Agentic Discovery Mode)
 	Listen         *bool   // [BETA] Stream consumer daemon mode (Kafka only)
+	Map            *string // --map: cross-system field mapping (mapping YAML file)
+	MapInput       *string // --input: source TDTP file for --map
+	MapDryRun      *bool   // --dry-run: validate mapping without writing to DB
 
 	// TDTQL Filters
 	Where   MultiStringFlag // repeatable: --where "A>1" --where "B IN (1,2)"
@@ -194,6 +197,9 @@ func ParseFlags() *Flags {
 	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
 	f.InspectTable = flag.String("inspect-table", "", "Print extended metadata of a live DB table: native types, FK relationships, row count, sample row (Agentic Discovery Mode)")
 	f.Listen = flag.Bool("listen", false, "Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
+	f.Map = flag.String("map", "", "Cross-system field mapping: apply mapping.yaml to a TDTP file and upsert into target DB")
+	f.MapInput = flag.String("input", "", "Source TDTP file for --map (e.g. out/emp_00247.tdtp.xml)")
+	f.MapDryRun = flag.Bool("dry-run", false, "Validate --map transformation without writing to DB")
 
 	// TDTQL Filters
 	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")
