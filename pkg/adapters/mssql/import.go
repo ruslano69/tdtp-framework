@@ -552,6 +552,11 @@ func (a *Adapter) stringToValue(str string, field packet.Field) any {
 		str == field.SpecialValues.Null.Marker {
 		return nil
 	}
+	// NoDate: "0000-00-00" (Navision/MSSQL "no date" sentinel) → SQL NULL
+	if field.SpecialValues != nil && field.SpecialValues.NoDate != nil &&
+		str == field.SpecialValues.NoDate.Marker {
+		return nil
+	}
 
 	// Конвертируем packet.Field в schema.FieldDef
 	fieldDef := fieldToFieldDef(field)
