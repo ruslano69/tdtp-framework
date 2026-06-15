@@ -51,6 +51,7 @@ func routeCommand(
 			InputFile:   *flags.MapInput,
 			DryRun:      *flags.MapDryRun,
 			MercuryURL:  *flags.MercuryURL,
+			Listen:      *flags.Listen,
 		})
 
 	} else if flags.List.IsSet {

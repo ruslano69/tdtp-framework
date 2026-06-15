@@ -196,7 +196,7 @@ func ParseFlags() *Flags {
 	f.Merge = flag.String("merge", "", "Merge multiple TDTP files (comma-separated file paths)")
 	f.Inspect = flag.String("inspect", "", "Print YAML metadata summary of a TDTP file (no config needed)")
 	f.InspectTable = flag.String("inspect-table", "", "Print extended metadata of a live DB table: native types, FK relationships, row count, sample row (Agentic Discovery Mode)")
-	f.Listen = flag.Bool("listen", false, "Streaming consumer daemon: listen to Kafka topic and import data as it arrives (Kafka only)")
+	f.Listen = flag.Bool("listen", false, "Daemon mode: loop on broker queue until SIGTERM. Use with --map --input broker://queue for continuous upsert, or with Kafka streaming consumer (legacy).")
 	f.Map = flag.String("map", "", "Cross-system field mapping: apply mapping.yaml to a TDTP file and upsert into target DB")
 	f.MapInput = flag.String("input", "", "Source TDTP file for --map (e.g. out/emp_00247.tdtp.xml)")
 	f.MapDryRun = flag.Bool("dry-run", false, "Validate --map transformation without writing to DB")
