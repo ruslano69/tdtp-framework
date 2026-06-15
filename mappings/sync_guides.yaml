@@ -1,0 +1,35 @@
+id: sync-guides-v1
+version: "1.0"
+
+loop_guard:
+  source_system: rabbitmq-travel
+  target_system: postgres-branch
+  min_interval: "5s"
+
+input_source:
+  type: broker
+  broker:
+    type: rabbitmq
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp
+    queue: tdtp.sync.guides
+    durable: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5433 dbname=tdtp_branch user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: guides_cache
+    table: public.guides_cache
+    upsert_key: guide_id
+    fields:
+      - {from: "guide_id",        to: "guide_id"}
+      - {from: "first_name",      to: "first_name"}
+      - {from: "last_name",       to: "last_name"}
+      - {from: "specialization",  to: "specialization"}
+      - {from: "rating",          to: "rating"}
+      - {from: "languages",       to: "languages"}
+      - {from: "is_active",       to: "is_active"}

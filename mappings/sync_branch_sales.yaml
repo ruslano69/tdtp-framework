@@ -1,0 +1,45 @@
+id: sync-branch-sales-v1
+version: "1.0"
+
+loop_guard:
+  source_system: rabbitmq-travel
+  target_system: postgres-central
+  min_interval: "5s"
+
+input_source:
+  type: broker
+  broker:
+    type: rabbitmq
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp
+    queue: tdtp.sync.branch.sales
+    durable: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: branch_sales
+    table: public.branch_sales_inbox
+    upsert_key: booking_reference
+    fields:
+      - {from: "source_local_id",      to: "source_local_id"}
+      - {from: "booking_reference",    to: "booking_reference"}
+      - {from: "schedule_id",          to: "schedule_id"}
+      - {from: "customer_uuid",        to: "customer_uuid"}
+      - {from: "number_of_travelers",  to: "number_of_travelers"}
+      - {from: "total_amount",         to: "total_amount"}
+      - {from: "deposit_paid",         to: "deposit_paid"}
+      - {from: "balance_due",          to: "balance_due"}
+      - {from: "payment_status",       to: "payment_status"}
+      - {from: "payment_method",       to: "payment_method"}
+      - {from: "sales_agent",          to: "sales_agent"}
+      - {from: "insurance_purchased",  to: "insurance_purchased"}
+      - {from: "cancellation_date",    to: "cancellation_date"}
+      - {from: "cancellation_reason",  to: "cancellation_reason"}
+      - {from: "refund_amount",        to: "refund_amount"}
+      - {from: "created_at",           to: "created_at"}
+      - {from: "last_updated",         to: "last_updated"}

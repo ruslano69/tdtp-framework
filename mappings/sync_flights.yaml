@@ -1,0 +1,44 @@
+id: sync-flights-v1
+version: "1.0"
+
+loop_guard:
+  source_system: rabbitmq-travel
+  target_system: postgres-central
+  min_interval: "5s"
+
+input_source:
+  type: broker
+  broker:
+    type: rabbitmq
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp
+    queue: tdtp.sync.flights
+    durable: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: flights
+    table: public.flights
+    upsert_key: flight_id
+    fields:
+      - {from: "flight_id",          to: "flight_id"}
+      - {from: "flight_number",      to: "flight_number"}
+      - {from: "origin_iata",        to: "origin_iata"}
+      - {from: "origin_city",        to: "origin_city"}
+      - {from: "destination_iata",   to: "destination_iata"}
+      - {from: "destination_city",   to: "destination_city"}
+      - {from: "departure_time",     to: "departure_time"}
+      - {from: "arrival_time",       to: "arrival_time"}
+      - {from: "duration_minutes",   to: "duration_minutes"}
+      - {from: "economy_price",      to: "economy_price"}
+      - {from: "business_price",     to: "business_price"}
+      - {from: "available_economy",  to: "available_economy"}
+      - {from: "available_business", to: "available_business"}
+      - {from: "status",             to: "status"}
+      - {from: "delay_minutes",      to: "delay_minutes"}
+      - {from: "last_updated",       to: "last_updated"}

@@ -1,16 +1,16 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Travel Agency Data Consumer — per-node
-РџРѕРґРїРёСЃС‹РІР°РµС‚СЃСЏ РЅР° Redis pub/sub tdtp:travel:notify,
-Р·Р°РїСѓСЃРєР°РµС‚ tdtpcli --import-broker (named queue → staging),
-РІС‹Р·С‹РІР°РµС‚ merge-РїСЂРѕС†РµРґСѓСЂСѓ, РїРёС€РµС‚ РјРµС‚РєСѓ РІ S3 (Р¶СѓСЂРЅР°Р»).
+Subscribes to Redis pub/sub tdtp:travel:notify,
+runs tdtpcli --map broker://<queue> for each entity,
+writes audit marker to S3.
 
 Usage:
     python consumer.py --node branch
     python consumer.py --node central
 
 Dependencies:
-    pip install redis psycopg2-binary boto3 botocore colorama
+    pip install redis boto3 botocore colorama
 """
 
 import argparse
@@ -24,7 +24,6 @@ from pathlib import Path
 
 import boto3
 import botocore.config
-import psycopg2
 import redis
 from colorama import Fore, Style, init
 
@@ -42,83 +41,55 @@ S3_BUCKET     = "travel-agency"
 S3_ACCESS_KEY = "tdtp_access"
 S3_SECRET_KEY = "tdtp_secret"
 
-DSN_CENTRAL = "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp"
-DSN_BRANCH  = "host=localhost port=5433 dbname=tdtp_branch user=tdtp password=tdtp"
-
-CFG_BRANCH   = str(TRAVEL_DIR / "configs/config_branch.yaml")
-CFG_CENTRAL  = str(TRAVEL_DIR / "configs/config_central.yaml")
-
 # ─── Queue → handler mapping ──────────────────────────────────────────────────
-# dst_cfg     — tdtpcli config (database = destination + broker source queue)
-# staging     — staging table name for --import-broker --table
-# merge_proc  — PostgreSQL stored procedure (CALL proc())
-# dsn         — psycopg2 DSN for merge call
-# s3_prefix   — S3 prefix for audit log entry
-# label       — human-readable name
+# map_yaml   — path to mapping YAML (input_source.broker + targets)
+# s3_prefix  — S3 prefix for audit log entry
+# label      — human-readable name
+
+MAPPINGS_DIR = TRAVEL_DIR.parents[1] / "mappings"
 
 QUEUE_HANDLERS = {
     # ── Branch receives from Central/Airline ─────────────────────────────────
     "tdtp.sync.countries": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_countries.yaml"),
-        "staging":    "countries_cache_staging",
-        "merge_proc": "merge_countries_cache",
-        "dsn":        DSN_BRANCH,
-        "s3_prefix":  "archive/countries",
-        "label":      "countries → branch",
+        "map_yaml":  str(MAPPINGS_DIR / "sync_countries.yaml"),
+        "s3_prefix": "archive/countries",
+        "label":     "countries -> branch",
     },
     "tdtp.sync.guides": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_guides.yaml"),
-        "staging":    "guides_cache_staging",
-        "merge_proc": "merge_guides_cache",
-        "dsn":        DSN_BRANCH,
-        "s3_prefix":  "archive/guides",
-        "label":      "guides → branch",
+        "map_yaml":  str(MAPPINGS_DIR / "sync_guides.yaml"),
+        "s3_prefix": "archive/guides",
+        "label":     "guides -> branch",
     },
     "tdtp.sync.tours": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_tours.yaml"),
-        "staging":    "tours_cache_staging",
-        "merge_proc": "merge_tours_cache",
-        "dsn":        DSN_BRANCH,
-        "s3_prefix":  "archive/tours",
-        "label":      "tours → branch",
+        "map_yaml":  str(MAPPINGS_DIR / "sync_tours.yaml"),
+        "s3_prefix": "archive/tours",
+        "label":     "tours -> branch",
     },
     "tdtp.sync.schedule": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_schedule.yaml"),
-        "staging":    "schedule_cache_staging",
-        "merge_proc": "merge_schedule_cache",
-        "dsn":        DSN_BRANCH,
-        "s3_prefix":  "archive/schedule",
-        "label":      "schedule → branch",
+        "map_yaml":  str(MAPPINGS_DIR / "sync_schedule.yaml"),
+        "s3_prefix": "archive/schedule",
+        "label":     "schedule -> branch",
     },
     # ── Central receives from Airline/Branch ─────────────────────────────────
     "tdtp.sync.flights": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_flights.yaml"),
-        "staging":    "flights_staging",
-        "merge_proc": "merge_flights",
-        "dsn":        DSN_CENTRAL,
-        "s3_prefix":  "archive/flights",
-        "label":      "flights → central",
+        "map_yaml":  str(MAPPINGS_DIR / "sync_flights.yaml"),
+        "s3_prefix": "archive/flights",
+        "label":     "flights -> central",
     },
     "tdtp.sync.reservations": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_reservations.yaml"),
-        "staging":    "flight_reservations_staging",
-        "merge_proc": "merge_flight_reservations",
-        "dsn":        DSN_CENTRAL,
-        "s3_prefix":  "archive/reservations",
-        "label":      "reservations → central",
+        "map_yaml":  str(MAPPINGS_DIR / "sync_reservations.yaml"),
+        "s3_prefix": "archive/reservations",
+        "label":     "reservations -> central",
     },
     "tdtp.sync.branch.customers": {
-        "map_yaml":  str(TRAVEL_DIR.parents[1] / "mappings/sync_branch_customers.yaml"),
+        "map_yaml":  str(MAPPINGS_DIR / "sync_branch_customers.yaml"),
         "s3_prefix": "archive/branch/customers",
         "label":     "customers -> central",
     },
     "tdtp.sync.branch.sales": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_branch_sales.yaml"),
-        "staging":    "branch_sales_inbox_staging",
-        "merge_proc": "merge_branch_sales_inbox",
-        "dsn":        DSN_CENTRAL,
-        "s3_prefix":  "archive/branch/sales",
-        "label":      "sales → central",
+        "map_yaml":  str(MAPPINGS_DIR / "sync_branch_sales.yaml"),
+        "s3_prefix": "archive/branch/sales",
+        "label":     "sales -> central",
     },
 }
 
@@ -196,49 +167,6 @@ def run_map_broker(tdtpcli: str, map_yaml: str, queue: str) -> tuple[bool, str, 
         return False, f"tdtpcli not found: {tdtpcli}", 0
 
 
-def run_import_broker(tdtpcli: str, dst_cfg: str, table: str) -> tuple[bool, str, int]:
-    """tdtpcli --import-broker → staging table."""
-    t0 = time.time()
-    try:
-        result = subprocess.run(
-            [tdtpcli, "--import-broker",
-             "--table",    table,
-             "--strategy", "replace",
-             "--config",   dst_cfg],
-            capture_output=True, text=True, timeout=120,
-        )
-        elapsed = round(time.time() - t0, 1)
-        out  = (result.stdout + result.stderr).strip()
-        rows = 0
-        m = re.search(r"(\d+)\s+row", out, re.IGNORECASE)
-        if not m:
-            m = re.search(r"Imported\s+(\d+)", out, re.IGNORECASE)
-        if m:
-            rows = int(m.group(1))
-        ok = result.returncode == 0
-        return ok, f"{elapsed}s\n{out}" if not ok else f"{elapsed}s rows={rows}", rows
-    except subprocess.TimeoutExpired:
-        return False, "timeout (120s)", 0
-    except FileNotFoundError:
-        return False, f"tdtpcli not found: {tdtpcli}", 0
-
-
-def run_merge(dsn: str, proc: str) -> tuple[bool, str]:
-    """CALL merge_proc() via psycopg2."""
-    t0 = time.time()
-    try:
-        conn = psycopg2.connect(dsn)
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute(f"CALL {proc}()")
-        conn.close()
-        elapsed = round(time.time() - t0, 1)
-        return True, f"{elapsed}s"
-    except Exception as exc:
-        elapsed = round(time.time() - t0, 1)
-        return False, f"{elapsed}s  {exc}"
-
-
 def set_state(r: redis.Redis, queue: str, state: dict):
     key = queue.replace(".", ":")
     r.set(f"{REDIS_PREFIX}:consumer:{key}", json.dumps(state), ex=86400)
@@ -269,43 +197,18 @@ def handle_notify(r: redis.Redis, tdtpcli: str, my_queues: set,
 
     log_mq(label, f"notify received -> {queue}")
 
-    if handler.get("map_yaml"):
-        # Sprint 6: direct upsert via --map (no staging table, no merge proc)
-        ok, out, rows = run_map_broker(tdtpcli, handler["map_yaml"], queue)
-        if not ok:
-            log_err(f"{label}/map", f"FAILED\n{out[:1500]}")
-            set_state(r, queue, {"status": "map_error", "error": out[:2000],
-                                 "ts": datetime.now().isoformat()})
-            return
-        log_ok(f"{label}/map", out)
-        elapsed_s = 0.0
-        try:
-            elapsed_s = float(out.split("s")[0])
-        except Exception:
-            pass
-    else:
-        # Legacy: import-broker -> staging -> merge
-        ok, out, rows = run_import_broker(tdtpcli, handler["dst_cfg"], handler["staging"])
-        if not ok:
-            log_err(f"{label}/import", f"FAILED\n{out[:1500]}")
-            set_state(r, queue, {"status": "import_error", "error": out[:2000],
-                                 "ts": datetime.now().isoformat()})
-            return
-        elapsed_str = out.split("\n")[0]
-        log_ok(f"{label}/import", f"{rows} rows -> {handler['staging']}  {elapsed_str}")
-
-        ok, merge_out = run_merge(handler["dsn"], handler["merge_proc"])
-        if not ok:
-            log_err(f"{label}/merge", f"FAILED: {merge_out}")
-            set_state(r, queue, {"status": "merge_error", "error": merge_out,
-                                 "ts": datetime.now().isoformat()})
-            return
-        log_ok(f"{label}/merge", f"{handler['merge_proc']}()  {merge_out}")
-        elapsed_s = 0.0
-        try:
-            elapsed_s = float(elapsed_str.rstrip("s").split("rows")[0].strip())
-        except Exception:
-            pass
+    ok, out, rows = run_map_broker(tdtpcli, handler["map_yaml"], queue)
+    if not ok:
+        log_err(f"{label}/map", f"FAILED\n{out[:1500]}")
+        set_state(r, queue, {"status": "map_error", "error": out[:2000],
+                             "ts": datetime.now().isoformat()})
+        return
+    log_ok(f"{label}/map", out)
+    elapsed_s = 0.0
+    try:
+        elapsed_s = float(out.split("s")[0])
+    except Exception:
+        pass
 
     # S3 audit marker (fire-and-forget)
     archive_marker(handler["s3_prefix"], sync_ts, rows, elapsed_s)
@@ -350,10 +253,7 @@ def main():
     print(f"\n  Listening queues:")
     for q in sorted(my_queues):
         h = QUEUE_HANDLERS[q]
-        if h.get("map_yaml"):
-            print(f"    {q:<35} -> --map {Path(h['map_yaml']).name}")
-        else:
-            print(f"    {q:<35} -> {h['staging']} -> CALL {h['merge_proc']}()")
+        print(f"    {q:<35} -> --map {Path(h['map_yaml']).name}")
     print(f"\n  Waiting for notifications... Ctrl+C to stop\n")
 
     r.set(f"{REDIS_PREFIX}:consumer:alive", datetime.now().isoformat(), ex=90)

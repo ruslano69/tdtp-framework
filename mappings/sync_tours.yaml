@@ -1,0 +1,38 @@
+id: sync-tours-v1
+version: "1.0"
+
+loop_guard:
+  source_system: rabbitmq-travel
+  target_system: postgres-branch
+  min_interval: "5s"
+
+input_source:
+  type: broker
+  broker:
+    type: rabbitmq
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp
+    queue: tdtp.sync.tours
+    durable: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5433 dbname=tdtp_branch user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: tours_cache
+    table: public.tours_cache
+    upsert_key: tour_id
+    fields:
+      - {from: "tour_id",                to: "tour_id"}
+      - {from: "tour_code",              to: "tour_code"}
+      - {from: "tour_name",              to: "tour_name"}
+      - {from: "description",            to: "description"}
+      - {from: "destination_country_id", to: "destination_country_id"}
+      - {from: "duration_days",          to: "duration_days"}
+      - {from: "difficulty_level",       to: "difficulty_level"}
+      - {from: "max_group_size",         to: "max_group_size"}
+      - {from: "base_price",             to: "base_price"}
+      - {from: "is_active",              to: "is_active"}
