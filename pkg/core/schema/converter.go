@@ -221,10 +221,10 @@ func (c *Converter) parseDate(tv *TypedValue, field FieldDef) (*TypedValue, erro
 // RFC3339 is canonical; the rest handle output from SQLite workspaces and
 // other sources that omit the 'T' separator or timezone suffix.
 var datetimeFormats = []string{
-	time.RFC3339,           // "2006-01-02T15:04:05Z07:00"  — canonical TDTP
-	"2006-01-02T15:04:05",  // ISO-8601 without timezone
-	"2006-01-02 15:04:05",  // SQLite/MySQL workspace format
-	"2006-01-02",           // date-only fallback
+	time.RFC3339,          // "2006-01-02T15:04:05Z07:00"  — canonical TDTP
+	"2006-01-02T15:04:05", // ISO-8601 without timezone
+	"2006-01-02 15:04:05", // SQLite/MySQL workspace format
+	"2006-01-02",          // date-only fallback
 }
 
 // parseDatetime парсит DATETIME (с таймзоной)
