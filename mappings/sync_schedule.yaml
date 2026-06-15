@@ -1,0 +1,37 @@
+id: sync-schedule-v1
+version: "1.0"
+
+loop_guard:
+  source_system: rabbitmq-travel
+  target_system: postgres-branch
+  min_interval: "5s"
+
+input_source:
+  type: broker
+  broker:
+    type: rabbitmq
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp
+    queue: tdtp.sync.schedule
+    durable: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5433 dbname=tdtp_branch user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: schedule_cache
+    table: public.schedule_cache
+    upsert_key: schedule_id
+    fields:
+      - {from: "schedule_id",    to: "schedule_id"}
+      - {from: "tour_id",        to: "tour_id"}
+      - {from: "guide_id",       to: "guide_id"}
+      - {from: "start_date",     to: "start_date"}
+      - {from: "end_date",       to: "end_date"}
+      - {from: "available_slots", to: "available_slots"}
+      - {from: "booked_slots",   to: "booked_slots"}
+      - {from: "price_modifier", to: "price_modifier"}
+      - {from: "status",         to: "status"}

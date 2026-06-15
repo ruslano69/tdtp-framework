@@ -45,7 +45,9 @@ func readLog(path string) ([]logEntry, error) {
 	}
 	var entries []logEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, err
+		// Corrupted log (e.g. partial write on crash) — reset to empty rather than
+		// blocking all future runs. The old log is overwritten on next writeLog call.
+		return nil, nil
 	}
 	return entries, nil
 }
@@ -91,18 +93,21 @@ func CheckAndRecord(cfg *MappingConfig) (correlationID string, done func(success
 
 	now := time.Now().UTC()
 
-	// Layer 4: min_interval cooldown — block if a run with same src+target completed recently
-	if minInterval > 0 && lg.SourceSystem != "" && lg.TargetSystem != "" {
+	// Layer 4: min_interval cooldown — block if a run with same src+target+mappingID completed recently.
+	// We scope checks to the same MappingID so that parallel steps targeting the same
+	// src→target pair (e.g. guides + tours + schedule all → postgres-branch) don't
+	// block each other. Only an instance of the SAME mapping should block itself.
+	if lg.SourceSystem != "" && lg.TargetSystem != "" {
 		for _, e := range entries {
-			if e.SourceSystem != lg.SourceSystem || e.TargetSystem != lg.TargetSystem {
+			if e.SourceSystem != lg.SourceSystem || e.TargetSystem != lg.TargetSystem || e.MappingID != cfg.ID {
 				continue
 			}
 			if e.Status == "running" {
 				return "", nil, fmt.Errorf(
-					"loop guard: mapping %s→%s is already running (id=%s started=%s)",
-					lg.SourceSystem, lg.TargetSystem, e.ID, e.StartedAt.Format(time.RFC3339))
+					"loop guard: mapping %s (%s→%s) is already running (id=%s started=%s)",
+					cfg.ID, lg.SourceSystem, lg.TargetSystem, e.ID, e.StartedAt.Format(time.RFC3339))
 			}
-			if e.Status == "completed" && now.Sub(e.StartedAt) < minInterval {
+			if minInterval > 0 && e.Status == "completed" && now.Sub(e.StartedAt) < minInterval {
 				return "", nil, fmt.Errorf(
 					"loop guard: min_interval=%s not elapsed since last run (started=%s, elapsed=%s)",
 					lg.MinInterval, e.StartedAt.Format(time.RFC3339), now.Sub(e.StartedAt).Round(time.Millisecond))

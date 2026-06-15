@@ -2,6 +2,150 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.17.1] — 2026-06-15
+
+### Fixed — loop guard conflict in parallel `--steps` execution
+
+`pkg/core/mapping/loopguard.go`: the "already running" check now scopes to
+`(SourceSystem, TargetSystem, MappingID)` instead of just `(SourceSystem,
+TargetSystem)`. Previously, parallel steps targeting the same database (e.g.
+guides + schedule + tours all writing to `postgres-branch`) would block each
+other even though they are completely independent mappings. Each mapping now
+only blocks itself from running twice concurrently.
+
+Also added graceful recovery from a corrupted log file (partial write from a
+prior crash): the log is silently reset instead of failing with
+`"unexpected end of JSON input"`.
+
+---
+
+## [1.17.0] — 2026-06-15
+
+### Added — `--steps <workflow.yaml>` (P10: multi-step orchestration)
+
+New top-level command for running a sequence of tdtpcli sub-commands defined in a
+YAML file. Replaces shell scripts for multi-stage ETL pipelines.
+
+**Key features:**
+
+- **DAG execution** — `depends_on` builds a dependency graph; steps without ordering
+  constraints between them run in parallel within each wave (Kahn's topological sort).
+- **Error policies per step** via `on_error`:
+  - `stop` (default) — abort the workflow, exit 1.
+  - `skip` — mark the step as skipped, continue; direct and transitive dependents are
+    also skipped automatically.
+  - `retry(N)` — retry up to N times with exponential back-off (2 s → 4 s → 8 s → 30 s).
+    After exhausting retries the step is treated as `stop`.
+- **Sub-process isolation** — each step runs `tdtpcli <command>` as a subprocess with
+  its own environment; stdout/stderr stream to the parent terminal in real time.
+- **Cycle detection** — circular `depends_on` chains produce a clear error at startup.
+
+**Workflow YAML format:**
+
+```yaml
+name: nightly-sync
+description: Export ZTR-Live → validate → map to EDM
+steps:
+  - id: export
+    command: "--pipeline pipelines/export_staff.yaml"
+
+  - id: validate
+    command: "--test out/staff.tdtp.xml"
+    depends_on: [export]
+    on_error: skip
+
+  - id: map_staff
+    command: "--map mappings/sync_staff.yaml --input out/staff.tdtp.xml"
+    depends_on: [export]
+    on_error: retry(3)
+
+  - id: map_salary
+    command: "--map mappings/sync_salary.yaml --input out/salary.tdtp.xml"
+    depends_on: [export]
+    on_error: retry(3)
+
+  - id: notify
+    command: "--pipeline pipelines/notify_done.yaml"
+    depends_on: [map_staff, map_salary]
+```
+
+**New files:** `pkg/workflow/config.go`, `pkg/workflow/runner.go`,
+`cmd/tdtpcli/commands/steps.go`.
+
+---
+
+## [1.16.1] — 2026-06-15
+
+### Fixed — RabbitMQ daemon resilience (`pkg/brokers/rabbitmq`)
+
+Three bugs identified by comparing against the production QueueBridge (3 months of
+reconnect-loop debugging). All affect `--map --listen` daemon mode.
+
+- **Infinite error loop after connection drop** (`pkg/brokers/rabbitmq.go`):
+  `deliveryChan` was never reset to `nil` on `Close()` or `Connect()`.
+  `startConsuming()` checked `if r.deliveryChan != nil { return nil }` — so after a
+  drop it kept reading from the closed AMQP delivery channel, returning the same error
+  every 2 s forever. Fixed: `Connect()` and `Close()` now both set `r.deliveryChan = nil`
+  before touching the connection, ensuring `startConsuming()` re-registers the consumer
+  on the next `Receive()` call.
+
+- **No exponential backoff on reconnect** (`cmd/tdtpcli/commands/map.go`):
+  The receive-error retry was a flat `sleep 2s; continue` that never actually
+  reconnected the broker — just retried `Receive()` on the dead connection. Replaced
+  with `reconnectBroker()`: calls `br.Close()` + `br.Connect()` with 2s→4s→8s→…→30s
+  exponential back-off. One log line on disconnect, one on restore. No per-second spam.
+
+- **QoS prefetch not set** (`pkg/brokers/rabbitmq.go`):
+  Without `Qos(1, 0, false)`, RabbitMQ pushes all queued messages to the consumer at
+  once (no backpressure). For 1.9 MB TDTP packets and slow upserts, this could exhaust
+  memory. Fixed: `startConsuming()` now calls `ch.Qos(1, 0, false)` before
+  `ch.Consume()` — broker delivers one message at a time, waits for ACK.
+
+- **Slow dead-connection detection** (`pkg/brokers/rabbitmq.go`):
+  `amqp.Dial()` inherited broker heartbeat (~60s default). After a network partition,
+  `Receive()` blocked silently for up to 60s. Replaced with `amqp.DialConfig` +
+  `Heartbeat: 10*time.Second`, matching production bridge behaviour.
+
+- **`pkg/core/version/version.go`**: `1.16.0` → `1.16.1`.
+
+---
+
+## [1.16.0] — 2026-06-15
+
+### Added — `--map --listen` daemon mode (Sprint 8)
+
+Turns any mapping YAML into a standalone daemon process: `tdtpcli --map <yaml>
+--input broker://queue --listen` keeps one persistent broker connection open and
+processes messages in a continuous loop — no Python coordinator required.
+
+- **`cmd/tdtpcli/commands/map.go`** — `Listen bool` field added to `MapOptions`;
+  `RunMap()` branches to `runMapListen()` when `--listen` is set and `--input` is a
+  `broker://` URI. Loop Guard is intentionally skipped in daemon mode — the broker
+  queue regulates the rate.
+
+- **`runMapListen()`** (new, ~80 lines) — daemon loop:
+  - Connects once; connection stays open for the daemon lifetime.
+  - `for { Receive → decrypt → parse → decompress → expand → mapping.Execute → ACK }`
+  - On parse/decompress/execute error: **NACK with requeue** (`nackIfAble()`) so the
+    message returns to the queue for retry; no silent drops.
+  - On receive error (transient): 2 s back-off, then retry.
+  - Signal handling: `SIGTERM`/`SIGINT` → `cancel()` → current message finishes, then
+    exit. Pattern mirrors `cmd/tdtpcli/commands/listen.go:106–117`.
+  - Per-message progress: `[map:listen] ✓  rows=42     total=420    18ms`.
+  - Final summary on exit: `[map:listen] stopped. total rows upserted: N`.
+
+- **`nackIfAble(br)`** (new helper) — type-asserts the broker to `NackLast(requeue bool)`;
+  no-op for brokers that don't implement NACK (e.g. Kafka — uses offset commit instead).
+
+- **`cmd/tdtpcli/main.go`** — `Listen: *flags.Listen` wired into `MapOptions`.
+
+- **`cmd/tdtpcli/flags.go`** — `--listen` help text updated to document both the new
+  `--map --input broker://` daemon mode and the legacy Kafka streaming consumer.
+
+- **`pkg/core/version/version.go`**: `1.15.0` → `1.16.0`.
+
+---
+
 ## [1.15.0] — 2026-06-15
 
 ### Added — `--map --input broker://` (Sprint 6)
@@ -41,6 +185,23 @@ mapping YAML, and upserts into the target database — no staging table, no merg
   guard interval return immediately without consuming from the queue.
 
 - **`pkg/core/version/version.go`**: `1.14.0` → `1.15.0`.
+
+### Changed — consumer.py full migration (Sprint 7, no binary change)
+
+All 7 remaining entity handlers in `examples/travel-agency/consumer.py` migrated from
+the legacy three-step flow (`--import-broker` → staging table → `CALL merge_*()`) to the
+single `--map broker://` call pattern introduced in Sprint 6. No Go code changed.
+
+- **`QUEUE_HANDLERS`** dict — all 8 entries now use `map_yaml` key pointing to a mapping
+  YAML under `mappings/`; legacy `dsn_key` / `merge_proc` keys removed.
+- **`handle_notify()`** — simplified: single `run_map_broker()` call for every entity,
+  no if/else branch for legacy vs. new handlers.
+- **`run_import_broker()` / `run_merge()`** helper functions — removed (~40 lines).
+- **`psycopg2` / `re` imports** — `psycopg2` removed (no direct DB calls); `re` retained
+  for `run_map_broker()` row-count extraction.
+- **New mapping YAMLs** — `sync_flights.yaml`, `sync_reservations.yaml`,
+  `sync_countries.yaml`, `sync_guides.yaml`, `sync_tours.yaml`, `sync_schedule.yaml`,
+  `sync_branch_sales.yaml` added under `mappings/`.
 
 ---
 

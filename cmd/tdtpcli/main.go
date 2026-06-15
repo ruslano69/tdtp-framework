@@ -42,7 +42,13 @@ func routeCommand(
 
 	// Database commands
 	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
-	if *flags.Map != "" {
+	if *flags.Steps != "" {
+		operation = audit.OpTransform
+		metadata = map[string]string{"command": "steps", "workflow": *flags.Steps}
+
+		err = commands.RunSteps(ctx, *flags.Steps)
+
+	} else if *flags.Map != "" {
 		operation = audit.OpTransform
 		metadata = map[string]string{"command": "map", "mapping": *flags.Map, "input": *flags.MapInput}
 
@@ -51,6 +57,7 @@ func routeCommand(
 			InputFile:   *flags.MapInput,
 			DryRun:      *flags.MapDryRun,
 			MercuryURL:  *flags.MercuryURL,
+			Listen:      *flags.Listen,
 		})
 
 	} else if flags.List.IsSet {
@@ -752,6 +759,7 @@ func main() {
 	// Commands that operate on files only and never connect to a database
 	// can run without a config file — skip loading entirely.
 	noDBRequired := *flags.Pipeline != "" ||
+		*flags.Steps != "" || // --steps launches sub-processes that each load their own config
 		*flags.Inspect != "" ||
 		*flags.Test != "" ||
 		*flags.Diff != "" ||
@@ -933,7 +941,8 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Inspect != "" ||
 		*flags.InspectTable != "" ||
 		*flags.Listen ||
-		*flags.Map != ""
+		*flags.Map != "" ||
+		*flags.Steps != ""
 }
 
 // fatal prints error and exits

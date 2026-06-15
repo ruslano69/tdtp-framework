@@ -1,0 +1,31 @@
+name: sync-all-entities
+description: "ZTR-Live → EDM: all 7 entity types in parallel (replaces consumer.py)"
+
+steps:
+  - id: flights
+    command: "--map mappings/sync_flights.yaml --input broker://tdtp.sync.flights"
+    on_error: skip
+
+  - id: reservations
+    command: "--map mappings/sync_reservations.yaml --input broker://tdtp.sync.reservations"
+    on_error: skip
+
+  - id: countries
+    command: "--map mappings/sync_countries.yaml --input broker://tdtp.sync.countries"
+    on_error: skip
+
+  - id: guides
+    command: "--map mappings/sync_guides.yaml --input broker://tdtp.sync.guides"
+    on_error: skip
+
+  - id: tours
+    command: "--map mappings/sync_tours.yaml --input broker://tdtp.sync.tours"
+    on_error: skip
+
+  - id: schedule
+    command: "--map mappings/sync_schedule.yaml --input broker://tdtp.sync.schedule"
+    on_error: skip
+
+  - id: branch_sales
+    command: "--map mappings/sync_branch_sales.yaml --input broker://tdtp.sync.branch_sales"
+    on_error: skip

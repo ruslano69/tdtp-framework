@@ -1,0 +1,22 @@
+name: demo-parallel
+description: Parallel integrity check + inspect, then merge summary
+
+steps:
+  # Wave 1: три файла проверяются параллельно
+  - id: check_bulk
+    command: "--test out/bulk_1478.tdtp.xml"
+
+  - id: check_emp_01072
+    command: "--test out/emp_01072.tdtp.xml"
+
+  - id: check_emp_10018
+    command: "--test out/emp_10018.tdtp.xml"
+
+  # Wave 2: inspect запускается только когда все три check завершились
+  - id: inspect_bulk
+    command: "--inspect out/bulk_1478.tdtp.xml"
+    depends_on: [check_bulk]
+
+  - id: inspect_emp
+    command: "--inspect out/emp_01072.tdtp.xml"
+    depends_on: [check_emp_01072, check_emp_10018]

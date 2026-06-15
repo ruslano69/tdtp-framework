@@ -1,0 +1,37 @@
+id: sync-reservations-v1
+version: "1.0"
+
+loop_guard:
+  source_system: rabbitmq-travel
+  target_system: postgres-central
+  min_interval: "5s"
+
+input_source:
+  type: broker
+  broker:
+    type: rabbitmq
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp
+    queue: tdtp.sync.reservations
+    durable: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: flight_reservations
+    table: public.flight_reservations
+    upsert_key: reservation_id
+    fields:
+      - {from: "reservation_id",       to: "reservation_id"}
+      - {from: "flight_id",            to: "flight_id"}
+      - {from: "booking_ref_external", to: "booking_ref_external"}
+      - {from: "passenger_name",       to: "passenger_name"}
+      - {from: "seat_class",           to: "seat_class"}
+      - {from: "price_paid",           to: "price_paid"}
+      - {from: "status",               to: "status"}
+      - {from: "agency_id",            to: "agency_id"}
+      - {from: "last_updated",         to: "last_updated"}
