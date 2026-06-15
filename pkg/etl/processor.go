@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"github.com/ruslano69/tdtp-framework/pkg/sanitize"
 )
@@ -372,9 +373,10 @@ func (p *Processor) GetConfig() *PipelineConfig {
 // applySchemaPassthrough restores original TDTP type metadata for output fields
 // that passed through the SQLite workspace unchanged. SQLite collapses BOOLEAN→INTEGER,
 // DECIMAL(8,2)→REAL, and drops subtype/SpecialValues entirely. For each output field
-// whose name matches a source field, we restore Type, Subtype, Length, Precision, Scale,
-// SpecialValues, and Timezone from the source schema. Fields that were computed or renamed
-// by transform.sql (not present in any source) keep their SQLite-derived types.
+// whose name matches a source field AND whose SQLite type equals what the source type
+// would produce in the workspace, we restore Type, Subtype, Length, Precision, Scale,
+// SpecialValues, and Timezone. Fields computed or renamed by transform.sql (not present
+// in any source, or with a different SQLite type) keep their workspace-derived types.
 func (p *Processor) applySchemaPassthrough(result *ExecutionResult, sourcesData []SourceData) {
 	if result == nil || result.Packet == nil {
 		return
@@ -398,6 +400,13 @@ func (p *Processor) applySchemaPassthrough(result *ExecutionResult, sourcesData 
 		if !ok {
 			continue
 		}
+		// Guard: only restore when the output SQLite type matches what the source
+		// type would produce in the workspace. A mismatch means transform.sql
+		// intentionally cast the field (e.g. CAST(work_years AS TEXT) AS work_years)
+		// and the result schema must not be overwritten with the stale source type.
+		if outField.Type != tdtpTypeToWorkspaceSQLite(orig.Type) {
+			continue
+		}
 		result.Packet.Schema.Fields[i].Type = orig.Type
 		result.Packet.Schema.Fields[i].Subtype = orig.Subtype
 		result.Packet.Schema.Fields[i].Length = orig.Length
@@ -405,5 +414,26 @@ func (p *Processor) applySchemaPassthrough(result *ExecutionResult, sourcesData 
 		result.Packet.Schema.Fields[i].Scale = orig.Scale
 		result.Packet.Schema.Fields[i].SpecialValues = orig.SpecialValues
 		result.Packet.Schema.Fields[i].Timezone = orig.Timezone
+	}
+}
+
+// tdtpTypeToWorkspaceSQLite maps a TDTP field type to the SQLite column type
+// the Workspace would create for it. Mirrors Workspace.mapTDTPTypeToSQLite.
+func tdtpTypeToWorkspaceSQLite(tdtpType string) string {
+	switch schema.DataType(tdtpType) {
+	case schema.TypeInteger, schema.TypeInt:
+		return "INTEGER"
+	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
+		return "REAL"
+	case schema.TypeBoolean, schema.TypeBool:
+		return "INTEGER"
+	case schema.TypeDate:
+		return "DATE"
+	case schema.TypeDatetime, schema.TypeTimestamp:
+		return "DATETIME"
+	case schema.TypeBlob:
+		return "BLOB"
+	default:
+		return "TEXT"
 	}
 }

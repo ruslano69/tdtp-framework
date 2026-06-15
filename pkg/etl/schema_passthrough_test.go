@@ -133,6 +133,40 @@ func TestPassthrough_ComputedFieldsUnchanged(t *testing.T) {
 	}
 }
 
+// TestPassthrough_CastTransformBlocksRestore verifies that when transform.sql
+// intentionally changes a field's type (e.g. CAST(work_years AS TEXT) AS work_years),
+// the passthrough does NOT overwrite the result with the stale source type.
+// The guard: output SQLite type must match what the source type produces in the workspace.
+func TestPassthrough_CastTransformBlocksRestore(t *testing.T) {
+	p := &Processor{}
+
+	sourceFields := []packet.Field{
+		{Name: "work_years", Type: "DECIMAL", Precision: 8, Scale: 2},
+		{Name: "birth_date", Type: "DATE"},
+		{Name: "is_active", Type: "BOOLEAN"},
+	}
+	// After CAST(work_years AS TEXT), CAST(birth_date AS TEXT), CAST(is_active AS TEXT):
+	// SQLite returns TEXT for all three — mismatch with source SQLite types (REAL, DATE, INTEGER).
+	outFields := []packet.Field{
+		{Name: "work_years", Type: "TEXT"}, // CAST(work_years AS TEXT) AS work_years
+		{Name: "birth_date", Type: "TEXT"}, // CAST(birth_date  AS TEXT) AS birth_date
+		{Name: "is_active", Type: "TEXT"},  // CAST(is_active   AS TEXT) AS is_active
+	}
+
+	result := resultWithFields(outFields)
+	p.applySchemaPassthrough(result, sourcesWithFields(sourceFields))
+
+	// All three must remain TEXT — source type must NOT be restored.
+	for _, f := range result.Packet.Schema.Fields {
+		if f.Type != "TEXT" {
+			t.Errorf("%s: Type = %q, want TEXT (cast result must not be overwritten by source type)", f.Name, f.Type)
+		}
+		if f.Precision != 0 || f.Scale != 0 {
+			t.Errorf("%s: Precision/Scale must stay 0 for cast TEXT output", f.Name)
+		}
+	}
+}
+
 // TestPassthrough_NilAndEmptyNoPanic verifies the function is safe to call
 // with nil result, nil packet, or empty source list.
 func TestPassthrough_NilAndEmptyNoPanic(t *testing.T) {
