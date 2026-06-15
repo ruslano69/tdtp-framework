@@ -39,10 +39,10 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	fmt.Printf("Mapping: %s\n", cfg.ID)
 
 	// Extract broker/S3 config from mapping YAML input_source section
-	var s3cfg     *storage.S3Config
+	var s3cfg *storage.S3Config
 	var brokercfg *brokers.Config
 	if cfg.InputSource != nil {
-		s3cfg     = cfg.InputSource.S3
+		s3cfg = cfg.InputSource.S3
 		brokercfg = cfg.InputSource.Broker
 	}
 
@@ -115,7 +115,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	if err != nil {
 		return fmt.Errorf("broker driver: %w", err)
 	}
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	if err := br.Connect(ctx); err != nil {
 		return fmt.Errorf("broker connect: %w", err)
 	}
@@ -284,7 +284,7 @@ func loadPacket(ctx context.Context, path, mercuryURL string,
 		if err != nil {
 			return nil, fmt.Errorf("broker driver: %w", err)
 		}
-		defer br.Close()
+		defer func() { _ = br.Close() }()
 		if err := br.Connect(ctx); err != nil {
 			return nil, fmt.Errorf("broker connect: %w", err)
 		}
@@ -313,12 +313,12 @@ func loadPacket(ctx context.Context, path, mercuryURL string,
 		if err != nil {
 			return nil, fmt.Errorf("s3 driver: %w", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		rc, err := store.Get(ctx, key)
 		if err != nil {
 			return nil, fmt.Errorf("s3 get %q: %w", key, err)
 		}
-		defer rc.Close()
+		defer func() { _ = rc.Close() }()
 		data, err = io.ReadAll(rc)
 		if err != nil {
 			return nil, fmt.Errorf("s3 read: %w", err)

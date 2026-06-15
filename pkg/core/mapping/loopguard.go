@@ -47,7 +47,7 @@ func readLog(path string) ([]logEntry, error) {
 	if err := json.Unmarshal(data, &entries); err != nil {
 		// Corrupted log (e.g. partial write on crash) — reset to empty rather than
 		// blocking all future runs. The old log is overwritten on next writeLog call.
-		return nil, nil
+		entries = nil
 	}
 	return entries, nil
 }

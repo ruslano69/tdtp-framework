@@ -56,8 +56,8 @@ func Run(ctx context.Context, cfg *WorkflowConfig) error {
 	skipped := make(map[string]bool)
 
 	type waveResult struct {
-		id            string
-		err           error
+		id             string
+		err            error
 		skipPropagated bool // true when skipped due to ancestor skip, not own failure
 	}
 
@@ -218,12 +218,13 @@ func tokenize(s string) ([]string, error) {
 				cur = append(cur, c)
 			}
 		case inDouble:
-			if c == '"' {
+			switch {
+			case c == '"':
 				inDouble = false
-			} else if c == '\\' && i+1 < len(s) {
+			case c == '\\' && i+1 < len(s):
 				i++
 				cur = append(cur, s[i])
-			} else {
+			default:
 				cur = append(cur, c)
 			}
 		case c == '\'':
