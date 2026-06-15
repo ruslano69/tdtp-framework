@@ -26,19 +26,27 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 		return fmt.Errorf("--map: %w", err)
 	}
 
-	// Loop guard check (Layers 2+4): blocks if min_interval hasn't elapsed
-	correlationID, done, err := mapping.CheckAndRecord(cfg)
-	if err != nil {
-		return fmt.Errorf("--map loop guard: %w", err)
-	}
-	// Record the final status exactly once when RunMap returns.
-	success := false
-	defer func() { done(success) }()
-
 	fmt.Printf("Mapping: %s\n", cfg.ID)
+
+	// Loop guard (Layers 2+4): skip entirely for dry-runs so validation runs
+	// do not consume the min_interval cooldown and block a subsequent real sync.
+	var (
+		correlationID = "dry-run"
+		markDone      func(bool)
+	)
 	if opts.DryRun {
 		fmt.Println("  [dry-run mode — no data will be written]")
+		markDone = func(bool) {} // no-op
+	} else {
+		id, done, err := mapping.CheckAndRecord(cfg)
+		if err != nil {
+			return fmt.Errorf("--map loop guard: %w", err)
+		}
+		correlationID = id
+		markDone = done
 	}
+	success := false
+	defer func() { markDone(success) }()
 	fmt.Printf("  correlation_id: %s\n", correlationID)
 	fmt.Printf("  source: %s → target: %s\n", cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
 
