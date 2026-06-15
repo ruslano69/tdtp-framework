@@ -32,24 +32,24 @@ func TestPassthrough_RestoresAllMetadata(t *testing.T) {
 
 	noDate := &packet.SpecialValues{NoDate: &packet.MarkerValue{Marker: "0000-00-00"}}
 	sourceFields := []packet.Field{
-		{Name: "is_active",  Type: "BOOLEAN"},
+		{Name: "is_active", Type: "BOOLEAN"},
 		{Name: "work_years", Type: "DECIMAL", Precision: 8, Scale: 2},
-		{Name: "hired_at",   Type: "TIMESTAMP", Subtype: "datetime"},
-		{Name: "sex",        Type: "INTEGER", Subtype: "tinyint"},
-		{Name: "born_on",    Type: "DATE", SpecialValues: noDate},
-		{Name: "full_name",  Type: "TEXT", Subtype: "nvarchar", Length: 200},
+		{Name: "hired_at", Type: "TIMESTAMP", Subtype: "datetime"},
+		{Name: "sex", Type: "INTEGER", Subtype: "tinyint"},
+		{Name: "born_on", Type: "DATE", SpecialValues: noDate},
+		{Name: "full_name", Type: "TEXT", Subtype: "nvarchar", Length: 200},
 		{Name: "created_at", Type: "TIMESTAMP", Subtype: "datetime2", Timezone: "UTC"},
 	}
 
 	// SQLite workspace collapses types: BOOLEAN→INTEGER, DECIMAL→REAL,
 	// TIMESTAMP→DATETIME; all subtype/precision/SpecialValues are gone.
 	outFields := []packet.Field{
-		{Name: "is_active",  Type: "INTEGER"},
+		{Name: "is_active", Type: "INTEGER"},
 		{Name: "work_years", Type: "REAL"},
-		{Name: "hired_at",   Type: "DATETIME"},
-		{Name: "sex",        Type: "INTEGER"},
-		{Name: "born_on",    Type: "DATE"},
-		{Name: "full_name",  Type: "TEXT"},
+		{Name: "hired_at", Type: "DATETIME"},
+		{Name: "sex", Type: "INTEGER"},
+		{Name: "born_on", Type: "DATE"},
+		{Name: "full_name", Type: "TEXT"},
 		{Name: "created_at", Type: "DATETIME"},
 	}
 
@@ -111,13 +111,13 @@ func TestPassthrough_ComputedFieldsUnchanged(t *testing.T) {
 	p := &Processor{}
 
 	sourceFields := []packet.Field{
-		{Name: "id",   Type: "INTEGER"},
+		{Name: "id", Type: "INTEGER"},
 		{Name: "name", Type: "TEXT"},
 	}
 	outFields := []packet.Field{
-		{Name: "id",         Type: "INTEGER"},
-		{Name: "name",       Type: "TEXT"},
-		{Name: "label",      Type: "TEXT"}, // computed: id || ' - ' || name
+		{Name: "id", Type: "INTEGER"},
+		{Name: "name", Type: "TEXT"},
+		{Name: "label", Type: "TEXT"},      // computed: id || ' - ' || name
 		{Name: "name_upper", Type: "TEXT"}, // computed: UPPER(name)
 	}
 
@@ -202,9 +202,9 @@ func TestPassthrough_MultipleSourcesAllFieldsRestored(t *testing.T) {
 
 	// Output after workspace: all types collapsed
 	outFields := []packet.Field{
-		{Name: "emp_id",    Type: "INTEGER"},
+		{Name: "emp_id", Type: "INTEGER"},
 		{Name: "is_active", Type: "INTEGER"},
-		{Name: "salary",    Type: "REAL"},
+		{Name: "salary", Type: "REAL"},
 	}
 	result := resultWithFields(outFields)
 	p.applySchemaPassthrough(result, sources)
@@ -238,11 +238,11 @@ func TestPassthrough_WorkspaceRoundTrip(t *testing.T) {
 
 	noDate := &packet.SpecialValues{NoDate: &packet.MarkerValue{Marker: "0000-00-00"}}
 	sourceFields := []packet.Field{
-		{Name: "emp_id",    Type: "INTEGER", Subtype: "int"},
+		{Name: "emp_id", Type: "INTEGER", Subtype: "int"},
 		{Name: "is_active", Type: "BOOLEAN"},
-		{Name: "salary",    Type: "DECIMAL", Precision: 10, Scale: 2},
-		{Name: "hired_at",  Type: "TIMESTAMP", Subtype: "datetime"},
-		{Name: "born_on",   Type: "DATE", SpecialValues: noDate},
+		{Name: "salary", Type: "DECIMAL", Precision: 10, Scale: 2},
+		{Name: "hired_at", Type: "TIMESTAMP", Subtype: "datetime"},
+		{Name: "born_on", Type: "DATE", SpecialValues: noDate},
 		{Name: "dept_code", Type: "INTEGER", Subtype: "tinyint"},
 		{Name: "full_name", Type: "TEXT"},
 	}
@@ -277,9 +277,9 @@ func TestPassthrough_WorkspaceRoundTrip(t *testing.T) {
 		rawTypes[f.Name] = f.Type
 	}
 	expectedCollapsed := map[string]string{
-		"is_active": "INTEGER", // BOOLEAN → INTEGER in SQLite
-		"salary":    "REAL",    // DECIMAL → REAL in SQLite
-		"hired_at":  "DATETIME",// TIMESTAMP → DATETIME in SQLite
+		"is_active": "INTEGER",  // BOOLEAN → INTEGER in SQLite
+		"salary":    "REAL",     // DECIMAL → REAL in SQLite
+		"hired_at":  "DATETIME", // TIMESTAMP → DATETIME in SQLite
 	}
 	for field, wantCollapsed := range expectedCollapsed {
 		if rawTypes[field] != wantCollapsed {

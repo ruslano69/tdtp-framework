@@ -495,31 +495,3 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 
 	return dataPacket, nil
 }
-
-// convertMSSQLTypeToTDTP конвертирует MS SQL Server тип в TDTP тип
-func convertMSSQLTypeToTDTP(sqlType string) (string, int) {
-	sqlType = strings.ToUpper(sqlType)
-
-	switch {
-	case strings.Contains(sqlType, "INT"), strings.Contains(sqlType, "BIGINT"), strings.Contains(sqlType, "SMALLINT"), strings.Contains(sqlType, "TINYINT"):
-		return "INTEGER", 0
-	case strings.Contains(sqlType, "FLOAT"), strings.Contains(sqlType, "REAL"), strings.Contains(sqlType, "DECIMAL"), strings.Contains(sqlType, "NUMERIC"), strings.Contains(sqlType, "MONEY"):
-		return "REAL", 0
-	case strings.Contains(sqlType, "BIT"):
-		return "BOOLEAN", 0
-	// DATETIME/SMALLDATETIME must be checked BEFORE DATE: "DATETIME" contains "DATE"
-	case strings.Contains(sqlType, "DATETIME"), strings.Contains(sqlType, "SMALLDATETIME"):
-		return "DATETIME", 0
-	case strings.Contains(sqlType, "TIMESTAMP"):
-		return "DATETIME", 0
-	case strings.Contains(sqlType, "DATE"):
-		return "DATE", 0
-	case strings.Contains(sqlType, "BINARY"), strings.Contains(sqlType, "IMAGE"):
-		return "BLOB", 0
-	case strings.Contains(sqlType, "VARCHAR"), strings.Contains(sqlType, "CHAR"), strings.Contains(sqlType, "TEXT"), strings.Contains(sqlType, "NVARCHAR"), strings.Contains(sqlType, "NCHAR"):
-		// Для TEXT полей устанавливаем разумное значение по умолчанию
-		return "TEXT", 1000
-	default:
-		return "TEXT", 1000
-	}
-}
