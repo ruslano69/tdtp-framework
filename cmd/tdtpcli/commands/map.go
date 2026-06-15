@@ -3,10 +3,12 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/mapping"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // MapOptions holds parameters for the --map command.
@@ -50,8 +52,12 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	fmt.Printf("  correlation_id: %s\n", correlationID)
 	fmt.Printf("  source: %s → target: %s\n", cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
 
-	// Parse input TDTP packet (decrypts .enc input via Mercury if needed)
-	pkt, err := loadPacket(ctx, opts.InputFile, opts.MercuryURL)
+	// Parse input TDTP packet — local file or S3 URI (s3://bucket/key)
+	var s3cfg *storage.S3Config
+	if cfg.InputSource != nil && cfg.InputSource.S3 != nil {
+		s3cfg = cfg.InputSource.S3
+	}
+	pkt, err := loadPacket(ctx, opts.InputFile, opts.MercuryURL, s3cfg)
 	if err != nil {
 		return fmt.Errorf("--map: load input %q: %w", opts.InputFile, err)
 	}
@@ -67,15 +73,46 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	return nil
 }
 
-// loadPacket reads a TDTP packet from disk, transparently handling the
-// encryption → compression → compact layers in that order:
+// loadPacket reads a TDTP packet from a local path or an S3 URI (s3://bucket/key),
+// transparently handling the encryption → compression → compact layers in that order:
 //   - .tdtp.enc input is decrypted via xZMercury (burn-on-read key retrieval)
 //   - a compressed Data section (zstd/kanzi) is expanded
 //   - a compact v1.3.1 packet is unfolded
-func loadPacket(ctx context.Context, path, mercuryURL string) (*packet.DataPacket, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read input: %w", err)
+//
+// When path is an S3 URI, s3cfg must be non-nil (credentials from mapping YAML
+// input_source.s3); the URI bucket overrides s3cfg.Bucket when present.
+func loadPacket(ctx context.Context, path, mercuryURL string, s3cfg *storage.S3Config) (*packet.DataPacket, error) {
+	var data []byte
+
+	if storage.IsRemote(path) {
+		if s3cfg == nil {
+			return nil, fmt.Errorf("--input is an S3 URI but mapping YAML has no input_source.s3 section")
+		}
+		_, bucket, key, _ := storage.ParseURI(path)
+		cfg := *s3cfg // copy: URI bucket overrides config without mutating the original
+		if bucket != "" {
+			cfg.Bucket = bucket
+		}
+		store, err := storage.New(storage.Config{Type: "s3", S3: cfg})
+		if err != nil {
+			return nil, fmt.Errorf("s3 driver: %w", err)
+		}
+		defer store.Close()
+		rc, err := store.Get(ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("s3 get %q: %w", key, err)
+		}
+		defer rc.Close()
+		data, err = io.ReadAll(rc)
+		if err != nil {
+			return nil, fmt.Errorf("s3 read: %w", err)
+		}
+	} else {
+		var err error
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read input: %w", err)
+		}
 	}
 
 	// Decrypt first when the input is an encrypted blob. Detected by content

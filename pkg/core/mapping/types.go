@@ -1,13 +1,23 @@
 package mapping
 
+import "github.com/ruslano69/tdtp-framework/pkg/storage"
+
+// InputSource describes where the input TDTP packet comes from.
+// When absent from the mapping YAML, --input must be a local file path.
+type InputSource struct {
+	Type string            `yaml:"type"` // "s3"
+	S3   *storage.S3Config `yaml:"s3"`
+}
+
 // MappingConfig is the top-level structure parsed from a mapping YAML file.
 type MappingConfig struct {
-	ID         string     `yaml:"id"`
-	Version    string     `yaml:"version"`
-	ApprovedBy string     `yaml:"approved_by,omitempty"`
-	LoopGuard  LoopGuard  `yaml:"loop_guard"`
-	TargetConn ConnConfig `yaml:"target_connection"`
-	Targets    []Target   `yaml:"targets"`
+	ID          string       `yaml:"id"`
+	Version     string       `yaml:"version"`
+	ApprovedBy  string       `yaml:"approved_by,omitempty"`
+	LoopGuard   LoopGuard    `yaml:"loop_guard"`
+	InputSource *InputSource `yaml:"input_source,omitempty"`
+	TargetConn  ConnConfig   `yaml:"target_connection"`
+	Targets     []Target     `yaml:"targets"`
 }
 
 // LoopGuard prevents recursive sync loops between systems.

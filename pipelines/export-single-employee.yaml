@@ -21,7 +21,9 @@ sources:
         CAST(
           DATEDIFF(day, eh.[Employment Date], GETDATE()) / 365.25
           AS DECIMAL(8,2)
-        )                          AS work_years
+        )                          AS work_years,
+        CAST(1 AS BIT)             AS is_active,
+        CAST('{"source":"ztr","version":1}' AS NVARCHAR(200)) AS meta_json
       FROM [ZTR$Employment History] eh
       JOIN [ZTR$Employee] e ON eh.[Employee No_] = e.[No_]
       JOIN (
