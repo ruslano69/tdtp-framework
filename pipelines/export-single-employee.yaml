@@ -1,0 +1,69 @@
+name: export-single-employee
+version: "1.0"
+description: "Виборка одного співробітника @emp_code з ZTR-Live"
+
+sources:
+  - name: emp
+    type: mssql
+    dsn: "server=sql-srv1;port=1433;database=ZTR-Live;trusted_connection=yes;encrypt=disable;TrustServerCertificate=true"
+    no_date_sentinels: ["1753-01-01"]
+    query: |
+      SELECT
+        e.[No_]                    AS employee_code,
+        eh.[No_]                   AS tabel_number,
+        e.[FullName]               AS full_name,
+        eh.[Employment Date]       AS hire_date,
+        eh.[Employment Type]       AS employment_type,
+        ISNULL(cd.[Name], '')      AS position_name,
+        d.[Name]                   AS department_name,
+        e.[Birth Date]             AS birth_date,
+        e.[Sex]                    AS sex,
+        CAST(
+          DATEDIFF(day, eh.[Employment Date], GETDATE()) / 365.25
+          AS DECIMAL(8,2)
+        )                          AS work_years
+      FROM [ZTR$Employment History] eh
+      JOIN [ZTR$Employee] e ON eh.[Employee No_] = e.[No_]
+      JOIN (
+          SELECT [Timetable No_], [Position Code], [Department Code],
+                 ROW_NUMBER() OVER (PARTITION BY [Timetable No_]
+                                    ORDER BY [Entry No_] DESC) AS rn
+          FROM [ZTR$Staff Change Log] WHERE [Log Type] = 0
+      ) scl ON CAST(eh.[No_] AS VARCHAR(20)) = CAST(scl.[Timetable No_] AS VARCHAR(20))
+            AND scl.rn = 1
+      JOIN [ZTR$Department IW] d ON scl.[Department Code] = d.[Code]
+      LEFT JOIN [ZTR$Common Directory] cd
+            ON scl.[Position Code] = CAST(cd.[Code] AS INT) AND cd.[Directory Type] = 10
+      WHERE CAST(e.[No_] AS VARCHAR(20)) = '@emp_code'
+        AND eh.[Active] = 1
+        AND eh.[Termination Date] = '1753-01-01'
+    timeout: 30
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: "result"
+  timeout: 30
+  sql: |
+    SELECT * FROM emp
+
+output:
+  type: tdtp
+  tdtp:
+    destination: "out/emp_{{emp_code}}.tdtp.xml"
+
+# xZMercury endpoint for --enc encryption (only used when --enc is passed).
+security:
+  mercury_url: "http://localhost:3000"
+  recipient_resource: "edm-sync"
+  server_secret: "dev-mode"   # dev opt-out of HMAC; use real $MERCURY_SERVER_SECRET in prod
+
+performance:
+  timeout: 60
+  parallel_sources: false
+
+error_handling:
+  on_source_error: "fail"
+  on_transform_error: "fail"

@@ -15,6 +15,11 @@ import (
 // sharedSchemaConverter — синглтон без состояния, потокобезопасен.
 var sharedSchemaConverter = schema.NewConverter()
 
+// sharedRowParser — синглтон без состояния, потокобезопасен.
+// Используется для разбора TDTP-строки на значения (split по | с обработкой
+// экранирования \|, \\, \n). UTF-8-safe, в отличие от прежнего локального parseRow.
+var sharedRowParser = packet.NewParser()
+
 // ImportPacket импортирует один TDTP пакет в PostgreSQL.
 // StrategyCopy: атомарная замена таблицы через временную (temp → rename).
 // StrategyReplace/Ignore/Fail: прямой INSERT с ON CONFLICT в существующую таблицу.
@@ -361,7 +366,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 		args = args[:0]
 
 		for _, row := range batch {
-			values := parseRow(row.Value)
+			values := sharedRowParser.GetRowValues(row)
 			for j, val := range values {
 				args = append(args, a.convertValue(val, pkt.Schema.Fields[j]))
 			}
@@ -374,7 +379,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 			sql = insertSQL + buildPlaceholders(len(batch)) + onConflict
 		}
 
-		_, err := a.pool.Exec(ctx, sql, args...)
+		_, err := a.pool.Exec(ctx, sql, append([]any{pgx.QueryExecModeSimpleProtocol}, args...)...)
 		if err != nil {
 			return fmt.Errorf("failed to insert batch: %w\nSQL: %s", err, sql)
 		}
@@ -442,7 +447,7 @@ func (a *Adapter) importWithCopy(ctx context.Context, pkt *packet.DataPacket) er
 	// Подготавливаем данные для COPY
 	rows := make([][]any, 0, len(pkt.Data.Rows))
 	for _, row := range pkt.Data.Rows {
-		values := parseRow(row.Value)
+		values := sharedRowParser.GetRowValues(row)
 		rowData := make([]any, len(values))
 
 		for i, val := range values {
@@ -494,10 +499,17 @@ func fieldToFieldDef(field packet.Field) schema.FieldDef {
 // convertValue конвертирует строковое значение в правильный тип для PostgreSQL
 // Использует schema.Converter для строгой типизации и валидации
 func (a *Adapter) convertValue(value string, field packet.Field) any {
-	// Проверяем NULL-маркер TDTP до любой конвертации типа
-	if field.SpecialValues != nil && field.SpecialValues.Null != nil &&
-		value == field.SpecialValues.Null.Marker {
-		return nil
+	// Декодируем маркеры SpecialValues до любой конвертации типа.
+	// NULL и NoDate ("0000-00-00", Navision/MSSQL "нет даты") → SQL NULL.
+	// Иначе сырой маркер ушёл бы в DATE/TIMESTAMP колонку и упал бы с
+	// "date/time field value out of range" (SQLSTATE 22008).
+	if sv := field.SpecialValues; sv != nil {
+		if sv.Null != nil && value == sv.Null.Marker {
+			return nil
+		}
+		if sv.NoDate != nil && value == sv.NoDate.Marker {
+			return nil
+		}
 	}
 
 	// Для типов с subtype используем строку без дополнительной конвертации

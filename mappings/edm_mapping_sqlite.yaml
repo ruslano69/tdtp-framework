@@ -1,0 +1,33 @@
+id: edm-employee-sqlite-v1
+version: "1.0"
+
+loop_guard:
+  source_system: mssql-ztr-live
+  target_system: sqlite-edm
+  min_interval: "5s"
+
+target_connection:
+  type: sqlite
+  dsn: "out/edm_sqlite.db"
+
+targets:
+  - id: employees
+    table: employees
+    upsert_key: ext_id
+    fields:
+      - {from: "employee_code",   to: "ext_id"}
+      - {from: "tabel_number",    to: "tabel_no"}
+      - {from: "full_name",       to: "display_name"}
+      - {from: "hire_date",       to: "hired_at"}
+      - {from: "department_name", to: "department"}
+      - {from: "position_name",   to: "job_title"}
+      - from: "employment_type"
+        to: "contract_type"
+        enum:
+          "1": "primary"
+          "2": "external_part"
+          "3": "internal_part"
+          "4": "contract"
+      - {from: "birth_date",  to: "birth_date"}
+      - {from: "sex",         to: "sex"}
+      - {from: "work_years",  to: "work_years"}

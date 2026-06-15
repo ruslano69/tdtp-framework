@@ -2,6 +2,65 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased] — feature/sprint4-map
+
+### Added — `--map` cross-system field mapping (Sprint 4, P8)
+
+New `tdtpcli --map <mapping.yaml> --input <file.tdtp.xml>` command: reads a TDTP
+packet, remaps fields and enum values per a mapping config, and upserts the rows
+into a target database via `pkg/adapters`. Enables on-demand record sync between
+systems (e.g. ZTR-Live → EDM) without a hand-written importer.
+
+- **`pkg/core/mapping`** — new package:
+  - `types.go` / `parser.go` — `MappingConfig` (id, loop_guard, target_connection,
+    targets[].fields with `from`/`to`/`enum`) parsed and validated from YAML.
+  - `executor.go` — `Execute()` builds a per-target packet (field remap + enum
+    remap), resolves schema-qualified table names (`edm.edm_employees` →
+    schema `edm` + table), and upserts via `adapter.ImportPacket(StrategyReplace)`.
+  - `loopguard.go` — Loop Guard Layers 2+4: `correlation_id` + `min_interval`
+    cooldown recorded in `~/.tdtp/mapping_log.json`; blocks rapid re-runs of the
+    same `source_system → target_system` pair to prevent recursive sync loops.
+- **`cmd/tdtpcli`** — `--map`, `--input`, `--dry-run` flags wired into routing;
+  `--map` is a no-DB-config command (target DSN comes from the mapping file).
+- **Compressed input** — `--map` auto-decompresses zstd/kanzi packets via the
+  shared `decompressPacketData` helper before reading rows, so a compressed
+  export (`output.tdtp.compression: true`) maps transparently. Round-trip test
+  in `map_test.go`. (zstd lvl 3 on the 1478-employee export: 218 KB → 52 KB.)
+- **Encrypted input** — `--map --mercury-url <url>` decrypts xZMercury
+  AES-256-GCM packets (burn-on-read key retrieval) before parsing. `loadPacket`
+  now reads the file as bytes and resolves the encryption → compression →
+  compact layers in order. Encryption is detected by content (`IsEncryptedBlob`,
+  the binary header) as well as the `.enc` extension, since a pipeline may write
+  the encrypted blob to a `.tdtp.xml` destination. New `commands.IsEncryptedBlob`
+  helper; false-positive guard test in `map_test.go`. Burn-on-read means an
+  encrypted packet decrypts exactly once — a replay is blocked with `KEY_BURNED`.
+- Test assets: `docker/sprint4/` (PostgreSQL + Redis + `edm.edm_employees` DDL),
+  `pipelines/export-single-employee.yaml`, `mappings/edm_mapping.yaml`,
+  `scripts/emulate_button.py` (UI-button emulator).
+- **Field types preserved** — `buildTargetPacket` carries over each source field's
+  `Type`/`Subtype`/`Length`/`SpecialValues` instead of stringifying everything, so
+  the target adapter applies the full conversion contract (dates, NoDate, NULL
+  markers). Enum-remapped fields drop to `TEXT` since their value becomes free text.
+
+### Fixed — NoDate marker not decoded to NULL on PostgreSQL import
+
+The PostgreSQL adapter's `convertValue` honored the `SpecialValues.Null` marker
+but not `SpecialValues.NoDate` ("0000-00-00", the canonical Navision/MSSQL
+"no date" produced by `no_date_sentinels`). The raw marker reached a DATE/TIMESTAMP
+column and failed with `date/time field value out of range` (SQLSTATE 22008).
+`convertValue` now decodes NoDate → SQL NULL, matching `base/import_helper.go`.
+Affected every PostgreSQL import of Navision date sentinels (`--import` and
+`--map`), not just the new command.
+
+### Fixed — Cyrillic double-encoding on PostgreSQL import
+
+`parseRow` in `pkg/adapters/postgres/export.go` accumulated row values via
+`current += string(ch)` where `ch` is a byte. For any byte ≥ 0x80 this re-encodes
+the byte as the UTF-8 of rune U+00XX, double-encoding every multi-byte UTF-8
+character (Cyrillic "С" d0a1 → c390c2a1). Now accumulates into a `[]byte` and
+converts once, preserving UTF-8 verbatim. Affected all non-ASCII PostgreSQL
+imports (`--import`, `--map`). Regression test added in `parserow_test.go`.
+
 ## [1.13.0] — 2026-06-12
 
 ### Refactoring — cmd/tdtp-xray: align with framework core

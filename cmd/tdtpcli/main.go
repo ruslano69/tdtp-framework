@@ -42,7 +42,18 @@ func routeCommand(
 
 	// Database commands
 	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
-	if flags.List.IsSet {
+	if *flags.Map != "" {
+		operation = audit.OpTransform
+		metadata = map[string]string{"command": "map", "mapping": *flags.Map, "input": *flags.MapInput}
+
+		err = commands.RunMap(ctx, commands.MapOptions{
+			MappingFile: *flags.Map,
+			InputFile:   *flags.MapInput,
+			DryRun:      *flags.MapDryRun,
+			MercuryURL:  *flags.MercuryURL,
+		})
+
+	} else if flags.List.IsSet {
 		operation = audit.OpQuery
 		metadata = map[string]string{"command": "list", "pattern": flags.List.Pattern}
 
@@ -748,6 +759,7 @@ func main() {
 		*flags.ToHTML != "" ||
 		*flags.ToCSV != "" ||
 		*flags.ToCompact != "" ||
+		*flags.Map != "" || // --map uses its own target DSN from mapping.yaml, not config.yaml
 		(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
 		(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
 
@@ -920,7 +932,8 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Merge != "" ||
 		*flags.Inspect != "" ||
 		*flags.InspectTable != "" ||
-		*flags.Listen
+		*flags.Listen ||
+		*flags.Map != ""
 }
 
 // fatal prints error and exits

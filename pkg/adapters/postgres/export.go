@@ -176,34 +176,6 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 	return dataRows, rows.Err()
 }
 
-// parseRow парсит строку данных TDTP формата (разделитель |) в срез значений
-func parseRow(rowValue string) []string {
-	var values []string
-	var current string
-	escaped := false
-
-	for i := 0; i < len(rowValue); i++ {
-		ch := rowValue[i]
-		if escaped {
-			current += string(ch)
-			escaped = false
-			continue
-		}
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-		if ch == '|' {
-			values = append(values, current)
-			current = ""
-		} else {
-			current += string(ch)
-		}
-	}
-	values = append(values, current)
-	return values
-}
-
 // pgValueToRawString конвертирует pgx значение в сырую строку для последующей обработки
 func (a *Adapter) pgValueToRawString(val any) string {
 	emptyField := packet.Field{}

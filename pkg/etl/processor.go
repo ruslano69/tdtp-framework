@@ -120,6 +120,11 @@ func (p *Processor) Execute(ctx context.Context) error {
 			return fmt.Errorf("failed to execute transformation: %w", err)
 		}
 
+		// SQLite workspace loses BOOLEAN→INTEGER, DECIMAL precision, subtypes, and
+		// SpecialValues. Restore original source type metadata for fields that were
+		// not renamed or computed by transform.sql.
+		p.applySchemaPassthrough(result, sourcesData)
+
 		if err := p.exportResults(ctx, result); err != nil {
 			return fmt.Errorf("failed to export results: %w", err)
 		}
@@ -362,4 +367,43 @@ func (p *Processor) Validate() error {
 // GetConfig возвращает конфигурацию процессора
 func (p *Processor) GetConfig() *PipelineConfig {
 	return p.config
+}
+
+// applySchemaPassthrough restores original TDTP type metadata for output fields
+// that passed through the SQLite workspace unchanged. SQLite collapses BOOLEAN→INTEGER,
+// DECIMAL(8,2)→REAL, and drops subtype/SpecialValues entirely. For each output field
+// whose name matches a source field, we restore Type, Subtype, Length, Precision, Scale,
+// SpecialValues, and Timezone from the source schema. Fields that were computed or renamed
+// by transform.sql (not present in any source) keep their SQLite-derived types.
+func (p *Processor) applySchemaPassthrough(result *ExecutionResult, sourcesData []SourceData) {
+	if result == nil || result.Packet == nil {
+		return
+	}
+
+	// Build name → Field map from all source packets; first source wins on name collision.
+	origFields := make(map[string]packet.Field)
+	for _, src := range sourcesData {
+		if src.Packet == nil {
+			continue
+		}
+		for _, f := range src.Packet.Schema.Fields {
+			if _, exists := origFields[f.Name]; !exists {
+				origFields[f.Name] = f
+			}
+		}
+	}
+
+	for i, outField := range result.Packet.Schema.Fields {
+		orig, ok := origFields[outField.Name]
+		if !ok {
+			continue
+		}
+		result.Packet.Schema.Fields[i].Type = orig.Type
+		result.Packet.Schema.Fields[i].Subtype = orig.Subtype
+		result.Packet.Schema.Fields[i].Length = orig.Length
+		result.Packet.Schema.Fields[i].Precision = orig.Precision
+		result.Packet.Schema.Fields[i].Scale = orig.Scale
+		result.Packet.Schema.Fields[i].SpecialValues = orig.SpecialValues
+		result.Packet.Schema.Fields[i].Timezone = orig.Timezone
+	}
 }

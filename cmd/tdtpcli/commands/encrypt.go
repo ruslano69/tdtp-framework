@@ -42,6 +42,14 @@ func IsEncryptedFile(path string) bool {
 	return strings.HasSuffix(lower, ".tdtp.enc") || strings.HasSuffix(lower, ".enc")
 }
 
+// IsEncryptedBlob reports whether blob carries the encryption header
+// ([2B ver][1B algo][16B uuid]…). Content-based detection, independent of the
+// file extension — a pipeline may write an encrypted blob to a .tdtp.xml path.
+func IsEncryptedBlob(blob []byte) bool {
+	_, err := tdtpcrypto.ExtractUUID(blob)
+	return err == nil
+}
+
 // DecryptEncBlob decrypts a binary blob produced by EncryptPacket / pipeline encryption.
 // It extracts the package UUID from the blob header, retrieves the AES-256 key from
 // xZMercury (burn-on-read), and returns the plaintext TDTP XML bytes.

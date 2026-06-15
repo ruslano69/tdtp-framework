@@ -1,0 +1,32 @@
+id: edm-employee-load
+version: "1.0"
+approved_by: arch-board
+
+# Load-test variant: loop guard cooldown disabled so repeated runs are not blocked.
+loop_guard:
+  source_system: mssql-ztr-live
+  target_system: postgres-edm
+  min_interval: "0s"
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: edm_employees
+    table: edm.edm_employees
+    upsert_key: ext_id
+    fields:
+      - {from: "employee_code",   to: "ext_id"}
+      - {from: "tabel_number",    to: "tabel_no"}
+      - {from: "full_name",       to: "display_name"}
+      - {from: "hire_date",       to: "hired_at"}
+      - {from: "department_name", to: "department"}
+      - {from: "position_name",   to: "job_title"}
+      - from: "employment_type"
+        to: "contract_type"
+        enum:
+          "1": "primary"
+          "2": "external_part"
+          "3": "internal_part"
+          "4": "contract"

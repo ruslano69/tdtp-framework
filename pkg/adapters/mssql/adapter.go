@@ -455,19 +455,28 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 
 	schema := packet.Schema{Fields: make([]packet.Field, len(columns))}
 	for i, col := range columns {
-		sqlType := columnTypes[i].DatabaseTypeName()
-		tdtpType, length := convertMSSQLTypeToTDTP(sqlType)
+		ct := columnTypes[i]
+		sqlType := ct.DatabaseTypeName()
+
+		// Use richer BuildFieldFromColumn path to preserve precision, scale, subtype.
+		// database/sql ColumnType exposes DecimalSize and Length for parameterized types.
+		var intPrec, intScale, intLen int
+		if p, s, ok := ct.DecimalSize(); ok && p > 0 {
+			intPrec, intScale = int(p), int(s)
+		}
+		if l, ok := ct.Length(); ok && l > 0 && l < 1<<31 {
+			intLen = int(l)
+		}
+		field := BuildFieldFromColumn(col, sqlType, intLen, intPrec, intScale, false)
+
 		// SQL Server rowversion: driver may return "VARBINARY" not "timestamp".
 		// A binary column named "timestamp" is always the rowversion pseudo-column.
 		isTS := strings.EqualFold(sqlType, "timestamp") ||
 			strings.EqualFold(sqlType, "rowversion") ||
-			(strings.EqualFold(col, "timestamp") && tdtpType == "BLOB")
-		schema.Fields[i] = packet.Field{
-			Name:     col,
-			Type:     tdtpType,
-			Length:   length,
-			ReadOnly: isTS, // timestamp — read-only, фильтруется PostProcessRows
-		}
+			(strings.EqualFold(col, "timestamp") && field.Type == "BLOB")
+		field.ReadOnly = isTS
+
+		schema.Fields[i] = field
 	}
 
 	// Сканируем через scanRows — правильная конвертация типов (hex для binary и т.п.)
