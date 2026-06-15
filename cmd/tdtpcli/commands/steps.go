@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/workflow"
@@ -27,7 +29,7 @@ import (
 //	    command: "--map mappings/sync.yaml --input out/export.tdtp.xml"
 //	    depends_on: [export]
 //	    on_error: retry(3)
-func RunSteps(ctx context.Context, path string) error {
+func RunSteps(ctx context.Context, path string, vars map[string]string) error {
 	cfg, err := workflow.LoadWorkflow(path)
 	if err != nil {
 		return fmt.Errorf("--steps: %w", err)
@@ -35,12 +37,25 @@ func RunSteps(ctx context.Context, path string) error {
 
 	fmt.Printf("Workflow: %s\n", cfg.Name)
 	if cfg.Description != "" {
-		fmt.Printf("   %s\n", cfg.Description)
+		fmt.Printf("   %s\n", workflow.ApplyVars(cfg.Description, vars))
 	}
-	fmt.Printf("   Steps: %d\n\n", len(cfg.Steps))
+	fmt.Printf("   Steps: %d\n", len(cfg.Steps))
+	if len(vars) > 0 {
+		keys := make([]string, 0, len(vars))
+		for k := range vars {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("@%s=%s", k, vars[k]))
+		}
+		fmt.Printf("   Variables: %s\n", strings.Join(parts, ", "))
+	}
+	fmt.Println()
 
 	t0 := time.Now()
-	if err := workflow.Run(ctx, cfg); err != nil {
+	if err := workflow.Run(ctx, cfg, vars); err != nil {
 		return err
 	}
 

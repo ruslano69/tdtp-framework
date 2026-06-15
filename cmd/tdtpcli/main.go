@@ -46,7 +46,7 @@ func routeCommand(
 		operation = audit.OpTransform
 		metadata = map[string]string{"command": "steps", "workflow": *flags.Steps}
 
-		err = commands.RunSteps(ctx, *flags.Steps)
+		err = commands.RunSteps(ctx, *flags.Steps, flags.PipelineVars)
 
 	} else if *flags.Map != "" {
 		operation = audit.OpTransform

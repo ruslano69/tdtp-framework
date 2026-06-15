@@ -58,6 +58,31 @@ COMMANDS:
       RabbitMQ — Stability  (reliable delivery, batch mode)
       Kafka    — Speed      (ordered partitions, batch + --listen streaming; production-ready)
 
+  Cross-System Mapping:
+    --map <file>               Execute mapping from YAML: read source packet → remap fields →
+                               upsert to target DB. Supports file, broker://, and s3:// sources.
+                               Loop guard records each run; prevents concurrent duplicate executions
+                               of the same mapping. Use --steps to run multiple mappings in parallel.
+    --input <src>              Input source for --map:
+                                 file path:       out/export.tdtp.xml
+                                 broker queue:    broker://tdtp.sync.orders
+                                 S3 object:       s3://bucket/path/data.tdtp.xml
+    --map-dry-run              Parse and validate mapping without writing anything to the target DB.
+                               Prints field remapping plan and row count. Safe for CI checks.
+    --listen                   Daemon mode: loop on broker queue until SIGTERM/Ctrl+C.
+                               Each message: receive → decrypt → parse → remap → upsert → ACK.
+                               Loop guard is skipped in --listen mode (broker regulates rate).
+
+  Multi-Step Workflow:
+    --steps <file>             Execute a multi-step workflow from a YAML file. Steps run as
+                               tdtpcli sub-processes; stdout/stderr stream to parent terminal.
+                               Steps with no ordering constraint between them run in parallel
+                               within each wave (Kahn's topological sort).
+    @name=value                Workflow variable: substituted as {{name}} in step commands and
+                               in the workflow description field.
+                               Example: @emp_no=24626 → step command "... @emp_no={{emp_no}}"
+                                        becomes "... @emp_no=24626" at runtime.
+
   Incremental Sync:
     --sync-incremental <table> Incremental sync from table
 
@@ -403,6 +428,39 @@ EXAMPLES:
   # Execute pipeline in unsafe mode (allows custom SQL)
   tdtpcli --pipeline etl-config.yaml --unsafe
 
+  # Cross-system mapping: read from file → remap → upsert to target DB
+  tdtpcli --map mappings/sync_orders.yaml --input out/orders.tdtp.xml
+
+  # Mapping from broker queue (one message: receive → remap → upsert → ACK)
+  tdtpcli --map mappings/sync_orders.yaml --input broker://tdtp.sync.orders
+
+  # Dry-run: validate mapping without writing to DB
+  tdtpcli --map mappings/sync_orders.yaml --input broker://tdtp.sync.orders --map-dry-run
+
+  # Daemon mode: loop on broker queue until Ctrl+C / SIGTERM
+  tdtpcli --map mappings/sync_flights.yaml --input broker://tdtp.sync.flights --listen
+
+  # Multi-step workflow: run steps in DAG order, parallel where possible
+  tdtpcli --steps workflows/nightly_sync.yaml
+
+  # Workflow with variables: {{emp_no}} substituted in each step command
+  tdtpcli --steps workflows/dosje_run.yaml @emp_no=24626
+
+  # Workflow YAML format:
+  #   name: sync-all-entities
+  #   steps:
+  #     - id: flights
+  #       command: "--map mappings/sync_flights.yaml --input broker://tdtp.sync.flights"
+  #       on_error: skip
+  #     - id: validate
+  #       command: "--test out/flights.tdtp.xml"
+  #       depends_on: [flights]
+  #       on_error: stop
+  #     - id: load
+  #       command: "--pipeline pipelines/load.yaml @emp_no={{emp_no}}"
+  #       depends_on: [validate]
+  #       on_error: retry(3)
+
   # ETL pipeline with field name sanitization (YAML snippet):
   #   sources:
   #     - name: legacy_erp
@@ -517,6 +575,10 @@ FEATURES:
   ✅ Audit Logger: GDPR/HIPAA compliance
   ✅ Retry Mechanism: Exponential backoff with jitter
   ✅ Incremental Sync: Checkpoint-based synchronization
+  ✅ Cross-System Mapping: --map YAML → remap fields → upsert; loop guard; broker/file/S3 sources
+  ✅ Mapping Daemon: --map --listen loops on broker queue until SIGTERM (RabbitMQ/Kafka)
+  ✅ Multi-Step Workflows: --steps YAML; DAG parallel execution; on_error stop/skip/retry(N)
+  ✅ Workflow Variables: @name=value substituted as {{name}} in step commands
   ✅ Data Processors: Masking, validation, normalization
   ✅ TDTQL: SQL-like query language for filtering
 
