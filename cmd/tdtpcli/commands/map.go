@@ -39,10 +39,10 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	fmt.Printf("Mapping: %s\n", cfg.ID)
 
 	// Extract broker/S3 config from mapping YAML input_source section
-	var s3cfg     *storage.S3Config
+	var s3cfg *storage.S3Config
 	var brokercfg *brokers.Config
 	if cfg.InputSource != nil {
-		s3cfg     = cfg.InputSource.S3
+		s3cfg = cfg.InputSource.S3
 		brokercfg = cfg.InputSource.Broker
 	}
 

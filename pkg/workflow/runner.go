@@ -56,8 +56,8 @@ func Run(ctx context.Context, cfg *WorkflowConfig) error {
 	skipped := make(map[string]bool)
 
 	type waveResult struct {
-		id            string
-		err           error
+		id             string
+		err            error
 		skipPropagated bool // true when skipped due to ancestor skip, not own failure
 	}
 
