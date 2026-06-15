@@ -62,7 +62,7 @@ func TestLoadPacket_Zstd(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := loadPacket(context.Background(), file, "")
+	got, err := loadPacket(context.Background(), file, "", nil, nil)
 	if err != nil {
 		t.Fatalf("loadPacket: %v", err)
 	}

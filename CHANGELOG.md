@@ -2,6 +2,23 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.17.1] — 2026-06-15
+
+### Fixed — loop guard conflict in parallel `--steps` execution
+
+`pkg/core/mapping/loopguard.go`: the "already running" check now scopes to
+`(SourceSystem, TargetSystem, MappingID)` instead of just `(SourceSystem,
+TargetSystem)`. Previously, parallel steps targeting the same database (e.g.
+guides + schedule + tours all writing to `postgres-branch`) would block each
+other even though they are completely independent mappings. Each mapping now
+only blocks itself from running twice concurrently.
+
+Also added graceful recovery from a corrupted log file (partial write from a
+prior crash): the log is silently reset instead of failing with
+`"unexpected end of JSON input"`.
+
+---
+
 ## [1.17.0] — 2026-06-15
 
 ### Added — `--steps <workflow.yaml>` (P10: multi-step orchestration)
