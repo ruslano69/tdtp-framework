@@ -6,10 +6,33 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"regexp"
 	"sync"
 	"time"
 	"unicode"
 )
+
+var reStepVar = regexp.MustCompile(`\{\{(\w+)\}\}`)
+
+// ApplyVars replaces {{name}} placeholders with values from vars.
+// Exported so callers (e.g. RunSteps) can substitute descriptions before printing.
+func ApplyVars(s string, vars map[string]string) string {
+	return applyVars(s, vars)
+}
+
+// applyVars replaces {{name}} placeholders in a step command string.
+func applyVars(s string, vars map[string]string) string {
+	if len(vars) == 0 {
+		return s
+	}
+	return reStepVar.ReplaceAllStringFunc(s, func(match string) string {
+		m := reStepVar.FindStringSubmatch(match)
+		if val, ok := vars[m[1]]; ok {
+			return val
+		}
+		return match
+	})
+}
 
 // Run executes the workflow using Kahn's topological-sort algorithm.
 // Steps in the same "wave" (no ordering constraint between them) run in
@@ -22,11 +45,14 @@ import (
 //     are also skipped (they print a one-line notice instead of running).
 //   - on_error:retry(N) — retry up to N times with exponential back-off (2s→30s).
 //     If all retries are exhausted, the step is treated as on_error:stop.
-func Run(ctx context.Context, cfg *WorkflowConfig) error {
+func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("cannot determine executable path: %w", err)
 	}
+
+	// Substitute vars in the description so callers that print it get the resolved value.
+	cfg.Description = applyVars(cfg.Description, vars)
 
 	// Build Kahn's bookkeeping structures.
 	inDegree := make(map[string]int, len(cfg.Steps))
@@ -88,7 +114,7 @@ func Run(ctx context.Context, cfg *WorkflowConfig) error {
 					}
 				}
 
-				err := runStep(waveCtx, exe, step)
+				err := runStep(waveCtx, exe, step, vars)
 				// If this step's failure would stop the workflow, cancel the wave
 				// context so other goroutines' subprocesses exit immediately rather
 				// than running to their own timeouts.
@@ -155,14 +181,15 @@ func Run(ctx context.Context, cfg *WorkflowConfig) error {
 // runStep executes one step, respecting the retry policy from on_error.
 // Each attempt runs the tdtpcli binary as a subprocess with the step's command
 // as the argument list. stdout/stderr pass through directly.
-func runStep(ctx context.Context, exe string, step StepConfig) error {
+func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]string) error {
 	policy, _ := ParseOnError(step.OnError)
 	maxAttempts := 1
 	if policy.Action == "retry" {
 		maxAttempts = 1 + policy.Retries
 	}
 
-	args, err := tokenize(step.Command)
+	resolved := applyVars(step.Command, vars)
+	args, err := tokenize(resolved)
 	if err != nil {
 		return fmt.Errorf("parse command: %w", err)
 	}
@@ -181,7 +208,7 @@ func runStep(ctx context.Context, exe string, step StepConfig) error {
 			}
 		}
 
-		fmt.Printf("[steps] ▶  %s: %s\n", step.ID, step.Command)
+		fmt.Printf("[steps] ▶  %s: %s\n", step.ID, resolved)
 		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
