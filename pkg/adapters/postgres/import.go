@@ -379,7 +379,7 @@ func (a *Adapter) importWithInsert(ctx context.Context, pkt *packet.DataPacket, 
 			sql = insertSQL + buildPlaceholders(len(batch)) + onConflict
 		}
 
-		_, err := a.pool.Exec(ctx, sql, args...)
+		_, err := a.pool.Exec(ctx, sql, append([]any{pgx.QueryExecModeSimpleProtocol}, args...)...)
 		if err != nil {
 			return fmt.Errorf("failed to insert batch: %w\nSQL: %s", err, sql)
 		}
