@@ -675,6 +675,19 @@ All consumer commands apply a security gate after decompression.
 --listen                   Streaming consumer daemon (Kafka only, production-ready)
 ```
 
+**Cross-system Mapping (`--map`):**
+```
+--map <mapping.yaml>                       One-shot: read one packet, apply field remap, upsert into target DB
+--map <yaml> --input <file>                Read from local TDTP file
+--map <yaml> --input s3://bucket/key       Read from S3-compatible object storage
+--map <yaml> --input broker://queue        One-shot from broker: one packet, ACK on success, exit
+--map <yaml> --input broker://queue        Daemon mode: keep connection open, process messages in a loop;
+    --listen                               ACK each packet only after successful upsert, NACK+requeue on
+                                           error, graceful shutdown via SIGTERM/SIGINT
+--map <yaml> --dry-run                     Validate mapping without writing to DB
+--map <yaml> --mercury-url <url>           Decrypt .enc input via xZMercury before mapping
+```
+
 **ETL:**
 ```
 --sync-incremental <table> Incremental table synchronization
@@ -971,6 +984,65 @@ tdtpcli --export-xlsx orders --output orders.xlsx
 tdtpcli --export users --output s3://my-bucket/exports/users.tdtp.xml
 ```
 
+### Broker-native EDA (event-driven architecture)
+
+Since v1.16.0 `--map --listen` turns any mapping YAML into a standalone daemon process.
+One process per queue — no Python middleware or coordinator required.
+
+**One-shot** (classic, coordinator-driven):
+```bash
+# coordinator subscribes to Redis pub/sub, spawns tdtpcli per notification
+tdtpcli --map mappings/sync_flights.yaml --input broker://tdtp.sync.flights
+```
+
+**Daemon** (new, v1.16.0):
+```bash
+# each entity runs as its own process — stays connected until SIGTERM
+tdtpcli --map mappings/sync_flights.yaml \
+        --input broker://tdtp.sync.flights \
+        --listen
+
+# start all queues in parallel (systemd, Docker Compose, or background jobs)
+tdtpcli --map mappings/sync_countries.yaml  --input broker://tdtp.sync.countries  --listen &
+tdtpcli --map mappings/sync_tours.yaml      --input broker://tdtp.sync.tours      --listen &
+tdtpcli --map mappings/sync_reservations.yaml --input broker://tdtp.sync.reservations --listen &
+```
+
+**How it works:**
+- Opens one persistent broker connection per daemon instance
+- `receive → decrypt → parse → decompress → field-remap → upsert → ACK` for every message
+- On parse/execute error: NACK with requeue (message returns to queue for retry)
+- Graceful shutdown: SIGTERM/SIGINT finishes the current message then exits
+- Progress printed per message: `[map:listen] ✓  rows=42     total=420    18ms`
+
+**Mapping YAML with inline broker config:**
+```yaml
+id: sync-flights-v1
+input_source:
+  broker:
+    type:     rabbitmq
+    host:     localhost
+    port:     5672
+    user:     guest
+    password: guest
+    queue:    tdtp.sync.flights
+    durable:  true
+
+target_connection:
+  dsn: "host=central port=5432 dbname=tdtp user=tdtp password=secret sslmode=disable"
+
+targets:
+  - table: public.flights
+    upsert_key: flight_id
+    fields: [flight_id, route_id, aircraft_type, departure_time, arrival_time, status]
+```
+
+The source sends via `--export-broker`; each daemon consumes its own queue independently:
+```bash
+# source side (branch office or upstream system)
+tdtpcli --export-broker flights --config branch.yaml
+```
+
 ### Using in Code
 
 ```go
@@ -1214,7 +1286,7 @@ go test -v ./pkg/core/packet/
 - **`BatchBytes`** raised to 100 MB, `BatchTimeout` lowered to 5ms
 - **Performance** (50k rows, 5 packets, localhost): kanzi 6 → 3.6s export, 3.9s import, 1.8 MB traffic (4× reduction)
 
-### v1.9.6 (current)
+### v1.9.6 (completed)
 - **`--enc` tier** — standalone AES-256-GCM encryption for any export
   - `--export --enc` → output renamed `.tdtp.enc` automatically
   - Auto-decrypt on `--import`, `--to-csv`, `--to-xlsx`, `--to-html` (detected by extension)
@@ -1228,13 +1300,50 @@ go test -v ./pkg/core/packet/
 - **SVG namespace fix** — `xlink:href`, `inkscape:label` and other URI-namespaced attributes
   round-trip correctly through `pkg/svg` (last-colon split instead of first-colon)
 
+### v1.11.0 (completed)
+- **Full trust chain**: hardware anchor (CA/TPM) → online environment authorization (xZMercury) → offline CLI license → scenario orchestration with dual gate
+- **xZMercury → CA on startup**: prod Mercury authorizes with CA before issuing keys; `CAGuard` blocks `/api/keys/*` on invalid session
+- **`tdtp-certify`** — vendor-only CA management CLI: `keygen`, `issue-license`, `revoke-cert`, `list-licenses`, `list-active`
+- **`pkg/license/`** — Ed25519-signed `tdtp.lic`, fully offline: `Community()` floor (SQLite only, 50k rows), `AllowsAdapter`/`AllowsFeature`/`RowLimit`
+- **Orchestrator `TrustGate`**: `GateScenario` checks `scenario.permissions ⊆ (license ∩ Mercury)`; `--require-prod` refuses non-CA-authorized Mercury
+
+### v1.12.0 (completed)
+- **Air-gap offline cert** — issue `EnvCert` without live challenge-response for isolated networks
+- **Seat policy** — one `env_id_pub` = one active license; re-enroll under same license is idempotent
+- **Structured audit log** (`pkg/license/audit.go`) — `text` / `json` format, `TDTP_AUDIT_FORMAT` env var, syslog hook (build tag `syslog`)
+- **Orchestrator per-job artifact** — SHA-256 + size recorded after successful job; `GET /jobs/{id}/artifact` download endpoint
+- **LDAP auth in orchestrator** — HTTP Basic Auth → LDAP bind → `memberOf` → `RoleMap` → `Principal`; `--auth-type token|ldap`
+- **Prometheus metrics** — `orchestrator_jobs_total`, `orchestrator_job_duration_seconds`, `orchestrator_jobs_active`, per-route HTTP metrics; `/healthz` extended for K8s readiness probe
+- **Docker deployment stack** — `Dockerfile.worker` (~25 MB distroless), `Dockerfile.mercury`, `Dockerfile.ca`; `docker-compose.dev.yml` (4 services) + `docker-compose.prod.yml`; Grafana dashboard auto-provisioned
+
+### v1.13.0 (completed)
+- **`cmd/tdtp-xray` aligned with framework core** — delegates all DB/ETL operations to `pkg/adapters` and `pkg/etl`; removed ~600 lines of duplicated SQL and in-memory SQLite logic
+- **`DeployToOrchestrator()`** — writes generated pipeline YAML directly to orchestrator `--scenarios` directory; picked up without restart
+- **Schema passthrough** (`applySchemaPassthrough`) — restores `Type/Subtype/Length/SpecialValues` from input packet after SQLite `transform.sql`; closes silent type-drift bug where `DECIMAL(12,4)` → `REAL`, `BOOLEAN` → `INTEGER` in workspace output
+
+### v1.14.0 (completed)
+- **`--map --input s3://bucket/key`** — reads TDTP packet from S3-compatible object storage, applies decrypt → decompress → compact-expand, then maps fields and upserts into target DB
+- **`InputSource`** in mapping YAML (`input_source.s3`) — S3 credentials and endpoint declared inline; `storage.IsRemote()` routes the download path
+- Backward-compatible: `--input <local-file>` unchanged
+
+### v1.15.0 (completed)
+- **`--map --input broker://queue`** — reads TDTP packet from a message broker queue (RabbitMQ), ACKs on success; replaces the legacy three-step consumer flow (import-broker → staging table → merge proc) with a single CLI call
+- **`input_source.broker`** in mapping YAML — broker connection parameters (`type`, `host`, `port`, `user`, `password`, `queue`, `durable`) declared inline; queue name in URI overrides YAML
+- **yaml tags on `brokers.Config`** — all fields now deserialize from YAML; enables inline broker config in mapping files
+- **Loop Guard** (`min_interval`) respected for broker input — rapid re-calls skip queue consume
+
+### v1.16.0 (current)
+- **`--map --input broker://queue --listen`** — daemon mode: keeps one persistent broker connection open, processes messages in a continuous loop; ACKs each packet only after a successful upsert, NACKs+requeues on error
+- **Graceful shutdown** — SIGTERM/SIGINT finishes the current in-flight message, then exits cleanly
+- **Zero coordinator dependency** — each entity queue runs as its own process; Python consumer/coordinator becomes optional for fully event-driven deployments
+- **NACK with requeue** — parse/decompress/execute errors return the message to the queue for retry (no silent drops)
+- **Loop guard skipped** in daemon mode — broker queue naturally throttles the rate; loop guard only applies to one-shot mode
+
 ### v2.0 (planned)
 - Streaming export/import (TotalParts=0, "TCP for tables")
   - Code ready: `pkg/core/packet/streaming.go` — `StreamingGenerator` with channel-based API
   - Not connected to CLI yet (`--export-stream` / `--import-stream`)
 - Parallel import workers
-- **Docker** multi-stage build (Dockerfile for tdtpcli)
-- Monitoring & metrics (Prometheus exporter)
 - Schema migration (ALTER TABLE — add/drop columns, type changes)
 
 ---

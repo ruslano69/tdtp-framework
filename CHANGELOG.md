@@ -2,6 +2,42 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.16.0] — 2026-06-15
+
+### Added — `--map --listen` daemon mode (Sprint 8)
+
+Turns any mapping YAML into a standalone daemon process: `tdtpcli --map <yaml>
+--input broker://queue --listen` keeps one persistent broker connection open and
+processes messages in a continuous loop — no Python coordinator required.
+
+- **`cmd/tdtpcli/commands/map.go`** — `Listen bool` field added to `MapOptions`;
+  `RunMap()` branches to `runMapListen()` when `--listen` is set and `--input` is a
+  `broker://` URI. Loop Guard is intentionally skipped in daemon mode — the broker
+  queue regulates the rate.
+
+- **`runMapListen()`** (new, ~80 lines) — daemon loop:
+  - Connects once; connection stays open for the daemon lifetime.
+  - `for { Receive → decrypt → parse → decompress → expand → mapping.Execute → ACK }`
+  - On parse/decompress/execute error: **NACK with requeue** (`nackIfAble()`) so the
+    message returns to the queue for retry; no silent drops.
+  - On receive error (transient): 2 s back-off, then retry.
+  - Signal handling: `SIGTERM`/`SIGINT` → `cancel()` → current message finishes, then
+    exit. Pattern mirrors `cmd/tdtpcli/commands/listen.go:106–117`.
+  - Per-message progress: `[map:listen] ✓  rows=42     total=420    18ms`.
+  - Final summary on exit: `[map:listen] stopped. total rows upserted: N`.
+
+- **`nackIfAble(br)`** (new helper) — type-asserts the broker to `NackLast(requeue bool)`;
+  no-op for brokers that don't implement NACK (e.g. Kafka — uses offset commit instead).
+
+- **`cmd/tdtpcli/main.go`** — `Listen: *flags.Listen` wired into `MapOptions`.
+
+- **`cmd/tdtpcli/flags.go`** — `--listen` help text updated to document both the new
+  `--map --input broker://` daemon mode and the legacy Kafka streaming consumer.
+
+- **`pkg/core/version/version.go`**: `1.15.0` → `1.16.0`.
+
+---
+
 ## [1.15.0] — 2026-06-15
 
 ### Added — `--map --input broker://` (Sprint 6)
@@ -41,6 +77,23 @@ mapping YAML, and upserts into the target database — no staging table, no merg
   guard interval return immediately without consuming from the queue.
 
 - **`pkg/core/version/version.go`**: `1.14.0` → `1.15.0`.
+
+### Changed — consumer.py full migration (Sprint 7, no binary change)
+
+All 7 remaining entity handlers in `examples/travel-agency/consumer.py` migrated from
+the legacy three-step flow (`--import-broker` → staging table → `CALL merge_*()`) to the
+single `--map broker://` call pattern introduced in Sprint 6. No Go code changed.
+
+- **`QUEUE_HANDLERS`** dict — all 8 entries now use `map_yaml` key pointing to a mapping
+  YAML under `mappings/`; legacy `dsn_key` / `merge_proc` keys removed.
+- **`handle_notify()`** — simplified: single `run_map_broker()` call for every entity,
+  no if/else branch for legacy vs. new handlers.
+- **`run_import_broker()` / `run_merge()`** helper functions — removed (~40 lines).
+- **`psycopg2` / `re` imports** — `psycopg2` removed (no direct DB calls); `re` retained
+  for `run_map_broker()` row-count extraction.
+- **New mapping YAMLs** — `sync_flights.yaml`, `sync_reservations.yaml`,
+  `sync_countries.yaml`, `sync_guides.yaml`, `sync_tours.yaml`, `sync_schedule.yaml`,
+  `sync_branch_sales.yaml` added under `mappings/`.
 
 ---
 
