@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/workflow"
@@ -49,7 +50,7 @@ func RunSteps(ctx context.Context, path string, vars map[string]string) error {
 		for _, k := range keys {
 			parts = append(parts, fmt.Sprintf("@%s=%s", k, vars[k]))
 		}
-		fmt.Printf("   Variables: %s\n", joinStrings(parts))
+		fmt.Printf("   Variables: %s\n", strings.Join(parts, ", "))
 	}
 	fmt.Println()
 
@@ -60,15 +61,4 @@ func RunSteps(ctx context.Context, path string, vars map[string]string) error {
 
 	fmt.Printf("\n[steps] all steps completed in %s\n", time.Since(t0).Round(time.Millisecond))
 	return nil
-}
-
-func joinStrings(ss []string) string {
-	result := ""
-	for i, s := range ss {
-		if i > 0 {
-			result += ", "
-		}
-		result += s
-	}
-	return result
 }
