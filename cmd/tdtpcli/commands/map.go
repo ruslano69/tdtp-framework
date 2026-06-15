@@ -150,10 +150,9 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 			if listenCtx.Err() != nil {
 				break // clean shutdown
 			}
-			fmt.Printf("[map:listen] receive error: %v — retrying in 2s\n", err)
-			select {
-			case <-time.After(2 * time.Second):
-			case <-listenCtx.Done():
+			fmt.Printf("[map:listen] receive error: %v — reconnecting\n", err)
+			if reconnectErr := reconnectBroker(listenCtx, br); reconnectErr != nil {
+				break // context cancelled during reconnect
 			}
 			continue
 		}
@@ -218,6 +217,32 @@ func nackIfAble(br brokers.MessageBroker) {
 	type nacker interface{ NackLast(requeue bool) error }
 	if n, ok := br.(nacker); ok {
 		_ = n.NackLast(true)
+	}
+}
+
+// reconnectBroker closes the broker and re-connects with exponential back-off (2s→4s→…→30s).
+// Returns nil when the connection is restored, ctx.Err() if the context is cancelled.
+// This is the same pattern used in the production QueueBridge: log once on disconnect,
+// then reconnect silently — no error-per-second spam during extended outages.
+func reconnectBroker(ctx context.Context, br brokers.MessageBroker) error {
+	_ = br.Close() // ignore: connection may already be gone at the TCP level
+	delay := 2 * time.Second
+	const maxDelay = 30 * time.Second
+	for {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if err := br.Connect(ctx); err != nil {
+			fmt.Printf("[map:listen] reconnect failed: %v — retry in %v\n", err, delay)
+			if delay < maxDelay {
+				delay *= 2
+			}
+			continue
+		}
+		fmt.Printf("[map:listen] ✓ reconnected to broker\n")
+		return nil
 	}
 }
 

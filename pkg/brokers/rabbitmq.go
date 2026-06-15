@@ -46,9 +46,13 @@ func NewRabbitMQ(cfg Config) (*RabbitMQ, error) {
 
 // Connect устанавливает соединение с RabbitMQ
 func (r *RabbitMQ) Connect(ctx context.Context) error {
-	// Формируем connection string
-	// amqp://user:password@host:port/vhost  (без TLS)
-	// amqps://user:password@host:port/vhost (с TLS)
+	// Reset consumer state so startConsuming() re-registers after reconnect.
+	// Without this, deliveryChan stays non-nil (pointing to the closed channel
+	// of the dead connection), startConsuming() returns early, and every
+	// subsequent Receive() reads from a closed channel — infinite error loop.
+	r.deliveryChan = nil
+	r.lastDelivery = nil
+
 	scheme := "amqp"
 	if r.config.UseTLS {
 		scheme = "amqps"
@@ -63,19 +67,23 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		r.config.VHost,
 	)
 
-	var err error
+	// DialConfig with explicit 10s heartbeat: amqp.Dial() inherits the broker
+	// default (~60s), meaning a network partition stays silent for up to 60s
+	// before Receive() surfaces an error. 10s matches production bridge behaviour.
+	dialCfg := amqp.Config{
+		Heartbeat: 10 * time.Second,
+		Locale:    "en_US",
+	}
 	if r.config.UseTLS {
-		// Для TLS используем DialTLS с правильной конфигурацией
-		tlsConfig := &tls.Config{
+		dialCfg.TLSClientConfig = &tls.Config{
 			ServerName:         r.config.Host,
 			MinVersion:         tls.VersionTLS12,
 			InsecureSkipVerify: r.config.TLSSkipVerify, //nolint:gosec // controlled by config
 		}
-		r.conn, err = amqp.DialTLS(connStr, tlsConfig)
-	} else {
-		// Для обычного подключения используем Dial
-		r.conn, err = amqp.Dial(connStr)
 	}
+
+	var err error
+	r.conn, err = amqp.DialConfig(connStr, dialCfg)
 
 	if err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
@@ -128,6 +136,15 @@ func (r *RabbitMQ) startConsuming() error {
 	if r.deliveryChan != nil {
 		return nil // уже зарегистрирован
 	}
+
+	// prefetch=1: broker delivers one message at a time and waits for ACK before
+	// the next. Prevents unbounded in-memory buffering when upserts are slow and
+	// limits unacknowledged exposure to a single message on crash.
+	// For --workers N mode (Sprint 9), set prefetch to N.
+	if err := r.channel.Qos(1, 0, false); err != nil {
+		return fmt.Errorf("failed to set QoS prefetch: %w", err)
+	}
+
 	var err error
 	r.deliveryChan, err = r.channel.Consume(
 		r.config.Queue, // queue
@@ -146,6 +163,12 @@ func (r *RabbitMQ) startConsuming() error {
 
 // Close закрывает соединение с RabbitMQ
 func (r *RabbitMQ) Close() error {
+	// Nil out the delivery channel first so Receive() unblocks and returns
+	// immediately on the next select iteration rather than blocking on the
+	// dying AMQP delivery channel until the library closes it.
+	r.deliveryChan = nil
+	r.lastDelivery = nil
+
 	if r.channel != nil {
 		if err := r.channel.Close(); err != nil {
 			return fmt.Errorf("failed to close channel: %w", err)

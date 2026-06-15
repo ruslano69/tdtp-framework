@@ -2,6 +2,42 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.16.1] — 2026-06-15
+
+### Fixed — RabbitMQ daemon resilience (`pkg/brokers/rabbitmq`)
+
+Three bugs identified by comparing against the production QueueBridge (3 months of
+reconnect-loop debugging). All affect `--map --listen` daemon mode.
+
+- **Infinite error loop after connection drop** (`pkg/brokers/rabbitmq.go`):
+  `deliveryChan` was never reset to `nil` on `Close()` or `Connect()`.
+  `startConsuming()` checked `if r.deliveryChan != nil { return nil }` — so after a
+  drop it kept reading from the closed AMQP delivery channel, returning the same error
+  every 2 s forever. Fixed: `Connect()` and `Close()` now both set `r.deliveryChan = nil`
+  before touching the connection, ensuring `startConsuming()` re-registers the consumer
+  on the next `Receive()` call.
+
+- **No exponential backoff on reconnect** (`cmd/tdtpcli/commands/map.go`):
+  The receive-error retry was a flat `sleep 2s; continue` that never actually
+  reconnected the broker — just retried `Receive()` on the dead connection. Replaced
+  with `reconnectBroker()`: calls `br.Close()` + `br.Connect()` with 2s→4s→8s→…→30s
+  exponential back-off. One log line on disconnect, one on restore. No per-second spam.
+
+- **QoS prefetch not set** (`pkg/brokers/rabbitmq.go`):
+  Without `Qos(1, 0, false)`, RabbitMQ pushes all queued messages to the consumer at
+  once (no backpressure). For 1.9 MB TDTP packets and slow upserts, this could exhaust
+  memory. Fixed: `startConsuming()` now calls `ch.Qos(1, 0, false)` before
+  `ch.Consume()` — broker delivers one message at a time, waits for ACK.
+
+- **Slow dead-connection detection** (`pkg/brokers/rabbitmq.go`):
+  `amqp.Dial()` inherited broker heartbeat (~60s default). After a network partition,
+  `Receive()` blocked silently for up to 60s. Replaced with `amqp.DialConfig` +
+  `Heartbeat: 10*time.Second`, matching production bridge behaviour.
+
+- **`pkg/core/version/version.go`**: `1.16.0` → `1.16.1`.
+
+---
+
 ## [1.16.0] — 2026-06-15
 
 ### Added — `--map --listen` daemon mode (Sprint 8)
