@@ -2,6 +2,61 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.17.0] — 2026-06-15
+
+### Added — `--steps <workflow.yaml>` (P10: multi-step orchestration)
+
+New top-level command for running a sequence of tdtpcli sub-commands defined in a
+YAML file. Replaces shell scripts for multi-stage ETL pipelines.
+
+**Key features:**
+
+- **DAG execution** — `depends_on` builds a dependency graph; steps without ordering
+  constraints between them run in parallel within each wave (Kahn's topological sort).
+- **Error policies per step** via `on_error`:
+  - `stop` (default) — abort the workflow, exit 1.
+  - `skip` — mark the step as skipped, continue; direct and transitive dependents are
+    also skipped automatically.
+  - `retry(N)` — retry up to N times with exponential back-off (2 s → 4 s → 8 s → 30 s).
+    After exhausting retries the step is treated as `stop`.
+- **Sub-process isolation** — each step runs `tdtpcli <command>` as a subprocess with
+  its own environment; stdout/stderr stream to the parent terminal in real time.
+- **Cycle detection** — circular `depends_on` chains produce a clear error at startup.
+
+**Workflow YAML format:**
+
+```yaml
+name: nightly-sync
+description: Export ZTR-Live → validate → map to EDM
+steps:
+  - id: export
+    command: "--pipeline pipelines/export_staff.yaml"
+
+  - id: validate
+    command: "--test out/staff.tdtp.xml"
+    depends_on: [export]
+    on_error: skip
+
+  - id: map_staff
+    command: "--map mappings/sync_staff.yaml --input out/staff.tdtp.xml"
+    depends_on: [export]
+    on_error: retry(3)
+
+  - id: map_salary
+    command: "--map mappings/sync_salary.yaml --input out/salary.tdtp.xml"
+    depends_on: [export]
+    on_error: retry(3)
+
+  - id: notify
+    command: "--pipeline pipelines/notify_done.yaml"
+    depends_on: [map_staff, map_salary]
+```
+
+**New files:** `pkg/workflow/config.go`, `pkg/workflow/runner.go`,
+`cmd/tdtpcli/commands/steps.go`.
+
+---
+
 ## [1.16.1] — 2026-06-15
 
 ### Fixed — RabbitMQ daemon resilience (`pkg/brokers/rabbitmq`)

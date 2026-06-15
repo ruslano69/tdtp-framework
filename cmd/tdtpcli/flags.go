@@ -78,6 +78,7 @@ type Flags struct {
 	Map            *string // --map: cross-system field mapping (mapping YAML file)
 	MapInput       *string // --input: source TDTP file for --map
 	MapDryRun      *bool   // --dry-run: validate mapping without writing to DB
+	Steps          *string // --steps: execute multi-step workflow YAML (depends_on + on_error)
 
 	// TDTQL Filters
 	Where   MultiStringFlag // repeatable: --where "A>1" --where "B IN (1,2)"
@@ -200,6 +201,7 @@ func ParseFlags() *Flags {
 	f.Map = flag.String("map", "", "Cross-system field mapping: apply mapping.yaml to a TDTP file and upsert into target DB")
 	f.MapInput = flag.String("input", "", "Source TDTP file for --map (e.g. out/emp_00247.tdtp.xml)")
 	f.MapDryRun = flag.Bool("dry-run", false, "Validate --map transformation without writing to DB")
+	f.Steps = flag.String("steps", "", "Execute multi-step workflow from YAML (depends_on, parallel waves, on_error: stop|skip|retry(N))")
 
 	// TDTQL Filters
 	flag.Var(&f.Where, "where", "TDTQL WHERE clause; repeatable — multiple flags are combined with AND\n\t(e.g., --where 'age > 18' --where 'status = active' --where 'role IN (1,2,3)')")

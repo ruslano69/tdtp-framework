@@ -1,6 +1,6 @@
 # TODO NEXT — Sprint план
 
-## Поточний стан (v1.16.1, 2026-06-15)
+## Поточний стан (v1.17.0, 2026-06-15)
 
 ### Закриті спринти
 
@@ -18,29 +18,14 @@
 | 7 | v1.15.0 | consumer.py: всі 7 entity мігровані на `--map broker://`; staging tables і merge procs видалені |
 |   | v1.15.0 | 7 нових mapping YAML: `sync_flights`, `sync_reservations`, `sync_countries`, `sync_guides`, `sync_tours`, `sync_schedule`, `sync_branch_sales` |
 | 8 | v1.16.0 | `--map --input broker://queue --listen` — daemon mode; NACK+requeue on error; graceful SIGTERM/SIGINT |
+|   | v1.16.1 | RabbitMQ resilience: deliveryChan reset, QoS prefetch=1, heartbeat 10s, exponential reconnect backoff |
+| 9 | v1.17.0 | P10 `--steps workflow.yaml` — DAG orchestration, parallel waves, on_error: stop/skip/retry(N) |
 
 ---
 
 ## Open Items (v1.x)
 
-### 1. P10 — Pipeline steps: `depends_on` + `on_error`
-
-Не реалізовано. Потрібно для multi-stage ETL (export → validate → map → import).
-
-```yaml
-steps:
-  - id: export
-    command: "--export ..."
-  - id: map
-    command: "--map ..."
-    depends_on: export
-    on_error: retry(3)
-```
-
-- Топологічне сортування кроків, паралельне виконання де можливо
-- `on_error: stop | skip | retry(N)` з exponential backoff
-
-### 2. Grace period для tdtp.lic
+### 1. Grace period для tdtp.lic
 
 Зараз: expired = fatal. Для integrators під час активного проекту — проблема.
 Варіант: `--grace-period 30d` flag, read-only mode після expiry. Не критично зараз.
