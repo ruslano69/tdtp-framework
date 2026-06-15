@@ -108,12 +108,9 @@ QUEUE_HANDLERS = {
         "label":      "reservations в†’ central",
     },
     "tdtp.sync.branch.customers": {
-        "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_branch_customers.yaml"),
-        "staging":    "branch_customers_inbox_staging",
-        "merge_proc": "merge_branch_customers_inbox",
-        "dsn":        DSN_CENTRAL,
-        "s3_prefix":  "archive/branch/customers",
-        "label":      "customers в†’ central",
+        "map_yaml":  str(TRAVEL_DIR.parents[1] / "mappings/sync_branch_customers.yaml"),
+        "s3_prefix": "archive/branch/customers",
+        "label":     "customers -> central",
     },
     "tdtp.sync.branch.sales": {
         "dst_cfg":    str(TRAVEL_DIR / "configs/config_dst_tdtp_sync_branch_sales.yaml"),
@@ -176,6 +173,28 @@ def archive_marker(s3_prefix: str, sync_ts: str, rows: int, elapsed: float):
 
 
 # в”Ђв”Ђв”Ђ Import + merge в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+
+def run_map_broker(tdtpcli: str, map_yaml: str, queue: str) -> tuple[bool, str, int]:
+    """tdtpcli --map yaml --input broker://queue — direct upsert, no staging."""
+    t0 = time.time()
+    try:
+        result = subprocess.run(
+            [tdtpcli, "--map", map_yaml, "--input", f"broker://{queue}"],
+            capture_output=True, text=True, timeout=120,
+        )
+        elapsed = round(time.time() - t0, 1)
+        out = (result.stdout + result.stderr).strip()
+        rows = 0
+        m = re.search(r"(\d+) rows upserted", out)
+        if m:
+            rows = int(m.group(1))
+        ok = result.returncode == 0
+        return ok, f"{elapsed}s rows={rows}" if ok else f"{elapsed}s\n{out}", rows
+    except subprocess.TimeoutExpired:
+        return False, "timeout (120s)", 0
+    except FileNotFoundError:
+        return False, f"tdtpcli not found: {tdtpcli}", 0
+
 
 def run_import_broker(tdtpcli: str, dst_cfg: str, table: str) -> tuple[bool, str, int]:
     """tdtpcli --import-broker в†’ staging table."""
@@ -248,33 +267,48 @@ def handle_notify(r: redis.Redis, tdtpcli: str, my_queues: set,
         log_err("HANDLER", f"no handler for {queue}")
         return
 
-    log_mq(label, f"notify received в†’ {queue}")
+    log_mq(label, f”notify received -> {queue}”)
 
-    # в”Ђв”Ђ 1. Import from broker queue into staging в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-    ok, out, rows = run_import_broker(tdtpcli, handler["dst_cfg"], handler["staging"])
-    if not ok:
-        log_err(f"{label}/import", f"FAILED\n{out[:1500]}")
-        set_state(r, queue, {"status": "import_error", "error": out[:2000],
-                             "ts": datetime.now().isoformat()})
-        return
-    elapsed_str = out.split("\n")[0]
-    log_ok(f"{label}/import", f"{rows} rows в†’ {handler['staging']}  {elapsed_str}")
-
-    # в”Ђв”Ђ 2. Call merge procedure в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-    ok, merge_out = run_merge(handler["dsn"], handler["merge_proc"])
-    if not ok:
-        log_err(f"{label}/merge", f"FAILED: {merge_out}")
-        set_state(r, queue, {"status": "merge_error", "error": merge_out,
-                             "ts": datetime.now().isoformat()})
-        return
-    log_ok(f"{label}/merge", f"{handler['merge_proc']}()  {merge_out}")
-
-    # в”Ђв”Ђ 3. S3 audit marker (fire-and-forget) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-    try:
-        elapsed_s = float(elapsed_str.rstrip("s").split("rows")[0].strip())
-    except Exception:
+    if handler.get(“map_yaml”):
+        # Sprint 6: direct upsert via --map (no staging table, no merge proc)
+        ok, out, rows = run_map_broker(tdtpcli, handler[“map_yaml”], queue)
+        if not ok:
+            log_err(f”{label}/map”, f”FAILED\n{out[:1500]}”)
+            set_state(r, queue, {“status”: “map_error”, “error”: out[:2000],
+                                 “ts”: datetime.now().isoformat()})
+            return
+        log_ok(f”{label}/map”, out)
         elapsed_s = 0.0
-    archive_marker(handler["s3_prefix"], sync_ts, rows, elapsed_s)
+        try:
+            elapsed_s = float(out.split(“s”)[0])
+        except Exception:
+            pass
+    else:
+        # Legacy: import-broker -> staging -> merge
+        ok, out, rows = run_import_broker(tdtpcli, handler[“dst_cfg”], handler[“staging”])
+        if not ok:
+            log_err(f”{label}/import”, f”FAILED\n{out[:1500]}”)
+            set_state(r, queue, {“status”: “import_error”, “error”: out[:2000],
+                                 “ts”: datetime.now().isoformat()})
+            return
+        elapsed_str = out.split(“\n”)[0]
+        log_ok(f”{label}/import”, f”{rows} rows -> {handler[‘staging’]}  {elapsed_str}”)
+
+        ok, merge_out = run_merge(handler[“dsn”], handler[“merge_proc”])
+        if not ok:
+            log_err(f”{label}/merge”, f”FAILED: {merge_out}”)
+            set_state(r, queue, {“status”: “merge_error”, “error”: merge_out,
+                                 “ts”: datetime.now().isoformat()})
+            return
+        log_ok(f”{label}/merge”, f”{handler[‘merge_proc’]}()  {merge_out}”)
+        elapsed_s = 0.0
+        try:
+            elapsed_s = float(elapsed_str.rstrip(“s”).split(“rows”)[0].strip())
+        except Exception:
+            pass
+
+    # S3 audit marker (fire-and-forget)
+    archive_marker(handler[“s3_prefix”], sync_ts, rows, elapsed_s)
 
     # в”Ђв”Ђ 4. Update state в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     set_state(r, queue, {
@@ -316,7 +350,10 @@ def main():
     print(f"\n  Listening queues:")
     for q in sorted(my_queues):
         h = QUEUE_HANDLERS[q]
-        print(f"    {q:<35} в†’ {h['staging']} в†’ CALL {h['merge_proc']}()")
+        if h.get("map_yaml"):
+            print(f"    {q:<35} -> --map {Path(h[‘map_yaml’]).name}")
+        else:
+            print(f"    {q:<35} -> {h[‘staging’]} -> CALL {h[‘merge_proc’]}()")
     print(f"\n  Waiting for notifications... Ctrl+C to stop\n")
 
     r.set(f"{REDIS_PREFIX}:consumer:alive", datetime.now().isoformat(), ex=90)

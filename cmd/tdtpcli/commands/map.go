@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"time"
 
+	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/mapping"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
@@ -52,12 +55,14 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	fmt.Printf("  correlation_id: %s\n", correlationID)
 	fmt.Printf("  source: %s → target: %s\n", cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
 
-	// Parse input TDTP packet — local file or S3 URI (s3://bucket/key)
-	var s3cfg *storage.S3Config
-	if cfg.InputSource != nil && cfg.InputSource.S3 != nil {
-		s3cfg = cfg.InputSource.S3
+	// Parse input TDTP packet — local file, S3 URI, or broker URI
+	var s3cfg     *storage.S3Config
+	var brokercfg *brokers.Config
+	if cfg.InputSource != nil {
+		s3cfg     = cfg.InputSource.S3
+		brokercfg = cfg.InputSource.Broker
 	}
-	pkt, err := loadPacket(ctx, opts.InputFile, opts.MercuryURL, s3cfg)
+	pkt, err := loadPacket(ctx, opts.InputFile, opts.MercuryURL, s3cfg, brokercfg)
 	if err != nil {
 		return fmt.Errorf("--map: load input %q: %w", opts.InputFile, err)
 	}
@@ -73,18 +78,61 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	return nil
 }
 
-// loadPacket reads a TDTP packet from a local path or an S3 URI (s3://bucket/key),
-// transparently handling the encryption → compression → compact layers in that order:
+// isBrokerURI reports whether path is a broker URI (broker://queue-name).
+func isBrokerURI(path string) bool {
+	return strings.HasPrefix(path, "broker://")
+}
+
+// acker is satisfied by broker implementations that support explicit ACK (e.g. RabbitMQ).
+type acker interface {
+	AckLast() error
+}
+
+// loadPacket reads a TDTP packet from a local path, an S3 URI (s3://bucket/key),
+// or a broker URI (broker://queue-name), transparently handling the encryption →
+// compression → compact layers in that order:
 //   - .tdtp.enc input is decrypted via xZMercury (burn-on-read key retrieval)
 //   - a compressed Data section (zstd/kanzi) is expanded
 //   - a compact v1.3.1 packet is unfolded
 //
-// When path is an S3 URI, s3cfg must be non-nil (credentials from mapping YAML
-// input_source.s3); the URI bucket overrides s3cfg.Bucket when present.
-func loadPacket(ctx context.Context, path, mercuryURL string, s3cfg *storage.S3Config) (*packet.DataPacket, error) {
+// For S3 URIs, s3cfg must be non-nil (credentials from mapping YAML input_source.s3).
+// For broker URIs, brokercfg must be non-nil (credentials from input_source.broker);
+// the queue name in the URI overrides brokercfg.Queue when present.
+// One message is consumed and ACKed; the broker connection is closed before returning.
+func loadPacket(ctx context.Context, path, mercuryURL string,
+	s3cfg *storage.S3Config, brokercfg *brokers.Config) (*packet.DataPacket, error) {
 	var data []byte
 
-	if storage.IsRemote(path) {
+	switch {
+	case isBrokerURI(path):
+		if brokercfg == nil {
+			return nil, fmt.Errorf("--input is a broker URI but mapping YAML has no input_source.broker section")
+		}
+		cfg := *brokercfg // copy: URI queue overrides config without mutating the original
+		if q := strings.TrimPrefix(path, "broker://"); q != "" {
+			cfg.Queue = q
+		}
+		br, err := brokers.New(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("broker driver: %w", err)
+		}
+		defer br.Close()
+		if err := br.Connect(ctx); err != nil {
+			return nil, fmt.Errorf("broker connect: %w", err)
+		}
+		recvCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		data, err = br.Receive(recvCtx)
+		if err != nil {
+			return nil, fmt.Errorf("broker receive: %w", err)
+		}
+		if a, ok := br.(acker); ok {
+			if err := a.AckLast(); err != nil {
+				return nil, fmt.Errorf("broker ack: %w", err)
+			}
+		}
+
+	case storage.IsRemote(path):
 		if s3cfg == nil {
 			return nil, fmt.Errorf("--input is an S3 URI but mapping YAML has no input_source.s3 section")
 		}
@@ -107,7 +155,8 @@ func loadPacket(ctx context.Context, path, mercuryURL string, s3cfg *storage.S3C
 		if err != nil {
 			return nil, fmt.Errorf("s3 read: %w", err)
 		}
-	} else {
+
+	default:
 		var err error
 		data, err = os.ReadFile(path)
 		if err != nil {

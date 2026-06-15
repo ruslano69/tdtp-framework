@@ -1,0 +1,40 @@
+id: sync-branch-customers-v1
+version: "1.0"
+
+loop_guard:
+  source_system: rabbitmq-travel
+  target_system: postgres-central
+  min_interval: "5s"
+
+input_source:
+  type: broker
+  broker:
+    type: rabbitmq
+    host: localhost
+    port: 5672
+    user: tdtp
+    password: tdtp
+    queue: tdtp.sync.branch.customers
+    durable: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5432 dbname=tdtp user=tdtp password=tdtp sslmode=disable"
+
+targets:
+  - id: branch_customers
+    table: public.branch_customers_inbox
+    upsert_key: customer_uuid
+    fields:
+      - {from: "source_local_id", to: "source_local_id"}
+      - {from: "customer_uuid",   to: "customer_uuid"}
+      - {from: "first_name",      to: "first_name"}
+      - {from: "last_name",       to: "last_name"}
+      - {from: "email",           to: "email"}
+      - {from: "phone",           to: "phone"}
+      - {from: "date_of_birth",   to: "date_of_birth"}
+      - {from: "city",            to: "city"}
+      - {from: "preferences",     to: "preferences"}
+      - {from: "registered_by",   to: "registered_by"}
+      - {from: "created_at",      to: "created_at"}
+      - {from: "last_updated",    to: "last_updated"}

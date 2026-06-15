@@ -1,12 +1,16 @@
 package mapping
 
-import "github.com/ruslano69/tdtp-framework/pkg/storage"
+import (
+	"github.com/ruslano69/tdtp-framework/pkg/brokers"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
+)
 
 // InputSource describes where the input TDTP packet comes from.
 // When absent from the mapping YAML, --input must be a local file path.
 type InputSource struct {
-	Type string            `yaml:"type"` // "s3"
-	S3   *storage.S3Config `yaml:"s3"`
+	Type   string            `yaml:"type"` // "s3" | "broker"
+	S3     *storage.S3Config `yaml:"s3,omitempty"`
+	Broker *brokers.Config   `yaml:"broker,omitempty"`
 }
 
 // MappingConfig is the top-level structure parsed from a mapping YAML file.
