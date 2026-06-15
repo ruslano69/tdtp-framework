@@ -6,6 +6,7 @@ sources:
   - name: emp
     type: mssql
     dsn: "server=sql-srv1;port=1433;database=ZTR-Live;trusted_connection=yes;encrypt=disable;TrustServerCertificate=true"
+    no_date_sentinels: ["1753-01-01"]
     query: |
       SELECT
         e.[No_]                    AS employee_code,
@@ -14,7 +15,13 @@ sources:
         eh.[Employment Date]       AS hire_date,
         eh.[Employment Type]       AS employment_type,
         ISNULL(cd.[Name], '')      AS position_name,
-        d.[Name]                   AS department_name
+        d.[Name]                   AS department_name,
+        e.[Birth Date]             AS birth_date,
+        e.[Sex]                    AS sex,
+        CAST(
+          DATEDIFF(day, eh.[Employment Date], GETDATE()) / 365.25
+          AS DECIMAL(8,2)
+        )                          AS work_years
       FROM [ZTR$Employment History] eh
       JOIN [ZTR$Employee] e ON eh.[Employee No_] = e.[No_]
       JOIN (

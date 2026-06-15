@@ -217,18 +217,29 @@ func (c *Converter) parseDate(tv *TypedValue, field FieldDef) (*TypedValue, erro
 	return tv, nil
 }
 
+// datetimeFormats is the ordered list of accepted datetime string formats.
+// RFC3339 is canonical; the rest handle output from SQLite workspaces and
+// other sources that omit the 'T' separator or timezone suffix.
+var datetimeFormats = []string{
+	time.RFC3339,           // "2006-01-02T15:04:05Z07:00"  — canonical TDTP
+	"2006-01-02T15:04:05",  // ISO-8601 without timezone
+	"2006-01-02 15:04:05",  // SQLite/MySQL workspace format
+	"2006-01-02",           // date-only fallback
+}
+
 // parseDatetime парсит DATETIME (с таймзоной)
 func (c *Converter) parseDatetime(tv *TypedValue, field FieldDef) (*TypedValue, error) {
-	val, err := time.Parse(time.RFC3339, tv.RawValue)
-	if err != nil {
-		return nil, &ValidationError{
-			Field:   field.Name,
-			Message: "invalid datetime format, expected RFC3339",
-			Value:   tv.RawValue,
+	for _, layout := range datetimeFormats {
+		if val, err := time.Parse(layout, tv.RawValue); err == nil {
+			tv.TimeValue = &val
+			return tv, nil
 		}
 	}
-	tv.TimeValue = &val
-	return tv, nil
+	return nil, &ValidationError{
+		Field:   field.Name,
+		Message: "invalid datetime format, expected RFC3339",
+		Value:   tv.RawValue,
+	}
 }
 
 // parseTimestamp парсит TIMESTAMP (всегда UTC)
@@ -239,19 +250,18 @@ func (c *Converter) parseTimestamp(tv *TypedValue, field FieldDef) (*TypedValue,
 		return c.parseTime(tv, field)
 	}
 
-	val, err := time.Parse(time.RFC3339, tv.RawValue)
-	if err != nil {
-		return nil, &ValidationError{
-			Field:   field.Name,
-			Message: "invalid timestamp format, expected RFC3339",
-			Value:   tv.RawValue,
+	for _, layout := range datetimeFormats {
+		if val, err := time.Parse(layout, tv.RawValue); err == nil {
+			val = val.UTC()
+			tv.TimeValue = &val
+			return tv, nil
 		}
 	}
-
-	// TIMESTAMP всегда UTC
-	val = val.UTC()
-	tv.TimeValue = &val
-	return tv, nil
+	return nil, &ValidationError{
+		Field:   field.Name,
+		Message: "invalid timestamp format, expected RFC3339",
+		Value:   tv.RawValue,
+	}
 }
 
 // parseTime парсит TIME (время суток, например 08:00:00)
