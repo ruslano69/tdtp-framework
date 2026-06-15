@@ -68,6 +68,11 @@ func Run(ctx context.Context, cfg *WorkflowConfig) error {
 		results := make(chan waveResult, len(wave))
 		var wg sync.WaitGroup
 
+		// waveCtx is cancelled when any step fails with on_error:stop (or exhausted
+		// retry). This kills the subprocesses of still-running parallel steps instead
+		// of waiting for their own timeouts to expire.
+		waveCtx, waveCancel := context.WithCancel(ctx)
+
 		for _, id := range wave {
 			wg.Add(1)
 			go func(id string) {
@@ -83,11 +88,22 @@ func Run(ctx context.Context, cfg *WorkflowConfig) error {
 					}
 				}
 
-				results <- waveResult{id: id, err: runStep(ctx, exe, step)}
+				err := runStep(waveCtx, exe, step)
+				// If this step's failure would stop the workflow, cancel the wave
+				// context so other goroutines' subprocesses exit immediately rather
+				// than running to their own timeouts.
+				if err != nil {
+					policy, _ := ParseOnError(step.OnError)
+					if policy.Action != "skip" {
+						waveCancel()
+					}
+				}
+				results <- waveResult{id: id, err: err}
 			}(id)
 		}
 
 		wg.Wait()
+		waveCancel() // always release the cancel func
 		close(results)
 
 		// Process results in the main goroutine — only place that writes to skipped.

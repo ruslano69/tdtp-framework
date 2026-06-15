@@ -35,4 +35,3 @@ targets:
       - {from: "booked_slots",   to: "booked_slots"}
       - {from: "price_modifier", to: "price_modifier"}
       - {from: "status",         to: "status"}
-      - {from: "last_updated",   to: "last_updated"}
