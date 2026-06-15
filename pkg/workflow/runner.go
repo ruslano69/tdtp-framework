@@ -218,12 +218,13 @@ func tokenize(s string) ([]string, error) {
 				cur = append(cur, c)
 			}
 		case inDouble:
-			if c == '"' {
+			switch {
+			case c == '"':
 				inDouble = false
-			} else if c == '\\' && i+1 < len(s) {
+			case c == '\\' && i+1 < len(s):
 				i++
 				cur = append(cur, s[i])
-			} else {
+			default:
 				cur = append(cur, c)
 			}
 		case c == '\'':
