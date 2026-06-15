@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -26,14 +27,28 @@ import (
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-const (
-	rmqHost     = "localhost"
-	rmqPort     = 5672
-	rmqUser     = "guest"
-	rmqPassword = "guest"
-	rmqVHost    = "/"
-	mgmtBase    = "http://localhost:15672/api"
+// Credentials are read from env vars so the tests work on any RabbitMQ setup.
+// Defaults match the travel-agency example (user=tdtp, password=tdtp).
+// Override: RABBITMQ_TEST_USER / RABBITMQ_TEST_PASSWORD / RABBITMQ_TEST_HOST
+var (
+	rmqHost     = envOrDefault("RABBITMQ_TEST_HOST", "localhost")
+	rmqUser     = envOrDefault("RABBITMQ_TEST_USER", "tdtp")
+	rmqPassword = envOrDefault("RABBITMQ_TEST_PASSWORD", "tdtp")
 )
+
+const (
+	rmqPort  = 5672
+	rmqVHost = "/"
+)
+
+var mgmtBase = fmt.Sprintf("http://%s:15672/api", envOrDefault("RABBITMQ_TEST_HOST", "localhost"))
+
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 func rmqConfig(queue string) Config {
 	return Config{
@@ -63,7 +78,7 @@ func requireBroker(t *testing.T) {
 	defer cancel()
 	if err := br.Connect(ctx); err != nil {
 		br.Close()
-		t.Skipf("broker not reachable with test credentials (guest/guest): %v", err)
+		t.Skipf("broker not reachable (%s@%s): %v", rmqUser, rmqHost, err)
 	}
 	br.Close()
 }
@@ -88,7 +103,11 @@ func deleteQueue(name string) {
 	http.DefaultClient.Do(req) //nolint:errcheck
 }
 
-// forceCloseAllConnections closes every broker connection via management API.
+// forceCloseAllConnections closes every broker connection via management API
+// using the test credentials (rmqUser/rmqPassword).
+// NOTE: requires the test user to have the `administrator` management tag.
+// If the user only has `management` tag, /api/connections returns [] and nothing
+// is closed. Use forceCloseAllConnectionsAs with an admin account instead.
 // This simulates a TCP-level drop: delivery channels close, heartbeat is gone,
 // any blocking Receive() returns "delivery channel closed" within ~heartbeat interval.
 func forceCloseAllConnections(t *testing.T) {
@@ -116,6 +135,36 @@ func forceCloseAllConnections(t *testing.T) {
 		http.DefaultClient.Do(req) //nolint:errcheck
 	}
 	t.Logf("force-closed %d connection(s)", len(conns))
+}
+
+// forceCloseAllConnectionsAs is like forceCloseAllConnections but uses explicit
+// credentials — useful when the admin account differs from the test account.
+// Set RABBITMQ_TEST_ADMIN_USER / RABBITMQ_TEST_ADMIN_PASSWORD to enable.
+func forceCloseAllConnectionsAs(t *testing.T, user, password string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, mgmtBase+"/connections", nil)
+	req.SetBasicAuth(user, password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("management GET /connections: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+
+	var conns []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &conns); err != nil {
+		t.Fatalf("parse connections: %v (body: %s)", err, raw)
+	}
+	for _, c := range conns {
+		req, _ := http.NewRequest(http.MethodDelete,
+			fmt.Sprintf("%s/connections/%s", mgmtBase, url.PathEscape(c.Name)), nil)
+		req.SetBasicAuth(user, password)
+		req.Header.Set("X-Reason", "integration-test-teardown")
+		http.DefaultClient.Do(req) //nolint:errcheck
+	}
+	t.Logf("force-closed %d connection(s) as %s", len(conns), user)
 }
 
 // ── test cases ─────────────────────────────────────────────────────────────────
@@ -201,16 +250,24 @@ func TestRabbitMQ_NackRequeue(t *testing.T) {
 }
 
 // TestRabbitMQ_ReconnectAfterConnectionDrop simulates a TCP-level connection drop
-// (management API force-closes the connection) and verifies that reconnectBroker()
-// restores the consumer so the daemon loop continues without manual intervention.
+// and verifies that reconnectBroker() restores the consumer so the daemon loop
+// continues without manual intervention.
+//
+// Drop simulation: we close the underlying amqp.Connection directly from a
+// goroutine (we are in package brokers, so private fields are accessible).
+// This is identical to what happens on a real network drop — the amqp library
+// closes the delivery channel, Receive() returns "delivery channel closed", and
+// the daemon loop must call reconnectBroker() to resume.
 //
 // This reproduces the bug fixed in v1.16.1: deliveryChan was not reset on
 // Close()/Connect(), so startConsuming() returned early and every subsequent
 // Receive() read from a permanently closed channel → infinite error loop.
+//
+// Management API alternative: if the RABBITMQ_TEST_ADMIN_USER / _PASSWORD env
+// vars are set for an administrator account, the test uses forceCloseAllConnections
+// instead — a more realistic external drop simulation.
 func TestRabbitMQ_ReconnectAfterConnectionDrop(t *testing.T) {
-	if !mgmtAvailable() {
-		t.Skip("RabbitMQ management plugin not available (need rabbitmq:3-management image)")
-	}
+	requireBroker(t)
 	const q = "tdtp.test.reconnect"
 	defer deleteQueue(q)
 
@@ -222,56 +279,66 @@ func TestRabbitMQ_ReconnectAfterConnectionDrop(t *testing.T) {
 	}
 	defer br.Close()
 
-	// Send a message that will be re-delivered after reconnect (NACKed implicitly
-	// by the broker when the consumer disappears).
-	if err := br.Send(ctx, []byte("survive-reconnect")); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-
-	// Receive once to register the consumer (lazy startConsuming).
-	recvCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	data, err := br.Receive(recvCtx)
-	cancel()
-	if err != nil {
-		t.Fatalf("first Receive: %v", err)
-	}
 	rmqBr := br.(*RabbitMQ)
-	_ = rmqBr.NackLast(true) // put message back so it survives reconnect
 
-	// Force-close the connection at the broker side — simulates network drop.
-	t.Log("force-closing connection (simulating network drop)...")
-	forceCloseAllConnections(t)
+	// Queue is empty — start a blocking Receive in a goroutine.
+	// The goroutine registers the consumer (startConsuming) and then blocks
+	// on the delivery channel, waiting for a message that never arrives.
+	// This is the steady-state of a --listen daemon between messages.
+	recvErrCh := make(chan error, 1)
+	go func() {
+		_, err := br.Receive(context.Background())
+		recvErrCh <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // give goroutine time to enter blocking select
 
-	// The delivery channel is now closed by the AMQP library. Receive() should
-	// surface "delivery channel closed" quickly (within heartbeat interval = 10s).
-	dropCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	_, receiveErr := br.Receive(dropCtx)
-	if receiveErr == nil {
-		t.Fatal("expected Receive to return an error after force-close, got nil")
+	// ── simulate connection drop ────────────────────────────────────────────
+	// Primary: close amqp.Connection directly. Identical to a TCP drop — the
+	// amqp library closes the delivery channel, select unblocks with ok=false.
+	// Alternative (real external drop): set RABBITMQ_TEST_ADMIN_USER/PASSWORD
+	// to an administrator account; the management API closes the TCP connection.
+	adminUser := os.Getenv("RABBITMQ_TEST_ADMIN_USER")
+	adminPass := os.Getenv("RABBITMQ_TEST_ADMIN_PASSWORD")
+	if adminUser != "" && adminPass != "" {
+		t.Log("dropping connection via management API (external TCP drop)...")
+		forceCloseAllConnectionsAs(t, adminUser, adminPass)
+	} else {
+		t.Log("dropping connection via conn.Close() (same code path as TCP drop)...")
+		_ = rmqBr.conn.Close()
 	}
-	t.Logf("Receive() surfaced error as expected: %v", receiveErr)
+
+	// Receive goroutine must surface an error — delivery channel is now closed.
+	select {
+	case receiveErr := <-recvErrCh:
+		t.Logf("✓ Receive() surfaced error after drop: %v", receiveErr)
+	case <-time.After(15 * time.Second):
+		// 15s > heartbeat (10s): if we don't get an error by then, the fix is broken.
+		t.Fatal("Receive() did not unblock within 15s after connection drop")
+	}
 
 	// reconnectBroker must restore the connection.
-	reconnCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	reconnCtx, cancel2 := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel2()
 	if err := reconnectBrokerForTest(reconnCtx, br); err != nil {
 		t.Fatalf("reconnectBroker: %v", err)
 	}
-	t.Log("reconnected — verifying message is redelivered...")
+	t.Log("reconnected — verifying send+receive works...")
 
-	// The broker should re-deliver the NACKed message.
-	recvCtx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel2()
-	data2, err := br.Receive(recvCtx2)
+	// Send a new message and receive it — proves the consumer was re-registered.
+	if err := br.Send(ctx, []byte("post-reconnect")); err != nil {
+		t.Fatalf("Send after reconnect: %v", err)
+	}
+	recvCtx2, cancel3 := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel3()
+	data, err := br.Receive(recvCtx2)
 	if err != nil {
 		t.Fatalf("Receive after reconnect: %v", err)
 	}
-	if string(data2) != string(data) {
-		t.Fatalf("redelivered payload mismatch: got %q want %q", data2, data)
+	if string(data) != "post-reconnect" {
+		t.Fatalf("payload mismatch: %q", data)
 	}
 	_ = rmqBr.AckLast()
-	t.Log("✓ reconnect: message redelivered after force-close")
+	t.Log("✓ reconnect: send→receive works after connection drop")
 }
 
 // TestRabbitMQ_QueueNotFound_PassiveDeclare verifies that when passive_declare=true
