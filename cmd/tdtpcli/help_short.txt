@@ -40,12 +40,23 @@ COMMANDS:
   ETL:
     --sync-incremental <table> Incremental sync
     --pipeline <file>          Execute ETL pipeline
-    @name=value                Pipeline variable (any number; after --pipeline flag)
+    @name=value                Pipeline variable (any number; after --pipeline or --steps flag)
                                SQL: WHERE col = '@name'  (text) | WHERE n = @name  (numeric)
                                YAML fields: destination: "out/{{name}}.tdtp.xml"
                                Used vars are embedded in output packet as PipelineContext
     --expect-var <name=value>  Verify PipelineContext variable before import (repeatable)
                                Fails before any DB write if variable is missing or mismatched
+
+  Mapping / Orchestration:
+    --map <file>               Execute cross-system mapping (YAML): read packet → remap fields →
+                               upsert to target DB. Loop guard prevents concurrent duplicate runs.
+    --input <src>              Input for --map: file path, broker://queue, or s3://bucket/key
+    --map-dry-run              Validate mapping without writing to target DB
+    --listen                   Daemon mode for --map: loop on broker queue until SIGTERM
+    --steps <file>             Execute multi-step workflow (YAML): DAG of tdtpcli sub-commands.
+                               Steps with no ordering dependency run in parallel (Kahn's sort).
+                               on_error: stop (default) | skip | retry(N) with exp. backoff
+    @name=value                Workflow variable: substituted as {{name}} in step commands
 
 OPTIONS:
 
