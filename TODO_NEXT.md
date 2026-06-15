@@ -1,6 +1,6 @@
 # TODO NEXT — Sprint план
 
-## Поточний стан (v1.16.0, 2026-06-15)
+## Поточний стан (v1.16.1, 2026-06-15)
 
 ### Закриті спринти
 
@@ -21,23 +21,7 @@
 
 ---
 
-## Sprint 9 — `--map --listen --workers N` (parallel daemon)
-
-**Навіщо**: зараз один daemon обробляє одне повідомлення за раз.
-При великому трафіку або повільній target DB — вузьке місце.
-
-**Що робити**:
-- `--workers N` flag — запускає N горутин-воркерів, кожна зі своїм `Receive`
-- ACK кожного воркера незалежно від інших (not в shared state)
-- graceful shutdown: wait for all workers to finish current message before exit
-
-Залежить від того чи broker driver підтримує concurrent `Receive`.
-RabbitMQ: так (multiple consumers на одній channel не рекомендовано — N connections).
-Kafka: так (consumer group, N partitions → N workers).
-
----
-
-## Open Items
+## Open Items (v1.x)
 
 ### 1. P10 — Pipeline steps: `depends_on` + `on_error`
 
@@ -56,17 +40,36 @@ steps:
 - Топологічне сортування кроків, паралельне виконання де можливо
 - `on_error: stop | skip | retry(N)` з exponential backoff
 
-### 2. Streaming CLI (`--export-stream` / `--import-stream`)
-
-Код готовий: `pkg/core/packet/streaming.go` — `StreamingGenerator` з channel-based API.
-Не підключено до CLI. Це `v2.0` scope.
-
-### 3. Schema migration (`ALTER TABLE`)
-
-Add/drop columns, type changes при schema drift між версіями пакета і target таблицею.
-`v2.0` scope.
-
-### 4. Grace period для tdtp.lic
+### 2. Grace period для tdtp.lic
 
 Зараз: expired = fatal. Для integrators під час активного проекту — проблема.
 Варіант: `--grace-period 30d` flag, read-only mode після expiry. Не критично зараз.
+
+---
+
+## v2.0 Roadmap — Масштабування, паралелізм, стрімінг
+
+Великий перехід: від single-threaded ETL до паралельної та потокової обробки.
+Всі пункти залежать один від одного — вводяться разом як breaking architecture change.
+
+### 2.1 Parallel daemon (`--map --listen --workers N`)
+
+- `--workers N` — N незалежних goroutine-воркерів, кожен зі своїм AMQP connection
+- ACK кожного воркера незалежно (жодного shared state між воркерами)
+- graceful shutdown: дочекатись завершення поточного повідомлення в кожному воркері
+- RabbitMQ: N окремих connections (multiple consumers на одному channel — anti-pattern)
+- Kafka: consumer group, N partitions → N workers (нативна модель)
+
+### 2.2 Streaming CLI (`--export-stream` / `--import-stream`)
+
+Код вже готовий: `pkg/core/packet/streaming.go` — `StreamingGenerator` з channel-based API.
+Не підключено до CLI.
+
+- `--export-stream` → пише рядки в output по мірі читання з DB (без буферизації всього набору)
+- `--import-stream` → читає з stdin/broker рядок за рядком, upsert без accumulation
+- Дозволяє обробляти таблиці розміром більше RAM
+
+### 2.3 Schema migration (`ALTER TABLE`)
+
+Add/drop columns, type changes при schema drift між версіями пакета і target таблицею.
+Потрібно як основа для `--import-stream` (streaming import потребує schema negotiation).
