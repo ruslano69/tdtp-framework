@@ -1,0 +1,35 @@
+id: travel-customers-v1
+version: "1.0"
+
+loop_guard:
+  source_system: seaweedfs-travel
+  target_system: postgres-edm
+  min_interval: "30s"
+
+input_source:
+  type: s3
+  s3:
+    endpoint: "http://127.0.0.1:8333"
+    region: "us-east-1"
+    bucket: "travel-agency"
+    access_key: "tdtp_access"
+    secret_key: "tdtp_secret"
+    disable_ssl: true
+
+target_connection:
+  type: postgres
+  dsn: "host=localhost port=5432 dbname=edm_test user=edm password=edm123 sslmode=disable"
+
+targets:
+  - id: customers
+    table: edm.edm_customers
+    upsert_key: ext_customer_id
+    fields:
+      - {from: "customer_id",   to: "ext_customer_id"}
+      - {from: "first_name",    to: "first_name"}
+      - {from: "last_name",     to: "last_name"}
+      - {from: "email",         to: "email"}
+      - {from: "phone",         to: "phone"}
+      - {from: "loyalty_points", to: "loyalty_points"}
+      - {from: "is_vip",        to: "tier",
+         enum: {"0": "standard", "1": "vip"}}

@@ -2,6 +2,74 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.15.0] — 2026-06-15
+
+### Added — `--map --input broker://` (Sprint 6)
+
+Extended `tdtpcli --map` with broker-sourced packets: `--input broker://<queue>` reads a
+TDTP packet directly from a message broker queue, ACKs on success, remaps fields per the
+mapping YAML, and upserts into the target database — no staging table, no merge procedure.
+
+- **`pkg/brokers/broker.go`** — added `yaml:` struct tags to all fields of `Config`
+  (`type`, `host`, `port`, `user`, `password`, `queue`, `vhost`, `durable`, `exchange`,
+  `routing_key`, `passive_declare`, `consumer_group`, `topic`, etc.) so broker connection
+  parameters can be declared inline in a mapping YAML under `input_source.broker`.
+
+- **`pkg/core/mapping/types.go`** — extended `InputSource` with `Broker *brokers.Config`
+  (tagged `yaml:"broker,omitempty"`). `type: broker` in `input_source:` is now a
+  first-class input kind alongside `type: s3`.
+
+- **`cmd/tdtpcli/commands/map.go`** — broker branch in `loadPacket()`:
+  - `isBrokerURI(path string) bool` — detects `broker://` prefix.
+  - `acker` interface (local) — type-asserts the broker driver to call `AckLast()`.
+  - On receive: connects to broker, calls `Receive(ctx)` with 30 s timeout, then `AckLast()`.
+    Queue name in the URI (`broker://q`) overrides the queue declared in the YAML.
+  - On error: skips ACK so the message returns to the queue automatically.
+  - `RunMap()` now extracts both `s3cfg` and `brokercfg` from `cfg.InputSource` and passes
+    both to `loadPacket()`.
+
+- **`mappings/sync_branch_customers.yaml`** — new mapping with `input_source.broker`
+  (RabbitMQ, queue `tdtp.sync.branch.customers`) → upsert into
+  `public.branch_customers_inbox` (Central PostgreSQL, upsert key `customer_uuid`).
+
+- **`examples/travel-agency/consumer.py`** — `tdtp.sync.branch.customers` handler migrated
+  from the three-step legacy flow (`--import-broker` → staging table → `CALL merge_*()`)
+  to a single `--map broker://` call via new `run_map_broker()` helper.
+  Remaining 7 entity handlers retain the legacy flow for comparison (Sprint 7 target).
+
+- **Loop Guard** (`min_interval: 5s`): rapid successive `--map broker://` calls within the
+  guard interval return immediately without consuming from the queue.
+
+- **`pkg/core/version/version.go`**: `1.14.0` → `1.15.0`.
+
+---
+
+## [1.14.0] — 2026-06-13
+
+### Added — `--map --input s3://` (Sprint 5)
+
+Extended `tdtpcli --map` to source the input packet from S3-compatible object storage:
+`--input s3://bucket/key` downloads the object, then applies the shared decrypt →
+decompress → compact-expand pipeline before field mapping and upsert.
+
+- **`pkg/core/mapping/types.go`** — new `InputSource` struct with `S3 *storage.S3Config`
+  (tagged `yaml:"s3,omitempty"`); parsed from the `input_source:` key in the mapping YAML.
+  `type: s3` selects the S3 download path.
+
+- **`cmd/tdtpcli/commands/map.go`** — S3 branch in `loadPacket()`:
+  `storage.IsRemote(path)` detects `s3://` URIs; `storage.Download()` fetches the object;
+  the resulting bytes feed through the existing decrypt/decompress/expand layers.
+  `RunMap()` extracts `s3cfg` from `cfg.InputSource.S3` and passes it to `loadPacket()`.
+
+- **`mappings/sync_branch_customers.yaml`** — initial version of the example mapping
+  (used as the Sprint 5 S3 round-trip target in the travel-agency demo).
+
+- Backward-compatible: `--input <local-file>` path unchanged.
+
+- **`pkg/core/version/version.go`**: `1.13.0` → `1.14.0`.
+
+---
+
 ## [Unreleased] — feature/sprint4-map
 
 ### Added — `--map` cross-system field mapping (Sprint 4, P8)

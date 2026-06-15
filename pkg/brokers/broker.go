@@ -36,31 +36,31 @@ type MessageBroker interface {
 
 // Config содержит параметры подключения к message broker
 type Config struct {
-	Type          string // rabbitmq, msmq, kafka
-	Host          string // Хост (для RabbitMQ)
-	Port          int    // Порт (для RabbitMQ)
-	User          string // Пользователь (для RabbitMQ)
-	Password      string // Пароль (для RabbitMQ)
-	Queue         string // Имя очереди (для RabbitMQ, MSMQ)
-	VHost         string // Virtual host (для RabbitMQ, по умолчанию "/")
-	UseTLS        bool   // Использовать TLS/SSL (amqps://) для RabbitMQ
-	TLSSkipVerify bool   // Пропустить проверку TLS-сертификата (для self-signed certs)
-	Exchange      string // RabbitMQ exchange (пустая строка = default exchange)
-	RoutingKey    string // RabbitMQ routing key (если пустой, используется имя очереди)
+	Type          string `yaml:"type"`                      // rabbitmq, msmq, kafka
+	Host          string `yaml:"host,omitempty"`            // Хост (для RabbitMQ)
+	Port          int    `yaml:"port,omitempty"`            // Порт (для RabbitMQ)
+	User          string `yaml:"user,omitempty"`            // Пользователь (для RabbitMQ)
+	Password      string `yaml:"password,omitempty"`        // Пароль (для RabbitMQ)
+	Queue         string `yaml:"queue,omitempty"`           // Имя очереди (для RabbitMQ, MSMQ)
+	VHost         string `yaml:"vhost,omitempty"`           // Virtual host (для RabbitMQ, по умолчанию "/")
+	UseTLS        bool   `yaml:"use_tls,omitempty"`         // Использовать TLS/SSL (amqps://) для RabbitMQ
+	TLSSkipVerify bool   `yaml:"tls_skip_verify,omitempty"` // Пропустить проверку TLS-сертификата
+	Exchange      string `yaml:"exchange,omitempty"`        // RabbitMQ exchange (пустая строка = default exchange)
+	RoutingKey    string `yaml:"routing_key,omitempty"`     // RabbitMQ routing key
 
 	// RabbitMQ параметры очереди (ВАЖНО: должны совпадать с существующей очередью!)
-	Durable        bool // Очередь переживает перезапуск RabbitMQ
-	AutoDelete     bool // Очередь удаляется когда нет consumer'ов
-	Exclusive      bool // Очередь доступна только одному соединению
-	PassiveDeclare bool // Не создавать очередь — только проверить что она существует
+	Durable        bool `yaml:"durable,omitempty"`         // Очередь переживает перезапуск RabbitMQ
+	AutoDelete     bool `yaml:"auto_delete,omitempty"`     // Очередь удаляется когда нет consumer'ов
+	Exclusive      bool `yaml:"exclusive,omitempty"`       // Очередь доступна только одному соединению
+	PassiveDeclare bool `yaml:"passive_declare,omitempty"` // Не создавать очередь — только проверить
 
 	// MSMQ специфичные параметры (Windows only)
-	QueuePath string // Путь к очереди MSMQ (например: ".\\private$\\tdtp_export")
+	QueuePath string `yaml:"queue_path,omitempty"` // Путь к очереди MSMQ
 
 	// Kafka специфичные параметры
-	Brokers       []string // Список Kafka brokers (например: ["localhost:9092", "localhost:9093"])
-	Topic         string   // Имя Kafka topic
-	ConsumerGroup string   // Consumer group ID (по умолчанию "tdtp-consumer-group")
+	Brokers       []string `yaml:"brokers,omitempty"`        // Список Kafka brokers
+	Topic         string   `yaml:"topic,omitempty"`          // Имя Kafka topic
+	ConsumerGroup string   `yaml:"consumer_group,omitempty"` // Consumer group ID
 }
 
 // New создает новый MessageBroker на основе конфигурации

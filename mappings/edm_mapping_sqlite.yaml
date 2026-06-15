@@ -31,3 +31,5 @@ targets:
       - {from: "birth_date",  to: "birth_date"}
       - {from: "sex",         to: "sex"}
       - {from: "work_years",  to: "work_years"}
+      - {from: "is_active",   to: "is_active"}
+      - {from: "meta_json",   to: "meta_json"}
