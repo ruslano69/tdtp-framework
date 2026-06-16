@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -179,12 +180,12 @@ func (l *License) Expired() bool {
 
 // AllowsAdapter reports whether the named DB adapter is permitted.
 func (l *License) AllowsAdapter(name string) bool {
-	return contains(l.Adapters, name)
+	return slices.ContainsFunc(l.Adapters, func(x string) bool { return strings.EqualFold(x, name) })
 }
 
 // AllowsFeature reports whether the named feature flag is permitted.
 func (l *License) AllowsFeature(name string) bool {
-	return contains(l.Features, name)
+	return slices.ContainsFunc(l.Features, func(x string) bool { return strings.EqualFold(x, name) })
 }
 
 // RowLimit returns the per-export row limit. 0 means unlimited.
@@ -214,11 +215,3 @@ func (l *License) Summary() string {
 		l.Limits.RowsPerExport, exp)
 }
 
-func contains(ss []string, s string) bool {
-	for _, x := range ss {
-		if strings.EqualFold(x, s) {
-			return true
-		}
-	}
-	return false
-}

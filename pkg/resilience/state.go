@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 )
@@ -244,7 +245,7 @@ func (sm *stateManager) getStats() Stats {
 		RunningCalls:      sm.runningCalls,
 		MaxRunningCalls:   sm.maxRunningCalls,
 		LastStateChange:   sm.lastStateChange,
-		StateChanges:      copyMap(sm.stateChanges),
+		StateChanges:      maps.Clone(sm.stateChanges),
 		TimeUntilHalfOpen: sm.timeUntilHalfOpen(),
 	}
 }
@@ -274,15 +275,6 @@ func (sm *stateManager) reset() {
 	sm.expiry = time.Time{}
 	sm.runningCalls = 0
 	sm.lastStateChange = time.Now()
-}
-
-// copyMap - копирование map
-func copyMap(m map[State]int) map[State]int {
-	result := make(map[State]int, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
 }
 
 // Stats - статистика Circuit Breaker
