@@ -198,13 +198,6 @@ func (h *HelloHandler) Middleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // HelloTokenStats returns current token and IP counter counts (for /metrics).
 func (h *HelloHandler) HelloTokenStats() (tokens, ipEntries int) {
 	h.mu.Lock()

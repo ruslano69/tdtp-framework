@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/license"
@@ -112,7 +113,7 @@ func (g *TrustGate) GateScenario(s *Scenario) error {
 			return fmt.Errorf("scenario %q requires permission %q not granted by license (tier=%s)",
 				s.Orchestrator.Name, perm, g.License.GetTier())
 		}
-		if g.MercuryStatus != nil && !containsPerm(g.MercuryStatus.Permissions, perm) {
+		if g.MercuryStatus != nil && !slices.Contains(g.MercuryStatus.Permissions, perm) {
 			return fmt.Errorf("scenario %q requires permission %q not in Mercury env permissions %v",
 				s.Orchestrator.Name, perm, g.MercuryStatus.Permissions)
 		}
@@ -142,11 +143,3 @@ func resolveDefaultLicensePath() string {
 	return ""
 }
 
-func containsPerm(ss []string, s string) bool {
-	for _, x := range ss {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}

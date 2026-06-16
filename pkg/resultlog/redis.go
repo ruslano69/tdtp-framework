@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -129,20 +130,7 @@ func isCompletedWithErrors(err error) bool {
 		mercury.ErrCodeHMACVerificationFailed,
 		mercury.ErrCodeKeyBindRejected,
 	} {
-		if containsString(err.Error(), code) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || s != "" && stringContains(s, substr))
-}
-
-func stringContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
+		if strings.Contains(err.Error(), code) {
 			return true
 		}
 	}
