@@ -201,7 +201,7 @@ func (ts *TDTPService) collectAllParts(initialPath string, firstPacket *packet.D
 
 		// Expand compact v1.3.1 format before merging
 		if packet.Data.Compact {
-			if err := packet.ExpandCompactRows(packet); err != nil {
+			if err := ts.parser.ExpandCompactRows(packet); err != nil {
 				return nil, fmt.Errorf("compact expansion failed for %s: %w", filename, err)
 			}
 		}
@@ -221,7 +221,7 @@ func (ts *TDTPService) decompressPacket(pkt *packet.DataPacket) error {
 
 	// Use parser.DecompressData with processors.DecompressDataForTdtp
 	// Same pattern as tdtpcli/commands/import.go and broker.go
-	return ts.parser.DecompressData(context.Background(), pkt, func(ctx context.Context, compressed string) ([]string, error) {
-		return processors.DecompressDataForTdtp(compressed)
+	return ts.parser.DecompressData(context.Background(), pkt, func(ctx context.Context, compressed string, algo string) ([]string, error) {
+		return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
 	})
 }
