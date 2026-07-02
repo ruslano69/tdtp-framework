@@ -46,20 +46,15 @@ func D_FreePacket(pkt *C.D_Packet) {
 	if pkt == nil {
 		return
 	}
-	// Free each row's values array and its strings.
-	if pkt.rows != nil {
-		rowSlice := unsafe.Slice(pkt.rows, int(pkt.row_count))
-		for _, row := range rowSlice {
-			if row.values != nil {
-				valueSlice := unsafe.Slice(row.values, int(row.value_count))
-				for _, v := range valueSlice {
-					C.free(unsafe.Pointer(v))
-				}
-				C.free(unsafe.Pointer(row.values))
-			}
-		}
-		C.free(unsafe.Pointer(pkt.rows))
-		pkt.rows = nil
+	// Free the flat row buffer and its offsets array (single alloc each,
+	// regardless of row/column count — see tdtp_structs.h D_Packet doc).
+	if pkt.row_data != nil {
+		C.free(unsafe.Pointer(pkt.row_data))
+		pkt.row_data = nil
+	}
+	if pkt.row_offsets != nil {
+		C.free(unsafe.Pointer(pkt.row_offsets))
+		pkt.row_offsets = nil
 	}
 	// Free schema fields array.
 	if pkt.schema.fields != nil {
@@ -106,48 +101,88 @@ func dFillSchema(pkt *C.D_Packet, schema packet.Schema) {
 	pkt.schema.field_count = C.int(n)
 }
 
-// dFillRows populates pkt.rows from [][]string using C.malloc.
+// dFillRows populates pkt.row_data/row_offsets from [][]string using C.malloc.
+// Layout: one flat buffer with every cell's bytes concatenated in row-major
+// order, plus an offsets array (row_count*col_count+1 int32 entries) giving
+// each cell's start byte — the same shape D_ColumnUTF8 already produces for
+// a single column, generalized to the whole grid. This lets the Python side
+// bulk-copy the entire packet with two ctypes.string_at() calls instead of
+// dereferencing a char* per cell (the previous D_Row*-array layout forced
+// one FFI crossing per cell on every read).
+//
+// Assumes every row has the same length (guaranteed by packet.GetRows() /
+// the TDTP schema model — rows are never ragged).
 func dFillRows(pkt *C.D_Packet, rows [][]string) {
 	n := len(rows)
 	if n == 0 {
-		pkt.rows = nil
+		pkt.row_data = nil
+		pkt.row_offsets = nil
 		pkt.row_count = 0
+		pkt.col_count = 0
 		return
 	}
-	rowsPtr := (*C.D_Row)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.D_Row{}))))
-	rowSlice := unsafe.Slice(rowsPtr, n)
-	for i, row := range rows {
-		m := len(row)
-		valuesPtr := (**C.char)(C.malloc(C.size_t(m) * C.size_t(unsafe.Sizeof((*C.char)(nil)))))
-		valueSlice := unsafe.Slice(valuesPtr, m)
-		for j, v := range row {
-			valueSlice[j] = C.CString(v)
+	cols := len(rows[0])
+	nOffsets := n*cols + 1
+
+	offs := make([]int32, nOffsets)
+	total := 0
+	k := 0
+	for _, row := range rows {
+		for _, v := range row {
+			offs[k] = int32(total)
+			total += len(v)
+			k++
 		}
-		rowSlice[i].values = valuesPtr
-		rowSlice[i].value_count = C.int(m)
 	}
-	pkt.rows = rowsPtr
+	offs[k] = int32(total)
+
+	dataSize := total
+	if dataSize == 0 {
+		dataSize = 1 // malloc(0) may return nil; keep the pointer non-nil
+	}
+	data := C.malloc(C.size_t(dataSize))
+	dslice := unsafe.Slice((*byte)(data), total)
+	pos := 0
+	for _, row := range rows {
+		for _, v := range row {
+			copy(dslice[pos:pos+len(v)], v)
+			pos += len(v)
+		}
+	}
+
+	offBuf := C.malloc(C.size_t(nOffsets) * C.size_t(unsafe.Sizeof(C.int(0))))
+	oslice := unsafe.Slice((*int32)(offBuf), nOffsets)
+	copy(oslice, offs)
+
+	pkt.row_data = (*C.char)(data)
+	pkt.row_offsets = (*C.int)(offBuf)
 	pkt.row_count = C.int(n)
+	pkt.col_count = C.int(cols)
 }
 
-// dGetRows extracts [][]string from a D_Packet (Go-side read).
+// dGetRows extracts [][]string from a D_Packet (Go-side read), reconstructing
+// rows from the flat row_data/row_offsets buffer.
 func dGetRows(pkt *C.D_Packet) [][]string {
 	n := int(pkt.row_count)
-	if n == 0 || pkt.rows == nil {
+	cols := int(pkt.col_count)
+	if n == 0 || cols == 0 || pkt.row_data == nil {
 		return nil
 	}
-	rowSlice := unsafe.Slice(pkt.rows, n)
+	nOffsets := n*cols + 1
+	offSlice := unsafe.Slice(pkt.row_offsets, nOffsets)
+	// Single bulk copy of the whole payload, then pure-Go slicing — avoids
+	// per-cell cgo pointer dereferencing.
+	data := C.GoBytes(unsafe.Pointer(pkt.row_data), offSlice[n*cols])
+
 	rows := make([][]string, n)
-	for i, row := range rowSlice {
-		m := int(row.value_count)
-		vals := make([]string, m)
-		if m > 0 && row.values != nil {
-			valueSlice := unsafe.Slice(row.values, m)
-			for j, v := range valueSlice {
-				vals[j] = C.GoString(v)
-			}
+	k := 0
+	for i := 0; i < n; i++ {
+		row := make([]string, cols)
+		for j := 0; j < cols; j++ {
+			row[j] = string(data[offSlice[k]:offSlice[k+1]])
+			k++
 		}
-		rows[i] = vals
+		rows[i] = row
 	}
 	return rows
 }

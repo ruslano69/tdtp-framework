@@ -528,16 +528,18 @@ typedef struct {
     int      field_count;
 } D_Schema;
 
-// Одна строка данных
+// Полный пакет данных. Строки хранятся как один непрерывный буфер (row_data)
+// плюс массив offset'ов (row_offsets, row_count*col_count+1 элементов
+// int32) — та же раскладка, что D_ColumnUTF8 использует для одной колонки,
+// обобщённая на всю таблицу. Ячейка (r,c) — это
+// row_data[row_offsets[r*col_count+c] .. row_offsets[r*col_count+c+1]].
+// Позволяет Python вычитать весь пакет за 1-2 вызова ctypes.string_at()
+// вместо разыменования char* на каждую ячейку.
 typedef struct {
-    char** values;
-    int    value_count;
-} D_Row;
-
-// Полный пакет данных
-typedef struct {
-    D_Row*    rows;
+    char*     row_data;          // конкатенированные байты всех ячеек, row-major
+    int*      row_offsets;       // row_count*col_count + 1 элементов
     int       row_count;
+    int       col_count;
     D_Schema  schema;
     char      msg_type[32];      // "DATA", "ACK", …
     char      table_name[256];
