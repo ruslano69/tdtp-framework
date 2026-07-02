@@ -16,7 +16,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.7.4
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/klauspost/compress v1.18.0
 	github.com/marcboeker/go-duckdb v1.8.5
 	github.com/mozillazg/go-unidecode v0.2.0
