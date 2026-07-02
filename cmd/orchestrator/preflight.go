@@ -142,4 +142,3 @@ func resolveDefaultLicensePath() string {
 	}
 	return ""
 }
-

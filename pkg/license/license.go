@@ -214,4 +214,3 @@ func (l *License) Summary() string {
 		strings.Join(l.Adapters, ","), strings.Join(l.Features, ","),
 		l.Limits.RowsPerExport, exp)
 }
-
