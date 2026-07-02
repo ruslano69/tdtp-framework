@@ -99,16 +99,10 @@ class PacketHandle:
         """
         from tdtp.pandas_ext import data_to_pandas
 
-        # Build a J_read-compatible dict from D_* data.
-        # D_Field.as_dict() uses lowercase keys ("name", "type"); wrap them
-        # into uppercase keys so data_to_pandas works with both.
-        raw_fields = self.get_schema()
-        fields = [
-            {"Name": f.get("name", ""), "Type": f.get("type", "TEXT")}
-            for f in raw_fields
-        ]
+        # D_Field.as_dict() already uses the canonical lowercase keys
+        # ("name", "type") that data_to_pandas expects — no translation needed.
         data = {
-            "schema": {"Fields": fields},
+            "schema": {"fields": self.get_schema()},
             "data":   self.get_rows(),
         }
         return data_to_pandas(data)
@@ -153,6 +147,32 @@ class TDTPClientDirect:
     def D_read_ctx(self, path: str) -> Generator[PacketHandle, None, None]:
         """Context manager version of D_read. Frees the packet on exit."""
         handle = self.D_read(path)
+        try:
+            yield handle
+        finally:
+            handle.free()
+
+    def D_parse_bytes(self, data: bytes) -> PacketHandle:
+        """Parse a TDTP blob already in memory (in-memory counterpart of D_read).
+
+        Caller must call handle.free() when done (or use D_parse_bytes_ctx).
+
+        Args:
+            data: raw TDTP XML bytes (plain or compressed).
+
+        Raises:
+            TDTPParseError: if the buffer cannot be parsed.
+        """
+        pkt = D_Packet()
+        rc = lib.D_ParseBytes(data, len(data), ctypes.byref(pkt))
+        if rc != 0:
+            raise TDTPParseError(pkt.get_error())
+        return PacketHandle(pkt)
+
+    @contextmanager
+    def D_parse_bytes_ctx(self, data: bytes) -> Generator[PacketHandle, None, None]:
+        """Context manager version of D_parse_bytes. Frees the packet on exit."""
+        handle = self.D_parse_bytes(data)
         try:
             yield handle
         finally:

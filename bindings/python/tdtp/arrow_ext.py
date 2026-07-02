@@ -245,7 +245,7 @@ def arrow_to_data(
         col  = table.column(i)
         name = table.schema.names[i]
         tdtp_type = _arrow_type_to_tdtp(col.type)
-        fields.append({"Name": name, "Type": tdtp_type})
+        fields.append({"name": name, "type": tdtp_type})
         col_strs.append(_arrow_col_to_strings(col))
 
     # Transpose column-major → row-major.
@@ -254,7 +254,7 @@ def arrow_to_data(
     rows = [list(row) for row in zip(*col_strs)] if col_strs and n else []
 
     return {
-        "schema": {"Fields": fields},
+        "schema": {"fields": fields},
         "header": {
             "type":       "reference",
             "table_name": table_name,
@@ -301,11 +301,11 @@ def write_arrow(
         col  = table.column(i)
         name = table.schema.names[i]
         tdtp_type = _arrow_type_to_tdtp(col.type)
-        fields.append({"Name": name, "Type": tdtp_type})
+        fields.append({"name": name, "type": tdtp_type})
         columns.append(_arrow_col_to_strings(col))
 
     payload = {
-        "schema":  {"Fields": fields},
+        "schema":  {"fields": fields},
         "header": {
             "type":       "reference",
             "table_name": table_name,

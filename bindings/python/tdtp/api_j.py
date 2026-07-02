@@ -137,6 +137,23 @@ class TDTPClientJSON:
         """
         return _call(lib.J_ReadFile, path.encode())
 
+    def J_parse_bytes(self, data: bytes) -> dict:
+        """Parse a TDTP blob already in memory (in-memory counterpart of J_read).
+
+        No filesystem access — useful when the packet arrives over the network
+        or from another in-process source rather than a local file.
+
+        Args:
+            data: raw TDTP XML bytes (plain or compressed).
+
+        Returns:
+            Same shape as :meth:`J_read`.
+
+        Raises:
+            TDTPParseError: if the buffer cannot be parsed or decompressed.
+        """
+        return _call(lib.J_ParseBytes, data, len(data))
+
     def J_inspect(self, path: str) -> dict:
         """Return structured metadata for a TDTP file without decompressing it.
 
@@ -163,6 +180,20 @@ class TDTPClientJSON:
             TDTPParseError: if the file cannot be parsed.
         """
         return _call(lib.J_Inspect, path.encode())
+
+    def J_inspect_bytes(self, data: bytes) -> dict:
+        """In-memory counterpart of J_inspect — metadata from a buffer, no decompression.
+
+        Args:
+            data: raw TDTP XML bytes (plain or compressed).
+
+        Returns:
+            Same shape as :meth:`J_inspect`.
+
+        Raises:
+            TDTPParseError: if the buffer cannot be parsed.
+        """
+        return _call(lib.J_InspectBytes, data, len(data))
 
     def J_test(self, path: str) -> dict:
         """Dry-run integrity check of a TDTP file or multi-part batch (no DB).
@@ -227,6 +258,52 @@ class TDTPClientJSON:
         """
         return _call(lib.J_Verify, path.encode())
 
+    def J_verify_mercury(self, path: str, mercury_url: str) -> dict:
+        """Verify a v1.4 packet against a live xzMercury hash registry.
+
+        Network-verifying counterpart of :meth:`J_verify`. Confirms the
+        packet's fingerprint was registered by an authenticated producer
+        (``GET /api/hashes/{uuid}/{part}?xxh3=...``), then recomputes the
+        local xxh3 hashes exactly like :meth:`J_verify`. Equivalent to
+        ``tdtpcli --test --mercury-url <url>``.
+
+        Args:
+            path: path to the ``.tdtp`` file.
+            mercury_url: base URL of the xzMercury instance, e.g.
+                ``"http://mercury:3000"``. Must not be empty — use
+                :meth:`J_verify` if you only want the local integrity check.
+
+        Returns::
+
+            {
+                "ok": <bool>,                 # False only for a definitive
+                                               # verdict: tampered / not
+                                               # registered / local mismatch
+                "version": <str>,             # "1.4", or "1.3.1" pre-integrity
+                "mercury_verified": <bool>,   # True only if Mercury confirmed
+                                               # the fingerprint over the network
+                "degraded": <bool>,           # True if Mercury was unreachable
+                                               # (local xxh3 was still checked)
+                "degraded_reason": <str>,
+                "sender": <str>,              # producer identity (Mercury only)
+                "packet_xxh3": <hex>,
+                "detail": <str>,
+            }
+
+        Raises:
+            TDTPParseError: if the file cannot be parsed or decompressed, or
+                if ``mercury_url`` is empty.
+
+        Example::
+
+            v = client.J_verify_mercury("incoming.tdtp.xml", "http://mercury:3000")
+            if not v["ok"]:
+                raise SystemExit("rejected: " + v["detail"])
+            if v["degraded"]:
+                log.warning("Mercury unavailable: %s", v["degraded_reason"])
+        """
+        return _call(lib.J_VerifyMercury, path.encode(), mercury_url.encode())
+
     def J_stamp(self, data: dict, path: str) -> dict:
         """Compute v1.4 XXH3 integrity hashes and write a stamped TDTP file.
 
@@ -289,6 +366,40 @@ class TDTPClientJSON:
             TDTPWriteError: if writing fails.
         """
         _call(lib.J_WriteFile, json.dumps(data).encode(), path.encode())
+
+    def J_write_columnar(self, schema: dict, header: dict, columns: list[list[str]], path: str) -> None:
+        """Write a TDTP file from column-major data (avoids row transposition in Python).
+
+        Compared with :meth:`J_write`, the caller sends one array per column
+        (e.g. ``df[col].tolist()`` / ``numpy`` arrays) and Go transposes to
+        rows in a single allocation — useful for large datasets built from
+        columnar sources (pandas, pyarrow, numpy).
+
+        Args:
+            schema: ``{"fields": [{"name": ..., "type": ...}, ...]}``.
+            header: ``{"type": ..., "table_name": ..., "message_id": ...,
+                      "timestamp": ...}`` (same shape as J_read's "header").
+            columns: column-major string data, ``columns[col_idx][row_idx]``;
+                     must have exactly ``len(schema["fields"])`` columns, and
+                     every column must have the same length.
+            path: destination file path.
+
+        Raises:
+            TDTPWriteError: if the columnar input is malformed or writing fails.
+
+        Example::
+
+            client.J_write_columnar(
+                schema={"fields": [{"name": "id", "type": "INTEGER"},
+                                    {"name": "name", "type": "TEXT"}]},
+                header={"type": "reference", "table_name": "users",
+                        "message_id": "...", "timestamp": "2026-01-01T00:00:00Z"},
+                columns=[["1", "2"], ["Alice", "Bob"]],
+                path="users.tdtp.xml",
+            )
+        """
+        payload = {"schema": schema, "header": header, "columns": columns}
+        _call(lib.J_WriteColumnar, json.dumps(payload).encode(), path.encode())
 
     def J_export_all(
         self,
