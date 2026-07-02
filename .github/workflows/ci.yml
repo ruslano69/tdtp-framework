@@ -14,8 +14,9 @@ jobs:
     strategy:
       fail-fast: false  # show all failures, not just the first
       matrix:
-        # go.mod requires go 1.24.0; older versions fail with GOTOOLCHAIN=local
-        go-version: ['1.24', 'stable']
+        # go.mod requires go 1.25.0 (jackc/pgx/v5 v5.9.2, GO-2026-5004 fix);
+        # older versions fail with GOTOOLCHAIN=local
+        go-version: ['1.25', 'stable']
 
     steps:
     - name: Checkout code
@@ -30,7 +31,7 @@ jobs:
     - name: Verify dependencies
       env:
         GOTOOLCHAIN: local  # use the matrix Go, never auto-download toolchain
-        GOWORK: off         # go.work requires go1.24; disable for matrix < 1.24
+        GOWORK: off         # go.work requires go1.25; disable for matrix < 1.25
       run: |
         go mod verify
         go mod download
@@ -52,7 +53,7 @@ jobs:
       run: go test -tags nokafka -short -race -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
-      if: matrix.go-version == '1.24'
+      if: matrix.go-version == '1.25'
       uses: codecov/codecov-action@v4
       with:
         file: ./coverage.txt
@@ -70,7 +71,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24.13'
+        go-version: '1.25.0'
         cache: true
 
     - name: Build tdtpcli (nokafka)
@@ -121,7 +122,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24.13'
+        go-version: '1.25.0'
         cache: true
 
     - name: Run integration tests
