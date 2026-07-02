@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.3.1">
+  <Header>
+    <Type>reference</Type>
+    <TableName>users_special_values</TableName>
+    <MessageID>REF-2026-SV001</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>4</RecordsInPart>
+    <Timestamp>2026-01-01T00:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="ID"      type="INTEGER" key="true"></Field>
+    <Field name="Name"    type="TEXT"></Field>
+    <Field name="City"    type="TEXT">
+      <SpecialValues>
+        <Null marker="[NULL]"/>
+      </SpecialValues>
+    </Field>
+    <Field name="Balance" type="INTEGER">
+      <SpecialValues>
+        <Null marker="[NULL]"/>
+      </SpecialValues>
+    </Field>
+  </Schema>
+  <Data>
+    <!-- v1.3.1: "[NULL]" is the explicit NULL marker; "" (empty) is a real empty string -->
+    <R>1|Alice|[NULL]|1500</R>
+    <R>2|Bob|Moscow|2000</R>
+    <R>3|Carol|[NULL]|[NULL]</R>
+    <R>4|Dave|SPb|1200</R>
+  </Data>
+</DataPacket>

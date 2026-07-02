@@ -145,6 +145,7 @@ func errorCodeFor(msg string) string {
 		{"invalid options", errCodeInvalid},
 		{"invalid config", errCodeInvalid},
 		{"invalid chain", errCodeInvalid},
+		{"invalid input", errCodeInvalid}, // J_WriteColumnar shape validation (missing/mismatched fields)
 		{"diff error", errCodeDiff},
 		{"old data error", errCodeDiff},
 		{"new data error", errCodeDiff},

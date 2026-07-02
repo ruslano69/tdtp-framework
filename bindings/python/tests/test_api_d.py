@@ -56,6 +56,25 @@ class TestDRead:
         handle.free()  # must not raise or crash
 
 
+class TestDParseBytes:
+    def test_matches_read_file(self, d_client, sample_tdtp_path) -> None:
+        raw = sample_tdtp_path.read_bytes()
+        with d_client.D_parse_bytes_ctx(raw) as h, \
+                d_client.D_read_ctx(str(sample_tdtp_path)) as h_file:
+            assert h.get_rows() == h_file.get_rows()
+            assert h.get_schema() == h_file.get_schema()
+
+    def test_invalid_bytes_raises(self, d_client) -> None:
+        with pytest.raises(TDTPParseError):
+            d_client.D_parse_bytes(b"not a tdtp packet")
+
+    def test_context_manager_frees(self, d_client, sample_tdtp_path) -> None:
+        raw = sample_tdtp_path.read_bytes()
+        with d_client.D_parse_bytes_ctx(raw) as h:
+            pass
+        assert h._freed is True
+
+
 class TestDWrite:
     def test_roundtrip_rows_equal(self, d_client, sample_tdtp_path, tmp_tdtp) -> None:
         with d_client.D_read_ctx(str(sample_tdtp_path)) as src:

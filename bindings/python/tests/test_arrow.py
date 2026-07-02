@@ -128,11 +128,11 @@ class TestArrowWrite:
     def test_arrow_to_data_schema(self, typed_table) -> None:
         from tdtp.arrow_ext import arrow_to_data
         d = arrow_to_data(typed_table, table_name="test")
-        fields = d["schema"]["Fields"]
-        assert [f["Name"] for f in fields] == ["IDs", "Scores", "Tags"]
-        assert fields[0]["Type"] == "INTEGER"
-        assert fields[1]["Type"] == "REAL"
-        assert fields[2]["Type"] == "TEXT"
+        fields = d["schema"]["fields"]
+        assert [f["name"] for f in fields] == ["IDs", "Scores", "Tags"]
+        assert fields[0]["type"] == "INTEGER"
+        assert fields[1]["type"] == "REAL"
+        assert fields[2]["type"] == "TEXT"
 
     def test_arrow_to_data_row_count(self, typed_table) -> None:
         from tdtp.arrow_ext import arrow_to_data
@@ -217,6 +217,6 @@ class TestArrowWrite:
         raw_copy = db.read(str(out))
         assert len(raw_copy["data"]) == len(raw_orig["data"])
         # Integer and string columns must be identical.
-        orig_names = [f.get("Name", f.get("name", "")) for f in raw_orig["schema"].get("Fields", [])]
-        copy_names = [f.get("Name", f.get("name", "")) for f in raw_copy["schema"].get("Fields", [])]
+        orig_names = [f.get("name", f.get("name", "")) for f in raw_orig["schema"].get("fields", [])]
+        copy_names = [f.get("name", f.get("name", "")) for f in raw_copy["schema"].get("fields", [])]
         assert orig_names == copy_names

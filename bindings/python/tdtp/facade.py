@@ -78,9 +78,17 @@ class Tdtp:
         """Assemble a ``_part_N_of_M`` batch into one dataset (pass any part)."""
         return self._j.J_read_multipart(path)
 
+    def parse_bytes(self, data: bytes) -> dict:
+        """Parse a TDTP blob already in memory (in-memory counterpart of read)."""
+        return self._j.J_parse_bytes(data)
+
     def write(self, data: dict, path: str) -> None:
         """Write a dataset dict to a ``.tdtp`` file."""
         self._j.J_write(data, path)
+
+    def write_columnar(self, schema: dict, header: dict, columns: list[list[str]], path: str) -> None:
+        """Write column-major data (avoids row transposition for numpy/pyarrow sources)."""
+        self._j.J_write_columnar(schema, header, columns, path)
 
     def export(self, data: dict, base_path: str, **opts: Any) -> dict:
         """Partition + write a dataset (optionally compress / compact).
@@ -97,6 +105,10 @@ class Tdtp:
         """Structured packet metadata without decompressing the data section."""
         return self._j.J_inspect(path)
 
+    def inspect_bytes(self, data: bytes) -> dict:
+        """In-memory counterpart of inspect — metadata from a buffer, no decompression."""
+        return self._j.J_inspect_bytes(data)
+
     def test(self, path: str) -> dict:
         """Dry-run integrity check (parts present, checksum, decompress, rows)."""
         return self._j.J_test(path)
@@ -104,6 +116,10 @@ class Tdtp:
     def verify(self, path: str) -> dict:
         """Verify v1.4 XXH3 integrity hashes (local, no Mercury)."""
         return self._j.J_verify(path)
+
+    def verify_mercury(self, path: str, mercury_url: str) -> dict:
+        """Verify a v1.4 packet against a live xzMercury hash registry (network call)."""
+        return self._j.J_verify_mercury(path, mercury_url)
 
     def stamp(self, data: dict, path: str) -> dict:
         """Compute XXH3 hashes and write a stamped v1.4 file; returns fingerprints."""

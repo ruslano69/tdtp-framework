@@ -22,13 +22,22 @@ import (
 // D_FreeBuffer. For D_ColumnUTF8 both the data buffer (return value) and the
 // offsets buffer (out-param) must be freed.
 
-// cellValue returns the string value at column ci of a D_Row, or "" if absent.
-func cellValue(row C.D_Row, ci int) string {
-	if ci < 0 || ci >= int(row.value_count) {
+// cellValue returns the string value at (rowIdx, colIdx) in pkt's flat
+// row_data/row_offsets buffer (see tdtp_structs.h D_Packet doc), or "" if
+// colIdx is out of range.
+func cellValue(pkt *C.D_Packet, rowIdx, colIdx int) string {
+	cols := int(pkt.col_count)
+	if colIdx < 0 || colIdx >= cols || pkt.row_data == nil {
 		return ""
 	}
-	vals := unsafe.Slice(row.values, int(row.value_count))
-	return C.GoString(vals[ci])
+	k := rowIdx*cols + colIdx
+	offs := unsafe.Slice(pkt.row_offsets, int(pkt.row_count)*cols+1)
+	start, end := offs[k], offs[k+1]
+	if start == end {
+		return ""
+	}
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(pkt.row_data)), end)
+	return string(buf[start:end])
 }
 
 // D_ColumnFloat64 extracts column colIdx as a contiguous float64 buffer.
@@ -43,10 +52,9 @@ func D_ColumnFloat64(pkt *C.D_Packet, colIdx C.int) *C.double {
 	}
 	buf := (*C.double)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.double(0)))))
 	out := unsafe.Slice(buf, n)
-	rows := unsafe.Slice(pkt.rows, n)
 	ci := int(colIdx)
 	for i := 0; i < n; i++ {
-		s := cellValue(rows[i], ci)
+		s := cellValue(pkt, i, ci)
 		if s == "" {
 			out[i] = C.double(math.NaN())
 			continue
@@ -73,10 +81,9 @@ func D_ColumnInt64(pkt *C.D_Packet, colIdx C.int) *C.longlong {
 	}
 	buf := (*C.longlong)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.longlong(0)))))
 	out := unsafe.Slice(buf, n)
-	rows := unsafe.Slice(pkt.rows, n)
 	ci := int(colIdx)
 	for i := 0; i < n; i++ {
-		s := cellValue(rows[i], ci)
+		s := cellValue(pkt, i, ci)
 		if s == "" {
 			out[i] = 0
 			continue
@@ -100,7 +107,6 @@ func D_ColumnInt64(pkt *C.D_Packet, colIdx C.int) *C.longlong {
 //export D_ColumnUTF8
 func D_ColumnUTF8(pkt *C.D_Packet, colIdx C.int, outOffsets **C.int, outNBytes *C.int) *C.char {
 	n := int(pkt.row_count)
-	rows := unsafe.Slice(pkt.rows, n)
 	ci := int(colIdx)
 
 	// First pass: gather values and compute offsets.
@@ -108,7 +114,7 @@ func D_ColumnUTF8(pkt *C.D_Packet, colIdx C.int, outOffsets **C.int, outNBytes *
 	offs := make([]int32, n+1)
 	total := 0
 	for i := 0; i < n; i++ {
-		s := cellValue(rows[i], ci)
+		s := cellValue(pkt, i, ci)
 		strs[i] = s
 		offs[i] = int32(total)
 		total += len(s)

@@ -82,16 +82,16 @@ type Header struct {
 // XXH3 (since TDTP v1.4) — xxh3_128 fingerprint of the canonical Schema
 // bytes (excluding the xxh3 attribute itself). Computed by ComputeIntegrity.
 type Schema struct {
-	Fields     []Field     `xml:"Field"`
-	Dictionary *Dictionary `xml:"Dictionary,omitempty"`
-	XXH3       string      `xml:"xxh3,attr,omitempty"` // v1.4: xxh3_128 of Schema content
+	Fields     []Field     `xml:"Field"                 json:"fields"`
+	Dictionary *Dictionary `xml:"Dictionary,omitempty"  json:"dictionary,omitempty"`
+	XXH3       string      `xml:"xxh3,attr,omitempty"   json:"xxh3,omitempty"` // v1.4: xxh3_128 of Schema content
 }
 
 // Dictionary — обёртка над []DictEntry, чтобы encoding/xml корректно
 // опускал секцию когда нет записей (`omitempty` для slice работает
 // только на содержимом, не на контейнерном теге).
 type Dictionary struct {
-	Entries []DictEntry `xml:"Entry"`
+	Entries []DictEntry `xml:"Entry" json:"entries"`
 }
 
 // DictEntry — одна запись словаря: короткий токен (например "@W3") и его
@@ -99,23 +99,23 @@ type Dictionary struct {
 // данных РАВНА токену целиком (whole-cell match по regex
 // ^@[A-Za-z][A-Za-z0-9_]*$). Substring внутри текста не трогается.
 type DictEntry struct {
-	Short string `xml:"short,attr"`
-	Full  string `xml:"full,attr"`
+	Short string `xml:"short,attr" json:"short"`
+	Full  string `xml:"full,attr"  json:"full"`
 }
 
 // Field описывает одно поле таблицы
 type Field struct {
-	Name          string         `xml:"name,attr"`
-	Type          string         `xml:"type,attr"`
-	Length        int            `xml:"length,attr,omitempty"`
-	Precision     int            `xml:"precision,attr,omitempty"`
-	Scale         int            `xml:"scale,attr,omitempty"`
-	Key           bool           `xml:"key,attr,omitempty"`
-	Timezone      string         `xml:"timezone,attr,omitempty"`
-	Subtype       string         `xml:"subtype,attr,omitempty"`
-	ReadOnly      bool           `xml:"readonly,attr,omitempty"` // Read-only поля (timestamp, computed)
-	Fixed         bool           `xml:"fixed,attr,omitempty"`    // v1.3.1: значение не меняется в пределах пакета
-	SpecialValues *SpecialValues `xml:"SpecialValues,omitempty"` // v1.3.1: маркеры специальных значений
+	Name          string         `xml:"name,attr"                        json:"name"`
+	Type          string         `xml:"type,attr"                        json:"type"`
+	Length        int            `xml:"length,attr,omitempty"            json:"length"`
+	Precision     int            `xml:"precision,attr,omitempty"         json:"precision"`
+	Scale         int            `xml:"scale,attr,omitempty"             json:"scale"`
+	Key           bool           `xml:"key,attr,omitempty"               json:"key"`
+	Timezone      string         `xml:"timezone,attr,omitempty"          json:"timezone,omitempty"`
+	Subtype       string         `xml:"subtype,attr,omitempty"           json:"subtype,omitempty"`
+	ReadOnly      bool           `xml:"readonly,attr,omitempty"          json:"readonly,omitempty"`       // Read-only поля (timestamp, computed)
+	Fixed         bool           `xml:"fixed,attr,omitempty"             json:"fixed,omitempty"`          // v1.3.1: значение не меняется в пределах пакета
+	SpecialValues *SpecialValues `xml:"SpecialValues,omitempty"          json:"special_values,omitempty"` // v1.3.1: маркеры специальных значений
 
 	// OriginalName is set by the sanitizer when Name is transformed into a safe
 	// SQL identifier. It is never serialized (xml:"-", json:"-") and carries the
@@ -125,16 +125,16 @@ type Field struct {
 
 // SpecialValues содержит маркеры специальных значений для поля (v1.3.1)
 type SpecialValues struct {
-	Null        *MarkerValue `xml:"Null,omitempty"`
-	Infinity    *MarkerValue `xml:"Infinity,omitempty"`
-	NegInfinity *MarkerValue `xml:"NegInfinity,omitempty"`
-	NaN         *MarkerValue `xml:"NaN,omitempty"`
-	NoDate      *MarkerValue `xml:"NoDate,omitempty"`
+	Null        *MarkerValue `xml:"Null,omitempty"        json:"null,omitempty"`
+	Infinity    *MarkerValue `xml:"Infinity,omitempty"    json:"infinity,omitempty"`
+	NegInfinity *MarkerValue `xml:"NegInfinity,omitempty" json:"neg_infinity,omitempty"`
+	NaN         *MarkerValue `xml:"NaN,omitempty"         json:"nan,omitempty"`
+	NoDate      *MarkerValue `xml:"NoDate,omitempty"      json:"no_date,omitempty"`
 }
 
 // MarkerValue содержит строковый маркер специального значения
 type MarkerValue struct {
-	Marker string `xml:"marker,attr"`
+	Marker string `xml:"marker,attr" json:"marker"`
 }
 
 // Data содержит табличные данные

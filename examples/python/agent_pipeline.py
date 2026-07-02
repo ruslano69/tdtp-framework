@@ -67,7 +67,7 @@ def main() -> None:
     loaded = db.read(str(signed))
     rich = db.filter(loaded, "City = 'Moscow' AND Balance > 1000")
     ranked = db.sort(rich, [{"field": "Balance", "direction": "desc"}])
-    bal = [f["Name"] for f in ranked["schema"]["Fields"]].index("Balance")
+    bal = [f["name"] for f in ranked["schema"]["fields"]].index("Balance")
     print("top Moscow customers:",
           [(r[1], r[bal]) for r in ranked["data"]])
 

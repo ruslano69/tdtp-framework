@@ -11,6 +11,7 @@ D_MaskConfig.fields is owned by Python ctypes; D_FreeMaskConfig is a no-op.
 """
 from __future__ import annotations
 
+import array
 import ctypes
 
 
@@ -61,39 +62,28 @@ class D_Schema(ctypes.Structure):
 
 
 # ---------------------------------------------------------------------------
-# D_Row — one parsed data row
-# ---------------------------------------------------------------------------
-
-class D_Row(ctypes.Structure):
-    """Array of string values for a single data row."""
-    _fields_ = [
-        ("values",      ctypes.POINTER(ctypes.c_char_p)),
-        ("value_count", ctypes.c_int),
-    ]
-
-    def as_list(self) -> list[str]:
-        n = self.value_count
-        if n <= 0 or not self.values:
-            return []
-        return [
-            (self.values[i] or b"").decode(errors="replace")
-            for i in range(n)
-        ]
-
-
-# ---------------------------------------------------------------------------
 # D_Packet — primary result / argument struct
 # ---------------------------------------------------------------------------
 
 class D_Packet(ctypes.Structure):
     """Full TDTP data packet (schema + rows + metadata).
 
+    Row data is a single flat buffer (row_data) plus an offsets array
+    (row_offsets, row_count*col_count+1 int32 entries) — the same layout
+    D_ColumnUTF8 uses for one column, generalized to the whole grid. get_rows()
+    bulk-copies both with two ctypes.string_at() calls and slices/decodes in
+    pure Python, instead of dereferencing a char* per cell (the previous
+    D_Row*-array layout forced one ctypes/FFI crossing per cell on every read
+    — see git history for the row-major-array version this replaced).
+
     Invariant: must be released via lib.D_FreePacket(ctypes.byref(pkt))
     after use. Do not share across threads without external synchronisation.
     """
     _fields_ = [
-        ("rows",           ctypes.POINTER(D_Row)),
+        ("row_data",       ctypes.c_void_p),
+        ("row_offsets",    ctypes.POINTER(ctypes.c_int32)),
         ("row_count",      ctypes.c_int),
+        ("col_count",      ctypes.c_int),
         ("schema",         D_Schema),
         ("msg_type",       ctypes.c_char * 32),
         ("table_name",     ctypes.c_char * 256),
@@ -111,10 +101,29 @@ class D_Packet(ctypes.Structure):
         return self.error.decode(errors="replace").rstrip("\x00")
 
     def get_rows(self) -> list[list[str]]:
-        n = self.row_count
-        if n <= 0 or not self.rows:
+        n, cols = self.row_count, self.col_count
+        if n <= 0:
             return []
-        return [self.rows[i].as_list() for i in range(n)]
+        if cols <= 0 or not self.row_data:
+            return [[] for _ in range(n)]
+        n_offsets = n * cols + 1
+
+        # Two bulk FFI reads (offsets, then payload) instead of one per cell.
+        off_bytes = ctypes.string_at(self.row_offsets, n_offsets * 4)
+        offsets = array.array("i")
+        offsets.frombytes(off_bytes)
+        data = ctypes.string_at(self.row_data, offsets[n * cols])
+
+        rows = []
+        k = 0
+        for _ in range(n):
+            row = [
+                data[offsets[k + j]:offsets[k + j + 1]].decode(errors="replace")
+                for j in range(cols)
+            ]
+            k += cols
+            rows.append(row)
+        return rows
 
     def get_schema(self) -> list[dict]:
         return self.schema.as_list()
