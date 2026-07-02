@@ -154,7 +154,7 @@ def _serialize(v) -> str:
     which is the single source of truth for wire-format decisions.
 
     - None / NaN / pd.NA / pd.NaT      → ""
-    - bool / numpy.bool_               → "true" / "false"  (lowercase)
+    - bool / numpy.bool_               → "1" / "0"  (TDTP BOOLEAN canonical format)
     - float with no fractional part    → str(int(v))  e.g. 71160.0 → "71160"
       (matches Go strconv.FormatFloat behavior with -1 precision)
     - bytes / bytearray                → Go J_SerializeValue("BLOB", hex)
@@ -168,13 +168,14 @@ def _serialize(v) -> str:
     if _is_na(v):
         return ""
     # bool must be checked before int (bool is subclass of int in Python)
+    # TDTP BOOLEAN canonical format is "1"/"0" (parseBoolean in schema/converter.go)
     if isinstance(v, bool):
-        return "true" if v else "false"
+        return "1" if v else "0"
     try:
         # pd.NA-backed boolean arrays yield numpy.bool_ on iteration
         import numpy as _np
         if isinstance(v, _np.bool_):
-            return "true" if v else "false"
+            return "1" if v else "0"
         # numpy float with no fractional part: 71160.0 → "71160" (matches Go)
         if isinstance(v, _np.floating) and v.is_integer():
             return str(int(v))
@@ -197,27 +198,32 @@ def _serialize(v) -> str:
 
 
 def _extract_fields(data: dict) -> list[dict]:
-    """Extract schema fields from a J_read dict (handles upper/lowercase keys)."""
+    """Extract schema fields from a J_read dict.
+
+    Canonical key is snake_case "fields" (Field/Schema carry json tags as of
+    types.go). "Fields" (PascalCase) is kept as a fallback for DLLs built
+    before the json tags were added.
+    """
     schema = data.get("schema", {})
-    # J_* API uses uppercase 'Fields'; keep compatible with any casing
-    return schema.get("Fields", schema.get("fields", []))
+    return schema.get("fields") or schema.get("Fields", [])
 
 
 def _field_name(f: dict) -> str:
-    return f.get("Name", f.get("name", ""))
+    return f.get("name") or f.get("Name", "")
 
 
 def _field_type(f: dict) -> str:
-    return f.get("Type", f.get("type", "TEXT"))
+    return f.get("type") or f.get("Type", "TEXT")
 
 
 def _field_special_values(f: dict) -> dict | None:
-    """Return SpecialValues dict from a schema field, or None.
+    """Return the special-values marker dict from a schema field, or None.
 
-    Go JSON encodes struct field names in PascalCase (no json tags),
-    so the key is "SpecialValues".  Fallback to camelCase for safety.
+    Canonical key is snake_case "special_values" (Field carries a json tag
+    as of types.go). "SpecialValues" / "specialValues" are kept as fallbacks
+    for DLLs built before the json tags were added.
     """
-    return f.get("SpecialValues") or f.get("specialValues") or None
+    return f.get("special_values") or f.get("SpecialValues") or f.get("specialValues") or None
 
 
 def _apply_special_values(series: "_pd.Series", sv: dict) -> "_pd.Series":
@@ -226,35 +232,40 @@ def _apply_special_values(series: "_pd.Series", sv: dict) -> "_pd.Series":
     Without this step, astype("float64") crashes on "INF"/"-INF"/"[NULL]",
     and date columns crash on "0000-00-00".
 
-    Go serialises SpecialValues fields in PascalCase without json tags:
-    {"Null": {"Marker": "[NULL]"}, "Infinity": {"Marker": "INF"}, ...}
-    Both PascalCase and camelCase keys are tried for forward-compatibility.
+    Canonical keys are snake_case (SpecialValues/MarkerValue carry json tags
+    as of types.go): {"null": {"marker": "[NULL]"}, "infinity": {"marker": "INF"}, ...}
+    PascalCase/camelCase are kept as fallbacks for DLLs built before the json
+    tags were added.
     """
-    def _marker(pascal_key: str) -> str | None:
-        node = sv.get(pascal_key) or sv.get(pascal_key[0].lower() + pascal_key[1:])
+    def _marker(snake_key: str, pascal_key: str) -> str | None:
+        node = (
+            sv.get(snake_key)
+            or sv.get(pascal_key)
+            or sv.get(pascal_key[0].lower() + pascal_key[1:])
+        )
         if not node:
             return None
-        return node.get("Marker") or node.get("marker") or None
+        return node.get("marker") or node.get("Marker") or None
 
-    null_m = _marker("Null")
+    null_m = _marker("null", "Null")
     if null_m:
         series = series.replace(null_m, None)
 
-    nan_m = _marker("NaN")
+    nan_m = _marker("nan", "NaN")
     if nan_m:
         # Leave as "NaN" string — pandas astype("float64") recognises it natively
         pass  # already canonical
 
-    inf_m = _marker("Infinity")
+    inf_m = _marker("infinity", "Infinity")
     if inf_m:
         # pandas astype("float64") recognises "inf" but NOT "INF" (spec marker)
         series = series.replace(inf_m, "inf")
 
-    neg_inf_m = _marker("NegInfinity")
+    neg_inf_m = _marker("neg_infinity", "NegInfinity")
     if neg_inf_m:
         series = series.replace(neg_inf_m, "-inf")
 
-    no_date_m = _marker("NoDate")
+    no_date_m = _marker("no_date", "NoDate")
     if no_date_m:
         # Zero-date has no standard Python equivalent → None
         series = series.replace(no_date_m, None)
@@ -360,19 +371,19 @@ def pandas_to_data(df: "pd.DataFrame", table_name: str = "data", message_id: str
     if not message_id:
         message_id = str(uuid.uuid4())
 
-    # Build schema fields (uppercase keys — J_* convention)
+    # Build schema fields (snake_case keys — canonical J_* JSON convention)
     fields = [
-        {"Name": str(col), "Type": _pandas_tdtp_type(dtype)}
+        {"name": str(col), "type": _pandas_tdtp_type(dtype)}
         for col, dtype in df.dtypes.items()
     ]
 
-    # Serialise rows: every value → TDTP string; booleans → "true"/"false"
+    # Serialise rows: every value → TDTP string; booleans → "1"/"0"
     rows: list[list[str]] = []
     for tup in df.itertuples(index=False, name=None):
         rows.append([_serialize(v) for v in tup])
 
     return {
-        "schema": {"Fields": fields},
+        "schema": {"fields": fields},
         "header": {
             "type":       "reference",
             "table_name": table_name,

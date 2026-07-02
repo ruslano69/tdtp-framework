@@ -274,6 +274,45 @@ diff = client.J_diff(old_data, new_data)
 # }
 ```
 
+### Integrity и xzMercury (v1.4)
+
+`J_verify` проверяет только **локальные** xxh3-хеши пакета — без сети,
+без зависимости от Mercury:
+
+```python
+v = client.J_verify("incoming.tdtp.xml")
+# v = {"ok": True, "has_integrity": True, "packet_xxh3": "..."}
+```
+
+`J_verify_mercury` — сетевой аналог: делает `GET /api/hashes/{uuid}/{part}`
+против живого xzMercury, чтобы подтвердить, что пакет зарегистрирован
+аутентифицированным продюсером, и только затем проверяет локальные хеши.
+Это C ABI-эквивалент `tdtpcli --test --mercury-url <url>`:
+
+```python
+v = client.J_verify_mercury("incoming.tdtp.xml", "http://mercury:3000")
+# v = {"ok": True, "mercury_verified": True, "sender": "svc-exporter", ...}
+
+if not v["ok"]:
+    raise SystemExit("rejected: " + v["detail"])
+if v["degraded"]:
+    # Mercury был недоступен — прошла только локальная проверка
+    log.warning("Mercury unavailable: %s", v["degraded_reason"])
+```
+
+> **Важно:** `J_verify` не обращается к сети никогда — это осознанное
+> архитектурное разделение. Если нужна гарантия, что пакет пришёл от
+> легитимного продюсера (а не просто не был повреждён в пути), используйте
+> `J_verify_mercury`.
+
+`J_stamp` — сторона продюсера: вычисляет xxh3-хеши и пишет v1.4-файл
+(аналог `tdtpcli --export --integrity` без регистрации в Mercury):
+
+```python
+r = client.J_stamp(data, "signed.tdtp.xml")
+# r = {"ok": True, "path": ..., "packet_xxh3": ..., "schema_xxh3": ..., "data_xxh3": ...}
+```
+
 ---
 
 ## Direct API (D_*)
@@ -401,12 +440,12 @@ client.J_write(result, "high_value.tdtp.xml")
 
 ### Сериализация значений (`pandas_ext.py`)
 
-Сериализация делегируется в Go (`J_SerializeValue`) — единый источник правды:
+Сериализация делегируется в Go (`J_SerializeValue`) — единый источник правды для большинства типов. Исключение: `bool`/`numpy.bool_` сериализуются в Python напрямую в `"1"`/`"0"`, минуя Go, поскольку тип Python не передаётся через C ABI.
 
 | Тип Python | Результат |
 |-----------|-----------|
 | `None` / `NaN` / `pd.NA` / `pd.NaT` | `""` (NULL в TDTP) |
-| `bool` / `numpy.bool_` | `"true"` / `"false"` |
+| `bool` / `numpy.bool_` | `"1"` / `"0"` |
 | `float` без дроби (71160.0) | `"71160"` |
 | `bytes` / `bytearray` | Base64 (через Go BLOB serializer) |
 | `datetime` / `pd.Timestamp` | UTC RFC3339 (через Go TIMESTAMP serializer) |
@@ -465,7 +504,8 @@ make bench
 
 `tests/testdata/`:
 - `users.tdtp.xml` — 8 строк, 7 полей (ID, Name, Email, City, Balance, IsActive, CreatedAt)
-- `users_nullable.tdtp.xml` — содержит NULL-значения
+- `users_nullable.tdtp.xml` — legacy v1.0-формат: пустая строка используется как NULL-маркер (неоднозначно, не различает NULL и `""`). Не демонстрирует механизм `SpecialValues` v1.3.1.
+- `users_special_values.tdtp.xml` — v1.3.1: явные `SpecialValues` с `Null marker="[NULL]"` (unambiguous NULL vs пустая строка)
 - `users_compressed.tdtp.xml` — сжатый файл (zstd)
 
 Константы в `tests/conftest.py`:

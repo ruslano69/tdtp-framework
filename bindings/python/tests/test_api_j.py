@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from tdtp import TDTPClientJSON
-from tdtp.exceptions import TDTPFilterError, TDTPParseError, TDTPProcessorError
+from tdtp.exceptions import TDTPError, TDTPFilterError, TDTPParseError, TDTPProcessorError
 
 from conftest import (
     SAMPLE_FIELD_NAMES,
@@ -70,9 +70,9 @@ class TestJRead:
         assert "data"   in sample_data_j
 
     def test_schema_has_fields(self, j_client, sample_data_j) -> None:
-        fields = sample_data_j["schema"]["Fields"]
+        fields = sample_data_j["schema"]["fields"]
         assert len(fields) == len(SAMPLE_FIELD_NAMES)
-        names = [f["Name"] for f in fields]
+        names = [f["name"] for f in fields]
         assert names == SAMPLE_FIELD_NAMES
 
     def test_data_row_count(self, j_client, sample_data_j) -> None:
@@ -118,7 +118,44 @@ class TestJWrite:
         assert out.exists()
         re_read = j_client.J_read(str(out))
         assert re_read["data"] == sample_data_j["data"]
-        assert [f["Name"] for f in re_read["schema"]["Fields"]] == SAMPLE_FIELD_NAMES
+        assert [f["name"] for f in re_read["schema"]["fields"]] == SAMPLE_FIELD_NAMES
+
+
+# ---------------------------------------------------------------------------
+# J_WriteColumnar — column-major write (avoids row transposition in Python)
+# ---------------------------------------------------------------------------
+
+class TestJWriteColumnar:
+    SCHEMA = {"fields": [{"name": "id", "type": "INTEGER", "key": True},
+                          {"name": "name", "type": "TEXT"},
+                          {"name": "score", "type": "REAL"}]}
+    HEADER = {"type": "reference", "table_name": "columnar_test",
+              "message_id": "COLTEST-0001", "timestamp": "2026-01-01T00:00:00Z"}
+
+    def test_roundtrip(self, j_client, tmp_path) -> None:
+        out = tmp_path / "columnar.tdtp.xml"
+        columns = [["1", "2", "3"], ["Alice", "Bob", "Carol"], ["1.5", "2.5", "3.5"]]
+        j_client.J_write_columnar(self.SCHEMA, self.HEADER, columns, str(out))
+
+        back = j_client.J_read(str(out))
+        assert back["data"] == [["1", "Alice", "1.5"], ["2", "Bob", "2.5"], ["3", "Carol", "3.5"]]
+        assert [f["name"] for f in back["schema"]["fields"]] == ["id", "name", "score"]
+
+    def test_empty_schema_raises(self, j_client, tmp_path) -> None:
+        out = tmp_path / "columnar.tdtp.xml"
+        with pytest.raises(TDTPError):
+            j_client.J_write_columnar({"fields": []}, self.HEADER, [], str(out))
+
+    def test_column_count_mismatch_raises(self, j_client, tmp_path) -> None:
+        out = tmp_path / "columnar.tdtp.xml"
+        with pytest.raises(TDTPError):
+            j_client.J_write_columnar(self.SCHEMA, self.HEADER, [["1", "2"]], str(out))
+
+    def test_row_length_mismatch_raises(self, j_client, tmp_path) -> None:
+        out = tmp_path / "columnar.tdtp.xml"
+        columns = [["1", "2"], ["Alice"], ["1.5", "2.5"]]  # 2nd column short one row
+        with pytest.raises(TDTPError):
+            j_client.J_write_columnar(self.SCHEMA, self.HEADER, columns, str(out))
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +421,7 @@ class TestJReadCompact:
         assert compact_data_j["header"]["table_name"] == COMPACT_TABLE_NAME
 
     def test_schema_field_names(self, j_client, compact_data_j) -> None:
-        names = [f["Name"] for f in compact_data_j["schema"]["Fields"]]
+        names = [f["name"] for f in compact_data_j["schema"]["fields"]]
         assert names == COMPACT_FIELD_NAMES
 
     def test_first_row_fully_populated(self, j_client, compact_data_j) -> None:
@@ -514,9 +551,9 @@ class TestJInspect:
         assert meta["compression"] == "none"
 
     def test_schema_fields_present(self, j_client, sample_tdtp_path) -> None:
-        # Schema uses the same packet.Schema shape as J_read (PascalCase keys).
+        # Schema uses the same packet.Schema shape as J_read (snake_case keys).
         meta = j_client.J_inspect(str(sample_tdtp_path))
-        names = [f["Name"] for f in meta["schema"]["Fields"]]
+        names = [f["name"] for f in meta["schema"]["fields"]]
         assert names == SAMPLE_FIELD_NAMES
 
     def test_compressed_metadata_without_decompress(self, j_client, compressed_tdtp_path) -> None:
@@ -537,12 +574,51 @@ class TestJInspect:
 
 
 # ---------------------------------------------------------------------------
+# J_ParseBytes — in-memory counterpart of J_ReadFile
+# ---------------------------------------------------------------------------
+
+class TestJParseBytes:
+    def test_matches_read_file(self, j_client, sample_tdtp_path, sample_data_j) -> None:
+        raw = sample_tdtp_path.read_bytes()
+        parsed = j_client.J_parse_bytes(raw)
+        assert parsed["data"] == sample_data_j["data"]
+        assert parsed["schema"] == sample_data_j["schema"]
+
+    def test_compressed_blob(self, j_client, compressed_tdtp_path) -> None:
+        raw = compressed_tdtp_path.read_bytes()
+        parsed = j_client.J_parse_bytes(raw)
+        assert len(parsed["data"]) == COMPRESSED_TOTAL_ROWS
+
+    def test_invalid_bytes_raises(self, j_client) -> None:
+        with pytest.raises(TDTPParseError):
+            j_client.J_parse_bytes(b"not a tdtp packet")
+
+
+# ---------------------------------------------------------------------------
+# J_InspectBytes — in-memory counterpart of J_Inspect
+# ---------------------------------------------------------------------------
+
+class TestJInspectBytes:
+    def test_matches_inspect_file(self, j_client, sample_tdtp_path) -> None:
+        raw = sample_tdtp_path.read_bytes()
+        meta = j_client.J_inspect_bytes(raw)
+        meta_file = j_client.J_inspect(str(sample_tdtp_path))
+        assert meta["table"] == meta_file["table"]
+        assert meta["fields_count"] == meta_file["fields_count"]
+        assert meta["total_rows"] == meta_file["total_rows"]
+
+    def test_invalid_bytes_raises(self, j_client) -> None:
+        with pytest.raises(TDTPParseError):
+            j_client.J_inspect_bytes(b"not a tdtp packet")
+
+
+# ---------------------------------------------------------------------------
 # J_Sort — order-by (Phase 1)
 # ---------------------------------------------------------------------------
 
 class TestJSort:
     def _balance_idx(self, data) -> int:
-        return [f["Name"] for f in data["schema"]["Fields"]].index("Balance")
+        return [f["name"] for f in data["schema"]["fields"]].index("Balance")
 
     def test_sort_desc(self, j_client, sample_data_j) -> None:
         out = j_client.J_sort(sample_data_j, [{"field": "Balance", "direction": "desc"}])
@@ -612,9 +688,11 @@ class TestJReadMultipart:
         p1 = copy.deepcopy(sample_data_j)
         p1["data"] = sample_data_j["data"][:half]
         p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        p1["header"]["records_in_part"] = len(p1["data"])
         p2 = copy.deepcopy(sample_data_j)
         p2["data"] = sample_data_j["data"][half:]
         p2["header"]["part_number"], p2["header"]["total_parts"] = 2, 2
+        p2["header"]["records_in_part"] = len(p2["data"])
         f1 = tmp_path / "U_part_1_of_2.tdtp.xml"
         f2 = tmp_path / "U_part_2_of_2.tdtp.xml"
         j_client.J_write(p1, str(f1))
@@ -661,7 +739,7 @@ class TestJExportCompact:
         out = tmp_path / "staff.tdtp.xml"
         res = j_client.J_export_all(dict(self.GROUPED), str(out), compact=True)
         meta = j_client.J_inspect(res["files"][0])
-        fixed = [f["Name"] for f in meta["schema"]["Fields"] if f.get("Fixed")]
+        fixed = [f["name"] for f in meta["schema"]["fields"] if f.get("fixed")]
         assert fixed == ["dept"]  # _dept stripped + marked fixed
 
     def test_compact_roundtrip_preserves_data(self, j_client, tmp_path) -> None:

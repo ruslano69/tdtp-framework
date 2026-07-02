@@ -16,7 +16,8 @@
     <Field name="Balance" type="INTEGER"></Field>
   </Schema>
   <Data>
-    <!-- City is empty (NULL) for rows 1 and 3 -->
+    <!-- Legacy v1.0 NULL convention: empty string = NULL (ambiguous, cannot distinguish NULL from "").
+         For unambiguous NULL handling see users_special_values.tdtp.xml (v1.3.1 SpecialValues). -->
     <R>1|Alice||1500</R>
     <R>2|Bob|Moscow|2000</R>
     <R>3|Carol||800</R>

@@ -25,7 +25,7 @@ type jColumnarInput struct {
 // columnarJSON must serialize to jColumnarInput:
 //
 //	{
-//	  "schema": {"Fields": [{"Name":"ID","Type":"INTEGER"}, ...]},
+//	  "schema": {"fields": [{"name":"ID","type":"INTEGER"}, ...]},
 //	  "header": {"type":"reference","table_name":"t","message_id":"m","timestamp":"..."},
 //	  "columns": [["1","2","3"], ["Alice","Bob","Carol"], ...]
 //	}

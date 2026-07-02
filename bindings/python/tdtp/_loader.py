@@ -104,9 +104,23 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     lib.J_ReadFile.argtypes = [ctypes.c_char_p]
     lib.J_ReadFile.restype = ctypes.c_void_p
 
+    # J_ParseBytes(*char, c_int) → *char  (in-memory counterpart of J_ReadFile;
+    # parses a TDTP blob already in memory, no filesystem access)
+    lib.J_ParseBytes.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    lib.J_ParseBytes.restype = ctypes.c_void_p
+
     # J_Inspect(*char) → *char  (structured metadata, no decompression)
     lib.J_Inspect.argtypes = [ctypes.c_char_p]
     lib.J_Inspect.restype = ctypes.c_void_p
+
+    # J_InspectBytes(*char, c_int) → *char  (in-memory counterpart of J_Inspect)
+    lib.J_InspectBytes.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    lib.J_InspectBytes.restype = ctypes.c_void_p
+
+    # J_WriteColumnar(*char, *char) → *char  (column-major write; avoids
+    # Python-side row transposition for numpy/pyarrow column data)
+    lib.J_WriteColumnar.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_WriteColumnar.restype = ctypes.c_void_p
 
     # J_ReadMultipart(*char) → *char  (assemble _part_N_of_M batch into one dataset)
     lib.J_ReadMultipart.argtypes = [ctypes.c_char_p]
@@ -119,6 +133,11 @@ def _configure_j_symbols(lib: ctypes.CDLL) -> None:
     # J_Verify(*char) → *char  (v1.4 XXH3 integrity verification, no Mercury)
     lib.J_Verify.argtypes = [ctypes.c_char_p]
     lib.J_Verify.restype = ctypes.c_void_p
+
+    # J_VerifyMercury(*char, *char) → *char  (v1.4 verification against a live
+    # xzMercury hash registry — the network-verifying counterpart of J_Verify)
+    lib.J_VerifyMercury.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.J_VerifyMercury.restype = ctypes.c_void_p
 
     # J_Stamp(*char, *char) → *char  (compute XXH3 hashes, write v1.4 file)
     lib.J_Stamp.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
@@ -182,6 +201,13 @@ def _configure_d_symbols(lib: ctypes.CDLL) -> None:
     # D_ReadFile(*char, *D_Packet) → c_int
     lib.D_ReadFile.argtypes = [ctypes.c_char_p, ctypes.POINTER(D_Packet)]
     lib.D_ReadFile.restype = ctypes.c_int
+
+    # D_ParseBytes(*char, c_int, *D_Packet) → c_int  (in-memory counterpart
+    # of D_ReadFile; parses a TDTP blob already in memory)
+    lib.D_ParseBytes.argtypes = [
+        ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(D_Packet),
+    ]
+    lib.D_ParseBytes.restype = ctypes.c_int
 
     # D_WriteFile(*D_Packet, *char) → c_int
     lib.D_WriteFile.argtypes = [ctypes.POINTER(D_Packet), ctypes.c_char_p]

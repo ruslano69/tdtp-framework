@@ -18,16 +18,20 @@ typedef struct {
     int      field_count;
 } D_Schema;
 
-/* D_Row mirrors packet.Row after parsing. */
+/* D_Packet is the primary result/argument struct for Direct functions.
+ *
+ * Row data is stored as a single flat buffer plus an offsets array — the
+ * same layout D_ColumnUTF8 uses for one column, generalized to the whole
+ * grid (row-major: cell (r,c) is data[offsets[r*col_count+c] .. offsets[r*col_count+c+1]]).
+ * offsets has row_count*col_count + 1 entries. This lets Python bulk-copy
+ * the entire row payload in one or two ctypes.string_at() calls instead of
+ * dereferencing a char* per cell — a per-row/per-cell D_Row* array (the
+ * previous layout) forced one FFI crossing per cell on every read. */
 typedef struct {
-    char** values;
-    int    value_count;
-} D_Row;
-
-/* D_Packet is the primary result/argument struct for Direct functions. */
-typedef struct {
-    D_Row*    rows;
+    char*     row_data;      /* concatenated cell bytes, row-major */
+    int*      row_offsets;   /* row_count*col_count + 1 entries */
     int       row_count;
+    int       col_count;
     D_Schema  schema;
     char      msg_type[32];
     char      table_name[256];

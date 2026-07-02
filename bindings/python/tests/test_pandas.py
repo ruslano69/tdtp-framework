@@ -95,7 +95,7 @@ class TestPandasToData:
     def test_column_names_preserved(self) -> None:
         df = pd.DataFrame({"Alpha": [1], "Beta": ["hello"]})
         result = pandas_to_data(df)
-        field_names = [f["Name"] for f in result["schema"]["Fields"]]
+        field_names = [f["name"] for f in result["schema"]["fields"]]
         assert field_names == ["Alpha", "Beta"]
 
     def test_row_count_preserved(self) -> None:
@@ -118,17 +118,17 @@ class TestPandasToData:
     def test_int_type_maps_to_integer(self) -> None:
         df = pd.DataFrame({"id": pd.array([1, 2, 3], dtype="Int64")})
         result = pandas_to_data(df)
-        assert result["schema"]["Fields"][0]["Type"] == "INTEGER"
+        assert result["schema"]["fields"][0]["type"] == "INTEGER"
 
     def test_float_type_maps_to_real(self) -> None:
         df = pd.DataFrame({"price": [1.5, 2.5]})
         result = pandas_to_data(df)
-        assert result["schema"]["Fields"][0]["Type"] in ("REAL", "TEXT")
+        assert result["schema"]["fields"][0]["type"] in ("REAL", "TEXT")
 
     def test_bool_type_maps_to_boolean(self) -> None:
         df = pd.DataFrame({"active": pd.array([True, False], dtype="boolean")})
         result = pandas_to_data(df)
-        assert result["schema"]["Fields"][0]["Type"] == "BOOLEAN"
+        assert result["schema"]["fields"][0]["type"] == "BOOLEAN"
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ class TestPandasToData:
 #
 # Эти тесты намеренно гоняют данные через нативный Go-парсер (J_write/J_read),
 # а не только через Python-словари. Именно так ловятся несовместимости формата:
-# неправильный регистр типа, пустой MessageID, "True" вместо "true",
+# неправильный регистр типа, пустой MessageID, "True" вместо "1",
 # нестандартный формат timestamp из внешней БД (MSSQL, Oracle и т.д.)
 # ---------------------------------------------------------------------------
 
@@ -176,7 +176,7 @@ class TestRoundTrip:
         assert list(df_back["Y"]) == ["a", "b"]
 
     def test_roundtrip_boolean_values(self, j_client: TDTPClientJSON, tmp_path) -> None:
-        """bool → "true"/"false" → J_write → J_read → обратно."""
+        """bool → "1"/"0" → J_write → J_read → обратно."""
         df_orig = pd.DataFrame({
             "ID":     pd.array([1, 2], dtype="Int64"),
             "Active": pd.array([True, False], dtype="boolean"),
@@ -188,10 +188,10 @@ class TestRoundTrip:
 
         # Файл должен читаться без ошибок — это основная проверка
         assert len(raw["data"]) == 2
-        # Значения в TDTP хранятся как строки; "true"/"false", не "True"/"False"
-        active_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Active")
-        assert raw["data"][0][active_idx] == "true"
-        assert raw["data"][1][active_idx] == "false"
+        # TDTP BOOLEAN canonical format is "1"/"0" (parseBoolean in schema/converter.go)
+        active_idx = [f["name"] for f in raw["schema"]["fields"]].index("Active")
+        assert raw["data"][0][active_idx] == "1"
+        assert raw["data"][1][active_idx] == "0"
 
     def test_roundtrip_nullable_integers(self, j_client: TDTPClientJSON, tmp_path) -> None:
         """NULL в Int64 → пустая строка → J_write → J_read → pd.NA."""
@@ -205,7 +205,7 @@ class TestRoundTrip:
         raw  = j_client.J_read(str(out))
         df   = data_to_pandas(raw)
 
-        bal_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Balance")
+        bal_idx = [f["name"] for f in raw["schema"]["fields"]].index("Balance")
         # NULL в TDTP → пустая строка в raw["data"]
         assert raw["data"][1][bal_idx] == ""
         # После data_to_pandas → pd.NA
@@ -403,7 +403,7 @@ class TestRoundTripNewTypes:
         j_client.J_write(data, str(out))
         raw  = j_client.J_read(str(out))
 
-        payload_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Payload")
+        payload_idx = [f["name"] for f in raw["schema"]["fields"]].index("Payload")
         for i, raw_bytes in enumerate(payloads):
             expected_b64 = base64.b64encode(raw_bytes).decode("ascii")
             assert raw["data"][i][payload_idx] == expected_b64
@@ -421,7 +421,7 @@ class TestRoundTripNewTypes:
         j_client.J_write(data, str(out))
         raw  = j_client.J_read(str(out))
 
-        ts_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Ts")
+        ts_idx = [f["name"] for f in raw["schema"]["fields"]].index("Ts")
         assert raw["data"][0][ts_idx] == "2025-01-15T10:00:00Z"
         assert raw["data"][1][ts_idx] == "2024-06-30T23:59:59Z"
 
@@ -438,7 +438,7 @@ class TestRoundTripNewTypes:
         j_client.J_write(data, str(out))
         raw  = j_client.J_read(str(out))
 
-        meta_idx = [f["Name"] for f in raw["schema"]["Fields"]].index("Meta")
+        meta_idx = [f["name"] for f in raw["schema"]["fields"]].index("Meta")
         # Values in file must be valid JSON with double quotes
         parsed_0 = json.loads(raw["data"][0][meta_idx])
         assert parsed_0["name"] == "Alice"
@@ -482,15 +482,15 @@ class TestSpecialValues:
     # --- schema inspection ---
 
     def test_special_values_present_in_schema(self, specials_data):
-        """J_read exposes SpecialValues in the schema dict."""
-        fields = specials_data["schema"]["Fields"]
-        score_field = next(f for f in fields if f["Name"] == "score")
-        sv = score_field.get("SpecialValues")
-        assert sv is not None, "score field should have SpecialValues"
-        assert sv["Null"]["Marker"] == "[NULL]"
-        assert sv["NaN"]["Marker"] == "NaN"
-        assert sv["Infinity"]["Marker"] == "INF"
-        assert sv["NegInfinity"]["Marker"] == "-INF"
+        """J_read exposes special_values in the schema dict."""
+        fields = specials_data["schema"]["fields"]
+        score_field = next(f for f in fields if f["name"] == "score")
+        sv = score_field.get("special_values")
+        assert sv is not None, "score field should have special_values"
+        assert sv["null"]["marker"] == "[NULL]"
+        assert sv["nan"]["marker"] == "NaN"
+        assert sv["infinity"]["marker"] == "INF"
+        assert sv["neg_infinity"]["marker"] == "-INF"
 
     # --- no crash ---
 
