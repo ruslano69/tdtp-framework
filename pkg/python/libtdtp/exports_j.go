@@ -192,7 +192,11 @@ func jPacketToDataPacket(jp jPacket) *packet.DataPacket {
 	pkt.Header.InReplyTo = jp.Header.InReplyTo
 	pkt.Header.PartNumber = jp.Header.PartNumber
 	pkt.Header.TotalParts = jp.Header.TotalParts
-	pkt.Header.RecordsInPart = jp.Header.RecordsInPart
+	// Always derived from the actual payload, never trusted from the caller —
+	// a stale/hand-set value here writes an internally inconsistent packet to
+	// disk with no error until some later reader's parser validation catches
+	// the mismatch (see RecordsInPart mismatch check in parser.go).
+	pkt.Header.RecordsInPart = len(jp.Data)
 	pkt.Header.Sender = jp.Header.Sender
 	pkt.Header.Recipient = jp.Header.Recipient
 	pkt.Schema = jp.Schema

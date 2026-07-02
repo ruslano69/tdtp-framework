@@ -688,9 +688,11 @@ class TestJReadMultipart:
         p1 = copy.deepcopy(sample_data_j)
         p1["data"] = sample_data_j["data"][:half]
         p1["header"]["part_number"], p1["header"]["total_parts"] = 1, 2
+        p1["header"]["records_in_part"] = len(p1["data"])
         p2 = copy.deepcopy(sample_data_j)
         p2["data"] = sample_data_j["data"][half:]
         p2["header"]["part_number"], p2["header"]["total_parts"] = 2, 2
+        p2["header"]["records_in_part"] = len(p2["data"])
         f1 = tmp_path / "U_part_1_of_2.tdtp.xml"
         f2 = tmp_path / "U_part_2_of_2.tdtp.xml"
         j_client.J_write(p1, str(f1))

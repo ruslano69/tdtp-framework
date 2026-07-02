@@ -6,4 +6,4 @@
 package version
 
 // Version is the semantic version of the tdtp-framework.
-const Version = "1.17.1"
+const Version = "1.17.2"

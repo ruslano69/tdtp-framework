@@ -2,6 +2,134 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.17.2] — 2026-07-02
+
+> **⚠️ Rebuild `libtdtp.dll`/`.so` before upgrading.** This release changes the
+> binary layout of `D_Packet` (see "Changed" below). Any non-Python consumer
+> that links against `libtdtp.h`/`D_Packet` directly (C, C#, PureBasic, etc.)
+> must recompile against the new header — old binaries will silently read
+> garbage from the new struct layout instead of failing loudly.
+
+### Fixed — libtdtp: JSON casing drift, BOOLEAN serialization bug, v1.4 gate bypass
+
+- **JSON field casing**: `Field`, `SpecialValues`, `MarkerValue`, `Schema`,
+  `Dictionary`, `DictEntry` now carry explicit `json:` tags (snake_case),
+  matching the already-documented convention instead of Go's default
+  PascalCase. `pandas_ext.py`'s defensive PascalCase/camelCase fallbacks are
+  kept for DLLs built before this change.
+- **BOOLEAN serialization**: `pandas_ext.py` wrote `"true"`/`"false"` for
+  `bool`/`numpy.bool_` values — the framework's own validator
+  (`schema/converter.go`'s `parseBoolean`) only accepts `"0"`/`"1"` and
+  rejected every boolean column written through the pandas bridge. Now
+  writes `"1"`/`"0"`.
+- **`J_Stamp` never set `Version = "1.4"`**: a packet stamped with real XXH3
+  integrity hashes was read back as pre-1.4 by any consumer of
+  `pipeline.VerifyAndPrepare` (including the new `J_VerifyMercury` below),
+  silently skipping the entire v1.4 security gate. Mirrors the version bump
+  `cmd/tdtpcli`'s `integrityProc` already does on export.
+- **Error code classification**: `J_WriteColumnar`'s validation errors
+  (`"invalid input: ..."`) fell through to `INTERNAL_ERROR` instead of
+  `INVALID_INPUT` — added the missing prefix to `errorCodeFor`.
+
+### Added — libtdtp: J_VerifyMercury, four previously-unreachable C ABI exports
+
+- **`J_VerifyMercury(path, mercuryUrl)`**: the C ABI's first network-verifying
+  v1.4 integrity check. `J_Verify` is deliberately local-only (no network);
+  any non-Go consumer of `libtdtp.dll` had no way to confirm a packet was
+  registered by an authenticated producer via xzMercury. Wraps
+  `pkg/pipeline.VerifyAndPrepare` with `FallbackDegrade`, matching
+  `tdtpcli --test --mercury-url`. Verified against a live `xzmercury --dev`
+  instance (registered+reachable, empty URL, not-registered, Mercury-down,
+  pre-1.4 packet). Python bindings: `TDTPClientJSON.J_verify_mercury`,
+  `Tdtp.verify_mercury`.
+- **`D_ParseBytes` / `J_ParseBytes` / `J_InspectBytes` / `J_WriteColumnar`**:
+  all four were exported by the Go DLL (present in `libtdtp.h`) but had zero
+  `ctypes` binding in `_loader.py` — unreachable from Python despite
+  compiling fine. Wired with `argtypes`/`restype` and wrapper methods on
+  `TDTPClientDirect`, `TDTPClientJSON`, and `Tdtp`.
+
+### Changed — libtdtp: `D_Packet` row storage is now a flat buffer (C ABI breaking change)
+
+`D_Row` previously stored each row as its own `C.malloc`'d array of
+individually `C.CString`'d cells — reading it back from Python meant one
+`ctypes`/FFI crossing per cell, which made `D_*` slower than `J_*` on
+read/filter/mask at 100k rows despite skipping JSON entirely (the opposite
+of what the Direct API is documented to deliver). Replaced with a single
+flat data buffer plus one offsets array (`row_count*col_count+1` int32
+entries) — the same shape `D_ColumnUTF8` already used for one column,
+generalized to the whole grid. `D_Packet.rows`/`D_Row` are gone; new fields
+are `row_data`/`row_offsets`/`col_count`.
+
+Benchmarked on a 100k-row export: `read`/`filter`/`filter_only`/`mask_only`
+flip from "`J_*` faster" to "`D_*` faster" (0.63–0.87×), matching the
+`DEVELOPER_GUIDE.md` performance claim for the first time it was actually
+measured. Verified byte-identical output vs `J_*` across 5 repeat read/free
+cycles (no corruption, no leaks under repeated use).
+
+Note: this flat-buffer layout specifically targets Python's `ctypes`
+per-call overhead. Benchmarked separately against a native C consumer
+(gcc/MinGW, no `ctypes` in the loop) on the same 100k-row file: the *old*
+per-row layout was faster there (8ms vs 11ms) — native calling-convention
+code doesn't pay the FFI tax this change eliminates. Native/PureBasic
+consumers should keep using the row-major JSON boundary (`J_ReadFile`) or
+the `D_Column*` accessors rather than assuming this change benefits them.
+
+### Added — PureBasic example (`bindings/purebasic/`)
+
+Empirically verified example calling `J_ReadFile`/`J_FreeString` via
+`OpenLibrary`/`GetFunction` (dynamic loading). Documents two crash-causing
+gotchas found by running the code, not by reading PureBasic's docs:
+`ParseJSON(#PB_Any, ...)` returns the real handle as the function's return
+value (not written back into the input variable), and `CloseLibrary()` on
+`libtdtp.dll` crashes during `DLL_PROCESS_DETACH` because Go's `c-shared`
+runtime doesn't support being unloaded. Static linking
+(`-buildmode=c-archive`) was evaluated and rejected: it links cleanly via
+gcc/MinGW and PureBasic's own linker accepts the archive format, but the
+resulting PureBasic executable hangs on startup (Go runtime init appears
+incompatible with PureBasic's own runtime bootstrap on Windows).
+
+### Fixed — cmd/tdtp-xray build
+
+`ExpandCompactRows` moved to a parser method and `DecompressData`'s
+decompressor callback gained an `algo` parameter upstream; `cmd/tdtp-xray`
+wasn't updated and failed to build.
+
+### Fixed — `J_WriteFile`/`J_Stamp` trusted a caller-supplied `records_in_part`
+
+`jPacketToDataPacket` (used by `J_WriteFile`, `J_Stamp`, and indirectly
+`J_Diff`/`J_Merge`) copied `records_in_part` from the input JSON header
+as-is instead of deriving it from the actual payload. Any caller hand-
+assembling a multi-part packet (anything not going through the sanctioned
+`J_ExportAll`/`--export` partitioner, which already computed this correctly)
+could write an internally inconsistent file with no error at write time —
+the mismatch only surfaces later, at read time, in a parser validation error
+possibly seen by a completely different consumer
+(`RecordsInPart mismatch: header declares N rows, <Data> contains M`).
+`jPacketToDataPacket` now always sets `RecordsInPart = len(Data)`, ignoring
+whatever the caller passed. Verified: a deliberately wrong
+`records_in_part: 999` in the input JSON is now silently corrected to the
+real row count in the written file.
+
+`D_WriteFile` was checked and found already correct — `DataPacket.SetRows()`
+sets `RecordsInPart` as a side effect, so the Direct API never had this bug.
+
+This surfaced via `TestJReadMultipart::test_two_part_assembly`: the test
+sliced `sample_data_j` into two parts but only patched
+`part_number`/`total_parts` in each part's header, leaving `records_in_part`
+at the original 8-row value — a real instance of the exact caller mistake
+described above. Fixed the test fixture too, by setting
+`records_in_part = len(data)` on each part after slicing.
+
+### Merged
+
+Merged `feature/kanzi-compression-packet-size` (libtdtp/Python-bindings work
+above) into `feature/sprint4-map` — clean merge, no conflicts, verified with
+`go build`/`go test` (including `pkg/core/mapping`, `cmd/tdtpcli`) and the
+full Python test suite (233/234 passing; the one failure predates this merge
+and is unrelated — `TestJReadMultipart::test_two_part_assembly`).
+
+---
+
 ## [1.17.1] — 2026-06-15
 
 ### Fixed — loop guard conflict in parallel `--steps` execution
