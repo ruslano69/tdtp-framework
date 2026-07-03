@@ -13,8 +13,26 @@
   the CLI (`--export-stream` / `--import-stream`)
 - **Parallel import workers** — concurrent multi-part import (export already parallelizes
   compress+serialize; import is still sequential per part)
-- **Schema migration** — `ALTER TABLE` support (add/drop columns, type changes) across
-  adapters
+- **Schema migration** — schema-drift *detection* by default (diff packet schema vs.
+  live table, report only); auto-apply is a separate, explicit opt-in per source
+  (mirrors ETL's `--unsafe` gate), additive-only (`ADD COLUMN`, never `DROP`/type
+  narrowing), mandatory field-name sanitization on the DDL path, mandatory audit log.
+  **Why so cautious:** the packet schema is producer-controlled — TDTP's own threat
+  model already treats the producer as less trusted than the consumer (that's what the
+  v1.4 integrity gate and Mercury notary exist for). Auto-applying DDL from an untrusted
+  schema unconditionally would let a compromised producer silently mutate a consumer's
+  database with no approval step and no visibility.
+- **Orchestrator scenario integrity registration** — today `--scenarios/*.yaml` is
+  trusted purely by filename, loaded once at startup, never re-read or hash-checked at
+  run time (`TrustGate`/`GateScenario` only checks `scenario.permissions ⊆ (license ∩
+  Mercury)`, i.e. declared capability strings — it never touches the file's own content).
+  Register scenarios by `name + sha256(content)`, reject execution on mismatch, and
+  record the executed scenario's hash on the job record (today only the *output
+  artifact* gets a SHA-256, not the pipeline definition that produced it). This closes a
+  different gap than schema-drift trust above: it protects the *instructions* (pipeline
+  YAML) from tampering; the schema-migration guardrails protect against a legitimate,
+  unmodified pipeline faithfully processing a malicious *payload*. Both are needed —
+  neither substitutes for the other.
 
 ## Later
 
