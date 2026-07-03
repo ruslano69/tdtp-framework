@@ -120,6 +120,23 @@ at the original 8-row value — a real instance of the exact caller mistake
 described above. Fixed the test fixture too, by setting
 `records_in_part = len(data)` on each part after slicing.
 
+### Security — SQL injection in jackc/pgx/v5 (GO-2026-5004)
+
+Upgraded `github.com/jackc/pgx/v5` `v5.7.4 → v5.9.2`: placeholder confusion
+with dollar-quoted string literals, reachable through
+`postgres.Adapter.ExecuteRawQuery → pgxpool.Pool.Query`. Caught by CI's
+`govulncheck`; verified locally that the fixed version resolves it (0
+reachable vulnerabilities, was 1).
+
+### Changed — minimum Go version bumped to 1.25
+
+`pgx v5.9.2` itself requires `go 1.25.0` — checked every pgx release between
+the vulnerable `5.7.4` and the fixed `5.9.2`: the module's own Go-version
+requirement jumps from `1.24.0` (v5.8.0) to `1.25.0` starting at `v5.9.0`,
+and the CVE fix lands at `v5.9.2`. No version exists with both the fix and
+Go 1.24 compatibility, so Go 1.24 support is dropped. `go.mod`/`go.work` →
+`go 1.25.0`; CI matrix/pins (`ci.yml`, `release.yml`) updated to match.
+
 ### Merged
 
 Merged `feature/kanzi-compression-packet-size` (libtdtp/Python-bindings work
