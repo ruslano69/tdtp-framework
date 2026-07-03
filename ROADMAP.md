@@ -33,6 +33,8 @@
   YAML) from tampering; the schema-migration guardrails protect against a legitimate,
   unmodified pipeline faithfully processing a malicious *payload*. Both are needed —
   neither substitutes for the other.
+  Design draft for both, with a DBA-signed delegation model and a staged rollout:
+  [docs/SCENARIO_TRUST.md](docs/SCENARIO_TRUST.md).
 
 ## Later
 
