@@ -214,21 +214,46 @@ func (pf *ProductionFeatures) LogOperation(ctx context.Context, op audit.Operati
 	}
 }
 
-// LogWithMetadata logs an operation with additional metadata
-func (pf *ProductionFeatures) LogWithMetadata(ctx context.Context, op audit.Operation, success bool, err error, metadata map[string]string) {
+// LogWithMetadata logs an operation with additional metadata, plus the
+// resource name, record count, and wall-clock duration of the operation.
+//
+// IMPORTANT: AuditLogger.LogSuccess/LogFailure (used by the old version of this
+// function) construct the Entry AND write it to every appender SYNCHRONOUSLY,
+// before returning the entry pointer to the caller. Chaining .With*() builder
+// calls onto that returned pointer — the natural-looking pattern — mutates the
+// entry only AFTER it has already been formatted and flushed to disk, so those
+// calls have zero effect on the persisted line. This is why every audit.log
+// line showed resource=, records=0, duration=0s regardless of what actually
+// happened: the old code's ".WithUser("tdtpcli")" on the returned entry was
+// equally inert — "tdtpcli" only ever appeared because production.go separately
+// sets LoggerConfig.DefaultUser="tdtpcli", applied by Log() itself before write.
+// Fixed 2026-07-20: build the entry completely first, call Log() once at the end.
+func (pf *ProductionFeatures) LogWithMetadata(ctx context.Context, op audit.Operation, success bool, err error, metadata map[string]string, resource string, records int64, duration time.Duration) {
 	if pf.AuditLogger == nil {
 		return
 	}
 
-	var entry *audit.Entry
-	if success {
-		entry = pf.AuditLogger.LogSuccess(ctx, op).WithUser("tdtpcli")
-	} else {
-		entry = pf.AuditLogger.LogFailure(ctx, op, err).WithUser("tdtpcli")
+	status := audit.StatusSuccess
+	if !success {
+		status = audit.StatusFailure
 	}
 
-	// Add metadata
+	entry := audit.NewEntry(op, status).WithUser("tdtpcli").WithDuration(duration)
+	if resource != "" {
+		entry.WithResource(resource)
+	}
+	if records > 0 {
+		entry.WithRecordsAffected(records)
+	}
+	if err != nil {
+		entry.WithError(err)
+	}
 	for key, value := range metadata {
 		entry.WithMetadata(key, value)
+	}
+
+	if logErr := pf.AuditLogger.Log(ctx, entry); logErr != nil {
+		// Best-effort: a broken audit sink must not fail the CLI operation itself.
+		fmt.Fprintf(os.Stderr, "warning: audit log write failed: %v\n", logErr)
 	}
 }

@@ -40,6 +40,11 @@ func routeCommand(
 	var operation audit.Operation
 	var metadata map[string]string
 
+	// Side channel for audit logging: command implementations (export.go/
+	// import.go/pipeline.go) record resource name + row count into this via
+	// ctx as they discover it, without changing their public signatures.
+	ctx, opMetrics := commands.WithOpMetrics(ctx)
+
 	// Database commands
 	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
 	if *flags.Steps != "" {
@@ -679,8 +684,10 @@ func routeCommand(
 
 	// Log operation result with metadata
 	if metadata != nil {
-		metadata["duration_ms"] = fmt.Sprintf("%d", time.Since(startTime).Milliseconds())
-		prodFeatures.LogWithMetadata(ctx, operation, err == nil, err, metadata)
+		elapsed := time.Since(startTime)
+		metadata["duration_ms"] = fmt.Sprintf("%d", elapsed.Milliseconds())
+		prodFeatures.LogWithMetadata(ctx, operation, err == nil, err, metadata,
+			opMetrics.Resource, opMetrics.RecordsAffected, elapsed)
 	}
 
 	return err

@@ -233,6 +233,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		totalRows += pkt.Header.RecordsInPart
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
+	recordOpMetrics(ctx, opts.TableName, int64(totalRows))
 
 	// Build packet processing chain.
 	// Порядок: mask/normalize/validate → compact → compress → (encrypt) → (hash)

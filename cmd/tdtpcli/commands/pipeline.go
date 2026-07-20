@@ -170,6 +170,7 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 	fmt.Printf("   Sources loaded: %d\n", stats.SourcesLoaded)
 	fmt.Printf("   Rows loaded: %d\n", stats.TotalRowsLoaded)
 	fmt.Printf("   Rows exported: %d\n", stats.TotalRowsExported)
+	recordOpMetrics(ctx, configPath, int64(stats.TotalRowsExported))
 	if processor.GetPackageUUID() != "" && config.Output.TDTP != nil && config.Output.TDTP.Encryption {
 		fmt.Printf("   Package UUID: %s\n", processor.GetPackageUUID())
 	}
