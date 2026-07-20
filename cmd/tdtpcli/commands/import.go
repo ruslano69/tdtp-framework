@@ -266,6 +266,7 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 	}
 
 	fmt.Printf("✓ Import complete! Table '%s' — %d row(s)\n", tableName, totalRows)
+	recordOpMetrics(ctx, tableName, int64(totalRows))
 	return nil
 }
 
