@@ -682,10 +682,11 @@ func routeCommand(
 		})
 	}
 
-	// Log operation result with metadata
+	// Log operation result with metadata. Duration is passed as a first-class
+	// argument (entry.Duration) — not duplicated into metadata["duration_ms"],
+	// since the audit line and DB appender both read it from entry.Duration.
 	if metadata != nil {
 		elapsed := time.Since(startTime)
-		metadata["duration_ms"] = fmt.Sprintf("%d", elapsed.Milliseconds())
 		prodFeatures.LogWithMetadata(ctx, operation, err == nil, err, metadata,
 			opMetrics.Resource, opMetrics.RecordsAffected, elapsed)
 	}
