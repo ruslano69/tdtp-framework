@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/ruslano69/tdtp-framework/pkg/etl"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
+	"github.com/ruslano69/tdtp-framework/pkg/resultlog/event"
 )
 
 // PipelineResult представляет состояние пайплайна, публикуемое в Redis
@@ -21,18 +22,13 @@ import (
 //
 //	SET  tdtp:pipeline:<name>:state  <JSON>  EX <ttl>  — для GET-запросов оркестратора
 //	PUB  tdtp:pipeline:<name>                          — для event-driven маршрутизации
-type PipelineResult struct {
-	PipelineName string    `json:"pipeline_name"`
-	ResultName   string    `json:"result_name"`
-	Status       string    `json:"status"`                 // "success" | "failed" | "completed_with_errors"
-	PackageUUID  string    `json:"package_uuid,omitempty"` // UUID зашифрованного пакета (если encryption: true)
-	StartedAt    time.Time `json:"started_at"`
-	FinishedAt   time.Time `json:"finished_at"`
-	DurationMs   int64     `json:"duration_ms"`
-	RowsLoaded   int       `json:"rows_loaded"`
-	RowsExported int       `json:"rows_exported"`
-	Error        *string   `json:"error,omitempty"`
-}
+//
+// Alias to pkg/resultlog/event.PipelineResult — the struct itself lives in
+// that leaf package (no etl/mercury dependency) so consumers that only need
+// to read this shape don't have to link this package's own etl/mercury/
+// go-redis dependencies. Existing code referencing resultlog.PipelineResult
+// is unaffected: an alias is the same type, not a copy.
+type PipelineResult = event.PipelineResult
 
 // RedisPublisher публикует результат выполнения пайплайна в Redis
 type RedisPublisher struct {

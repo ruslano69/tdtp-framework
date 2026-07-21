@@ -13,7 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/ruslano69/tdtp-framework/pkg/resultlog"
+	"github.com/ruslano69/tdtp-framework/pkg/resultlog/event"
 )
 
 func writePubSubFile(t *testing.T, content string) string {
@@ -138,7 +138,7 @@ func approvedScenario(t *testing.T, db *OrchestratorDB, name string, params []Pa
 
 func publishPipelineResult(t *testing.T, mr *miniredis.Miniredis, resultName, status string) {
 	t.Helper()
-	result := resultlog.PipelineResult{
+	result := event.PipelineResult{
 		PipelineName: "some_pipeline",
 		ResultName:   resultName,
 		Status:       status,
