@@ -6,6 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/alexbrainman/odbc v0.0.0-20250601004241-49e6b2bc0cf0
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.12
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.12
@@ -83,6 +84,7 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
