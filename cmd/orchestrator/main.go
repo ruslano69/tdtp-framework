@@ -1,15 +1,19 @@
 // orchestrator — scenario execution server.
 //
-// HTTP API for manual activation and cron scheduling over one or more
-// pluggable runners (tdtpcli by default; see runners.go for others).
+// HTTP API for manual activation, cron scheduling, and pipeline-completion
+// pub/sub triggers, over one or more pluggable runners (tdtpcli by default;
+// see runners.go for others).
 // Scenarios = rendered YAML files with an optional orchestrator: header,
 // including which runner they need (orchestrator.runner:).
 // Schedules = stored in SQLite DB; seeded from YAML files on first run.
+// Pub/sub triggers = subscribe to pkg/resultlog's tdtp:pipeline:* events and
+// run the scenario mapped to each pipeline's result_name (see pubsub.go).
 //
 // Usage:
 //
 //	orchestrator --scenarios ./scenarios --db orchestrator.db --tdtpcli ./tdtpcli
 //	orchestrator --scenarios ./scenarios --db orchestrator.db --runners ./runners.yaml
+//	orchestrator --scenarios ./scenarios --db orchestrator.db --redis-addr localhost:6379 --pubsub ./pubsub.yaml
 //
 // API:
 //
@@ -43,6 +47,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -64,6 +69,10 @@ func main() {
 	ldapBindDN := flag.String("ldap-bind-dn", "", "LDAP service account DN (ldap auth only)")
 	ldapBindPass := flag.String("ldap-bind-pass", "", "LDAP service account password (ldap auth only)")
 	ldapBaseDN := flag.String("ldap-base-dn", "", "LDAP search base DN (ldap auth only)")
+	redisAddr := flag.String("redis-addr", "", "Redis address for pipeline-completion pub/sub triggers (empty = disabled)")
+	redisPassword := flag.String("redis-password", "", "Redis password (pubsub trigger only)")
+	redisDB := flag.Int("redis-db", 0, "Redis DB number (pubsub trigger only)")
+	pubsubPath := flag.String("pubsub", "", "path to pubsub.yaml mapping pipeline result_name -> scenario (requires --redis-addr)")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
@@ -139,6 +148,29 @@ func main() {
 		log.Fatal().Err(err).Msg("load schedules from db")
 	}
 
+	// Pub/sub trigger: subscribe to pkg/resultlog's pipeline-completion events
+	// (tdtp:pipeline:*) and run the scenario mapped to each result_name.
+	var subscriber *Subscriber
+	if *redisAddr != "" {
+		if *pubsubPath == "" {
+			_ = db.Close()
+			log.Fatal().Msg("--redis-addr requires --pubsub")
+		}
+		subs, err := LoadPubSub(*pubsubPath)
+		if err != nil {
+			_ = db.Close()
+			log.Fatal().Err(err).Str("path", *pubsubPath).Msg("load pubsub config")
+		}
+		if err := ValidatePubSubScenarios(subs, scenes); err != nil {
+			_ = db.Close()
+			log.Fatal().Err(err).Msg("pubsub scenario validation failed")
+		}
+		redisClient := redis.NewClient(&redis.Options{Addr: *redisAddr, Password: *redisPassword, DB: *redisDB})
+		subscriber = NewSubscriber(redisClient, subs, scenes, executor, gate, db)
+		go subscriber.Run(context.Background())
+		log.Info().Str("addr", *redisAddr).Int("subscriptions", len(subs)).Msg("pubsub subscriber started")
+	}
+
 	// Authentication: choose token-based or LDAP.
 	var authMiddleware func(http.Handler) http.Handler
 	var auth *Authenticator // only set for token mode (used by /tokens routes)
@@ -193,6 +225,7 @@ func main() {
 			"active_jobs":  active,
 			"license_tier": string(gate.License.GetTier()),
 			"mercury":      mercuryStatus(*mercuryURL),
+			"pubsub":       pubsubStatus(subscriber),
 		})
 	})
 	r.Get("/metrics", MetricsHandler().ServeHTTP)
@@ -495,4 +528,16 @@ func mercuryStatus(url string) string {
 		return "skip"
 	}
 	return "ok" // full liveness check would require an HTTP call — skip for now
+}
+
+// pubsubStatus reports the Redis pub/sub trigger's connectivity, or "skip"
+// when it isn't configured at all — a dead broker should never be silent.
+func pubsubStatus(s *Subscriber) string {
+	if s == nil {
+		return "skip"
+	}
+	if s.Connected() {
+		return "connected"
+	}
+	return "disconnected"
 }

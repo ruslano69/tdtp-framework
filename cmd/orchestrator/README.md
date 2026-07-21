@@ -67,6 +67,11 @@ allowed it and who touched it.
   lives inside that same hashed content, silently reassigning a scenario to a
   different (more dangerous) runner also invalidates its approval.
 - **Scheduling**: cron entries in SQLite (seeded from YAML), managed at runtime.
+- **Pub/sub triggers**: subscribe to `pkg/resultlog`'s pipeline-completion
+  events (`tdtp:pipeline:*` — already published by any `tdtpcli --pipeline`
+  run with `result_log.type: redis` configured) and run the scenario mapped
+  to each `result_name`. Same approval/trust-gate/audit path as every other
+  trigger. See [Pub/sub triggers](#pubsub-triggers).
 - **Trust gates** (see preflight.go): own `tdtp.lic` (offline) + Mercury `/status`
   (online). A scenario runs only if its permissions are covered by both, and the
   licensed concurrent-pipeline limit is respected.
@@ -243,6 +248,10 @@ orchestrator \
 | `--ldap-bind-dn` | `` | service account DN for user search (ldap mode) |
 | `--ldap-bind-pass` | `` | service account password (ldap mode) |
 | `--ldap-base-dn` | `` | LDAP search base DN (ldap mode) |
+| `--redis-addr` | `` | Redis address for pipeline-completion pub/sub triggers (empty = disabled) |
+| `--redis-password` | `` | Redis password (pubsub trigger only) |
+| `--redis-db` | `0` | Redis DB number (pubsub trigger only) |
+| `--pubsub` | `` | path to `pubsub.yaml` mapping pipeline `result_name` → scenario (requires `--redis-addr`) |
 
 ### Token auth (default)
 
@@ -329,6 +338,58 @@ Every job records which runner actually executed it (`GET /jobs/{id}` →
 show what really ran them, not what the scenario currently says. A scenario
 naming an unregistered runner fails the orchestrator's startup with a clear
 error, and `Submit()` refuses it at request time too, before touching the DB.
+
+## Pub/sub triggers
+
+`pkg/resultlog` already publishes after every `tdtpcli --pipeline` run
+configured with `result_log.type: redis` in its own YAML (see
+`examples/07-redis-orchestration` for that side, which predates and is
+independent of the orchestrator):
+
+```
+SET  tdtp:pipeline:<result_name>:state  <JSON>  EX <ttl>   ← for polling
+PUB  tdtp:pipeline:<result_name>        <JSON>              ← for event-driven
+```
+
+Passing `--redis-addr` subscribes the orchestrator to `tdtp:pipeline:*` —
+one connection covers every pipeline; adding a new one needs no orchestrator
+restart, only a `pubsub.yaml` entry:
+
+```yaml
+# pubsub.yaml
+subscriptions:
+  - result_name: MASK_V001
+    scenario: reconcile-mask-sync
+    on_status: [success]        # default; failed/completed_with_errors are opt-in
+    params:
+      note: triggered-by-pipeline-completion   # static, merged with pipeline_name/result_name/status
+```
+
+```bash
+orchestrator --scenarios ./scenarios --db orchestrator.db \
+  --redis-addr localhost:6379 --pubsub ./pubsub.yaml
+```
+
+**The event never picks the scenario or bypasses anything.** `result_name`
+is only ever used as a lookup key into the admin-configured mapping above —
+nothing in the message payload can name an arbitrary scenario. Everything
+downstream of that lookup goes through the exact same path as cron and
+manual activation: scenario approval, trust gate, runner resolution, job
+audit. An unapproved or gate-refused scenario is silently skipped (logged),
+not run.
+
+A limited, whitelisted set of the pipeline result — `pipeline_name`,
+`result_name`, `status` — is available as scenario params (only if the
+scenario declares them, same as any other param), merged with whatever
+static `params:` the subscription sets. Nothing else from the payload
+reaches the scenario.
+
+Redis pub/sub is at-most-once — if the orchestrator is down when an event
+fires, it's gone. This is fine for a "go check what changed" nudge (the real
+data already sits durably wherever the pipeline wrote it) but not a
+substitute for a queue if the event itself is the only carrier of data that
+matters. `GET /healthz` → `"pubsub"` reports `"connected"` / `"disconnected"`
+/ `"skip"` (not configured) — a dead broker doesn't fail silently.
 
 ## Schedule seed file
 
