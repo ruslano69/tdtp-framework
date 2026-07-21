@@ -4,6 +4,50 @@ Scenario execution server: a thin HTTP wrapper over pluggable command-line
 runners (`tdtpcli` by default) with cron scheduling, token authentication,
 and trust-chain enforcement.
 
+## Why not just cron?
+
+Cron (or Task Scheduler) plus a YAML-parameterized script gets you the
+*execution* part for free — that's the least interesting piece here. What
+this actually adds is a governance layer around execution that a bare
+scheduler has no concept of:
+
+- **Nothing runs unapproved.** Every scenario's exact content must have an
+  admin-approved SHA-256 on record before it executes — by cron, by direct
+  activation, or via the request workflow. Editing an already-approved
+  scenario invalidates the approval; a new, never-reviewed one has none to
+  begin with. A plain scheduler will happily run whatever file is sitting in
+  the directory, no questions asked.
+- **RBAC lives in the launcher, not the OS.** Consumer / activator / admin
+  roles, per-token scenario allowlists, and job ownership (only your own job
+  or an admin can stop/cancel it) are enforced by the service itself —
+  cron/Task Scheduler have no equivalent; access control is whatever
+  filesystem permissions happen to allow.
+- **A submit → dry-run → approve/reject workflow** for callers who shouldn't
+  run things directly — a lightweight four-eyes principle a bare scheduler
+  has no way to express.
+- **License/environment trust gates**: a scenario runs only if its declared
+  permissions are covered by both an offline license and an online
+  environment check (xZMercury) — business-level capability gating baked
+  into the launch path itself.
+- **Every job is audited**: who submitted it, who cancelled or stopped it and
+  when, the output artifact's SHA-256, the full log — queryable in SQLite,
+  not scattered across log files.
+- **Process lifecycle done properly**: each job gets its own context
+  independent of whatever triggered it, so a run started via the HTTP API
+  keeps going after the request that started it returns; Stop sends SIGTERM
+  and only force-kills after a grace period. Naive scheduler wrappers
+  routinely get exactly this wrong.
+- **The runner is pluggable, everything above is not.** `tdtpcli` is the
+  default execution backend, but approval, RBAC, trust gates, and audit
+  apply identically to any registered runner — the governance doesn't have
+  to be rebuilt per tool.
+
+What it deliberately is *not*: no distributed execution (one node, one
+subprocess per job), no DAG/dependencies between scenarios, no retry/backoff
+policy, no UI. It's not a workflow engine like Airflow or Argo — it's a
+governed way to run one command at a time, safely, with a record of who
+allowed it and who touched it.
+
 ## What it does
 
 - **Scenarios** = a rendered text file + an optional `orchestrator:` header
