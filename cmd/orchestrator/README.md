@@ -1,18 +1,27 @@
 # orchestrator
 
-Scenario execution server: a thin HTTP wrapper over `tdtpcli --pipeline` with
-cron scheduling, token authentication, and trust-chain enforcement.
+Scenario execution server: a thin HTTP wrapper over pluggable command-line
+runners (`tdtpcli` by default) with cron scheduling, token authentication,
+and trust-chain enforcement.
 
 ## What it does
 
-- **Scenarios** = existing pipeline YAML + an optional `orchestrator:` header
-  (params schema, required permissions). `tdtpcli` ignores the header.
-- **Activation**: `POST /scenarios/{name}/run` renders the YAML with params and
-  runs `tdtpcli --pipeline` as a subprocess; the job is tracked in SQLite.
+- **Scenarios** = a rendered text file + an optional `orchestrator:` header
+  (params schema, required permissions, which runner it needs). A runner that
+  doesn't understand the header (e.g. `tdtpcli`) just ignores the unknown key.
+- **Runners**: which command actually executes a scenario is pluggable and
+  named centrally (`--runners`), not hardcoded — `tdtpcli --pipeline` is the
+  default, but any binary invocation can be registered and referenced by
+  scenarios via `orchestrator.runner:`. See [Runners](#runners).
+- **Activation**: `POST /scenarios/{name}/run` renders the scenario with
+  params and runs its resolved runner as a subprocess; the job is tracked in
+  SQLite, including which runner actually ran it.
 - **Scenario approval**: nothing runs — cron, direct activation, or an approved
   request — unless an admin has approved the scenario's exact current content
   (SHA-256 pinned in SQLite). Closes both editing an already-known scenario
-  unnoticed and planting a new, never-reviewed one.
+  unnoticed and planting a new, never-reviewed one. Since `orchestrator.runner:`
+  lives inside that same hashed content, silently reassigning a scenario to a
+  different (more dangerous) runner also invalidates its approval.
 - **Scheduling**: cron entries in SQLite (seeded from YAML), managed at runtime.
 - **Trust gates** (see preflight.go): own `tdtp.lic` (offline) + Mercury `/status`
   (online). A scenario runs only if its permissions are covered by both, and the
@@ -180,6 +189,7 @@ orchestrator \
 
 | Flag | Default | Purpose |
 |------|---------|---------|
+| `--runners` | `` | path to `runners.yaml` (empty = synthesize a single `tdtpcli` runner from `--tdtpcli`) |
 | `--license` | env/./tdtp.lic/community | tdtp.lic for offline capability gating |
 | `--mercury-url` | `` | xZMercury base URL for online preflight (empty = skip) |
 | `--require-prod` | false | refuse to start against dev-mode / non-CA-authorized Mercury |
@@ -219,6 +229,7 @@ In LDAP mode, `/tokens` endpoints are not available.
 orchestrator:
   name: export-payroll
   description: "Payroll export by period"
+  runner: tdtpcli              # optional — omit to use the configured default
   permissions: [etl, enc]      # must be covered by license ∩ Mercury env
   params:
     - name: period
@@ -231,6 +242,49 @@ sources:
     type: mssql
     query: "SELECT * FROM Payroll WHERE Period = '{{.period}}'"
 ```
+
+## Runners
+
+A runner is a named execution backend: a binary plus an argument template.
+`orchestrator.runner:` in a scenario picks one by name; omitted, it falls
+back to the configured default (`tdtpcli`, invoked exactly as before this
+feature existed — nothing about an existing deployment changes unless you
+opt in).
+
+```yaml
+# runners.yaml
+runners:
+  tdtpcli:
+    binary: ./tdtpcli
+    args: ["--pipeline", "{{.tmpfile}}"]
+  python-etl:
+    binary: python
+    args: ["etl_runner.py", "--config", "{{.tmpfile}}", "--period", "{{.period}}"]
+  powershell:
+    binary: pwsh
+    args: ["-File", "{{.tmpfile}}"]
+```
+
+```bash
+orchestrator --scenarios ./scenarios --db orchestrator.db --runners ./runners.yaml
+```
+
+Each arg is rendered with the same `{{.param}}` substitution as the scenario
+body, plus one reserved key: `{{.tmpfile}}` — the path to the scenario's
+rendered content. An arg that references a param with no value errors before
+the subprocess ever starts; a param nobody's args reference is simply unused.
+
+Binary paths and invocation shape live in `runners.yaml`, not in the scenario
+file — scenarios stay portable across environments where `python` or
+`tdtpcli` sit at different paths. Passing `--tdtpcli <path>` without
+`--runners` still works exactly as before: it synthesizes a single `tdtpcli`
+runner behind the scenes.
+
+Every job records which runner actually executed it (`GET /jobs/{id}` →
+`"runner"`) — if a scenario's declared runner ever changes, past jobs still
+show what really ran them, not what the scenario currently says. A scenario
+naming an unregistered runner fails the orchestrator's startup with a clear
+error, and `Submit()` refuses it at request time too, before touching the DB.
 
 ## Schedule seed file
 

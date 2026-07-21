@@ -14,7 +14,11 @@ func newRequestHarness(t *testing.T, run runnerFunc) (*requestHandlers, *Orchest
 	t.Cleanup(func() { _ = db.Close() })
 
 	exec := &Executor{
-		tdtpcliPath: "stub", tmpDir: t.TempDir(), db: db, run: run, done: make(chan string, 1),
+		runners: map[string]RunnerSpec{
+			defaultRunnerName: {Binary: "stub", Args: []string{"--pipeline", "{{.tmpfile}}"}},
+		},
+		defaultRunner: defaultRunnerName,
+		tmpDir:        t.TempDir(), db: db, run: run, done: make(chan string, 1),
 		registry: make(map[string]*runningJob),
 	}
 	// Scenario with permissions set explicitly (scenarioFromYAML only sets the name).

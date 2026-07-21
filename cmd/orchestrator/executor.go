@@ -50,6 +50,7 @@ type Job struct {
 	ArtifactSize   int64             `json:"artifact_size,omitempty"`   // bytes
 	CancelledBy    string            `json:"cancelled_by,omitempty"`
 	CancelledAt    *time.Time        `json:"cancelled_at,omitempty"`
+	Runner         string            `json:"runner,omitempty"` // resolved runner name actually used
 }
 
 // Typed errors returned by Cancel/Stop so the HTTP layer can map them to
@@ -91,14 +92,15 @@ type runningJob struct {
 	started bool // true once the goroutine has committed to exec.CommandContext
 }
 
-// Executor runs tdtpcli --pipeline with rendered scenario YAML.
-// Jobs are persisted to OrchestratorDB so status survives restarts.
+// Executor renders a scenario and runs it through its declared (or default)
+// runner. Jobs are persisted to OrchestratorDB so status survives restarts.
 type Executor struct {
-	tdtpcliPath string
-	tmpDir      string
-	logDir      string
-	db          *OrchestratorDB
-	run         runnerFunc
+	runners       map[string]RunnerSpec
+	defaultRunner string
+	tmpDir        string
+	logDir        string
+	db            *OrchestratorDB
+	run           runnerFunc
 	// done, when non-nil, receives each job ID after its run completes.
 	// Used by tests to await async completion without polling.
 	done chan string
@@ -107,12 +109,13 @@ type Executor struct {
 	registry map[string]*runningJob // jobID -> live handle, while pending or running
 }
 
-func NewExecutor(tdtpcliPath, tmpDir string, db *OrchestratorDB) *Executor {
+func NewExecutor(runners map[string]RunnerSpec, defaultRunner, tmpDir string, db *OrchestratorDB) *Executor {
 	_ = os.MkdirAll(tmpDir, 0o700)
 	logDir := filepath.Join(tmpDir, "logs")
 	_ = os.MkdirAll(logDir, 0o700)
 	return &Executor{
-		tdtpcliPath: tdtpcliPath, tmpDir: tmpDir, logDir: logDir, db: db, run: execRunner,
+		runners: runners, defaultRunner: defaultRunner,
+		tmpDir: tmpDir, logDir: logDir, db: db, run: execRunner,
 		registry: make(map[string]*runningJob),
 	}
 }
@@ -141,6 +144,18 @@ func (e *Executor) Submit(s *Scenario, params map[string]string, scheduleID, sub
 		return nil, fmt.Errorf("executor: write tmp pipeline: %w", err)
 	}
 
+	runnerName := resolveRunnerName(s, e.defaultRunner)
+	spec, ok := e.runners[runnerName]
+	if !ok {
+		_ = os.Remove(tmpFile)
+		return nil, fmt.Errorf("executor: scenario %q references unknown runner %q", s.Orchestrator.Name, runnerName)
+	}
+	runArgs, err := renderArgs(spec.Args, tmpFile, params)
+	if err != nil {
+		_ = os.Remove(tmpFile)
+		return nil, fmt.Errorf("executor: render runner args: %w", err)
+	}
+
 	jobCtx, cancel := context.WithCancel(context.Background())
 
 	job := &Job{
@@ -151,6 +166,7 @@ func (e *Executor) Submit(s *Scenario, params map[string]string, scheduleID, sub
 		SubmittedBy: submittedBy,
 		Status:      JobPending,
 		StartedAt:   time.Now().UTC(),
+		Runner:      runnerName,
 	}
 	if err := e.db.InsertJob(job); err != nil {
 		cancel()
@@ -191,7 +207,7 @@ func (e *Executor) Submit(s *Scenario, params map[string]string, scheduleID, sub
 
 		_ = e.db.UpdateJobStatus(job.ID, JobRunning)
 
-		out, runErr := e.run(jobCtx, e.tdtpcliPath, "--pipeline", tmpFile)
+		out, runErr := e.run(jobCtx, spec.Binary, runArgs...)
 
 		var status JobStatus
 		errMsg := ""
