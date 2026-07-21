@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS idx_requests_status    ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_submitter ON requests(submitter_id);
 CREATE INDEX IF NOT EXISTS idx_requests_created   ON requests(created_at DESC);
+
+-- Scenario approvals: pins the SHA-256 of a scenario YAML's content at the
+-- moment an admin approves it. Execution is refused unless the currently
+-- loaded scenario's content still matches — closes both tampering (same
+-- filename, edited content) and planting (new file, never approved).
+CREATE TABLE IF NOT EXISTS scenarios (
+	name         TEXT PRIMARY KEY,
+	sha256       TEXT NOT NULL,
+	approved_by  TEXT NOT NULL,
+	approved_at  DATETIME NOT NULL,
+	enabled      INTEGER NOT NULL DEFAULT 1
+);
 `
 
 // OrchestratorDB wraps the orchestrator SQLite database.
@@ -97,6 +109,9 @@ func OpenOrchestratorDB(path string) (*OrchestratorDB, error) {
 		{"artifact_path", `ALTER TABLE jobs ADD COLUMN artifact_path TEXT NOT NULL DEFAULT ''`},
 		{"artifact_sha256", `ALTER TABLE jobs ADD COLUMN artifact_sha256 TEXT NOT NULL DEFAULT ''`},
 		{"artifact_size", `ALTER TABLE jobs ADD COLUMN artifact_size INTEGER NOT NULL DEFAULT 0`},
+		{"submitted_by", `ALTER TABLE jobs ADD COLUMN submitted_by TEXT NOT NULL DEFAULT ''`},
+		{"cancelled_by", `ALTER TABLE jobs ADD COLUMN cancelled_by TEXT NOT NULL DEFAULT ''`},
+		{"cancelled_at", `ALTER TABLE jobs ADD COLUMN cancelled_at DATETIME`},
 	}
 	for _, m := range migrations {
 		if _, err := db.Exec(m.ddl); err != nil {
@@ -239,11 +254,21 @@ func (d *OrchestratorDB) InsertJob(j *Job) error {
 		schedID = j.ScheduleID
 	}
 	_, err = d.db.Exec(`
-		INSERT INTO jobs(id, schedule_id, scenario, params, status, started_at)
-		VALUES(?,?,?,?,?,?)`,
+		INSERT INTO jobs(id, schedule_id, scenario, params, status, started_at, submitted_by)
+		VALUES(?,?,?,?,?,?,?)`,
 		j.ID, schedID, j.Scenario, string(params),
-		string(j.Status), j.StartedAt.UTC().Format(time.RFC3339),
+		string(j.Status), j.StartedAt.UTC().Format(time.RFC3339), j.SubmittedBy,
 	)
+	return err
+}
+
+// MarkCancelRequested records who requested cancellation/stop and when.
+// The job's status itself transitions to "cancelled" asynchronously, once
+// the executor's goroutine observes the underlying context was cancelled
+// (see UpdateJobDone) — this only stamps that a request was made.
+func (d *OrchestratorDB) MarkCancelRequested(id, requestedBy string) error {
+	_, err := d.db.Exec(`UPDATE jobs SET cancelled_by=?, cancelled_at=? WHERE id=?`,
+		requestedBy, time.Now().UTC().Format(time.RFC3339), id)
 	return err
 }
 
@@ -282,16 +307,20 @@ func (d *OrchestratorDB) CountActiveJobs() (int, error) {
 func (d *OrchestratorDB) GetJob(id string) (*Job, error) {
 	row := d.db.QueryRow(`
 		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
-		       artifact_path, artifact_sha256, artifact_size
+		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at
 		FROM jobs WHERE id=?`, id)
-	return scanJob(row)
+	j, err := scanJob(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return j, err
 }
 
 // ListJobs returns the N most recent jobs (all scenarios).
 func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 	rows, err := d.db.Query(`
 		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
-		       artifact_path, artifact_sha256, artifact_size
+		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at
 		FROM jobs ORDER BY started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -314,7 +343,7 @@ func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 func (d *OrchestratorDB) ListJobsByScenario(scenario string, limit int) ([]*Job, error) {
 	rows, err := d.db.Query(`
 		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
-		       artifact_path, artifact_sha256, artifact_size
+		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at
 		FROM jobs WHERE scenario=? ORDER BY started_at DESC LIMIT ?`, scenario, limit)
 	if err != nil {
 		return nil, err
@@ -551,6 +580,82 @@ func scanRequest(row scannable) (*ProjectRequest, error) {
 	return &r, nil
 }
 
+// ─── Scenario approval operations ──────────────────────────────────────────────
+
+// ScenarioApproval is a row in the scenarios table: the pinned SHA-256 of a
+// scenario's approved content.
+type ScenarioApproval struct {
+	Name       string    `json:"name"`
+	SHA256     string    `json:"sha256"`
+	ApprovedBy string    `json:"approved_by"`
+	ApprovedAt time.Time `json:"approved_at"`
+	Enabled    bool      `json:"enabled"`
+}
+
+// UpsertScenarioApproval registers (or re-registers) the approved checksum for a scenario.
+func (d *OrchestratorDB) UpsertScenarioApproval(name, sha256hex, approvedBy string) error {
+	_, err := d.db.Exec(`
+		INSERT INTO scenarios(name, sha256, approved_by, approved_at, enabled)
+		VALUES(?,?,?,?,1)
+		ON CONFLICT(name) DO UPDATE SET
+			sha256=excluded.sha256,
+			approved_by=excluded.approved_by,
+			approved_at=excluded.approved_at,
+			enabled=1`,
+		name, sha256hex, approvedBy, time.Now().UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+// GetScenarioApproval returns the approval record for a scenario, or (nil, nil) if none exists.
+func (d *OrchestratorDB) GetScenarioApproval(name string) (*ScenarioApproval, error) {
+	row := d.db.QueryRow(
+		`SELECT name, sha256, approved_by, approved_at, enabled FROM scenarios WHERE name=?`, name)
+	a, err := scanScenarioApproval(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return a, err
+}
+
+// ListScenarioApprovals returns all registered scenario approvals.
+func (d *OrchestratorDB) ListScenarioApprovals() ([]*ScenarioApproval, error) {
+	rows, err := d.db.Query(`SELECT name, sha256, approved_by, approved_at, enabled FROM scenarios ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*ScenarioApproval
+	for rows.Next() {
+		a, err := scanScenarioApproval(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// DeleteScenarioApproval revokes a scenario's approval entirely.
+func (d *OrchestratorDB) DeleteScenarioApproval(name string) error {
+	_, err := d.db.Exec(`DELETE FROM scenarios WHERE name=?`, name)
+	return err
+}
+
+func scanScenarioApproval(row scannable) (*ScenarioApproval, error) {
+	var a ScenarioApproval
+	var approvedAt string
+	var enabled int
+	if err := row.Scan(&a.Name, &a.SHA256, &a.ApprovedBy, &approvedAt, &enabled); err != nil {
+		return nil, err
+	}
+	a.Enabled = enabled == 1
+	if t, err := time.Parse(time.RFC3339, approvedAt); err == nil {
+		a.ApprovedAt = t
+	}
+	return &a, nil
+}
+
 // ─── Scan helpers ─────────────────────────────────────────────────────────────
 
 type scannable interface {
@@ -604,11 +709,14 @@ func scanJobRow(row scannable) (*Job, error) {
 	var status string
 	var artifactPath, artifactSHA256 sql.NullString
 	var artifactSize sql.NullInt64
+	var submittedBy, cancelledBy sql.NullString
+	var cancelledAt sql.NullString
 
 	err := row.Scan(
 		&j.ID, &schedID, &j.Scenario, &paramsJSON, &status,
 		&startedAt, &finishedAt, &log, &errMsg,
 		&artifactPath, &artifactSHA256, &artifactSize,
+		&submittedBy, &cancelledBy, &cancelledAt,
 	)
 	if err != nil {
 		return nil, err
@@ -620,6 +728,8 @@ func scanJobRow(row scannable) (*Job, error) {
 	j.ArtifactPath = artifactPath.String
 	j.ArtifactSHA256 = artifactSHA256.String
 	j.ArtifactSize = artifactSize.Int64
+	j.SubmittedBy = submittedBy.String
+	j.CancelledBy = cancelledBy.String
 	if err := json.Unmarshal([]byte(paramsJSON), &j.Params); err != nil {
 		j.Params = map[string]string{}
 	}
@@ -629,6 +739,11 @@ func scanJobRow(row scannable) (*Job, error) {
 	if finishedAt.Valid {
 		if t, err := time.Parse(time.RFC3339, finishedAt.String); err == nil {
 			j.FinishedAt = &t
+		}
+	}
+	if cancelledAt.Valid {
+		if t, err := time.Parse(time.RFC3339, cancelledAt.String); err == nil {
+			j.CancelledAt = &t
 		}
 	}
 	return &j, nil

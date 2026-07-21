@@ -13,13 +13,21 @@ func newRequestHarness(t *testing.T, run runnerFunc) (*requestHandlers, *Orchest
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	exec := &Executor{tdtpcliPath: "stub", tmpDir: t.TempDir(), db: db, run: run, done: make(chan string, 1)}
+	exec := &Executor{
+		tdtpcliPath: "stub", tmpDir: t.TempDir(), db: db, run: run, done: make(chan string, 1),
+		registry: make(map[string]*runningJob),
+	}
 	// Scenario with permissions set explicitly (scenarioFromYAML only sets the name).
 	reportScene := &Scenario{
 		Orchestrator: OrchestratorBlock{Name: "report", Permissions: []string{"etl"}},
 		RawYAML:      []byte("sources: []\n"),
 	}
 	scenes := map[string]*Scenario{"report": reportScene}
+	// Approve "report" with its current content so checksum-gated tests below
+	// exercise license/param logic, not the approval gate itself.
+	if err := db.UpsertScenarioApproval("report", scenarioChecksum(reportScene), "test-setup"); err != nil {
+		t.Fatalf("UpsertScenarioApproval: %v", err)
+	}
 	// License grants etl; no Mercury → online check skipped.
 	gate := &TrustGate{License: proLicense([]string{"etl"}, 0)}
 	return &requestHandlers{db: db, scenes: scenes, executor: exec, gate: gate}, db
@@ -71,6 +79,31 @@ func TestRequest_EvaluateBlockedByLicense(t *testing.T) {
 	}
 }
 
+func TestRequest_EvaluateBlockedByMissingApproval(t *testing.T) {
+	rh, db := newRequestHarness(t, func(context.Context, string, ...string) ([]byte, error) { return nil, nil })
+	// Revoke the approval the harness registered.
+	if err := db.DeleteScenarioApproval("report"); err != nil {
+		t.Fatalf("DeleteScenarioApproval: %v", err)
+	}
+	req := &ProjectRequest{Scenario: "report", Params: map[string]string{}}
+	_, verdict := rh.evaluate(rh.scenes["report"], req)
+	if verdict == "" {
+		t.Error("expected block: scenario has no approval record")
+	}
+}
+
+func TestRequest_EvaluateBlockedByTamperedContent(t *testing.T) {
+	rh, _ := newRequestHarness(t, func(context.Context, string, ...string) ([]byte, error) { return nil, nil })
+	// Simulate the loaded scenario's content changing after approval (e.g. the
+	// file was edited and the orchestrator reloaded) without a re-approve.
+	rh.scenes["report"].RawYAML = []byte("sources: []\n# tampered\n")
+	req := &ProjectRequest{Scenario: "report", Params: map[string]string{}}
+	_, verdict := rh.evaluate(rh.scenes["report"], req)
+	if verdict == "" {
+		t.Error("expected block: content no longer matches approved checksum")
+	}
+}
+
 func TestRequest_ApproveExecutesAndLinksJob(t *testing.T) {
 	ran := false
 	rh, db := newRequestHarness(t, func(context.Context, string, ...string) ([]byte, error) {
@@ -90,7 +123,7 @@ func TestRequest_ApproveExecutesAndLinksJob(t *testing.T) {
 	if verdict != "" {
 		t.Fatalf("evaluate blocked: %s", verdict)
 	}
-	job, err := rh.executor.Submit(context.Background(), s, resolved, "")
+	job, err := rh.executor.Submit(s, resolved, "", "alice")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

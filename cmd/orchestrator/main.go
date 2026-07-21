@@ -13,9 +13,14 @@
 //	GET  /scenarios                   list available scenarios
 //	GET  /scenarios/{name}            scenario definition
 //	POST /scenarios/{name}/run        run with params → {job_id}
+//	POST /scenarios/{name}/approve    approve currently loaded content (admin)
+//	GET  /scenarios/{name}/approval   view approval record + live match (admin)
+//	DELETE /scenarios/{name}/approval revoke approval (admin)
 //	GET  /jobs                        recent jobs (last 100)
 //	GET  /jobs/{id}                   job status + log
 //	GET  /jobs/{id}/artifact          download the job output file
+//	POST /jobs/{id}/cancel             abort a job that hasn't started yet
+//	POST /jobs/{id}/stop               request graceful termination of a running job
 //	GET  /schedules                   list schedules
 //	POST /schedules                   add schedule
 //	PATCH /schedules/{id}/enable      resume
@@ -208,7 +213,8 @@ func main() {
 			}
 
 			// Per-token scenario allowlist: an activator may be scoped to specific scenarios.
-			if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(name) {
+			principal := PrincipalFrom(r.Context())
+			if principal != nil && !principal.AllowsScenario(name) {
 				writeError(w, http.StatusForbidden, "token not authorized for scenario "+name)
 				return
 			}
@@ -228,6 +234,13 @@ func main() {
 				return
 			}
 
+			// Content-integrity gate: refuse unless this scenario's current content
+			// matches an admin-approved checksum (see scenario_approval.go).
+			if err := VerifyScenarioChecksum(db, s); err != nil {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+
 			// Trust gate: scenario permissions must be covered by license + Mercury env.
 			if err := gate.GateScenario(s); err != nil {
 				writeError(w, http.StatusForbidden, err.Error())
@@ -241,13 +254,19 @@ func main() {
 				}
 			}
 
-			job, err := executor.Submit(r.Context(), s, params, "" /* manual run */)
+			job, err := executor.Submit(s, params, "" /* manual run */, principalID(principal))
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			writeJSON(w, http.StatusAccepted, map[string]string{"job_id": job.ID})
 		}))
+
+		// ── Scenario approvals (admin) ───────────────────────────────────────────────
+		sah := &scenarioApprovalHandlers{db: db, scenes: scenes}
+		r.Post("/scenarios/{name}/approve", RequireRole(RoleAdmin, sah.Approve))
+		r.Get("/scenarios/{name}/approval", RequireRole(RoleAdmin, sah.Get))
+		r.Delete("/scenarios/{name}/approval", RequireRole(RoleAdmin, sah.Revoke))
 
 		// ── Jobs ───────────────────────────────────────────────────────────────────
 		r.Get("/jobs", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
@@ -290,6 +309,11 @@ func main() {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			http.ServeFile(w, r, job.ArtifactPath)
 		}))
+
+		// Cancel: only for a job that hasn't started running yet (409 otherwise).
+		r.Post("/jobs/{id}/cancel", RequireRole(RoleActivator, jobActionHandler(db, executor.Cancel)))
+		// Stop: graceful termination of a currently running job (409 otherwise).
+		r.Post("/jobs/{id}/stop", RequireRole(RoleActivator, jobActionHandler(db, executor.Stop)))
 
 		// ── Results (consumer view) ─────────────────────────────────────────────────
 		// Recent jobs for a scenario, scoped by the token's scenario allowlist.
