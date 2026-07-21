@@ -25,6 +25,7 @@ type OrchestratorBlock struct {
 	Description string     `yaml:"description"`
 	Params      []ParamDef `yaml:"params"`
 	Permissions []string   `yaml:"permissions"` // required license features
+	Runner      string     `yaml:"runner"`      // logical runner name (see runners.go); "" = the configured default
 }
 
 // Scenario is a loaded scenario with its raw YAML template.

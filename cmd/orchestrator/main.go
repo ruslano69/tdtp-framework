@@ -1,12 +1,15 @@
-// orchestrator — TDTP scenario execution server.
+// orchestrator — scenario execution server.
 //
-// Wraps tdtpcli --pipeline with HTTP API for manual activation and cron scheduling.
-// Scenarios = pipeline YAML files with optional orchestrator: header.
+// HTTP API for manual activation and cron scheduling over one or more
+// pluggable runners (tdtpcli by default; see runners.go for others).
+// Scenarios = rendered YAML files with an optional orchestrator: header,
+// including which runner they need (orchestrator.runner:).
 // Schedules = stored in SQLite DB; seeded from YAML files on first run.
 //
 // Usage:
 //
 //	orchestrator --scenarios ./scenarios --db orchestrator.db --tdtpcli ./tdtpcli
+//	orchestrator --scenarios ./scenarios --db orchestrator.db --runners ./runners.yaml
 //
 // API:
 //
@@ -48,7 +51,8 @@ func main() {
 	scenariosDir := flag.String("scenarios", "./scenarios", "directory with scenario YAML files")
 	schedulesDir := flag.String("schedules-seed", "./schedules", "directory with schedule seed YAML files")
 	dbPath := flag.String("db", "orchestrator.db", "SQLite database path")
-	tdtpcliPath := flag.String("tdtpcli", "./tdtpcli", "path to tdtpcli binary")
+	tdtpcliPath := flag.String("tdtpcli", "./tdtpcli", "path to tdtpcli binary (used only when --runners is empty)")
+	runnersPath := flag.String("runners", "", "path to runners.yaml (empty = synthesize a single 'tdtpcli' runner from --tdtpcli)")
 	tmpDir := flag.String("tmp", os.TempDir(), "directory for rendered pipeline YAMLs")
 	addr := flag.String("addr", ":8080", "listen address")
 	licensePath := flag.String("license", "", "path to tdtp.lic (default: TDTP_LICENSE env, ./tdtp.lic, else community)")
@@ -97,8 +101,31 @@ func main() {
 	}
 	log.Info().Int("count", len(scenes)).Str("dir", *scenariosDir).Msg("scenarios loaded")
 
+	// Runners: named execution backends. --runners config takes precedence;
+	// otherwise synthesize the legacy single-tdtpcli behavior so existing
+	// deployments and scenario files are unaffected.
+	var runners map[string]RunnerSpec
+	if *runnersPath != "" {
+		runners, err = LoadRunners(*runnersPath)
+		if err != nil {
+			_ = db.Close()
+			log.Fatal().Err(err).Str("path", *runnersPath).Msg("load runners")
+		}
+	} else {
+		runners = map[string]RunnerSpec{
+			defaultRunnerName: {Binary: *tdtpcliPath, Args: []string{"--pipeline", "{{.tmpfile}}"}},
+		}
+	}
+	log.Info().Int("count", len(runners)).Str("default", defaultRunnerName).Msg("runners loaded")
+
+	// Fail fast on a typo'd orchestrator.runner: rather than at first Submit().
+	if err := ValidateScenarioRunners(scenes, runners, defaultRunnerName); err != nil {
+		_ = db.Close()
+		log.Fatal().Err(err).Msg("scenario runner validation failed")
+	}
+
 	// Wire executor and scheduler.
-	executor := NewExecutor(*tdtpcliPath, filepath.Join(*tmpDir, "orch-pipelines"), db)
+	executor := NewExecutor(runners, defaultRunnerName, filepath.Join(*tmpDir, "orch-pipelines"), db)
 	scheduler := NewScheduler(executor, scenes, db, gate)
 
 	// Seed schedules from YAML → DB (idempotent: ON CONFLICT DO UPDATE).
@@ -181,6 +208,7 @@ func main() {
 				Description string     `json:"description"`
 				Params      []ParamDef `json:"params,omitempty"`
 				Permissions []string   `json:"permissions,omitempty"`
+				Runner      string     `json:"runner"`
 			}
 			out := make([]item, 0, len(scenes))
 			for _, s := range scenes {
@@ -189,6 +217,7 @@ func main() {
 					Description: s.Orchestrator.Description,
 					Params:      s.Orchestrator.Params,
 					Permissions: s.Orchestrator.Permissions,
+					Runner:      resolveRunnerName(s, defaultRunnerName),
 				})
 			}
 			writeJSON(w, http.StatusOK, out)

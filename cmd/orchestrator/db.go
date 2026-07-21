@@ -112,6 +112,7 @@ func OpenOrchestratorDB(path string) (*OrchestratorDB, error) {
 		{"submitted_by", `ALTER TABLE jobs ADD COLUMN submitted_by TEXT NOT NULL DEFAULT ''`},
 		{"cancelled_by", `ALTER TABLE jobs ADD COLUMN cancelled_by TEXT NOT NULL DEFAULT ''`},
 		{"cancelled_at", `ALTER TABLE jobs ADD COLUMN cancelled_at DATETIME`},
+		{"runner", `ALTER TABLE jobs ADD COLUMN runner TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, m := range migrations {
 		if _, err := db.Exec(m.ddl); err != nil {
@@ -254,10 +255,10 @@ func (d *OrchestratorDB) InsertJob(j *Job) error {
 		schedID = j.ScheduleID
 	}
 	_, err = d.db.Exec(`
-		INSERT INTO jobs(id, schedule_id, scenario, params, status, started_at, submitted_by)
-		VALUES(?,?,?,?,?,?,?)`,
+		INSERT INTO jobs(id, schedule_id, scenario, params, status, started_at, submitted_by, runner)
+		VALUES(?,?,?,?,?,?,?,?)`,
 		j.ID, schedID, j.Scenario, string(params),
-		string(j.Status), j.StartedAt.UTC().Format(time.RFC3339), j.SubmittedBy,
+		string(j.Status), j.StartedAt.UTC().Format(time.RFC3339), j.SubmittedBy, j.Runner,
 	)
 	return err
 }
@@ -307,7 +308,7 @@ func (d *OrchestratorDB) CountActiveJobs() (int, error) {
 func (d *OrchestratorDB) GetJob(id string) (*Job, error) {
 	row := d.db.QueryRow(`
 		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
-		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at
+		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at, runner
 		FROM jobs WHERE id=?`, id)
 	j, err := scanJob(row)
 	if err == sql.ErrNoRows {
@@ -320,7 +321,7 @@ func (d *OrchestratorDB) GetJob(id string) (*Job, error) {
 func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 	rows, err := d.db.Query(`
 		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
-		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at
+		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at, runner
 		FROM jobs ORDER BY started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -343,7 +344,7 @@ func (d *OrchestratorDB) ListJobs(limit int) ([]*Job, error) {
 func (d *OrchestratorDB) ListJobsByScenario(scenario string, limit int) ([]*Job, error) {
 	rows, err := d.db.Query(`
 		SELECT id, schedule_id, scenario, params, status, started_at, finished_at, log, error,
-		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at
+		       artifact_path, artifact_sha256, artifact_size, submitted_by, cancelled_by, cancelled_at, runner
 		FROM jobs WHERE scenario=? ORDER BY started_at DESC LIMIT ?`, scenario, limit)
 	if err != nil {
 		return nil, err
@@ -709,14 +710,14 @@ func scanJobRow(row scannable) (*Job, error) {
 	var status string
 	var artifactPath, artifactSHA256 sql.NullString
 	var artifactSize sql.NullInt64
-	var submittedBy, cancelledBy sql.NullString
+	var submittedBy, cancelledBy, runner sql.NullString
 	var cancelledAt sql.NullString
 
 	err := row.Scan(
 		&j.ID, &schedID, &j.Scenario, &paramsJSON, &status,
 		&startedAt, &finishedAt, &log, &errMsg,
 		&artifactPath, &artifactSHA256, &artifactSize,
-		&submittedBy, &cancelledBy, &cancelledAt,
+		&submittedBy, &cancelledBy, &cancelledAt, &runner,
 	)
 	if err != nil {
 		return nil, err
@@ -730,6 +731,7 @@ func scanJobRow(row scannable) (*Job, error) {
 	j.ArtifactSize = artifactSize.Int64
 	j.SubmittedBy = submittedBy.String
 	j.CancelledBy = cancelledBy.String
+	j.Runner = runner.String
 	if err := json.Unmarshal([]byte(paramsJSON), &j.Params); err != nil {
 		j.Params = map[string]string{}
 	}

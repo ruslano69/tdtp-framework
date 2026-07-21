@@ -22,12 +22,15 @@ func newTestExecutor(t *testing.T, run runnerFunc) (*Executor, *OrchestratorDB) 
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := &Executor{
-		tdtpcliPath: "tdtpcli-stub",
-		tmpDir:      t.TempDir(),
-		db:          db,
-		run:         run,
-		done:        make(chan string, 1),
-		registry:    make(map[string]*runningJob),
+		runners: map[string]RunnerSpec{
+			defaultRunnerName: {Binary: "tdtpcli-stub", Args: []string{"--pipeline", "{{.tmpfile}}"}},
+		},
+		defaultRunner: defaultRunnerName,
+		tmpDir:        t.TempDir(),
+		db:            db,
+		run:           run,
+		done:          make(chan string, 1),
+		registry:      make(map[string]*runningJob),
 	}
 	return e, db
 }
