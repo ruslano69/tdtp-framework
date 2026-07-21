@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,7 +119,7 @@ func (s *Scheduler) register(r *ScheduleRecord) error {
 			// License expired or scenario no longer permitted — skip the run.
 			status = "failed"
 		default:
-			if _, execErr := s.executor.Submit(context.Background(), scene, resolvedParams, schedID); execErr != nil {
+			if _, execErr := s.executor.Submit(scene, resolvedParams, schedID, ""); execErr != nil {
 				status = "failed"
 			}
 		}

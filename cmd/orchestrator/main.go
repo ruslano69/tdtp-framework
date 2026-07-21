@@ -19,6 +19,8 @@
 //	GET  /jobs                        recent jobs (last 100)
 //	GET  /jobs/{id}                   job status + log
 //	GET  /jobs/{id}/artifact          download the job output file
+//	POST /jobs/{id}/cancel             abort a job that hasn't started yet
+//	POST /jobs/{id}/stop               request graceful termination of a running job
 //	GET  /schedules                   list schedules
 //	POST /schedules                   add schedule
 //	PATCH /schedules/{id}/enable      resume
@@ -211,7 +213,8 @@ func main() {
 			}
 
 			// Per-token scenario allowlist: an activator may be scoped to specific scenarios.
-			if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(name) {
+			principal := PrincipalFrom(r.Context())
+			if principal != nil && !principal.AllowsScenario(name) {
 				writeError(w, http.StatusForbidden, "token not authorized for scenario "+name)
 				return
 			}
@@ -251,7 +254,7 @@ func main() {
 				}
 			}
 
-			job, err := executor.Submit(r.Context(), s, params, "" /* manual run */)
+			job, err := executor.Submit(s, params, "" /* manual run */, principalID(principal))
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -306,6 +309,11 @@ func main() {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			http.ServeFile(w, r, job.ArtifactPath)
 		}))
+
+		// Cancel: only for a job that hasn't started running yet (409 otherwise).
+		r.Post("/jobs/{id}/cancel", RequireRole(RoleActivator, jobActionHandler(db, executor.Cancel)))
+		// Stop: graceful termination of a currently running job (409 otherwise).
+		r.Post("/jobs/{id}/stop", RequireRole(RoleActivator, jobActionHandler(db, executor.Stop)))
 
 		// ── Results (consumer view) ─────────────────────────────────────────────────
 		// Recent jobs for a scenario, scoped by the token's scenario allowlist.

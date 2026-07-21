@@ -139,7 +139,7 @@ func (h *requestHandlers) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.executor.Submit(r.Context(), s, resolved, "" /* manual */)
+	job, err := h.executor.Submit(s, resolved, "" /* manual */, principalID(PrincipalFrom(r.Context())))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "execute failed: "+err.Error())
 		return

@@ -27,6 +27,7 @@ func newTestExecutor(t *testing.T, run runnerFunc) (*Executor, *OrchestratorDB) 
 		db:          db,
 		run:         run,
 		done:        make(chan string, 1),
+		registry:    make(map[string]*runningJob),
 	}
 	return e, db
 }
@@ -68,7 +69,7 @@ sources:
   - query: "SELECT * FROM Payroll WHERE Period = '{{.period}}'"
 `)
 
-	job, err := e.Submit(context.Background(), s, map[string]string{"period": "2026-06"}, "")
+	job, err := e.Submit(s, map[string]string{"period": "2026-06"}, "", "")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestExecutor_FailedRunRecordsError(t *testing.T) {
 	e, db := newTestExecutor(t, run)
 
 	s := scenarioFromYAML("failing", "orchestrator:\n  name: failing\nsources: []\n")
-	job, err := e.Submit(context.Background(), s, nil, "")
+	job, err := e.Submit(s, nil, "", "")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestExecutor_MissingParamFailsBeforeRun(t *testing.T) {
 
 	// Scenario references {{.period}} but we pass no params → render error.
 	s := scenarioFromYAML("x", "query: '{{.period}}'\n")
-	_, err := e.Submit(context.Background(), s, map[string]string{}, "")
+	_, err := e.Submit(s, map[string]string{}, "", "")
 	if err == nil {
 		t.Fatal("Submit should fail when a referenced param is missing")
 	}
@@ -152,7 +153,7 @@ func TestExecutor_ScheduledRunCarriesScheduleID(t *testing.T) {
 	e, db := newTestExecutor(t, run)
 
 	s := scenarioFromYAML("nightly", "orchestrator:\n  name: nightly\nsources: []\n")
-	job, err := e.Submit(context.Background(), s, nil, "sched-123")
+	job, err := e.Submit(s, nil, "sched-123", "")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestExecutor_CountActiveJobs(t *testing.T) {
 	e, db := newTestExecutor(t, run)
 
 	s := scenarioFromYAML("slow", "orchestrator:\n  name: slow\nsources: []\n")
-	_, err := e.Submit(context.Background(), s, nil, "")
+	_, err := e.Submit(s, nil, "", "")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestJobArtifact(t *testing.T) {
 	yamlSrc := "orchestrator:\n  name: artifact-test\noutput: " + outputPath + "\n"
 	s := scenarioFromYAML("artifact-test", yamlSrc)
 
-	job, err := e.Submit(context.Background(), s, nil, "")
+	job, err := e.Submit(s, nil, "", "")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

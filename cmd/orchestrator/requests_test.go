@@ -13,7 +13,10 @@ func newRequestHarness(t *testing.T, run runnerFunc) (*requestHandlers, *Orchest
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	exec := &Executor{tdtpcliPath: "stub", tmpDir: t.TempDir(), db: db, run: run, done: make(chan string, 1)}
+	exec := &Executor{
+		tdtpcliPath: "stub", tmpDir: t.TempDir(), db: db, run: run, done: make(chan string, 1),
+		registry: make(map[string]*runningJob),
+	}
 	// Scenario with permissions set explicitly (scenarioFromYAML only sets the name).
 	reportScene := &Scenario{
 		Orchestrator: OrchestratorBlock{Name: "report", Permissions: []string{"etl"}},
@@ -120,7 +123,7 @@ func TestRequest_ApproveExecutesAndLinksJob(t *testing.T) {
 	if verdict != "" {
 		t.Fatalf("evaluate blocked: %s", verdict)
 	}
-	job, err := rh.executor.Submit(context.Background(), s, resolved, "")
+	job, err := rh.executor.Submit(s, resolved, "", "alice")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
