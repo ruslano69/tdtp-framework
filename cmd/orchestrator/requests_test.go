@@ -20,6 +20,11 @@ func newRequestHarness(t *testing.T, run runnerFunc) (*requestHandlers, *Orchest
 		RawYAML:      []byte("sources: []\n"),
 	}
 	scenes := map[string]*Scenario{"report": reportScene}
+	// Approve "report" with its current content so checksum-gated tests below
+	// exercise license/param logic, not the approval gate itself.
+	if err := db.UpsertScenarioApproval("report", scenarioChecksum(reportScene), "test-setup"); err != nil {
+		t.Fatalf("UpsertScenarioApproval: %v", err)
+	}
 	// License grants etl; no Mercury → online check skipped.
 	gate := &TrustGate{License: proLicense([]string{"etl"}, 0)}
 	return &requestHandlers{db: db, scenes: scenes, executor: exec, gate: gate}, db
@@ -68,6 +73,31 @@ func TestRequest_EvaluateBlockedByLicense(t *testing.T) {
 	_, verdict := rh.evaluate(rh.scenes["report"], req)
 	if verdict == "" {
 		t.Error("expected block: license lacks etl")
+	}
+}
+
+func TestRequest_EvaluateBlockedByMissingApproval(t *testing.T) {
+	rh, db := newRequestHarness(t, func(context.Context, string, ...string) ([]byte, error) { return nil, nil })
+	// Revoke the approval the harness registered.
+	if err := db.DeleteScenarioApproval("report"); err != nil {
+		t.Fatalf("DeleteScenarioApproval: %v", err)
+	}
+	req := &ProjectRequest{Scenario: "report", Params: map[string]string{}}
+	_, verdict := rh.evaluate(rh.scenes["report"], req)
+	if verdict == "" {
+		t.Error("expected block: scenario has no approval record")
+	}
+}
+
+func TestRequest_EvaluateBlockedByTamperedContent(t *testing.T) {
+	rh, _ := newRequestHarness(t, func(context.Context, string, ...string) ([]byte, error) { return nil, nil })
+	// Simulate the loaded scenario's content changing after approval (e.g. the
+	// file was edited and the orchestrator reloaded) without a re-approve.
+	rh.scenes["report"].RawYAML = []byte("sources: []\n# tampered\n")
+	req := &ProjectRequest{Scenario: "report", Params: map[string]string{}}
+	_, verdict := rh.evaluate(rh.scenes["report"], req)
+	if verdict == "" {
+		t.Error("expected block: content no longer matches approved checksum")
 	}
 }
 

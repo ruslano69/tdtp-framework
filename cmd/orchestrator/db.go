@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS idx_requests_status    ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_submitter ON requests(submitter_id);
 CREATE INDEX IF NOT EXISTS idx_requests_created   ON requests(created_at DESC);
+
+-- Scenario approvals: pins the SHA-256 of a scenario YAML's content at the
+-- moment an admin approves it. Execution is refused unless the currently
+-- loaded scenario's content still matches — closes both tampering (same
+-- filename, edited content) and planting (new file, never approved).
+CREATE TABLE IF NOT EXISTS scenarios (
+	name         TEXT PRIMARY KEY,
+	sha256       TEXT NOT NULL,
+	approved_by  TEXT NOT NULL,
+	approved_at  DATETIME NOT NULL,
+	enabled      INTEGER NOT NULL DEFAULT 1
+);
 `
 
 // OrchestratorDB wraps the orchestrator SQLite database.
@@ -549,6 +561,82 @@ func scanRequest(row scannable) (*ProjectRequest, error) {
 		}
 	}
 	return &r, nil
+}
+
+// ─── Scenario approval operations ──────────────────────────────────────────────
+
+// ScenarioApproval is a row in the scenarios table: the pinned SHA-256 of a
+// scenario's approved content.
+type ScenarioApproval struct {
+	Name       string    `json:"name"`
+	SHA256     string    `json:"sha256"`
+	ApprovedBy string    `json:"approved_by"`
+	ApprovedAt time.Time `json:"approved_at"`
+	Enabled    bool      `json:"enabled"`
+}
+
+// UpsertScenarioApproval registers (or re-registers) the approved checksum for a scenario.
+func (d *OrchestratorDB) UpsertScenarioApproval(name, sha256hex, approvedBy string) error {
+	_, err := d.db.Exec(`
+		INSERT INTO scenarios(name, sha256, approved_by, approved_at, enabled)
+		VALUES(?,?,?,?,1)
+		ON CONFLICT(name) DO UPDATE SET
+			sha256=excluded.sha256,
+			approved_by=excluded.approved_by,
+			approved_at=excluded.approved_at,
+			enabled=1`,
+		name, sha256hex, approvedBy, time.Now().UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+// GetScenarioApproval returns the approval record for a scenario, or (nil, nil) if none exists.
+func (d *OrchestratorDB) GetScenarioApproval(name string) (*ScenarioApproval, error) {
+	row := d.db.QueryRow(
+		`SELECT name, sha256, approved_by, approved_at, enabled FROM scenarios WHERE name=?`, name)
+	a, err := scanScenarioApproval(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return a, err
+}
+
+// ListScenarioApprovals returns all registered scenario approvals.
+func (d *OrchestratorDB) ListScenarioApprovals() ([]*ScenarioApproval, error) {
+	rows, err := d.db.Query(`SELECT name, sha256, approved_by, approved_at, enabled FROM scenarios ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*ScenarioApproval
+	for rows.Next() {
+		a, err := scanScenarioApproval(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// DeleteScenarioApproval revokes a scenario's approval entirely.
+func (d *OrchestratorDB) DeleteScenarioApproval(name string) error {
+	_, err := d.db.Exec(`DELETE FROM scenarios WHERE name=?`, name)
+	return err
+}
+
+func scanScenarioApproval(row scannable) (*ScenarioApproval, error) {
+	var a ScenarioApproval
+	var approvedAt string
+	var enabled int
+	if err := row.Scan(&a.Name, &a.SHA256, &a.ApprovedBy, &approvedAt, &enabled); err != nil {
+		return nil, err
+	}
+	a.Enabled = enabled == 1
+	if t, err := time.Parse(time.RFC3339, approvedAt); err == nil {
+		a.ApprovedAt = t
+	}
+	return &a, nil
 }
 
 // ─── Scan helpers ─────────────────────────────────────────────────────────────

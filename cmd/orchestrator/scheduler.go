@@ -113,6 +113,9 @@ func (s *Scheduler) register(r *ScheduleRecord) error {
 		switch {
 		case valErr != nil:
 			status = "failed"
+		case VerifyScenarioChecksum(s.db, scene) != nil:
+			// Not approved, or content changed since approval — skip the run.
+			status = "failed"
 		case s.gate != nil && s.gate.GateScenario(scene) != nil:
 			// License expired or scenario no longer permitted — skip the run.
 			status = "failed"
