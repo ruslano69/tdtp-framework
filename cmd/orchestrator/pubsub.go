@@ -99,6 +99,30 @@ func statusAllowed(status string, allowed []string) bool {
 	return false
 }
 
+// setupPubSub wires the Redis pub/sub trigger and starts its Run loop in the
+// background when redisAddr is set. Returns (nil, nil) when disabled — the
+// orchestrator runs perfectly well without it (cron/manual activation only).
+func setupPubSub(redisAddr, redisPassword string, redisDB int, pubsubPath string, scenes map[string]*Scenario, executor *Executor, gate *TrustGate, db *OrchestratorDB) (*Subscriber, error) {
+	if redisAddr == "" {
+		return nil, nil
+	}
+	if pubsubPath == "" {
+		return nil, fmt.Errorf("--redis-addr requires --pubsub")
+	}
+	subs, err := LoadPubSub(pubsubPath)
+	if err != nil {
+		return nil, fmt.Errorf("load pubsub config %q: %w", pubsubPath, err)
+	}
+	if err := ValidatePubSubScenarios(subs, scenes); err != nil {
+		return nil, fmt.Errorf("pubsub scenario validation failed: %w", err)
+	}
+	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr, Password: redisPassword, DB: redisDB})
+	subscriber := NewSubscriber(redisClient, subs, scenes, executor, gate, db)
+	go subscriber.Run(context.Background())
+	log.Info().Str("addr", redisAddr).Int("subscriptions", len(subs)).Msg("pubsub subscriber started")
+	return subscriber, nil
+}
+
 // Subscriber listens for pipeline-completion events and triggers the
 // scenarios subscribed to them. It runs for the lifetime of the orchestrator
 // process, reconnecting with backoff if the Redis connection drops.
