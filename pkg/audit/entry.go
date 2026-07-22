@@ -3,6 +3,7 @@ package audit
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -258,10 +259,15 @@ func (e *Entry) FilterByLevel(level Level) *Entry {
 	return filtered
 }
 
+// entryIDSeq guarantees uniqueness even when time.Now() returns the same
+// value across back-to-back calls (observed on Windows in tight loops with
+// no I/O between entries — the OS clock resolution can be coarser than the
+// loop itself, which previously produced duplicate IDs and made every
+// PRIMARY KEY insert after the first collision fail).
+var entryIDSeq uint64
+
 // generateID - генерация уникального ID
 func generateID() string {
-	return fmt.Sprintf("audit-%d-%d",
-		time.Now().UnixNano(),
-		time.Now().Unix()%1000,
-	)
+	seq := atomic.AddUint64(&entryIDSeq, 1)
+	return fmt.Sprintf("audit-%d-%d", time.Now().UnixNano(), seq)
 }
