@@ -37,6 +37,7 @@ from tdtp.api_d import TDTPClientDirect, PacketHandle
 from tdtp.api_j import TDTPClientJSON
 from tdtp.facade import Tdtp
 from tdtp.exceptions import (
+    TDTPEncryptedPacketError,
     TDTPError,
     TDTPFilterError,
     TDTPLibraryError,
@@ -102,6 +103,7 @@ __all__ = [
     "PacketHandle",
     "TDTPError",
     "TDTPParseError",
+    "TDTPEncryptedPacketError",
     "TDTPFilterError",
     "TDTPProcessorError",
     "TDTPWriteError",

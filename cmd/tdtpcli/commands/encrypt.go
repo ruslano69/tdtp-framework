@@ -264,11 +264,7 @@ func bindAndVerifyKey(ctx context.Context, mercuryURL, packageUUID, pipelineName
 // different signals: IsEncryptedBlob inspects raw bytes before any XML
 // parse; IsEncryptedPacket inspects an already-parsed packet's attributes.
 func IsEncryptedPacket(pkt *packet.DataPacket) bool {
-	if pkt == nil {
-		return false
-	}
-	return pkt.Schema.Encryption != "" || pkt.Data.Encryption != "" ||
-		(pkt.QueryContext != nil && pkt.QueryContext.Encryption != "")
+	return packet.IsEncrypted(pkt)
 }
 
 // DecryptPacketV15 retrieves the AES-256 key for pkt.Header.MessageID from
