@@ -2,6 +2,33 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.18.1] — 2026-07-22
+
+### Security — golang.org/x/text infinite loop (GO-2026-5970)
+
+Upgraded `golang.org/x/text` `v0.30.0 → v0.39.0`: crafted input can drive an
+internal `norm` routine into an infinite loop, reachable through
+`pkg/xlsx/converter.go` (excelize) and `pkg/adapters/postgres/adapter.go`
+(pgxpool). Caught by CI's `govulncheck`; `go mod tidy` cascaded consistent
+upgrades to `golang.org/x/crypto`, `x/mod`, `x/net`, `x/sync`, `x/sys`,
+`x/telemetry`, `x/tools` as transitive consequences — verified no breaking
+API changes (`go build`/`go vet`/full unit test suite unaffected).
+
+### Security — crypto/tls Encrypted Client Hello privacy leak (GO-2026-5856)
+
+`go.work` was missing a `toolchain` directive, so in workspace mode its own
+`go 1.25.0` line silently governed toolchain selection for every build —
+the `toolchain go1.26.5` already declared in `go.mod` was never honored,
+and every `go build`/`go vet`/`govulncheck` run kept using the
+locally-installed `go1.26.4` regardless. Added a matching
+`toolchain go1.26.5` line to `go.work`; verified via `go version` on a
+freshly built binary that builds now actually use go1.26.5 (fixed version)
+instead of go1.26.4.
+
+Verified locally with `govulncheck` scoped to non-cgo packages
+(`./cmd/tdtpcli/... ./pkg/... ./xzmercury/...`, working around this
+environment's broken cgo toolchain): 0 reachable vulnerabilities, was 2.
+
 ## [1.18.0] — 2026-07-22
 
 ### Added — TDTP v1.5: section-level encryption
