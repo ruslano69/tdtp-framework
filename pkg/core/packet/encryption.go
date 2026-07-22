@@ -12,6 +12,21 @@ import (
 // the encryption="..." attribute on QueryContext/Schema/Data.
 const EncryptionAlgoAESGCM = "aes-256-gcm"
 
+// IsEncrypted reports whether any section of pkt still carries opaque v1.5
+// ciphertext (QueryContext/Schema/Data.Encryption non-empty). Callers that
+// only understand plaintext/compressed packets — e.g. libtdtp's read path,
+// which has no xZMercury key access — must check this before treating
+// Schema.Fields or Data.Rows as real data: an encrypted packet parses as
+// valid XML (Header stays plain) but Schema.Fields is empty and Data.Rows
+// holds one opaque blob, not real rows.
+func IsEncrypted(pkt *DataPacket) bool {
+	if pkt == nil {
+		return false
+	}
+	return pkt.Schema.Encryption != "" || pkt.Data.Encryption != "" ||
+		(pkt.QueryContext != nil && pkt.QueryContext.Encryption != "")
+}
+
 // EncryptSections turns pkt into a TDTP v1.5 packet: QueryContext, Schema,
 // and Data content are each replaced with opaque ciphertext, Header stays
 // untouched. Sets pkt.Version = "1.5".

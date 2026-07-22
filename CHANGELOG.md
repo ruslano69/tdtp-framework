@@ -2,6 +2,47 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.18.2] — 2026-07-22
+
+### Fixed — libtdtp silently returned garbage for v1.5 encrypted packets
+
+`Tdtp.read()`/`parse_bytes()`/`read_multipart()` (the Python facade's whole
+reason for existing — no xZMercury client, pure parse/compress only) had
+zero awareness that TDTP v1.5 encryption exists. An encrypted packet parses
+as valid XML (`Header` always stays plain), so `J_ReadFile`/`J_ParseBytes`/
+`J_ReadMultipart` would parse it "successfully" and hand back
+`{"schema": {"fields": []}, "data": [["<entire base64 ciphertext blob>"]]}`
+— no error, no field, just one opaque row masquerading as data. Combined
+with `--compress`, the same read path instead failed with a confusing
+"decompress error" (it tried to zstd-decompress still-encrypted bytes) —
+loud, but for the wrong reason.
+
+- New `packet.IsEncrypted(pkt)` ([pkg/core/packet/encryption.go](pkg/core/packet/encryption.go))
+  is the single canonical detector, used by both the CLI's
+  `IsEncryptedPacket` (now a thin wrapper, no logic duplicated) and libtdtp.
+- `J_ReadFile`, `J_ParseBytes`, and the shared `readPacketToJPacket` behind
+  `J_ReadMultipart` now check it immediately after parsing and return a
+  clear `error_code: "ENCRYPTED_PACKET"` explaining that decrypting a v1.5
+  packet requires the full `tdtpcli` binary plus a reachable xZMercury
+  server for burn-on-read key retrieval — libtdtp itself has no key-exchange
+  capability by design and never will.
+- Same gap, same fix, in the parallel C-struct ABI used by
+  `TDTPClientDirect`/`PacketHandle`: `D_ReadFile`/`D_ParseBytes`
+  (`exports_d.go`) now call `dSetError` + return 1 instead of returning
+  `field_count=0`/`row_count=1` (the ciphertext blob as a single opaque
+  "row") with a success code. No separate error-code channel exists on the
+  D_ struct ABI, so this surfaces as the same plain-text "encrypted
+  packet: ..." message, raised as `TDTPParseError` like every other D_ read
+  failure — consistent with how that API already reports errors.
+- Python bindings gained `TDTPEncryptedPacketError` (subclass of
+  `TDTPParseError`, so existing broad `except TDTPParseError` handlers still
+  catch it) mapped from the new J_ error code.
+- Verified against the actual compiled library (not just Go unit tests):
+  built `libtdtp.so`/`libtdtp.dll`, called `J_ReadFile`/`J_ParseBytes`/
+  `J_ReadMultipart`/`D_ReadFile`/`D_ParseBytes` through ctypes exactly as
+  the Python facade does, confirmed all five now reject a genuine
+  v1.5-encrypted fixture instead of returning garbage.
+
 ## [1.18.1] — 2026-07-22
 
 ### Security — golang.org/x/text infinite loop (GO-2026-5970)
