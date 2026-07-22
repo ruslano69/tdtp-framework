@@ -190,6 +190,13 @@ full detail and the exact wire-format redesign in root
       `IsEncryptedBlob`/`DecryptEncBlob` calls gain a second detection
       branch for the new attribute-based format alongside the old binary
       header — old and new packets both keep decrypting correctly.
+      `--import-broker` (`broker.go`'s `ImportFromBroker`) gets the same
+      dual-format decrypt dispatch — encryption is a wire-format property
+      detected at parse time, not something tied to `--map`'s remapping
+      layer, so both consumers of broker packets support it independently.
+      `consumer.py` doesn't use `--import-broker` today, but the export side
+      (`--export-broker`, above) must be decryptable by *any* first-class
+      consumer, not only `--map`.
 - [ ] Tests for both, matching this session's established bar (real
       round-trip, not mocks — same spirit as the `miniredis` pub/sub tests).
 

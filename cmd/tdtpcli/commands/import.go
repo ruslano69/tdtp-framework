@@ -159,6 +159,31 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 			return fmt.Errorf("failed to parse TDTP packet from '%s': %w", src.label, err)
 		}
 
+		// ── Decrypt v1.5 section-level encryption ────────────────────────────────
+		// Unlike the legacy blob above, v1.5 packets are valid XML from the start —
+		// nothing to detect before parsing succeeds. Detected per-attribute on the
+		// already-parsed packet, same IsEncryptedPacket signal --map/--import-broker use.
+		if IsEncryptedPacket(pkt) {
+			fmt.Printf("  v1.5 encrypted packet — decrypting via xZMercury (%s)...\n", opts.MercuryURL)
+			if decErr := DecryptPacketV15(ctx, pkt, opts.MercuryURL); decErr != nil {
+				errCode := mercury.ErrorCode(decErr)
+				errPktPath := errorPacketPath(src.label)
+
+				var serverMode string
+				var burnedErr *mercury.KeyBurnedError
+				if errors.As(decErr, &burnedErr) {
+					serverMode = burnedErr.Mode
+				}
+
+				if writeErr := WriteErrorPacket(errCode, decErr.Error(), "", "", serverMode, errPktPath); writeErr != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: could not write error packet to %s: %v\n", errPktPath, writeErr)
+				} else {
+					fmt.Fprintf(os.Stderr, "Error packet written: %s (ServerMode=%q)\n", errPktPath, serverMode)
+				}
+				return fmt.Errorf("failed to decrypt '%s': %w", src.label, decErr)
+			}
+		}
+
 		if pkt.Data.Compression != "" {
 			fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
 			if err := decompressPacketData(pkt); err != nil {

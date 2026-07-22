@@ -13,6 +13,8 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/mercury"
+	"github.com/ruslano69/tdtp-framework/pkg/pipeline"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
@@ -38,8 +40,18 @@ type BrokerConfig struct {
 	ConsumerGroup  string   // Kafka: consumer group ID
 }
 
-// ExportToBroker exports table data to message broker
-func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, compressAlgo string, procMgr ProcessorManager, packetSizeMB int) error {
+// ExportToBroker exports table data to message broker.
+//
+// mercuryURL non-empty + encrypt=true enables encryption (mirrors --enc's
+// export.go behavior, previously unsupported here — confirmed by grep this
+// command pair had zero encryption support before this):
+//   - encryptLegacy=false (default, v1.5): each packet's QueryContext/
+//     Schema/Data go opaque via EncryptPacketV15, Header stays plain XML —
+//     the broker message is still valid XML, keyed by that packet's own
+//     Header.MessageID.
+//   - encryptLegacy=true (--enc13): whole-packet binary blob via
+//     EncryptPacket, same as --export --enc13 produces to a file.
+func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, compressAlgo string, procMgr ProcessorManager, packetSizeMB int, mercuryURL string, encrypt, encryptLegacy bool) error {
 	// Create database adapter
 	adapter, err := adapters.New(ctx, *dbConfig)
 	if err != nil {
@@ -89,21 +101,78 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	if compress {
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
 	}
+	if encrypt {
+		if mercuryURL == "" {
+			return fmt.Errorf("--enc/--enc13 requires --mercury-url pointing at a running xZMercury instance")
+		}
+		if encryptLegacy {
+			fmt.Println("Encrypting data (TDTP v1.3 whole-blob via xZMercury)...")
+		} else {
+			fmt.Println("Encrypting data (TDTP v1.5 section-level via xZMercury)...")
+		}
+	}
 
 	xmlMsgs := make([][]byte, len(packets))
 	errs := make([]error, len(packets))
 
+	// v1.5 encryption needs a Mercury client shared across the per-packet
+	// goroutines below for the mandatory integrity step — one instance,
+	// not one per packet.
+	var integrityClient *mercury.Client
+	if encrypt && !encryptLegacy {
+		integrityClient = mercury.NewClient(mercuryURL, 5000)
+	}
+
+	// Encryption calls xZMercury over HTTP per packet — keep this concurrent
+	// like compression/marshal already are, not a reason to serialize.
 	var wg sync.WaitGroup
 	for i, pkt := range packets {
 		wg.Add(1)
 		go func(i int, pkt *packet.DataPacket) {
 			defer wg.Done()
+
+			// v1.4 integrity is mandatory ahead of v1.5 encryption, not
+			// opt-in — see pkg/pipeline/produce.go's doc comment: without
+			// this, VerifyAndPrepare's consumer-side pre-flight (which
+			// always runs once --mercury-url is set, and v1.5 decryption
+			// requires it) blocks the packet with HASH_NOT_REGISTERED.
+			// Must run before compression (hashes cover plaintext).
+			if encrypt && !encryptLegacy {
+				if err := pipeline.ComputeAndRegisterIntegrity(ctx, pkt, integrityClient, tableName); err != nil {
+					errs[i] = fmt.Errorf("packet %d integrity: %w", i+1, err)
+					return
+				}
+			}
+
 			if compress {
 				if err := compressPacketData(pkt, compressLevel, compressAlgo, true); err != nil { // checksum always enabled with compression
 					errs[i] = fmt.Errorf("packet %d compress: %w", i+1, err)
 					return
 				}
 			}
+
+			if encrypt && encryptLegacy {
+				// EncryptPacket marshals pkt to XML internally before encrypting —
+				// no separate marshal step needed here.
+				blob, _, err := EncryptPacket(ctx, pkt, mercuryURL, tableName)
+				if err != nil {
+					errs[i] = fmt.Errorf("packet %d encrypt (v1.3): %w", i+1, err)
+					return
+				}
+				xmlMsgs[i] = blob
+				return
+			}
+
+			if encrypt {
+				xml, _, err := EncryptPacketV15(ctx, pkt, mercuryURL, tableName)
+				if err != nil {
+					errs[i] = fmt.Errorf("packet %d encrypt (v1.5): %w", i+1, err)
+					return
+				}
+				xmlMsgs[i] = xml
+				return
+			}
+
 			gen := packet.NewGenerator()
 			xml, err := gen.ToXML(pkt, true)
 			if err != nil {
@@ -123,6 +192,9 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 
 	if compress {
 		fmt.Printf("✓ Data compressed with %s\n", compressAlgo)
+	}
+	if encrypt {
+		fmt.Printf("✓ Data encrypted (%s)\n", map[bool]string{true: "v1.3 whole-blob", false: "v1.5 section-level"}[encryptLegacy])
 	}
 
 	// Connect to broker
@@ -227,7 +299,6 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		}
 		return nil
 	}
-	parser := packet.NewParser()
 	generator := packet.NewGenerator()
 
 	receive := func() ([]byte, error) {
@@ -240,10 +311,8 @@ func ImportFromBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg 
 		return data, err
 	}
 
-	parse := func(xmlData []byte) (*packet.DataPacket, error) {
-		return parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string, algo string) ([]string, error) {
-			return decompressData(compressed, algo)
-		})
+	parse := func(raw []byte) (*packet.DataPacket, error) {
+		return parseAndDecryptBrokerMessage(ctx, raw, opts.MercuryURL)
 	}
 
 	// ── Step 1: read the first packet to learn batchID and TotalParts ──────
@@ -415,10 +484,8 @@ func importBrokerKeep(ctx context.Context, broker brokers.MessageBroker, adapter
 		return data, err
 	}
 
-	parse := func(xmlData []byte) (*packet.DataPacket, error) {
-		return packet.NewParser().ParseBytesWithDecompression(xmlData, func(pCtx context.Context, compressed string, algo string) ([]string, error) {
-			return decompressData(compressed, algo)
-		})
+	parse := func(raw []byte) (*packet.DataPacket, error) {
+		return parseAndDecryptBrokerMessage(ctx, raw, opts.MercuryURL)
 	}
 
 	// Read first packet to learn batchID and TotalParts.
@@ -649,4 +716,83 @@ func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 // decompressData decompresses compressed data using processors package
 func decompressData(compressed, algo string) ([]string, error) {
 	return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
+}
+
+// decryptLegacyBlobIfNeeded returns raw as-is unless it's a legacy v1.3
+// whole-packet binary blob (IsEncryptedBlob), in which case it decrypts
+// via xZMercury and returns the recovered plaintext TDTP XML. Must run
+// BEFORE any XML parse attempt — the legacy format isn't XML at all, so
+// parsing it first would just fail. Shared between the broker and --map
+// import paths, which both had their own copy of this exact check.
+func decryptLegacyBlobIfNeeded(ctx context.Context, raw []byte, mercuryURL string) ([]byte, error) {
+	if !IsEncryptedBlob(raw) {
+		return raw, nil
+	}
+	plaintext, err := DecryptEncBlob(ctx, raw, mercuryURL)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt v1.3 blob: %w", err)
+	}
+	return plaintext, nil
+}
+
+// decryptV15PacketIfNeeded decrypts pkt in place if it carries v1.5
+// section-level encryption (IsEncryptedPacket); no-op otherwise. Checked
+// after XML parsing, unlike the legacy blob check — v1.5's Header always
+// stays plain, so parsing succeeds before this needs to run.
+func decryptV15PacketIfNeeded(ctx context.Context, pkt *packet.DataPacket, mercuryURL string) error {
+	if !IsEncryptedPacket(pkt) {
+		return nil
+	}
+	if err := DecryptPacketV15(ctx, pkt, mercuryURL); err != nil {
+		return fmt.Errorf("decrypt v1.5 packet: %w", err)
+	}
+	return nil
+}
+
+// parseAndDecryptBrokerMessage parses one broker message, transparently
+// decrypting it first if it's encrypted (either format) and decompressing
+// after — mirrors what --map/--import already do for file/S3 input,
+// previously entirely missing from the broker path (confirmed by grep:
+// zero encryption support before this).
+//
+// Order matters and must not change: decrypt legacy blob (pre-parse) →
+// parse → decrypt v1.5 (post-parse) → decompress → expand compact.
+// Decompression always runs last of the transform steps — a v1.5 packet
+// that was also compressed still carries its Compression attribute after
+// DecryptSections (that function deliberately leaves it alone, see
+// docs/tdtp-protocol-schema.md → "v1.5" → "Wire-transform order":
+// decrypt-then-decompress, ciphertext can't be decompressed first).
+// Compact expansion runs unconditionally, independent of whether
+// compression also happened — compact format and compression are
+// orthogonal flags (ExpandCompactRows itself no-ops when !Data.Compact).
+func parseAndDecryptBrokerMessage(ctx context.Context, raw []byte, mercuryURL string) (*packet.DataPacket, error) {
+	xmlData, err := decryptLegacyBlobIfNeeded(ctx, raw, mercuryURL)
+	if err != nil {
+		return nil, err
+	}
+
+	parser := packet.NewParser()
+	pkt, err := parser.ParseBytes(xmlData)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := decryptV15PacketIfNeeded(ctx, pkt, mercuryURL); err != nil {
+		return nil, err
+	}
+
+	if parser.IsCompressed(pkt) {
+		if err := parser.DecompressData(ctx, pkt, func(dCtx context.Context, compressed, algo string) ([]string, error) {
+			return decompressData(compressed, algo)
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if pkt.Data.Compact {
+		if err := packet.ExpandCompactRows(pkt); err != nil {
+			return nil, fmt.Errorf("compact expansion failed: %w", err)
+		}
+	}
+
+	return pkt, nil
 }

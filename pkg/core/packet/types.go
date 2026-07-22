@@ -81,10 +81,18 @@ type Header struct {
 //
 // XXH3 (since TDTP v1.4) — xxh3_128 fingerprint of the canonical Schema
 // bytes (excluding the xxh3 attribute itself). Computed by ComputeIntegrity.
+//
+// Encryption/Encrypted (since TDTP v1.5) — when Encryption is non-empty
+// (currently only "aes-256-gcm"), Fields/Dictionary are NOT populated —
+// the entire section content is opaque ciphertext in Encrypted instead.
+// Always check Encryption before reading Fields; see
+// docs/tdtp-protocol-schema.md → "v1.5" for the wire format and why.
 type Schema struct {
-	Fields     []Field     `xml:"Field"                 json:"fields"`
-	Dictionary *Dictionary `xml:"Dictionary,omitempty"  json:"dictionary,omitempty"`
-	XXH3       string      `xml:"xxh3,attr,omitempty"   json:"xxh3,omitempty"` // v1.4: xxh3_128 of Schema content
+	Fields     []Field     `xml:"Field"                    json:"fields"`
+	Dictionary *Dictionary `xml:"Dictionary,omitempty"     json:"dictionary,omitempty"`
+	XXH3       string      `xml:"xxh3,attr,omitempty"      json:"xxh3,omitempty"`        // v1.4: xxh3_128 of Schema content
+	Encryption string      `xml:"encryption,attr,omitempty" json:"encryption,omitempty"` // v1.5: "aes-256-gcm" if Encrypted holds ciphertext
+	Encrypted  string      `xml:",chardata"                 json:"encrypted,omitempty"`  // v1.5: base64(nonce||ciphertext) when Encryption != ""
 }
 
 // Dictionary — обёртка над []DictEntry, чтобы encoding/xml корректно
@@ -145,7 +153,13 @@ type Data struct {
 	Compact     bool   `xml:"compact,attr,omitempty"`     // v1.3.1: compact format (пропуски для fixed полей)
 	Tail        bool   `xml:"tail,attr,omitempty"`        // v1.3.1: последняя строка явно повторяет все fixed-поля — для потокового восстановления и валидации
 	Carry       string `xml:"carry,attr,omitempty"`       // v1.3.1: начальное carry-состояние чанка (pipe-разделённые значения полей); позволяет декодировать чанки независимо друг от друга
-	Rows        []Row  `xml:"R"`
+	// Encryption (since TDTP v1.5): "aes-256-gcm" if Rows holds exactly one
+	// opaque Row whose Value is base64(nonce||ciphertext) of the entire
+	// pre-encryption <R>...</R> fragment (whatever Compression already
+	// produced — one compressed row, or the plain N rows joined). Always
+	// check Encryption before treating Rows as plaintext row values.
+	Encryption string `xml:"encryption,attr,omitempty"`
+	Rows       []Row  `xml:"R"`
 }
 
 // Row представляет одну строку данных

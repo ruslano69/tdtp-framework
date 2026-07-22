@@ -390,6 +390,33 @@ receive raw bytes
                                                  DB write / adapter
 ```
 
+### xZMercury pairing — verified zero server-side changes required
+
+This redesign only ever changes what happens **client-side**, inside
+`tdtpcli`, between `BindKey`/`RetrieveKey`. Verified directly against
+xZMercury's implementation, not assumed:
+
+- `xzmercury/internal/keystore/store.go` `Bind(ctx, uuid, pipelineName)`
+  generates 32 random bytes, stores them base64-encoded in Redis under
+  `mercury:key:{uuid}` with a TTL. It has no concept of how many times, or
+  in what shape, that key will be used to encrypt anything downstream.
+- `BurnOnRead(ctx, uuid)` atomically reads-and-deletes the same Redis key
+  via a Lua script, keyed only by `uuid`. Same story: opaque bytes in,
+  opaque bytes out.
+- `xzmercury/internal/api/keys.go`'s `Bind`/`Retrieve` HTTP handlers
+  (ACL/LDAP check → quota check → `store.Bind`/`store.BurnOnRead`) carry no
+  encryption-shape assumption either — the request/response contract is
+  `{package_uuid, pipeline_name} → {key_b64, hmac, mode}` and
+  `{package_uuid, caller} → {key_b64}`, unchanged from v1.3.
+
+Consequence: v1.3's "one key, one `Seal` call" and v1.5's "one key, three
+`Seal` calls (QueryContext/Schema/Data), one nonce each" are both just
+different **client-side** uses of the exact same bind/retrieve contract.
+`pkg/mercury/client.go`'s `BindKey`/`RetrieveKey` need no signature change.
+The pairing this section set out to confirm already holds today — nothing
+in xZMercury blocks or needs to anticipate v1.5; only `pkg/crypto`,
+`pkg/core/packet`, and the `cmd/tdtpcli/commands/*` call sites change.
+
 ### No graceful degrade — this is the one real asymmetry with v1.4
 
 v1.4's integrity checks have three fallback tiers (Block / Degrade /
@@ -418,6 +445,139 @@ v1.5 packets are a **second, additive** detection branch in both call
 sites, not a replacement of the first. Old packets (whole-blob, v1.0-v1.4)
 keep decrypting exactly as they do today; new packets (v1.5,
 section-level) take the new path. Nothing currently working regresses.
+
+### CLI flag naming — `--enc` moves to v1.5, `--enc13` keeps the old format
+
+Encode-side (unlike decode-side detection above) needs an explicit choice —
+nothing to auto-detect before a packet exists yet. Current flag, unchanged
+since its introduction: `--enc` (`cmd/tdtpcli/flags.go:241`,
+`PipelineOptions.Encrypt` in `pipeline.go`) triggers whole-packet
+`EncryptPacket` (`encrypt.go:156`). That whole-blob format is what v1.3
+introduced — v1.4 added integrity hashing (xxh3), not a new encryption
+shape, so the old format is correctly named after **1.3**, not 1.4.
+
+- **`--enc`** (bare, name unchanged) — now means "encrypt with the current
+  default format." Once v1.5 lands, that default becomes v1.5's
+  section-level encryption. This is a **behavior change on an existing
+  flag name**, not a new flag — anyone scripting `--enc` today gets v1.5
+  output the moment this ships, without touching their command line.
+- **`--enc13`** (new flag) — explicitly requests the legacy v1.3
+  whole-packet blob format, for producers that must interoperate with a
+  consumer that only understands the old shape (e.g. not yet upgraded, or
+  a third-party integration built against `IsEncryptedBlob`/
+  `DecryptEncBlob` directly). Maps to the exact same `EncryptPacket` call
+  `--enc` makes today — no behavior change to that path, just a new name
+  that also happens to be the honest one.
+- **`--enc-dev`** stays orthogonal to both — it swaps the key *source*
+  (local `DevClient` instead of live xZMercury), not the wire *format*.
+  Combines with either `--enc` or `--enc13`.
+
+Decode side needs no equivalent flag: `IsEncryptedBlob` vs. the new
+`encryption="aes-256-gcm"` attribute check (see "Consumer: dual-format
+detection" above) already disambiguates the two shapes automatically from
+the bytes on the wire — a reader never needs to be told in advance which
+format it's about to see.
+
+### Wire-transform order — hash, then compress, then encrypt (fixed, no policy)
+
+Verified against `pkg/core/packet/integrity.go`'s `computeHashes`: v1.4's
+xxh3 is computed over **raw plaintext** row values and the uncompressed
+`Schema`, explicitly "before compression" per its own comment. That fixes
+the full order for a packet carrying all three features at once, and it
+never varies — there is no configuration knob for this, anywhere:
+
+- **Write:** `ComputeIntegrity` (stamps `xxh3` attrs on `Schema`/`Data`
+  from plaintext) → compress `Data`'s rows → encrypt `QueryContext`/
+  `Schema`/`Data` content. The `xxh3`/`compression` attributes stay on the
+  element (outside the encrypted text node) exactly like `compression`
+  already does today — only the section's *content* goes opaque, never
+  its attributes.
+- **Read:** decrypt → decompress → recompute xxh3 over the recovered
+  plaintext → compare to the (never-encrypted) `xxh3` attribute.
+
+Encrypting first would make compression pointless (ciphertext has
+maximal entropy, doesn't compress) and would make the Mercury hash
+registry check integrity of ciphertext instead of content — neither is
+ever correct, so this isn't a per-deployment choice.
+
+### Multi-part packets — each part already has its own `MessageID`, so nothing special is needed
+
+`EncryptPacket` (`encrypt.go:156`) today generates a **fresh random UUID
+per call**, unrelated to `Header.MessageID`, and that UUID travels inside
+the binary blob's own header — readable only after nothing needs
+decrypting first, since the whole blob is opaque anyway. v1.5 cannot reuse
+that: `Header` stays plain specifically so a consumer can route without a
+key, which only works if the UUID passed to `RetrieveKey` is something
+readable *before* decryption — i.e. `Header.MessageID` itself, not a
+separate generated UUID smuggled inside ciphertext.
+
+**Corrected after checking `GenerateReference` directly** (an earlier draft
+of this section wrongly assumed multi-part packets share one `MessageID`
+across parts — they don't): `generateMessageID` produces one base ID per
+call (e.g. `REF-2026-a1b2c3d4`), and each part gets its own **distinct**
+`Header.MessageID` built from it — `fmt.Sprintf("%s-P%d", messageIDBase,
+i+1)`, i.e. `REF-2026-a1b2c3d4-P1`, `-P2`, etc. (`generator.go`'s
+`GenerateReference`). Every part therefore already binds under a different
+Redis key (`mercury:key:{uuid}` keyed by the *full* MessageID string,
+suffix included) — no shared identifier, no `keystore.Bind` overwrite
+race, no special "bind once before generating parts" handling required.
+**`BindKey` simply happens once per part, exactly where legacy `--enc13`
+already calls it once per part today** (`pkg/etl/exporter.go`'s
+`exportToTDTP` loop) — v1.5 slots into the same per-part call site, just
+keyed by `part.Header.MessageID` instead of a separately generated UUID.
+
+Consumer-side mirrors this: multi-part reassembly (`import.go`'s
+`validateMultiPartSession`) already waits for every part file to arrive
+before processing; each part is decrypted independently with its own
+`RetrieveKey(part.Header.MessageID)` call, not one shared retrieval.
+
+Separately, worth flagging (not a v1.5 concern, pre-existing behavior):
+legacy `--enc13` multi-part export reuses **one** Exporter-wide
+`packageUUID` (unrelated to any part's `MessageID`, set once outside the
+per-part loop) for every part's `BindKey` call — repeated binds under the
+same UUID against `keystore.Bind`'s plain `SET` *would* have exactly the
+overwrite race described above, if multi-part `--enc13` export is ever
+exercised. Out of scope here; noted for whoever next touches that path.
+
+### `Schema`/`QueryContext` need one new struct field each; `Data` needs none
+
+Checked directly against `pkg/core/packet/types.go` and `query.go`:
+
+- **`Data`** already has `Rows []Row` where `Row.Value` is
+  `xml:",chardata"` — the exact shape compression already exploits
+  (`<Data compression="zstd"><R>OPAQUE</R></Data>`). Encryption reuses
+  this unchanged: one `<R>` holding `base64(nonce||ciphertext)`, no struct
+  change.
+- **`Schema`** (`Fields []Field \`xml:"Field"\``) and **`QueryContext`**
+  (`OriginalQuery Query`, `ExecutionResults ExecutionResults`, no chardata
+  field at all) have no field to hold text content. Unmarshaling
+  `<Schema encryption="aes-256-gcm">BASE64</Schema>` into today's struct
+  silently succeeds with `Fields == nil` — indistinguishable from a
+  genuinely empty schema, not an error, which is the dangerous part: any
+  code touching `pkt.Schema.Fields` before checking the `encryption`
+  attribute would misread "encrypted" as "empty" with no warning.
+  **Fix:** add `Encrypted string \`xml:",chardata"\`` to both structs,
+  guarded everywhere by checking a new `Encryption string
+  \`xml:"encryption,attr,omitempty"\`` field first. Additive and harmless
+  for existing unencrypted packets — chardata around child elements is
+  just inter-tag whitespace there, already ignored.
+
+### Streaming export — out of scope for the first v1.5 landing
+
+`pkg/core/packet/streaming.go`'s `StreamingGenerator` isn't wired to any
+CLI flag today (`TODO_NEXT.md`'s v2.0 roadmap: "`--export-stream`... code
+ready, not connected to CLI"). Nothing currently produces an encrypted
+*or* compressed streaming packet, so v1.5 introduces no regression by not
+touching it. Revisit only if/when streaming CLI wiring itself is scheduled
+— not part of this feature.
+
+### Error reporting on key-retrieval failure — reuse v1.3's path unchanged
+
+`RetrieveKey`'s failure modes (`ErrMercuryUnavailable`, `ErrKeyExpired`,
+`KeyBurnedError`, ...) are identical between v1.3 and v1.5 — same Mercury
+API, same `mercury.ErrorCode()` mapping, same `encrypt.go` `WriteErrorPacket`
+helper. Nothing new to design here: v1.5's import path calls the same
+error-packet writer v1.3's already does, with the same error codes.
 
 ### What's protected vs. what isn't
 

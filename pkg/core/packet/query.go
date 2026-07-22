@@ -46,10 +46,18 @@ type OrderField struct {
 }
 
 // QueryContext содержит контекст выполнения запроса (в response)
+//
+// Encryption/Encrypted (since TDTP v1.5) — when Encryption is non-empty
+// (currently only "aes-256-gcm"), OriginalQuery/ExecutionResults/
+// FilterStatistics are NOT populated — the entire section content is
+// opaque ciphertext in Encrypted instead. Always check Encryption before
+// reading the other fields; see docs/tdtp-protocol-schema.md → "v1.5".
 type QueryContext struct {
 	OriginalQuery    Query             `xml:"OriginalQuery"`
 	ExecutionResults ExecutionResults  `xml:"ExecutionResults"`
 	FilterStatistics *FilterStatistics `xml:"FilterStatistics,omitempty"`
+	Encryption       string            `xml:"encryption,attr,omitempty"` // v1.5: "aes-256-gcm" if Encrypted holds ciphertext
+	Encrypted        string            `xml:",chardata"`                 // v1.5: base64(nonce||ciphertext) when Encryption != ""
 }
 
 // ExecutionResults содержит результаты выполнения

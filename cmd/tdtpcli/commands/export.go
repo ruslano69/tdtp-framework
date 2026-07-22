@@ -47,11 +47,20 @@ type ExportOptions struct {
 	MercuryURL    string // Optional: register hash in xzMercury (empty = local integrity only)
 	MercuryCaller string // X-Caller header for Mercury registration (default: "tdtpcli")
 
-	// Encryption (--enc tier). Requires MercuryURL.
-	// Each exported part gets its own UUID; key is bound in xZMercury (burn-on-read).
-	// Output file: <name>.tdtp.enc (binary AES-256-GCM blob).
-	// Consumer reads with: --import file.tdtp.enc --mercury-url http://...
-	Encrypt bool // AES-256-GCM via xZMercury BindKey/RetrieveKey
+	// Encryption (--enc / --enc13 tier). Requires MercuryURL.
+	// Key is bound in xZMercury (burn-on-read).
+	//
+	// Encrypt=true, EncryptLegacy=false (--enc, default since v1.5):
+	//   TDTP v1.5 section-level format — QueryContext/Schema/Data go opaque,
+	//   Header stays plain XML. Key bound to pkt.Header.MessageID. Output
+	//   stays a normal .tdtp.xml file (still valid XML).
+	//   Consumer reads with: --import file.tdtp.xml --mercury-url http://...
+	//
+	// Encrypt=true, EncryptLegacy=true (--enc13):
+	//   Legacy TDTP v1.3 whole-packet binary blob. Output file: <name>.tdtp.enc.
+	//   Consumer reads with: --import file.tdtp.enc --mercury-url http://...
+	Encrypt       bool // AES-256-GCM via xZMercury BindKey/RetrieveKey
+	EncryptLegacy bool // true = --enc13 (whole-blob v1.3); false = --enc (v1.5 section-level, default)
 
 	// Object storage (S3/SeaweedFS). Non-nil → stream to object storage instead of local file.
 	StorageCfg *storage.Config // storage driver config with bucket
@@ -109,6 +118,37 @@ func (p *integrityProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacke
 	// Without this, consumer treats packet as pre-v1.4 and skips all integrity checks.
 	pkt.Version = "1.4"
 
+	// Embed Mercury base URL in Dictionary as @MRC so the consumer knows
+	// where to call GET /api/hashes/{uuid}/{part}?xxh3=... for pre-flight.
+	// Only added when Mercury registration is active — no URL = no entry.
+	//
+	// MUST run before ComputeIntegrity below, not after: this mutates
+	// Schema.Dictionary, which is part of what Schema.XXH3 hashes. Adding
+	// it afterward (an earlier version of this function did) stamps a hash
+	// over content that's about to change, so the consumer's recomputed
+	// hash — over the packet's real, final Dictionary — would never match
+	// what was registered. Found live: any --integrity --mercury-url
+	// export failed VerifyIntegrity on import with a schema hash mismatch,
+	// 100% reproducible, not a corner case.
+	if p.mercuryClient != nil && p.mercuryURL != "" {
+		if pkt.Schema.Dictionary == nil {
+			pkt.Schema.Dictionary = &packet.Dictionary{}
+		}
+		// Avoid duplicate @MRC if packet already carries one (e.g. from data export).
+		hasMRC := false
+		for _, e := range pkt.Schema.Dictionary.Entries {
+			if e.Short == "@MRC" {
+				hasMRC = true
+				break
+			}
+		}
+		if !hasMRC {
+			pkt.Schema.Dictionary.Entries = append(pkt.Schema.Dictionary.Entries,
+				packet.DictEntry{Short: "@MRC", Full: p.mercuryURL},
+			)
+		}
+	}
+
 	if _, err := packet.ComputeIntegrity(pkt); err != nil {
 		return fmt.Errorf("integrity: %w", err)
 	}
@@ -127,28 +167,6 @@ func (p *integrityProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacke
 
 	if p.mercuryClient == nil {
 		return nil
-	}
-
-	// Embed Mercury base URL in Dictionary as @MRC so the consumer knows
-	// where to call GET /api/hashes/{uuid}/{part}?xxh3=... for pre-flight.
-	// Only added when Mercury registration is active — no URL = no entry.
-	if p.mercuryURL != "" {
-		if pkt.Schema.Dictionary == nil {
-			pkt.Schema.Dictionary = &packet.Dictionary{}
-		}
-		// Avoid duplicate @MRC if packet already carries one (e.g. from data export).
-		hasMRC := false
-		for _, e := range pkt.Schema.Dictionary.Entries {
-			if e.Short == "@MRC" {
-				hasMRC = true
-				break
-			}
-		}
-		if !hasMRC {
-			pkt.Schema.Dictionary.Entries = append(pkt.Schema.Dictionary.Entries,
-				packet.DictEntry{Short: "@MRC", Full: p.mercuryURL},
-			)
-		}
 	}
 
 	caller := p.caller
@@ -254,7 +272,19 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	}
 
 	// v1.4 integrity: runs BEFORE compression so hashes cover plain-text rows.
-	if opts.IntegrityV14 {
+	//
+	// Mandatory (not opt-in) whenever v1.5 encryption is active, even if
+	// --integrity wasn't passed explicitly: VerifyAndPrepare's consumer-side
+	// pre-flight runs for any packet with Version >= "1.4" and treats an
+	// empty XXH3 as a hard block (ErrHashNotRegistered), not "wasn't
+	// requested". A v1.5-encrypted packet that skipped this would be
+	// unimportable the moment --mercury-url is set — which v1.5 decryption
+	// itself always requires. See pkg/pipeline/produce.go's doc comment for
+	// the full explanation; this is not a v1.5-specific security feature,
+	// it's v1.4's existing gate being satisfied unconditionally so v1.5
+	// doesn't regress it.
+	needsIntegrity := opts.IntegrityV14 || (opts.Encrypt && !opts.EncryptLegacy)
+	if needsIntegrity {
 		caller := opts.MercuryCaller
 		if caller == "" {
 			caller = "tdtpcli"
@@ -315,9 +345,12 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			fmt.Printf("✓ v1.4 integrity hashes stamped (local only)\n")
 		}
 	}
-	if opts.Encrypt {
-		fmt.Printf("✓ AES-256-GCM encrypted (keys stored in xZMercury, burn-on-read)\n")
+	if opts.Encrypt && opts.EncryptLegacy {
+		fmt.Printf("✓ AES-256-GCM encrypted (TDTP v1.3 whole-blob, keys stored in xZMercury, burn-on-read)\n")
 		fmt.Printf("  Decrypt with: --import <file>.tdtp.enc --mercury-url %s\n", opts.MercuryURL)
+	} else if opts.Encrypt {
+		fmt.Printf("✓ AES-256-GCM encrypted (TDTP v1.5 section-level, keys stored in xZMercury, burn-on-read)\n")
+		fmt.Printf("  Decrypt with: --import <file>.tdtp.xml --mercury-url %s\n", opts.MercuryURL)
 	}
 
 	return nil
@@ -383,12 +416,18 @@ func parallelProcessAndWrite(
 }
 
 // writePacket writes a single packet to the configured destination (S3, stdout, or local file).
-// When opts.Encrypt is true the packet is first serialized to XML, then encrypted via xZMercury
-// (AES-256-GCM, UUID-binding); the binary blob is written with a ".tdtp.enc" extension.
+//
+// When opts.Encrypt is true, which format depends on opts.EncryptLegacy:
+//   - false (--enc, default since v1.5): section-level encryption via
+//     EncryptPacketV15 — QueryContext/Schema/Data go opaque, Header stays
+//     plain. Result is still valid XML, written as a normal .tdtp.xml file
+//     (or streamed to stdout — no binary-envelope restriction applies).
+//   - true (--enc13): legacy whole-packet binary blob via EncryptPacket,
+//     written with a ".tdtp.enc" extension (cannot go to stdout).
 func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts ExportOptions, store storage.ObjectStorage) error {
 	switch {
-	case store != nil && opts.Encrypt:
-		// Encrypt → upload binary blob to S3.
+	case store != nil && opts.Encrypt && opts.EncryptLegacy:
+		// --enc13 → upload legacy binary blob to S3.
 		key := opts.StorageKey
 		if total > 1 {
 			key = generatePacketFilename(opts.StorageKey, n, total)
@@ -402,9 +441,28 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 			return err
 		}
 		if total == 1 {
-			fmt.Printf("✓ Encrypted+uploaded: s3://%s/%s (uuid=%s)\n", opts.StorageCfg.S3.Bucket, key, uuid)
+			fmt.Printf("✓ Encrypted (v1.3)+uploaded: s3://%s/%s (uuid=%s)\n", opts.StorageCfg.S3.Bucket, key, uuid)
 		} else {
-			fmt.Printf("✓ Encrypted+uploaded packet %d/%d: s3://%s/%s (uuid=%s)\n", n, total, opts.StorageCfg.S3.Bucket, key, uuid)
+			fmt.Printf("✓ Encrypted (v1.3)+uploaded packet %d/%d: s3://%s/%s (uuid=%s)\n", n, total, opts.StorageCfg.S3.Bucket, key, uuid)
+		}
+
+	case store != nil && opts.Encrypt:
+		// --enc (v1.5) → upload still-valid-XML section-encrypted packet to S3.
+		key := opts.StorageKey
+		if total > 1 {
+			key = generatePacketFilename(opts.StorageKey, n, total)
+		}
+		xmlData, uuid, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+		if err != nil {
+			return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+		}
+		if err := uploadXMLBytesToStorage(ctx, store, xmlData, key, pkt); err != nil {
+			return err
+		}
+		if total == 1 {
+			fmt.Printf("✓ Encrypted (v1.5)+uploaded: s3://%s/%s (uuid=%s)\n", opts.StorageCfg.S3.Bucket, key, uuid)
+		} else {
+			fmt.Printf("✓ Encrypted (v1.5)+uploaded packet %d/%d: s3://%s/%s (uuid=%s)\n", n, total, opts.StorageCfg.S3.Bucket, key, uuid)
 		}
 
 	case store != nil:
@@ -422,8 +480,16 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 		}
 
 	case opts.OutputFile == "" || opts.OutputFile == "-":
+		if opts.Encrypt && opts.EncryptLegacy {
+			return fmt.Errorf("--enc13 cannot be used with stdout output; specify --output file.tdtp.enc")
+		}
 		if opts.Encrypt {
-			return fmt.Errorf("--enc cannot be used with stdout output; specify --output file.tdtp.enc")
+			xmlData, _, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+			if err != nil {
+				return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+			}
+			fmt.Println(string(xmlData))
+			return nil
 		}
 		generator := packet.NewGenerator()
 		xml, err := generator.ToXML(pkt, true)
@@ -437,7 +503,8 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 		if total > 1 {
 			filename = generatePacketFilename(opts.OutputFile, n, total)
 		}
-		if opts.Encrypt {
+		switch {
+		case opts.Encrypt && opts.EncryptLegacy:
 			filename = encOutputKey(filename)
 			blob, uuid, err := EncryptPacket(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
 			if err != nil {
@@ -447,11 +514,26 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 				return err
 			}
 			if total == 1 {
-				fmt.Printf("✓ Encrypted: %s (uuid=%s)\n", filename, uuid)
+				fmt.Printf("✓ Encrypted (v1.3): %s (uuid=%s)\n", filename, uuid)
 			} else {
-				fmt.Printf("✓ Encrypted packet %d/%d: %s (uuid=%s)\n", n, total, filename, uuid)
+				fmt.Printf("✓ Encrypted (v1.3) packet %d/%d: %s (uuid=%s)\n", n, total, filename, uuid)
 			}
-		} else {
+
+		case opts.Encrypt:
+			xmlData, uuid, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+			if err != nil {
+				return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+			}
+			if err := writeEncryptedBlobToFile(xmlData, filename); err != nil {
+				return err
+			}
+			if total == 1 {
+				fmt.Printf("✓ Encrypted (v1.5): %s (uuid=%s)\n", filename, uuid)
+			} else {
+				fmt.Printf("✓ Encrypted (v1.5) packet %d/%d: %s (uuid=%s)\n", n, total, filename, uuid)
+			}
+
+		default:
 			if err := writePacketToFile(pkt, filename); err != nil {
 				return err
 			}
@@ -481,7 +563,10 @@ func encOutputKey(path string) string {
 	return path + ".tdtp.enc"
 }
 
-// writeEncryptedBlobToFile writes a binary encrypted blob to path.
+// writeEncryptedBlobToFile writes raw bytes to path, creating parent
+// directories as needed. Used both for --enc13's binary blob and for
+// --enc's (v1.5) already-marshaled XML bytes — content-agnostic on
+// purpose, it only needs to write what its caller already produced.
 func writeEncryptedBlobToFile(blob []byte, path string) error {
 	dir := filepath.Dir(path)
 	if dir != "" && dir != "." {
@@ -511,6 +596,38 @@ func uploadBlobToStorage(ctx context.Context, store storage.ObjectStorage, blob 
 	}()
 
 	if _, err := io.Copy(pw, bytes.NewReader(blob)); err != nil {
+		pw.CloseWithError(err)
+		<-errCh
+		return fmt.Errorf("failed to write to storage pipe: %w", err)
+	}
+	_ = pw.Close()
+
+	if err := <-errCh; err != nil {
+		return fmt.Errorf("storage Put failed: %w", err)
+	}
+	return nil
+}
+
+// uploadXMLBytesToStorage streams already-serialized XML bytes (a v1.5
+// section-encrypted packet — EncryptPacketV15 already marshaled it once;
+// reusing those bytes here avoids marshaling pkt a second time) to store
+// via io.Pipe. pkt is used only for metadata (table name, row count) —
+// note EncryptSections mutates pkt in place, so by this point pkt itself
+// also reflects the encrypted state, not the original plaintext.
+func uploadXMLBytesToStorage(ctx context.Context, store storage.ObjectStorage, xmlBytes []byte, key string, pkt *packet.DataPacket) error {
+	meta := map[string]string{
+		"table":    pkt.Header.TableName,
+		"protocol": "TDTP 1.5",
+		"rows":     strconv.Itoa(pkt.Header.RecordsInPart),
+	}
+
+	pr, pw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.Put(ctx, key, pr, meta)
+	}()
+
+	if _, err := io.Copy(pw, bytes.NewReader(xmlBytes)); err != nil {
 		pw.CloseWithError(err)
 		<-errCh
 		return fmt.Errorf("failed to write to storage pipe: %w", err)

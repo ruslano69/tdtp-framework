@@ -159,18 +159,24 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 
 		t0 := time.Now()
 
-		// Decrypt → parse → decompress → expand (mirrors loadPacket pipeline).
-		if IsEncryptedBlob(data) {
-			data, err = DecryptEncBlob(listenCtx, data, opts.MercuryURL)
-			if err != nil {
-				fmt.Printf("[map:listen] decrypt error (skipping): %v\n", err)
-				nackIfAble(br)
-				continue
-			}
+		// Decrypt (either format) → parse → decompress → expand (mirrors
+		// loadPacket's pipeline, and parseAndDecryptBrokerMessage's — same
+		// three shared steps, see docs/tdtp-protocol-schema.md → "v1.5" →
+		// "Consumer: dual-format detection").
+		data, err = decryptLegacyBlobIfNeeded(listenCtx, data, opts.MercuryURL)
+		if err != nil {
+			fmt.Printf("[map:listen] decrypt error (skipping): %v\n", err)
+			nackIfAble(br)
+			continue
 		}
 		pkt, err := parser.ParseBytes(data)
 		if err != nil {
 			fmt.Printf("[map:listen] parse error (skipping): %v\n", err)
+			nackIfAble(br)
+			continue
+		}
+		if err := decryptV15PacketIfNeeded(listenCtx, pkt, opts.MercuryURL); err != nil {
+			fmt.Printf("[map:listen] decrypt error (skipping): %v\n", err)
 			nackIfAble(br)
 			continue
 		}
@@ -332,9 +338,11 @@ func loadPacket(ctx context.Context, path, mercuryURL string,
 		}
 	}
 
-	// Decrypt first when the input is an encrypted blob. Detected by content
-	// (binary header) or by the .enc extension — a pipeline may write the
-	// encrypted blob to the YAML destination path (often .tdtp.xml).
+	// Decrypt first when the input is a legacy v1.3 encrypted blob. Detected
+	// by content (binary header) or by the .enc extension — a pipeline may
+	// write the encrypted blob to the YAML destination path (often
+	// .tdtp.xml). v1.5 packets are valid XML and need no pre-parse check;
+	// they're detected after parsing below instead.
 	if IsEncryptedFile(path) || IsEncryptedBlob(data) {
 		plaintext, derr := DecryptEncBlob(ctx, data, mercuryURL)
 		if derr != nil {
@@ -346,6 +354,10 @@ func loadPacket(ctx context.Context, path, mercuryURL string,
 	parser := packet.NewParser()
 	pkt, err := parser.ParseBytes(data)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := decryptV15PacketIfNeeded(ctx, pkt, mercuryURL); err != nil {
 		return nil, err
 	}
 
