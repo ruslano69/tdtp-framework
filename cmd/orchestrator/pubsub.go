@@ -16,6 +16,12 @@ package main
 // and triggers the mapped scenario through the exact same executor.Submit
 // path as cron and manual activation — so approval, trust gates, and audit
 // all apply identically, no special-casing for this trigger source.
+//
+// The event payload's shape (pkg/resultlog/event.PipelineResult) is imported
+// from its own leaf package rather than pkg/resultlog directly — pkg/resultlog
+// pulls in pkg/etl for its publisher side, and pkg/etl statically links
+// kafka-go, RabbitMQ, and excelize even though none of that is reachable
+// from here. Importing the leaf package alone keeps this binary lean.
 
 import (
 	"context"
@@ -29,7 +35,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ruslano69/tdtp-framework/pkg/resultlog"
+	"github.com/ruslano69/tdtp-framework/pkg/resultlog/event"
 )
 
 // pipelineEventPattern matches every pipeline's completion channel, per the
@@ -175,7 +181,7 @@ func (s *Subscriber) runOnce(ctx context.Context) error {
 // key and the small set of fields templated into scenario params — no field
 // in the payload can name a scenario or bypass approval/trust-gate checks.
 func (s *Subscriber) dispatch(payload string) {
-	var result resultlog.PipelineResult
+	var result event.PipelineResult
 	if err := json.Unmarshal([]byte(payload), &result); err != nil {
 		log.Warn().Err(err).Msg("pubsub: malformed pipeline event, ignoring")
 		return

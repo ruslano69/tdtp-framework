@@ -180,3 +180,144 @@ func EncryptPacket(ctx context.Context, pkt *packet.DataPacket, mercuryURL, pipe
 
 	return result.Encrypted, packageUUID, nil
 }
+
+// EncryptPacketV15 encrypts pkt in place using TDTP v1.5 section-level
+// encryption (QueryContext/Schema/Data each turn opaque; Header stays
+// plain XML) and returns the resulting XML bytes.
+//
+// Unlike EncryptPacket (--enc13, legacy whole-blob format), the package
+// UUID bound at xZMercury is always pkt.Header.MessageID — never a freshly
+// generated one — because a v1.5 consumer must be able to read the UUID
+// straight from the plain Header before decrypting anything. For
+// multi-part packets, this is simply called once per part: each part
+// already carries its own distinct Header.MessageID ("{base}-P{n}", set
+// by GenerateReference), so each part's BindKey call lands on its own
+// Redis key — no shared identifier, no overwrite race, no special
+// handling needed (see docs/tdtp-protocol-schema.md → "v1.5" →
+// "Multi-part packets").
+//
+// pkt must already have ComputeIntegrity (and compression, if enabled)
+// applied — this function does not run either; order is fixed
+// (hash -> compress -> encrypt) and is the caller's responsibility.
+func EncryptPacketV15(ctx context.Context, pkt *packet.DataPacket, mercuryURL, pipelineName string) (xmlData []byte, packageUUID string, err error) {
+	if mercuryURL == "" {
+		return nil, "", fmt.Errorf("--enc requires --mercury-url pointing at a running xZMercury instance")
+	}
+
+	packageUUID = pkt.Header.MessageID
+	if packageUUID == "" {
+		return nil, "", fmt.Errorf("encrypt v1.5: packet Header.MessageID is empty — cannot bind a key without it")
+	}
+
+	key, err := bindAndVerifyKey(ctx, mercuryURL, packageUUID, pipelineName)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := packet.EncryptSections(pkt, key); err != nil {
+		return nil, "", fmt.Errorf("encrypt sections: %w", err)
+	}
+
+	gen := packet.NewGenerator()
+	xmlData, err = gen.ToXML(pkt, true)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal encrypted packet to XML: %w", err)
+	}
+
+	return xmlData, packageUUID, nil
+}
+
+// bindAndVerifyKey calls xZMercury BindKey and verifies the HMAC exactly
+// like processors.FileEncryptor.Encrypt does for the legacy path — shared
+// here so v1.5 gets the identical ACL/quota/HMAC guarantees without
+// duplicating that logic's security-relevant details.
+func bindAndVerifyKey(ctx context.Context, mercuryURL, packageUUID, pipelineName string) ([]byte, error) {
+	mc := mercury.NewClient(mercuryURL, 5000)
+	binding, err := mc.BindKey(ctx, packageUUID, pipelineName)
+	if err != nil {
+		return nil, fmt.Errorf("bind key: %w", err)
+	}
+
+	serverSecret := os.Getenv("MERCURY_SERVER_SECRET")
+	if serverSecret == "" {
+		return nil, fmt.Errorf("%w: MERCURY_SERVER_SECRET not set — "+
+			"HMAC verification is mandatory; use serverSecret=\"dev-mode\" to opt out explicitly",
+			mercury.ErrHMACVerificationFailed)
+	}
+	if serverSecret != "dev-mode" {
+		if !mercury.VerifyHMAC(packageUUID, binding.HMAC, serverSecret, binding.Mode) {
+			return nil, fmt.Errorf("%w: uuid=%s mode=%s", mercury.ErrHMACVerificationFailed, packageUUID, binding.Mode)
+		}
+	}
+
+	key, err := mercury.DecodeKey(binding.KeyB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode key: %w", err)
+	}
+	return key, nil
+}
+
+// IsEncryptedPacket reports whether a parsed DataPacket carries v1.5
+// section-level encryption (QueryContext/Schema/Data attribute-based),
+// as opposed to IsEncryptedBlob's whole-packet binary envelope (v1.0-v1.4,
+// --enc13). The two formats are mutually exclusive and auto-detected from
+// different signals: IsEncryptedBlob inspects raw bytes before any XML
+// parse; IsEncryptedPacket inspects an already-parsed packet's attributes.
+func IsEncryptedPacket(pkt *packet.DataPacket) bool {
+	if pkt == nil {
+		return false
+	}
+	return pkt.Schema.Encryption != "" || pkt.Data.Encryption != "" ||
+		(pkt.QueryContext != nil && pkt.QueryContext.Encryption != "")
+}
+
+// DecryptPacketV15 retrieves the AES-256 key for pkt.Header.MessageID from
+// xZMercury (burn-on-read — call once, reuse for every part of a
+// multi-part message) and decrypts every encrypted section in place.
+func DecryptPacketV15(ctx context.Context, pkt *packet.DataPacket, mercuryURL string) error {
+	if mercuryURL == "" {
+		return fmt.Errorf(
+			"decryption requires --mercury-url: v1.5 packets use xZMercury burn-on-read key retrieval")
+	}
+
+	packageUUID := pkt.Header.MessageID
+	if packageUUID == "" {
+		return fmt.Errorf("decrypt v1.5: packet Header.MessageID is empty — cannot retrieve a key without it")
+	}
+	fmt.Printf("  v1.5 encrypted packet UUID: %s\n", packageUUID)
+
+	mc := mercury.NewClient(mercuryURL, 5000)
+	caller := os.Getenv("TDTPCLI_CALLER")
+	keyB64, err := mc.RetrieveKey(ctx, packageUUID, caller)
+	if err != nil {
+		var burnedErr *mercury.KeyBurnedError
+		if errors.As(err, &burnedErr) {
+			if burnedErr.Mode == "dev" {
+				fmt.Fprintf(os.Stderr,
+					"\n⚠  DEV-FAILOVER BURN: key for package %s was burned by a dev-mode Mercury instance.\n"+
+						"   ServerMode: dev  BurnedAt: %s\n\n",
+					packageUUID, burnedErr.BurnedAt.Format(time.RFC3339))
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"\n🚨 SECURITY ALERT: key for package %s was already burned in PROD mode.\n"+
+						"   ServerMode: %s  BurnedAt: %s\n\n",
+					packageUUID, burnedErr.Mode, burnedErr.BurnedAt.Format(time.RFC3339))
+			}
+		} else if errors.Is(err, mercury.ErrKeyExpired) {
+			fmt.Fprintf(os.Stderr,
+				"\n⚠  KEY EXPIRED: key for package %s not found (TTL expired or UUID never existed).\n\n",
+				packageUUID)
+		}
+		return fmt.Errorf("retrieve key from Mercury (uuid=%s): %w", packageUUID, err)
+	}
+
+	key, err := mercury.DecodeKey(keyB64)
+	if err != nil {
+		return fmt.Errorf("decode key: %w", err)
+	}
+
+	if err := packet.DecryptSections(pkt, key); err != nil {
+		return fmt.Errorf("decrypt sections (uuid=%s): %w", packageUUID, err)
+	}
+	return nil
+}

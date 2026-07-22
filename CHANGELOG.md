@@ -2,6 +2,76 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.18.0] — 2026-07-22
+
+### Added — TDTP v1.5: section-level encryption
+
+Encryption redesigned to mirror how compression (v1.2+) already works:
+instead of wrapping the whole packet in an opaque binary envelope (v1.3),
+`<QueryContext>`, `<Schema>`, and `<Data>` are each individually replaced
+with `encryption="aes-256-gcm"` ciphertext; `<Header>` always stays plain
+XML so routing, dedup, and multi-part reassembly need no key. Full design
+and wire-format diagrams: `docs/tdtp-protocol-schema.md` → "v1.5".
+
+- **Wire format** (`pkg/core/packet`): `EncryptSections`/`DecryptSections`
+  (new `encryption.go`) encrypt/decrypt each section with one AES-256 key
+  and a unique nonce per section. New `Encryption`/`Encrypted` fields on
+  `Schema`/`QueryContext`; `Data` reuses its existing opaque-row shape
+  (`Rows []Row`) unchanged. Fixed, non-configurable order: hash (v1.4) →
+  compress → encrypt on write; decrypt → decompress → verify on read.
+- **Key binding**: bound to the packet's own `Header.MessageID` (not a
+  freshly generated UUID as v1.3 does) — the consumer must be able to read
+  the UUID straight from the plain Header before decrypting anything.
+  Multi-part packets need no special handling: each part already carries
+  its own distinct `MessageID` (`{base}-P{n}`).
+- **CLI**: `--enc` now produces v1.5 by default (was v1.3 whole-blob); new
+  `--enc13` flag requests the legacy format explicitly for consumers not
+  yet updated. Both share the same xZMercury `BindKey`/`RetrieveKey` flow —
+  verified zero xZMercury server-side changes needed (`keystore.Bind`
+  treats the key as opaque bytes regardless of client-side usage shape).
+  Wired into `--export`, `--export-broker`, and `--pipeline`
+  (`output.tdtp.encryption`).
+- **`--export-broker`/`--import-broker`** (`cmd/tdtpcli/commands/broker.go`):
+  gained encryption support entirely — previously zero (confirmed by grep
+  before starting). `--import-broker`, `--map`, and `--import` all gained
+  dual-format decrypt dispatch (legacy blob vs. v1.5 attribute-based,
+  auto-detected from the bytes) via shared helpers
+  (`parseAndDecryptBrokerMessage`, `decryptLegacyBlobIfNeeded`,
+  `decryptV15PacketIfNeeded`).
+- **Mandatory v1.4 integrity ahead of v1.5 encryption** (new
+  `pkg/pipeline/produce.go`, `ComputeAndRegisterIntegrity`): found live,
+  not planned — `VerifyAndPrepare`'s consumer-side pre-flight runs for any
+  packet with `Version >= "1.4"` (v1.5 packets included) and blocks on an
+  empty `XXH3` with `HASH_NOT_REGISTERED`. Every v1.5 encryption call site
+  now stamps + registers the integrity hash first, so no v1.5 packet is
+  ever missing what the existing v1.4 gate already required — zero
+  regression to the pre-v1.5 security posture, no changes needed to the
+  gate itself.
+
+### Fixed — two real bugs found via live end-to-end testing (not unit tests)
+
+- **`pkg/core/packet.EncryptSections` silent plaintext leak**: an earlier
+  version left `MaterializeRows()` to the caller; a caller that skipped
+  compression (or went through `pkg/etl`'s exporter, which only
+  materializes as a compression side effect) left `rawRows` populated, so
+  `writePacketTo`'s fast path silently wrote the *original plaintext rows*
+  into `<Data>` right next to a truthful `encryption="aes-256-gcm"`
+  attribute — a packet that looks encrypted but isn't. Caught by
+  `pkg/etl/exporter_v15_test.go` before it shipped; guarantee now lives
+  inside `EncryptSections` itself, not duplicated per call site.
+- **`integrityProc` schema-hash/`@MRC` ordering** (`cmd/tdtpcli/commands/export.go`):
+  the Mercury base-URL `@MRC` Dictionary entry was embedded *after*
+  `ComputeIntegrity` stamped `Schema.XXH3` — the hash covered a Schema
+  that was about to change, so `VerifyIntegrity` on import always failed
+  with a schema hash mismatch. 100% reproducible whenever `--integrity`/
+  v1.5 encryption and `--mercury-url` were combined — not v1.5-specific,
+  but v1.5 made this combination unconditional, surfacing it. Fixed by
+  reordering: embed `@MRC` before computing integrity. Regression test:
+  `export_integrity_test.go`.
+
+Both confirmed via live round-trips against a real `xzmercury --dev`
+instance, real RabbitMQ (Docker), and real SQLite — not mocks alone.
+
 ## [1.17.2] — 2026-07-02
 
 > **⚠️ Rebuild `libtdtp.dll`/`.so` before upgrading.** This release changes the

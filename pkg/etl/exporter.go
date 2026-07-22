@@ -13,6 +13,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
+	"github.com/ruslano69/tdtp-framework/pkg/pipeline"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"github.com/ruslano69/tdtp-framework/pkg/resilience"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
@@ -45,6 +46,17 @@ type Exporter struct {
 // precedence; this is the global fallback from PipelineConfig.Performance.Fast.
 func (e *Exporter) SetFast(fast bool) {
 	e.fast = fast
+}
+
+// resolveHashRegistrar returns a pipeline.HashRegistrar for the mandatory
+// v1.5 integrity step: e.mercuryBinder if it also implements HashRegistrar
+// (the same dev-mode/test substitute already used for BindKey), else a
+// production mercury.Client built from e.security.MercuryURL.
+func (e *Exporter) resolveHashRegistrar() pipeline.HashRegistrar {
+	if hr, ok := e.mercuryBinder.(pipeline.HashRegistrar); ok {
+		return hr
+	}
+	return mercury.NewClient(e.security.MercuryURL, e.security.MercuryTimeoutMs)
 }
 
 // newGenerator returns a Generator configured with the effective fast flag:
@@ -263,10 +275,29 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		return fmt.Errorf("failed to generate parts: %w", err)
 	}
 
+	// v1.5 encryption needs a Mercury client shared across all parts for the
+	// mandatory integrity step below — one instance, not one per part.
+	var integrityRegistrar pipeline.HashRegistrar
+	if e.config.TDTP.Encryption && !e.config.TDTP.EncryptionV13 {
+		integrityRegistrar = e.resolveHashRegistrar()
+	}
+
 	for _, part := range parts {
 		// Встраиваем метаданные pipeline (v1.4) если заданы
 		if e.pipelineCtx != nil {
 			part.PipelineContext = e.pipelineCtx
+		}
+
+		// v1.4 integrity is mandatory ahead of v1.5 encryption, not
+		// opt-in — see pkg/pipeline/produce.go's doc comment: without
+		// this, VerifyAndPrepare's consumer-side pre-flight (which always
+		// runs once --mercury-url is set, and v1.5 decryption requires
+		// it) blocks the packet with HASH_NOT_REGISTERED. Must run before
+		// compression (hashes cover plaintext).
+		if e.config.TDTP.Encryption && !e.config.TDTP.EncryptionV13 {
+			if err := pipeline.ComputeAndRegisterIntegrity(ctx, part, integrityRegistrar, e.pipelineName); err != nil {
+				return fmt.Errorf("integrity for part %d: %w", part.Header.PartNumber, err)
+			}
 		}
 
 		// Сжатие применяем к каждой части отдельно
@@ -278,16 +309,33 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 
 		partDest := tdtpPartDestination(destination, part.Header.PartNumber, part.Header.TotalParts)
 
-		xmlData, err := generator.ToXML(part, true)
-		if err != nil {
-			return fmt.Errorf("failed to generate XML for part %d: %w", part.Header.PartNumber, err)
-		}
-
-		if e.config.TDTP.Encryption {
+		if e.config.TDTP.Encryption && e.config.TDTP.EncryptionV13 {
+			// Legacy v1.3 whole-blob: XML is generated first, then the
+			// entire blob becomes the ciphertext plaintext.
+			xmlData, err := generator.ToXML(part, true)
+			if err != nil {
+				return fmt.Errorf("failed to generate XML for part %d: %w", part.Header.PartNumber, err)
+			}
 			if err := e.exportEncrypted(ctx, generator, xmlData, partDest); err != nil {
 				return err
 			}
 			continue
+		}
+
+		if e.config.TDTP.Encryption {
+			// v1.5 section-level: EncryptSections mutates part in place
+			// (QueryContext/Schema/Data go opaque, Header stays plain) —
+			// marshal happens AFTER, inside exportEncryptedV15, so it
+			// serializes the encrypted state, not the original plaintext.
+			if err := e.exportEncryptedV15(ctx, generator, part, partDest); err != nil {
+				return err
+			}
+			continue
+		}
+
+		xmlData, err := generator.ToXML(part, true)
+		if err != nil {
+			return fmt.Errorf("failed to generate XML for part %d: %w", part.Header.PartNumber, err)
 		}
 
 		if storage.IsRemote(partDest) {
@@ -413,6 +461,60 @@ func (e *Exporter) exportEncrypted(ctx context.Context, generator *packet.Genera
 	}
 	if err := processors.WriteEncrypted(destination, result.Encrypted); err != nil {
 		return fmt.Errorf("write encrypted output: %w", err)
+	}
+	return nil
+}
+
+// exportEncryptedV15 шифрует part TDTP v1.5 section-level форматом
+// (QueryContext/Schema/Data становятся ciphertext, Header остаётся plain
+// XML) и записывает результат в destination. Ключ привязывается к
+// part.Header.MessageID — не к e.packageUUID — потому что консьюмер должен
+// суметь прочитать uuid прямо из Header без расшифровки; каждая часть
+// multi-part сообщения уже несёт свой уникальный MessageID
+// (GenerateReference добавляет суффикс "-P{n}"), так что вызов этой
+// функции один раз на часть — весь необходимый multi-part флоу, без
+// специальной обработки (см. docs/tdtp-protocol-schema.md → "v1.5" →
+// "Multi-part packets").
+//
+// При недоступности xZMercury записывает error-пакет и возвращает исходную
+// ошибку Mercury, как exportEncrypted — тот же контракт с вызывающим кодом.
+func (e *Exporter) exportEncryptedV15(ctx context.Context, generator *packet.Generator, part *packet.DataPacket, destination string) error {
+	packageUUID := part.Header.MessageID
+	if packageUUID == "" {
+		return fmt.Errorf("v1.5 encryption requires part.Header.MessageID to be set")
+	}
+
+	var binder processors.MercuryBinder
+	if e.mercuryBinder != nil {
+		binder = e.mercuryBinder
+	} else {
+		binder = mercury.NewClient(e.security.MercuryURL, e.security.MercuryTimeoutMs)
+	}
+
+	serverSecret := e.security.ServerSecret
+	if serverSecret == "" {
+		serverSecret = os.Getenv("MERCURY_SERVER_SECRET")
+	}
+	encryptor := processors.NewFileEncryptor(binder, serverSecret, packageUUID, e.pipelineName)
+
+	errCode, encErr := encryptor.EncryptSectionsV15(ctx, part)
+	if encErr != nil {
+		if writeErr := e.writeErrorPacket(ctx, generator, destination, errCode, encErr.Error()); writeErr != nil {
+			return fmt.Errorf("write error packet after mercury failure: %w", writeErr)
+		}
+		return encErr
+	}
+
+	xmlData, err := generator.ToXML(part, true)
+	if err != nil {
+		return fmt.Errorf("failed to generate XML for encrypted part %d: %w", part.Header.PartNumber, err)
+	}
+
+	if storage.IsRemote(destination) {
+		return e.uploadToStorage(ctx, xmlData, destination, part)
+	}
+	if err := os.WriteFile(destination, xmlData, 0o600); err != nil {
+		return fmt.Errorf("failed to write encrypted part %d: %w", part.Header.PartNumber, err)
 	}
 	return nil
 }

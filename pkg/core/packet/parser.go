@@ -126,15 +126,20 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 		}
 	}
 
-	// Проверка соответствия количества полей и данных
-	if len(packet.Data.Rows) > 0 && len(packet.Schema.Fields) == 0 {
-		return fmt.Errorf("schema is required when data is present")
+	// Проверка соответствия количества полей и данных.
+	// v1.5: зашифрованная Schema/Data не содержит Fields до расшифровки —
+	// обе проверки ниже бессмысленны для ciphertext и пропускаются.
+	if packet.Schema.Encryption == "" && packet.Data.Encryption == "" {
+		if len(packet.Data.Rows) > 0 && len(packet.Schema.Fields) == 0 {
+			return fmt.Errorf("schema is required when data is present")
+		}
 	}
 
 	// RecordsInPart должен точно совпадать с числом <R> строк.
 	// Для сжатых пакетов строки упакованы в blob — проверка невозможна без декомпрессии.
 	// Начиная с v1.4 целостность гарантируется XXH3 — проверка счётчика избыточна.
-	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" && NeedsRowCountCheck(packet.Version) {
+	// v1.5: зашифрованные строки тоже упакованы в один opaque <R> — тот же случай.
+	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" && packet.Data.Encryption == "" && NeedsRowCountCheck(packet.Version) {
 		if actual := len(packet.Data.Rows); actual != packet.Header.RecordsInPart {
 			return fmt.Errorf("RecordsInPart mismatch: header declares %d rows, <Data> contains %d",
 				packet.Header.RecordsInPart, actual)

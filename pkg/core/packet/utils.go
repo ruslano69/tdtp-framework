@@ -40,6 +40,17 @@ func NewErrorPacket(code, message, table, inReplyTo, serverMode string) *DataPac
 //
 // Starting with v1.4, packets carry XXH3-128 hashes that guarantee integrity
 // end-to-end, making the RecordsInPart counter redundant as a safety check.
+//
+// This same predicate also gates pkg/pipeline's VerifyAndPrepare pre-flight
+// (via the inverse: !NeedsRowCountCheck(version) → run the Mercury pre-flight)
+// — meaning it doubles as "does this packet's version REQUIRE a registered
+// xxh3 hash to be importable." That's a real assumption, not just a naming
+// coincidence: any producer of a version >= "1.4" packet (this includes
+// v1.5 encryption, whose packets always carry Version="1.5") MUST have
+// called ComputeIntegrity + RegisterHash, or the consumer-side gate blocks
+// it with HASH_NOT_REGISTERED — found live via a v1.5 packet that skipped
+// this. See pkg/pipeline/produce.go's ComputeAndRegisterIntegrity, which
+// every v1.5 encryption call site now calls for exactly this reason.
 func NeedsRowCountCheck(version string) bool {
 	return version <= "1.3.1"
 }

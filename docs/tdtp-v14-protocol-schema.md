@@ -1,3 +1,8 @@
+> **Superseded** by [`tdtp-protocol-schema.md`](tdtp-protocol-schema.md) —
+> one chronological English-language document covering v1.4 onward
+> (including v1.5's encryption redesign). Kept here unchanged for anyone
+> with an existing link to this file; not maintained going forward.
+
 # TDTP v1.4 — схема использования протокола
 
 ## Участники

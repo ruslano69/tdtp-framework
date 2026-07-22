@@ -161,7 +161,8 @@ func routeCommand(
 				IntegrityV14:     *flags.Integrity,
 				MercuryURL:       *flags.MercuryURL,
 				MercuryCaller:    *flags.MercuryCaller,
-				Encrypt:          *flags.Encrypt,
+				Encrypt:          *flags.Encrypt || *flags.Enc13,
+				EncryptLegacy:    *flags.Enc13,
 			})
 		})
 
@@ -448,7 +449,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize, *flags.MercuryURL, *flags.Encrypt || *flags.Enc13, *flags.Enc13)
 		})
 
 	} else if *flags.ImportBroker {
@@ -529,7 +530,8 @@ func routeCommand(
 		pipelineOpts := commands.PipelineOptions{
 			Unsafe:         *flags.Unsafe,
 			UnsafeCertPath: *flags.UnsafeCert,
-			Encrypt:        *flags.Encrypt,
+			Encrypt:        *flags.Encrypt || *flags.Enc13,
+			EncryptLegacy:  *flags.Enc13,
 			EncDev:         encDev,
 			Variables:      flags.PipelineVars,
 		}
@@ -753,7 +755,7 @@ func main() {
 	}
 
 	// Feature gates: refuse licensed-only flags up front (before any DB work).
-	if *flags.Encrypt {
+	if *flags.Encrypt || *flags.Enc13 {
 		if err := commands.GateFeature("enc"); err != nil {
 			fatal("%v", err)
 		}

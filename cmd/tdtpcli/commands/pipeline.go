@@ -18,7 +18,8 @@ import (
 type PipelineOptions struct {
 	Unsafe         bool              // --unsafe: разрешить все SQL операции (требует admin)
 	UnsafeCertPath string            // --unsafe-cert: path to capability certificate
-	Encrypt        bool              // --enc: переопределить output.tdtp.encryption: true
+	Encrypt        bool              // --enc: переопределить output.tdtp.encryption: true (v1.5 section-level, по умолчанию с v1.5)
+	EncryptLegacy  bool              // --enc13: legacy TDTP v1.3 whole-blob формат вместо v1.5
 	EncDev         bool              // --enc-dev: использовать DevClient вместо xZMercury (только !production сборки)
 	Variables      map[string]string // @name=value аргументы из CLI
 }
@@ -54,12 +55,15 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 		return fmt.Errorf("failed to load pipeline config: %w", err)
 	}
 
-	// 2a. Apply CLI encryption overrides (--enc / --enc-dev переопределяют YAML)
+	// 2a. Apply CLI encryption overrides (--enc / --enc13 / --enc-dev переопределяют YAML)
 	if opts.Encrypt || opts.EncDev {
 		if config.Output.Type != "tdtp" || config.Output.TDTP == nil {
-			return fmt.Errorf("--enc/--enc-dev require output.type: tdtp with tdtp section in pipeline config")
+			return fmt.Errorf("--enc/--enc13/--enc-dev require output.type: tdtp with tdtp section in pipeline config")
 		}
 		config.Output.TDTP.Encryption = true
+	}
+	if opts.EncryptLegacy {
+		config.Output.TDTP.EncryptionV13 = true
 	}
 
 	// 2b. Apply CLI pipeline variables (@name=value) — substitution before SQL validation
@@ -93,10 +97,14 @@ func ExecutePipeline(ctx context.Context, configPath string, opts PipelineOption
 	// 5. Display pipeline information
 	encLabel := ""
 	if config.Output.TDTP != nil && config.Output.TDTP.Encryption {
+		formatLabel := "v1.5"
+		if config.Output.TDTP.EncryptionV13 {
+			formatLabel = "v1.3"
+		}
 		if opts.EncDev {
-			encLabel = " [ENC-DEV: local key]"
+			encLabel = fmt.Sprintf(" [ENC-DEV %s: local key]", formatLabel)
 		} else {
-			encLabel = " [ENC: xZMercury]"
+			encLabel = fmt.Sprintf(" [ENC %s: xZMercury]", formatLabel)
 		}
 	}
 	fmt.Printf("Pipeline: %s\n", config.Name)

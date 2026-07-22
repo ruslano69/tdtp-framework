@@ -15,6 +15,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -146,4 +147,78 @@ func ExtractUUID(blob []byte) (string, error) {
 		return "", fmt.Errorf("unsupported algorithm: 0x%02x", blob[2])
 	}
 	return bytesToUUID(blob[3 : 3+uuidSize]), nil
+}
+
+// EncryptSection шифрует содержимое одной секции пакета (QueryContext,
+// Schema или Data) для формата v1.5 — в отличие от Encrypt, не добавляет
+// собственный заголовок (version/algo/uuid): эти данные уже присутствуют
+// в открытом Header пакета, дублировать их незачем. Возвращает
+// base64(nonce || ciphertext), готовый лечь текстовым содержимым секции
+// (см. docs/tdtp-protocol-schema.md → "v1.5").
+//
+// Один key используется для всех секций пакета (и всех частей multi-part
+// сообщения с одним MessageID) — обязательно свой nonce на каждый вызов,
+// GCM не допускает повторного nonce с одним key.
+func EncryptSection(key, plaintext []byte) (string, error) {
+	if len(key) != 32 {
+		return "", fmt.Errorf("encrypt section: key must be 32 bytes, got %d", len(key))
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("encrypt section: create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("encrypt section: create GCM: %w", err)
+	}
+
+	nonce := make([]byte, nonceSize)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("encrypt section: generate nonce: %w", err)
+	}
+
+	ciphertext := gcm.Seal(nil, nonce, plaintext, nil)
+
+	out := make([]byte, 0, nonceSize+len(ciphertext))
+	out = append(out, nonce...)
+	out = append(out, ciphertext...)
+
+	return base64.StdEncoding.EncodeToString(out), nil
+}
+
+// DecryptSection расшифровывает секцию, зашифрованную EncryptSection.
+func DecryptSection(key []byte, encoded string) ([]byte, error) {
+	if len(key) != 32 {
+		return nil, fmt.Errorf("decrypt section: key must be 32 bytes, got %d", len(key))
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt section: invalid base64: %w", err)
+	}
+	if len(raw) < nonceSize {
+		return nil, fmt.Errorf("decrypt section: data too short: %d bytes", len(raw))
+	}
+
+	nonce := raw[:nonceSize]
+	ciphertext := raw[nonceSize:]
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt section: create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt section: create GCM: %w", err)
+	}
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt section: authentication failed (wrong key or corrupted data): %w", err)
+	}
+
+	return plaintext, nil
 }

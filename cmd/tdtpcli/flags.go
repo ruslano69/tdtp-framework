@@ -113,7 +113,8 @@ type Flags struct {
 	CompactTail *bool   // Write tail row with all fixed fields explicit (stream validation / carry handoff)
 
 	// Encryption (xZMercury UUID-binding флоу)
-	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
+	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML). С версии 1.5 — TDTP v1.5 section-level формат (Header остаётся plain XML).
+	Enc13   *bool // --enc13: явно запросить legacy v1.3 whole-blob формат (для консьюмеров, ещё не обновлённых до v1.5)
 
 	// v1.4 Integrity (TDTP v1.4 xxh3 hashes + Mercury hash registration)
 	Integrity     *bool   // --integrity: compute Schema+Data+Packet xxh3_128 hashes and stamp the packet
@@ -238,7 +239,8 @@ func ParseFlags() *Flags {
 	f.CompactTail = flag.Bool("compact-tail", false, "Write tail row with all fixed fields explicit for stream validation and carry-state handoff")
 
 	// Encryption
-	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")
+	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). TDTP v1.5 section-level format (Header stays plain XML; QueryContext/Schema/Data opaque). Requires security.mercury_url in pipeline YAML")
+	f.Enc13 = flag.Bool("enc13", false, "Encrypt output using the legacy TDTP v1.3 whole-packet binary blob format, for consumers not yet updated to v1.5. Same xZMercury BindKey/RetrieveKey flow as --enc")
 
 	// v1.4 Integrity
 	f.Integrity = flag.Bool("integrity", false, "Stamp packet with TDTP v1.4 xxh3_128 integrity hashes (Schema + Data + Packet fingerprint). Optionally register in xzMercury with --mercury-url.")
