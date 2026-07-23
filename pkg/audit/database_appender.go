@@ -195,10 +195,19 @@ func (da *DatabaseAppender) insertEntry(ctx context.Context, entry *Entry) error
 }
 
 // flushBatch - записать batch entries
+//
+// The queue is always cleared before returning, success or failure. A failed
+// batch is dropped rather than left in the queue: retrying it verbatim on
+// the next flush would fail again for the same reason (e.g. a duplicate
+// key), permanently wedging every subsequent flush behind it — previously
+// observed to silently lose 100% of entries across an entire run instead of
+// just the one bad batch.
 func (da *DatabaseAppender) flushBatch(ctx context.Context) error {
 	if len(da.batchQueue) == 0 {
 		return nil
 	}
+	batch := da.batchQueue
+	da.batchQueue = da.batchQueue[:0]
 
 	// Начинаем транзакцию
 	tx, err := da.db.BeginTx(ctx, nil)
@@ -211,7 +220,7 @@ func (da *DatabaseAppender) flushBatch(ctx context.Context) error {
 	defer func() { _ = stmt.Close() }()
 
 	// Вставляем все entries
-	for _, entry := range da.batchQueue {
+	for _, entry := range batch {
 		metadataJSON, errMeta := json.Marshal(entry.Metadata)
 		_ = errMeta
 		dataJSON, errData := json.Marshal(entry.Data)
@@ -247,9 +256,6 @@ func (da *DatabaseAppender) flushBatch(ctx context.Context) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
-
-	// Очищаем batch queue
-	da.batchQueue = da.batchQueue[:0]
 
 	return nil
 }

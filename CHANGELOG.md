@@ -2,6 +2,52 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.18.3] — 2026-07-22
+
+### Added — audit.database: SQL sink for the audit logger
+
+`AuditConfig` gained an optional `database` block (`type`, `dsn`, `table`,
+`batch_size`, `auto_create_table`) so `tdtpcli` can write audit entries to
+their own SQL database (sqlite/mysql/mssql/postgres) alongside the existing
+file/console appenders — previously `pkg/audit.DatabaseAppender` was reachable
+only by importing the library directly, with zero CLI config surface and
+zero e2e coverage (`tests/cli/` had no audit tests at all). Deliberately a
+separate connection from the pipeline's own `database:` config: reusing the
+same connection/credentials would let the process being audited also rewrite
+its own audit trail.
+
+### Fixed — pkg/audit: two real bugs found while wiring this up
+
+- **`generateID()`** ([entry.go](pkg/audit/entry.go)) built IDs from
+  `time.Now().UnixNano()` alone. In a tight loop with no I/O between calls
+  (exactly what a batched `DatabaseAppender.Append` does), the OS clock
+  resolution can be coarser than the loop itself — observed producing
+  duplicate IDs on Windows, which then broke every subsequent insert in the
+  batch on the `id` PRIMARY KEY. Fixed with an atomic sequence counter,
+  independent of clock resolution.
+- **`flushBatch()`** ([database_appender.go](pkg/audit/database_appender.go))
+  rolled back and returned an error on a failed batch but never cleared
+  `batchQueue` — the same poisoned entries stayed queued and re-failed every
+  later flush, permanently wedging the appender after a single collision
+  (reproduced: 0 of 12 entries committed, not just the one bad batch). Now
+  clears the queue unconditionally before returning, bounding a failure to
+  the batch that hit it.
+- **`newAuditDatabaseAppender`** ([production.go](cmd/tdtpcli/production.go)) —
+  found only by testing concurrent `tdtpcli` invocations against the same
+  `audit.database` SQLite file (a question raised in review, not something
+  the original design considered): SQLite allows one writer at a time, and
+  without a `busy_timeout` a second process hit an immediate
+  `SQLITE_BUSY "database is locked"` instead of waiting — 3 of 8 concurrent
+  runs failed outright. `PRAGMA busy_timeout` + `journal_mode = WAL` fixes
+  it, but only in that order: switching journal mode itself takes the write
+  lock, so applying WAL first left one more race window (still ~1-in-8
+  bursts failing) before `busy_timeout` was active to cover it. Verified
+  reliable across 5 bursts of 8 concurrent processes (40/40 entries
+  committed, 0 errors) after fixing the order.
+
+`tests/cli/test_audit_database.py` (new) covers all three: config wiring
+(A1), the failure path (A2), and concurrent-writer regression (A3).
+
 ## [1.18.2] — 2026-07-22
 
 ### Fixed — libtdtp silently returned garbage for v1.5 encrypted packets

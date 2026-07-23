@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -29,22 +31,41 @@ type Dataset struct {
 
 // Server — HTTP сервер tdtpserve
 type Server struct {
-	cfg       *ServeConfig
-	datasets  map[string]*Dataset
-	order     []string // порядок для отображения в UI
-	startedAt time.Time
+	cfg     *ServeConfig
+	lookups map[string]*Lookup // не под mu — каждое соединение открывается один раз и переживает refresh неизменным
+
+	// mu guards datasets/order/lastRefresh: handleAPIRefresh replaces them
+	// wholesale on a successful reload, while every read handler
+	// (handleIndex, queryDataset, handleAPIDatasets) reads them per-request.
+	// Methods below that read these fields (sourceCount, viewCount,
+	// renderIndex's internal loop) assume the caller already holds mu —
+	// see the note on each.
+	mu          sync.RWMutex
+	datasets    map[string]*Dataset
+	order       []string // порядок для отображения в UI
+	startedAt   time.Time
+	lastRefresh time.Time
+
+	// refreshMu prevents two POST /api/refresh calls from reloading
+	// concurrently — each does real DB round-trips, so overlapping runs
+	// only waste a production connection for no benefit, never corrupt
+	// data (they'd each build an independent map and swap separately).
+	refreshMu sync.Mutex
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Startup: load all sources and views
 // ─────────────────────────────────────────────────────────────────────────────
 
-func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
-	srv := &Server{
-		cfg:       cfg,
-		datasets:  make(map[string]*Dataset),
-		startedAt: time.Now(),
-	}
+// loadDatasets runs cfg.Sources through etl.Loader and cfg.Views through a
+// fresh SQLite :memory: workspace, returning the resulting Dataset map and
+// display order. Used by newServer (initial load) and handleAPIRefresh
+// (reload) — both build a complete, independent map before touching
+// anything the server is already serving, so a failed reload never
+// corrupts a working one.
+func loadDatasets(ctx context.Context, cfg *ServeConfig) (map[string]*Dataset, []string, error) {
+	datasets := make(map[string]*Dataset)
+	var order []string
 
 	fmt.Printf("tdtpserve: loading %d source(s)...\n", len(cfg.Sources))
 
@@ -52,7 +73,7 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 	loader := etl.NewLoader(cfg.Sources, etl.ErrorHandlingConfig{OnSourceError: "fail"})
 	sourcesData, err := loader.LoadAll(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("loading sources: %w", err)
+		return nil, nil, fmt.Errorf("loading sources: %w", err)
 	}
 
 	// Build a name→type index from config
@@ -63,7 +84,7 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 
 	for _, sd := range sourcesData {
 		if sd.Error != nil {
-			return nil, fmt.Errorf("source %q: %w", sd.SourceName, sd.Error)
+			return nil, nil, fmt.Errorf("source %q: %w", sd.SourceName, sd.Error)
 		}
 		rows := 0
 		if sd.Packet != nil {
@@ -72,13 +93,13 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 		fmt.Printf("  [%s] %s — %d rows, %d fields\n",
 			sourceTypes[sd.SourceName], sd.SourceName, rows, len(sd.Packet.Schema.Fields))
 
-		srv.datasets[sd.SourceName] = &Dataset{
+		datasets[sd.SourceName] = &Dataset{
 			Name:   sd.SourceName,
 			IsView: false,
 			Type:   sourceTypes[sd.SourceName],
 			Packet: sd.Packet,
 		}
-		srv.order = append(srv.order, sd.SourceName)
+		order = append(order, sd.SourceName)
 	}
 
 	// 2. Compute views in a SQLite :memory: workspace (JOIN over sources)
@@ -87,7 +108,7 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 
 		workspace, err := etl.NewWorkspace(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("workspace init: %w", err)
+			return nil, nil, fmt.Errorf("workspace init: %w", err)
 		}
 		defer workspace.Close(ctx) //nolint:errcheck
 
@@ -97,10 +118,10 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 				continue
 			}
 			if err := workspace.CreateTable(ctx, sd.TableName, sd.Packet.Schema.Fields); err != nil {
-				return nil, fmt.Errorf("workspace create table %q: %w", sd.TableName, err)
+				return nil, nil, fmt.Errorf("workspace create table %q: %w", sd.TableName, err)
 			}
 			if err := workspace.LoadData(ctx, sd.TableName, sd.Packet); err != nil {
-				return nil, fmt.Errorf("workspace load %q: %w", sd.TableName, err)
+				return nil, nil, fmt.Errorf("workspace load %q: %w", sd.TableName, err)
 			}
 		}
 
@@ -108,19 +129,46 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 		for _, v := range cfg.Views {
 			pkt, err := workspace.ExecuteSQL(ctx, v.SQL, v.Name)
 			if err != nil {
-				return nil, fmt.Errorf("view %q: %w", v.Name, err)
+				return nil, nil, fmt.Errorf("view %q: %w", v.Name, err)
 			}
 			fmt.Printf("  [view] %s — %d rows, %d fields\n",
 				v.Name, len(pkt.Data.Rows), len(pkt.Schema.Fields))
 
-			srv.datasets[v.Name] = &Dataset{
+			datasets[v.Name] = &Dataset{
 				Name:   v.Name,
 				IsView: true,
 				Desc:   v.Description,
 				Type:   "view",
 				Packet: pkt,
 			}
-			srv.order = append(srv.order, v.Name)
+			order = append(order, v.Name)
+		}
+	}
+
+	return datasets, order, nil
+}
+
+func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
+	srv := &Server{cfg: cfg, startedAt: time.Now()}
+
+	datasets, order, err := loadDatasets(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	srv.datasets = datasets
+	srv.order = order
+	srv.lastRefresh = time.Now()
+
+	// 3. Open lookup connections (not preloaded — see lookup.go)
+	if len(cfg.Lookups) > 0 {
+		fmt.Printf("tdtpserve: opening %d lookup(s)...\n", len(cfg.Lookups))
+		lookups, err := loadLookups(cfg.Lookups)
+		if err != nil {
+			return nil, fmt.Errorf("loading lookups: %w", err)
+		}
+		srv.lookups = lookups
+		for _, lk := range cfg.Lookups {
+			fmt.Printf("  [lookup] %s (%s) — result: %s\n", lk.Name, lk.Type, lk.Result)
 		}
 	}
 
@@ -143,6 +191,18 @@ func runServer(cfg *ServeConfig) error {
 	mux.HandleFunc("/", srv.handleIndex)
 	mux.HandleFunc("/data/", srv.handleData)
 
+	// JSON API — deliberately a separate prefix from the HTML routes above,
+	// so access control (auth, rate limiting) can be added to /api/* alone
+	// later without touching the browser-facing views. See api.go.
+	mux.HandleFunc("/api/datasets", srv.handleAPIDatasets)
+	mux.HandleFunc("/api/data/", srv.handleAPIData)
+	// Lookups (live per-request queries, e.g. photo-by-code) — an even
+	// narrower surface than /api/data, worth locking down separately still.
+	// See lookup.go.
+	mux.HandleFunc("/api/lookup/", srv.handleAPILookup)
+	// Reload sources/views from the current config without a restart.
+	mux.HandleFunc("/api/refresh", srv.handleAPIRefresh)
+
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	fmt.Printf("\ntdtpserve ready → http://localhost%s\n", addr)
 	fmt.Printf("  %d source(s), %d view(s)\n", srv.sourceCount(), srv.viewCount())
@@ -150,6 +210,9 @@ func runServer(cfg *ServeConfig) error {
 	return http.ListenAndServe(addr, mux) //nolint:gosec // G114: timeout configured via server middleware
 }
 
+// sourceCount/viewCount read s.datasets without locking — callers already
+// holding s.mu (renderIndex) must keep doing so; callers before the server
+// starts serving requests (runServer's startup log) don't need to.
 func (s *Server) sourceCount() int {
 	n := 0
 	for _, d := range s.datasets {
@@ -180,6 +243,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	s.renderIndex(w)
 }
 
@@ -191,39 +256,60 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ds, ok := s.datasets[name]
+	res, ok := s.queryDataset(name, r.URL.Query())
 	if !ok {
 		http.Error(w, "dataset not found: "+name, http.StatusNotFound)
 		return
 	}
 
-	q := r.URL.Query()
-	whereExpr := q.Get("where")
-	orderBy := q.Get("order_by")
-	limit, _ := strconv.Atoi(q.Get("limit"))   //nolint:errcheck // invalid values are silently treated as 0
-	offset, _ := strconv.Atoi(q.Get("offset")) //nolint:errcheck // invalid values are silently treated as 0
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	s.renderData(w, res.Dataset, res.Rows, res.Where, res.OrderBy, res.Limit, res.Offset, res.FilterErr)
+}
 
-	// Apply TDTQL filtering
-	allRows := extractRows(ds.Packet)
-	var filterErr string
+// datasetQuery is the result of resolving a dataset by name and applying its
+// WHERE/ORDER BY/LIMIT/OFFSET query params — shared by the HTML view
+// (handleData) and the JSON API (api.go), so both filter identically.
+type datasetQuery struct {
+	Dataset   *Dataset
+	Rows      [][]string
+	Where     string
+	OrderBy   string
+	Limit     int
+	Offset    int
+	FilterErr string
+}
 
-	if whereExpr != "" || orderBy != "" || limit > 0 || offset > 0 {
-		query, err := buildQuery(whereExpr, orderBy, limit, offset)
+// queryDataset resolves name against s.datasets and applies TDTQL filtering
+// from q (where/order_by/limit/offset). ok is false if no such dataset.
+// Takes s.mu for reading itself — callers must not already hold it.
+func (s *Server) queryDataset(name string, q url.Values) (res *datasetQuery, ok bool) {
+	s.mu.RLock()
+	ds, found := s.datasets[name]
+	s.mu.RUnlock()
+	if !found {
+		return nil, false
+	}
+
+	res = &datasetQuery{Dataset: ds, Where: q.Get("where"), OrderBy: q.Get("order_by")}
+	res.Limit, _ = strconv.Atoi(q.Get("limit"))   //nolint:errcheck // invalid values are silently treated as 0
+	res.Offset, _ = strconv.Atoi(q.Get("offset")) //nolint:errcheck // invalid values are silently treated as 0
+
+	res.Rows = extractRows(ds.Packet)
+	if res.Where != "" || res.OrderBy != "" || res.Limit > 0 || res.Offset > 0 {
+		query, err := buildQuery(res.Where, res.OrderBy, res.Limit, res.Offset)
 		if err != nil {
-			filterErr = err.Error()
+			res.FilterErr = err.Error()
 		} else if query != nil {
 			exec := tdtql.NewExecutor()
-			result, err := exec.Execute(query, allRows, ds.Packet.Schema)
+			result, err := exec.Execute(query, res.Rows, ds.Packet.Schema)
 			if err != nil {
-				filterErr = err.Error()
+				res.FilterErr = err.Error()
 			} else {
-				allRows = result.FilteredRows
+				res.Rows = result.FilteredRows
 			}
 		}
 	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	s.renderData(w, ds, allRows, whereExpr, orderBy, limit, offset, filterErr)
+	return res, true
 }
 
 // extractRows gets all rows from a DataPacket as [][]string
@@ -383,6 +469,8 @@ func parseOrderBy(orderBy string) (*packet.OrderBy, error) {
 // HTML rendering — index page
 // ─────────────────────────────────────────────────────────────────────────────
 
+// renderIndex reads s.datasets/s.order — caller (handleIndex) must hold
+// s.mu for reading.
 func (s *Server) renderIndex(w http.ResponseWriter) {
 	var b strings.Builder
 

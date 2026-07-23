@@ -64,6 +64,43 @@ func (p *Principal) AllowsScenario(name string) bool {
 
 type principalCtxKey struct{}
 
+// setupAuth wires the configured authentication backend (token or ldap) and
+// returns the middleware to apply to the authenticated route group, plus
+// (token mode only) the *Authenticator the /tokens routes need — nil in ldap
+// mode, where token management isn't available. A non-nil error (only
+// possible in token mode, if bootstrapping the admin token fails) is fatal.
+func setupAuth(db *OrchestratorDB, authType, ldapURL, ldapBindDN, ldapBindPass, ldapBaseDN string, noAuth bool) (authMiddleware func(http.Handler) http.Handler, auth *Authenticator, err error) {
+	if authType == "ldap" {
+		ldapAuth := NewLDAPAuthenticator(LDAPConfig{
+			URL:         ldapURL,
+			BindDN:      ldapBindDN,
+			BindPass:    ldapBindPass,
+			BaseDN:      ldapBaseDN,
+			GroupAttr:   "memberOf",
+			DefaultRole: RoleConsumer,
+		})
+		log.Info().Str("url", ldapURL).Msg("LDAP authentication enabled")
+		return ldapAuth.Middleware, nil, nil
+	}
+
+	// "token" (default)
+	auth = NewAuthenticator(db, !noAuth)
+	if noAuth {
+		log.Warn().Msg("AUTH DISABLED (--no-auth) — every request is treated as admin")
+		return auth.Middleware, auth, nil
+	}
+	raw, err := auth.BootstrapAdminToken()
+	if err != nil {
+		return nil, nil, fmt.Errorf("bootstrap admin token: %w", err)
+	}
+	if raw != "" {
+		log.Warn().Msg("──────────────────────────────────────────────────────────────")
+		log.Warn().Str("admin_token", raw).Msg("BOOTSTRAP ADMIN TOKEN — store it now, shown once")
+		log.Warn().Msg("──────────────────────────────────────────────────────────────")
+	}
+	return auth.Middleware, auth, nil
+}
+
 // Authenticator validates Bearer tokens against the DB.
 type Authenticator struct {
 	db      *OrchestratorDB

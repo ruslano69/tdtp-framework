@@ -2,20 +2,37 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver, for audit.database.type: postgres
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/resilience"
 	"github.com/ruslano69/tdtp-framework/pkg/retry"
 )
+
+// auditDBDriverNames maps the audit.database.type config value to the
+// database/sql driver name registered for it in this binary.
+var auditDBDriverNames = map[string]string{
+	"sqlite":   "sqlite",
+	"mysql":    "mysql",
+	"mssql":    "mssql",
+	"postgres": "pgx",
+}
 
 // ProductionFeatures holds all production-ready components
 type ProductionFeatures struct {
 	AuditLogger    *audit.AuditLogger
 	CircuitBreaker *resilience.CircuitBreaker
 	RetryManager   *retry.Retryer
+
+	// auditDB is the connection opened for audit.database, if configured.
+	// audit.DatabaseAppender.Close only flushes+closes its prepared
+	// statement, not the *sql.DB itself — whoever opens the connection owns
+	// closing it, same as every other adapter in this binary.
+	auditDB *sql.DB
 }
 
 // InitProductionFeatures initializes all production features from config
@@ -24,11 +41,12 @@ func InitProductionFeatures(config *Config) (*ProductionFeatures, error) {
 
 	// Initialize Audit Logger
 	if config.Audit.Enabled {
-		auditLogger, err := initAuditLogger(config.Audit)
+		auditLogger, auditDB, err := initAuditLogger(config.Audit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize audit logger: %w", err)
 		}
 		pf.AuditLogger = auditLogger
+		pf.auditDB = auditDB
 	}
 
 	// Initialize Circuit Breaker
@@ -64,11 +82,18 @@ func (pf *ProductionFeatures) Close() error {
 			return fmt.Errorf("failed to close audit logger: %w", err)
 		}
 	}
+	if pf.auditDB != nil {
+		if err := pf.auditDB.Close(); err != nil {
+			return fmt.Errorf("failed to close audit database connection: %w", err)
+		}
+	}
 	return nil
 }
 
-// initAuditLogger initializes audit logger from config
-func initAuditLogger(cfg AuditConfig) (*audit.AuditLogger, error) {
+// initAuditLogger initializes audit logger from config. The returned *sql.DB
+// is non-nil only when cfg.Database is set — the caller owns closing it (see
+// ProductionFeatures.auditDB).
+func initAuditLogger(cfg AuditConfig) (*audit.AuditLogger, *sql.DB, error) {
 	var level audit.Level
 	switch cfg.Level {
 	case "minimal":
@@ -83,6 +108,7 @@ func initAuditLogger(cfg AuditConfig) (*audit.AuditLogger, error) {
 
 	// Create appenders based on config
 	var appenders []audit.Appender
+	var auditDB *sql.DB
 
 	// Console appender
 	if cfg.Console {
@@ -100,9 +126,19 @@ func initAuditLogger(cfg AuditConfig) (*audit.AuditLogger, error) {
 			FormatJSON: false,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create file appender: %w", err)
+			return nil, nil, fmt.Errorf("failed to create file appender: %w", err)
 		}
 		appenders = append(appenders, fileAppender)
+	}
+
+	// Database appender
+	if cfg.Database != nil {
+		dbAppender, db, err := newAuditDatabaseAppender(*cfg.Database, level)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create audit database appender: %w", err)
+		}
+		appenders = append(appenders, dbAppender)
+		auditDB = db
 	}
 
 	// If no appenders configured, use console by default
@@ -117,7 +153,70 @@ func initAuditLogger(cfg AuditConfig) (*audit.AuditLogger, error) {
 		DefaultUser:  "tdtpcli",
 	}, appenders...)
 
-	return logger, nil
+	return logger, auditDB, nil
+}
+
+// newAuditDatabaseAppender opens cfg's connection and wraps it in a
+// audit.DatabaseAppender. A separate connection from the pipeline's own
+// Database config is intentional: reusing the same connection/credentials
+// would let the very process being audited also rewrite its own audit
+// trail — see AuditDatabaseConfig's doc comment.
+func newAuditDatabaseAppender(cfg AuditDatabaseConfig, level audit.Level) (*audit.DatabaseAppender, *sql.DB, error) {
+	driverName, ok := auditDBDriverNames[cfg.Type]
+	if !ok {
+		return nil, nil, fmt.Errorf("audit.database.type %q not supported (expected one of: sqlite, mysql, mssql, postgres)", cfg.Type)
+	}
+
+	db, err := sql.Open(driverName, cfg.DSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open audit database connection: %w", err)
+	}
+
+	// SQLite only allows one writer at a time; without a busy_timeout, a
+	// second concurrent tdtpcli process (writing its own audit entry, or
+	// racing AutoCreateTable's CREATE TABLE IF NOT EXISTS on first run)
+	// gets an immediate SQLITE_BUSY "database is locked" instead of
+	// waiting — confirmed by actually running 8 tdtpcli processes
+	// concurrently against the same audit DSN before this fix: 3 of 8
+	// failed outright. WAL mode lets readers proceed without blocking on a
+	// writer; busy_timeout makes a genuinely concurrent writer wait and
+	// retry instead of erroring immediately. Mirrors pkg/adapters/sqlite's
+	// own PRAGMA journal_mode=WAL (that adapter still lacks busy_timeout —
+	// a separate, pre-existing gap outside this feature's scope).
+	//
+	// busy_timeout MUST be set first: switching journal_mode itself takes
+	// SQLite's write lock, so if THAT statement is the one that races
+	// against another process, busy_timeout isn't active yet to make it
+	// wait — confirmed by a repeat run: with WAL applied first, "PRAGMA
+	// journal_mode = WAL" itself failed with SQLITE_BUSY twice in three
+	// 8-process bursts.
+	if cfg.Type == "sqlite" {
+		for _, pragma := range []string{"PRAGMA busy_timeout = 5000", "PRAGMA journal_mode = WAL"} {
+			if _, err := db.Exec(pragma); err != nil {
+				_ = db.Close()
+				return nil, nil, fmt.Errorf("failed to apply %q: %w", pragma, err)
+			}
+		}
+	}
+
+	tableName := cfg.Table
+	if tableName == "" {
+		tableName = "audit_log"
+	}
+
+	appender, err := audit.NewDatabaseAppender(audit.DatabaseAppenderConfig{
+		DB:              db,
+		TableName:       tableName,
+		Level:           level,
+		BatchSize:       cfg.BatchSize,
+		AutoCreateTable: cfg.AutoCreateTable,
+	})
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("failed to create database appender: %w", err)
+	}
+
+	return appender, db, nil
 }
 
 // initCircuitBreaker initializes circuit breaker from config
