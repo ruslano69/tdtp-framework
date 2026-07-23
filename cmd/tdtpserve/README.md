@@ -110,6 +110,125 @@ Views выполняются **один раз при старте** в SQLite `
 
 ---
 
+## JSON API
+
+Отдельный префикс `/api/*` — те же данные и те же фильтры, что и в
+`/data/<name>`, но JSON вместо HTML. Отдельный префикс специально: чтобы
+позже можно было навесить auth/rate-limit только на `/api/*`, не трогая
+браузерные страницы.
+
+### `GET /api/datasets`
+
+Сводка по всем источникам и видам:
+
+```json
+[
+  {"name": "Users", "is_view": false, "type": "sqlite", "row_count": 3, "field_count": 4}
+]
+```
+
+### `GET /api/data/<name>`
+
+Те же `where` / `order_by` / `limit` / `offset`, что и у `/data/<name>`:
+
+```
+/api/data/Users
+/api/data/Users?where=City='Moscow'&order_by=Balance DESC
+```
+
+```json
+{
+  "name": "Users",
+  "is_view": false,
+  "type": "sqlite",
+  "schema": {"fields": [{"name": "ID", "type": "INTEGER", "key": true}, ...]},
+  "rows": [["1", "Ann", "Moscow", "3200"]],
+  "row_count": 1
+}
+```
+
+Несуществующий датасет → `404 {"error": "dataset not found: ..."}`.
+
+### `GET /api/lookup/<name>?<param>=<value>`
+
+В отличие от `sources` (загружаются целиком при старте), `lookups` — это
+параметризованный запрос, который выполняется **вживую** на каждый запрос,
+через своё отдельное подключение. Для данных, которые дорого или бессмысленно
+тянуть заранее для всех строк — фото сотрудника, история проходов по одному
+коду и т.п.
+
+```yaml
+lookups:
+  - name: photo
+    type: sqlite            # sqlite | mysql | mssql | postgres
+    dsn: ./polynet.db
+    query: "SELECT photo FROM employees WHERE code = ?"
+    params: [code]           # имена URL query-параметров, по порядку биндинга
+    result: binary            # row | rows | binary
+    content_type: image/jpeg  # обязателен для result: binary
+
+  - name: employee_info
+    type: sqlite
+    dsn: ./polynet.db
+    query: "SELECT code, full_name FROM employees WHERE code = ?"
+    params: [code]
+    result: row
+
+  - name: access_history
+    type: sqlite
+    dsn: ./polynet.db
+    query: "SELECT ts, direction, checkpoint FROM checkpoint_log WHERE code = ? ORDER BY ts DESC"
+    params: [code]
+    result: rows
+    max_rows: 50               # сервер-side cap, клиент не может его поднять
+```
+
+`query` использует нативный синтаксис плейсхолдеров своей БД — `@p1` для
+mssql, `?` для mysql/sqlite, `$1` для postgres — как и `sources.query` уже
+требует нативный SQL под свой тип, никакой кросс-диалектной трансляции нет.
+
+**`result: row`** — ровно одна строка → JSON-объект, 0 строк → `404`, больше
+одной → `500` (неоднозначно).
+
+**`result: rows`** — 0+ строк → JSON-массив, всегда обрезан `max_rows` на
+сервере.
+
+**`result: binary`** — ровно одна строка с одной колонкой → сырые байты
+напрямую с заголовком `Content-Type: <content_type>`, без JSON-обёртки.
+
+```
+GET /api/lookup/employee_info?code=12620  → {"code": "12620", "full_name": "..."}
+GET /api/lookup/access_history?code=12620 → [{"ts": "...", "direction": "in", ...}, ...]
+GET /api/lookup/photo?code=12620          → (сырые байты, Content-Type: image/jpeg)
+```
+
+Отсутствующий обязательный параметр → `400`. Неизвестный lookup → `404`.
+
+Соединения открываются один раз при старте (как у `sources`), а не на
+каждый запрос — но сам запрос выполняется заново каждый раз, в отличие от
+`sources`, чьи данные фиксированы до перезапуска сервера.
+
+### `POST /api/refresh`
+
+Перечитывает `sources`/`views` (текущий конфиг в памяти, не файл с диска —
+для изменения самого YAML нужен рестарт) без остановки сервера:
+
+```json
+{"status": "ok", "sources": 1, "views": 0, "refreshed_at": "2026-07-23T07:55:37+03:00"}
+```
+
+Новые данные загружаются полностью, и только затем атомарно подменяют
+старые — если reload упал (например БД недоступна), старые данные
+продолжают отдаваться, сервер не падает. Второй `/api/refresh`, запущенный
+пока первый ещё выполняется, получает `409 Conflict` — параллельные
+reload'ы не запрещены из соображений корректности (каждый строит свою
+независимую копию), а просто чтобы не долбить продовую БД избыточными
+запросами. `lookups` не участвуют — они и так живые на каждый запрос.
+
+`GET /api/refresh` → `405 Method Not Allowed`.
+
+---
+
 ## Примеры конфигов
 
 ### SQLite + TDTP-файл
@@ -185,6 +304,12 @@ HTTP запрос /data/<name>
   ├── разобрать where / order_by / limit / offset
   ├── tdtql.Executor.Execute()   ← фильтрация/сортировка в памяти
   └── renderData()               ← HTML-ответ
+
+POST /api/refresh
+  ├── loadDatasets() заново       ← та же логика, что и на старте, в новую карту
+  └── атомарная подмена под мьютексом (не блокирует читателей на время самой загрузки)
 ```
 
-Данные загружаются **один раз при старте** и хранятся в памяти. Перезапустить сервер для обновления.
+Данные `sources`/`views` — снимок в памяти. Обновляются либо перезапуском
+сервера, либо `POST /api/refresh` без остановки (см. JSON API выше).
+`lookups` — исключение, они всегда живые, каждый запрос отдельно.
