@@ -2,6 +2,7 @@ package packet
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"strings"
@@ -30,6 +31,68 @@ func DefaultCompressionOptions() CompressionOptions {
 // Внутренняя оценка намеренно вдвое больше реального XML,
 // т.к. размер строк считается в UTF-16 единицах (MSMQ/COM-совместимость).
 const DefaultMaxMessageSize = 3_800_000
+
+// measureEnvelopeSize возвращает стоимость XML-конверта одной части в тех же
+// единицах, что и estimateRowSize (т.е. вдвое больше байт UTF-8).
+//
+// Зачем измерять, а не брать константу: writePacketTo копирует Schema в каждую
+// часть целиком (для самодостаточности файлового экспорта), а с TDTP v1.4 внутри
+// Schema лежит Dictionary. Словарь тем крупнее, чем лучше сжались строки —
+// полные значения переезжают из строк в словарь, а в строках остаются короткие
+// @-идентификаторы. Резерв в estimateRowSize масштабируется от строк, которые
+// как раз усохли, поэтому фиксированные packetOverheadSize байт перестают
+// покрывать конверт ровно в том случае, ради которого словарь и включали.
+// Эффект сильнее на многобайтовых алфавитах: идентификаторы всегда ASCII, а
+// содержимое словаря — исходный текст (кириллица и арабский по 2 байта, CJK по 3).
+//
+// packetOverheadSize остаётся нижней границей: она покрывает Header, корневые
+// теги и XML-декларацию, которых нет в сериализованной Schema, и заодно
+// сохраняет прежние границы частей для обычных схем без словаря.
+func measureEnvelopeSize(schema Schema) int {
+	if size := serializedSchemaSize(schema); size > packetOverheadSize {
+		return size
+	}
+	return packetOverheadSize
+}
+
+// serializedSchemaSize — фактический размер Schema в тех же единицах, без пола.
+// Это ровно та величина, которая копируется в каждую часть, поэтому решение
+// «дробить или нет» принимается по ней, а не по завышенному резерву.
+func serializedSchemaSize(schema Schema) int {
+	b, err := xml.Marshal(schema)
+	if err != nil {
+		return packetOverheadSize
+	}
+	return len(b) * 2
+}
+
+// rowBudget возвращает место под строки в одной части: бюджет минус конверт.
+//
+// Резерв под конверт ограничен половиной бюджета, и вот почему. Schema копируется
+// в каждую часть, поэтому каждая новая часть добавляет ещё одну копию словаря.
+// Если честно вычитать крупный конверт, места под строки почти не остаётся,
+// частей становится очень много, и суммарный объём растёт кратно — дробление
+// не приближает части к бюджету, а отдаляет. Поэтому при большом конверте
+// выгоднее допустить превышение размера части, чем взрывной рост их числа:
+// превышение ограничено, а размножение конверта — нет.
+//
+// Ноль или меньше означает, что конверт не помещается в бюджет даже наполовину;
+// вызывающий в этом случае не дробит вообще.
+func (g *Generator) rowBudget(schema Schema) int {
+	// Сравниваем именно измеренный размер, а не резерв: packetOverheadSize —
+	// консервативный пол, и он не должен запрещать дробление там, где схема
+	// крошечная, а бюджет задан маленьким.
+	if serializedSchemaSize(schema) >= g.maxMessageSize {
+		return 0
+	}
+
+	budget := g.maxMessageSize - measureEnvelopeSize(schema)
+	if half := g.maxMessageSize / 2; budget < half {
+		budget = half
+	}
+
+	return budget
+}
 
 // packetOverheadSize is a conservative estimate of XML envelope bytes
 // (Schema, Header, attributes) subtracted from the part-size budget
@@ -279,9 +342,17 @@ func (g *Generator) WriteToWriter(packet *DataPacket, w io.Writer) error {
 }
 
 // partitionRows разбивает строки на части по размеру
-func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
+func (g *Generator) partitionRows(rows [][]string, schema Schema) [][][]string {
 	if len(rows) == 0 {
 		return [][][]string{{}}
+	}
+
+	rowBudget := g.rowBudget(schema)
+
+	// Конверт не влезает в бюджет сам по себе: ни одна часть его не выполнит,
+	// а каждая новая только добавит ещё одну копию Schema. Дробить нечего.
+	if rowBudget <= 0 {
+		return [][][]string{rows}
 	}
 
 	partitions := [][][]string{}
@@ -291,7 +362,7 @@ func (g *Generator) partitionRows(rows [][]string, _ Schema) [][][]string {
 	for _, row := range rows {
 		rowSize := estimateRowSize(row)
 
-		if currentSize+rowSize+packetOverheadSize > g.maxMessageSize && len(currentPartition) > 0 {
+		if currentSize+rowSize > rowBudget && len(currentPartition) > 0 {
 			partitions = append(partitions, currentPartition)
 			currentPartition = [][]string{}
 			currentSize = 0
