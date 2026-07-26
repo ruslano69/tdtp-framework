@@ -1,11 +1,17 @@
 package packet
 
 import (
+	"bytes"
 	"encoding/xml"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // parseReference — эталон: полный разбор через reflection, как было до fast path.
@@ -268,4 +274,122 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ─── Parse / ParseFile ──────────────────────────────────────────────────────
+
+// TestParse_MatchesParseBytes — Parse(io.Reader) должен давать то же, что
+// ParseBytes на тех же байтах.
+func TestParse_MatchesParseBytes(t *testing.T) {
+	data := buildPacketBytes(t, [][]string{
+		{"a<b", "c&d", "e|f"},
+		{"Привіт", `back\slash`, `q"uote`},
+	}, 3)
+
+	p := NewParser()
+	fromBytes, err := p.ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	fromReader, err := p.Parse(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !reflect.DeepEqual(fromReader, fromBytes) {
+		t.Errorf("Parse diverged from ParseBytes\n got: %+v\nwant: %+v", fromReader, fromBytes)
+	}
+}
+
+// TestParse_NonSizedReader — reader без Len() (нет преаллокации) обрабатывается
+// так же.
+func TestParse_NonSizedReader(t *testing.T) {
+	data := buildPacketBytes(t, [][]string{{"x", "y", "z"}}, 3)
+
+	p := NewParser()
+	want, err := p.ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	// iotest-подобная обёртка: только Read, без Len.
+	got, err := p.Parse(struct{ io.Reader }{bytes.NewReader(data)})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Parse over a plain reader diverged\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestParseFile_MatchesParseBytes — ParseFile читает файл и даёт тот же результат.
+func TestParseFile_MatchesParseBytes(t *testing.T) {
+	data := buildPacketBytes(t, [][]string{{"1", "2", "3"}, {"4", "5", "6"}}, 3)
+
+	path := filepath.Join(t.TempDir(), "p.tdtp.xml")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewParser()
+	want, err := p.ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	got, err := p.ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseFile diverged\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestParse_ExpandsCompact — Parse/ParseFile разворачивают compact-формат,
+// а ParseBytes намеренно нет. Эта асимметрия должна сохраниться.
+func TestParse_ExpandsCompact(t *testing.T) {
+	const compactXML = `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<DataPacket protocol="TDTP" version="1.3.1">` +
+		`<Header><Type>reference</Type><TableName>t</TableName><MessageID>M1</MessageID>` +
+		`<PartNumber>1</PartNumber><TotalParts>1</TotalParts><RecordsInPart>2</RecordsInPart>` +
+		`<Timestamp>2026-01-01T00:00:00Z</Timestamp></Header>` +
+		`<Schema><Field name="dept" type="TEXT" fixed="true"></Field>` +
+		`<Field name="name" type="TEXT"></Field></Schema>` +
+		`<Data compact="true"><R>HR|Ann</R><R>|Bob</R></Data></DataPacket>`
+
+	p := NewParser()
+
+	viaBytes, err := p.ParseBytes([]byte(compactXML))
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	viaReader, err := p.Parse(bytes.NewReader([]byte(compactXML)))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// ParseBytes оставляет compact как есть.
+	if viaBytes.Data.Rows[1].Value != "|Bob" {
+		t.Errorf("ParseBytes should leave compact rows untouched, got %q", viaBytes.Data.Rows[1].Value)
+	}
+	// Parse разворачивает carry-forward.
+	if viaReader.Data.Rows[1].Value != "HR|Bob" {
+		t.Errorf("Parse should expand compact rows, got %q", viaReader.Data.Rows[1].Value)
+	}
+}
+
+// TestParse_ErrorsPreserved — ошибки чтения и разбора не теряются.
+func TestParse_ErrorsPreserved(t *testing.T) {
+	p := NewParser()
+
+	if _, err := p.Parse(bytes.NewReader([]byte("not xml"))); err == nil {
+		t.Error("expected an error on garbage input")
+	}
+	if _, err := p.Parse(bytes.NewReader(nil)); err == nil {
+		t.Error("expected an error on empty input")
+	}
+	if _, err := p.ParseFile(filepath.Join(t.TempDir(), "missing.xml")); err == nil {
+		t.Error("expected an error on a missing file")
+	}
+	if _, err := p.Parse(iotest.ErrReader(errors.New("boom"))); err == nil {
+		t.Error("expected the reader error to propagate")
+	}
 }

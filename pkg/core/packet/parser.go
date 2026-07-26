@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -19,27 +20,37 @@ func NewParser() *Parser {
 
 // ParseFile парсит TDTP пакет из файла
 func (p *Parser) ParseFile(filename string) (*DataPacket, error) {
-	file, err := os.Open(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer func() { _ = file.Close() }()
 
-	return p.Parse(file)
+	return p.parseAndExpand(data)
 }
 
-// Parse парсит TDTP пакет из reader
+// Parse парсит TDTP пакет из reader.
+//
+// Вход вычитывается целиком, чтобы разбор шёл тем же гибридным путём, что и
+// ParseBytes (см. parser_fast.go) — потоковый xml.Decoder заставлял бы гонять
+// каждую строку через reflection. Дополнительной памяти это почти не стоит:
+// пакеты ограничены DefaultMaxMessageSize (~3.8MB), а оба вызывающих с
+// io.Reader (cmd/tdtp-svg, pkg/etl/importer) и так держат байты в памяти и
+// лишь оборачивают их в bytes.Reader.
 func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
-	decoder := xml.NewDecoder(r)
-
-	var packet DataPacket
-	if err := decoder.Decode(&packet); err != nil {
-		return nil, fmt.Errorf("failed to decode XML: %w", err)
+	data, err := readAllHinted(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read input: %w", err)
 	}
 
-	// Базовая валидация
-	if err := p.validatePacket(&packet); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
+	return p.parseAndExpand(data)
+}
+
+// parseAndExpand — общий хвост Parse/ParseFile: разбор плюс авто-разворачивание
+// compact-формата. ParseBytes этого намеренно не делает, поэтому шаг живёт здесь.
+func (p *Parser) parseAndExpand(data []byte) (*DataPacket, error) {
+	packet, err := p.ParseBytes(data)
+	if err != nil {
+		return nil, err
 	}
 
 	// Auto-expand compact v1.3.1 format (carry-forward fixed fields).
@@ -47,12 +58,25 @@ func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
 	// into a single blob; expansion must happen after decompression instead
 	// (see ParseWithDecompression / ParseBytesWithDecompression).
 	if packet.Data.Compact && packet.Data.Compression == "" {
-		if err := ExpandCompactRows(&packet); err != nil {
+		if err := ExpandCompactRows(packet); err != nil {
 			return nil, fmt.Errorf("compact expansion failed: %w", err)
 		}
 	}
 
-	return &packet, nil
+	return packet, nil
+}
+
+// readAllHinted вычитывает r целиком, преаллоцируя буфер когда длина известна
+// (bytes.Reader, bytes.Buffer, strings.Reader).
+func readAllHinted(r io.Reader) ([]byte, error) {
+	var buf bytes.Buffer
+	if l, ok := r.(interface{ Len() int }); ok {
+		buf.Grow(l.Len())
+	}
+	if _, err := buf.ReadFrom(r); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // ParseBytes парсит TDTP пакет из байтового массива.
