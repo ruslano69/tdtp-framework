@@ -55,8 +55,21 @@ func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
 	return &packet, nil
 }
 
-// ParseBytes парсит TDTP пакет из байтового массива
+// ParseBytes парсит TDTP пакет из байтового массива.
+//
+// Сначала пробуется ручной разбор Data-секции (parser_fast.go) — зеркало
+// writePacketTo: reflection остаётся только на мелких секциях, тысячи <R>
+// сканируются вручную. Если форма пакета отличается от ожидаемой, tryFastParse
+// возвращает ok=false и разбор идёт обычным xml.Unmarshal — включая выдачу
+// ошибки на действительно битом XML.
 func (p *Parser) ParseBytes(data []byte) (*DataPacket, error) {
+	if packet, ok := tryFastParse(data); ok {
+		if err := p.validatePacket(packet); err != nil {
+			return nil, fmt.Errorf("validation failed: %w", err)
+		}
+		return packet, nil
+	}
+
 	var packet DataPacket
 	if err := xml.Unmarshal(data, &packet); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal XML: %w", err)
