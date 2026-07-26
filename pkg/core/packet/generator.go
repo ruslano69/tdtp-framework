@@ -66,6 +66,41 @@ func serializedSchemaSize(schema Schema) int {
 	return len(b) * 2
 }
 
+// MaxSchemaBytes — предел размера сериализованной Schema, включая Dictionary.
+//
+// Schema копируется в каждую часть многотомного пакета, поэтому её размер
+// умножается на число частей. Обычная схема — это описания полей, и до этого
+// предела ей далеко: даже таблица на 1600 колонок укладывается заметно ниже.
+// Реально упереться можно только крупным Dictionary. Автопостроения словаря в
+// фреймворке пока нет — словарь либо приходит от внешнего продюсера через
+// библиотечный API, либо содержит одну служебную запись (@MRC с адресом
+// Mercury). Когда построение появится, оно должно укладываться в этот же предел.
+const MaxSchemaBytes = 200 * 1024
+
+// validateSchemaSize отклоняет схему, которая не помещается в MaxSchemaBytes.
+// Проверка стоит на входе генерации — там же, где ValidateDictionary, и по той
+// же причине: продюсер должен увидеть ошибку при создании пакета, а не потребитель
+// при разборе.
+func validateSchemaSize(schema Schema) error {
+	b, err := xml.Marshal(schema)
+	if err != nil {
+		return nil // измерить не вышло — не блокируем генерацию
+	}
+
+	if len(b) > MaxSchemaBytes {
+		entries := 0
+		if schema.Dictionary != nil {
+			entries = len(schema.Dictionary.Entries)
+		}
+		return fmt.Errorf(
+			"schema is %d bytes, limit is %d (Dictionary entries: %d): "+
+				"Schema is copied into every part, so its size multiplies by the part count",
+			len(b), MaxSchemaBytes, entries)
+	}
+
+	return nil
+}
+
 // rowBudget возвращает место под строки в одной части: бюджет минус конверт.
 //
 // Резерв под конверт ограничен половиной бюджета, и вот почему. Schema копируется
@@ -163,6 +198,10 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 		}
 	}
 
+	if err := validateSchemaSize(schema); err != nil {
+		return nil, err
+	}
+
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
 	if !g.skipSpecialValues {
 		rows, schema = DetectAndApply(rows, schema)
@@ -224,6 +263,10 @@ func (g *Generator) GenerateResponse(
 	queryContext *QueryContext,
 	sender, recipient string,
 ) ([]*DataPacket, error) {
+
+	if err := validateSchemaSize(schema); err != nil {
+		return nil, err
+	}
 
 	// Авто-детект и кодирование SpecialValues (NULL, NaN, ±Inf) перед партиционированием
 	if !g.skipSpecialValues {

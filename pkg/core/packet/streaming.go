@@ -86,6 +86,12 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 		partNum := 1
 		totalRows := 0
 
+		if err := validateSchemaSize(schema); err != nil {
+			partsChan <- &PartResult{Error: err}
+			summaryChan <- &StreamingSummary{}
+			return
+		}
+
 		currentPartRows := [][]string{}
 		currentSize := 0
 		rowBudget := sg.rowBudget(schema)
@@ -219,6 +225,12 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 		messageIDBase := sg.generateMessageID(msgType)
 		partNum := 1
 		totalRows := 0
+
+		if err := validateSchemaSize(schema); err != nil {
+			partsChan <- &PartResult{Error: err}
+			summaryChan <- &StreamingSummary{}
+			return
+		}
 
 		currentPartRows := [][]string{}
 		currentSize := 0

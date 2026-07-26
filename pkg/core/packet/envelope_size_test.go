@@ -236,3 +236,104 @@ func TestPartitionRows_TinySchemaSmallBudgetStillSplits(t *testing.T) {
 		t.Errorf("a tiny schema with a small budget must still split, got %d part(s)", parts)
 	}
 }
+
+// ─── Предел размера схемы ───────────────────────────────────────────────────
+
+// schemaBytes — размер сериализованной схемы в байтах (не в единицах бюджета).
+func schemaBytes(t *testing.T, s Schema) int {
+	t.Helper()
+	b, err := xml.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(b)
+}
+
+// TestValidateSchemaSize_AllowsNormalSchemas — обычные схемы, включая очень
+// широкие таблицы, обязаны проходить: предел рассчитан на словарь, а не на поля.
+func TestValidateSchemaSize_AllowsNormalSchemas(t *testing.T) {
+	for _, n := range []int{1, 100, 1600} {
+		s := simpleSchema(n)
+		if err := validateSchemaSize(s); err != nil {
+			t.Errorf("%d fields (%d bytes) must be allowed: %v", n, schemaBytes(t, s), err)
+		}
+	}
+}
+
+// TestValidateSchemaSize_RejectsOversizedDictionary — превысить предел можно
+// практически только словарём.
+func TestValidateSchemaSize_RejectsOversizedDictionary(t *testing.T) {
+	s := simpleSchema(3)
+	s.Dictionary = bigDictionary(3000, "достаточно длинное значение")
+
+	if got := schemaBytes(t, s); got <= MaxSchemaBytes {
+		t.Fatalf("test premise broken: schema is only %d bytes", got)
+	}
+
+	err := validateSchemaSize(s)
+	if err == nil {
+		t.Fatal("oversized schema must be rejected")
+	}
+	if !strings.Contains(err.Error(), "Dictionary entries") {
+		t.Errorf("error should point at the dictionary, got: %v", err)
+	}
+}
+
+// TestValidateSchemaSize_BoundaryIsInclusive — ровно на пределе схема ещё валидна.
+func TestValidateSchemaSize_BoundaryIsInclusive(t *testing.T) {
+	// Подбираем словарь чуть ниже предела.
+	s := simpleSchema(1)
+	for n := 100; ; n += 100 {
+		s.Dictionary = bigDictionary(n, "value")
+		if schemaBytes(t, s) > MaxSchemaBytes {
+			s.Dictionary = bigDictionary(n-100, "value")
+			break
+		}
+	}
+
+	if got := schemaBytes(t, s); got > MaxSchemaBytes {
+		t.Fatalf("premise broken: %d > %d", got, MaxSchemaBytes)
+	}
+	if err := validateSchemaSize(s); err != nil {
+		t.Errorf("schema just under the limit must pass: %v", err)
+	}
+}
+
+// TestGenerateReference_RejectsOversizedSchema — предел действует на входе
+// генерации, а не где-то в глубине.
+func TestGenerateReference_RejectsOversizedSchema(t *testing.T) {
+	s := simpleSchema(3)
+	s.Dictionary = bigDictionary(3000, "достаточно длинное значение")
+
+	rows := [][]string{{"a", "b", "c"}}
+
+	if _, err := NewGenerator().GenerateReference("t", s, rows); err == nil {
+		t.Error("GenerateReference must reject an oversized schema")
+	}
+}
+
+// TestGenerateResponse_RejectsOversizedSchema — то же для response.
+func TestGenerateResponse_RejectsOversizedSchema(t *testing.T) {
+	s := simpleSchema(3)
+	s.Dictionary = bigDictionary(3000, "достаточно длинное значение")
+
+	rows := [][]string{{"a", "b", "c"}}
+
+	_, err := NewGenerator().GenerateResponse("t", "REQ-1", s, rows, nil, "a", "b")
+	if err == nil {
+		t.Error("GenerateResponse must reject an oversized schema")
+	}
+}
+
+// TestGenerateReference_AcceptsMercuryDictionary — служебная запись @MRC, ради
+// которой словарь реально используется сегодня, обязана проходить свободно.
+func TestGenerateReference_AcceptsMercuryDictionary(t *testing.T) {
+	s := simpleSchema(5)
+	s.Dictionary = &Dictionary{Entries: []DictEntry{
+		{Short: "@MRC", Full: "https://mercury.example.com/api"},
+	}}
+
+	if _, err := NewGenerator().GenerateReference("t", s, [][]string{{"1", "2", "3", "4", "5"}}); err != nil {
+		t.Errorf("the @MRC dictionary must be accepted: %v", err)
+	}
+}
