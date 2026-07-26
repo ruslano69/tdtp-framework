@@ -18,31 +18,95 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
+// maxBufferedParse — предел, до которого вход буферизуется целиком ради
+// быстрого пути (parser_fast.go). Выше него разбор идёт потоковым xml.Decoder,
+// чтобы не держать в памяти весь вход.
+//
+// DefaultMaxMessageSize (~3.8MB оценки → ~1.9MB XML) — только дефолт, не
+// гарантия: размер пакета задаётся вручную через --packet-size у экспорта в
+// брокер и packet_kb в pipeline YAML, и сверху ничем не ограничен. Порог даёт
+// ~30-кратный запас над дефолтом, так что обычные пакеты идут быстрым путём,
+// а осознанно раздутые сохраняют прежний профиль памяти.
+//
+// Переменная, а не константа, чтобы тесты могли опустить порог.
+var maxBufferedParse int64 = 64 << 20
+
 // ParseFile парсит TDTP пакет из файла
 func (p *Parser) ParseFile(filename string) (*DataPacket, error) {
-	data, err := os.ReadFile(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
+	defer func() { _ = file.Close() }()
 
-	return p.parseAndExpand(data)
+	// Размер известен заранее — читаем одним куском без роста буфера.
+	if st, statErr := file.Stat(); statErr == nil && st.Size() <= maxBufferedParse {
+		data := make([]byte, st.Size())
+		if _, err := io.ReadFull(file, data); err != nil {
+			return nil, fmt.Errorf("failed to read file: %w", err)
+		}
+		return p.parseAndExpand(data)
+	}
+
+	return p.Parse(file)
 }
 
 // Parse парсит TDTP пакет из reader.
 //
-// Вход вычитывается целиком, чтобы разбор шёл тем же гибридным путём, что и
-// ParseBytes (см. parser_fast.go) — потоковый xml.Decoder заставлял бы гонять
-// каждую строку через reflection. Дополнительной памяти это почти не стоит:
-// пакеты ограничены DefaultMaxMessageSize (~3.8MB), а оба вызывающих с
-// io.Reader (cmd/tdtp-svg, pkg/etl/importer) и так держат байты в памяти и
-// лишь оборачивают их в bytes.Reader.
+// Вход до maxBufferedParse вычитывается целиком, чтобы разбор шёл тем же
+// гибридным путём, что и ParseBytes — потоковый xml.Decoder гонял бы каждую
+// строку через reflection. Для обычных пакетов это почти не стоит памяти: оба
+// вызывающих с io.Reader (cmd/tdtp-svg, pkg/etl/importer) и так держат байты в
+// памяти и лишь оборачивают их в bytes.Reader.
+//
+// Если вход больше порога, дочитывание идёт потоковым декодером, а уже
+// прочитанный кусок подставляется обратно через io.MultiReader — перематывать
+// reader не требуется.
 func (p *Parser) Parse(r io.Reader) (*DataPacket, error) {
-	data, err := readAllHinted(r)
+	data, complete, err := readCapped(r, maxBufferedParse)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
 	}
 
-	return p.parseAndExpand(data)
+	if complete {
+		return p.parseAndExpand(data)
+	}
+
+	return p.parseStreaming(io.MultiReader(bytes.NewReader(data), r))
+}
+
+// parseStreaming — прежний потоковый путь для входов сверх maxBufferedParse.
+// Каждая строка проходит через reflection, зато вход не держится в памяти.
+func (p *Parser) parseStreaming(r io.Reader) (*DataPacket, error) {
+	var packet DataPacket
+	if err := xml.NewDecoder(r).Decode(&packet); err != nil {
+		return nil, fmt.Errorf("failed to decode XML: %w", err)
+	}
+
+	if err := p.validatePacket(&packet); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	return p.expandCompact(&packet)
+}
+
+// readCapped читает не больше limit байт. complete=false означает, что вход
+// длиннее предела и в r осталось непрочитанное.
+func readCapped(r io.Reader, limit int64) (data []byte, complete bool, err error) {
+	var buf bytes.Buffer
+	if l, ok := r.(interface{ Len() int }); ok {
+		if n := int64(l.Len()); n <= limit {
+			buf.Grow(int(n))
+		}
+	}
+
+	// limit+1 байт позволяет отличить «ровно влезло» от «есть ещё».
+	n, err := buf.ReadFrom(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+
+	return buf.Bytes(), n <= limit, nil
 }
 
 // parseAndExpand — общий хвост Parse/ParseFile: разбор плюс авто-разворачивание
@@ -53,10 +117,14 @@ func (p *Parser) parseAndExpand(data []byte) (*DataPacket, error) {
 		return nil, err
 	}
 
-	// Auto-expand compact v1.3.1 format (carry-forward fixed fields).
-	// Only when data is NOT compressed — compressed packets still have rows packed
-	// into a single blob; expansion must happen after decompression instead
-	// (see ParseWithDecompression / ParseBytesWithDecompression).
+	return p.expandCompact(packet)
+}
+
+// expandCompact разворачивает compact v1.3.1 (carry-forward fixed fields).
+// Только для несжатых данных — у сжатых строки ещё упакованы в blob, и
+// разворачивание должно идти после распаковки
+// (см. ParseWithDecompression / ParseBytesWithDecompression).
+func (p *Parser) expandCompact(packet *DataPacket) (*DataPacket, error) {
 	if packet.Data.Compact && packet.Data.Compression == "" {
 		if err := ExpandCompactRows(packet); err != nil {
 			return nil, fmt.Errorf("compact expansion failed: %w", err)
@@ -64,19 +132,6 @@ func (p *Parser) parseAndExpand(data []byte) (*DataPacket, error) {
 	}
 
 	return packet, nil
-}
-
-// readAllHinted вычитывает r целиком, преаллоцируя буфер когда длина известна
-// (bytes.Reader, bytes.Buffer, strings.Reader).
-func readAllHinted(r io.Reader) ([]byte, error) {
-	var buf bytes.Buffer
-	if l, ok := r.(interface{ Len() int }); ok {
-		buf.Grow(l.Len())
-	}
-	if _, err := buf.ReadFrom(r); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 // ParseBytes парсит TDTP пакет из байтового массива.

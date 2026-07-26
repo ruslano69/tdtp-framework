@@ -393,3 +393,117 @@ func TestParse_ErrorsPreserved(t *testing.T) {
 		t.Error("expected the reader error to propagate")
 	}
 }
+
+// ─── Порог буферизации ──────────────────────────────────────────────────────
+
+// withLoweredParseCap временно опускает порог, чтобы обычный пакет пошёл
+// потоковой веткой.
+func withLoweredParseCap(t *testing.T, limit int64) {
+	t.Helper()
+	old := maxBufferedParse
+	maxBufferedParse = limit
+	t.Cleanup(func() { maxBufferedParse = old })
+}
+
+// TestParse_OverCap_StreamsAndMatches — вход больше порога разбирается
+// потоковым декодером и даёт тот же результат.
+func TestParse_OverCap_StreamsAndMatches(t *testing.T) {
+	data := buildPacketBytes(t, [][]string{
+		{"a<b", "c&d", "e|f"},
+		{"Привіт", `back\slash`, "plain"},
+	}, 3)
+
+	p := NewParser()
+	want, err := p.ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+
+	withLoweredParseCap(t, 64) // пакет заведомо больше
+
+	got, err := p.Parse(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Parse over cap: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("streaming path diverged\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestParse_OverCap_NonSizedReader — та же ветка для reader без Len():
+// уже прочитанный кусок должен подставляться обратно через MultiReader.
+func TestParse_OverCap_NonSizedReader(t *testing.T) {
+	data := buildPacketBytes(t, [][]string{{"x", "y", "z"}, {"1", "2", "3"}}, 3)
+
+	p := NewParser()
+	want, err := p.ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+
+	withLoweredParseCap(t, 32)
+
+	got, err := p.Parse(struct{ io.Reader }{bytes.NewReader(data)})
+	if err != nil {
+		t.Fatalf("Parse over cap on a plain reader: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MultiReader hand-off lost data\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestParseFile_OverCap_Streams — файл больше порога тоже идёт потоковой веткой.
+func TestParseFile_OverCap_Streams(t *testing.T) {
+	data := buildPacketBytes(t, [][]string{{"f1", "f2", "f3"}}, 3)
+	path := filepath.Join(t.TempDir(), "big.tdtp.xml")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewParser()
+	want, err := p.ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+
+	withLoweredParseCap(t, 16)
+
+	got, err := p.ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile over cap: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseFile streaming path diverged\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestParse_OverCap_ExpandsCompact — compact разворачивается и на потоковой ветке.
+func TestParse_OverCap_ExpandsCompact(t *testing.T) {
+	const compactXML = `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<DataPacket protocol="TDTP" version="1.3.1">` +
+		`<Header><Type>reference</Type><TableName>t</TableName><MessageID>M1</MessageID>` +
+		`<PartNumber>1</PartNumber><TotalParts>1</TotalParts><RecordsInPart>2</RecordsInPart>` +
+		`<Timestamp>2026-01-01T00:00:00Z</Timestamp></Header>` +
+		`<Schema><Field name="dept" type="TEXT" fixed="true"></Field>` +
+		`<Field name="name" type="TEXT"></Field></Schema>` +
+		`<Data compact="true"><R>HR|Ann</R><R>|Bob</R></Data></DataPacket>`
+
+	withLoweredParseCap(t, 32)
+
+	got, err := NewParser().Parse(bytes.NewReader([]byte(compactXML)))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Data.Rows[1].Value != "HR|Bob" {
+		t.Errorf("streaming path should expand compact rows, got %q", got.Data.Rows[1].Value)
+	}
+}
+
+// TestParse_OverCap_ErrorsPreserved — на битом входе сверх порога ошибка не теряется.
+func TestParse_OverCap_ErrorsPreserved(t *testing.T) {
+	withLoweredParseCap(t, 8)
+
+	if _, err := NewParser().Parse(bytes.NewReader([]byte("this is definitely not xml at all"))); err == nil {
+		t.Error("expected an error from the streaming path")
+	}
+}
