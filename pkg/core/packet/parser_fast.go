@@ -26,6 +26,44 @@ import (
 var bDataName = []byte("<Data")
 var bDataCloseTag = []byte("</Data>")
 
+var bSchemaName = []byte("<Schema")
+var bSchemaCloseTag = []byte("</Schema>")
+
+// schemaSpanSize возвращает размер элемента <Schema>...</Schema> прямо в
+// исходных байтах.
+//
+// Это ровно та величина, которую validateSchemaSize меряет на записи: writer
+// пишет туда результат того же xml.Marshal, так что для наших пакетов числа
+// совпадают байт в байт. Но здесь она достаётся двумя bytes.Index вместо
+// повторной сериализации — marshal схемы на 10 полей стоит ~13.7мкс против
+// ~51мкс на разбор небольшого пакета целиком, то есть проверка съедала бы
+// четверть разбора, а на 100 полях (~111мкс) превышала бы его вдвое.
+//
+// Для чужих пакетов это к тому же честнее: меряется то, что реально пришло,
+// а не результат нашей повторной сериализации.
+//
+// ok=false означает, что секцию найти не удалось — вызывающий пропускает
+// проверку и полагается на обычный разбор.
+func schemaSpanSize(data []byte) (int, bool) {
+	start := bytes.Index(data, bSchemaName)
+	if start < 0 {
+		return 0, false
+	}
+
+	// Отсекаем возможные элементы с префиксом Schema в имени.
+	next := start + len(bSchemaName)
+	if next >= len(data) || !isDataTagBoundary(data[next]) {
+		return 0, false
+	}
+
+	end := bytes.Index(data[start:], bSchemaCloseTag)
+	if end < 0 {
+		return 0, false
+	}
+
+	return end + len(bSchemaCloseTag), true
+}
+
 func isXMLSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }

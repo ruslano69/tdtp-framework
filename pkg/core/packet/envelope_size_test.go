@@ -1,7 +1,10 @@
 package packet
 
 import (
+	"bytes"
 	"encoding/xml"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -336,4 +339,136 @@ func TestGenerateReference_AcceptsMercuryDictionary(t *testing.T) {
 	if _, err := NewGenerator().GenerateReference("t", s, [][]string{{"1", "2", "3", "4", "5"}}); err != nil {
 		t.Errorf("the @MRC dictionary must be accepted: %v", err)
 	}
+}
+
+// ─── Предел размера схемы на чтении ─────────────────────────────────────────
+
+// packetWithSchema собирает пакет с заданной схемой, минуя предел генерации:
+// на чтении нужно проверять и такие пакеты, которых наш генератор уже не выпустит.
+func packetWithSchema(t *testing.T, s Schema) []byte {
+	t.Helper()
+	b, err := xml.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []byte(`<?xml version="1.0" encoding="UTF-8"?>` +
+		`<DataPacket protocol="TDTP" version="1.4">` +
+		`<Header><Type>reference</Type><TableName>t</TableName><MessageID>M1</MessageID>` +
+		`<PartNumber>1</PartNumber><TotalParts>1</TotalParts><RecordsInPart>1</RecordsInPart>` +
+		`<Timestamp>2026-01-01T00:00:00Z</Timestamp></Header>` +
+		string(b) +
+		`<Data><R>v</R></Data></DataPacket>`)
+}
+
+// TestSchemaSpanSize_MatchesMarshal — измерение по исходным байтам обязано
+// совпадать с тем, что меряет запись через xml.Marshal. Иначе пороги разъедутся.
+func TestSchemaSpanSize_MatchesMarshal(t *testing.T) {
+	for _, n := range []int{1, 10, 200} {
+		s := simpleSchema(n)
+		data := packetWithSchema(t, s)
+
+		got, ok := schemaSpanSize(data)
+		if !ok {
+			t.Fatalf("%d fields: schema span not found", n)
+		}
+		if want := schemaBytes(t, s); got != want {
+			t.Errorf("%d fields: span = %d, marshal = %d", n, got, want)
+		}
+	}
+}
+
+// TestSchemaSpanSize_MatchesRealWriter — то же на пакете от настоящего writer'а.
+func TestSchemaSpanSize_MatchesRealWriter(t *testing.T) {
+	data := buildPacketBytes(t, [][]string{{"a", "b", "c"}}, 3)
+
+	got, ok := schemaSpanSize(data)
+	if !ok {
+		t.Fatal("schema span not found in a real packet")
+	}
+	if want := schemaBytes(t, simpleSchema(3)); got != want {
+		t.Errorf("span = %d, marshal = %d", got, want)
+	}
+}
+
+// TestParseBytes_WarnsAboveGenerationLimit — схема между 200KB и 1MB читается,
+// но с предупреждением в лог.
+func TestParseBytes_WarnsAboveGenerationLimit(t *testing.T) {
+	s := schemaSizedBetween(t, MaxSchemaBytes, MaxSchemaBytesRead)
+
+	size := schemaBytes(t, s)
+	if size <= MaxSchemaBytes || size > MaxSchemaBytesRead {
+		t.Fatalf("test premise broken: schema is %d bytes, need between %d and %d",
+			size, MaxSchemaBytes, MaxSchemaBytesRead)
+	}
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	pkt, err := NewParser().ParseBytes(packetWithSchema(t, s))
+	if err != nil {
+		t.Fatalf("a schema under the read limit must still parse: %v", err)
+	}
+	if pkt == nil {
+		t.Fatal("expected a packet")
+	}
+	if !strings.Contains(logBuf.String(), "WARNING") {
+		t.Errorf("expected a warning in the log, got: %q", logBuf.String())
+	}
+}
+
+// TestParseBytes_RejectsAboveReadLimit — свыше 1MB чтение отклоняется.
+func TestParseBytes_RejectsAboveReadLimit(t *testing.T) {
+	s := simpleSchema(1)
+	s.Dictionary = bigDictionary(20000, "достаточно длинное значение для превышения")
+
+	if size := schemaBytes(t, s); size <= MaxSchemaBytesRead {
+		t.Fatalf("test premise broken: schema is only %d bytes", size)
+	}
+
+	_, err := NewParser().ParseBytes(packetWithSchema(t, s))
+	if err == nil {
+		t.Fatal("a schema above the read limit must be rejected")
+	}
+	if !strings.Contains(err.Error(), "refusing to parse") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestParseBytes_NormalSchemaSilent — обычный пакет не должен ничего писать в лог.
+func TestParseBytes_NormalSchemaSilent(t *testing.T) {
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	if _, err := NewParser().ParseBytes(buildPacketBytes(t, [][]string{{"a", "b", "c"}}, 3)); err != nil {
+		t.Fatal(err)
+	}
+	if logBuf.Len() != 0 {
+		t.Errorf("a normal packet must not log anything, got: %q", logBuf.String())
+	}
+}
+
+// schemaSizedBetween подбирает словарь так, чтобы сериализованная схема
+// попадала строго в окно (lo, hi]. Подбор, а не константа: размер записи
+// зависит от разметки и алфавита, и захардкоженное число тихо уедет из окна
+// при любом изменении формата.
+func schemaSizedBetween(t *testing.T, lo, hi int) Schema {
+	t.Helper()
+
+	s := simpleSchema(1)
+	for n := 50; n <= 100000; n += 50 {
+		s.Dictionary = bigDictionary(n, "достаточно длинное значение")
+		switch size := schemaBytes(t, s); {
+		case size <= lo:
+			continue
+		case size <= hi:
+			return s
+		default:
+			t.Fatalf("step too coarse: jumped from below %d to %d", lo, size)
+		}
+	}
+
+	t.Fatalf("could not build a schema between %d and %d bytes", lo, hi)
+	return Schema{}
 }

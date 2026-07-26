@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 )
@@ -83,11 +84,47 @@ func (p *Parser) parseStreaming(r io.Reader) (*DataPacket, error) {
 		return nil, fmt.Errorf("failed to decode XML: %w", err)
 	}
 
+	// Исходных байтов здесь нет, поэтому размер схемы меряется сериализацией
+	// и уже после разбора. Стоимость на этом пути несущественна: сюда попадают
+	// только входы свыше maxBufferedParse.
+	if b, err := xml.Marshal(packet.Schema); err == nil {
+		if err := checkSchemaSizeOnRead(len(b)); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := p.validatePacket(&packet); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
 	return p.expandCompact(&packet)
+}
+
+// MaxSchemaBytesRead — жёсткий предел размера Schema при чтении.
+//
+// Отдельная величина от MaxSchemaBytes (предел генерации, 200KB), и намеренно
+// выше него. Предел на записи — правило формата: он касается только пакетов,
+// которые мы создаём. Предел на чтении отвергал бы уже существующие данные,
+// поэтому он не правило формата, а защита от патологического входа: чужой
+// пакет с гигантской схемой иначе будет разобран и размещён в памяти целиком.
+// Между 200KB и этим порогом пакет читается, но с предупреждением.
+const MaxSchemaBytesRead = 1024 * 1024
+
+// checkSchemaSizeOnRead применяет двухуровневую политику чтения:
+// выше MaxSchemaBytes — предупреждение, выше MaxSchemaBytesRead — отказ.
+func checkSchemaSizeOnRead(size int) error {
+	if size > MaxSchemaBytesRead {
+		return fmt.Errorf("schema is %d bytes, refusing to parse (read limit %d)",
+			size, MaxSchemaBytesRead)
+	}
+
+	if size > MaxSchemaBytes {
+		log.Printf("WARNING: schema is %d bytes, above the %d generation limit — "+
+			"Schema is copied into every part, so this multiplies by the part count",
+			size, MaxSchemaBytes)
+	}
+
+	return nil
 }
 
 // readCapped читает не больше limit байт. complete=false означает, что вход
@@ -142,6 +179,13 @@ func (p *Parser) expandCompact(packet *DataPacket) (*DataPacket, error) {
 // возвращает ok=false и разбор идёт обычным xml.Unmarshal — включая выдачу
 // ошибки на действительно битом XML.
 func (p *Parser) ParseBytes(data []byte) (*DataPacket, error) {
+	// Проверка до разбора: схему-переросток отклоняем, не выделив под неё память.
+	if size, ok := schemaSpanSize(data); ok {
+		if err := checkSchemaSizeOnRead(size); err != nil {
+			return nil, err
+		}
+	}
+
 	if packet, ok := tryFastParse(data); ok {
 		if err := p.validatePacket(packet); err != nil {
 			return nil, fmt.Errorf("validation failed: %w", err)
