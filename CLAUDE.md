@@ -267,7 +267,26 @@ GetRows: 2.7 мс → 1.5 мс (1.8×), ~720 MB/s на 10k×10
 
 ### Бинарник
 ```
-/tmp/weed   (version 30GB 3.80, linux amd64)
+/tmp/weed   (version 3.80, linux amd64)
+```
+
+`/tmp` в контейнере периодически очищается — восстанавливается так:
+
+```bash
+curl -sSL -o /tmp/weed.tar.gz \
+  https://github.com/seaweedfs/seaweedfs/releases/download/3.80/linux_amd64_large_disk.tar.gz
+tar xzf /tmp/weed.tar.gz -C /tmp/ && chmod +x /tmp/weed
+mkdir -p /tmp/seaweedfs-data
+```
+
+**GitHub API заблокирован, прямые ссылки на релизы — нет.** `api.github.com`
+отдаёт 403 на чужие репозитории («access to this repository is not enabled»),
+а `github.com/.../releases/download/...` качается нормально. Значит версию
+надо указывать явно, «latest» через API узнать не выйдет.
+
+Бакет `tdtp-test` после чистого старта не существует — создать:
+```bash
+curl -s -X PUT http://127.0.0.1:8333/tdtp-test
 ```
 
 ### ВАЖНО: `-ip` не работает в `weed server` — запускать компоненты отдельно!
