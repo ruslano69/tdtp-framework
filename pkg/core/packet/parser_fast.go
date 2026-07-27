@@ -44,24 +44,48 @@ var bSchemaCloseTag = []byte("</Schema>")
 //
 // ok=false означает, что секцию найти не удалось — вызывающий пропускает
 // проверку и полагается на обычный разбор.
+//
+// Поиск идёт циклом, как в findDataSection, и по той же причине: элемент с
+// префиксом в имени (<SchemaVersion>) не должен прекращать поиск. Раньше
+// прекращал, и проверка размера молча выключалась — а пропуск здесь означает
+// пропуск MaxSchemaBytesRead, то есть ровно того предела, ради которого
+// функция и написана.
 func schemaSpanSize(data []byte) (int, bool) {
-	start := bytes.Index(data, bSchemaName)
-	if start < 0 {
-		return 0, false
-	}
+	off := 0
+	for {
+		i := bytes.Index(data[off:], bSchemaName)
+		if i < 0 {
+			return 0, false
+		}
+		i += off
 
-	// Отсекаем возможные элементы с префиксом Schema в имени.
-	next := start + len(bSchemaName)
-	if next >= len(data) || !isDataTagBoundary(data[next]) {
-		return 0, false
-	}
+		next := i + len(bSchemaName)
+		if next >= len(data) {
+			return 0, false
+		}
+		if !isDataTagBoundary(data[next]) {
+			off = next // <SchemaVersion> или другое имя с префиксом Schema
+			continue
+		}
 
-	end := bytes.Index(data[start:], bSchemaCloseTag)
-	if end < 0 {
-		return 0, false
-	}
+		gt := bytes.IndexByte(data[next:], '>')
+		if gt < 0 {
+			return 0, false
+		}
+		gt += next
 
-	return end + len(bSchemaCloseTag), true
+		// <Schema/> — пустая схема, весь элемент и есть её размер.
+		if data[gt-1] == '/' {
+			return gt + 1 - i, true
+		}
+
+		end := bytes.Index(data[gt:], bSchemaCloseTag)
+		if end < 0 {
+			return 0, false
+		}
+
+		return gt + end + len(bSchemaCloseTag) - i, true
+	}
 }
 
 func isXMLSpace(c byte) bool {
@@ -205,6 +229,30 @@ func decodeChardata(s []byte) (string, bool) {
 	return string(out), true
 }
 
+// isXMLChar — продукция Char из XML 1.0 §2.2: что вообще может стоять в
+// документе. Числовая ссылка на всё остальное (NUL, управляющие символы,
+// суррогаты, FFFE/FFFF) документ не спасает — encoding/xml такой вход
+// отвергает.
+//
+// Быстрый путь обязан отвергать его тоже. Иначе нарушается контракт из шапки
+// файла: «любое отклонение от ожидаемой формы даёт ok=false». Принимая
+// &#0;, он не откатывался в fallback, а молча возвращал значение с NUL внутри
+// — то есть тот же пакет проходил или не проходил в зависимости от того,
+// сработал быстрый путь или нет.
+func isXMLChar(r rune) bool {
+	switch {
+	case r == 0x9 || r == 0xA || r == 0xD:
+		return true
+	case r >= 0x20 && r <= 0xD7FF: // ниже суррогатов
+		return true
+	case r >= 0xE000 && r <= 0xFFFD: // выше суррогатов, без FFFE/FFFF
+		return true
+	case r >= 0x10000 && r <= utf8.MaxRune:
+		return true
+	}
+	return false
+}
+
 // parseCharRef разбирает числовую ссылку: "60" или "x3C".
 func parseCharRef(ref []byte) (rune, bool) {
 	if len(ref) == 0 {
@@ -237,7 +285,7 @@ func parseCharRef(ref []byte) (rune, bool) {
 			return 0, false
 		}
 	}
-	if !utf8.ValidRune(rune(v)) {
+	if !isXMLChar(rune(v)) {
 		return 0, false
 	}
 	return rune(v), true

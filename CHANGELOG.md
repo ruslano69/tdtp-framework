@@ -2,6 +2,33 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.19.2] — 2026-07-27
+
+### Fixed — the fast parser's two ways of being more permissive than the reference
+
+`parser_fast.go` promises that any deviation from the expected shape yields
+`ok=false` and hands the packet to `encoding/xml`. Two places broke that
+promise in the direction that matters — accepting what the fallback would not.
+
+**`schemaSpanSize` stopped searching at the first near-miss.** An element whose
+name merely starts with `Schema` (`<SchemaVersion>`) ended the scan instead of
+skipping it, the way `findDataSection` next to it already did correctly. The
+span was then reported as not found, and a not-found span means
+`MaxSchemaBytesRead` is silently skipped — so a single extra element ahead of
+the real `<Schema>` disabled the read limit that the check exists to enforce.
+It now loops, and measures self-closing `<Schema/>` correctly too.
+
+**`parseCharRef` accepted characters XML has no way to represent.** `&#0;`
+decoded to a NUL inside the value; `encoding/xml` rejects that packet outright.
+Control characters, surrogates and `FFFE`/`FFFF` behaved the same way. The
+check is now the Char production from XML 1.0 §2.2, so such a packet goes to
+the fallback and is rejected there, instead of parsing differently depending on
+whether the fast path happened to engage.
+
+Tests cross-check the fast path against `encoding/xml` on twelve rejected
+references and eight accepted ones, and assert the read limit still fires with
+a prefixed element in front of the schema.
+
 ## [1.19.1] — 2026-07-27
 
 ### Fixed — CR in a cell value no longer changes on the way through the format
