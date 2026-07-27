@@ -31,6 +31,7 @@ import sys
 import time
 import shutil
 import signal
+import socket
 import sqlite3
 import subprocess
 import urllib.request
@@ -57,7 +58,26 @@ TEST_DB  = str(_TMP / "tdtp_enc_test.db")
 OUTDIR   = _TMP / "tdtp_enc_test_out"
 CFG      = str(_TMP / "tdtp_enc_test.yaml")
 
-MERCURY_ADDR = os.environ.get("TDTP_MERCURY_ADDR", "127.0.0.1:3091")  # non-default port: avoid clashing with a real xZMercury on :3000
+def _free_port() -> int:
+    """A port the OS says is free right now.
+
+    Replaces a hardcoded 3091. That constant avoided clashing with a real
+    xZMercury on :3000, but not with this fixture's own leftovers: a mock
+    surviving an interrupted run kept answering there, and the next run
+    silently used it instead of the build under test. Asking the OS removes
+    the class of problem rather than moving the number.
+
+    The port is released before the mock claims it, so it can in principle be
+    taken in between — start_mercury_mock detects that instead of trusting it.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+# Override to pin a port (debugging, or a mock started by hand); otherwise a
+# fresh one per run.
+MERCURY_ADDR = os.environ.get("TDTP_MERCURY_ADDR") or f"127.0.0.1:{_free_port()}"
 MERCURY_URL  = f"http://{MERCURY_ADDR}"
 # "dev-mode" is a literal sentinel FileEncryptor.Encrypt checks for
 # (cmd/tdtpcli/commands/encrypt.go / pkg/processors/encryption.go) — it
@@ -81,6 +101,7 @@ RESET  = "\033[0m"
 
 results: list = []
 _mock_proc: "subprocess.Popen | None" = None
+_mock_log_path: str = ""
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -297,27 +318,69 @@ def mercury_healthy() -> bool:
 
 
 def start_mercury_mock() -> bool:
-    """Start cmd/xzmercury-mock as a disposable subprocess. Returns True if it
-    became healthy within the timeout."""
-    global _mock_proc
+    """Start cmd/xzmercury-mock as a disposable subprocess. Returns True once
+    the process this function started is the one answering.
+
+    Each guard below exists because its absence produced a run that lied. A
+    mock left listening by an earlier run answered /healthz, this function
+    reported success, and the suite then exercised a stale binary — twice
+    showing failures that were not real, and equally able to show passes that
+    are not. A freshly picked port (see MERCURY_ADDR) makes the collision
+    unlikely; these checks make one impossible to mistake for success.
+    """
+    global _mock_proc, _mock_log_path
     if not go_available():
         return False
+
+    # 1. Nothing may already be answering. If something is, it is not ours —
+    #    the port was free moments ago — and there is no way to tell which
+    #    build it is running. Refusing beats adopting it.
+    if mercury_healthy():
+        print(f"{RED}  {MERCURY_URL} already answers /healthz before we start.{RESET}")
+        print("  Refusing to run against a server this fixture did not launch:")
+        print("  it may be a stale mock from an earlier run, built from other code.")
+        return False
+
     env = dict(os.environ)
     env["MERCURY_SERVER_SECRET"] = MERCURY_SECRET
     env["MOCK_ADDR"] = f":{MERCURY_ADDR.split(':')[-1]}"
+
+    # 2. Keep the mock's output. It went to DEVNULL, which is exactly where
+    #    "bind: address already in use" went — the one message that would have
+    #    explained the failure.
+    _mock_log_path = str(_TMP / "tdtp_enc_mock.log")
+    log = open(_mock_log_path, "wb")
     _mock_proc = subprocess.Popen(
         ["go", "run", "./cmd/xzmercury-mock/", "--addr", env["MOCK_ADDR"],
          "--secret", MERCURY_SECRET],
         cwd=str(ROOT), env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=log, stderr=subprocess.STDOUT,
     )
+
     for _ in range(60):  # up to ~30s for `go run` first-time compile
+        # 3. Liveness first, health second. The other order takes a reply from
+        #    somebody else's server as proof that ours came up.
+        if _mock_proc.poll() is not None:
+            _report_mock_failure("mock process exited before becoming healthy")
+            return False
         if mercury_healthy():
             return True
-        if _mock_proc.poll() is not None:
-            return False
         time.sleep(0.5)
+
+    _report_mock_failure("mock did not become healthy within 30s")
     return False
+
+
+def _report_mock_failure(reason: str):
+    """Print why the mock never came up, including its own output."""
+    print(f"{RED}  {reason}{RESET}")
+    if not _mock_log_path or not os.path.exists(_mock_log_path):
+        return
+    text = Path(_mock_log_path).read_text(encoding="utf-8", errors="replace").strip()
+    if text:
+        print("  mock output:")
+        for line in text.splitlines()[-10:]:
+            print(f"    {line}")
 
 
 def stop_mercury_mock():
