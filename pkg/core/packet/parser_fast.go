@@ -132,57 +132,73 @@ func hasAnotherDataTag(tail []byte) bool {
 	}
 }
 
-// decodeChardata раскрывает XML-сущности в теле строки.
-// Быстрый путь — нет '&' — возвращает содержимое без разбора.
+// decodeChardata раскрывает XML-сущности в теле строки и нормализует переводы
+// строк — то и другое ровно так, как это делает encoding/xml, на который
+// откатывается быстрый путь.
+//
+// Про нормализацию: XML 1.0 §2.11 предписывает привести сырые CRLF и одиночный
+// CR к LF, и encoding/xml так и поступает. Расхождение здесь означало бы, что
+// один и тот же файл читается по-разному в зависимости от того, сработал
+// быстрый путь или нет — а он срабатывает не всегда. Числовые ссылки под
+// нормализацию не подпадают: &#xD; — это способ записать CR так, чтобы он
+// пережил разбор (см. escCR в xmlwriter.go), поэтому он раскрывается в CR и
+// остаётся CR.
+//
+// Быстрый путь — нет ни '&', ни CR — возвращает содержимое без разбора.
 // Нераспознанная сущность даёт ok=false (уходим в fallback).
 func decodeChardata(s []byte) (string, bool) {
-	amp := bytes.IndexByte(s, '&')
-	if amp < 0 {
+	if bytes.IndexByte(s, '&') < 0 && bytes.IndexByte(s, '\r') < 0 {
 		return string(s), true
 	}
 
 	out := make([]byte, 0, len(s))
-	out = append(out, s[:amp]...)
-	i := amp
 
-	for i < len(s) {
-		if s[i] != '&' {
-			j := bytes.IndexByte(s[i:], '&')
-			if j < 0 {
-				out = append(out, s[i:]...)
-				break
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '\r':
+			// CRLF и одиночный CR → LF.
+			out = append(out, '\n')
+			i++
+			if i < len(s) && s[i] == '\n' {
+				i++
 			}
-			out = append(out, s[i:i+j]...)
-			i += j
-			continue
-		}
 
-		semi := bytes.IndexByte(s[i:], ';')
-		if semi < 0 {
-			return "", false
-		}
-		ent := s[i+1 : i+semi] // без '&' и ';'
-		i += semi + 1
-
-		switch {
-		case bytes.Equal(ent, []byte("lt")):
-			out = append(out, '<')
-		case bytes.Equal(ent, []byte("gt")):
-			out = append(out, '>')
-		case bytes.Equal(ent, []byte("amp")):
-			out = append(out, '&')
-		case bytes.Equal(ent, []byte("quot")):
-			out = append(out, '"')
-		case bytes.Equal(ent, []byte("apos")):
-			out = append(out, '\'')
-		case len(ent) > 1 && ent[0] == '#':
-			r, ok := parseCharRef(ent[1:])
-			if !ok {
+		case '&':
+			semi := bytes.IndexByte(s[i:], ';')
+			if semi < 0 {
 				return "", false
 			}
-			out = utf8.AppendRune(out, r)
+			ent := s[i+1 : i+semi] // без '&' и ';'
+			i += semi + 1
+
+			switch {
+			case bytes.Equal(ent, []byte("lt")):
+				out = append(out, '<')
+			case bytes.Equal(ent, []byte("gt")):
+				out = append(out, '>')
+			case bytes.Equal(ent, []byte("amp")):
+				out = append(out, '&')
+			case bytes.Equal(ent, []byte("quot")):
+				out = append(out, '"')
+			case bytes.Equal(ent, []byte("apos")):
+				out = append(out, '\'')
+			case len(ent) > 1 && ent[0] == '#':
+				r, ok := parseCharRef(ent[1:])
+				if !ok {
+					return "", false
+				}
+				out = utf8.AppendRune(out, r)
+			default:
+				return "", false
+			}
+
 		default:
-			return "", false
+			j := i
+			for j < len(s) && s[j] != '&' && s[j] != '\r' {
+				j++
+			}
+			out = append(out, s[i:j]...)
+			i = j
 		}
 	}
 

@@ -2,6 +2,47 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.19.1] — 2026-07-27
+
+### Fixed — CR in a cell value no longer changes on the way through the format
+
+A value carrying Windows line endings did not survive a round-trip. The writer
+put a raw CR into `<R>`, and XML 1.0 §2.11 obliges *every* parser to fold raw
+CRLF and lone CR into LF — so an MSSQL remark field exported and re-imported
+came back different, in a packet that stayed formally valid the whole time.
+The hand-rolled fast parser did not fold, which made it worse: the same file
+decoded one way through `tdtpcli 1.17.3` and another through a current build.
+
+The rule is now explicit and identical on both sides, and it belongs to the
+format rather than to the platform — TDTP carries the bytes that were in the
+column, so a packet exported on Windows and on Linux is byte-identical:
+
+- **Write:** CR → `&#xD;`. Numeric character references are exempt from
+  line-ending normalisation, so this is the only way to carry CR intact. LF
+  stays raw — no parser touches it in chardata.
+- **Read:** `&#xD;` → CR; raw CR and CRLF → LF, matching `encoding/xml`.
+  Files written before this release keep decoding exactly as they did.
+
+Attribute values escape CR, LF **and** TAB (`&#xD;` `&#xA;` `&#x9;`): §3.3.3
+replaces all three with a space in any attribute, and `carry` holds field
+values for the compact format.
+
+Only packets containing CR change on the wire; everything else is byte-for-byte
+what it was. Verified end-to-end through sqlite: export → import of five values
+with CRLF/LF/lone-CR/TAB, each SHA256-identical to what was inserted.
+
+### Fixed — `--to-tdtp` refuses encrypted input instead of quietly decrypting it
+
+`--to-tdtp` accepted `.tdtp.enc` and, with no `--output`, wrote its plaintext
+result back over the input. That burned the xZMercury key on read and left a
+readable file still named `.enc`, with no way back. It was also a second,
+quieter route out of the envelope than `--decrypt`.
+
+The command now has no decryption path at all. Encrypted input is refused by
+content as well as by name, so renaming an `.enc` to `.tdtp.xml` is not a way
+around it, and v1.5 packets whose Schema or Data is still ciphertext are
+refused after parsing. The input file is never touched.
+
 ## [1.19.0] — 2026-07-27
 
 ### Added — `--to-tdtp`: re-filter/re-version an existing TDTP file without a DB round-trip
