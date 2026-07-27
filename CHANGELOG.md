@@ -2,6 +2,42 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.19.0] — 2026-07-27
+
+### Added — `--to-tdtp`: re-filter/re-version an existing TDTP file without a DB round-trip
+
+New sibling to `--to-csv`/`--to-html`/`--to-xlsx`/`--to-compact`, but the
+output stays TDTP XML instead of converting away from it. Closes a real gap:
+previously the only way to narrow an already-exported `.tdtp.xml` file by an
+additional filter was to re-run the original DB query with a wider `--where`
+— there was no way to work purely from an existing file.
+
+```bash
+tdtpcli --to-tdtp export.tdtp.xml --where "Dept = '20-040'" --order-by "Balance DESC" --output filtered.tdtp.xml
+tdtpcli --to-tdtp export.tdtp.xml -v1 --output legacy.tdtp.xml   # strip to bare v1.0
+tdtpcli --to-tdtp export.tdtp.xml -v13 --output compat.tdtp.xml  # v1.3.1 (packet.Downgrade)
+```
+
+- Shares its read/decrypt/decompress/security-gate/filter pipeline with
+  `--to-csv` (`--where`/`--order-by`/`--limit`/`--offset`/`--fields`) —
+  the only difference is the last step writes TDTP XML instead of CSV.
+  Unlike `--to-csv`'s render-time-only projection, `--fields` here actually
+  prunes `Schema.Fields` and every row so the output packet is internally
+  self-consistent, not just display-filtered.
+- `-v1` / `-v13` / `-v14` (default) choose the output protocol version —
+  mutually exclusive, rejected with a clear error if more than one is
+  given. `-v14` recomputes xxh3 integrity hashes fresh (anything upstream
+  — filtering, projection, re-versioning — invalidates any pre-existing
+  hash). `-v13` reuses the framework's own existing v1.4→v1.3.1
+  `packet.Downgrade` semantics rather than inventing stricter behavior.
+  `-v1` does the same plus strips the v1.4 integrity attributes.
+  The version is never implicit — every `--to-tdtp` output declares
+  exactly which feature set it carries, unlike a hand-assembled or
+  third-party-generated file where that can silently drift from the truth.
+- Verified end-to-end: filtered + sorted output round-tripped through
+  `--test` reports `Integrity check passed` — the freshly computed v1.4
+  hashes are independently verifiable, not just cosmetically present.
+
 ## [1.18.3] — 2026-07-22
 
 ### Added — audit.database: SQL sink for the audit logger
