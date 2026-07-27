@@ -288,6 +288,10 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 			part.PipelineContext = e.pipelineCtx
 		}
 
+		// Resolved before the integrity step, not after: when registration
+		// fails this is where the error packet has to land.
+		partDest := tdtpPartDestination(destination, part.Header.PartNumber, part.Header.TotalParts)
+
 		// v1.4 integrity is mandatory ahead of v1.5 encryption, not
 		// opt-in — see pkg/pipeline/produce.go's doc comment: without
 		// this, VerifyAndPrepare's consumer-side pre-flight (which always
@@ -296,7 +300,28 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		// compression (hashes cover plaintext).
 		if e.config.TDTP.Encryption && !e.config.TDTP.EncryptionV13 {
 			if err := pipeline.ComputeAndRegisterIntegrity(ctx, part, integrityRegistrar, e.pipelineName); err != nil {
-				return fmt.Errorf("integrity for part %d: %w", part.Header.PartNumber, err)
+				// Same doctrine as exportEncrypted, applied to the step that
+				// runs before it: plaintext is never written, and writing
+				// nothing is silence — the consumer cannot tell a failed
+				// export from an export that was never asked for. So the
+				// error packet takes the data's place at the destination.
+				//
+				// This step is where an unreachable Mercury actually surfaces,
+				// since registration precedes encryption. Returning early from
+				// here skipped writeErrorPacket entirely, while the caller
+				// (cmd/tdtpcli/commands/pipeline.go) still announced "Error
+				// packet written to output" — the one outcome the doctrine
+				// exists to prevent, reported as if it had been honoured.
+				wrapped := fmt.Errorf("integrity for part %d: %w", part.Header.PartNumber, err)
+				if writeErr := e.writeErrorPacket(ctx, generator, partDest, mercury.ErrorCode(err), wrapped.Error()); writeErr != nil {
+					// Deliberately not wrapping the Mercury error here: the
+					// receipt could not be written either, so this is a hard
+					// failure and must not be mistaken for graceful
+					// degradation by the caller's errors.Is check.
+					return fmt.Errorf("write error packet after integrity failure for part %d: %w",
+						part.Header.PartNumber, writeErr)
+				}
+				return wrapped
 			}
 		}
 
@@ -306,8 +331,6 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)
 			}
 		}
-
-		partDest := tdtpPartDestination(destination, part.Header.PartNumber, part.Header.TotalParts)
 
 		if e.config.TDTP.Encryption && e.config.TDTP.EncryptionV13 {
 			// Legacy v1.3 whole-blob: XML is generated first, then the

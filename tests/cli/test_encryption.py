@@ -4,7 +4,7 @@ TDTP CLI Integration Tests — Encryption (AES-256-GCM via xZMercury)
 
 Tests every encryption mode this build of tdtpcli supports:
     --export --enc                (whole-packet AES-256-GCM, real xZMercury/mock)
-    --import <file>.tdtp.enc      (decrypt, burn-on-read)
+    --import <file>.tdtp.xml      (decrypt, burn-on-read)
     --enc + --compress            (compression then encryption, combined)
     --pipeline --enc-dev          (local ephemeral key, no xZMercury — mechanical
                                     success only; NOT decryptable after the process
@@ -31,6 +31,7 @@ import sys
 import time
 import shutil
 import signal
+import socket
 import sqlite3
 import subprocess
 import urllib.request
@@ -57,7 +58,26 @@ TEST_DB  = str(_TMP / "tdtp_enc_test.db")
 OUTDIR   = _TMP / "tdtp_enc_test_out"
 CFG      = str(_TMP / "tdtp_enc_test.yaml")
 
-MERCURY_ADDR = os.environ.get("TDTP_MERCURY_ADDR", "127.0.0.1:3091")  # non-default port: avoid clashing with a real xZMercury on :3000
+def _free_port() -> int:
+    """A port the OS says is free right now.
+
+    Replaces a hardcoded 3091. That constant avoided clashing with a real
+    xZMercury on :3000, but not with this fixture's own leftovers: a mock
+    surviving an interrupted run kept answering there, and the next run
+    silently used it instead of the build under test. Asking the OS removes
+    the class of problem rather than moving the number.
+
+    The port is released before the mock claims it, so it can in principle be
+    taken in between — start_mercury_mock detects that instead of trusting it.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+# Override to pin a port (debugging, or a mock started by hand); otherwise a
+# fresh one per run.
+MERCURY_ADDR = os.environ.get("TDTP_MERCURY_ADDR") or f"127.0.0.1:{_free_port()}"
 MERCURY_URL  = f"http://{MERCURY_ADDR}"
 # "dev-mode" is a literal sentinel FileEncryptor.Encrypt checks for
 # (cmd/tdtpcli/commands/encrypt.go / pkg/processors/encryption.go) — it
@@ -81,6 +101,7 @@ RESET  = "\033[0m"
 
 results: list = []
 _mock_proc: "subprocess.Popen | None" = None
+_mock_log_path: str = ""
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -114,16 +135,60 @@ def out(name: str) -> str:
     return str(OUTDIR / name)
 
 
-def is_valid_xml(path: str) -> bool:
-    """True if path parses as XML — used to assert an .tdtp.enc file is
-    genuinely opaque binary, not a plaintext/compressed TDTP packet."""
+# Values present in the source table. If any of them can be read out of an
+# encrypted file then the encryption did not happen — and unlike the shape of
+# the format, that check holds no matter which version produced the file.
+PLAINTEXT_NEEDLES = ("John Doe", "john@example.com", "Jane Smith", "Moscow")
+
+
+def encryption_shape(path: str) -> str:
+    """Classify what an --enc output file actually is.
+
+    Two shapes are legitimate, and which one appears follows from the protocol
+    version rather than from anything the test does:
+
+      'sections'  TDTP v1.5, the default for --enc: an ordinary XML envelope
+                  whose Schema and Data carry encryption="..." and hold
+                  ciphertext. It parses as XML by design — the header stays
+                  readable so a consumer can route the packet without a key.
+      'blob'      TDTP v1.3 whole-blob (--enc13): opaque bytes, no XML at all.
+      'plaintext' parses as XML with no encrypted section — a readable packet,
+                  which for an --enc output is the failure worth catching.
+      'missing'   no file.
+
+    This file used to assert "not valid XML", written when --enc still meant
+    the v1.3 blob. That test now rejects the default path while admitting
+    nothing extra: v1.5 output is valid XML *and* fully encrypted.
+    """
+    if not os.path.exists(path):
+        return "missing"
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError:
+        return "blob"
+
+    for section in ("Schema", "Data"):
+        node = root.find(section)
+        if node is not None and node.get("encryption"):
+            return "sections"
+    return "plaintext"
+
+
+def leaks_plaintext(path: str) -> bool:
+    """True if any source value is readable in the file as raw bytes."""
     if not os.path.exists(path):
         return False
-    try:
-        ET.parse(path)
-        return True
-    except ET.ParseError:
-        return False
+    with open(path, "rb") as fh:
+        blob = fh.read()
+    return any(n.encode() in blob for n in PLAINTEXT_NEEDLES)
+
+
+def is_encrypted_output(path: str) -> tuple:
+    """(ok, detail) — encrypted in either shape, and leaking nothing."""
+    shape = encryption_shape(path)
+    leaked = leaks_plaintext(path)
+    return (shape in ("sections", "blob") and not leaked,
+            f"shape={shape} leaked={leaked}")
 
 
 def count_rows_xml(path: str) -> int:
@@ -253,27 +318,69 @@ def mercury_healthy() -> bool:
 
 
 def start_mercury_mock() -> bool:
-    """Start cmd/xzmercury-mock as a disposable subprocess. Returns True if it
-    became healthy within the timeout."""
-    global _mock_proc
+    """Start cmd/xzmercury-mock as a disposable subprocess. Returns True once
+    the process this function started is the one answering.
+
+    Each guard below exists because its absence produced a run that lied. A
+    mock left listening by an earlier run answered /healthz, this function
+    reported success, and the suite then exercised a stale binary — twice
+    showing failures that were not real, and equally able to show passes that
+    are not. A freshly picked port (see MERCURY_ADDR) makes the collision
+    unlikely; these checks make one impossible to mistake for success.
+    """
+    global _mock_proc, _mock_log_path
     if not go_available():
         return False
+
+    # 1. Nothing may already be answering. If something is, it is not ours —
+    #    the port was free moments ago — and there is no way to tell which
+    #    build it is running. Refusing beats adopting it.
+    if mercury_healthy():
+        print(f"{RED}  {MERCURY_URL} already answers /healthz before we start.{RESET}")
+        print("  Refusing to run against a server this fixture did not launch:")
+        print("  it may be a stale mock from an earlier run, built from other code.")
+        return False
+
     env = dict(os.environ)
     env["MERCURY_SERVER_SECRET"] = MERCURY_SECRET
     env["MOCK_ADDR"] = f":{MERCURY_ADDR.split(':')[-1]}"
+
+    # 2. Keep the mock's output. It went to DEVNULL, which is exactly where
+    #    "bind: address already in use" went — the one message that would have
+    #    explained the failure.
+    _mock_log_path = str(_TMP / "tdtp_enc_mock.log")
+    log = open(_mock_log_path, "wb")
     _mock_proc = subprocess.Popen(
         ["go", "run", "./cmd/xzmercury-mock/", "--addr", env["MOCK_ADDR"],
          "--secret", MERCURY_SECRET],
         cwd=str(ROOT), env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=log, stderr=subprocess.STDOUT,
     )
+
     for _ in range(60):  # up to ~30s for `go run` first-time compile
+        # 3. Liveness first, health second. The other order takes a reply from
+        #    somebody else's server as proof that ours came up.
+        if _mock_proc.poll() is not None:
+            _report_mock_failure("mock process exited before becoming healthy")
+            return False
         if mercury_healthy():
             return True
-        if _mock_proc.poll() is not None:
-            return False
         time.sleep(0.5)
+
+    _report_mock_failure("mock did not become healthy within 30s")
     return False
+
+
+def _report_mock_failure(reason: str):
+    """Print why the mock never came up, including its own output."""
+    print(f"{RED}  {reason}{RESET}")
+    if not _mock_log_path or not os.path.exists(_mock_log_path):
+        return
+    text = Path(_mock_log_path).read_text(encoding="utf-8", errors="replace").strip()
+    if text:
+        print("  mock output:")
+        for line in text.splitlines()[-10:]:
+            print(f"    {line}")
 
 
 def stop_mercury_mock():
@@ -302,15 +409,15 @@ def test_E1_roundtrip():
     # E1.1 — export --enc produces a file that is NOT valid XML (opaque blob)
     t = time.monotonic()
     p = run("--export", "users", "--enc", "--mercury-url", MERCURY_URL,
-            "--output", out("e1_users.tdtp.enc"))
-    is_binary = not is_valid_xml(out("e1_users.tdtp.enc"))
-    record("E1.1 --export --enc → output is NOT valid XML (opaque blob)",
-           p.returncode == 0 and is_binary,
-           time.monotonic() - t, f"rc={p.returncode} binary={is_binary}")
+            "--output", out("e1_users.tdtp.xml"))
+    enc_ok, detail = is_encrypted_output(out("e1_users.tdtp.xml"))
+    record("E1.1 --export --enc → encrypted output, no readable source values",
+           p.returncode == 0 and enc_ok,
+           time.monotonic() - t, f"rc={p.returncode} {detail}")
 
     # E1.2 — --import decrypts and round-trips all 10 rows
     t = time.monotonic()
-    p = _import(out("e1_users.tdtp.enc"), "users_enc_copy")
+    p = _import(out("e1_users.tdtp.xml"), "users_enc_copy")
     rows = sqlite_query(TEST_DB, "SELECT COUNT(*) FROM users_enc_copy")[0][0] \
            if p.returncode == 0 else -1
     record("E1.2 --import --mercury-url decrypts → 10 rows",
@@ -334,18 +441,18 @@ def test_E2_burn_on_read():
     print(f"\n{BOLD}=== E2 Burn-on-read (key consumed after first decrypt) ==={RESET}")
 
     run("--export", "users", "--enc", "--mercury-url", MERCURY_URL,
-        "--output", out("e2_users.tdtp.enc"))
+        "--output", out("e2_users.tdtp.xml"))
 
     # E2.1 — first decrypt succeeds
     t = time.monotonic()
-    p1 = _import(out("e2_users.tdtp.enc"), "users_burn1")
+    p1 = _import(out("e2_users.tdtp.xml"), "users_burn1")
     record("E2.1 first --import decrypts successfully",
            p1.returncode == 0,
            time.monotonic() - t, f"rc={p1.returncode} stderr={p1.stderr.strip()[:100]}")
 
     # E2.2 — second decrypt of the SAME file must fail (key already burned)
     t = time.monotonic()
-    p2 = _import(out("e2_users.tdtp.enc"), "users_burn2")
+    p2 = _import(out("e2_users.tdtp.xml"), "users_burn2")
     record("E2.2 second --import of same file fails (burn-on-read)",
            p2.returncode != 0,
            time.monotonic() - t, f"rc={p2.returncode}")
@@ -358,17 +465,17 @@ def test_E3_error_paths():
 
     # E3.1 — --enc without --mercury-url → export fails
     t = time.monotonic()
-    p = run("--export", "users", "--enc", "--output", out("e3_no_url.tdtp.enc"))
+    p = run("--export", "users", "--enc", "--output", out("e3_no_url.tdtp.xml"))
     record("E3.1 --enc without --mercury-url → export fails",
            p.returncode != 0,
            time.monotonic() - t, f"rc={p.returncode} stderr={p.stderr.strip()[:100]}")
 
     # E3.2 — --import of an encrypted file without --mercury-url → fails
     run("--export", "users", "--enc", "--mercury-url", MERCURY_URL,
-        "--output", out("e3_valid.tdtp.enc"))
+        "--output", out("e3_valid.tdtp.xml"))
     t = time.monotonic()
     p = subprocess.run(
-        [TDTPCLI, "--config", CFG, "--import", out("e3_valid.tdtp.enc"),
+        [TDTPCLI, "--config", CFG, "--import", out("e3_valid.tdtp.xml"),
          "--table", "e3_should_fail"],
         capture_output=True, text=True, timeout=30,
     )
@@ -379,8 +486,8 @@ def test_E3_error_paths():
     # E3.3 — --import against a wrong/unreachable Mercury URL → fails
     t = time.monotonic()
     run("--export", "users", "--enc", "--mercury-url", MERCURY_URL,
-        "--output", out("e3_wrong_url.tdtp.enc"))
-    p = _import(out("e3_wrong_url.tdtp.enc"), "e3_wrong",
+        "--output", out("e3_wrong_url.tdtp.xml"))
+    p = _import(out("e3_wrong_url.tdtp.xml"), "e3_wrong",
                 mercury_url="http://127.0.0.1:1")
     record("E3.3 --import with unreachable Mercury URL → fails",
            p.returncode != 0,
@@ -389,25 +496,41 @@ def test_E3_error_paths():
     # E3.4 — corrupted ciphertext → --import fails (AES-GCM auth failure)
     t = time.monotonic()
     run("--export", "users", "--enc", "--mercury-url", MERCURY_URL,
-        "--output", out("e3_corrupt.tdtp.enc"))
-    fsize = os.path.getsize(out("e3_corrupt.tdtp.enc"))
-    with open(out("e3_corrupt.tdtp.enc"), "r+b") as f:
+        "--output", out("e3_corrupt.tdtp.xml"))
+    fsize = os.path.getsize(out("e3_corrupt.tdtp.xml"))
+    with open(out("e3_corrupt.tdtp.xml"), "r+b") as f:
         f.seek(fsize - 1)
         b = f.read(1)
         f.seek(fsize - 1)
         f.write(bytes([b[0] ^ 0xFF]))
-    p = _import(out("e3_corrupt.tdtp.enc"), "e3_corrupt_table")
+    p = _import(out("e3_corrupt.tdtp.xml"), "e3_corrupt_table")
     record("E3.4 corrupted ciphertext → --import fails (GCM auth)",
            p.returncode != 0,
            time.monotonic() - t, f"rc={p.returncode}")
 
-    # E3.5 — --enc cannot be combined with stdout output
+    # E3.5 — the stdout restriction belongs to --enc13, and only to it.
+    #   A v1.3 whole-blob is raw bytes, so export.go rejects it outright:
+    #   "--enc13 cannot be used with stdout output". This test used to point
+    #   that expectation at --enc, which was right while --enc still meant
+    #   v1.3, and became wrong when v1.5 took over the flag.
+    t = time.monotonic()
+    p = run("--export", "users", "--enc13", "--mercury-url", MERCURY_URL,
+            "--output", "-")
+    record("E3.5 --enc13 (v1.3 blob) with stdout output (-) → rejected",
+           p.returncode != 0,
+           time.monotonic() - t, f"rc={p.returncode} stderr={p.stderr.strip()[:120]}")
+
+    # E3.6 — v1.5 is an XML envelope, so stdout is legitimate. What still has
+    #   to hold is the part that matters: what lands there is ciphertext.
     t = time.monotonic()
     p = run("--export", "users", "--enc", "--mercury-url", MERCURY_URL,
             "--output", "-")
-    record("E3.5 --enc with stdout output (-) → rejected",
-           p.returncode != 0,
-           time.monotonic() - t, f"rc={p.returncode}")
+    leaked = any(n in p.stdout for n in PLAINTEXT_NEEDLES)
+    encrypted = 'encryption="aes-256-gcm"' in p.stdout
+    record("E3.6 --enc (v1.5) to stdout → allowed, and encrypted",
+           p.returncode == 0 and encrypted and not leaked,
+           time.monotonic() - t,
+           f"rc={p.returncode} encrypted={encrypted} leaked={leaked}")
 
 
 # ─── E4 Encryption + compression combined ──────────────────────────────────────
@@ -418,14 +541,14 @@ def test_E4_compress_plus_encrypt():
     # E4.1 — export --compress --enc → still round-trips correctly
     t = time.monotonic()
     p = run("--export", "users", "--compress", "--enc", "--mercury-url", MERCURY_URL,
-            "--output", out("e4_comp_enc.tdtp.enc"))
-    is_binary = not is_valid_xml(out("e4_comp_enc.tdtp.enc"))
-    record("E4.1 --compress --enc → opaque blob produced",
-           p.returncode == 0 and is_binary,
-           time.monotonic() - t, f"rc={p.returncode}")
+            "--output", out("e4_comp_enc.tdtp.xml"))
+    enc_ok, detail = is_encrypted_output(out("e4_comp_enc.tdtp.xml"))
+    record("E4.1 --compress --enc → encrypted output, no readable source values",
+           p.returncode == 0 and enc_ok,
+           time.monotonic() - t, f"rc={p.returncode} {detail}")
 
     t = time.monotonic()
-    p = _import(out("e4_comp_enc.tdtp.enc"), "users_comp_enc")
+    p = _import(out("e4_comp_enc.tdtp.xml"), "users_comp_enc")
     rows = sqlite_query(TEST_DB, "SELECT COUNT(*) FROM users_comp_enc")[0][0] \
            if p.returncode == 0 else -1
     record("E4.2 --compress --enc roundtrip → 10 rows",
@@ -438,7 +561,7 @@ def test_E4_compress_plus_encrypt():
 def test_E5_enc_dev():
     print(f"\n{BOLD}=== E5 --pipeline --enc-dev (local ephemeral key) ==={RESET}")
 
-    dest = out("e5_enc_dev.tdtp.enc")
+    dest = out("e5_enc_dev.tdtp.xml")
     pipeline_yaml = str(_TMP / "tdtp_enc_dev_pipeline.yaml")
     write_pipeline_yaml(pipeline_yaml, dest, encrypt=True, enc_dev=True)
 
@@ -447,11 +570,11 @@ def test_E5_enc_dev():
     #   persisted; see flags_dev.go's own warning comment)
     t = time.monotonic()
     p = run_no_cfg("--pipeline", pipeline_yaml, "--enc-dev")
-    is_binary = not is_valid_xml(dest) if os.path.exists(dest) else False
-    record("E5.1 --pipeline --enc-dev → exit 0, opaque blob (no Mercury needed)",
-           p.returncode == 0 and is_binary,
+    enc_ok, detail = is_encrypted_output(dest)
+    record("E5.1 --pipeline --enc-dev → exit 0, encrypted output (no Mercury needed)",
+           p.returncode == 0 and enc_ok,
            time.monotonic() - t,
-           f"rc={p.returncode} binary={is_binary} stderr={p.stderr.strip()[:150]}")
+           f"rc={p.returncode} {detail} stderr={p.stderr.strip()[:150]}")
 
     # E5.2 — running the exact same pipeline WITHOUT --enc-dev and without
     #   Mercury reachable degrades gracefully, not a hard failure: the CLI
@@ -464,7 +587,7 @@ def test_E5_enc_dev():
     #   (exit 0)". Sanity check that --enc-dev is doing something (not
     #   silently ignored): the *content* differs — an opaque encrypted blob
     #   (E5.1) vs. a readable XML error packet naming MERCURY_UNAVAILABLE.
-    dest2 = out("e5_should_fail.tdtp.enc")
+    dest2 = out("e5_should_fail.tdtp.xml")
     pipeline_yaml2 = str(_TMP / "tdtp_enc_dev_pipeline_no_dev.yaml")
     write_pipeline_yaml(pipeline_yaml2, dest2, encrypt=True)
     # Point security.mercury_url at an address nothing listens on.
