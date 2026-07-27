@@ -26,9 +26,10 @@ type ToTDTPOptions struct {
 }
 
 // ConvertTDTPToTDTP re-filters and/or re-versions an existing TDTP file into
-// a new TDTP file, without a database round-trip. Shares its read/decrypt/
-// decompress/security-gate/filter pipeline with ConvertTDTPToCSV — the only
-// difference is the last step writes TDTP XML instead of CSV.
+// a new TDTP file, without a database round-trip. Shares its decompress/
+// security-gate/filter pipeline with ConvertTDTPToCSV — the differences are
+// that the last step writes TDTP XML instead of CSV, and that encrypted input
+// is refused rather than decrypted (see rejectEncryptedFile).
 //
 // The explicit, mandatory version choice (--v1/--v13/--v14) is deliberate:
 // a file produced by --to-tdtp always declares exactly which feature set
@@ -51,16 +52,27 @@ func ConvertTDTPToTDTP(ctx context.Context, opts ToTDTPOptions) error {
 	}
 	fmt.Printf("Output: %s\n", outLabel)
 
-	// Read input — decrypt if .tdtp.enc (AES-256-GCM, xZMercury burn-on-read).
-	data, err := DecryptEncFile(ctx, opts.InputFile, opts.MercuryURL)
+	data, err := os.ReadFile(opts.InputFile)
 	if err != nil {
 		return fmt.Errorf("failed to read TDTP file: %w", err)
+	}
+
+	// Encrypted input is refused outright — see rejectEncrypted. Checked before
+	// anything else touches the bytes, so the xZMercury key is never burned.
+	if err := rejectEncryptedFile(opts.InputFile, data); err != nil {
+		return err
 	}
 
 	parser := packet.NewParser()
 	pkt, err := parser.ParseBytes(data)
 	if err != nil {
 		return fmt.Errorf("failed to parse TDTP packet: %w", err)
+	}
+
+	// v1.5 keeps ciphertext inside an otherwise readable packet, so it parses
+	// fine and only shows up here.
+	if err := rejectEncryptedSections(pkt); err != nil {
+		return err
 	}
 
 	// Decompress first — integrity hashes (v1.4) are computed on plain-text
@@ -131,6 +143,49 @@ func ConvertTDTPToTDTP(ctx context.Context, opts ToTDTPOptions) error {
 	}
 
 	fmt.Printf("✓ TDTP v%s written to: %s (%d rows)\n", version, out, len(pkt.Data.Rows))
+	return nil
+}
+
+// rejectEncryptedFile refuses a whole-file encrypted input (.tdtp.enc,
+// AES-256-GCM + xZMercury).
+//
+// --to-tdtp deliberately has no decryption path at all. Decrypting here would
+// make it a second, quieter way out of the envelope: reading an .enc burns the
+// xZMercury key, and the command's own output is plaintext, so a single
+// "convert" would consume the key and leave the ciphertext replaced by a
+// readable file still named .enc. Decryption stays where it is auditable —
+// --decrypt — and this command only ever sees material that is already plain.
+//
+// Detection is by content as well as by name: IsEncryptedBlob reads the
+// encryption header, so renaming an .enc to .tdtp.xml is not a way around it.
+func rejectEncryptedFile(path string, data []byte) error {
+	if !IsEncryptedFile(path) && !IsEncryptedBlob(data) {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"--to-tdtp: %s is encrypted and this command does not decrypt: "+
+			"decrypt it explicitly first (--decrypt), then convert the plaintext", path)
+}
+
+// rejectEncryptedSections refuses a v1.5 packet whose Schema or Data is still
+// ciphertext. Same rule as rejectEncryptedFile, one level in: the packet parses,
+// but its rows are one opaque blob, so filtering and projection below would
+// silently operate on ciphertext and write out a packet that is neither
+// decryptable nor meaningful.
+func rejectEncryptedSections(pkt *packet.DataPacket) error {
+	switch {
+	case pkt.Data.Encryption != "" && pkt.Schema.Encryption != "":
+		return fmt.Errorf("--to-tdtp: packet Schema and Data are encrypted (%s), decrypt it first",
+			pkt.Data.Encryption)
+	case pkt.Data.Encryption != "":
+		return fmt.Errorf("--to-tdtp: packet Data is encrypted (%s), decrypt it first",
+			pkt.Data.Encryption)
+	case pkt.Schema.Encryption != "":
+		return fmt.Errorf("--to-tdtp: packet Schema is encrypted (%s), decrypt it first",
+			pkt.Schema.Encryption)
+	}
+
 	return nil
 }
 
