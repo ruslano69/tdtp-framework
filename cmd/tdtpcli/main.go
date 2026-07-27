@@ -103,6 +103,36 @@ func routeCommand(
 			})
 		})
 
+	} else if *flags.ToTDTP != "" {
+		operation = audit.OpTransform
+		outputTDTP := determineOutputFile(*flags.Output, *flags.ToTDTP, "xml")
+		// Don't rename if output equals input (in-place overwrite)
+		if *flags.Output == "" {
+			outputTDTP = *flags.ToTDTP
+		}
+
+		version, verErr := resolveToTDTPVersion(*flags.ToTDTPV1, *flags.ToTDTPV13, *flags.ToTDTPV14)
+		if verErr != nil {
+			fatal("--to-tdtp: %v", verErr)
+		}
+
+		metadata = map[string]string{
+			"command": "to-tdtp",
+			"input":   *flags.ToTDTP,
+			"output":  outputTDTP,
+			"version": version,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-tdtp", func() error {
+			return commands.ConvertTDTPToTDTP(ctx, commands.ToTDTPOptions{
+				InputFile:  *flags.ToTDTP,
+				OutputFile: outputTDTP,
+				Query:      query,
+				Version:    version,
+				MercuryURL: *flags.MercuryURL,
+			})
+		})
+
 	} else if *flags.Export != "" {
 		// Merge compression settings: flag takes precedence, then config
 		compress := *flags.Compress || config.Export.Compress
@@ -777,6 +807,7 @@ func main() {
 		*flags.ToHTML != "" ||
 		*flags.ToCSV != "" ||
 		*flags.ToCompact != "" ||
+		*flags.ToTDTP != "" ||
 		*flags.Map != "" || // --map uses its own target DSN from mapping.yaml, not config.yaml
 		(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
 		(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
@@ -909,6 +940,33 @@ func buildBrokerConfig(config *Config) commands.BrokerConfig {
 }
 
 // determineOutputFile determines output file name
+// resolveToTDTPVersion turns the --v1/--v13/--v14 flags into a target
+// version string for --to-tdtp. At most one may be set; none given
+// defaults to v1.4.
+func resolveToTDTPVersion(v1, v13, v14 bool) (string, error) {
+	set := 0
+	if v1 {
+		set++
+	}
+	if v13 {
+		set++
+	}
+	if v14 {
+		set++
+	}
+	if set > 1 {
+		return "", fmt.Errorf("only one of --v1/--v13/--v14 may be given")
+	}
+	switch {
+	case v1:
+		return "1.0", nil
+	case v13:
+		return "1.3.1", nil
+	default:
+		return "1.4", nil
+	}
+}
+
 func determineOutputFile(output, baseName, ext string) string {
 	if output != "" {
 		return output
@@ -935,6 +993,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Export != "" ||
 		*flags.Import != "" ||
 		*flags.ToCompact != "" ||
+		*flags.ToTDTP != "" ||
 		*flags.ToHTML != "" ||
 		*flags.ToCSV != "" ||
 		*flags.ToXLSX != "" ||

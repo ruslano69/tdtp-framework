@@ -51,6 +51,11 @@ type Server struct {
 	// only waste a production connection for no benefit, never corrupt
 	// data (they'd each build an independent map and swap separately).
 	refreshMu sync.Mutex
+
+	// tokens is nil when auth isn't configured/enabled — requireAuth and
+	// handleAPILogin both check cfg.Auth first and never touch it in that
+	// case. See auth.go.
+	tokens *TokenStore
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,6 +177,16 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 		}
 	}
 
+	// 4. Auth (opt-in — nil/disabled leaves /api/* exactly as before it existed)
+	if cfg.Auth != nil && cfg.Auth.Enabled {
+		ttl, err := time.ParseDuration(cfg.Auth.TokenTTL)
+		if err != nil {
+			return nil, fmt.Errorf("auth.token_ttl: %w", err)
+		}
+		srv.tokens = NewTokenStore(ttl)
+		fmt.Printf("tdtpserve: auth enabled, %d user(s), token_ttl=%s\n", len(cfg.Auth.Users), ttl)
+	}
+
 	return srv, nil
 }
 
@@ -194,14 +209,17 @@ func runServer(cfg *ServeConfig) error {
 	// JSON API — deliberately a separate prefix from the HTML routes above,
 	// so access control (auth, rate limiting) can be added to /api/* alone
 	// later without touching the browser-facing views. See api.go.
-	mux.HandleFunc("/api/datasets", srv.handleAPIDatasets)
-	mux.HandleFunc("/api/data/", srv.handleAPIData)
+	// Every /api/* route except /api/login itself is wrapped in requireAuth
+	// (auth.go) — a no-op pass-through when cfg.Auth isn't enabled.
+	mux.HandleFunc("/api/login", srv.handleAPILogin)
+	mux.HandleFunc("/api/datasets", srv.requireAuth(srv.handleAPIDatasets))
+	mux.HandleFunc("/api/data/", srv.requireAuth(srv.handleAPIData))
 	// Lookups (live per-request queries, e.g. photo-by-code) — an even
 	// narrower surface than /api/data, worth locking down separately still.
 	// See lookup.go.
-	mux.HandleFunc("/api/lookup/", srv.handleAPILookup)
+	mux.HandleFunc("/api/lookup/", srv.requireAuth(srv.handleAPILookup))
 	// Reload sources/views from the current config without a restart.
-	mux.HandleFunc("/api/refresh", srv.handleAPIRefresh)
+	mux.HandleFunc("/api/refresh", srv.requireAuth(srv.handleAPIRefresh))
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	fmt.Printf("\ntdtpserve ready → http://localhost%s\n", addr)
