@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -60,5 +61,41 @@ func BenchmarkGetRowValues_Comparison(b *testing.B) {
 				_ = parser.GetRowValues(row)
 			}
 		})
+	}
+}
+
+// BenchmarkParseBytes измеряет полный разбор пакета через ParseBytes.
+// Сторожит гибридный путь (parser_fast.go): при откате на reflection
+// пропускная способность падает примерно в 10 раз.
+func BenchmarkParseBytes(b *testing.B) {
+	fields := make([]Field, 10)
+	for i := range fields {
+		fields[i] = Field{Name: "col" + strconv.Itoa(i), Type: "TEXT"}
+	}
+	rows := make([][]string, 10000)
+	for r := range rows {
+		row := make([]string, 10)
+		for c := range row {
+			row[c] = "val_" + strconv.Itoa(r) + "_" + strconv.Itoa(c)
+		}
+		rows[r] = row
+	}
+	pkts, err := NewGenerator().GenerateReference("bench", Schema{Fields: fields}, rows)
+	if err != nil {
+		b.Fatal(err)
+	}
+	data, err := packetToBytes(pkts[0])
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	p := NewParser()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := p.ParseBytes(data); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

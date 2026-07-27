@@ -76,10 +76,27 @@ type DecompressionProcessor struct {
 	decoder *zstd.Decoder
 }
 
+// MaxDecompressedBytes — предел размера распакованных данных одного пакета.
+//
+// Без него распаковка — удалённый отказ в обслуживании: сжатие не ограничено
+// сверху по коэффициенту, поэтому крошечный пакет разворачивается во сколько
+// угодно. Замерено на обычных повторяющихся данных: 25 КБ в пакете → 200 МБ
+// после распаковки (8184×), то есть мегабайтный файл даёт около 8 ГБ. На
+// специально подобранном содержимом коэффициент кратно выше.
+//
+// Ни один другой предел сюда не достаёт: maxBufferedParse ограничивает вход
+// (а он крошечный), MaxSchemaBytesRead — секцию Schema (а бомба в Data).
+//
+// Тот, кто читает пакет, не выбирает его происхождение — файл приходит из
+// брокера, из объектного хранилища, от контрагента. Поэтому предел нужен на
+// чтении, даже если все свои пакеты заведомо доверенные.
+const MaxDecompressedBytes = 256 << 20 // 256 MB
+
 // NewDecompressionProcessor создает новый, готовый к использованию процессор распаковки.
 func NewDecompressionProcessor() (*DecompressionProcessor, error) {
 	opts := []zstd.DOption{
-		zstd.WithDecoderConcurrency(4), // Использовать до 4 ядер для распаковки
+		zstd.WithDecoderConcurrency(4),                  // Использовать до 4 ядер для распаковки
+		zstd.WithDecoderMaxMemory(MaxDecompressedBytes), // защита от decompression bomb
 	}
 	decoder, err := zstd.NewReader(nil, opts...)
 	if err != nil {

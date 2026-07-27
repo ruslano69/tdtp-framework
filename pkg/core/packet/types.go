@@ -1,6 +1,10 @@
 package packet
 
-import "time"
+import (
+	"runtime"
+	"sync"
+	"time"
+)
 
 // MessageType определяет тип TDTP сообщения
 type MessageType string
@@ -194,19 +198,63 @@ func NewDataPacket(msgType MessageType, tableName string) *DataPacket {
 	}
 }
 
+// parallelGetRowsThreshold — число строк, ниже которого GetRows разбирает их
+// последовательно. На маленьких пакетах накладные на горутины съедают выигрыш.
+const parallelGetRowsThreshold = 512
+
 // GetRows извлекает все данные из пакета в виде [][]string
-// Правильно обрабатывает экранирование специальных символов
+// Правильно обрабатывает экранирование специальных символов.
+//
+// Это общий узел для сжатых и несжатых пакетов: DecompressData приводит
+// Data.Rows к той же форме (pipe-joined строки), что и обычный разбор, поэтому
+// дальше оба случая идут здесь и стоят одинаково.
+//
+// Строки независимы друг от друга, поэтому на больших пакетах разбор идёт
+// параллельно. Результат пишется по индексу в заранее выделенный слайс, так что
+// порядок детерминирован и не зависит от планировщика.
 func (p *DataPacket) GetRows() [][]string {
 	// Если rawRows установлены (GenerateReference fast-path) — возвращаем напрямую.
 	// Это исходные значения до pipe-join, они уже в формате [][]string.
 	if len(p.rawRows) > 0 {
 		return p.rawRows
 	}
+
+	// Parser не хранит состояния (struct{}), поэтому один экземпляр безопасно
+	// используется всеми горутинами.
 	parser := NewParser()
-	rows := make([][]string, len(p.Data.Rows))
-	for i, row := range p.Data.Rows {
-		rows[i] = parser.GetRowValues(row)
+	src := p.Data.Rows
+	rows := make([][]string, len(src))
+
+	if len(src) < parallelGetRowsThreshold {
+		for i := range src {
+			rows[i] = parser.GetRowValues(src[i])
+		}
+		return rows
 	}
+
+	workers := runtime.NumCPU()
+	if workers > len(src) {
+		workers = len(src)
+	}
+	chunk := (len(src) + workers - 1) / workers
+
+	var wg sync.WaitGroup
+	for lo := 0; lo < len(src); lo += chunk {
+		hi := lo + chunk
+		if hi > len(src) {
+			hi = len(src)
+		}
+
+		wg.Add(1)
+		go func(lo, hi int) {
+			defer wg.Done()
+			for i := lo; i < hi; i++ {
+				rows[i] = parser.GetRowValues(src[i])
+			}
+		}(lo, hi)
+	}
+	wg.Wait()
+
 	return rows
 }
 

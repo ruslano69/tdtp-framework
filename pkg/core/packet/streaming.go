@@ -86,8 +86,15 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 		partNum := 1
 		totalRows := 0
 
+		if err := validateSchemaSize(schema); err != nil {
+			partsChan <- &PartResult{Error: err}
+			summaryChan <- &StreamingSummary{}
+			return
+		}
+
 		currentPartRows := [][]string{}
 		currentSize := 0
+		rowBudget := sg.rowBudget(schema)
 		for {
 			select {
 			case <-ctx.Done():
@@ -137,7 +144,7 @@ func (sg *StreamingGenerator) GeneratePartsStream(
 				rowSize := estimateRowSize(row)
 
 				// Проверяем нужно ли начать новую часть
-				if currentSize+rowSize+packetOverheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
+				if rowBudget > 0 && currentSize+rowSize > rowBudget && len(currentPartRows) > 0 {
 					// Генерируем текущую часть
 					packet := sg.createPart(
 						messageIDBase,
@@ -219,8 +226,15 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 		partNum := 1
 		totalRows := 0
 
+		if err := validateSchemaSize(schema); err != nil {
+			partsChan <- &PartResult{Error: err}
+			summaryChan <- &StreamingSummary{}
+			return
+		}
+
 		currentPartRows := [][]string{}
 		currentSize := 0
+		rowBudget := sg.rowBudget(schema)
 
 		for {
 			select {
@@ -272,7 +286,7 @@ func (sg *StreamingGenerator) GeneratePartsStreamWithSender(
 
 				rowSize := estimateRowSize(row)
 
-				if currentSize+rowSize+packetOverheadSize > sg.partSizeBytes && len(currentPartRows) > 0 {
+				if rowBudget > 0 && currentSize+rowSize > rowBudget && len(currentPartRows) > 0 {
 					packet := sg.createPartWithSender(
 						messageIDBase,
 						partNum,
@@ -333,4 +347,13 @@ func UpdatePartTotalParts(packets []*DataPacket, totalParts int) {
 	for _, packet := range packets {
 		packet.Header.TotalParts = totalParts
 	}
+}
+
+// rowBudget — место под строки в одной части потокового экспорта.
+// Логика и мотивация те же, что у Generator.rowBudget: резерв под конверт
+// ограничен половиной бюджета, потому что Schema копируется в каждую часть.
+// Ноль означает, что конверт не влезает и дробить не нужно.
+func (sg *StreamingGenerator) rowBudget(schema Schema) int {
+	g := &Generator{maxMessageSize: sg.partSizeBytes}
+	return g.rowBudget(schema)
 }
