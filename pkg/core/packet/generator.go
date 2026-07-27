@@ -540,20 +540,21 @@ func rowsToDataMasked(rows [][]string, mask []bool) Data {
 func writeEscaped(sb *strings.Builder, value string) {
 	start := 0
 	for i := 0; i < len(value); i++ {
+		var esc string
 		switch value[i] {
 		case '\\':
-			sb.WriteString(value[start:i])
-			sb.WriteString(`\\`)
-			start = i + 1
+			esc = `\\`
 		case '|':
-			sb.WriteString(value[start:i])
-			sb.WriteString(`\|`)
-			start = i + 1
+			esc = `\|`
 		case '\n':
-			sb.WriteString(value[start:i])
-			sb.WriteString(`\n`)
-			start = i + 1
+			esc = `\n`
+		default:
+			continue
 		}
+
+		sb.WriteString(value[start:i])
+		sb.WriteString(esc)
+		start = i + 1
 	}
 	sb.WriteString(value[start:])
 }

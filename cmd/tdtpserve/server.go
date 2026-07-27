@@ -56,6 +56,12 @@ type Server struct {
 	// handleAPILogin both check cfg.Auth first and never touch it in that
 	// case. See auth.go.
 	tokens *TokenStore
+
+	// loginLimiter throttles /api/login. A value, not a pointer, and usable
+	// zeroed — so it cannot be left uninstalled by a Server built as a
+	// literal. Costs nothing when auth is off: nothing calls it. See
+	// ratelimit.go.
+	loginLimiter loginLimiter
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,7 +190,8 @@ func newServer(ctx context.Context, cfg *ServeConfig) (*Server, error) {
 			return nil, fmt.Errorf("auth.token_ttl: %w", err)
 		}
 		srv.tokens = NewTokenStore(ttl)
-		fmt.Printf("tdtpserve: auth enabled, %d user(s), token_ttl=%s\n", len(cfg.Auth.Users), ttl)
+		fmt.Printf("tdtpserve: auth enabled, %d user(s), token_ttl=%s, login limit %d/%s\n",
+			len(cfg.Auth.Users), ttl, loginAttemptsPerWindow, loginWindow)
 	}
 
 	return srv, nil
@@ -212,6 +219,9 @@ func runServer(cfg *ServeConfig) error {
 	// Every /api/* route except /api/login itself is wrapped in requireAuth
 	// (auth.go) — a no-op pass-through when cfg.Auth isn't enabled.
 	mux.HandleFunc("/api/login", srv.handleAPILogin)
+	// Logout is behind requireAuth: revoking a token requires presenting it,
+	// so nobody can revoke someone else's by guessing.
+	mux.HandleFunc("/api/logout", srv.requireAuth(srv.handleAPILogout))
 	mux.HandleFunc("/api/datasets", srv.requireAuth(srv.handleAPIDatasets))
 	mux.HandleFunc("/api/data/", srv.requireAuth(srv.handleAPIData))
 	// Lookups (live per-request queries, e.g. photo-by-code) — an even

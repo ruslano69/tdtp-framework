@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"io"
 	"os"
-	"strings"
 )
 
 // Фиксированные байтовые константы для горячего пути записи строк.
@@ -14,10 +13,21 @@ import (
 var (
 	bTagROpen  = []byte("<R>")
 	bTagRClose = []byte("</R>")
-	bEscLt     = []byte("&lt;")
-	bEscGt     = []byte("&gt;")
-	bEscAmp    = []byte("&amp;")
-	bEscQuot   = []byte("&quot;")
+)
+
+// Числовые ссылки для символов, которые XML-разбор изменил бы молча.
+//
+// CR обязателен: XML 1.0 §2.11 предписывает любому парсеру привести CRLF и
+// одиночный CR к LF. Значение из БД с виндовыми переносами прошло бы запись и
+// вернулось из чтения уже другим — причём пакет остался бы формально валидным,
+// так что заметить это можно только сравнив данные. Числовые ссылки от этой
+// нормализации освобождены, поэтому &#xD; — единственный способ пронести CR
+// через формат. LF и TAB в chardata парсер не трогает, а в значении атрибута
+// (§3.3.3) заменяет на пробел — отсюда разный набор в chardata и в атрибутах.
+const (
+	escCR  = "&#xD;"
+	escLF  = "&#xA;"
+	escTab = "&#x9;"
 )
 
 // writePacketTo сериализует DataPacket в XML без encoding/xml reflection для Data-секции.
@@ -144,88 +154,102 @@ func writeXMLAttr(w *bufio.Writer, name, value string) {
 	w.WriteByte('"')
 }
 
-// writeXMLAttrValue пишет строку с экранированием для XML атрибута (<>&"').
+// writeXMLAttrValue пишет строку с экранированием для XML атрибута.
+//
+// Помимо < > & ", экранируются CR, LF и TAB. Для атрибутов это строже, чем для
+// chardata: XML 1.0 §3.3.3 требует заменить каждый из этих трёх символов на
+// пробел при разборе любого атрибута, а не только CR. Атрибут carry несёт
+// значения полей (см. compact.go), поэтому запись их сырыми означала бы тихую
+// подмену на пробел у любого читателя.
 func writeXMLAttrValue(w *bufio.Writer, s string) {
-	for {
-		i := strings.IndexAny(s, `<>&"`)
-		if i < 0 {
-			w.WriteString(s)
-			return
-		}
-		if i > 0 {
-			w.WriteString(s[:i])
-		}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		var esc string
 		switch s[i] {
 		case '<':
-			w.Write(bEscLt)
+			esc = "&lt;"
 		case '>':
-			w.Write(bEscGt)
+			esc = "&gt;"
 		case '&':
-			w.Write(bEscAmp)
+			esc = "&amp;"
 		case '"':
-			w.Write(bEscQuot)
+			esc = "&quot;"
+		case '\r':
+			esc = escCR
+		case '\n':
+			esc = escLF
+		case '\t':
+			esc = escTab
+		default:
+			continue
 		}
-		s = s[i+1:]
+
+		w.WriteString(s[start:i])
+		w.WriteString(esc)
+		start = i + 1
 	}
+	w.WriteString(s[start:])
 }
 
 // writeRawValue пишет одно значение ячейки с комбинированным экранированием за один проход:
 //   - TDTP pipe-разделитель: | → \|,  \ → \\
-//   - XML chardata:          < → &lt;, > → &gt;, & → &amp;
+//   - XML chardata:          < → &lt;, > → &gt;, & → &amp;, CR → &#xD;
+//
+// Про CR см. escCR — без него значение с CRLF не переживает round-trip.
 //
 // Заменяет связку escapeValue + strings.Join + writeXMLChardata — ноль аллокаций.
 func writeRawValue(w *bufio.Writer, s string) {
 	start := 0
 	for i := 0; i < len(s); i++ {
+		var esc string
 		switch s[i] {
 		case '|':
-			w.WriteString(s[start:i])
-			w.WriteString(`\|`)
-			start = i + 1
+			esc = `\|`
 		case '\\':
-			w.WriteString(s[start:i])
-			w.WriteString(`\\`)
-			start = i + 1
+			esc = `\\`
 		case '<':
-			w.WriteString(s[start:i])
-			w.Write(bEscLt)
-			start = i + 1
+			esc = "&lt;"
 		case '>':
-			w.WriteString(s[start:i])
-			w.Write(bEscGt)
-			start = i + 1
+			esc = "&gt;"
 		case '&':
-			w.WriteString(s[start:i])
-			w.Write(bEscAmp)
-			start = i + 1
+			esc = "&amp;"
+		case '\r':
+			esc = escCR
+		default:
+			continue
 		}
+
+		w.WriteString(s[start:i])
+		w.WriteString(esc)
+		start = i + 1
 	}
 	w.WriteString(s[start:])
 }
 
-// writeXMLChardata пишет строку с экранированием для XML chardata (<>&).
-// strings.IndexAny использует SIMD-оптимизированный поиск — быстрее побайтового цикла.
-// Для типичных строк без спецсимволов — один Write всей строки.
+// writeXMLChardata пишет строку с экранированием для XML chardata
+// (< > & и CR — см. escCR).
 func writeXMLChardata(w *bufio.Writer, s string) {
-	for {
-		i := strings.IndexAny(s, "<>&")
-		if i < 0 {
-			w.WriteString(s)
-			return
-		}
-		if i > 0 {
-			w.WriteString(s[:i])
-		}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		var esc string
 		switch s[i] {
 		case '<':
-			w.Write(bEscLt)
+			esc = "&lt;"
 		case '>':
-			w.Write(bEscGt)
+			esc = "&gt;"
 		case '&':
-			w.Write(bEscAmp)
+			esc = "&amp;"
+		case '\r':
+			esc = escCR
+		default:
+			continue
 		}
-		s = s[i+1:]
+
+		w.WriteString(s[start:i])
+		w.WriteString(esc)
+		start = i + 1
 	}
+	w.WriteString(s[start:])
 }
 
 // newPacketWriter создаёт bufio.Writer поверх w с буфером 4MB.

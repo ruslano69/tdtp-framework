@@ -44,24 +44,48 @@ var bSchemaCloseTag = []byte("</Schema>")
 //
 // ok=false означает, что секцию найти не удалось — вызывающий пропускает
 // проверку и полагается на обычный разбор.
+//
+// Поиск идёт циклом, как в findDataSection, и по той же причине: элемент с
+// префиксом в имени (<SchemaVersion>) не должен прекращать поиск. Раньше
+// прекращал, и проверка размера молча выключалась — а пропуск здесь означает
+// пропуск MaxSchemaBytesRead, то есть ровно того предела, ради которого
+// функция и написана.
 func schemaSpanSize(data []byte) (int, bool) {
-	start := bytes.Index(data, bSchemaName)
-	if start < 0 {
-		return 0, false
-	}
+	off := 0
+	for {
+		i := bytes.Index(data[off:], bSchemaName)
+		if i < 0 {
+			return 0, false
+		}
+		i += off
 
-	// Отсекаем возможные элементы с префиксом Schema в имени.
-	next := start + len(bSchemaName)
-	if next >= len(data) || !isDataTagBoundary(data[next]) {
-		return 0, false
-	}
+		next := i + len(bSchemaName)
+		if next >= len(data) {
+			return 0, false
+		}
+		if !isDataTagBoundary(data[next]) {
+			off = next // <SchemaVersion> или другое имя с префиксом Schema
+			continue
+		}
 
-	end := bytes.Index(data[start:], bSchemaCloseTag)
-	if end < 0 {
-		return 0, false
-	}
+		gt := bytes.IndexByte(data[next:], '>')
+		if gt < 0 {
+			return 0, false
+		}
+		gt += next
 
-	return end + len(bSchemaCloseTag), true
+		// <Schema/> — пустая схема, весь элемент и есть её размер.
+		if data[gt-1] == '/' {
+			return gt + 1 - i, true
+		}
+
+		end := bytes.Index(data[gt:], bSchemaCloseTag)
+		if end < 0 {
+			return 0, false
+		}
+
+		return gt + end + len(bSchemaCloseTag) - i, true
+	}
 }
 
 func isXMLSpace(c byte) bool {
@@ -132,61 +156,101 @@ func hasAnotherDataTag(tail []byte) bool {
 	}
 }
 
-// decodeChardata раскрывает XML-сущности в теле строки.
-// Быстрый путь — нет '&' — возвращает содержимое без разбора.
+// decodeChardata раскрывает XML-сущности в теле строки и нормализует переводы
+// строк — то и другое ровно так, как это делает encoding/xml, на который
+// откатывается быстрый путь.
+//
+// Про нормализацию: XML 1.0 §2.11 предписывает привести сырые CRLF и одиночный
+// CR к LF, и encoding/xml так и поступает. Расхождение здесь означало бы, что
+// один и тот же файл читается по-разному в зависимости от того, сработал
+// быстрый путь или нет — а он срабатывает не всегда. Числовые ссылки под
+// нормализацию не подпадают: &#xD; — это способ записать CR так, чтобы он
+// пережил разбор (см. escCR в xmlwriter.go), поэтому он раскрывается в CR и
+// остаётся CR.
+//
+// Быстрый путь — нет ни '&', ни CR — возвращает содержимое без разбора.
 // Нераспознанная сущность даёт ok=false (уходим в fallback).
 func decodeChardata(s []byte) (string, bool) {
-	amp := bytes.IndexByte(s, '&')
-	if amp < 0 {
+	if bytes.IndexByte(s, '&') < 0 && bytes.IndexByte(s, '\r') < 0 {
 		return string(s), true
 	}
 
 	out := make([]byte, 0, len(s))
-	out = append(out, s[:amp]...)
-	i := amp
 
-	for i < len(s) {
-		if s[i] != '&' {
-			j := bytes.IndexByte(s[i:], '&')
-			if j < 0 {
-				out = append(out, s[i:]...)
-				break
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '\r':
+			// CRLF и одиночный CR → LF.
+			out = append(out, '\n')
+			i++
+			if i < len(s) && s[i] == '\n' {
+				i++
 			}
-			out = append(out, s[i:i+j]...)
-			i += j
-			continue
-		}
 
-		semi := bytes.IndexByte(s[i:], ';')
-		if semi < 0 {
-			return "", false
-		}
-		ent := s[i+1 : i+semi] // без '&' и ';'
-		i += semi + 1
-
-		switch {
-		case bytes.Equal(ent, []byte("lt")):
-			out = append(out, '<')
-		case bytes.Equal(ent, []byte("gt")):
-			out = append(out, '>')
-		case bytes.Equal(ent, []byte("amp")):
-			out = append(out, '&')
-		case bytes.Equal(ent, []byte("quot")):
-			out = append(out, '"')
-		case bytes.Equal(ent, []byte("apos")):
-			out = append(out, '\'')
-		case len(ent) > 1 && ent[0] == '#':
-			r, ok := parseCharRef(ent[1:])
-			if !ok {
+		case '&':
+			semi := bytes.IndexByte(s[i:], ';')
+			if semi < 0 {
 				return "", false
 			}
-			out = utf8.AppendRune(out, r)
+			ent := s[i+1 : i+semi] // без '&' и ';'
+			i += semi + 1
+
+			switch {
+			case bytes.Equal(ent, []byte("lt")):
+				out = append(out, '<')
+			case bytes.Equal(ent, []byte("gt")):
+				out = append(out, '>')
+			case bytes.Equal(ent, []byte("amp")):
+				out = append(out, '&')
+			case bytes.Equal(ent, []byte("quot")):
+				out = append(out, '"')
+			case bytes.Equal(ent, []byte("apos")):
+				out = append(out, '\'')
+			case len(ent) > 1 && ent[0] == '#':
+				r, ok := parseCharRef(ent[1:])
+				if !ok {
+					return "", false
+				}
+				out = utf8.AppendRune(out, r)
+			default:
+				return "", false
+			}
+
 		default:
-			return "", false
+			j := i
+			for j < len(s) && s[j] != '&' && s[j] != '\r' {
+				j++
+			}
+			out = append(out, s[i:j]...)
+			i = j
 		}
 	}
 
 	return string(out), true
+}
+
+// isXMLChar — продукция Char из XML 1.0 §2.2: что вообще может стоять в
+// документе. Числовая ссылка на всё остальное (NUL, управляющие символы,
+// суррогаты, FFFE/FFFF) документ не спасает — encoding/xml такой вход
+// отвергает.
+//
+// Быстрый путь обязан отвергать его тоже. Иначе нарушается контракт из шапки
+// файла: «любое отклонение от ожидаемой формы даёт ok=false». Принимая
+// &#0;, он не откатывался в fallback, а молча возвращал значение с NUL внутри
+// — то есть тот же пакет проходил или не проходил в зависимости от того,
+// сработал быстрый путь или нет.
+func isXMLChar(r rune) bool {
+	switch {
+	case r == 0x9 || r == 0xA || r == 0xD:
+		return true
+	case r >= 0x20 && r <= 0xD7FF: // ниже суррогатов
+		return true
+	case r >= 0xE000 && r <= 0xFFFD: // выше суррогатов, без FFFE/FFFF
+		return true
+	case r >= 0x10000 && r <= utf8.MaxRune:
+		return true
+	}
+	return false
 }
 
 // parseCharRef разбирает числовую ссылку: "60" или "x3C".
@@ -221,7 +285,7 @@ func parseCharRef(ref []byte) (rune, bool) {
 			return 0, false
 		}
 	}
-	if !utf8.ValidRune(rune(v)) {
+	if !isXMLChar(rune(v)) {
 		return 0, false
 	}
 	return rune(v), true

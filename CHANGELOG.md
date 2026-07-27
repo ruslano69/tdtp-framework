@@ -2,6 +2,74 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.19.2] — 2026-07-27
+
+### Fixed — the fast parser's two ways of being more permissive than the reference
+
+`parser_fast.go` promises that any deviation from the expected shape yields
+`ok=false` and hands the packet to `encoding/xml`. Two places broke that
+promise in the direction that matters — accepting what the fallback would not.
+
+**`schemaSpanSize` stopped searching at the first near-miss.** An element whose
+name merely starts with `Schema` (`<SchemaVersion>`) ended the scan instead of
+skipping it, the way `findDataSection` next to it already did correctly. The
+span was then reported as not found, and a not-found span means
+`MaxSchemaBytesRead` is silently skipped — so a single extra element ahead of
+the real `<Schema>` disabled the read limit that the check exists to enforce.
+It now loops, and measures self-closing `<Schema/>` correctly too.
+
+**`parseCharRef` accepted characters XML has no way to represent.** `&#0;`
+decoded to a NUL inside the value; `encoding/xml` rejects that packet outright.
+Control characters, surrogates and `FFFE`/`FFFF` behaved the same way. The
+check is now the Char production from XML 1.0 §2.2, so such a packet goes to
+the fallback and is rejected there, instead of parsing differently depending on
+whether the fast path happened to engage.
+
+Tests cross-check the fast path against `encoding/xml` on twelve rejected
+references and eight accepted ones, and assert the read limit still fires with
+a prefixed element in front of the schema.
+
+## [1.19.1] — 2026-07-27
+
+### Fixed — CR in a cell value no longer changes on the way through the format
+
+A value carrying Windows line endings did not survive a round-trip. The writer
+put a raw CR into `<R>`, and XML 1.0 §2.11 obliges *every* parser to fold raw
+CRLF and lone CR into LF — so an MSSQL remark field exported and re-imported
+came back different, in a packet that stayed formally valid the whole time.
+The hand-rolled fast parser did not fold, which made it worse: the same file
+decoded one way through `tdtpcli 1.17.3` and another through a current build.
+
+The rule is now explicit and identical on both sides, and it belongs to the
+format rather than to the platform — TDTP carries the bytes that were in the
+column, so a packet exported on Windows and on Linux is byte-identical:
+
+- **Write:** CR → `&#xD;`. Numeric character references are exempt from
+  line-ending normalisation, so this is the only way to carry CR intact. LF
+  stays raw — no parser touches it in chardata.
+- **Read:** `&#xD;` → CR; raw CR and CRLF → LF, matching `encoding/xml`.
+  Files written before this release keep decoding exactly as they did.
+
+Attribute values escape CR, LF **and** TAB (`&#xD;` `&#xA;` `&#x9;`): §3.3.3
+replaces all three with a space in any attribute, and `carry` holds field
+values for the compact format.
+
+Only packets containing CR change on the wire; everything else is byte-for-byte
+what it was. Verified end-to-end through sqlite: export → import of five values
+with CRLF/LF/lone-CR/TAB, each SHA256-identical to what was inserted.
+
+### Fixed — `--to-tdtp` refuses encrypted input instead of quietly decrypting it
+
+`--to-tdtp` accepted `.tdtp.enc` and, with no `--output`, wrote its plaintext
+result back over the input. That burned the xZMercury key on read and left a
+readable file still named `.enc`, with no way back. It was also a second,
+quieter route out of the envelope than `--decrypt`.
+
+The command now has no decryption path at all. Encrypted input is refused by
+content as well as by name, so renaming an `.enc` to `.tdtp.xml` is not a way
+around it, and v1.5 packets whose Schema or Data is still ciphertext are
+refused after parsing. The input file is never touched.
+
 ## [1.19.0] — 2026-07-27
 
 ### Added — `--to-tdtp`: re-filter/re-version an existing TDTP file without a DB round-trip
