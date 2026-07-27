@@ -854,7 +854,9 @@ pull requests.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). Exception: `pkg/license/` (commercial license
+verification and enterprise-tier gating) is proprietary, not MIT — see
+[pkg/license/LICENSE](pkg/license/LICENSE).
 
 ## Contacts
 
