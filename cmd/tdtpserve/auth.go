@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,14 @@ type tokenInfo struct {
 	username  string
 	expiresAt time.Time
 }
+
+// maxLiveTokens caps how many unexpired tokens the store will hold.
+//
+// Every successful login adds an entry that only leaves on expiry, so without
+// a ceiling the map is a slow memory leak on a long-running server and a fast
+// one for anyone with valid credentials and a loop. The number is far above
+// any real usage — this is a backstop, not a quota.
+const maxLiveTokens = 10000
 
 // TokenStore issues and validates short-lived opaque login tokens.
 type TokenStore struct {
@@ -45,6 +54,10 @@ func NewTokenStore(ttl time.Duration) *TokenStore {
 }
 
 // Issue creates a new random token for username, valid for the store's ttl.
+//
+// Expired entries are swept here rather than by a background goroutine: the
+// store has no lifecycle of its own to hang one off, and issuing is the only
+// moment the map can grow, so it is also the only moment a sweep is needed.
 func (s *TokenStore) Issue(username string) (token string, expiresAt time.Time, err error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -54,10 +67,54 @@ func (s *TokenStore) Issue(username string) (token string, expiresAt time.Time, 
 	expiresAt = time.Now().Add(s.ttl)
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.tokens) >= maxLiveTokens {
+		s.sweepLocked(time.Now())
+
+		// Still full after the sweep: every entry is live, so this is real
+		// concurrent usage rather than accumulated garbage. Refusing beats
+		// growing without bound -- a login that fails loudly can be retried,
+		// a server killed by the OOM killer takes every session with it.
+		if len(s.tokens) >= maxLiveTokens {
+			return "", time.Time{}, fmt.Errorf(
+				"token store is full (%d live tokens), try again later", maxLiveTokens)
+		}
+	}
+
 	s.tokens[token] = tokenInfo{username: username, expiresAt: expiresAt}
-	s.mu.Unlock()
 
 	return token, expiresAt, nil
+}
+
+// sweepLocked drops every expired entry. Caller must hold the write lock.
+func (s *TokenStore) sweepLocked(now time.Time) {
+	for tok, info := range s.tokens {
+		if now.After(info.expiresAt) {
+			delete(s.tokens, tok)
+		}
+	}
+}
+
+// Revoke drops a token immediately, whether or not it had expired. Reports
+// whether the token was there to begin with.
+func (s *TokenStore) Revoke(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, found := s.tokens[token]
+	delete(s.tokens, token)
+
+	return found
+}
+
+// Len reports how many entries the store currently holds, expired ones
+// included. For tests and diagnostics.
+func (s *TokenStore) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return len(s.tokens)
 }
 
 // Validate reports whether token exists and hasn't expired. An expired
@@ -112,21 +169,36 @@ type apiLoginResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// maxLoginBodyBytes bounds the request body. Credentials are two short
+// strings; anything larger is a mistake or an attempt to make an
+// unauthenticated endpoint allocate.
+const maxLoginBodyBytes = 4 << 10
+
 // handleAPILogin serves POST /api/login. Deliberately never distinguishes
 // "unknown username" from "wrong password" in its response — either gives
 // a generic 401, so a caller can't use this endpoint to enumerate accounts.
 func (s *Server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Auth == nil || !s.cfg.Auth.Enabled {
+		// Checked before the method, so a probe cannot tell "auth is off"
+		// from "wrong verb" — both look like a route that isn't there.
+		writeAPIError(w, http.StatusNotFound, "not found")
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "POST required")
 		return
 	}
-	if s.cfg.Auth == nil || !s.cfg.Auth.Enabled {
-		writeAPIError(w, http.StatusNotFound, "not found")
+
+	// Throttle before bcrypt runs — the point is to bound the work, so the
+	// check has to come ahead of the expensive part.
+	if ok, retryAfter := s.loginLimiter.allow(clientKey(r), time.Now()); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+		writeAPIError(w, http.StatusTooManyRequests, "too many login attempts, try again later")
 		return
 	}
 
 	var req apiLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)).Decode(&req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
@@ -145,6 +217,38 @@ func (s *Server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 	writeAPIJSON(w, http.StatusOK, apiLoginResponse{Token: token, ExpiresAt: expiresAt})
 }
 
+// bearerToken pulls the token out of an Authorization header, or "" if the
+// header is missing or not a Bearer one.
+func bearerToken(r *http.Request) string {
+	const prefix = "Bearer "
+
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, prefix) {
+		return ""
+	}
+
+	return strings.TrimPrefix(h, prefix)
+}
+
+// handleAPILogout serves POST /api/logout: revokes the token it was called
+// with. Sits behind requireAuth, so reaching the body means the token was
+// valid. Without this, a token handed to the wrong place stays usable for the
+// rest of its TTL and the only remedy is restarting the server.
+func (s *Server) handleAPILogout(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Auth == nil || !s.cfg.Auth.Enabled {
+		writeAPIError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+
+	s.tokens.Revoke(bearerToken(r))
+
+	writeAPIJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
+}
+
 // requireAuth wraps an /api/* handler with a Bearer-token check. A no-op
 // pass-through when auth isn't configured/enabled — every handler behaves
 // exactly as it did before auth existed.
@@ -155,13 +259,11 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		const prefix = "Bearer "
-		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, prefix) {
+		token := bearerToken(r)
+		if token == "" {
 			writeAPIError(w, http.StatusUnauthorized, "missing or invalid Authorization header")
 			return
 		}
-		token := strings.TrimPrefix(authHeader, prefix)
 
 		if _, ok := s.tokens.Validate(token); !ok {
 			writeAPIError(w, http.StatusUnauthorized, "invalid or expired token")
