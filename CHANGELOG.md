@@ -2,6 +2,89 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.19.3] — 2026-07-27
+
+Five fixes, four of which reached main before this entry existed — recorded
+here rather than left to `git log`.
+
+### Fixed — `--enc-dev` required the xZMercury it exists to avoid
+
+The flag's own help reads "no xZMercury required". It required one and failed
+without it. `resolveHashRegistrar` accepts a custom Mercury client only if it
+type-asserts to `pipeline.HashRegistrar`; `DevClient` implemented `BindKey` and
+nothing else, so the assertion failed silently and the v1.5-mandatory hash
+registration fell through to a real client with an empty URL —
+`Post "/api/hashes/": unsupported protocol scheme ""`. Encryption degraded and
+no output file was produced at all.
+
+`DevClient` now satisfies the interface. The body is empty because that is what
+the mode is: the hash registry lives inside xZMercury, and in dev mode there is
+nobody to register with and nobody to verify — the key never leaves the
+process. `client_dev.go` is `//go:build !production`, so this is not a way
+around real registration in a production build.
+
+### Fixed — the error packet promised on Mercury failure was not always written
+
+`exportEncrypted` guarantees that an unreachable xZMercury yields a TDTP error
+packet in place of the data, never plaintext and never nothing. But hash
+registration runs *before* encryption (v1.4 hashes cover plaintext rows), so an
+unreachable Mercury surfaced there and returned straight out of the part loop,
+above every `writeErrorPacket` call site — while the CLI still printed "Error
+packet written to output", a line that never checked whether anything had been.
+
+The receipt is now written from that path too, carrying
+`MERCURY_UNAVAILABLE`. If writing the receipt itself fails, the returned error
+deliberately wraps *that* failure rather than the Mercury one, so the caller
+does not mistake it for graceful degradation and the pipeline exits non-zero.
+
+### Fixed — MySQL identifiers were quoted in a dialect MySQL does not read
+
+`pkg/adapters/mysql/adapter.go` passed `nil` as the `SQLAdapter`, so
+`AdaptSQL`'s `"` → `` ` `` conversion never ran. Identifiers containing spaces,
+`$` or `?` were emitted in ANSI double quotes, which MySQL without
+`sql_mode=ANSI_QUOTES` reads as a string literal rather than an identifier —
+`--where "[Order ID] > 3"` matched nothing at all: no error, no rows, no
+indication anything was wrong.
+
+### Fixed — SQLite exported DATE as a fabricated midnight timestamp
+
+A DATE column holding `2020-01-01` came out as `2020-01-01T00:00:00Z`. The time
+and the UTC offset are both invented; modernc's driver runs `parseTime()` on
+DATE/DATETIME/TIMESTAMP columns before `Scan` sees them, so no
+scan-destination trick could decline it. Those columns are now selected through
+`CAST(x AS TEXT)`, which changes the reported column type and leaves the stored
+string alone.
+
+**This changes exported output.** A DATE now reads `2020-01-01`. TIMESTAMP is
+unaffected — that column really does carry a time. Also about 40% faster on
+date-heavy tables (100k rows, warm: 655ms → 395ms), since `parseTime` walks a
+list of layouts per cell.
+
+### Fixed — the xZMercury mock never grew the endpoint the client calls
+
+`cmd/xzmercury-mock` served `/healthz`, `/api/keys/bind` and
+`/api/keys/retrieve`. `pkg/mercury` has also called `/api/hashes/` since TDTP
+v1.4. Every `--export --enc` of a v1.4+ packet therefore died against the mock
+with HTTP 404 — the one scenario anybody starts it for. Implemented to the
+client's contract: `POST` returns 201 or 409 on a taken `uuid:part` slot,
+`GET` reports `registered`/`match` as body fields rather than HTTP status,
+because that is how the client separates "not registered" from "tampered".
+
+### Added — encryption end-to-end coverage
+
+`tests/cli/test_encryption.py`: 15 cases over `--enc`, `--enc13`, burn-on-read
+replay, corrupted ciphertext, `--compress` combined, `--enc-dev`, and the
+Mercury-unavailable degradation path. `tests/cli` previously had none. Not
+wired into CI; run it directly.
+
+### Changed — CI runs on branch pushes, not only through a pull request
+
+All three workflows triggered only on push to `main`/`master`/`develop` or a PR
+targeting them, so a branch push was checked by nothing — every branch here got
+checked only because a PR happened to be opened. `feature/**` and `fix/**` now
+trigger on push. This does not make CI a gate: required status checks are
+branch protection, configured on GitHub rather than in the repository.
+
 ## [1.19.2] — 2026-07-27
 
 ### Fixed — the fast parser's two ways of being more permissive than the reference
