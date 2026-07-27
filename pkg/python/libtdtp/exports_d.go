@@ -288,6 +288,11 @@ func D_ReadFile(path *C.char, out *C.D_Packet) C.int {
 		return 1
 	}
 
+	if packet.IsEncrypted(pkt) {
+		dSetError(out, errEncryptedPacket)
+		return 1
+	}
+
 	if pkt.Data.Compression != "" {
 		return dDecompressRows(pkt, out)
 	}
@@ -311,6 +316,11 @@ func D_ParseBytes(data *C.char, length C.int, out *C.D_Packet) C.int {
 	pkt, err := packet.NewParser().ParseBytes(raw)
 	if err != nil {
 		dSetError(out, "parse error: "+err.Error())
+		return 1
+	}
+
+	if packet.IsEncrypted(pkt) {
+		dSetError(out, errEncryptedPacket)
 		return 1
 	}
 

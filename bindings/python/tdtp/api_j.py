@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from tdtp._loader import lib, free_string
 from tdtp.exceptions import (
+    TDTPEncryptedPacketError,
     TDTPError,
     TDTPFilterError,
     TDTPParseError,
@@ -33,13 +34,14 @@ from tdtp.exceptions import (
 # Map the Go error_code (single source of truth, see exports_j.go errorCodeFor)
 # → specific exception type. This is the primary, stable mapping.
 _ERROR_CODE_MAP: dict[str, type[TDTPError]] = {
-    "PARSE_ERROR":     TDTPParseError,
-    "FILTER_ERROR":    TDTPFilterError,
-    "WRITE_ERROR":     TDTPWriteError,
-    "PROCESSOR_ERROR": TDTPProcessorError,
-    "INVALID_INPUT":   TDTPError,
-    "DIFF_ERROR":      TDTPError,
-    "INTERNAL_ERROR":  TDTPError,
+    "PARSE_ERROR":      TDTPParseError,
+    "FILTER_ERROR":     TDTPFilterError,
+    "WRITE_ERROR":      TDTPWriteError,
+    "PROCESSOR_ERROR":  TDTPProcessorError,
+    "INVALID_INPUT":    TDTPError,
+    "DIFF_ERROR":       TDTPError,
+    "ENCRYPTED_PACKET": TDTPEncryptedPacketError,
+    "INTERNAL_ERROR":   TDTPError,
 }
 
 # Legacy fallback: prefix matching for libraries built before error_code existed.

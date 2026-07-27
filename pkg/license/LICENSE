@@ -1,0 +1,15 @@
+Copyright (c) 2026 Ruslan Omelchenko. All rights reserved.
+
+This directory (pkg/license/) implements tdtp-framework's commercial
+license verification, tier gating, and enterprise-feature entitlement
+checks (license certificates, signature verification, tier/pipeline-limit
+enforcement, licensing audit log).
+
+Unlike the rest of this repository — see the MIT LICENSE at the repository
+root — the contents of this directory are NOT open source and are NOT
+covered by that license.
+
+No permission is granted to use, copy, modify, merge, publish, distribute,
+sublicense, or sell copies of this directory's contents, or to incorporate
+them into other software, without prior written permission from the
+copyright holder.

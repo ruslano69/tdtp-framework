@@ -18,6 +18,16 @@ class TDTPParseError(TDTPError):
     """Raised when a .tdtp file cannot be parsed."""
 
 
+class TDTPEncryptedPacketError(TDTPParseError):
+    """Raised when reading a TDTP v1.5 encrypted packet directly.
+
+    libtdtp is a pure parse/compress library with no xZMercury client, so it
+    cannot decrypt QueryContext/Schema/Data ciphertext. Use the tdtpcli
+    binary instead: ``tdtpcli --import --mercury-url <url>`` (requires a
+    reachable xZMercury server for burn-on-read key retrieval).
+    """
+
+
 class TDTPFilterError(TDTPError):
     """Raised when a TDTQL WHERE clause is invalid or filter fails."""
 

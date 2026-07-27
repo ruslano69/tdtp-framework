@@ -40,6 +40,11 @@ func routeCommand(
 	var operation audit.Operation
 	var metadata map[string]string
 
+	// Side channel for audit logging: command implementations (export.go/
+	// import.go/pipeline.go) record resource name + row count into this via
+	// ctx as they discover it, without changing their public signatures.
+	ctx, opMetrics := commands.WithOpMetrics(ctx)
+
 	// Database commands
 	//nolint:gocritic // if-else chain is clearer than switch for this command routing logic
 	if *flags.Steps != "" {
@@ -95,6 +100,36 @@ func routeCommand(
 				OutputFile:  outputCompact,
 				FixedFields: splitCommaSeparated(*flags.FixedFields),
 				Tail:        *flags.CompactTail,
+			})
+		})
+
+	} else if *flags.ToTDTP != "" {
+		operation = audit.OpTransform
+		outputTDTP := determineOutputFile(*flags.Output, *flags.ToTDTP, "xml")
+		// Don't rename if output equals input (in-place overwrite)
+		if *flags.Output == "" {
+			outputTDTP = *flags.ToTDTP
+		}
+
+		version, verErr := resolveToTDTPVersion(*flags.ToTDTPV1, *flags.ToTDTPV13, *flags.ToTDTPV14)
+		if verErr != nil {
+			fatal("--to-tdtp: %v", verErr)
+		}
+
+		metadata = map[string]string{
+			"command": "to-tdtp",
+			"input":   *flags.ToTDTP,
+			"output":  outputTDTP,
+			"version": version,
+		}
+
+		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-tdtp", func() error {
+			return commands.ConvertTDTPToTDTP(ctx, commands.ToTDTPOptions{
+				InputFile:  *flags.ToTDTP,
+				OutputFile: outputTDTP,
+				Query:      query,
+				Version:    version,
+				MercuryURL: *flags.MercuryURL,
 			})
 		})
 
@@ -156,7 +191,8 @@ func routeCommand(
 				IntegrityV14:     *flags.Integrity,
 				MercuryURL:       *flags.MercuryURL,
 				MercuryCaller:    *flags.MercuryCaller,
-				Encrypt:          *flags.Encrypt,
+				Encrypt:          *flags.Encrypt || *flags.Enc13,
+				EncryptLegacy:    *flags.Enc13,
 			})
 		})
 
@@ -443,7 +479,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize, *flags.MercuryURL, *flags.Encrypt || *flags.Enc13, *flags.Enc13)
 		})
 
 	} else if *flags.ImportBroker {
@@ -524,7 +560,8 @@ func routeCommand(
 		pipelineOpts := commands.PipelineOptions{
 			Unsafe:         *flags.Unsafe,
 			UnsafeCertPath: *flags.UnsafeCert,
-			Encrypt:        *flags.Encrypt,
+			Encrypt:        *flags.Encrypt || *flags.Enc13,
+			EncryptLegacy:  *flags.Enc13,
 			EncDev:         encDev,
 			Variables:      flags.PipelineVars,
 		}
@@ -677,10 +714,13 @@ func routeCommand(
 		})
 	}
 
-	// Log operation result with metadata
+	// Log operation result with metadata. Duration is passed as a first-class
+	// argument (entry.Duration) — not duplicated into metadata["duration_ms"],
+	// since the audit line and DB appender both read it from entry.Duration.
 	if metadata != nil {
-		metadata["duration_ms"] = fmt.Sprintf("%d", time.Since(startTime).Milliseconds())
-		prodFeatures.LogWithMetadata(ctx, operation, err == nil, err, metadata)
+		elapsed := time.Since(startTime)
+		prodFeatures.LogWithMetadata(ctx, operation, err == nil, err, metadata,
+			opMetrics.Resource, opMetrics.RecordsAffected, elapsed)
 	}
 
 	return err
@@ -745,7 +785,7 @@ func main() {
 	}
 
 	// Feature gates: refuse licensed-only flags up front (before any DB work).
-	if *flags.Encrypt {
+	if *flags.Encrypt || *flags.Enc13 {
 		if err := commands.GateFeature("enc"); err != nil {
 			fatal("%v", err)
 		}
@@ -767,6 +807,7 @@ func main() {
 		*flags.ToHTML != "" ||
 		*flags.ToCSV != "" ||
 		*flags.ToCompact != "" ||
+		*flags.ToTDTP != "" ||
 		*flags.Map != "" || // --map uses its own target DSN from mapping.yaml, not config.yaml
 		(*flags.ImportBroker && *flags.Output != "") || // save-to-file mode: no DB needed
 		(*flags.ImportBroker && *flags.RawBroker) // raw mode: no DB needed
@@ -899,6 +940,33 @@ func buildBrokerConfig(config *Config) commands.BrokerConfig {
 }
 
 // determineOutputFile determines output file name
+// resolveToTDTPVersion turns the --v1/--v13/--v14 flags into a target
+// version string for --to-tdtp. At most one may be set; none given
+// defaults to v1.4.
+func resolveToTDTPVersion(v1, v13, v14 bool) (string, error) {
+	set := 0
+	if v1 {
+		set++
+	}
+	if v13 {
+		set++
+	}
+	if v14 {
+		set++
+	}
+	if set > 1 {
+		return "", fmt.Errorf("only one of --v1/--v13/--v14 may be given")
+	}
+	switch {
+	case v1:
+		return "1.0", nil
+	case v13:
+		return "1.3.1", nil
+	default:
+		return "1.4", nil
+	}
+}
+
 func determineOutputFile(output, baseName, ext string) string {
 	if output != "" {
 		return output
@@ -925,6 +993,7 @@ func commandWasSpecified(flags *Flags) bool {
 		*flags.Export != "" ||
 		*flags.Import != "" ||
 		*flags.ToCompact != "" ||
+		*flags.ToTDTP != "" ||
 		*flags.ToHTML != "" ||
 		*flags.ToCSV != "" ||
 		*flags.ToXLSX != "" ||

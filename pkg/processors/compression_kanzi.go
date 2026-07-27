@@ -66,9 +66,17 @@ func DecompressKanzi(input []byte) ([]byte, error) {
 	}
 	defer func() { _ = r.Close() }()
 
-	decompressed, err := io.ReadAll(r)
+	// Тот же предел, что и у zstd (см. MaxDecompressedBytes): распаковка чужого
+	// пакета не должна превращаться в отказ по памяти. Читаем на байт больше
+	// предела — если он пришёл, значит поток длиннее допустимого.
+	limited := io.LimitReader(r, MaxDecompressedBytes+1)
+	decompressed, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, fmt.Errorf("kanzi decompress failed: %w", err)
+	}
+	if len(decompressed) > MaxDecompressedBytes {
+		return nil, fmt.Errorf(
+			"kanzi decompress failed: decompressed data exceeds %d bytes", MaxDecompressedBytes)
 	}
 	return decompressed, nil
 }

@@ -89,3 +89,12 @@ weed/
 filerldb2/
 sqlite.test
 postgres.test
+
+# Licences and signing keys — never commit.
+# tdtpcli looks for ./tdtp.lic in the working directory by default, so the
+# natural place to drop a licence is the repo root. The vendor signing key
+# (tdtp-license keygen) must stay offline.
+tdtp.lic
+*.lic
+*.priv
+vendor.priv

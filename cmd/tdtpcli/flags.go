@@ -112,8 +112,15 @@ type Flags struct {
 	ToCompact   *string // Convert existing TDTP file to compact v1.3.1 format
 	CompactTail *bool   // Write tail row with all fixed fields explicit (stream validation / carry handoff)
 
+	// TDTP → TDTP conversion (re-filter/re-version an existing file without a DB round-trip)
+	ToTDTP    *string // Convert existing TDTP file to TDTP again, applying --where/--order-by/--limit/--fields (input file path)
+	ToTDTPV1  *bool   // --v1: write plain v1.0 (strips v1.4 integrity + Dictionary)
+	ToTDTPV13 *bool   // --v13: write v1.3.1 (packet.Downgrade semantics)
+	ToTDTPV14 *bool   // --v14: write v1.4 (recomputes xxh3 integrity) — default when none given
+
 	// Encryption (xZMercury UUID-binding флоу)
-	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML)
+	Encrypt *bool // --enc: активирует шифрование через xZMercury (переопределяет output.tdtp.encryption в YAML). С версии 1.5 — TDTP v1.5 section-level формат (Header остаётся plain XML).
+	Enc13   *bool // --enc13: явно запросить legacy v1.3 whole-blob формат (для консьюмеров, ещё не обновлённых до v1.5)
 
 	// v1.4 Integrity (TDTP v1.4 xxh3 hashes + Mercury hash registration)
 	Integrity     *bool   // --integrity: compute Schema+Data+Packet xxh3_128 hashes and stamp the packet
@@ -237,8 +244,14 @@ func ParseFlags() *Flags {
 	f.ToCompact = flag.String("to-compact", "", "Convert existing TDTP v1.x file to compact v1.3.1 format (input file path)")
 	f.CompactTail = flag.Bool("compact-tail", false, "Write tail row with all fixed fields explicit for stream validation and carry-state handoff")
 
+	f.ToTDTP = flag.String("to-tdtp", "", "Re-filter/re-version an existing TDTP file into a new TDTP file, without a DB round-trip. Supports --where/--order-by/--limit/--offset/--fields, same as --to-csv (input file path)")
+	f.ToTDTPV1 = flag.Bool("v1", false, "With --to-tdtp: write plain v1.0 (strips v1.4 integrity hashes and any Dictionary, expanding tokens first)")
+	f.ToTDTPV13 = flag.Bool("v13", false, "With --to-tdtp: write v1.3.1 (packet.Downgrade — expands and clears Dictionary; does not touch v1.4 integrity hashes)")
+	f.ToTDTPV14 = flag.Bool("v14", false, "With --to-tdtp: write v1.4, recomputing xxh3 integrity hashes fresh (default when none of --v1/--v13/--v14 given)")
+
 	// Encryption
-	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). Requires security.mercury_url in pipeline YAML")
+	f.Encrypt = flag.Bool("enc", false, "Encrypt output via xZMercury (AES-256-GCM, UUID-binding). TDTP v1.5 section-level format (Header stays plain XML; QueryContext/Schema/Data opaque). Requires security.mercury_url in pipeline YAML")
+	f.Enc13 = flag.Bool("enc13", false, "Encrypt output using the legacy TDTP v1.3 whole-packet binary blob format, for consumers not yet updated to v1.5. Same xZMercury BindKey/RetrieveKey flow as --enc")
 
 	// v1.4 Integrity
 	f.Integrity = flag.Bool("integrity", false, "Stamp packet with TDTP v1.4 xxh3_128 integrity hashes (Schema + Data + Packet fingerprint). Optionally register in xzMercury with --mercury-url.")

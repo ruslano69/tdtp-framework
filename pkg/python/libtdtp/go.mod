@@ -1,6 +1,6 @@
 module github.com/ruslano69/tdtp-framework/pkg/python/libtdtp
 
-go 1.24.7
+go 1.25.0
 
 require github.com/ruslano69/tdtp-framework v0.0.0
 
@@ -9,7 +9,7 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 )
 
 replace github.com/ruslano69/tdtp-framework => ../../..

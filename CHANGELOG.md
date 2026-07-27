@@ -2,6 +2,294 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.19.2] — 2026-07-27
+
+### Fixed — the fast parser's two ways of being more permissive than the reference
+
+`parser_fast.go` promises that any deviation from the expected shape yields
+`ok=false` and hands the packet to `encoding/xml`. Two places broke that
+promise in the direction that matters — accepting what the fallback would not.
+
+**`schemaSpanSize` stopped searching at the first near-miss.** An element whose
+name merely starts with `Schema` (`<SchemaVersion>`) ended the scan instead of
+skipping it, the way `findDataSection` next to it already did correctly. The
+span was then reported as not found, and a not-found span means
+`MaxSchemaBytesRead` is silently skipped — so a single extra element ahead of
+the real `<Schema>` disabled the read limit that the check exists to enforce.
+It now loops, and measures self-closing `<Schema/>` correctly too.
+
+**`parseCharRef` accepted characters XML has no way to represent.** `&#0;`
+decoded to a NUL inside the value; `encoding/xml` rejects that packet outright.
+Control characters, surrogates and `FFFE`/`FFFF` behaved the same way. The
+check is now the Char production from XML 1.0 §2.2, so such a packet goes to
+the fallback and is rejected there, instead of parsing differently depending on
+whether the fast path happened to engage.
+
+Tests cross-check the fast path against `encoding/xml` on twelve rejected
+references and eight accepted ones, and assert the read limit still fires with
+a prefixed element in front of the schema.
+
+## [1.19.1] — 2026-07-27
+
+### Fixed — CR in a cell value no longer changes on the way through the format
+
+A value carrying Windows line endings did not survive a round-trip. The writer
+put a raw CR into `<R>`, and XML 1.0 §2.11 obliges *every* parser to fold raw
+CRLF and lone CR into LF — so an MSSQL remark field exported and re-imported
+came back different, in a packet that stayed formally valid the whole time.
+The hand-rolled fast parser did not fold, which made it worse: the same file
+decoded one way through `tdtpcli 1.17.3` and another through a current build.
+
+The rule is now explicit and identical on both sides, and it belongs to the
+format rather than to the platform — TDTP carries the bytes that were in the
+column, so a packet exported on Windows and on Linux is byte-identical:
+
+- **Write:** CR → `&#xD;`. Numeric character references are exempt from
+  line-ending normalisation, so this is the only way to carry CR intact. LF
+  stays raw — no parser touches it in chardata.
+- **Read:** `&#xD;` → CR; raw CR and CRLF → LF, matching `encoding/xml`.
+  Files written before this release keep decoding exactly as they did.
+
+Attribute values escape CR, LF **and** TAB (`&#xD;` `&#xA;` `&#x9;`): §3.3.3
+replaces all three with a space in any attribute, and `carry` holds field
+values for the compact format.
+
+Only packets containing CR change on the wire; everything else is byte-for-byte
+what it was. Verified end-to-end through sqlite: export → import of five values
+with CRLF/LF/lone-CR/TAB, each SHA256-identical to what was inserted.
+
+### Fixed — `--to-tdtp` refuses encrypted input instead of quietly decrypting it
+
+`--to-tdtp` accepted `.tdtp.enc` and, with no `--output`, wrote its plaintext
+result back over the input. That burned the xZMercury key on read and left a
+readable file still named `.enc`, with no way back. It was also a second,
+quieter route out of the envelope than `--decrypt`.
+
+The command now has no decryption path at all. Encrypted input is refused by
+content as well as by name, so renaming an `.enc` to `.tdtp.xml` is not a way
+around it, and v1.5 packets whose Schema or Data is still ciphertext are
+refused after parsing. The input file is never touched.
+
+## [1.19.0] — 2026-07-27
+
+### Added — `--to-tdtp`: re-filter/re-version an existing TDTP file without a DB round-trip
+
+New sibling to `--to-csv`/`--to-html`/`--to-xlsx`/`--to-compact`, but the
+output stays TDTP XML instead of converting away from it. Closes a real gap:
+previously the only way to narrow an already-exported `.tdtp.xml` file by an
+additional filter was to re-run the original DB query with a wider `--where`
+— there was no way to work purely from an existing file.
+
+```bash
+tdtpcli --to-tdtp export.tdtp.xml --where "Dept = '20-040'" --order-by "Balance DESC" --output filtered.tdtp.xml
+tdtpcli --to-tdtp export.tdtp.xml -v1 --output legacy.tdtp.xml   # strip to bare v1.0
+tdtpcli --to-tdtp export.tdtp.xml -v13 --output compat.tdtp.xml  # v1.3.1 (packet.Downgrade)
+```
+
+- Shares its read/decrypt/decompress/security-gate/filter pipeline with
+  `--to-csv` (`--where`/`--order-by`/`--limit`/`--offset`/`--fields`) —
+  the only difference is the last step writes TDTP XML instead of CSV.
+  Unlike `--to-csv`'s render-time-only projection, `--fields` here actually
+  prunes `Schema.Fields` and every row so the output packet is internally
+  self-consistent, not just display-filtered.
+- `-v1` / `-v13` / `-v14` (default) choose the output protocol version —
+  mutually exclusive, rejected with a clear error if more than one is
+  given. `-v14` recomputes xxh3 integrity hashes fresh (anything upstream
+  — filtering, projection, re-versioning — invalidates any pre-existing
+  hash). `-v13` reuses the framework's own existing v1.4→v1.3.1
+  `packet.Downgrade` semantics rather than inventing stricter behavior.
+  `-v1` does the same plus strips the v1.4 integrity attributes.
+  The version is never implicit — every `--to-tdtp` output declares
+  exactly which feature set it carries, unlike a hand-assembled or
+  third-party-generated file where that can silently drift from the truth.
+- Verified end-to-end: filtered + sorted output round-tripped through
+  `--test` reports `Integrity check passed` — the freshly computed v1.4
+  hashes are independently verifiable, not just cosmetically present.
+
+## [1.18.3] — 2026-07-22
+
+### Added — audit.database: SQL sink for the audit logger
+
+`AuditConfig` gained an optional `database` block (`type`, `dsn`, `table`,
+`batch_size`, `auto_create_table`) so `tdtpcli` can write audit entries to
+their own SQL database (sqlite/mysql/mssql/postgres) alongside the existing
+file/console appenders — previously `pkg/audit.DatabaseAppender` was reachable
+only by importing the library directly, with zero CLI config surface and
+zero e2e coverage (`tests/cli/` had no audit tests at all). Deliberately a
+separate connection from the pipeline's own `database:` config: reusing the
+same connection/credentials would let the process being audited also rewrite
+its own audit trail.
+
+### Fixed — pkg/audit: two real bugs found while wiring this up
+
+- **`generateID()`** ([entry.go](pkg/audit/entry.go)) built IDs from
+  `time.Now().UnixNano()` alone. In a tight loop with no I/O between calls
+  (exactly what a batched `DatabaseAppender.Append` does), the OS clock
+  resolution can be coarser than the loop itself — observed producing
+  duplicate IDs on Windows, which then broke every subsequent insert in the
+  batch on the `id` PRIMARY KEY. Fixed with an atomic sequence counter,
+  independent of clock resolution.
+- **`flushBatch()`** ([database_appender.go](pkg/audit/database_appender.go))
+  rolled back and returned an error on a failed batch but never cleared
+  `batchQueue` — the same poisoned entries stayed queued and re-failed every
+  later flush, permanently wedging the appender after a single collision
+  (reproduced: 0 of 12 entries committed, not just the one bad batch). Now
+  clears the queue unconditionally before returning, bounding a failure to
+  the batch that hit it.
+- **`newAuditDatabaseAppender`** ([production.go](cmd/tdtpcli/production.go)) —
+  found only by testing concurrent `tdtpcli` invocations against the same
+  `audit.database` SQLite file (a question raised in review, not something
+  the original design considered): SQLite allows one writer at a time, and
+  without a `busy_timeout` a second process hit an immediate
+  `SQLITE_BUSY "database is locked"` instead of waiting — 3 of 8 concurrent
+  runs failed outright. `PRAGMA busy_timeout` + `journal_mode = WAL` fixes
+  it, but only in that order: switching journal mode itself takes the write
+  lock, so applying WAL first left one more race window (still ~1-in-8
+  bursts failing) before `busy_timeout` was active to cover it. Verified
+  reliable across 5 bursts of 8 concurrent processes (40/40 entries
+  committed, 0 errors) after fixing the order.
+
+`tests/cli/test_audit_database.py` (new) covers all three: config wiring
+(A1), the failure path (A2), and concurrent-writer regression (A3).
+
+## [1.18.2] — 2026-07-22
+
+### Fixed — libtdtp silently returned garbage for v1.5 encrypted packets
+
+`Tdtp.read()`/`parse_bytes()`/`read_multipart()` (the Python facade's whole
+reason for existing — no xZMercury client, pure parse/compress only) had
+zero awareness that TDTP v1.5 encryption exists. An encrypted packet parses
+as valid XML (`Header` always stays plain), so `J_ReadFile`/`J_ParseBytes`/
+`J_ReadMultipart` would parse it "successfully" and hand back
+`{"schema": {"fields": []}, "data": [["<entire base64 ciphertext blob>"]]}`
+— no error, no field, just one opaque row masquerading as data. Combined
+with `--compress`, the same read path instead failed with a confusing
+"decompress error" (it tried to zstd-decompress still-encrypted bytes) —
+loud, but for the wrong reason.
+
+- New `packet.IsEncrypted(pkt)` ([pkg/core/packet/encryption.go](pkg/core/packet/encryption.go))
+  is the single canonical detector, used by both the CLI's
+  `IsEncryptedPacket` (now a thin wrapper, no logic duplicated) and libtdtp.
+- `J_ReadFile`, `J_ParseBytes`, and the shared `readPacketToJPacket` behind
+  `J_ReadMultipart` now check it immediately after parsing and return a
+  clear `error_code: "ENCRYPTED_PACKET"` explaining that decrypting a v1.5
+  packet requires the full `tdtpcli` binary plus a reachable xZMercury
+  server for burn-on-read key retrieval — libtdtp itself has no key-exchange
+  capability by design and never will.
+- Same gap, same fix, in the parallel C-struct ABI used by
+  `TDTPClientDirect`/`PacketHandle`: `D_ReadFile`/`D_ParseBytes`
+  (`exports_d.go`) now call `dSetError` + return 1 instead of returning
+  `field_count=0`/`row_count=1` (the ciphertext blob as a single opaque
+  "row") with a success code. No separate error-code channel exists on the
+  D_ struct ABI, so this surfaces as the same plain-text "encrypted
+  packet: ..." message, raised as `TDTPParseError` like every other D_ read
+  failure — consistent with how that API already reports errors.
+- Python bindings gained `TDTPEncryptedPacketError` (subclass of
+  `TDTPParseError`, so existing broad `except TDTPParseError` handlers still
+  catch it) mapped from the new J_ error code.
+- Verified against the actual compiled library (not just Go unit tests):
+  built `libtdtp.so`/`libtdtp.dll`, called `J_ReadFile`/`J_ParseBytes`/
+  `J_ReadMultipart`/`D_ReadFile`/`D_ParseBytes` through ctypes exactly as
+  the Python facade does, confirmed all five now reject a genuine
+  v1.5-encrypted fixture instead of returning garbage.
+
+## [1.18.1] — 2026-07-22
+
+### Security — golang.org/x/text infinite loop (GO-2026-5970)
+
+Upgraded `golang.org/x/text` `v0.30.0 → v0.39.0`: crafted input can drive an
+internal `norm` routine into an infinite loop, reachable through
+`pkg/xlsx/converter.go` (excelize) and `pkg/adapters/postgres/adapter.go`
+(pgxpool). Caught by CI's `govulncheck`; `go mod tidy` cascaded consistent
+upgrades to `golang.org/x/crypto`, `x/mod`, `x/net`, `x/sync`, `x/sys`,
+`x/telemetry`, `x/tools` as transitive consequences — verified no breaking
+API changes (`go build`/`go vet`/full unit test suite unaffected).
+
+### Security — crypto/tls Encrypted Client Hello privacy leak (GO-2026-5856)
+
+`go.work` was missing a `toolchain` directive, so in workspace mode its own
+`go 1.25.0` line silently governed toolchain selection for every build —
+the `toolchain go1.26.5` already declared in `go.mod` was never honored,
+and every `go build`/`go vet`/`govulncheck` run kept using the
+locally-installed `go1.26.4` regardless. Added a matching
+`toolchain go1.26.5` line to `go.work`; verified via `go version` on a
+freshly built binary that builds now actually use go1.26.5 (fixed version)
+instead of go1.26.4.
+
+Verified locally with `govulncheck` scoped to non-cgo packages
+(`./cmd/tdtpcli/... ./pkg/... ./xzmercury/...`, working around this
+environment's broken cgo toolchain): 0 reachable vulnerabilities, was 2.
+
+## [1.18.0] — 2026-07-22
+
+### Added — TDTP v1.5: section-level encryption
+
+Encryption redesigned to mirror how compression (v1.2+) already works:
+instead of wrapping the whole packet in an opaque binary envelope (v1.3),
+`<QueryContext>`, `<Schema>`, and `<Data>` are each individually replaced
+with `encryption="aes-256-gcm"` ciphertext; `<Header>` always stays plain
+XML so routing, dedup, and multi-part reassembly need no key. Full design
+and wire-format diagrams: `docs/tdtp-protocol-schema.md` → "v1.5".
+
+- **Wire format** (`pkg/core/packet`): `EncryptSections`/`DecryptSections`
+  (new `encryption.go`) encrypt/decrypt each section with one AES-256 key
+  and a unique nonce per section. New `Encryption`/`Encrypted` fields on
+  `Schema`/`QueryContext`; `Data` reuses its existing opaque-row shape
+  (`Rows []Row`) unchanged. Fixed, non-configurable order: hash (v1.4) →
+  compress → encrypt on write; decrypt → decompress → verify on read.
+- **Key binding**: bound to the packet's own `Header.MessageID` (not a
+  freshly generated UUID as v1.3 does) — the consumer must be able to read
+  the UUID straight from the plain Header before decrypting anything.
+  Multi-part packets need no special handling: each part already carries
+  its own distinct `MessageID` (`{base}-P{n}`).
+- **CLI**: `--enc` now produces v1.5 by default (was v1.3 whole-blob); new
+  `--enc13` flag requests the legacy format explicitly for consumers not
+  yet updated. Both share the same xZMercury `BindKey`/`RetrieveKey` flow —
+  verified zero xZMercury server-side changes needed (`keystore.Bind`
+  treats the key as opaque bytes regardless of client-side usage shape).
+  Wired into `--export`, `--export-broker`, and `--pipeline`
+  (`output.tdtp.encryption`).
+- **`--export-broker`/`--import-broker`** (`cmd/tdtpcli/commands/broker.go`):
+  gained encryption support entirely — previously zero (confirmed by grep
+  before starting). `--import-broker`, `--map`, and `--import` all gained
+  dual-format decrypt dispatch (legacy blob vs. v1.5 attribute-based,
+  auto-detected from the bytes) via shared helpers
+  (`parseAndDecryptBrokerMessage`, `decryptLegacyBlobIfNeeded`,
+  `decryptV15PacketIfNeeded`).
+- **Mandatory v1.4 integrity ahead of v1.5 encryption** (new
+  `pkg/pipeline/produce.go`, `ComputeAndRegisterIntegrity`): found live,
+  not planned — `VerifyAndPrepare`'s consumer-side pre-flight runs for any
+  packet with `Version >= "1.4"` (v1.5 packets included) and blocks on an
+  empty `XXH3` with `HASH_NOT_REGISTERED`. Every v1.5 encryption call site
+  now stamps + registers the integrity hash first, so no v1.5 packet is
+  ever missing what the existing v1.4 gate already required — zero
+  regression to the pre-v1.5 security posture, no changes needed to the
+  gate itself.
+
+### Fixed — two real bugs found via live end-to-end testing (not unit tests)
+
+- **`pkg/core/packet.EncryptSections` silent plaintext leak**: an earlier
+  version left `MaterializeRows()` to the caller; a caller that skipped
+  compression (or went through `pkg/etl`'s exporter, which only
+  materializes as a compression side effect) left `rawRows` populated, so
+  `writePacketTo`'s fast path silently wrote the *original plaintext rows*
+  into `<Data>` right next to a truthful `encryption="aes-256-gcm"`
+  attribute — a packet that looks encrypted but isn't. Caught by
+  `pkg/etl/exporter_v15_test.go` before it shipped; guarantee now lives
+  inside `EncryptSections` itself, not duplicated per call site.
+- **`integrityProc` schema-hash/`@MRC` ordering** (`cmd/tdtpcli/commands/export.go`):
+  the Mercury base-URL `@MRC` Dictionary entry was embedded *after*
+  `ComputeIntegrity` stamped `Schema.XXH3` — the hash covered a Schema
+  that was about to change, so `VerifyIntegrity` on import always failed
+  with a schema hash mismatch. 100% reproducible whenever `--integrity`/
+  v1.5 encryption and `--mercury-url` were combined — not v1.5-specific,
+  but v1.5 made this combination unconditional, surfacing it. Fixed by
+  reordering: embed `@MRC` before computing integrity. Regression test:
+  `export_integrity_test.go`.
+
+Both confirmed via live round-trips against a real `xzmercury --dev`
+instance, real RabbitMQ (Docker), and real SQLite — not mocks alone.
+
 ## [1.17.2] — 2026-07-02
 
 > **⚠️ Rebuild `libtdtp.dll`/`.so` before upgrading.** This release changes the

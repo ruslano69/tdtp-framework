@@ -93,11 +93,24 @@ type RetryConfig struct {
 
 // AuditConfig for audit logging settings
 type AuditConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Level   string `yaml:"level"` // minimal, standard, full
-	File    string `yaml:"file,omitempty"`
-	MaxSize int    `yaml:"max_size_mb,omitempty"` // Max file size in MB
-	Console bool   `yaml:"console,omitempty"`     // Log to console
+	Enabled  bool                 `yaml:"enabled"`
+	Level    string               `yaml:"level"` // minimal, standard, full
+	File     string               `yaml:"file,omitempty"`
+	MaxSize  int                  `yaml:"max_size_mb,omitempty"` // Max file size in MB
+	Console  bool                 `yaml:"console,omitempty"`     // Log to console
+	Database *AuditDatabaseConfig `yaml:"database,omitempty"`    // Log to a SQL database, in addition to file/console
+}
+
+// AuditDatabaseConfig configures the audit log's own database sink.
+// Deliberately separate from the pipeline's own Database config (which the
+// audited operation reads/writes) — reusing that same connection would let
+// the very process being audited also rewrite its own audit trail.
+type AuditDatabaseConfig struct {
+	Type            string `yaml:"type"`                        // sqlite, mysql, mssql, postgres
+	DSN             string `yaml:"dsn"`                         // Raw connection string
+	Table           string `yaml:"table,omitempty"`             // Table name (default: audit_log)
+	BatchSize       int    `yaml:"batch_size,omitempty"`        // 0 = no batching (insert one row per entry)
+	AutoCreateTable bool   `yaml:"auto_create_table,omitempty"` // Create the table (and indexes) if missing
 }
 
 // ProcessorsConfig for data processing settings

@@ -139,7 +139,7 @@ func (h *requestHandlers) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.executor.Submit(r.Context(), s, resolved, "" /* manual */)
+	job, err := h.executor.Submit(s, resolved, "" /* manual */, principalID(PrincipalFrom(r.Context())))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "execute failed: "+err.Error())
 		return
@@ -216,6 +216,9 @@ func (h *requestHandlers) evaluate(s *Scenario, req *ProjectRequest) (map[string
 	resolved, err := s.ValidateParams(req.Params)
 	if err != nil {
 		return nil, "invalid params: " + err.Error()
+	}
+	if err := VerifyScenarioChecksum(h.db, s); err != nil {
+		return nil, err.Error()
 	}
 	if err := h.gate.GateScenario(s); err != nil {
 		return nil, err.Error()

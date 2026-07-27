@@ -28,6 +28,10 @@ func readPacketToJPacket(path string) (jPacket, error) {
 		return jPacket{}, fmt.Errorf("parse error: %v", err)
 	}
 
+	if packet.IsEncrypted(pkt) {
+		return jPacket{}, fmt.Errorf("%s", errEncryptedPacket)
+	}
+
 	if pkt.Data.Compression != "" {
 		// Reuse the decompression path; it returns the canonical JSON envelope.
 		cstr := jDecompressRows(pkt)

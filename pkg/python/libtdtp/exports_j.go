@@ -110,14 +110,26 @@ func jOK(v any) *C.char {
 // the error taxonomy — Python (and any other binding) maps error_code → exception
 // instead of fragile prefix matching on the human-readable message.
 const (
-	errCodeParse     = "PARSE_ERROR"     // parse/decompress/checksum/compact decode
-	errCodeFilter    = "FILTER_ERROR"    // invalid WHERE clause or evaluation failure
-	errCodeWrite     = "WRITE_ERROR"     // write/partition/serialize failure
-	errCodeProcessor = "PROCESSOR_ERROR" // processor or compression chain failure
-	errCodeInvalid   = "INVALID_INPUT"   // malformed JSON / options / config input
-	errCodeDiff      = "DIFF_ERROR"      // diff computation failure
-	errCodeInternal  = "INTERNAL_ERROR"  // uncategorized
+	errCodeParse     = "PARSE_ERROR"      // parse/decompress/checksum/compact decode
+	errCodeFilter    = "FILTER_ERROR"     // invalid WHERE clause or evaluation failure
+	errCodeWrite     = "WRITE_ERROR"      // write/partition/serialize failure
+	errCodeProcessor = "PROCESSOR_ERROR"  // processor or compression chain failure
+	errCodeInvalid   = "INVALID_INPUT"    // malformed JSON / options / config input
+	errCodeDiff      = "DIFF_ERROR"       // diff computation failure
+	errCodeEncrypted = "ENCRYPTED_PACKET" // v1.5 packet — libtdtp has no key-exchange capability
+	errCodeInternal  = "INTERNAL_ERROR"   // uncategorized
 )
+
+// errEncryptedPacket is returned by every libtdtp read path (J_ReadFile,
+// J_ParseBytes, J_ReadMultipart) the moment a v1.5 encrypted packet is
+// detected, instead of silently handing back an empty Schema.Fields and one
+// opaque ciphertext "row" as if it were real data. libtdtp is a pure
+// parse/compress library with no xZMercury client — decrypting requires the
+// full tdtpcli binary plus a reachable xZMercury server for burn-on-read key
+// retrieval (see docs/tdtp-protocol-schema.md → "v1.5").
+const errEncryptedPacket = "encrypted packet: this file uses TDTP v1.5 section-level encryption " +
+	"(schema/data are opaque ciphertext); libtdtp cannot decrypt it — use tdtpcli " +
+	"--import --mercury-url <url> (requires a reachable xZMercury server for key retrieval)"
 
 // errorCodeFor derives a stable error code from a message prefix. Centralizing
 // this in Go means bindings never have to re-implement the prefix table.
@@ -149,6 +161,7 @@ func errorCodeFor(msg string) string {
 		{"diff error", errCodeDiff},
 		{"old data error", errCodeDiff},
 		{"new data error", errCodeDiff},
+		{"encrypted packet", errCodeEncrypted},
 	}
 	lower := strings.ToLower(msg)
 	for _, p := range prefixes {
@@ -253,6 +266,10 @@ func J_ReadFile(path *C.char) *C.char {
 		return jErr(fmt.Sprintf("parse error: %v", err))
 	}
 
+	if packet.IsEncrypted(pkt) {
+		return jErr(errEncryptedPacket)
+	}
+
 	if pkt.Data.Compression != "" {
 		// Decompression delegated to exports_j_compress.go
 		return jDecompressRows(pkt)
@@ -272,6 +289,10 @@ func J_ParseBytes(data *C.char, length C.int) *C.char {
 	pkt, err := parser.ParseBytes(raw)
 	if err != nil {
 		return jErr(fmt.Sprintf("parse error: %v", err))
+	}
+
+	if packet.IsEncrypted(pkt) {
+		return jErr(errEncryptedPacket)
 	}
 
 	if pkt.Data.Compression != "" {

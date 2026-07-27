@@ -149,6 +149,7 @@ type TDTPOutputConfig struct {
 	CompressLevel int               `yaml:"compress_level"` // Уровень: 1-19 (zstd), 6-7 (kanzi)
 	Destination   string            `yaml:"destination"`    // Путь к файлу или s3://bucket/key
 	Encryption    bool              `yaml:"encryption"`     // Шифровать результат через xZMercury (AES-256-GCM)
+	EncryptionV13 bool              `yaml:"encryption_v13"` // true = legacy TDTP v1.3 whole-blob формат вместо v1.5 section-level (по умолчанию)
 	Compact       bool              `yaml:"compact"`        // v1.3.1: compact format
 	CompactTail   bool              `yaml:"compact_tail"`   // v1.3.1: tail-строка
 	FixedFields   []string          `yaml:"fixed_fields"`   // v1.3.1: явный список fixed полей
