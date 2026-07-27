@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/etl"
 	"gopkg.in/yaml.v3"
@@ -15,6 +16,23 @@ type ServeConfig struct {
 	Sources []etl.SourceConfig `yaml:"sources"` // те же типы что и в ETL: tdtp, postgres, mssql, mysql, sqlite
 	Views   []ViewConfig       `yaml:"views"`
 	Lookups []LookupConfig     `yaml:"lookups,omitempty"` // параметризованные live-запросы по требованию (см. lookup.go)
+	Auth    *AuthConfig        `yaml:"auth,omitempty"`    // логин по паролю -> токен с TTL для /api/* (см. auth.go, AUTH_PLAN.md)
+}
+
+// AuthConfig включает контроль доступа для /api/* (кроме /api/login самого).
+// Отсутствует или Enabled=false — /api/* остаётся полностью открытым, как
+// было до появления авторизации (обратная совместимость по умолчанию).
+type AuthConfig struct {
+	Enabled  bool         `yaml:"enabled"`
+	TokenTTL string       `yaml:"token_ttl"` // например "30m" — см. time.ParseDuration
+	Users    []UserConfig `yaml:"users"`
+}
+
+// UserConfig — один логин/пароль-хеш. PasswordHash генерируется офлайн
+// (tdtpserve --hash-password <pw>) и никогда не хранится как plaintext.
+type UserConfig struct {
+	Username     string `yaml:"username"`
+	PasswordHash string `yaml:"password_hash"`
 }
 
 // ServerSection — параметры HTTP сервера
@@ -131,6 +149,31 @@ func loadConfig(path string) (*ServeConfig, error) {
 	}
 	if cfg.Server.Name == "" {
 		cfg.Server.Name = "TDTP Serve"
+	}
+
+	if cfg.Auth != nil && cfg.Auth.Enabled {
+		if len(cfg.Auth.Users) == 0 {
+			return nil, fmt.Errorf("auth.enabled is true but auth.users is empty")
+		}
+		seen := make(map[string]bool, len(cfg.Auth.Users))
+		for i, u := range cfg.Auth.Users {
+			if u.Username == "" {
+				return nil, fmt.Errorf("auth.users[%d]: username is required", i)
+			}
+			if seen[u.Username] {
+				return nil, fmt.Errorf("auth.users: duplicate username %q", u.Username)
+			}
+			seen[u.Username] = true
+			if u.PasswordHash == "" {
+				return nil, fmt.Errorf("auth.users[%d] (%s): password_hash is required (generate with --hash-password)", i, u.Username)
+			}
+		}
+		if cfg.Auth.TokenTTL == "" {
+			cfg.Auth.TokenTTL = "30m"
+		}
+		if _, err := time.ParseDuration(cfg.Auth.TokenTTL); err != nil {
+			return nil, fmt.Errorf("auth.token_ttl %q: %w", cfg.Auth.TokenTTL, err)
+		}
 	}
 
 	return &cfg, nil
