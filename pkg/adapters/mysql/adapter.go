@@ -68,7 +68,15 @@ func (a *Adapter) initHelpers() {
 		a,           // SchemaReader (GetTableSchema)
 		a,           // DataReader (ReadAllRows, ReadRowsWithSQL, GetRowCount)
 		a.converter, // ValueConverter
-		nil,         // SQLAdapter не нужен для MySQL (простые типы)
+		// SQLAdapter: MySQL не квалифицирует имя таблицы схемой (useSchemaName=false
+		// при schemaPrefix=""), но нуждается в конвертации ANSI-квотирования полей —
+		// quoteFieldName/quoteTableName в SQL-генераторе оборачивают идентификаторы со
+		// спецсимволами (пробелы, $, ?) в двойные кавычки ("Order ID"), а MySQL без
+		// sql_mode=ANSI_QUOTES трактует "..." как строковый литерал, а не идентификатор —
+		// WHERE "Order ID" > 3 молча не находит совпадений вместо ошибки или данных.
+		// StandardSQLAdapter.AdaptSQL уже содержит нужную замену " → ` при непустом
+		// quoteChar; ранее сюда передавался nil, и эта замена никогда не выполнялась.
+		base.NewStandardSQLAdapter("mysql", "", "`"),
 	)
 
 	// ImportHelper делает всю работу импорта с temporary tables
