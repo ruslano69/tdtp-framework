@@ -177,28 +177,25 @@ func writeXMLAttrValue(w *bufio.Writer, s string) {
 func writeRawValue(w *bufio.Writer, s string) {
 	start := 0
 	for i := 0; i < len(s); i++ {
+		var esc string
 		switch s[i] {
 		case '|':
-			w.WriteString(s[start:i])
-			w.WriteString(`\|`)
-			start = i + 1
+			esc = `\|`
 		case '\\':
-			w.WriteString(s[start:i])
-			w.WriteString(`\\`)
-			start = i + 1
+			esc = `\\`
 		case '<':
-			w.WriteString(s[start:i])
-			w.Write(bEscLt)
-			start = i + 1
+			esc = "&lt;"
 		case '>':
-			w.WriteString(s[start:i])
-			w.Write(bEscGt)
-			start = i + 1
+			esc = "&gt;"
 		case '&':
-			w.WriteString(s[start:i])
-			w.Write(bEscAmp)
-			start = i + 1
+			esc = "&amp;"
+		default:
+			continue
 		}
+
+		w.WriteString(s[start:i])
+		w.WriteString(esc)
+		start = i + 1
 	}
 	w.WriteString(s[start:])
 }
