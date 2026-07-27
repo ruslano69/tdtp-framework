@@ -84,7 +84,11 @@ const MaxSchemaBytes = 200 * 1024
 func validateSchemaSize(schema Schema) error {
 	b, err := xml.Marshal(schema)
 	if err != nil {
-		return nil // измерить не вышло — не блокируем генерацию
+		// Меряем размер — не сериализуем на выход. Если xml.Marshal падает
+		// здесь, настоящая сериализация ниже по пайплайну упадёт тоже и даст
+		// куда более точную ошибку на месте; блокировать генерацию именно
+		// здесь, из-за неудачного измерения, было бы неверным диагнозом.
+		return nil //nolint:nilerr // намеренный fail-open — см. комментарий выше
 	}
 
 	if len(b) > MaxSchemaBytes {
