@@ -24,7 +24,7 @@ graph TD
     MQ -- "2. Event Notification" --> CO[coordinator.py]
     CO -- "3. tdtpcli --export-broker" --> Q[RabbitMQ Named Queues]
     CO -- "4. Signal" --> R[Redis Pub/Sub]
-    R -- "5. Notification" --> CS[consumer.py]
+    MQ2 -- "5. Queue" --> CS[tdtpcli --map --listen]
     CS -- "6. tdtpcli --import-broker" --> STG[(Staging Tables)]
     STG -- "7. SQL Merge" --> DB[(Destination DB)]
     CS -- "8. Log" --> S3[MinIO / S3 Audit]
@@ -58,12 +58,25 @@ Bridge between events and data:
   compresses and sends to the target RabbitMQ queue
 - Publishes a readiness signal to Redis Pub/Sub
 
-### `consumer.py` — Import Consumer
-Handles delivery and integration:
-- Listens to Redis notification channel
-- Runs `tdtpcli --import-broker` — reads from RabbitMQ queue into staging tables
-- Calls `merge_...` SQL procedures for atomic upsert from staging to main tables
-- Writes audit record (transaction log) to S3 bucket `travel-agency`
+### `listeners.ps1` — Import Listeners
+
+No Python here: `tdtpcli` listens to the queue itself.
+
+    tdtpcli --map <mapping> --input broker://<queue> --listen
+
+One long-lived process per queue, started by `listeners.ps1 -Node <node>`.
+The message is ACKed only after the upsert succeeds, so a process that dies
+mid-write returns the message to the queue instead of losing it.
+
+This replaced `consumer.py`, which subscribed to a Redis channel and launched
+`tdtpcli --map` per notification — a new process and a new broker connection
+each time, with no acknowledgement. The Redis notification went with it: the
+queue is the signal, and announcing "there is something in the queue" only
+made sense while nothing was listening to the queue.
+
+Its S3 audit marker went too, replaced by a real audit record per message
+(`audit:` in the node config) written to a database kept separate from the one
+being written to.
 
 ---
 
@@ -108,9 +121,9 @@ Run each in a separate terminal:
 # Export coordinator
 python coordinator.py
 
-# Import consumers
-python consumer.py --node central
-python consumer.py --node branch
+# Import listeners (one tdtpcli process per queue)
+./listeners.ps1 -Node central
+./listeners.ps1 -Node branch
 
 # Traffic simulators
 python activity.py --node airline --interval 5
@@ -126,10 +139,10 @@ All TDTP settings (compression, retries, circuit breaker) are in `configs/`:
 
 | File pattern | Used by | Purpose |
 |---|---|---|
-| `configs/config_central.yaml` | `consumer.py` | Central DB connection |
-| `configs/config_branch.yaml` | `consumer.py` | Branch DB connection |
+| `configs/config_central.yaml` | `listeners.ps1` | Central DB connection + audit sink |
+| `configs/config_branch.yaml` | `listeners.ps1` | Branch DB connection + audit sink |
 | `configs/config_src_tdtp_sync_*.yaml` | `coordinator.py` | Source configs per entity |
-| `configs/config_dst_tdtp_sync_*.yaml` | `consumer.py` | Destination configs per entity |
+| `mappings/sync_*.yaml` | `listeners.ps1` | Queue + target table per entity |
 | `configs/config_broker_*.yaml` | both | RabbitMQ broker settings |
 
 Default settings:
