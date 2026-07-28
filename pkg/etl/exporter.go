@@ -996,6 +996,17 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 	// Создаем streaming generator
 	streamGen := packet.NewStreamingGenerator()
 
+	// Размер части по конфигу выхода, а не по умолчанию.
+	//
+	// Без этого packet_kb действовал только на spool-пути, а сюда приходит
+	// каждый Kafka-пайплайн без fallback (processor.go: isBrokerStreaming) —
+	// то есть основной маршрут данных. Генератор оставался с
+	// DefaultMaxMessageSize (~1.9 МБ XML), и настройка, поставленная ровно
+	// затем, чтобы уложиться в лимит брокера, молча не работала.
+	if partSize := e.streamPartSizeBytes(); partSize > 0 {
+		streamGen.SetPartSize(partSize)
+	}
+
 	// Генерируем части в потоковом режиме
 	partsChan, summaryChan := streamGen.GeneratePartsStream(
 		ctx,
@@ -1063,10 +1074,59 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 		result.ErrorsCount++
 	}
 
-	// Если были ошибки при отправке частей, возвращаем ошибку
+	// Если были ошибки при отправке частей, возвращаем ошибку.
+	//
+	// Причины перечисляются, а не сворачиваются в счётчик. Раньше отсюда
+	// уходило "streaming export completed with N errors", и всё, что собрано в
+	// result.Errors через %w, до пользователя не доезжало вовсе: отказ Kafka по
+	// размеру сообщения выглядел безымянным сбоем, а разбирать его приходилось
+	// по логам брокера.
+	//
+	// Первая ошибка оборачивается через %w — по ней работает errors.Is выше
+	// (isMercuryDegraded и подобные); остальные дописываются текстом.
 	if result.ErrorsCount > 0 {
-		return result, fmt.Errorf("streaming export completed with %d errors", result.ErrorsCount)
+		return result, fmt.Errorf("streaming export failed on %d of %d part(s): %w%s",
+			result.ErrorsCount, result.PartsSent+result.ErrorsCount,
+			result.Errors[0], formatExtraErrors(result.Errors[1:]))
 	}
 
 	return result, nil
+}
+
+// formatExtraErrors дописывает ошибки со второй и далее.
+//
+// Первая уходит через %w, чтобы errors.Is продолжал работать; остальные
+// добавляются текстом — потерять их означало бы вернуться к счётчику, из-за
+// которого причина отказа не доезжала до пользователя.
+func formatExtraErrors(errs []error) string {
+	if len(errs) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for i, err := range errs {
+		fmt.Fprintf(&b, "\n  error %d: %v", i+2, err)
+	}
+
+	return b.String()
+}
+
+// streamPartSizeBytes возвращает размер части для потокового экспорта в
+// брокер, 0 — оставить дефолт генератора.
+//
+// Kafka отвергает produce-запрос по message.max.bytes, поэтому размер части
+// там не вопрос вкуса: часть по умолчанию (~1.9 МБ XML) не влезает в
+// брокерский дефолт 1 МБ, если данные не сжались. packet_kb существует ровно
+// для этого, и до сих пор действовал только на spool-пути — сюда, на путь
+// каждого пайплайна без fallback, он не доходил.
+//
+// Для RabbitMQ настройки нет, поэтому там остаётся дефолт: у него нет
+// сопоставимого предела на сообщение, и подменять его размером из чужой
+// секции конфига было бы догадкой.
+func (e *Exporter) streamPartSizeBytes() int {
+	if e.config.Kafka == nil || e.config.Kafka.PacketKB <= 0 {
+		return 0
+	}
+
+	return e.config.Kafka.PacketKB * 1024
 }

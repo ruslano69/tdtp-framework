@@ -16,6 +16,10 @@ type Kafka struct {
 	writer      *kafka.Writer
 	reader      *kafka.Reader
 	lastMessage *kafka.Message // Последнее полученное сообщение (для manual commit)
+
+	// limits — предел размера сообщения, полученный у брокера (kafka_limits.go).
+	// Спрашивается один раз на соединение.
+	limits limitCache
 }
 
 // NewKafka создает новый Kafka брокер
@@ -39,21 +43,58 @@ func NewKafka(cfg Config) (*Kafka, error) {
 // Reader создаётся лениво при первом вызове Receive() —
 // это убирает ~3-секундный блок в Close() когда брокер используется только для записи.
 func (k *Kafka) Connect(ctx context.Context) error {
-	k.writer = &kafka.Writer{
-		Addr:         kafka.TCP(k.config.Brokers...),
-		Topic:        k.config.Topic,
+	k.ConnectLazy()
+
+	// Проверяем подключение без создания Reader
+	return k.Ping(ctx)
+}
+
+// ConnectLazy готовит writer, ничего не отправляя и никуда не подключаясь.
+//
+// kafka.Writer открывает соединение при первой записи, и для отправителя,
+// которому нечего делать до появления данных, это единственно верное
+// поведение: спул может быть создан заранее, а брокер подняться позже.
+// Connect с его Ping остаётся для случаев, где доступность надо знать сразу.
+//
+// Разница не косметическая: spool раньше создавал writer напрямую и был
+// ленивым. Перевод его на Connect сделал конструктор сетевым, и первый же
+// прогон это показал — Ping резолвит localhost в ::1 и падает там, где
+// отложенная запись прошла бы по IPv4.
+func (k *Kafka) ConnectLazy() {
+	k.writer = NewKafkaWriter(k.config.Brokers, k.config.Topic)
+}
+
+// NewKafkaWriter — единственное место, где настраивается kafka.Writer.
+//
+// Раньше эта конфигурация существовала в двух экземплярах: здесь и в
+// pkg/etl/kafka_spool.go. Десять полей, совпадавших значение в значение —
+// не два writer'а под разные задачи, а копия. Spool завёл свой, чтобы не
+// создавать Reader (его Close() блокирует на секунды); позже Reader здесь
+// сделали ленивым — ensureReader, и Close() проверяет reader != nil, —
+// то есть причина отпала, а копия осталась.
+//
+// Цена копии выяснилась предметно: предупреждение о превышении
+// message.max.bytes, добавленное в Send/SendBatch, не действовало на
+// spool-путь — то есть на основной путь выгрузки в Kafka.
+func NewKafkaWriter(brokerAddrs []string, topic string) *kafka.Writer {
+	return &kafka.Writer{
+		Addr:         kafka.TCP(brokerAddrs...),
+		Topic:        topic,
 		Balancer:     &kafka.LeastBytes{},
 		RequiredAcks: kafka.RequireOne,
 		Async:        false,
 		Compression:  kafka.Snappy,
 		MaxAttempts:  3,
 		WriteTimeout: 30 * time.Second,
-		BatchBytes:   100 * 1024 * 1024,    // 100MB — поддержка крупных TDTP-пакетов
+
+		// Предел того, что kafka-go соберёт в один запрос. К брокеру
+		// отношения не имеет: тот меряет сжатый record batch по своему
+		// message.max.bytes и отвергает независимо от этого числа. Высокое
+		// значение здесь лишь разрешает собрать крупный запрос — примет его
+		// брокер или нет, решают kafka_limits.go и kafka_diag.go.
+		BatchBytes:   100 * 1024 * 1024,
 		BatchTimeout: 5 * time.Millisecond, // Не ждать накопления — отправлять сразу
 	}
-
-	// Проверяем подключение без создания Reader
-	return k.Ping(ctx)
 }
 
 // ensureReader создаёт Reader при первом обращении к Receive().
@@ -126,18 +167,75 @@ func (k *Kafka) Send(ctx context.Context, message []byte) error {
 		},
 	}
 
+	// Одиночная отправка: дробить нечего, поэтому предупреждение только про
+	// сообщение, которое само не влезает.
+	limit, _ := k.MessageMaxBytes(ctx)
+	k.warnIfSingleOversized([][]byte{message}, limit)
+
 	if err := k.writer.WriteMessages(ctx, msg); err != nil {
-		return fmt.Errorf("failed to write message to Kafka: %w", err)
+		// Тот же разбор, что и у батча: одиночная отправка — это путь
+		// streaming-экспорта, и раньше отказ по размеру доезжал до
+		// пользователя как безымянная ошибка.
+		return classifyWriteError(err, [][]byte{message}, k.limits.value)
 	}
 	return nil
 }
 
+// ContentTypeXML — обычный TDTP-пакет.
+// ContentTypeXMLZstd — пакет, сжатый перед отправкой (spool-путь).
+const (
+	ContentTypeXML     = "application/xml"
+	ContentTypeXMLZstd = "application/xml+zstd"
+)
+
 // SendBatch отправляет все сообщения одним вызовом WriteMessages —
 // все пакеты уходят в одном roundtrip вместо N последовательных.
 func (k *Kafka) SendBatch(ctx context.Context, messages [][]byte) error {
+	return k.SendBatchAs(ctx, messages, ContentTypeXML)
+}
+
+// SendBatchAs — то же самое с явным content-type.
+//
+// Существует потому, что spool отправляет уже сжатые пакеты и помечает их
+// application/xml+zstd: потребитель по этому заголовку понимает, надо ли
+// распаковывать. При переводе spool на этот writer заголовок нельзя было
+// потерять — иначе сжатые пакеты уехали бы под видом обычных.
+func (k *Kafka) SendBatchAs(ctx context.Context, messages [][]byte, contentType string) error {
 	if k.writer == nil {
 		return fmt.Errorf("not connected to Kafka")
 	}
+	if len(messages) == 0 {
+		return nil
+	}
+
+	limit, _ := k.MessageMaxBytes(ctx)
+
+	// Батч режется по байтам, а не только по числу сообщений. Kafka меряет
+	// record batch целиком, поэтому batch_send из конфига — это счётчик, не
+	// знающий размеров: десять пакетов по 270 КБ дают 2.7 МБ и отвергаются
+	// вместе, хотя каждый по отдельности прошёл бы. Здесь размеры известны,
+	// и подобрать безопасную границу можно без участия пользователя.
+	//
+	// Бюджет считается по несжатым данным, а брокер меряет сжатые — то есть
+	// оценка заведомо консервативная. Это осознанно: сжатие может только
+	// уменьшить, так что уложившийся по несжатому размеру уложится и после
+	// компрессии. Цена — лишние запросы на хорошо сжимаемых данных; плата за
+	// обратное — отказ.
+	for _, chunk := range splitByBudget(messages, limit) {
+		if err := k.writeChunk(ctx, chunk, contentType, limit); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// writeChunk отправляет одну порцию, уже уложенную в бюджет.
+func (k *Kafka) writeChunk(ctx context.Context, messages [][]byte, contentType string, limit int) error {
+	// Предупреждаем только о том, чего дробление не лечит: одиночное
+	// сообщение больше предела. Батч, который был бы велик целиком, к этому
+	// моменту уже разрезан.
+	k.warnIfSingleOversized(messages, limit)
 
 	now := time.Now()
 	msgs := make([]kafka.Message, len(messages))
@@ -147,15 +245,16 @@ func (k *Kafka) SendBatch(ctx context.Context, messages [][]byte) error {
 			Value: m,
 			Time:  now,
 			Headers: []kafka.Header{
-				{Key: "content-type", Value: []byte("application/xml")},
+				{Key: "content-type", Value: []byte(contentType)},
 				{Key: "protocol", Value: []byte("tdtp")},
 			},
 		}
 	}
 
 	if err := k.writer.WriteMessages(ctx, msgs...); err != nil {
-		return fmt.Errorf("failed to write batch to Kafka: %w", err)
+		return classifyWriteError(err, messages, limit)
 	}
+
 	return nil
 }
 

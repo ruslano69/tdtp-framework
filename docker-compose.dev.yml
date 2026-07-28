@@ -70,8 +70,17 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_RETENTION_HOURS: 24
-      KAFKA_MESSAGE_MAX_BYTES: 10485760          # 10MB — TDTP пакеты до 3.8MB несжатых
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760    # должен совпадать с message.max.bytes
+      # 4MB — рекомендация из docs/ETL_PIPELINE.md, «Kafka: размер сообщения».
+      # Покрывает часть TDTP целиком даже когда сжатие не помогает, с запасом
+      # на батч из нескольких мелких. Было 10MB под старый расчёт «пакеты до
+      # 3.8MB несжатых»; после того как packet_kb заработал на streaming-пути,
+      # размер части задаётся конфигом выхода, и держать здесь больше, чем
+      # советуешь пользователям, значит проверять не то, что они получат.
+      KAFKA_MESSAGE_MAX_BYTES: 4194304
+      # Не ниже message.max.bytes: иначе лидер примет сообщение, которое
+      # реплики не смогут вычитать, и партиция уедет в under-replicated. При
+      # replication factor 1 незаметно — тем важнее не расходиться здесь.
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 4194304
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0  # не ждать других консьюмеров при JoinGroup
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
