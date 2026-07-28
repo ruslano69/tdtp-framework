@@ -528,6 +528,17 @@ func routeCommand(
 			"output":          determineOutputFile(*flags.Output, *flags.SyncIncr, "xml"),
 		}
 
+		// --to-broker sends the increment to the queue instead of a file. The
+		// checkpoint is kept either way, which is the point: until now tracking
+		// a watermark and sending to a broker were separate commands, so
+		// anyone needing both kept the watermark outside the tool.
+		var syncBrokerCfg *commands.BrokerConfig
+		if *flags.SyncToBroker {
+			cfg := buildBrokerConfig(config)
+			syncBrokerCfg = &cfg
+			metadata["output"] = "broker://" + cfg.Queue
+		}
+
 		err = prodFeatures.ExecuteWithResilience(ctx, "incremental-sync", func() error {
 			return commands.IncrementalSync(ctx, adapterConfig, commands.SyncOptions{
 				TableName:      *flags.SyncIncr,
@@ -537,6 +548,14 @@ func routeCommand(
 				BatchSize:      *flags.BatchSize,
 				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
+
+				BrokerCfg:     syncBrokerCfg,
+				Compress:      *flags.Compress || config.Export.Compress,
+				CompressLevel: *flags.CompressLevel,
+				CompressAlgo:  *flags.CompressAlgo,
+				Encrypt:       *flags.Encrypt || *flags.Enc13,
+				EncryptLegacy: *flags.Enc13,
+				MercuryURL:    *flags.MercuryURL,
 			})
 		})
 

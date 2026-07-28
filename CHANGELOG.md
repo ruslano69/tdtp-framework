@@ -2,6 +2,47 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.20.0] — 2026-07-28
+
+### Added — `--sync-incremental --to-broker`
+
+Incremental sync tracked a watermark but could only write files; `--export-broker`
+could only send. Anyone wanting both — the ordinary case of feeding a queue with
+changes — had to keep the watermark outside tdtpcli and build the `WHERE` clause
+by hand, which is exactly what the checkpoint file exists to avoid.
+
+`--to-broker` sends the increment to the broker from `--config` instead. The send
+goes through the same path as `--export-broker`, so compression, v1.4 integrity
+and both encryption formats work unchanged rather than being reimplemented for
+sync.
+
+**The checkpoint advances only after the send succeeds.** On a broker failure the
+watermark stays where it was and the reason is recorded in `last_error`, so the
+next run retries the same rows. Advancing first would put those rows below the
+watermark with nothing left to bring them back.
+
+With `--map --input broker://<queue> --listen` on the receiving side this is
+continuous replication without any external state.
+
+### Fixed — incremental sync failed on every run after the first
+
+`buildIncrementalQuery` emitted `">"` as the filter operator. TDTQL spells its
+operators out in words; neither the in-memory evaluator nor the SQL generator has
+ever accepted the symbol, so the query died with `unknown operator: >`. The first
+run has no watermark and therefore builds no filter at all, which is why the
+failure only appeared from the second run onward — and why the unit test, which
+compared the operator against the same literal `">"`, passed throughout.
+
+The operator is now `gt`, and the test generates SQL from the query instead of
+re-asserting the value it was handed: a builder that emits something the consumer
+rejects can no longer pass.
+
+### Fixed — "no changes" was reported as an error
+
+An unchanged table comes back as one empty packet, not as zero packets, so the
+`len(packets) == 0` guard missed it and the run failed with `no valid tracking
+field values found`. It now reports no changes and exits cleanly.
+
 ## [1.19.2] — 2026-07-27
 
 ### Fixed — the fast parser's two ways of being more permissive than the reference

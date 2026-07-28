@@ -112,117 +112,23 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 		}
 	}
 
-	xmlMsgs := make([][]byte, len(packets))
-	errs := make([]error, len(packets))
-
-	// v1.5 encryption needs a Mercury client shared across the per-packet
-	// goroutines below for the mandatory integrity step — one instance,
-	// not one per packet.
-	var integrityClient *mercury.Client
-	if encrypt && !encryptLegacy {
-		integrityClient = mercury.NewClient(mercuryURL, 5000)
+	if err := sendPacketsToBroker(ctx, broker, packets, brokerSendOptions{
+		TableName:     tableName,
+		Compress:      compress,
+		CompressLevel: compressLevel,
+		CompressAlgo:  compressAlgo,
+		Encrypt:       encrypt,
+		EncryptLegacy: encryptLegacy,
+		MercuryURL:    mercuryURL,
+	}); err != nil {
+		return err
 	}
 
-	// Encryption calls xZMercury over HTTP per packet — keep this concurrent
-	// like compression/marshal already are, not a reason to serialize.
-	var wg sync.WaitGroup
-	for i, pkt := range packets {
-		wg.Add(1)
-		go func(i int, pkt *packet.DataPacket) {
-			defer wg.Done()
-
-			// v1.4 integrity is mandatory ahead of v1.5 encryption, not
-			// opt-in — see pkg/pipeline/produce.go's doc comment: without
-			// this, VerifyAndPrepare's consumer-side pre-flight (which
-			// always runs once --mercury-url is set, and v1.5 decryption
-			// requires it) blocks the packet with HASH_NOT_REGISTERED.
-			// Must run before compression (hashes cover plaintext).
-			if encrypt && !encryptLegacy {
-				if err := pipeline.ComputeAndRegisterIntegrity(ctx, pkt, integrityClient, tableName); err != nil {
-					errs[i] = fmt.Errorf("packet %d integrity: %w", i+1, err)
-					return
-				}
-			}
-
-			if compress {
-				if err := compressPacketData(pkt, compressLevel, compressAlgo, true); err != nil { // checksum always enabled with compression
-					errs[i] = fmt.Errorf("packet %d compress: %w", i+1, err)
-					return
-				}
-			}
-
-			if encrypt && encryptLegacy {
-				// EncryptPacket marshals pkt to XML internally before encrypting —
-				// no separate marshal step needed here.
-				blob, _, err := EncryptPacket(ctx, pkt, mercuryURL, tableName)
-				if err != nil {
-					errs[i] = fmt.Errorf("packet %d encrypt (v1.3): %w", i+1, err)
-					return
-				}
-				xmlMsgs[i] = blob
-				return
-			}
-
-			if encrypt {
-				xml, _, err := EncryptPacketV15(ctx, pkt, mercuryURL, tableName)
-				if err != nil {
-					errs[i] = fmt.Errorf("packet %d encrypt (v1.5): %w", i+1, err)
-					return
-				}
-				xmlMsgs[i] = xml
-				return
-			}
-
-			gen := packet.NewGenerator()
-			xml, err := gen.ToXML(pkt, true)
-			if err != nil {
-				errs[i] = fmt.Errorf("packet %d marshal: %w", i+1, err)
-				return
-			}
-			xmlMsgs[i] = xml
-		}(i, pkt)
-	}
-	wg.Wait()
-
-	for _, e := range errs {
-		if e != nil {
-			return e
-		}
-	}
-
-	if compress {
-		fmt.Printf("✓ Data compressed with %s\n", compressAlgo)
-	}
-	if encrypt {
-		fmt.Printf("✓ Data encrypted (%s)\n", map[bool]string{true: "v1.3 whole-blob", false: "v1.5 section-level"}[encryptLegacy])
-	}
-
-	// Connect to broker
-	if err := broker.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect to broker: %w", err)
-	}
-
-	// Если брокер поддерживает пакетную отправку — используем один roundtrip
-	type batchSender interface {
-		SendBatch(ctx context.Context, messages [][]byte) error
-	}
-	if bs, ok := broker.(batchSender); ok {
-		if err := bs.SendBatch(ctx, xmlMsgs); err != nil {
-			return fmt.Errorf("failed to send batch: %w", err)
-		}
-	} else {
-		for i, msg := range xmlMsgs {
-			if err := broker.Send(ctx, msg); err != nil {
-				return fmt.Errorf("failed to send packet %d: %w", i+1, err)
-			}
-		}
-	}
-
-	fmt.Printf("✓ Sent %d packet(s)\n", len(packets))
 	fmt.Println("✓ Export to broker complete!")
 
 	return nil
 }
+
 
 // defaultIdleTimeout is how long --import-broker waits for the next message
 // before deciding the queue is empty and stopping.
@@ -795,4 +701,137 @@ func parseAndDecryptBrokerMessage(ctx context.Context, raw []byte, mercuryURL st
 	}
 
 	return pkt, nil
+}
+
+// brokerSendOptions describes how packets are turned into broker messages.
+type brokerSendOptions struct {
+	TableName     string
+	Compress      bool
+	CompressLevel int
+	CompressAlgo  string
+	Encrypt       bool
+	EncryptLegacy bool
+	MercuryURL    string
+}
+
+// sendPacketsToBroker serialises ready packets and sends them.
+//
+// Split out of ExportToBroker so --sync-incremental can reach a broker at all.
+// Incremental sync knew how to track a checkpoint but only how to write files;
+// export knew how to send but nothing about checkpoints. Anyone wanting both
+// had to keep the watermark themselves outside the tool and hand-build a
+// --where clause — which is exactly what the travel-agency coordinator does.
+//
+// Extracted rather than reimplemented on the sync side: compression, v1.4
+// integrity and both encryption formats all live here, and a second copy would
+// drift from this one the moment either changed.
+func sendPacketsToBroker(ctx context.Context, broker brokers.MessageBroker, packets []*packet.DataPacket, opts brokerSendOptions) error {
+	xmlMsgs := make([][]byte, len(packets))
+	errs := make([]error, len(packets))
+
+	// v1.5 encryption needs a Mercury client shared across the per-packet
+	// goroutines below for the mandatory integrity step — one instance,
+	// not one per packet.
+	var integrityClient *mercury.Client
+	if opts.Encrypt && !opts.EncryptLegacy {
+		integrityClient = mercury.NewClient(opts.MercuryURL, 5000)
+	}
+
+	// Encryption calls xZMercury over HTTP per packet — keep this concurrent
+	// like compression/marshal already are, not a reason to serialize.
+	var wg sync.WaitGroup
+	for i, pkt := range packets {
+		wg.Add(1)
+		go func(i int, pkt *packet.DataPacket) {
+			defer wg.Done()
+
+			// v1.4 integrity is mandatory ahead of v1.5 encryption, not
+			// opt-in — see pkg/pipeline/produce.go's doc comment: without
+			// this, VerifyAndPrepare's consumer-side pre-flight (which
+			// always runs once --mercury-url is set, and v1.5 decryption
+			// requires it) blocks the packet with HASH_NOT_REGISTERED.
+			// Must run before compression (hashes cover plaintext).
+			if opts.Encrypt && !opts.EncryptLegacy {
+				if err := pipeline.ComputeAndRegisterIntegrity(ctx, pkt, integrityClient, opts.TableName); err != nil {
+					errs[i] = fmt.Errorf("packet %d integrity: %w", i+1, err)
+					return
+				}
+			}
+
+			if opts.Compress {
+				if err := compressPacketData(pkt, opts.CompressLevel, opts.CompressAlgo, true); err != nil { // checksum always enabled with compression
+					errs[i] = fmt.Errorf("packet %d compress: %w", i+1, err)
+					return
+				}
+			}
+
+			if opts.Encrypt && opts.EncryptLegacy {
+				// EncryptPacket marshals pkt to XML internally before encrypting —
+				// no separate marshal step needed here.
+				blob, _, err := EncryptPacket(ctx, pkt, opts.MercuryURL, opts.TableName)
+				if err != nil {
+					errs[i] = fmt.Errorf("packet %d encrypt (v1.3): %w", i+1, err)
+					return
+				}
+				xmlMsgs[i] = blob
+				return
+			}
+
+			if opts.Encrypt {
+				xml, _, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, opts.TableName)
+				if err != nil {
+					errs[i] = fmt.Errorf("packet %d encrypt (v1.5): %w", i+1, err)
+					return
+				}
+				xmlMsgs[i] = xml
+				return
+			}
+
+			gen := packet.NewGenerator()
+			xml, err := gen.ToXML(pkt, true)
+			if err != nil {
+				errs[i] = fmt.Errorf("packet %d marshal: %w", i+1, err)
+				return
+			}
+			xmlMsgs[i] = xml
+		}(i, pkt)
+	}
+	wg.Wait()
+
+	for _, e := range errs {
+		if e != nil {
+			return e
+		}
+	}
+
+	if opts.Compress {
+		fmt.Printf("✓ Data compressed with %s\n", opts.CompressAlgo)
+	}
+	if opts.Encrypt {
+		fmt.Printf("✓ Data encrypted (%s)\n", map[bool]string{true: "v1.3 whole-blob", false: "v1.5 section-level"}[opts.EncryptLegacy])
+	}
+
+	// Connect to broker
+	if err := broker.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect to broker: %w", err)
+	}
+
+	// Если брокер поддерживает пакетную отправку — используем один roundtrip
+	type batchSender interface {
+		SendBatch(ctx context.Context, messages [][]byte) error
+	}
+	if bs, ok := broker.(batchSender); ok {
+		if err := bs.SendBatch(ctx, xmlMsgs); err != nil {
+			return fmt.Errorf("failed to send batch: %w", err)
+		}
+	} else {
+		for i, msg := range xmlMsgs {
+			if err := broker.Send(ctx, msg); err != nil {
+				return fmt.Errorf("failed to send packet %d: %w", i+1, err)
+			}
+		}
+	}
+
+	fmt.Printf("✓ Sent %d packet(s)\n", len(packets))
+	return nil
 }

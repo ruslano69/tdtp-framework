@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 func TestBuildIncrementalQuery(t *testing.T) {
@@ -75,8 +77,8 @@ func TestBuildIncrementalQuery(t *testing.T) {
 					if filter.Field != tt.trackingField {
 						t.Errorf("expected field %s, got %s", tt.trackingField, filter.Field)
 					}
-					if filter.Operator != ">" {
-						t.Errorf("expected operator >, got %s", filter.Operator)
+					if filter.Operator != "gt" {
+						t.Errorf("expected operator gt, got %s", filter.Operator)
 					}
 					if filter.Value != tt.lastSyncValue {
 						t.Errorf("expected value %s, got %s", tt.lastSyncValue, filter.Value)
@@ -237,5 +239,42 @@ func TestExtractLastSyncValue(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestIncrementalQueryIsExecutable pushes the query buildIncrementalQuery
+// produces through the SQL generator that actually consumes it.
+//
+// The previous test only compared the operator against a literal, and that
+// literal was ">" -- a symbol no part of TDTQL accepts. It passed while every
+// incremental sync after the first failed with "unknown operator: >". Asserting
+// against the consumer instead of a copy of the value makes the two impossible
+// to disagree.
+func TestIncrementalQueryIsExecutable(t *testing.T) {
+	query := buildIncrementalQuery("updated_at", "2026-01-03T10:00:00Z", 100)
+
+	sql, err := tdtql.NewSQLGenerator().GenerateSQL("orders", query)
+	if err != nil {
+		t.Fatalf("generated query is not executable: %v", err)
+	}
+
+	// The watermark must end up as a strict lower bound: >= would resend the
+	// last row every run, <= or = would send nothing new.
+	if !strings.Contains(sql, "> '2026-01-03T10:00:00Z'") {
+		t.Errorf("expected a strict > bound on the watermark, got: %s", sql)
+	}
+}
+
+// TestIncrementalQueryFirstRunIsExecutable covers the no-watermark case, which
+// takes the other branch and builds no filter at all.
+func TestIncrementalQueryFirstRunIsExecutable(t *testing.T) {
+	query := buildIncrementalQuery("updated_at", "", 100)
+
+	sql, err := tdtql.NewSQLGenerator().GenerateSQL("orders", query)
+	if err != nil {
+		t.Fatalf("generated query is not executable: %v", err)
+	}
+	if strings.Contains(sql, "WHERE") {
+		t.Errorf("first run must not filter, got: %s", sql)
 	}
 }

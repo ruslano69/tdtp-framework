@@ -131,6 +131,7 @@ type Flags struct {
 	TrackingField  *string
 	CheckpointFile *string
 	BatchSize      *int
+	SyncToBroker   *bool // --to-broker: send the increment to the queue instead of writing files
 
 	// Field Name Sanitization (--import)
 	Translit *bool // transliterate non-ASCII field names to ASCII via go-unidecode
@@ -262,6 +263,7 @@ func ParseFlags() *Flags {
 	f.TrackingField = flag.String("tracking-field", "updated_at", "Field to track changes (timestamp, sequence, version)")
 	f.CheckpointFile = flag.String("checkpoint-file", "checkpoint.yaml", "Checkpoint file for incremental sync state")
 	f.BatchSize = flag.Int("batch-size", 1000, "Batch size for incremental sync")
+	f.SyncToBroker = flag.Bool("to-broker", false, "Send --sync-incremental output to the broker from --config instead of writing files")
 
 	// Field Name Sanitization
 	f.Translit = flag.Bool("translit", false, "Transliterate non-ASCII field names to ASCII (Cyrillic, European diacritics) using go-unidecode. Use with --import.")
