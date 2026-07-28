@@ -88,6 +88,41 @@ rows that no event announced, and `coordinator.py` would never sync them.
 checksum stops matching the approval, and the schedule skips the run rather than
 executing changed content unnoticed. Re-approve with `-Approve`.
 
+### `dashboard.py` — Watching It Run
+
+    python dashboard.py     # then open http://localhost:8100
+
+The one place the whole flow is visible at once. Read-only: it polls four
+sources and joins them, and never publishes, consumes, writes to a database or
+moves a checkpoint. Kill it mid-flight and nothing notices.
+
+That is why it is allowed to be Python in an example whose data path
+deliberately has none — `coordinator.py` was Python that *moved data*; this is
+a window. It is not started or stopped by `shutdown.ps1` for the same reason:
+it is not part of the pipeline.
+
+| Source | What it contributes |
+|---|---|
+| orchestrator `:8099` | every run with its outcome, and when each schedule next fires |
+| RabbitMQ `:15672` | queue depth, **consumer count**, publish/deliver rates |
+| `state/audit_*.db` | messages and rows actually imported, per queue |
+| `state/*.json` | the watermark each table has reached |
+
+Each is polled independently and its failure is reported in place, so a stopped
+orchestrator does not blank the queue view.
+
+The entity list is not written into the dashboard. It is derived from
+`workflows/*.yaml` (which table, which config) and `configs/*.yaml` (which
+queue) — the same files the workflow itself uses. A dashboard carrying its own
+copy of the topology eventually describes a system that no longer exists.
+
+**What it is actually for** is the failure that has no other symptom: a queue
+with messages and *no consumer*. A stalled import looks exactly like a healthy
+idle queue if you only watch depth, and the export side keeps reporting success
+because its own job did succeed. The dashboard calls it out by name. It also
+lists queues no workflow step sends to, which is how leftovers from deleted
+scripts surface.
+
 ### `workflows/` — What Gets Synced
 
 | File | Trigger | Contents |
@@ -184,14 +219,17 @@ Then, each in a separate terminal:
 python activity.py --node airline --interval 5
 python activity.py --node branch  --interval 3
 python activity.py --node central --interval 10
+
+# Live view of all of it
+python dashboard.py
 ```
 
-Watch it work:
+Then open <http://localhost:8100>. Or, without the dashboard:
 
 ```bash
-curl -s http://localhost:8099/jobs | python -m json.tool     # every run, with output
-curl -s http://localhost:8099/schedules                      # when each next fires
-docker exec tdtp-rabbitmq rabbitmqctl list_queues name messages
+curl -s "http://localhost:8099/jobs?limit=5" | python -m json.tool
+curl -s http://localhost:8099/schedules
+docker exec tdtp-rabbitmq rabbitmqctl list_queues name messages consumers
 ```
 
 The first run backfills: the checkpoints start empty, so every table sends up to
