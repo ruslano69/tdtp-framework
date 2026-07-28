@@ -12,8 +12,8 @@ project, so both are tested here rather than assumed.
     K3  spool path (packet_kb) keeps every message under the broker limit
     K4  a batch over the limit is reported before the send, not after
     K5  a rejection names each packet and its size, not just a count
-    K6  compression decides the outcome: the same export passes on ordinary
-        data and is refused on high-entropy data
+    K6  packet_kb holds whatever the data compresses to — the same settings
+        deliver both ordinary and high-entropy tables
 
 K4-K6 lower the broker's message.max.bytes to the Kafka default for the duration
 of the run and restore it afterwards. The override is dynamic — it shadows the
@@ -27,18 +27,21 @@ left behind by an interrupted run would otherwise be consumed from at a stale
 offset and the results would be quietly wrong.
 
 
-ЗНАЙТЕ ПЕРЕД ТЕМ КАК «ЧИНИТЬ» K3 И K6
-    Обе падают, и падают заслуженно: pipeline с output.type kafka уходит в
-    streaming-экспорт (processor.go: isBrokerStreaming), а тот не смотрит ни на
-    packet_kb, ни на spool_dir, ни на mem_limit_mb — ноль обращений к ним в
-    коде. KafkaSpoolExporter при этом жив и работает, но добраться до него из
-    пайплайна можно только задав output.fallback, что переключает на batch-режим
-    по совсем другой причине.
+ЧТО ИМЕННО СТЕРЕГУТ K3 И K6
+    Пайплайн с output.type kafka уходит в streaming-экспорт
+    (processor.go: isBrokerStreaming), и тот долгое время не смотрел ни на
+    packet_kb, ни на spool_dir, ни на mem_limit_mb — ноль обращений к ним.
+    KafkaSpoolExporter при этом работал, но добраться до него из пайплайна
+    можно было только задав output.fallback, который переключает на batch по
+    совершенно другой причине. Защита от превышения существовала не на том
+    пути, которым идут данные: части выходили дефолтные (~1.9 МБ), и
+    несжимаемая таблица отвергалась, тогда как сжимаемая проскакивала через
+    Snappy — один и тот же экспорт удавался или нет в зависимости от формы
+    данных.
 
-    То есть защита от превышения размера существует, но не на том пути, которым
-    данные идут. Пока это не исправлено, K3 и K6 должны оставаться красными —
-    они и написаны, чтобы это было видно. Ослаблять их проверки нельзя: это
-    вернёт молчание, из-за которого дефект прожил так долго.
+    Теперь ExportStream берёт размер части из packet_kb. K3 проверяет, что
+    дробление действительно происходит, K6 — что исход перестал зависеть от
+    сжимаемости. Если они снова покраснеют, это вернулось.
 
 Prerequisites:
     - Kafka reachable at KAFKA_BROKER (docker-compose.dev.yml brings one up)
@@ -373,9 +376,16 @@ def test_K4_warning():
         return
 
     pipeline = str(_TMP / f"tdtp_kafka_warn_{RUN_ID}.yaml")
-    # batch_send 10 × ~270 KB is over 1 MB together while no single packet is.
+    # packet_kb deliberately far above the broker's limit. Note the unit:
+    # packet_kb feeds SetMaxMessageSize, which budgets in UTF-16 units -- about
+    # twice the byte count -- so 8000 asks for roughly 4 MB of actual XML
+    # against a 1 MB limit. 2000 was not enough: it lands near 1 MB and slips
+    # through.
+    # Asking for a size that fits no longer produces a warning — that is what
+    # the streaming fix achieved — so provoking one now means asking for a size
+    # that genuinely does not.
     write_pipeline(pipeline, "noisy", name,
-                   "    packet_kb: 750\n    batch_send: 10\n")
+                   "    packet_kb: 8000\n    batch_send: 1\n")
 
     t = time.monotonic()
     p = run("--pipeline", pipeline)
@@ -404,8 +414,9 @@ def test_K5_rejection():
         return
 
     pipeline = str(_TMP / f"tdtp_kafka_reject_{RUN_ID}.yaml")
+    # Same reasoning as K4: ask for parts the broker cannot accept.
     write_pipeline(pipeline, "noisy", name,
-                   "    packet_kb: 750\n    batch_send: 10\n")
+                   "    packet_kb: 8000\n    batch_send: 1\n")
 
     t = time.monotonic()
     p = run("--pipeline", pipeline)
@@ -433,18 +444,23 @@ def test_K5_rejection():
 # ─── K6: compression decides the outcome ──────────────────────────────────────
 
 def test_K6_compressibility():
-    print(f"\n{BOLD}=== K6 compressible vs high-entropy data ==={RESET}")
+    print(f"\n{BOLD}=== K6 packet_kb holds for both data shapes ==={RESET}")
 
     if not _limit_lowered:
-        skip("K6.1 ordinary data fits where random data does not", "broker limit not lowered")
+        skip("K6.1 sized parts fit whatever the data compresses to", "broker limit not lowered")
         return
 
     plain_topic, noisy_topic = topic("k6a"), topic("k6b")
     if not (create_topic(plain_topic) and create_topic(noisy_topic)):
-        skip("K6.1 ordinary data fits where random data does not", "could not create topics")
+        skip("K6.1 sized parts fit whatever the data compresses to", "could not create topics")
         return
 
-    settings = "    packet_kb: 750\n    batch_send: 10\n"
+    # Well under the 1 MB limit, so the outcome must not depend on how well the
+    # data compresses. Before streaming honoured packet_kb this setting was
+    # ignored here, parts came out at the ~1.9 MB default, and the high-entropy
+    # table was rejected while the compressible one squeaked through Snappy —
+    # the same export passing or failing on the shape of the data alone.
+    settings = "    packet_kb: 200\n    batch_send: 1\n"
 
     pl = str(_TMP / f"tdtp_kafka_k6a_{RUN_ID}.yaml")
     write_pipeline(pl, "plain", plain_topic, settings)
@@ -457,13 +473,20 @@ def test_K6_compressibility():
     p_noisy = run("--pipeline", pn)
     noisy_count = topic_message_count(noisy_topic)
 
-    # Same settings, same row count, same limit — only the data differs. This is
-    # why the problem stayed hidden: demo data compresses and gets through.
-    record("K6.1 compressible data passes the same limit that rejects random data",
-           plain_count > 0 and noisy_count == 0,
-           time.monotonic() - t,
-           f"plain={plain_count} msgs (rc={p_plain.returncode}), "
-           f"noisy={noisy_count} msgs (rc={p_noisy.returncode})")
+    record("K6.1 compressible data delivers",
+           p_plain.returncode == 0 and plain_count > 0,
+           time.monotonic() - t, f"rc={p_plain.returncode} messages={plain_count}")
+
+    record("K6.2 high-entropy data delivers on the same settings",
+           p_noisy.returncode == 0 and noisy_count > 0,
+           0.0, f"rc={p_noisy.returncode} messages={noisy_count}")
+
+    # The incompressible table has to become more messages than the
+    # compressible one at the same packet_kb, since each part carries the same
+    # uncompressed budget but far more bytes on the wire.
+    record("K6.3 high-entropy data splits into more parts than compressible data",
+           noisy_count > plain_count > 0,
+           0.0, f"plain={plain_count} noisy={noisy_count}")
 
 
 # ─── Runner ───────────────────────────────────────────────────────────────────

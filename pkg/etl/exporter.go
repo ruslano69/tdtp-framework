@@ -996,6 +996,17 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 	// Создаем streaming generator
 	streamGen := packet.NewStreamingGenerator()
 
+	// Размер части по конфигу выхода, а не по умолчанию.
+	//
+	// Без этого packet_kb действовал только на spool-пути, а сюда приходит
+	// каждый Kafka-пайплайн без fallback (processor.go: isBrokerStreaming) —
+	// то есть основной маршрут данных. Генератор оставался с
+	// DefaultMaxMessageSize (~1.9 МБ XML), и настройка, поставленная ровно
+	// затем, чтобы уложиться в лимит брокера, молча не работала.
+	if partSize := e.streamPartSizeBytes(); partSize > 0 {
+		streamGen.SetPartSize(partSize)
+	}
+
 	// Генерируем части в потоковом режиме
 	partsChan, summaryChan := streamGen.GeneratePartsStream(
 		ctx,
@@ -1098,4 +1109,24 @@ func formatExtraErrors(errs []error) string {
 	}
 
 	return b.String()
+}
+
+// streamPartSizeBytes возвращает размер части для потокового экспорта в
+// брокер, 0 — оставить дефолт генератора.
+//
+// Kafka отвергает produce-запрос по message.max.bytes, поэтому размер части
+// там не вопрос вкуса: часть по умолчанию (~1.9 МБ XML) не влезает в
+// брокерский дефолт 1 МБ, если данные не сжались. packet_kb существует ровно
+// для этого, и до сих пор действовал только на spool-пути — сюда, на путь
+// каждого пайплайна без fallback, он не доходил.
+//
+// Для RabbitMQ настройки нет, поэтому там остаётся дефолт: у него нет
+// сопоставимого предела на сообщение, и подменять его размером из чужой
+// секции конфига было бы догадкой.
+func (e *Exporter) streamPartSizeBytes() int {
+	if e.config.Kafka == nil || e.config.Kafka.PacketKB <= 0 {
+		return 0
+	}
+
+	return e.config.Kafka.PacketKB * 1024
 }
