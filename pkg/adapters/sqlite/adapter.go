@@ -139,7 +139,22 @@ func (a *Adapter) initHelpers(noDateSentinels []string) {
 // Эти настройки критичны для производительности SQLite при массовых операциях
 func (a *Adapter) applyPragmaOptimizations(ctx context.Context) {
 	pragmas := []string{
-		// WAL mode: Write-Ahead Logging - до 10x быстрее записи, безопасно
+		// busy_timeout ПЕРВЫМ, до journal_mode.
+		//
+		// SQLite допускает одного писателя. Без busy_timeout второй процесс
+		// получает SQLITE_BUSY ("database is locked") немедленно, вместо того
+		// чтобы подождать и повторить. Замерено на аудит-приёмнике, где была
+		// ровно эта дыра: из 8 одновременных процессов tdtpcli падали 3.
+		//
+		// Порядок важен: смена journal_mode сама берёт блокировку записи, так
+		// что если гонка придётся именно на неё, busy_timeout ещё не действует
+		// и ждать будет нечему. Тот же вывод, что и в cmd/tdtpcli/production.go
+		// для аудит-БД — здесь он повторён, потому что это другой путь и
+		// другое соединение, а не потому, что забыли.
+		"PRAGMA busy_timeout = 5000",
+
+		// WAL mode: Write-Ahead Logging - до 10x быстрее записи, безопасно.
+		// Читатели не блокируются на писателе.
 		"PRAGMA journal_mode = WAL",
 
 		// Synchronous NORMAL: fsync только на критичных моментах (не на каждый INSERT)

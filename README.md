@@ -220,7 +220,7 @@ transaction support, and import strategies `REPLACE`/`IGNORE`/`FAIL`/`COPY`.
 
 - **XLSX** (`pkg/xlsx`) — TDTP ⇄ Excel with a full data-integrity trap matrix (BIGINT
   precision, NaN/Inf, pre-1900 dates, formula injection, error cells) — see
-  [Special Values](#special-values--cross-adapter-data-integrity) below
+  [Special Values](#special-values--cross-adapter-data-integrity-v131) below
 - **CSV** (`pkg/csv`) — TDTP → CSV, encrypted input auto-decrypted, v1.4 gate applied
 - **HTML Viewer** (`pkg/html`) — quick browser preview (`--to-html`, `--row`, `--open`)
 - **SVG** (`pkg/svg`, `tdtp-svg`) — namespace-aware SVG ⇄ TDTP round-trip

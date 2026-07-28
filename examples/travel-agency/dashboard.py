@@ -317,7 +317,7 @@ td.num{text-align:right}
 
 <h2>Schedules</h2>
 <div class="wrap"><table id="schedules">
-<thead><tr><th>Schedule</th><th>Every</th><th>Dispatch</th><th>Last fired</th><th>Next</th></tr></thead>
+<thead><tr><th>Schedule</th><th>Every</th><th>Last run</th><th>Last fired</th><th>Next</th></tr></thead>
 <tbody></tbody></table></div>
 
 <h2>Recent runs</h2>
@@ -389,17 +389,14 @@ function schedules(rows){
     const tr = el('tr');
     tr.appendChild(el('td','', s.id));
     tr.appendChild(el('td','mono dim', s.cron));
-    // The orchestrator writes this when it hands the job to the executor and
-    // never revisits it, so "running" does not mean a job is still running --
-    // it means the scheduler dispatched one. "failed" means it refused to:
-    // unapproved content, a trust-gate rejection, an invalid parameter. That
-    // distinction is exactly what you need after editing a workflow and
-    // forgetting to re-approve it, so it is worth labelling honestly rather
-    // than passing the raw word through.
-    const dispatch = s.last_status === 'failed' ? 'refused'
-                   : s.last_status === 'running' ? 'dispatched'
-                   : (s.last_status || '—');
-    tr.appendChild(el('td', s.last_status === 'failed' ? 'bad' : 'ok', dispatch));
+    // Passed through as-is since v1.20.4, where the orchestrator started
+    // writing the outcome back. Before that it stamped "running" at dispatch
+    // and never revisited it, so this column relabelled the raw value to say
+    // what it actually meant. Now "running" is a genuine in-flight run and
+    // "failed" a genuine failure, and relabelling would be the lie.
+    tr.appendChild(el('td', s.last_status === 'failed' ? 'bad'
+                         : s.last_status === 'running' ? 'warn' : 'ok',
+                      s.last_status || '—'));
     tr.appendChild(el('td','mono dim', short(s.last_run)));
     tr.appendChild(el('td','mono dim', short(s.next_run)));
     tb.appendChild(tr);

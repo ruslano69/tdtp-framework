@@ -2,6 +2,52 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.20.4] — 2026-07-28
+
+### Fixed — the SQLite adapter refused concurrent writers instead of waiting
+
+`applyPragmaOptimizations` set `journal_mode = WAL` but never `busy_timeout`,
+and modernc.org/sqlite defaults it to 0 — measured, not assumed. SQLite allows
+one writer, so a second process got `SQLITE_BUSY` immediately rather than
+waiting its turn. Two tdtpcli processes against one SQLite file is the ordinary
+way this tool is used: an import while an export runs, two `--map --listen`
+daemons, a pipeline beside a sync.
+
+This is the same gap that was closed for the audit sink in 1.20.1, where 8
+concurrent processes produced 3 outright failures. A comment in
+`cmd/tdtpcli/production.go` had already named the adapter as still carrying it.
+
+`busy_timeout` is set **before** `journal_mode`, because switching journal_mode
+takes SQLite's write lock itself — if that statement is the one that races, a
+timeout set afterwards is not yet in effect.
+
+The regression test holds the write lock from a second connection for 400ms and
+asserts the adapter's write waits and succeeds. Without the pragma it fails in
+7.6ms with `database is locked (5) (SQLITE_BUSY)`.
+
+### Fixed — a schedule's status never reached its outcome
+
+The scheduler stamped `running` when it handed a job to the executor and never
+revisited it. The column comment in `db.go` promises `done|failed|running`, and
+nothing wrote `done` — so `GET /schedules` reported every healthy schedule as
+permanently mid-run, and `failed` there meant only that the scheduler had
+*refused* to start a job (unapproved content, a trust-gate rejection, an
+invalid parameter), never that a run had failed. Two different things wearing
+one word.
+
+`UpdateJobDone` now carries the outcome back to the schedule that started the
+job. It is the single method every terminal transition goes through,
+cancellation included, so both call sites in the executor are covered at once.
+
+A manual run has `schedule_id` NULL and touches no schedule. Overlapping runs
+are guarded: robfig/cron does not skip a tick because the previous one is still
+going, so only the newest job of a schedule may set its status — otherwise a
+slow job finishing late would overwrite a fresh `running` with a stale outcome.
+
+`examples/travel-agency/dashboard.py` stops relabelling the field. It had been
+showing `dispatched`/`refused` to say what the value actually meant; now that
+the value is honest, relabelling would be the lie.
+
 ## [1.20.3] — 2026-07-28
 
 ### Added — `GET /jobs?limit=`
