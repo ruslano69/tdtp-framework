@@ -63,6 +63,9 @@ func routeCommand(
 			DryRun:      *flags.MapDryRun,
 			MercuryURL:  *flags.MercuryURL,
 			Listen:      *flags.Listen,
+			// Только для демона. У одноразового запуска запись появится ниже,
+			// на выходе из routeCommand, и вторая была бы дублем.
+			Auditor: mapListenAuditor(prodFeatures, *flags.Listen, *flags.Map),
 		})
 
 	} else if flags.List.IsSet {
@@ -1018,4 +1021,37 @@ func commandWasSpecified(flags *Flags) bool {
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// syncAuditor адаптирует ProductionFeatures под commands.SyncAuditor.
+//
+// Нужен потому, что аудит живёт здесь, в package main, а цикл демона — в
+// commands, который main импортирует. Интерфейс объявлен на стороне
+// потребителя, реализация остаётся тут, вместе с логгером.
+type syncAuditor struct {
+	pf      *ProductionFeatures
+	mapping string
+}
+
+// RecordSync пишет одну запись за обработанное сообщение.
+//
+// Операция та же OpTransform, что и у одноразового --map: это та же работа,
+// отличается только то, что она повторяется. Различить их в логе позволяет
+// command=map:listen.
+func (a syncAuditor) RecordSync(ctx context.Context, resource string, records int64, duration time.Duration, err error) {
+	a.pf.LogWithMetadata(ctx, audit.OpTransform, err == nil, err,
+		map[string]string{"command": "map:listen", "mapping": a.mapping},
+		resource, records, duration)
+}
+
+// mapListenAuditor возвращает сток аудита только для демона.
+//
+// Одноразовому запуску он не нужен: его запись всё равно пишется на выходе из
+// routeCommand, и вторая была бы дублем той же работы.
+func mapListenAuditor(pf *ProductionFeatures, listen bool, mappingFile string) commands.SyncAuditor {
+	if !listen || pf == nil {
+		return nil
+	}
+
+	return syncAuditor{pf: pf, mapping: mappingFile}
 }
