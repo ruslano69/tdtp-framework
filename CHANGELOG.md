@@ -2,6 +2,53 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.20.2] — 2026-07-28
+
+### Fixed — timestamps lost their sub-second precision on export
+
+TDTP's canonical form was RFC3339, which formats to whole seconds. Every
+database the framework talks to stores more: Postgres `timestamp` keeps
+microseconds, MSSQL `datetime2` up to 100ns. Exporting discarded that, and a
+round-trip could not give it back.
+
+Not only cosmetic. `--sync-incremental` derives its watermark from the exported
+data, so against a microsecond column the watermark could never represent the
+row it stood for — `last_updated > '11:38:11Z'` still matches the row at
+11:38:11.52877, and the sync re-sent that row on every run, forever. Neither
+`>` nor `>=` converges when the watermark is coarser than the values it is
+compared against. In the travel-agency example this showed as a permanent floor
+of one row per table per tick; it now reports no changes at rest.
+
+The canonical form is RFC3339Nano, defined once in `schema.FormatTimestamp`.
+It had been spelled out in two places — the adapters' `DBValueToString` and
+`schema.FormatValue` — and `ConvertValueToTDTP` runs the second over the
+first's output, so fixing only the adapters was silently undone. Both now
+delegate to the one definition.
+
+`normalizeSQLiteDateTime` had the same loss on the other path in: it cut SQLite
+datetimes at 19 characters, dropping the milliseconds SQLite had stored. It now
+carries the fractional part through, and leaves an explicit zone alone instead
+of relabelling it `Z`.
+
+Compatibility, measured rather than assumed:
+
+- A value with no sub-second component formats byte-identically under both
+  layouts, so packets for such data — and their checksums — do not change. The
+  whole test suite passing unmodified is that property being exercised.
+- `time.Parse` with the RFC3339 layout already accepts a fractional part, so
+  every existing reader takes the longer string unchanged; no consumer-side
+  change was needed.
+
+One caveat, documented at the definition: RFC3339Nano trims trailing zeros, so
+`"…:11.5Z"` sorts before `"…:11Z"` as raw text. Nothing in the framework compares
+these as text — tdtql's comparator compares parsed times, the SQL generator
+hands the value to the database, and sync's watermark comparison parses first —
+but a caller sorting the raw strings would be wrong to.
+
+**Checkpoints written before this hold truncated watermarks.** The first run
+after upgrading re-sends the rows inside that final second and then converges;
+no data is lost either way, since the import side upserts.
+
 ## [1.20.1] — 2026-07-28
 
 ### Fixed — the audit log's time filter dropped records, and retention deleted the wrong ones

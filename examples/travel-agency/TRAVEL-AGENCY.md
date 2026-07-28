@@ -227,26 +227,24 @@ Default settings:
 
 ## Notes
 
-### The idle tick is not zero rows
+### Why the idle tick reports nothing
 
-At rest, `travel-sync-out` reports one row per table on every run rather than
-"no changes". It is the same row each time, and re-sending it is harmless —
-`--map` upserts — but it is worth knowing why.
+At rest, `travel-sync-out` reports "no changes" for all six tables. Reaching
+that took a framework fix worth knowing about, because the symptom was subtle:
+the workflow used to report exactly one row per table forever.
 
-TDTP serialises timestamps as RFC 3339 truncated to whole seconds, while these
+TDTP serialised timestamps as RFC 3339 truncated to whole seconds, while these
 `last_updated` columns are Postgres `timestamp`, which keeps microseconds. The
-watermark that comes back from an exported packet is therefore *less precise*
-than the column it came from: a row at `11:38:11.52877` yields the watermark
-`11:38:11Z`, and `last_updated > '11:38:11Z'` still matches that same row on the
-next run.
+watermark taken from an exported packet was therefore *less precise* than the
+column it came from: a row at `11:38:11.52877` produced the watermark
+`11:38:11Z`, and `last_updated > '11:38:11Z'` matched that same row again on the
+next run. Neither `>` nor `>=` converges when the watermark cannot express the
+value it stands for.
 
-Nothing in the sync logic can fix this — neither `>` nor `>=` converges when the
-watermark cannot express the value it is standing in for. The fix belongs in the
-serialisation, and is not made here because it changes bytes on the wire for
-every deployment, not just this example.
-
-Until then, `--sync-incremental` converges exactly when its tracking column has
-no sub-second component: an integer key, or a `timestamp(0)`.
+Fixed in v1.20.2 — the canonical form is now RFC3339Nano, which is
+byte-identical for values with no sub-second component and lossless for those
+that have one. Checkpoints written before it hold truncated watermarks; the
+first run after upgrading re-sends one row per table and then settles.
 
 ### Staging Tables and Data Types
 

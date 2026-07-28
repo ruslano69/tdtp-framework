@@ -22,6 +22,17 @@ import (
 // Не попадает в финальный TDTP файл.
 const NullSentinel = "\x00"
 
+// formatTimestamp renders a DATETIME/TIMESTAMP value for a TDTP packet.
+//
+// Delegates to schema.FormatTimestamp, which is the single definition of the
+// canonical form and carries the reasoning. Keeping a second copy of the
+// layout here is what let the two disagree: whatever an adapter produced,
+// ConvertValueToTDTP's second pass re-formatted through schema.FormatValue,
+// so a fix applied only here was silently undone.
+func formatTimestamp(t time.Time) string {
+	return schema.FormatTimestamp(t)
+}
+
 // UniversalTypeConverter - универсальный конвертер типов для всех адаптеров
 // Устраняет дублирование кода конвертации между адаптерами
 type UniversalTypeConverter struct {
@@ -215,7 +226,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		}
 		// Timestamp в RFC3339 формате (TDTP стандарт)
 		// Нормализуем в UTC для consistency
-		return v.UTC().Format(time.RFC3339)
+		return formatTimestamp(v)
 
 	case pgtype.Time:
 		// PostgreSQL TIME (время суток, например 08:00:00)
@@ -252,7 +263,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		case pgtype.NegativeInfinity:
 			return "-Infinity"
 		}
-		return v.Time.UTC().Format(time.RFC3339)
+		return formatTimestamp(v.Time)
 
 	case pgtype.Timestamptz:
 		if !v.Valid {
@@ -264,7 +275,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		case pgtype.NegativeInfinity:
 			return "-Infinity"
 		}
-		return v.Time.UTC().Format(time.RFC3339)
+		return formatTimestamp(v.Time)
 
 	case pgtype.Numeric:
 		// PostgreSQL NUMERIC/DECIMAL - конвертируем через Float64
@@ -399,7 +410,7 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 		}
 		// DATETIME, DATETIME2, DATETIMEOFFSET - конвертируем в RFC3339 для TDTP
 		// ВАЖНО: нормализуем в UTC для консистентности
-		return v.UTC().Format(time.RFC3339)
+		return formatTimestamp(v)
 
 	default:
 		return fmt.Sprintf("%v", v)
@@ -467,7 +478,7 @@ func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Fiel
 			return packet.SpecNoDateMarker
 		}
 		// Конвертируем в RFC3339 для TDTP (консистентность с MSSQL и PostgreSQL)
-		return v.UTC().Format(time.RFC3339)
+		return formatTimestamp(v)
 
 	default:
 		return fmt.Sprintf("%v", v)
