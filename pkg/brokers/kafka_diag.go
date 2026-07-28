@@ -1,3 +1,5 @@
+//go:build !nokafka
+
 package brokers
 
 // kafka_diag.go — сказать про размер до отправки и разобрать отказ после неё.
