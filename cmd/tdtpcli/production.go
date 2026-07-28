@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver, for audit.database.type: postgres
@@ -167,7 +168,12 @@ func newAuditDatabaseAppender(cfg AuditDatabaseConfig, level audit.Level) (*audi
 		return nil, nil, fmt.Errorf("audit.database.type %q not supported (expected one of: sqlite, mysql, mssql, postgres)", cfg.Type)
 	}
 
-	db, err := sql.Open(driverName, cfg.DSN)
+	dsn := cfg.DSN
+	if cfg.Type == "sqlite" {
+		dsn = withSQLiteTimeFormat(dsn)
+	}
+
+	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open audit database connection: %w", err)
 	}
@@ -355,4 +361,38 @@ func (pf *ProductionFeatures) LogWithMetadata(ctx context.Context, op audit.Oper
 		// Best-effort: a broken audit sink must not fail the CLI operation itself.
 		fmt.Fprintf(os.Stderr, "warning: audit log write failed: %v\n", logErr)
 	}
+}
+
+// sqliteTimeFormatParam makes modernc.org/sqlite write timestamps in the
+// canonical SQLite datetime format instead of Go's time.Time.String().
+//
+// The driver says so itself (conn.go, formatTime): "Before configurable write
+// time formats were supported, time.Time.String was used. Maintain that
+// default to keep existing driver users formatting times the same." That
+// default put values like
+//
+//	2026-07-28 11:12:31.8174159 +0300 EEST m=+10.312223101
+//
+// into the audit table's TIMESTAMP column — a zone abbreviation and a
+// monotonic clock reading, in a column every audit query sorts and filters on.
+// With this parameter the same instant is written as
+//
+//	2026-07-28 08:12:31.8174159+00:00
+//
+// which SQLite's own date functions understand and which any other reader can
+// parse. Only the sqlite backend needs it; pgx, mysql and mssql send time
+// natively.
+const sqliteTimeFormatParam = "_time_format=sqlite"
+
+// withSQLiteTimeFormat appends sqliteTimeFormatParam to a SQLite DSN, leaving
+// an explicit _time_format alone so an operator can still override it.
+func withSQLiteTimeFormat(dsn string) string {
+	if strings.Contains(dsn, "_time_format=") {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + sqliteTimeFormatParam
 }

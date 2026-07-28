@@ -1,0 +1,13 @@
+# Execution backends the orchestrator may invoke.
+#
+# The orchestrator's built-in default runner is `tdtpcli --pipeline <file>`.
+# This example's scenarios are --steps workflows, not pipelines: a pipeline is
+# one extract/transform/load, while a workflow is a set of independent syncs
+# that should run in parallel and fail independently. Declaring the shape here
+# rather than in each scenario keeps the scenarios portable — the binary path
+# is the one thing that differs between machines.
+
+runners:
+  tdtpcli-steps:
+    binary: ../../tdtpcli.exe
+    args: ["--steps", "{{.tmpfile}}"]

@@ -304,6 +304,40 @@ func (c *Converter) parseBlob(tv *TypedValue, field FieldDef) (*TypedValue, erro
 	return tv, nil
 }
 
+// FormatTimestamp renders a DATETIME/TIMESTAMP value in TDTP's canonical form.
+// It is the single definition of that format: adapters converting a driver
+// value and FormatValue re-formatting a parsed one must agree, or the second
+// pass silently undoes the first.
+//
+// RFC3339Nano rather than RFC3339, because RFC3339 formats to whole seconds and
+// every database this framework talks to stores more: Postgres `timestamp`
+// keeps microseconds, MSSQL `datetime2` up to 100ns. Exporting through RFC3339
+// discarded that, and a round-trip could not give it back.
+//
+// The loss was not only cosmetic. --sync-incremental derives its watermark from
+// the exported data, so against a microsecond column the watermark could never
+// represent the row it stood for: `last_updated > '11:38:11Z'` still matches
+// the row at 11:38:11.52877, and the sync re-sent that row on every run
+// forever. Neither > nor >= converges when the watermark is coarser than the
+// values it is compared against.
+//
+// Compatibility rests on two measured properties:
+//
+//   - A value with no sub-second component formats byte-identically under both
+//     layouts, so packets for such data — and their checksums — do not change.
+//   - time.Parse with the RFC3339 layout already accepts a fractional part, so
+//     every existing reader takes the longer string unchanged. datetimeFormats
+//     above leads with exactly that layout.
+//
+// One caveat: RFC3339Nano trims trailing zeros, so widths differ between rows
+// and "…:11.5Z" sorts before "…:11Z" as raw text. Nothing here compares these
+// as text — tdtql's comparator compares parsed times, the SQL generator hands
+// the value to the database, and sync's watermark comparison parses first — but
+// a caller sorting the raw strings would be wrong to.
+func FormatTimestamp(t time.Time) string {
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
 // FormatValue форматирует типизированное значение обратно в строку
 func (c *Converter) FormatValue(tv *TypedValue) string {
 	if tv.IsNull {
@@ -340,7 +374,7 @@ func (c *Converter) FormatValue(tv *TypedValue) string {
 		}
 	case TypeDatetime, TypeTimestamp:
 		if tv.TimeValue != nil {
-			return tv.TimeValue.Format(time.RFC3339)
+			return FormatTimestamp(*tv.TimeValue)
 		}
 	case TypeBlob:
 		if tv.BlobValue != nil {

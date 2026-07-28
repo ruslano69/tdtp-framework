@@ -1,31 +1,40 @@
 name: sync-all-entities
 description: "ZTR-Live → EDM: all 7 entity types in parallel (replaces consumer.py)"
 
+# --input broker:// carries no queue name on purpose. The name lives in each
+# mapping's input_source.broker.queue, so it is written once.
+#
+# It used to be repeated here, and one copy had drifted: this file said
+# tdtp.sync.branch_sales while the mapping said tdtp.sync.branch.sales. The
+# override wins, so that step listened on a queue nothing ever wrote to and
+# reported success having synced nothing -- the failure mode of naming the
+# same thing twice.
+
 steps:
   - id: flights
-    command: "--map mappings/sync_flights.yaml --input broker://tdtp.sync.flights"
+    command: "--map mappings/sync_flights.yaml --input broker://"
     on_error: skip
 
   - id: reservations
-    command: "--map mappings/sync_reservations.yaml --input broker://tdtp.sync.reservations"
+    command: "--map mappings/sync_reservations.yaml --input broker://"
     on_error: skip
 
   - id: countries
-    command: "--map mappings/sync_countries.yaml --input broker://tdtp.sync.countries"
+    command: "--map mappings/sync_countries.yaml --input broker://"
     on_error: skip
 
   - id: guides
-    command: "--map mappings/sync_guides.yaml --input broker://tdtp.sync.guides"
+    command: "--map mappings/sync_guides.yaml --input broker://"
     on_error: skip
 
   - id: tours
-    command: "--map mappings/sync_tours.yaml --input broker://tdtp.sync.tours"
+    command: "--map mappings/sync_tours.yaml --input broker://"
     on_error: skip
 
   - id: schedule
-    command: "--map mappings/sync_schedule.yaml --input broker://tdtp.sync.schedule"
+    command: "--map mappings/sync_schedule.yaml --input broker://"
     on_error: skip
 
   - id: branch_sales
-    command: "--map mappings/sync_branch_sales.yaml --input broker://tdtp.sync.branch_sales"
+    command: "--map mappings/sync_branch_sales.yaml --input broker://"
     on_error: skip

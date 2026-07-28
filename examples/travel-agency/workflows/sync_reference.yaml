@@ -1,0 +1,33 @@
+orchestrator:
+  name: travel-sync-reference
+  description: "Full reload of central reference data (countries, tours)"
+  runner: tdtpcli-steps
+
+name: travel-sync-reference
+description: "Central reference data (countries, tours) → Branch, full reload"
+
+# Separate from sync_out.yaml because these two tables cannot be synced
+# incrementally: neither countries nor tours carries an update timestamp, only
+# a surrogate key. Tracking the key would pick up new rows and silently miss
+# every edit to an existing one -- a renamed country would never reach the
+# branches, and nothing would report it. A full reload is honest about that.
+#
+# The cost is the reason this is its own workflow rather than two more steps in
+# sync_out.yaml: a full reload of the catalogue on every change event would
+# move the whole table for a change to one tour. Reference data earns a slower
+# trigger, and the coordinator gives it one.
+
+steps:
+  - id: countries
+    command: >-
+      --export-broker countries
+      --fields country_id,country_code,country_name,continent,currency_code,is_visa_required
+      --config configs/config_src_tdtp_sync_countries.yaml
+    on_error: skip
+
+  - id: tours
+    command: >-
+      --export-broker tours
+      --fields tour_id,tour_code,tour_name,description,destination_country_id,duration_days,difficulty_level,max_group_size,base_price,is_active
+      --config configs/config_src_tdtp_sync_tours.yaml
+    on_error: skip

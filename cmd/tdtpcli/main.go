@@ -63,6 +63,9 @@ func routeCommand(
 			DryRun:      *flags.MapDryRun,
 			MercuryURL:  *flags.MercuryURL,
 			Listen:      *flags.Listen,
+			// Только для демона. У одноразового запуска запись появится ниже,
+			// на выходе из routeCommand, и вторая была бы дублем.
+			Auditor: mapListenAuditor(prodFeatures, *flags.Listen, *flags.Map),
 		})
 
 	} else if flags.List.IsSet {
@@ -525,6 +528,17 @@ func routeCommand(
 			"output":          determineOutputFile(*flags.Output, *flags.SyncIncr, "xml"),
 		}
 
+		// --to-broker sends the increment to the queue instead of a file. The
+		// checkpoint is kept either way, which is the point: until now tracking
+		// a watermark and sending to a broker were separate commands, so
+		// anyone needing both kept the watermark outside the tool.
+		var syncBrokerCfg *commands.BrokerConfig
+		if *flags.SyncToBroker {
+			cfg := buildBrokerConfig(config)
+			syncBrokerCfg = &cfg
+			metadata["output"] = "broker://" + cfg.Queue
+		}
+
 		err = prodFeatures.ExecuteWithResilience(ctx, "incremental-sync", func() error {
 			return commands.IncrementalSync(ctx, adapterConfig, commands.SyncOptions{
 				TableName:      *flags.SyncIncr,
@@ -534,6 +548,14 @@ func routeCommand(
 				BatchSize:      *flags.BatchSize,
 				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
+
+				BrokerCfg:     syncBrokerCfg,
+				Compress:      *flags.Compress || config.Export.Compress,
+				CompressLevel: *flags.CompressLevel,
+				CompressAlgo:  *flags.CompressAlgo,
+				Encrypt:       *flags.Encrypt || *flags.Enc13,
+				EncryptLegacy: *flags.Enc13,
+				MercuryURL:    *flags.MercuryURL,
 			})
 		})
 
@@ -1018,4 +1040,37 @@ func commandWasSpecified(flags *Flags) bool {
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// syncAuditor адаптирует ProductionFeatures под commands.SyncAuditor.
+//
+// Нужен потому, что аудит живёт здесь, в package main, а цикл демона — в
+// commands, который main импортирует. Интерфейс объявлен на стороне
+// потребителя, реализация остаётся тут, вместе с логгером.
+type syncAuditor struct {
+	pf      *ProductionFeatures
+	mapping string
+}
+
+// RecordSync пишет одну запись за обработанное сообщение.
+//
+// Операция та же OpTransform, что и у одноразового --map: это та же работа,
+// отличается только то, что она повторяется. Различить их в логе позволяет
+// command=map:listen.
+func (a syncAuditor) RecordSync(ctx context.Context, resource string, records int64, duration time.Duration, err error) {
+	a.pf.LogWithMetadata(ctx, audit.OpTransform, err == nil, err,
+		map[string]string{"command": "map:listen", "mapping": a.mapping},
+		resource, records, duration)
+}
+
+// mapListenAuditor возвращает сток аудита только для демона.
+//
+// Одноразовому запуску он не нужен: его запись всё равно пишется на выходе из
+// routeCommand, и вторая была бы дублем той же работы.
+func mapListenAuditor(pf *ProductionFeatures, listen bool, mappingFile string) commands.SyncAuditor {
+	if !listen || pf == nil {
+		return nil
+	}
+
+	return syncAuditor{pf: pf, mapping: mappingFile}
 }

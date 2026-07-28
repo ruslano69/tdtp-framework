@@ -16,13 +16,29 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
+// SyncAuditor receives one audit record per message processed in daemon mode.
+//
+// The audit entry is written when the process exits. For a one-shot --map that
+// is the same as "after the work". A daemon runs until SIGTERM, so the same
+// mechanism produced one record covering days of syncs: the run was audited,
+// the work inside it was not.
+//
+// Declared here rather than taking the logger directly because the audit
+// machinery lives in package main, which imports this package.
+//
+// nil disables it — that is what a one-shot run passes.
+type SyncAuditor interface {
+	RecordSync(ctx context.Context, resource string, records int64, duration time.Duration, err error)
+}
+
 // MapOptions holds parameters for the --map command.
 type MapOptions struct {
-	MappingFile string // path to mapping.yaml
-	InputFile   string // path to source .tdtp.xml (or .tdtp.enc) file
-	DryRun      bool   // print what would happen without writing to DB
-	MercuryURL  string // xZMercury base URL for decrypting .enc input (burn-on-read)
-	Listen      bool   // daemon mode: loop on broker queue until SIGTERM
+	MappingFile string      // path to mapping.yaml
+	InputFile   string      // path to source .tdtp.xml (or .tdtp.enc) file
+	DryRun      bool        // print what would happen without writing to DB
+	MercuryURL  string      // xZMercury base URL for decrypting .enc input (burn-on-read)
+	Listen      bool        // daemon mode: loop on broker queue until SIGTERM
+	Auditor     SyncAuditor // per-message audit in daemon mode; nil = disabled
 }
 
 // RunMap executes a cross-system field mapping: reads a TDTP packet, applies
@@ -194,6 +210,10 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		rows := len(pkt.Data.Rows)
 		if err := mapping.Execute(listenCtx, cfg, pkt, opts.DryRun); err != nil {
 			fmt.Printf("[map:listen] execute error: %v\n", err)
+			// Отказ пишется в аудит наравне с успехом: сообщение уходит в nack
+			// и возвращается в очередь, не оставляя следа нигде, кроме stdout
+			// демона — а его никто не читает через неделю работы.
+			recordSync(listenCtx, opts.Auditor, bcfg.Queue, 0, time.Since(t0).Round(time.Millisecond), err)
 			nackIfAble(br)
 			continue
 		}
@@ -211,6 +231,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		total += rows
 		elapsed := time.Since(t0).Round(time.Millisecond)
 		fmt.Printf("[map:listen] ✓  rows=%-6d  total=%-6d  %s\n", rows, total, elapsed)
+		recordSync(listenCtx, opts.Auditor, bcfg.Queue, int64(rows), elapsed, nil)
 	}
 
 	fmt.Printf("[map:listen] stopped. total rows upserted: %d\n", total)
@@ -371,4 +392,17 @@ func loadPacket(ctx context.Context, path, mercuryURL string,
 		return nil, fmt.Errorf("expand compact rows: %w", err)
 	}
 	return pkt, nil
+}
+
+// recordSync отдаёт одну запись аудита за обработанное сообщение.
+//
+// Отдельная функция, а не вызов по месту: отчитаться надо из нескольких точек
+// (успех и каждый вид отказа), и проверка на nil в каждой из них читалась бы
+// хуже, чем один раз здесь.
+func recordSync(ctx context.Context, auditor SyncAuditor, queue string, rows int64, elapsed time.Duration, err error) {
+	if auditor == nil {
+		return
+	}
+
+	auditor.RecordSync(ctx, "broker://"+queue, rows, elapsed, err)
 }

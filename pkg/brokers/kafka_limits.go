@@ -1,3 +1,5 @@
+//go:build !nokafka
+
 package brokers
 
 // kafka_limits.go — размер сообщения глазами брокера, а не клиента.

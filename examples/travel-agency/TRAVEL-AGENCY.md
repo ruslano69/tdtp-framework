@@ -1,8 +1,11 @@
-# Travel Agency: Event-Driven Data Synchronization
+# Travel Agency: Distributed Data Synchronization
 
 A reference example of a distributed data synchronization system built on **TDTP Framework**.  
-Three independent nodes — **Central**, **Branch**, **Airline** — exchange data through RabbitMQ  
-using **Event-Driven Architecture (EDA)**: database changes trigger high-throughput sync pipelines.
+Three independent nodes — **Central**, **Branch**, **Airline** — exchange data through RabbitMQ.
+
+The only Python left is `activity.py`, which simulates what users do. Everything
+that moves data is the framework itself: the orchestrator triggers, `tdtpcli`
+exports and imports.
 
 ---
 
@@ -20,15 +23,20 @@ Three nodes, each with its own PostgreSQL database:
 
 ```mermaid
 graph TD
-    A[activity.py] -- "1. DB Change & Event" --> MQ[RabbitMQ Exchange: travel]
-    MQ -- "2. Event Notification" --> CO[coordinator.py]
-    CO -- "3. tdtpcli --export-broker" --> Q[RabbitMQ Named Queues]
-    CO -- "4. Signal" --> R[Redis Pub/Sub]
-    R -- "5. Notification" --> CS[consumer.py]
-    CS -- "6. tdtpcli --import-broker" --> STG[(Staging Tables)]
-    STG -- "7. SQL Merge" --> DB[(Destination DB)]
-    CS -- "8. Log" --> S3[MinIO / S3 Audit]
+    A[activity.py] -- "1. writes rows" --> SRC[(Source DB)]
+    O[orchestrator<br/>schedule] -- "2. runs scenario" --> ST[tdtpcli --steps]
+    ST -- "3. --sync-incremental --to-broker" --> SRC
+    SRC -- "4. rows past the watermark" --> Q[RabbitMQ named queues]
+    ST -- "5. advances" --> CP[(state/*.json<br/>checkpoints)]
+    Q -- "6. one listener per queue" --> CS[tdtpcli --map --listen]
+    CS -- "7. upsert, then ACK" --> DB[(Destination DB)]
+    CS -- "8. audit record per message" --> AUD[(Audit DB)]
 ```
+
+Nothing tells the exporter what changed — it asks. Each table's checkpoint holds
+the highest `last_updated` already sent, and the next run takes what is above it.
+That is why the trigger can be a plain schedule, and why rows written by anyone
+other than `activity.py` are picked up just the same.
 
 ### Sync Map
 
@@ -43,27 +51,114 @@ graph TD
 ## Components
 
 ### `activity.py` — Traffic Simulator
-Emulates real user activity across all nodes:
+The one remaining Python process, and the only thing here that is not the
+framework. Emulates real user activity across all nodes:
 - Registers new clients and sales in **Branch**
 - Updates catalogs (prices, guide statuses) in **Central**
 - Changes flight statuses and creates bookings in **Airline**
-- After each DB write: publishes a short JSON event to RabbitMQ exchange `travel`  
-  with a routing key (e.g. `branch.sales.created`)
 
-### `coordinator.py` — Export Coordinator
-Bridge between events and data:
-- Listens to RabbitMQ exchange `travel`
-- On event: determines which data to transfer (via `ROUTE_MAP`)
-- Runs `tdtpcli --export-broker` — reads changed records (using incremental fields like `last_updated`),  
-  compresses and sends to the target RabbitMQ queue
-- Publishes a readiness signal to Redis Pub/Sub
+It writes to the databases and nothing else. It used to also announce each write
+on a RabbitMQ topic exchange so the coordinator would know to export; that
+publisher is gone along with its only subscriber.
 
-### `consumer.py` — Import Consumer
-Handles delivery and integration:
-- Listens to Redis notification channel
-- Runs `tdtpcli --import-broker` — reads from RabbitMQ queue into staging tables
-- Calls `merge_...` SQL procedures for atomic upsert from staging to main tables
-- Writes audit record (transaction log) to S3 bucket `travel-agency`
+### `orchestrator.ps1` — Export Trigger
+
+Starts the framework's orchestrator against this directory. It replaced
+`coordinator.py`, whose four jobs each went somewhere that already had them:
+
+| coordinator.py did | now |
+|---|---|
+| kept a cursor per table in Redis, then set it to `datetime.now()` | `state/*.json`, taken from the exported data by `--sync-incremental` |
+| held a `ROUTE_MAP` of event → tables, built `--where` by hand | `workflows/sync_out.yaml`, one `--sync-incremental --to-broker` step per table |
+| subscribed to a topic exchange and debounced 10s | a schedule in the orchestrator |
+| wrote a state key to Redis | the orchestrator's job log, one record with full output per run |
+
+Setting the cursor from `datetime.now()` was a quiet data-loss bug: rows written
+between the start of the `SELECT` and the moment `now()` was read landed below
+the new watermark and were never sent. `--sync-incremental` takes the watermark
+from the rows it actually exported, so a row that was not in the result set
+cannot be skipped.
+
+Dropping the event trigger for a schedule looks like a step back and is not. The
+event said which *simulated activity* had run, not which rows had changed — it
+only worked because `activity.py` was the sole writer. Any other writer changed
+rows that no event announced, and `coordinator.py` would never sync them.
+
+**Scenarios must be approved before they run.** Edit a workflow file and its
+checksum stops matching the approval, and the schedule skips the run rather than
+executing changed content unnoticed. Re-approve with `-Approve`.
+
+### `dashboard.py` — Watching It Run
+
+    python dashboard.py     # then open http://localhost:8100
+
+The one place the whole flow is visible at once. Read-only: it polls four
+sources and joins them, and never publishes, consumes, writes to a database or
+moves a checkpoint. Kill it mid-flight and nothing notices.
+
+That is why it is allowed to be Python in an example whose data path
+deliberately has none — `coordinator.py` was Python that *moved data*; this is
+a window. It is not started or stopped by `shutdown.ps1` for the same reason:
+it is not part of the pipeline.
+
+| Source | What it contributes |
+|---|---|
+| orchestrator `:8099` | every run with its outcome, and when each schedule next fires |
+| RabbitMQ `:15672` | queue depth, **consumer count**, publish/deliver rates |
+| `state/audit_*.db` | messages and rows actually imported, per queue |
+| `state/*.json` | the watermark each table has reached |
+
+Each is polled independently and its failure is reported in place, so a stopped
+orchestrator does not blank the queue view.
+
+The entity list is not written into the dashboard. It is derived from
+`workflows/*.yaml` (which table, which config) and `configs/*.yaml` (which
+queue) — the same files the workflow itself uses. A dashboard carrying its own
+copy of the topology eventually describes a system that no longer exists.
+
+**What it is actually for** is the failure that has no other symptom: a queue
+with messages and *no consumer*. A stalled import looks exactly like a healthy
+idle queue if you only watch depth, and the export side keeps reporting success
+because its own job did succeed. The dashboard calls it out by name. It also
+lists queues no workflow step sends to, which is how leftovers from deleted
+scripts surface.
+
+### `workflows/` — What Gets Synced
+
+| File | Trigger | Contents |
+|---|---|---|
+| `sync_out.yaml` | `@every 15s` | Six tables with a `last_updated`, synced incrementally, all in parallel |
+| `sync_reference.yaml` | `@every 5m` | `countries` and `tours`, reloaded whole |
+
+The split is not arbitrary: neither `countries` nor `tours` carries an update
+timestamp, only a surrogate key. Tracking the key would pick up new rows and
+silently miss every edit to an existing one, so those two are reloaded whole —
+and a whole catalogue every 15s to catch a renamed country is not a trade worth
+making.
+
+Each file runs on its own too, without the orchestrator:
+
+    tdtpcli --steps workflows/sync_out.yaml
+
+### `listeners.ps1` — Import Listeners
+
+No Python here: `tdtpcli` listens to the queue itself.
+
+    tdtpcli --map <mapping> --input broker://<queue> --listen
+
+One long-lived process per queue, started by `listeners.ps1 -Node <node>`.
+The message is ACKed only after the upsert succeeds, so a process that dies
+mid-write returns the message to the queue instead of losing it.
+
+This replaced `consumer.py`, which subscribed to a Redis channel and launched
+`tdtpcli --map` per notification — a new process and a new broker connection
+each time, with no acknowledgement. The Redis notification went with it: the
+queue is the signal, and announcing "there is something in the queue" only
+made sense while nothing was listening to the queue.
+
+Its S3 audit marker went too, replaced by a real audit record per message
+(`audit:` in the node config) written to a database kept separate from the one
+being written to.
 
 ---
 
@@ -104,19 +199,46 @@ python setup/populate_data_postgres.py
 
 Run each in a separate terminal:
 
-```bash
-# Export coordinator
-python coordinator.py
+Build both binaries first — the example runs them from the repository root:
 
-# Import consumers
-python consumer.py --node central
-python consumer.py --node branch
+```bash
+go build -o tdtpcli.exe ./cmd/tdtpcli/ && go build -o orchestrator.exe ./cmd/orchestrator/
+```
+
+Then, each in a separate terminal:
+
+```bash
+# Export trigger. -Approve is needed on the first run and after editing a workflow.
+./orchestrator.ps1 -Approve
+
+# Import listeners (one tdtpcli process per queue)
+./listeners.ps1 -Node central
+./listeners.ps1 -Node branch
 
 # Traffic simulators
 python activity.py --node airline --interval 5
 python activity.py --node branch  --interval 3
 python activity.py --node central --interval 10
+
+# Live view of all of it
+python dashboard.py
 ```
+
+Then open <http://localhost:8100>. Or, without the dashboard:
+
+```bash
+curl -s "http://localhost:8099/jobs?limit=5" | python -m json.tool
+curl -s http://localhost:8099/schedules
+docker exec tdtp-rabbitmq rabbitmqctl list_queues name messages consumers
+```
+
+The first run backfills: the checkpoints start empty, so every table sends up to
+`--batch-size` rows per tick until it catches up. Steady state is reached within
+a few ticks, after which each run carries only what changed.
+
+Stop everything with `./shutdown.ps1`, which stops producing before it stops
+consuming and drains the queues in between. Checkpoints in `state/` survive —
+delete them only to force a full re-sync.
 
 ---
 
@@ -126,11 +248,14 @@ All TDTP settings (compression, retries, circuit breaker) are in `configs/`:
 
 | File pattern | Used by | Purpose |
 |---|---|---|
-| `configs/config_central.yaml` | `consumer.py` | Central DB connection |
-| `configs/config_branch.yaml` | `consumer.py` | Branch DB connection |
-| `configs/config_src_tdtp_sync_*.yaml` | `coordinator.py` | Source configs per entity |
-| `configs/config_dst_tdtp_sync_*.yaml` | `consumer.py` | Destination configs per entity |
+| `configs/config_central.yaml` | `listeners.ps1` | Central DB connection + audit sink |
+| `configs/config_branch.yaml` | `listeners.ps1` | Branch DB connection + audit sink |
+| `configs/config_src_tdtp_sync_*.yaml` | `workflows/sync_out.yaml` | Source DB + destination queue per entity |
+| `mappings/sync_*.yaml` | `listeners.ps1` | Queue + target table per entity |
 | `configs/config_broker_*.yaml` | both | RabbitMQ broker settings |
+| `orchestrator/runners.yaml` | `orchestrator.ps1` | How the orchestrator invokes `tdtpcli` |
+| `schedules/travel.yaml` | `orchestrator.ps1` | Seed schedules (the DB owns them after first run) |
+| `state/*.json` | `--sync-incremental` | Checkpoints — the resume point, not a cache |
 
 Default settings:
 - Compression: `compress: true`, level 3 (zstd)
@@ -139,6 +264,25 @@ Default settings:
 ---
 
 ## Notes
+
+### Why the idle tick reports nothing
+
+At rest, `travel-sync-out` reports "no changes" for all six tables. Reaching
+that took a framework fix worth knowing about, because the symptom was subtle:
+the workflow used to report exactly one row per table forever.
+
+TDTP serialised timestamps as RFC 3339 truncated to whole seconds, while these
+`last_updated` columns are Postgres `timestamp`, which keeps microseconds. The
+watermark taken from an exported packet was therefore *less precise* than the
+column it came from: a row at `11:38:11.52877` produced the watermark
+`11:38:11Z`, and `last_updated > '11:38:11Z'` matched that same row again on the
+next run. Neither `>` nor `>=` converges when the watermark cannot express the
+value it stands for.
+
+Fixed in v1.20.2 — the canonical form is now RFC3339Nano, which is
+byte-identical for values with no sub-second component and lossless for those
+that have one. Checkpoints written before it hold truncated watermarks; the
+first run after upgrading re-sends one row per table and then settles.
 
 ### Staging Tables and Data Types
 

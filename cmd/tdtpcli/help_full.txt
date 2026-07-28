@@ -172,6 +172,9 @@ OPTIONS:
     --tracking-field <field>   Field to track changes (default: updated_at)
     --checkpoint-file <file>   Checkpoint file (default: checkpoint.yaml)
     --batch-size <size>        Batch size for sync (default: 1000)
+    --to-broker                Send the increment to the broker from --config
+                               instead of writing files. The checkpoint advances
+                               only after the send succeeds.
 
   ETL Pipeline Options:
     --unsafe                   Enable unsafe mode (allows all SQL, requires admin)

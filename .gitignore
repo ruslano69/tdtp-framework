@@ -105,3 +105,6 @@ vendor.priv
 # ловит их все, а не только корневое.
 __pycache__/
 *.py[cod]
+
+# travel-agency runtime state: checkpoints, orchestrator DB, rendered scenarios
+examples/travel-agency/state/

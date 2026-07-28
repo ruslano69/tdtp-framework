@@ -2,6 +2,229 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.20.3] — 2026-07-28
+
+### Added — `GET /jobs?limit=`
+
+The orchestrator's job listing was fixed at the last hundred, and every job
+carries tdtpcli's full output — a few hundred kilobytes per request. Anything
+that polls the endpoint wants the last handful and had no way to say so.
+
+`?limit=` is clamped to 500 and falls back to the previous hundred when absent,
+unparseable or out of range, so no existing caller changes behaviour. A listing
+endpoint asked for more rows than exist wants the rows, not an argument, which
+is why it clamps rather than returning 400.
+
+### Added — `examples/travel-agency/dashboard.py`
+
+    python dashboard.py     # http://localhost:8100
+
+One page joining the four things that already described the flow but had no
+single place to be seen together: the orchestrator's runs and schedules,
+RabbitMQ's queue depth and consumer count, the audit databases' imported
+messages, and the watermark files.
+
+Read-only throughout — it never publishes, consumes, writes to a database or
+moves a checkpoint, and opens the audit databases through a `file:` URI in
+`mode=ro` so it cannot take SQLite's write lock from a listener mid-upsert.
+Standard library only: no pika, redis, requests or PyYAML.
+
+The point of it is the failure with no other symptom: a queue holding messages
+with **no consumer**. A stalled import looks exactly like a healthy idle queue
+if you only watch depth, and the export side keeps reporting success because
+its own job did succeed. On first run it found the branch listeners down with
+286 messages waiting, and a `tdtp.coordinator` queue still holding 163,553
+messages left behind when `coordinator.py` was deleted.
+
+The entity list is derived from `workflows/*.yaml` and `configs/*.yaml` rather
+than restated in the dashboard — a dashboard carrying its own copy of the
+topology eventually describes a system that no longer exists.
+
+## [1.20.2] — 2026-07-28
+
+### Fixed — timestamps lost their sub-second precision on export
+
+TDTP's canonical form was RFC3339, which formats to whole seconds. Every
+database the framework talks to stores more: Postgres `timestamp` keeps
+microseconds, MSSQL `datetime2` up to 100ns. Exporting discarded that, and a
+round-trip could not give it back.
+
+Not only cosmetic. `--sync-incremental` derives its watermark from the exported
+data, so against a microsecond column the watermark could never represent the
+row it stood for — `last_updated > '11:38:11Z'` still matches the row at
+11:38:11.52877, and the sync re-sent that row on every run, forever. Neither
+`>` nor `>=` converges when the watermark is coarser than the values it is
+compared against. In the travel-agency example this showed as a permanent floor
+of one row per table per tick; it now reports no changes at rest.
+
+The canonical form is RFC3339Nano, defined once in `schema.FormatTimestamp`.
+It had been spelled out in two places — the adapters' `DBValueToString` and
+`schema.FormatValue` — and `ConvertValueToTDTP` runs the second over the
+first's output, so fixing only the adapters was silently undone. Both now
+delegate to the one definition.
+
+`normalizeSQLiteDateTime` had the same loss on the other path in: it cut SQLite
+datetimes at 19 characters, dropping the milliseconds SQLite had stored. It now
+carries the fractional part through, and leaves an explicit zone alone instead
+of relabelling it `Z`.
+
+Compatibility, measured rather than assumed:
+
+- A value with no sub-second component formats byte-identically under both
+  layouts, so packets for such data — and their checksums — do not change. The
+  whole test suite passing unmodified is that property being exercised.
+- `time.Parse` with the RFC3339 layout already accepts a fractional part, so
+  every existing reader takes the longer string unchanged; no consumer-side
+  change was needed.
+
+One caveat, documented at the definition: RFC3339Nano trims trailing zeros, so
+`"…:11.5Z"` sorts before `"…:11Z"` as raw text. Nothing in the framework compares
+these as text — tdtql's comparator compares parsed times, the SQL generator
+hands the value to the database, and sync's watermark comparison parses first —
+but a caller sorting the raw strings would be wrong to.
+
+**Checkpoints written before this hold truncated watermarks.** The first run
+after upgrading re-sends the rows inside that final second and then converges;
+no data is lost either way, since the import side upserts.
+
+## [1.20.1] — 2026-07-28
+
+### Fixed — the audit log's time filter dropped records, and retention deleted the wrong ones
+
+`DatabaseAppender` bound `time.Time` values straight into SQL. With a driver
+that stores time as text — modernc.org/sqlite, the backend the examples use —
+comparison is then lexical on that text, and the text carried the writer's
+local zone. Two records written at the same instant from nodes in different
+zones therefore did not compare in chronological order.
+
+The damage was silent in both directions:
+
+- `Query` with a `StartTime`/`EndTime` returned fewer rows than it should. A
+  record written by a caller holding a UTC time sorted below a `+03:00`
+  boundary that it actually postdates, so it simply was not in the result.
+- `DeleteOlderThan` shares the comparison, so retention destroyed records
+  newer than the cutoff. In the regression test the pre-fix code deletes
+  *both* rows, including one an hour newer than the boundary it was given.
+
+Every timestamp entering SQL — the inserted row, both filter bounds, and the
+retention cutoff — is now normalized to UTC, so text order and chronological
+order are the same thing. Converting the location also drops the monotonic
+clock reading `time.Now()` carries, which had been persisted as a literal
+` m=+10.312223101` suffix inside a `TIMESTAMP` column: an offset from an
+arbitrary point in a process that has since exited.
+
+The SQLite audit DSN additionally gets `_time_format=sqlite`, which makes the
+driver write the canonical SQLite datetime instead of Go's `time.Time.String()`.
+The driver's own comment explains the default: "Before configurable write time
+formats were supported, time.Time.String was used. Maintain that default to
+keep existing driver users formatting times the same." That default is fine for
+a value nobody sorts on; an audit table's timestamp column is not that.
+
+Reading a row back through the driver hid all of this, because it re-parses
+`TIMESTAMP` columns — the stored bytes only differ when read as text, which is
+what the new test does.
+
+pgx, mysql and mssql send time natively and were never affected.
+
+**Existing SQLite audit databases keep their old rows.** The two forms do not
+sort against each other, so range queries and retention stay unreliable for
+those rows until they are rewritten or aged out. Nothing rewrites them
+automatically — an audit trail should not be edited as a side effect of an
+upgrade. `AuditDatabaseConfig`'s doc comment carries a verified migration
+statement that reads each row's own recorded offset, so a table spanning a DST
+change converts correctly.
+
+## [1.20.0] — 2026-07-28
+
+### Added — `--sync-incremental --to-broker`
+
+Incremental sync tracked a watermark but could only write files; `--export-broker`
+could only send. Anyone wanting both — the ordinary case of feeding a queue with
+changes — had to keep the watermark outside tdtpcli and build the `WHERE` clause
+by hand, which is exactly what the checkpoint file exists to avoid.
+
+`--to-broker` sends the increment to the broker from `--config` instead. The send
+goes through the same path as `--export-broker`, so compression, v1.4 integrity
+and both encryption formats work unchanged rather than being reimplemented for
+sync.
+
+**The checkpoint advances only after the send succeeds.** On a broker failure the
+watermark stays where it was and the reason is recorded in `last_error`, so the
+next run retries the same rows. Advancing first would put those rows below the
+watermark with nothing left to bring them back.
+
+With `--map --input broker://<queue> --listen` on the receiving side this is
+continuous replication without any external state.
+
+### Added — an audit record per message in `--map --listen`
+
+The daemon wrote one audit entry for the run, so a listener up for a week
+produced a single record however many messages it upserted. Each message now
+records its own, on success and on failure, naming the queue it came from and
+the rows it wrote.
+
+### Changed — `examples/travel-agency` has no Python left in its data path
+
+The example's two orchestration scripts are gone, replaced by the framework
+doing the same work. What remains in Python is `activity.py`, which simulates
+what users do, and nothing else touches the data.
+
+**`consumer.py` → `listeners.ps1`.** It subscribed to a Redis channel and
+launched `tdtpcli --map` per notification — a new process and a new broker
+connection each time, acknowledging nothing. It is now one long-lived
+`tdtpcli --map --input broker://<queue> --listen` per queue, where the message
+is ACKed only after the upsert commits, so a process that dies mid-write
+returns the message to the queue instead of losing it. The Redis notification
+went with it: the queue is the signal, and announcing "there is something in
+the queue" only made sense while nothing was listening to the queue.
+
+**`coordinator.py` → the orchestrator.** Its four responsibilities each moved
+to something that already had them: the per-table cursor in Redis became
+`state/*.json` written by `--sync-incremental`; the `ROUTE_MAP` of event →
+tables became `workflows/sync_out.yaml`; the topic-exchange subscription with a
+10s debounce became a schedule; the Redis state key became the orchestrator's
+job log.
+
+Setting that cursor from `datetime.now()` had been quiet data loss — rows
+written between the start of the `SELECT` and the moment `now()` was read
+landed below the new watermark and were never sent. The watermark now comes
+from the rows actually exported, so a row absent from the result set cannot be
+skipped.
+
+Trading the event trigger for a schedule looks like a step back and is not.
+The event named which *simulated activity* ran, not which rows changed, and
+only worked because `activity.py` was the sole writer — any other writer
+changed rows no event announced, and `coordinator.py` never synced them.
+
+Scenarios must be checksum-approved before the schedule will run them, so
+editing a workflow stops its runs until it is re-approved rather than executing
+changed content unnoticed.
+
+**The audit sink the docs described now exists.** `configs/config_*.yaml` had
+no `audit:` section, so the per-message audit above was live but never switched
+on for this example. It writes to a SQLite file rather than the node's own
+Postgres, because the separation is the point: pointing the sink at the audited
+database would let the process being audited rewrite its own trail.
+
+### Fixed — incremental sync failed on every run after the first
+
+`buildIncrementalQuery` emitted `">"` as the filter operator. TDTQL spells its
+operators out in words; neither the in-memory evaluator nor the SQL generator has
+ever accepted the symbol, so the query died with `unknown operator: >`. The first
+run has no watermark and therefore builds no filter at all, which is why the
+failure only appeared from the second run onward — and why the unit test, which
+compared the operator against the same literal `">"`, passed throughout.
+
+The operator is now `gt`, and the test generates SQL from the query instead of
+re-asserting the value it was handed: a builder that emits something the consumer
+rejects can no longer pass.
+
+### Fixed — "no changes" was reported as an error
+
+An unchanged table comes back as one empty packet, not as zero packets, so the
+`len(packets) == 0` guard missed it and the run failed with `no valid tracking
+field values found`. It now reports no changes and exits cleanly.
+
 ## [1.19.2] — 2026-07-27
 
 ### Fixed — the fast parser's two ways of being more permissive than the reference

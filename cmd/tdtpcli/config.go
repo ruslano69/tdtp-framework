@@ -105,6 +105,31 @@ type AuditConfig struct {
 // Deliberately separate from the pipeline's own Database config (which the
 // audited operation reads/writes) — reusing that same connection would let
 // the very process being audited also rewrite its own audit trail.
+//
+// Migrating a SQLite audit database written before v1.20.1: rows from then
+// carry Go's time.Time.String() form, complete with a zone abbreviation and a
+// monotonic clock reading —
+//
+//	2026-07-28 11:12:31.8174159 +0300 EEST m=+10.312223101
+//
+// New rows are canonical UTC. The two forms do not sort against each other, so
+// range queries and retention stay unreliable for the old rows until they are
+// rewritten or aged out. Nothing rewrites them automatically: an audit trail
+// should not be edited as a side effect of an upgrade. To do it deliberately,
+// after taking a copy:
+//
+//	UPDATE audit_log
+//	   SET timestamp = strftime('%Y-%m-%d %H:%M:%f',
+//	         rtrim(substr(timestamp, 1, 10 + instr(substr(timestamp, 12), ' ')))
+//	         || substr(substr(timestamp, 12 + instr(substr(timestamp, 12), ' '), 5), 1, 3)
+//	         || ':'
+//	         || substr(substr(timestamp, 12 + instr(substr(timestamp, 12), ' '), 5), 4, 2)
+//	       ) || '+00:00'
+//	 WHERE timestamp LIKE '% m=%';
+//
+// It reads each row's own recorded offset rather than assuming one, so a table
+// spanning a DST change converts correctly. Sub-second precision drops to
+// milliseconds, which is what SQLite's %f emits.
 type AuditDatabaseConfig struct {
 	Type            string `yaml:"type"`                        // sqlite, mysql, mssql, postgres
 	DSN             string `yaml:"dsn"`                         // Raw connection string

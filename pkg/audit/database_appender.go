@@ -133,10 +133,32 @@ func (da *DatabaseAppender) prepareInsert() error {
 	return nil
 }
 
+// auditTime normalizes a timestamp before it takes part in SQL.
+//
+// Two problems, both of which only show up in the text-based backends:
+//
+// A driver that stores time as text writes whatever the Go value formats to,
+// and comparison is then lexical on that text. Two records written at the same
+// instant but in different zones — one node on UTC, another on local time —
+// produce strings that do not compare in chronological order, so a time-range
+// query silently omits records and DeleteOlderThan prunes the wrong ones. One
+// zone for every row makes text order and chronological order the same thing.
+//
+// Converting the location also drops the monotonic clock reading that
+// time.Now() carries. Persisting that reading is meaningless — it is an offset
+// from an arbitrary point in the process that wrote it, gone the moment the
+// process exits — and with modernc.org/sqlite's default format it ends up in
+// the column as a literal " m=+10.312223101" suffix.
+//
+// The wall-clock instant is preserved; only the zone in which it is displayed
+// is lost, which for an audit trail is the conventional trade.
+func auditTime(t time.Time) time.Time { return t.UTC() }
+
 // Append - записать entry в базу данных
 func (da *DatabaseAppender) Append(ctx context.Context, entry *Entry) error {
 	// Фильтруем по уровню
 	filtered := entry.FilterByLevel(da.level)
+	filtered.Timestamp = auditTime(filtered.Timestamp)
 
 	// Batching режим
 	if da.batchSize > 0 {
@@ -311,12 +333,12 @@ func (da *DatabaseAppender) Query(ctx context.Context, filter QueryFilter) ([]*E
 
 	if !filter.StartTime.IsZero() {
 		query += " AND timestamp >= ?"
-		args = append(args, filter.StartTime)
+		args = append(args, auditTime(filter.StartTime))
 	}
 
 	if !filter.EndTime.IsZero() {
 		query += " AND timestamp <= ?"
-		args = append(args, filter.EndTime)
+		args = append(args, auditTime(filter.EndTime))
 	}
 
 	// Сортировка и лимит
@@ -431,12 +453,12 @@ func (da *DatabaseAppender) Count(ctx context.Context, filter QueryFilter) (int6
 
 	if !filter.StartTime.IsZero() {
 		query += " AND timestamp >= ?"
-		args = append(args, filter.StartTime)
+		args = append(args, auditTime(filter.StartTime))
 	}
 
 	if !filter.EndTime.IsZero() {
 		query += " AND timestamp <= ?"
-		args = append(args, filter.EndTime)
+		args = append(args, auditTime(filter.EndTime))
 	}
 
 	var count int64
@@ -452,7 +474,7 @@ func (da *DatabaseAppender) Count(ctx context.Context, filter QueryFilter) (int6
 func (da *DatabaseAppender) DeleteOlderThan(ctx context.Context, before time.Time) (int64, error) {
 	query := fmt.Sprintf("DELETE FROM %s WHERE timestamp < ?", da.tableName)
 
-	result, err := da.db.ExecContext(ctx, query, before)
+	result, err := da.db.ExecContext(ctx, query, auditTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete old entries: %w", err)
 	}

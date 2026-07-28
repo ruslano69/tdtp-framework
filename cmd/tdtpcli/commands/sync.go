@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,23 @@ type SyncOptions struct {
 	BatchSize      int
 	Fields         []string // Column projection; tracking field is always included automatically
 	ProcessorMgr   ProcessorManager
+
+	// BrokerCfg sends the result to a queue instead of writing files.
+	//
+	// Incremental sync tracked a checkpoint but could only write to disk;
+	// export could only send. Wanting both meant keeping the watermark
+	// outside the tool and building the --where clause by hand.
+	//
+	// nil keeps the file output, which is what every existing caller gets.
+	BrokerCfg *BrokerConfig
+
+	// Broker send options, ignored unless BrokerCfg is set.
+	Compress      bool
+	CompressLevel int
+	CompressAlgo  string
+	Encrypt       bool
+	EncryptLegacy bool
+	MercuryURL    string
 }
 
 // IncrementalSync performs incremental synchronization of a table
@@ -107,6 +125,15 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	}
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 
+	// "Nothing new" arrives as one empty packet, not as zero packets, so the
+	// len(packets) check above does not catch it. Without this the run failed
+	// with "no valid tracking field values found" — an error for the ordinary
+	// case of a table that simply has not changed since the last sync.
+	if totalRows == 0 {
+		fmt.Println("✓ No new changes to sync")
+		return nil
+	}
+
 	// Apply data processors if configured
 	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
 		fmt.Printf("Applying data processors...\n")
@@ -122,6 +149,34 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	newLastSyncValue, err := extractLastSyncValue(packets, opts.TrackingField)
 	if err != nil {
 		return fmt.Errorf("failed to extract last sync value: %w", err)
+	}
+
+	// Send to a broker instead of writing files, when one is configured.
+	//
+	// Placed before the checkpoint update deliberately: the watermark must not
+	// advance unless the data actually left. A checkpoint moved past rows that
+	// were never delivered loses them permanently — the next run starts after
+	// them and nothing ever goes back.
+	if opts.BrokerCfg != nil {
+		if err := syncToBroker(ctx, packets, opts); err != nil {
+			// State records the failure so the next run can see it; the
+			// checkpoint itself stays where it was.
+			if stateErr := stateMgr.UpdateStateWithError(opts.TableName, err); stateErr != nil {
+				fmt.Printf("⚠ Warning: failed to save error state: %v\n", stateErr)
+			}
+			return err
+		}
+
+		if err := stateMgr.UpdateState(opts.TableName, newLastSyncValue, totalRows); err != nil {
+			fmt.Printf("⚠ Warning: failed to update sync state: %v\n", err)
+		} else {
+			fmt.Printf("✓ Checkpoint updated: %s\n", newLastSyncValue)
+		}
+
+		fmt.Printf("✓ Incremental sync complete!\n")
+		fmt.Printf("  Records synced: %d\n", totalRows)
+
+		return nil
 	}
 
 	// Write packets to file(s)
@@ -170,9 +225,16 @@ func buildIncrementalQuery(trackingField, lastSyncValue string, batchSize int) *
 	// Build filter for incremental sync
 	if lastSyncValue != "" {
 		// Create filter: tracking_field > last_sync_value
+		//
+		// "gt", not ">": TDTQL's operator vocabulary is spelled out in words
+		// (see tdtql.Filter and tdtql/sql_generator.go), and neither the
+		// in-memory evaluator nor the SQL generator recognises the symbol.
+		// A ">" here failed every run after the first with
+		// "unknown operator: >" — the first run has no watermark and so
+		// builds no filter at all, which is why it went unnoticed.
 		filter := packet.Filter{
 			Field:    trackingField,
-			Operator: ">",
+			Operator: "gt",
 			Value:    lastSyncValue,
 		}
 
@@ -224,7 +286,7 @@ func extractLastSyncValue(packets []*packet.DataPacket, trackingField string) (s
 			values := strings.Split(row.Value, "|")
 			if fieldIndex < len(values) {
 				value := values[fieldIndex]
-				if value > maxValue {
+				if maxValue == "" || trackingGreater(value, maxValue) {
 					maxValue = value
 				}
 			}
@@ -236,4 +298,58 @@ func extractLastSyncValue(packets []*packet.DataPacket, trackingField string) (s
 	}
 
 	return maxValue, nil
+}
+
+// trackingGreater reports whether a is a later watermark than b.
+//
+// Plain string comparison is wrong for the most common tracking field there
+// is — an auto-increment key. Lexically "9" > "25", so a table whose id
+// crossed a digit boundary parked its watermark at the highest *first digit*
+// and every later row was skipped for good. It only looked correct in tests
+// because every id there had the same width.
+//
+// Integers are compared as integers; anything that parses as an RFC 3339
+// timestamp is compared as a time, which keeps the comparison right if the
+// values ever carry fractional seconds (".5Z" sorts before "Z" lexically, so
+// a mixed column would otherwise pick the wrong maximum). Everything else
+// falls back to string order, which is what a textual version or ULID wants.
+func trackingGreater(a, b string) bool {
+	if ai, err := strconv.ParseInt(a, 10, 64); err == nil {
+		if bi, err := strconv.ParseInt(b, 10, 64); err == nil {
+			return ai > bi
+		}
+	}
+	if at, err := time.Parse(time.RFC3339, a); err == nil {
+		if bt, err := time.Parse(time.RFC3339, b); err == nil {
+			return at.After(bt)
+		}
+	}
+	return a > b
+}
+
+// syncToBroker sends the incremental packets through the same path as
+// --export-broker, rather than a second one written for sync.
+//
+// Compression, v1.4 integrity and both encryption formats live in
+// sendPacketsToBroker; duplicating them here would give two implementations
+// that drift the moment either changes.
+func syncToBroker(ctx context.Context, packets []*packet.DataPacket, opts SyncOptions) error {
+	broker, err := createBroker(opts.BrokerCfg)
+	if err != nil {
+		return fmt.Errorf("broker: %w", err)
+	}
+	defer func() { _ = broker.Close() }()
+
+	fmt.Printf("Sending %d packet(s) to %s queue %q...\n",
+		len(packets), opts.BrokerCfg.Type, opts.BrokerCfg.Queue)
+
+	return sendPacketsToBroker(ctx, broker, packets, brokerSendOptions{
+		TableName:     opts.TableName,
+		Compress:      opts.Compress,
+		CompressLevel: opts.CompressLevel,
+		CompressAlgo:  opts.CompressAlgo,
+		Encrypt:       opts.Encrypt,
+		EncryptLegacy: opts.EncryptLegacy,
+		MercuryURL:    opts.MercuryURL,
+	})
 }

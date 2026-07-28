@@ -2,19 +2,37 @@
 <#
 .SYNOPSIS
     Graceful shutdown of travel-agency infrastructure.
-    Order: activity nodes → coordinator queue drain → stop coordinator
-           → data queue drain → stop consumers → purge leftovers.
+
+.DESCRIPTION
+    Order matters: stop producing before stopping consuming, so nothing is
+    still arriving when the listeners go down.
+
+      1. activity.py     -- stop simulating changes
+      2. orchestrator    -- stop triggering exports (no new packets enqueued)
+      3. drain           -- let the listeners finish what is already queued
+      4. listeners       -- stop tdtpcli --map --listen
+      5. purge           -- whatever survived the drain timeout
+
+    Two stages from the earlier version are gone with the scripts they served:
+    coordinator.py (replaced by the orchestrator) and its tdtp.coordinator
+    queue, and consumer.py (replaced by listeners.ps1).
+
+    An interrupted listener is safe: --listen acknowledges a message only
+    after the upsert commits, so anything in flight returns to the queue
+    rather than vanishing. A purge here does discard messages -- it runs only
+    after the drain timeout, and says how many.
 
 .PARAMETER DrainTimeoutSec
-    Seconds to wait for each drain stage before force-purging (default 60).
+    Seconds to wait for the data queues to empty before force-purging
+    (default 60).
 
 .PARAMETER Force
-    Skip drain, kill everything and purge all queues immediately.
+    Skip the drain: kill everything and purge all queues immediately.
 
 .EXAMPLE
-    .\shutdown.ps1
-    .\shutdown.ps1 -Force
-    .\shutdown.ps1 -DrainTimeoutSec 30
+    ./shutdown.ps1
+    ./shutdown.ps1 -Force
+    ./shutdown.ps1 -DrainTimeoutSec 30
 #>
 param(
     [int]$DrainTimeoutSec = 60,
@@ -33,14 +51,6 @@ $DATA_QUEUES = @(
     "tdtp.sync.branch.customers",
     "tdtp.sync.branch.sales"
 )
-$COORD_QUEUE = "tdtp.coordinator"
-
-function Get-QueueDepth($queue) {
-    $out = docker exec $RABBIT_CONTAINER rabbitmqctl list_queues name messages 2>$null |
-           Where-Object { $_ -match "^$([regex]::Escape($queue))\s" }
-    if ($out -match "\s(\d+)$") { return [int]$Matches[1] }
-    return 0
-}
 
 function Get-AllDepths($queues) {
     $raw = docker exec $RABBIT_CONTAINER rabbitmqctl list_queues name messages 2>$null
@@ -52,7 +62,7 @@ function Get-AllDepths($queues) {
     return $map
 }
 
-function Stop-ByScript($pattern, $label) {
+function Stop-PythonByScript($pattern, $label) {
     $killed = 0
     $procs = Get-WmiObject Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue
     foreach ($p in $procs) {
@@ -68,34 +78,27 @@ function Stop-ByScript($pattern, $label) {
     }
 }
 
-function Drain-Queue($queue, $label) {
-    $elapsed = 0
-    while ($elapsed -lt $DrainTimeoutSec) {
-        $d = Get-QueueDepth $queue
-        if ($d -eq 0) { Write-Host "         $label empty" -ForegroundColor Green; return }
-        Write-Host "         $label : $d msg(s)..." -ForegroundColor DarkCyan
-        Start-Sleep -Seconds 3
-        $elapsed += 3
-    }
-    $d = Get-QueueDepth $queue
-    if ($d -gt 0) {
-        Write-Host "         Timeout -- purging $queue ($d messages)" -ForegroundColor Red
-        docker exec $RABBIT_CONTAINER rabbitmqctl purge_queue $queue 2>$null | Out-Null
+function Stop-ByImage($name, $label) {
+    $procs = Get-Process $name -ErrorAction SilentlyContinue
+    if ($procs) {
+        $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Host "         Stopped $($procs.Count) $label process(es)" -ForegroundColor Green
+    } else {
+        Write-Host "         No $label processes found" -ForegroundColor DarkGray
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 Write-Host ""
 Write-Host "=== Travel Agency Graceful Shutdown ===" -ForegroundColor Cyan
 Write-Host ""
 
-# ── Force mode ────────────────────────────────────────────────────────────────
 if ($Force) {
     Write-Host "[ FORCE ] Killing all processes and purging queues..." -ForegroundColor Red
-    Stop-ByScript "activity\.py"   "activity"
-    Stop-ByScript "coordinator\.py" "coordinator"
-    Stop-ByScript "consumer\.py"   "consumer"
-    foreach ($q in $DATA_QUEUES + $COORD_QUEUE) {
+    Stop-PythonByScript "activity\.py" "activity"
+    Stop-ByImage "orchestrator" "orchestrator"
+    Stop-ByImage "tdtpcli" "listener"
+    foreach ($q in $DATA_QUEUES) {
         docker exec $RABBIT_CONTAINER rabbitmqctl purge_queue $q 2>$null | Out-Null
         Write-Host "         Purged: $q" -ForegroundColor DarkYellow
     }
@@ -103,19 +106,19 @@ if ($Force) {
     exit 0
 }
 
-# ── Step 1: Stop activity nodes ───────────────────────────────────────────────
+# -- Step 1: stop the simulation ----------------------------------------------
 Write-Host "[ 1/4 ] Stopping activity nodes..." -ForegroundColor Yellow
-Stop-ByScript "activity\.py" "activity"
+Stop-PythonByScript "activity\.py" "activity"
 Start-Sleep -Seconds 1
 
-# ── Step 2: Drain coordinator queue ───────────────────────────────────────────
-Write-Host "[ 2/4 ] Draining coordinator queue..." -ForegroundColor Yellow
-Drain-Queue $COORD_QUEUE "tdtp.coordinator"
+# -- Step 2: stop triggering exports ------------------------------------------
+# Before the drain, not after: the orchestrator is what puts new packets on the
+# queues, so draining while it is still running is a race it wins.
+Write-Host "[ 2/4 ] Stopping orchestrator..." -ForegroundColor Yellow
+Stop-ByImage "orchestrator" "orchestrator"
 
-# ── Step 3: Stop coordinator, drain data queues ───────────────────────────────
-Write-Host "[ 3/4 ] Stopping coordinator, draining data queues..." -ForegroundColor Yellow
-Stop-ByScript "coordinator\.py" "coordinator"
-
+# -- Step 3: drain the data queues --------------------------------------------
+Write-Host "[ 3/4 ] Draining data queues..." -ForegroundColor Yellow
 $elapsed = 0
 while ($elapsed -lt $DrainTimeoutSec) {
     $depths = Get-AllDepths $DATA_QUEUES
@@ -127,7 +130,11 @@ while ($elapsed -lt $DrainTimeoutSec) {
     Start-Sleep -Seconds 3
     $elapsed += 3
 }
-# Purge anything left
+
+# -- Step 4: stop the listeners, purge the remainder ---------------------------
+Write-Host "[ 4/4 ] Stopping listeners..." -ForegroundColor Yellow
+Stop-ByImage "tdtpcli" "listener"
+
 $depths = Get-AllDepths $DATA_QUEUES
 foreach ($q in $DATA_QUEUES) {
     if ($depths[$q] -gt 0) {
@@ -136,18 +143,16 @@ foreach ($q in $DATA_QUEUES) {
     }
 }
 
-# ── Step 4: Stop consumers ────────────────────────────────────────────────────
-Write-Host "[ 4/4 ] Stopping consumers..." -ForegroundColor Yellow
-Stop-ByScript "consumer\.py" "consumer"
-
-# ── Summary ───────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "Final queue state:" -ForegroundColor Cyan
-$all = Get-AllDepths ($DATA_QUEUES + $COORD_QUEUE)
-foreach ($q in $DATA_QUEUES + $COORD_QUEUE) {
+$all = Get-AllDepths $DATA_QUEUES
+foreach ($q in $DATA_QUEUES) {
     $d = $all[$q]
     $color = if ($d -eq 0) { "Green" } else { "Red" }
     Write-Host ("  {0,-42} {1} msg(s)" -f $q, $d) -ForegroundColor $color
 }
+Write-Host ""
+Write-Host "Checkpoints in state/ are left alone: they are the resume point," -ForegroundColor DarkGray
+Write-Host "not runtime state. Delete them only to force a full re-sync." -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Shutdown complete." -ForegroundColor Green

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -160,7 +161,11 @@ func newRouter(deps routerDeps) chi.Router {
 
 		// ── Jobs ───────────────────────────────────────────────────────────────────
 		r.Get("/jobs", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-			jobs, err := db.ListJobs(100)
+			// Every job carries tdtpcli's full output, so the default hundred
+			// is a few hundred kilobytes. Anything that polls this — a
+			// dashboard, a health check — wants the last handful and had no
+			// way to ask for it.
+			jobs, err := db.ListJobs(queryLimit(r, 100, 500))
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -364,4 +369,24 @@ func pubsubStatus(s *Subscriber) string {
 		return "connected"
 	}
 	return "disconnected"
+}
+
+// queryLimit reads a ?limit= query parameter, falling back to def when it is
+// absent, unparseable or out of range. Silently clamping rather than
+// 400-ing keeps a listing endpoint forgiving — a caller asking for more rows
+// than exist wants the rows, not an argument — while max stops one request
+// from serving the entire table.
+func queryLimit(r *http.Request, def, max int) int {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return def
+	}
+	if n > max {
+		return max
+	}
+	return n
 }
