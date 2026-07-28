@@ -48,6 +48,28 @@ slow job finishing late would overwrite a fresh `running` with a stale outcome.
 showing `dispatched`/`refused` to say what the value actually meant; now that
 the value is honest, relabelling would be the lie.
 
+### Fixed — GOWORK: off broke the integration suite
+
+1.20.3 put `GOWORK: off` on every job that runs Go. One job needs the
+workspace: `tests/integration/xzmercury_pipeline_test.go` starts the sibling
+module with `go run ./xzmercury/cmd/xzmercury/`, and that path exists only
+while `go.work` is active. Without it the run failed with
+
+    main module (github.com/ruslano69/tdtp-framework) does not contain
+    package github.com/ruslano69/tdtp-framework/xzmercury/cmd/xzmercury
+
+and then sat through the full 60s health-check wait before the suite hit its
+2-minute timeout and panicked. The integration job now keeps the workspace;
+every other job still resolves from go.mod alone.
+
+Two things made this land unseen. The integration job runs only on
+`refs/heads/main`, so no branch build could exercise it — the change was
+green on its branch and red the moment it merged. And the measurement quoted
+in 1.20.3 — identical package set, five extra modules, no shared dependency
+moved — was taken from `go list` and `go build`, which see what the *test
+binary* compiles against. It cannot see a `go run` the test issues at runtime,
+which is the only place the sibling module is reached.
+
 ## [1.20.3] — 2026-07-28
 
 ### Added — `GET /jobs?limit=`
