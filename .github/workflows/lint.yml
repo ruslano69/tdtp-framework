@@ -63,6 +63,9 @@ jobs:
           cache: true
 
       - name: Run go vet
+        env:
+          GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
+          GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
         run: go vet ./...
 
       # The build and test jobs in ci.yml compile with -tags nokafka. Vetting
@@ -72,4 +75,7 @@ jobs:
       # CLI, both test matrix entries and Integration while this job stayed
       # green. Catching it here costs a minute instead of five.
       - name: Run go vet (nokafka)
+        env:
+          GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
+          GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
         run: go vet -tags nokafka ./...
