@@ -9,11 +9,10 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/klauspost/compress/zstd"
-	kafka "github.com/segmentio/kafka-go"
 
+	"github.com/ruslano69/tdtp-framework/pkg/brokers"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -37,14 +36,18 @@ const (
 // Размер каждого сообщения ≤ defaultPacketKB после сжатия — работает
 // с любым Kafka-брокером без изменения конфигурации брокера.
 //
-// Использует kafka.Writer напрямую (без Reader) — без лишнего overhead
-// на создание consumer при закрытии соединения.
+// Отправка идёт через общий brokers.Kafka. Свой kafka.Writer здесь был
+// заведён ради write-only соединения без Reader, чей Close() блокировал на
+// секунды; в brokers.Kafka это позже решили ленивым созданием Reader, и копия
+// стала лишней. Пока она жила, конфигурация writer'а существовала в двух
+// экземплярах, и всё, что добавлялось в один — включая проверку
+// message.max.bytes, — не действовало на другой.
 type KafkaSpoolExporter struct {
 	cfg      *KafkaOutputConfig
 	spoolDir string        // рабочая директория
 	encoder  *zstd.Encoder // переиспользуемый энкодер (EncodeAll потокобезопасен)
 	gen      *packet.Generator
-	writer   *kafka.Writer // write-only Kafka соединение (без Reader)
+	broker   *brokers.Kafka // общий writer, см. brokers.NewKafkaWriter
 }
 
 // NewKafkaSpoolExporter создаёт экспортер, применяя дефолты.
@@ -83,34 +86,34 @@ func NewKafkaSpoolExporter(cfg *KafkaOutputConfig, jobID string) (*KafkaSpoolExp
 		return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
 	}
 
-	// Создаём writer-only Kafka соединение.
-	// Не создаём Reader — он нам не нужен и его Close() блокирует на несколько секунд.
-	writer := &kafka.Writer{
-		Addr:         kafka.TCP(cfg.Brokers...),
-		Topic:        cfg.Topic,
-		Balancer:     &kafka.LeastBytes{},
-		RequiredAcks: kafka.RequireOne,
-		Async:        false,
-		Compression:  kafka.Snappy,
-		MaxAttempts:  3,
-		WriteTimeout: 30 * time.Second,
-		BatchBytes:   100 * 1024 * 1024, // 100MB — вся партия влезает в один WriteMessages
-		BatchTimeout: 5 * time.Millisecond,
+	// Write-only соединение через общий brokers.Kafka: Reader создаётся там
+	// лениво, поэтому запись за него не платит.
+	broker, err := brokers.NewKafka(brokers.Config{
+		Type:    "kafka",
+		Brokers: cfg.Brokers,
+		Topic:   cfg.Topic,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("kafka spool: %w", err)
 	}
+	// Ленивое соединение: writer подключится при первой записи. Спул может
+	// создаваться раньше, чем поднимется брокер, и конструктор не место для
+	// сетевой проверки.
+	broker.ConnectLazy()
 
 	return &KafkaSpoolExporter{
 		cfg:      cfg,
 		spoolDir: spoolDir,
 		encoder:  enc,
 		gen:      packet.NewGenerator(),
-		writer:   writer,
+		broker:   broker,
 	}, nil
 }
 
-// Close освобождает ресурсы энкодера и Kafka writer.
+// Close освобождает ресурсы энкодера и Kafka-соединение.
 func (ke *KafkaSpoolExporter) Close() {
-	if ke.writer != nil {
-		_ = ke.writer.Close()
+	if ke.broker != nil {
+		_ = ke.broker.Close()
 	}
 	_ = ke.encoder.Close()
 }
@@ -351,24 +354,17 @@ func (ke *KafkaSpoolExporter) runInMemorySender(ctx context.Context, dataCh <-ch
 			return nil
 		}
 
-		msgs := make([]kafka.Message, 0, len(batch))
-		now := time.Now()
+		// Ключи, время и заголовки проставляет SendBatchAs — здесь только
+		// полезная нагрузка, чтобы формат сообщения задавался в одном месте.
+		values := make([][]byte, 0, len(batch))
 		var released int64
-		for i, e := range batch {
-			msgs = append(msgs, kafka.Message{
-				Key:   []byte(fmt.Sprintf("tdtp-%d-%d", now.UnixNano(), i)),
-				Value: e.data,
-				Time:  now,
-				Headers: []kafka.Header{
-					{Key: "content-type", Value: []byte("application/xml+zstd")},
-					{Key: "protocol", Value: []byte("tdtp")},
-				},
-			})
+		for _, e := range batch {
+			values = append(values, e.data)
 			released += int64(len(e.data))
 		}
 
-		if err := ke.writer.WriteMessages(ctx, msgs...); err != nil {
-			return fmt.Errorf("WriteMessages (%d msgs): %w", len(msgs), err)
+		if err := ke.broker.SendBatchAs(ctx, values, brokers.ContentTypeXMLZstd); err != nil {
+			return fmt.Errorf("send batch (%d msgs): %w", len(values), err)
 		}
 
 		sem.Release(released)
@@ -407,26 +403,17 @@ func (ke *KafkaSpoolExporter) runSender(ctx context.Context, fileCh <-chan strin
 			return nil
 		}
 
-		msgs := make([]kafka.Message, 0, len(batch))
-		now := time.Now()
-		for i, p := range batch {
+		values := make([][]byte, 0, len(batch))
+		for _, p := range batch {
 			data, err := os.ReadFile(p)
 			if err != nil {
 				return fmt.Errorf("read spool file %s: %w", p, err)
 			}
-			msgs = append(msgs, kafka.Message{
-				Key:   []byte(fmt.Sprintf("tdtp-%d-%d", now.UnixNano(), i)), //nolint:gocritic
-				Value: data,
-				Time:  now,
-				Headers: []kafka.Header{
-					{Key: "content-type", Value: []byte("application/xml+zstd")},
-					{Key: "protocol", Value: []byte("tdtp")},
-				},
-			})
+			values = append(values, data)
 		}
 
-		if err := ke.writer.WriteMessages(ctx, msgs...); err != nil {
-			return fmt.Errorf("WriteMessages (%d msgs): %w", len(msgs), err)
+		if err := ke.broker.SendBatchAs(ctx, values, brokers.ContentTypeXMLZstd); err != nil {
+			return fmt.Errorf("send batch (%d msgs): %w", len(values), err)
 		}
 
 		// Удаляем только после успешной отправки
