@@ -19,13 +19,13 @@ Nodes:
     branch.customers.registered    — новый клиент в филиале
 
 Usage:
-    python activity.py --node central  [--pg-dsn "..."] [--amqp "..."] [--redis "..."]
+    python activity.py --node central  [--pg-dsn "..."] [--redis "..."]
     python activity.py --node branch
     python activity.py --node airline
     python activity.py --node central --interval 2 --burst 3
 
 Dependencies:
-    pip install psycopg2-binary redis pika colorama
+    pip install psycopg2-binary redis colorama
 """
 
 import argparse
@@ -37,7 +37,6 @@ from datetime import datetime, date, timedelta
 
 import psycopg2
 import psycopg2.extras
-import pika
 import redis
 from colorama import Fore, Style, init
 
@@ -51,9 +50,7 @@ NODE_DEFAULTS = {
     "airline": "host=localhost port=5434 dbname=tdtp_airline user=tdtp password=tdtp",
 }
 
-AMQP_DEFAULT  = "amqp://tdtp:tdtp@localhost:5672/"
 REDIS_DEFAULT = "localhost:6379"
-EXCHANGE      = "travel"
 REDIS_PREFIX  = "tdtp:travel"
 
 # ─── Fake data pools ─────────────────────────────────────────────────────────
@@ -108,40 +105,15 @@ def rand_future_date(days_min=30, days_max=365) -> date:
     return date.today() + timedelta(days=random.randint(days_min, days_max))
 
 
-# ─── RabbitMQ publisher (lazy connection) ────────────────────────────────────
-
-class MQPublisher:
-    def __init__(self, amqp_url: str):
-        self.amqp_url = amqp_url
-        self._conn    = None
-        self._channel = None
-
-    def _ensure(self):
-        if self._conn and not self._conn.is_closed:
-            return
-        params = pika.URLParameters(self.amqp_url)
-        params.socket_timeout = 5
-        self._conn    = pika.BlockingConnection(params)
-        self._channel = self._conn.channel()
-        self._channel.exchange_declare(
-            exchange=EXCHANGE, exchange_type="topic", durable=True
-        )
-
-    def publish(self, routing_key: str, payload: dict):
-        try:
-            self._ensure()
-            self._channel.basic_publish(
-                exchange=EXCHANGE,
-                routing_key=routing_key,
-                body=json.dumps(payload),
-                properties=pika.BasicProperties(
-                    content_type="application/json",
-                    delivery_mode=2,  # persistent
-                ),
-            )
-        except Exception as exc:
-            print(f"{Fore.YELLOW}[MQ] {routing_key}: {exc}{Style.RESET_ALL}")
-            self._conn = None  # force reconnect next call
+# The RabbitMQ publisher that used to live here is gone with coordinator.py.
+#
+# It announced "a booking was created" on a topic exchange so the coordinator
+# would know to export. Nothing subscribes to that exchange any more: the
+# orchestrator syncs on a schedule and finds changed rows from the watermark
+# in state/*.json -- which also works for rows this simulator did not write.
+#
+# The routing keys the activity functions still return are kept as labels:
+# they name which entity changed, which is worth having in the log.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -596,25 +568,19 @@ NODE_ACTIVITIES = {
 
 # ─── Main tick ───────────────────────────────────────────────────────────────
 
-def tick(node: str, conn, mq: MQPublisher, r: redis.Redis, burst: int):
+def tick(node: str, conn, r: redis.Redis, burst: int):
     activities = NODE_ACTIVITIES[node]
     weights    = [a[3] for a in activities]
     chosen     = random.choices(activities, weights=weights, k=burst)
 
     for name, fn, color, _ in chosen:
         try:
-            detail, routing_key = fn(conn)
+            detail, _routing_key = fn(conn)
             if detail is None:
                 continue
             ts = datetime.now().strftime("%H:%M:%S")
             node_tag = f"[{node.upper()[:3]}]"
             print(f"{Fore.WHITE}[{ts}]{color}{node_tag} {name:<18}{Style.RESET_ALL} {detail}")
-
-            mq.publish(routing_key, {
-                "node": node,
-                "event": name,
-                "ts": datetime.now().isoformat(),
-            })
 
             r.hincrby(f"{REDIS_PREFIX}:{node}:activity:counts", name, 1)
             r.hset(f"{REDIS_PREFIX}:{node}:activity:last", name, datetime.now().isoformat())
@@ -636,8 +602,6 @@ def main():
                         default="central", help="Which node to simulate (default: central)")
     parser.add_argument("--pg-dsn",  default=None,
                         help="PostgreSQL DSN (default: node-specific localhost)")
-    parser.add_argument("--amqp",    default=AMQP_DEFAULT,
-                        help=f"RabbitMQ AMQP URL (default: {AMQP_DEFAULT})")
     parser.add_argument("--redis",   default=REDIS_DEFAULT,
                         help=f"Redis address (default: {REDIS_DEFAULT})")
     parser.add_argument("--interval",type=float, default=3.0,
@@ -652,11 +616,8 @@ def main():
     r   = redis.Redis(host=host, port=int(port), decode_responses=True)
     r.ping()
 
-    mq = MQPublisher(args.amqp)
-
     print(f"{Fore.GREEN}Travel Agency Activity Simulator — {args.node.upper()}{Style.RESET_ALL}")
     print(f"  PG  : {dsn}")
-    print(f"  AMQP: {args.amqp}")
     print(f"  Redis: {args.redis}")
     print(f"  Interval: {args.interval}s  Burst: {args.burst}")
     print(f"  Press Ctrl+C to stop\n")
@@ -666,7 +627,7 @@ def main():
     try:
         while True:
             cycle += 1
-            tick(args.node, conn, mq, r, args.burst)
+            tick(args.node, conn, r, args.burst)
             if cycle % 20 == 0:
                 counts = r.hgetall(f"{REDIS_PREFIX}:{args.node}:activity:counts")
                 total  = sum(int(v) for v in counts.values())

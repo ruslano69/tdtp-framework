@@ -278,3 +278,62 @@ func TestIncrementalQueryFirstRunIsExecutable(t *testing.T) {
 		t.Errorf("first run must not filter, got: %s", sql)
 	}
 }
+
+// TestExtractLastSyncValueNumeric covers an auto-increment tracking field whose
+// values do not all have the same number of digits.
+//
+// The old lexical comparison put "9" above "25" and "100", so the watermark
+// stopped at the highest first digit and every row past it was skipped
+// permanently. The existing table-driven test missed it because all its ids
+// were two digits wide.
+func TestExtractLastSyncValueNumeric(t *testing.T) {
+	pkt := &packet.DataPacket{
+		Schema: packet.Schema{Fields: []packet.Field{
+			{Name: "id", Type: "INTEGER"},
+			{Name: "name", Type: "VARCHAR"},
+		}},
+		Data: packet.Data{Rows: []packet.Row{
+			{Value: "9|Alice"},
+			{Value: "100|Bob"},
+			{Value: "25|Charlie"},
+		}},
+	}
+
+	got, err := extractLastSyncValue([]*packet.DataPacket{pkt}, "id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "100" {
+		t.Errorf("expected watermark 100, got %s", got)
+	}
+}
+
+func TestTrackingGreater(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"integers across a digit boundary", "100", "99", true},
+		{"integers, smaller", "9", "25", false},
+		{"negative integers", "-1", "-2", true},
+		{"timestamps", "2026-01-04T10:00:00Z", "2026-01-03T10:00:00Z", true},
+		{"timestamps, equal", "2026-01-03T10:00:00Z", "2026-01-03T10:00:00Z", false},
+		// Fractional seconds sort before a bare "Z" lexically, so this pair is
+		// the one a string comparison gets backwards.
+		{"fractional beats whole second", "2026-01-03T10:00:00.5Z", "2026-01-03T10:00:00Z", true},
+		{"whole second loses to fractional", "2026-01-03T10:00:00Z", "2026-01-03T10:00:00.5Z", false},
+		{"non-numeric, non-time falls back to string", "v2", "v1", true},
+		// A ULID or similar is fixed-width and base32, where string order is
+		// the intended order.
+		{"ulid-like", "01HQ0000000000000000000002", "01HQ0000000000000000000001", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := trackingGreater(tt.a, tt.b); got != tt.want {
+				t.Errorf("trackingGreater(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}

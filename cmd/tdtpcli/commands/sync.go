@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -285,7 +286,7 @@ func extractLastSyncValue(packets []*packet.DataPacket, trackingField string) (s
 			values := strings.Split(row.Value, "|")
 			if fieldIndex < len(values) {
 				value := values[fieldIndex]
-				if value > maxValue {
+				if maxValue == "" || trackingGreater(value, maxValue) {
 					maxValue = value
 				}
 			}
@@ -297,6 +298,33 @@ func extractLastSyncValue(packets []*packet.DataPacket, trackingField string) (s
 	}
 
 	return maxValue, nil
+}
+
+// trackingGreater reports whether a is a later watermark than b.
+//
+// Plain string comparison is wrong for the most common tracking field there
+// is — an auto-increment key. Lexically "9" > "25", so a table whose id
+// crossed a digit boundary parked its watermark at the highest *first digit*
+// and every later row was skipped for good. It only looked correct in tests
+// because every id there had the same width.
+//
+// Integers are compared as integers; anything that parses as an RFC 3339
+// timestamp is compared as a time, which keeps the comparison right if the
+// values ever carry fractional seconds (".5Z" sorts before "Z" lexically, so
+// a mixed column would otherwise pick the wrong maximum). Everything else
+// falls back to string order, which is what a textual version or ULID wants.
+func trackingGreater(a, b string) bool {
+	if ai, err := strconv.ParseInt(a, 10, 64); err == nil {
+		if bi, err := strconv.ParseInt(b, 10, 64); err == nil {
+			return ai > bi
+		}
+	}
+	if at, err := time.Parse(time.RFC3339, a); err == nil {
+		if bt, err := time.Parse(time.RFC3339, b); err == nil {
+			return at.After(bt)
+		}
+	}
+	return a > b
 }
 
 // syncToBroker sends the incremental packets through the same path as

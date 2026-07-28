@@ -1,0 +1,99 @@
+# Runs both as a plain workflow (tdtpcli --steps workflows/sync_out.yaml) and
+# as an orchestrator scenario. tdtpcli's workflow loader ignores the
+# orchestrator: block, and the orchestrator reads only that block -- neither
+# needs a separate copy of the file.
+orchestrator:
+  name: travel-sync-out
+  description: "Incremental sync of every changed row into its queue"
+  runner: tdtpcli-steps
+
+name: travel-sync-out
+description: "Every changed row, from all three nodes, into its queue"
+
+# Replaces coordinator.py's ROUTE_MAP and its Redis cursors.
+#
+# coordinator.py held a cursor per (routing key, table) in Redis, built
+# --where by hand from it, and after a successful export set the cursor to
+# datetime.now(). That last part loses data: rows written between the start of
+# the SELECT and the moment now() is read end up below the new watermark and
+# are never sent. --sync-incremental takes the watermark from the exported
+# data instead, so a row that was not in the result set cannot be skipped.
+#
+# The old cursor also used >= rather than >, which resent the boundary row on
+# every run -- harmless with upsert semantics, but it meant "no changes" still
+# produced traffic.
+#
+# Every step runs in parallel: no depends_on anywhere, so they form a single
+# wave. Ordering between entities would be false comfort in any case -- these
+# are independent queues consumed by independent listeners.
+#
+# on_error: skip throughout. One unreachable database must not stop the other
+# seven; the checkpoint of the failed table stays where it was, so the next
+# run picks up exactly what this one missed.
+
+steps:
+  # ── Airline (localhost:5434) → Central ───────────────────────────────
+  - id: flights
+    command: >-
+      --sync-incremental v_flights
+      --tracking-field last_updated
+      --batch-size 5000
+      --checkpoint-file state/flights.json
+      --config configs/config_src_tdtp_sync_flights.yaml
+      --to-broker
+    on_error: skip
+
+  - id: reservations
+    command: >-
+      --sync-incremental flight_reservations
+      --fields reservation_id,flight_id,booking_ref_external,passenger_name,seat_class,price_paid,status,agency_id
+      --tracking-field last_updated
+      --batch-size 5000
+      --checkpoint-file state/reservations.json
+      --config configs/config_src_tdtp_sync_reservations.yaml
+      --to-broker
+    on_error: skip
+
+  # ── Central (localhost:5432) → Branch ────────────────────────────────
+  - id: guides
+    command: >-
+      --sync-incremental guides
+      --fields guide_id,first_name,last_name,specialization,rating,languages,is_active
+      --tracking-field last_updated
+      --batch-size 5000
+      --checkpoint-file state/guides.json
+      --config configs/config_src_tdtp_sync_guides.yaml
+      --to-broker
+    on_error: skip
+
+  - id: schedule
+    command: >-
+      --sync-incremental tour_schedule
+      --fields schedule_id,tour_id,guide_id,start_date,end_date,available_slots,booked_slots,price_modifier,status
+      --tracking-field last_updated
+      --batch-size 5000
+      --checkpoint-file state/schedule.json
+      --config configs/config_src_tdtp_sync_schedule.yaml
+      --to-broker
+    on_error: skip
+
+  # ── Branch (localhost:5433) → Central ────────────────────────────────
+  - id: branch_customers
+    command: >-
+      --sync-incremental v_local_customers
+      --tracking-field last_updated
+      --batch-size 5000
+      --checkpoint-file state/branch_customers.json
+      --config configs/config_src_tdtp_sync_branch_customers.yaml
+      --to-broker
+    on_error: skip
+
+  - id: branch_sales
+    command: >-
+      --sync-incremental v_local_sales
+      --tracking-field last_updated
+      --batch-size 5000
+      --checkpoint-file state/branch_sales.json
+      --config configs/config_src_tdtp_sync_branch_sales.yaml
+      --to-broker
+    on_error: skip

@@ -1,0 +1,31 @@
+# Seed schedules. Loaded into orchestrator.db on first run; after that the DB
+# is the source of truth and changes go through POST/DELETE /schedules.
+#
+# These two triggers replace coordinator.py, which subscribed to a RabbitMQ
+# topic exchange fed by activity.py, debounced 10s per routing key, and then
+# exported the tables that key mapped to.
+#
+# The event trigger looked more precise than a timer, but it was precise about
+# the wrong thing. It knew which *simulated activity* had run, not which rows
+# had changed -- and it only worked at all because activity.py was the sole
+# writer to those databases. Any other writer (a DBA, a second app, a restore)
+# changed rows that no event announced, and coordinator.py would never sync
+# them. The watermark in state/*.json answers the real question directly, so
+# the trigger no longer has to.
+#
+# What is lost is latency below the tick: an isolated change now waits up to
+# 15s instead of firing immediately. coordinator.py's own 10s debounce was
+# already spending most of that, so the gap is small and it buys correctness
+# for writers the simulation does not control.
+
+schedules:
+  - id: travel-sync-out
+    scenario: travel-sync-out
+    schedule: "@every 15s"
+
+  # Reference data has no update timestamp and so must be reloaded whole (see
+  # workflows/sync_reference.yaml). Moving the entire catalogue every 15s to
+  # catch a renamed country is not a trade worth making.
+  - id: travel-sync-reference
+    scenario: travel-sync-reference
+    schedule: "@every 5m"
