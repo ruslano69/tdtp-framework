@@ -2,6 +2,19 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.20.3] — 2026-07-28
+
+### Added — `GET /jobs?limit=`
+
+The orchestrator's job listing was fixed at the last hundred, and every job
+carries tdtpcli's full output — a few hundred kilobytes per request. Anything
+that polls the endpoint wants the last handful and had no way to say so.
+
+`?limit=` is clamped to 500 and falls back to the previous hundred when absent,
+unparseable or out of range, so no existing caller changes behaviour. A listing
+endpoint asked for more rows than exist wants the rows, not an argument, which
+is why it clamps rather than returning 400.
+
 ## [1.20.2] — 2026-07-28
 
 ### Fixed — timestamps lost their sub-second precision on export
