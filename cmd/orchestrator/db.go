@@ -273,11 +273,49 @@ func (d *OrchestratorDB) MarkCancelRequested(id, requestedBy string) error {
 	return err
 }
 
-// UpdateJobDone updates status, finished_at, log, error when a job completes.
+// UpdateJobDone updates status, finished_at, log, error when a job completes,
+// and carries the outcome back to the schedule that started it.
 func (d *OrchestratorDB) UpdateJobDone(id string, status JobStatus, log, errMsg string) error {
-	_, err := d.db.Exec(`
+	if _, err := d.db.Exec(`
 		UPDATE jobs SET status=?, finished_at=?, log=?, error=? WHERE id=?`,
-		string(status), time.Now().UTC().Format(time.RFC3339), log, errMsg, id)
+		string(status), time.Now().UTC().Format(time.RFC3339), log, errMsg, id); err != nil {
+		return err
+	}
+	return d.syncScheduleStatus(id, status)
+}
+
+// syncScheduleStatus writes a finished job's outcome onto its schedule.
+//
+// The scheduler stamps "running" when it hands the job to the executor and
+// never revisits it, so last_status stayed "running" for good — the column
+// comment promises done|failed|running and nothing ever wrote "done".
+// GET /schedules reported every healthy schedule as permanently mid-run, and
+// "failed" there meant only that the scheduler had refused to start a job
+// (unapproved content, a trust-gate rejection, an invalid parameter), never
+// that a run itself failed. Two different things wearing one word.
+//
+// Placed here rather than in the executor because this is the single method
+// every terminal transition goes through, cancellation included; the two call
+// sites in executor.go would otherwise each need their own copy of it.
+//
+// A manual run has schedule_id NULL, so the subquery yields NULL, `id = NULL`
+// matches no row, and no schedule is touched.
+//
+// The NOT EXISTS guard covers overlapping runs: robfig/cron does not skip a
+// tick because the previous one is still going, so a slow job finishing after
+// the next one started would otherwise overwrite a fresh "running" with a
+// stale outcome. Only the newest job of a schedule may set its status.
+func (d *OrchestratorDB) syncScheduleStatus(jobID string, status JobStatus) error {
+	_, err := d.db.Exec(`
+		UPDATE schedules
+		   SET last_status = ?
+		 WHERE id = (SELECT schedule_id FROM jobs WHERE id = ?)
+		   AND NOT EXISTS (
+		         SELECT 1 FROM jobs newer
+		          WHERE newer.schedule_id = schedules.id
+		            AND newer.started_at > (SELECT started_at FROM jobs WHERE id = ?)
+		       )`,
+		string(status), jobID, jobID)
 	return err
 }
 
