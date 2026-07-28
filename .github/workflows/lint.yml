@@ -64,3 +64,12 @@ jobs:
 
       - name: Run go vet
         run: go vet ./...
+
+      # The build and test jobs in ci.yml compile with -tags nokafka. Vetting
+      # only the default configuration leaves that one unchecked, and a file
+      # missing its //go:build constraint compiles here and fails there --
+      # which is exactly how kafka_limits.go and kafka_diag.go took down Build
+      # CLI, both test matrix entries and Integration while this job stayed
+      # green. Catching it here costs a minute instead of five.
+      - name: Run go vet (nokafka)
+        run: go vet -tags nokafka ./...
