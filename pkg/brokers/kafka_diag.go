@@ -8,7 +8,6 @@ package brokers
 // заранее и разбор отказа поимённо.
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -19,53 +18,75 @@ import (
 // экспорте оно иначе повторится на каждой части.
 var warnedOversize atomic.Bool
 
-// warnIfOversized предупреждает, если несжатый размер уже перерос предел
-// брокера, но отправку не отменяет.
+// splitByBudget режет партию на порции, каждая из которых укладывается в
+// limit по несжатому размеру.
 //
-// Отправлять всё равно правильно: брокер меряет сжатый record batch, а
-// kafka.Writer сжимает (Snappy). Обычные табличные данные ужимаются втрое и
-// проходят — именно поэтому проблему годами не замечали. Но коэффициент
-// определяется данными: UUID, base64 и шифротекст не сжимаются вовсе, и там
-// тот же экспорт отвергается. Предсказать, чем кончится, здесь нельзя —
-// поэтому предупреждение, а не отказ.
-func (k *Kafka) warnIfOversized(ctx context.Context, messages [][]byte) {
-	limit, known := k.MessageMaxBytes(ctx)
+// Сообщение, которое само по себе больше предела, уходит отдельной порцией:
+// дробление ему не поможет, зато так оно не утянет за собой соседей, и отказ
+// в classifyWriteError укажет именно на него.
+func splitByBudget(messages [][]byte, limit int) [][][]byte {
+	if limit <= 0 {
+		return [][][]byte{messages}
+	}
 
-	total := 0
-	largest := 0
+	var chunks [][][]byte
+	var current [][]byte
+	size := 0
+
 	for _, m := range messages {
-		total += len(m)
-		if len(m) > largest {
-			largest = len(m)
+		if len(m) > limit {
+			if len(current) > 0 {
+				chunks = append(chunks, current)
+				current, size = nil, 0
+			}
+			chunks = append(chunks, [][]byte{m})
+			continue
 		}
+
+		if len(current) > 0 && size+len(m) > limit {
+			chunks = append(chunks, current)
+			current, size = nil, 0
+		}
+
+		current = append(current, m)
+		size += len(m)
 	}
 
-	// Предел применяется к record batch целиком, а не к отдельной записи:
-	// десять пакетов по 200 КБ в одном вызове дают 2 МБ и отвергаются
-	// вместе, хотя каждый по отдельности прошёл бы.
-	if total <= limit {
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
+
+	return chunks
+}
+
+// warnIfSingleOversized предупреждает про сообщение, которое не спасёт никакое
+// дробление.
+//
+// Раньше предупреждение выдавалось на любой батч сверх предела — но батч
+// теперь режется автоматически, так что говорить об этом стало не о чем.
+// Осталось то, чего автоматика не решает: одна часть крупнее, чем брокер
+// готов принять. Лечится только уменьшением packet_kb или настройкой брокера.
+func (k *Kafka) warnIfSingleOversized(messages [][]byte, limit int) {
+	if limit <= 0 {
 		return
 	}
-	if warnedOversize.Swap(true) {
+
+	for _, m := range messages {
+		if len(m) <= limit {
+			continue
+		}
+		if warnedOversize.Swap(true) {
+			return
+		}
+
+		log.Printf("WARNING: a single Kafka message is %d bytes against a %d byte limit. "+
+			"Splitting the batch cannot help — one packet does not fit. The broker "+
+			"measures the compressed batch, so this may still get through if the data "+
+			"compresses; high-entropy data (UUID, base64, ciphertext) will not. Lower "+
+			"kafka.packet_kb, or raise the broker's message.max.bytes — %d bytes is the "+
+			"recommended setting for TDTP.",
+			len(m), limit, RecommendedMessageMaxBytes)
 		return
-	}
-
-	source := "broker"
-	if !known {
-		source = "Kafka default (broker did not answer DescribeConfigs)"
-	}
-
-	log.Printf("WARNING: Kafka batch is %d bytes uncompressed against a %d byte limit (%s). "+
-		"Sending anyway — the broker measures the compressed batch, and ordinary table data "+
-		"usually fits. High-entropy data (UUID, base64, ciphertext) will not: it does not "+
-		"compress, and the send is rejected. If that happens, lower kafka.packet_kb or "+
-		"kafka.batch_send, or raise the broker's message.max.bytes — %d bytes is the "+
-		"recommended setting for TDTP.",
-		total, limit, source, RecommendedMessageMaxBytes)
-
-	if largest > limit {
-		log.Printf("WARNING: one packet alone is %d bytes, over the %d byte limit — "+
-			"batching cannot help; kafka.packet_kb has to come down.", largest, limit)
 	}
 }
 

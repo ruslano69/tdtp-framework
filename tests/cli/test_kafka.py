@@ -390,7 +390,11 @@ def test_K4_warning():
     t = time.monotonic()
     p = run("--pipeline", pipeline)
     out = p.stdout + p.stderr
-    warned = "WARNING" in out and "uncompressed against" in out
+    # The warning is now about a single packet that cannot fit, not about a
+    # batch: an oversized batch is split automatically, so there is nothing
+    # left to warn about there. What splitting cannot fix is one part being
+    # larger than the broker accepts.
+    warned = "WARNING" in out and "a single Kafka message is" in out
     record("K4.1 oversized batch is reported before the send",
            warned, time.monotonic() - t, f"warned={warned}")
 

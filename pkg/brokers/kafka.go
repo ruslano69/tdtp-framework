@@ -167,7 +167,10 @@ func (k *Kafka) Send(ctx context.Context, message []byte) error {
 		},
 	}
 
-	k.warnIfOversized(ctx, [][]byte{message})
+	// Одиночная отправка: дробить нечего, поэтому предупреждение только про
+	// сообщение, которое само не влезает.
+	limit, _ := k.MessageMaxBytes(ctx)
+	k.warnIfSingleOversized([][]byte{message}, limit)
 
 	if err := k.writer.WriteMessages(ctx, msg); err != nil {
 		// Тот же разбор, что и у батча: одиночная отправка — это путь
@@ -201,6 +204,38 @@ func (k *Kafka) SendBatchAs(ctx context.Context, messages [][]byte, contentType 
 	if k.writer == nil {
 		return fmt.Errorf("not connected to Kafka")
 	}
+	if len(messages) == 0 {
+		return nil
+	}
+
+	limit, _ := k.MessageMaxBytes(ctx)
+
+	// Батч режется по байтам, а не только по числу сообщений. Kafka меряет
+	// record batch целиком, поэтому batch_send из конфига — это счётчик, не
+	// знающий размеров: десять пакетов по 270 КБ дают 2.7 МБ и отвергаются
+	// вместе, хотя каждый по отдельности прошёл бы. Здесь размеры известны,
+	// и подобрать безопасную границу можно без участия пользователя.
+	//
+	// Бюджет считается по несжатым данным, а брокер меряет сжатые — то есть
+	// оценка заведомо консервативная. Это осознанно: сжатие может только
+	// уменьшить, так что уложившийся по несжатому размеру уложится и после
+	// компрессии. Цена — лишние запросы на хорошо сжимаемых данных; плата за
+	// обратное — отказ.
+	for _, chunk := range splitByBudget(messages, limit) {
+		if err := k.writeChunk(ctx, chunk, contentType, limit); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// writeChunk отправляет одну порцию, уже уложенную в бюджет.
+func (k *Kafka) writeChunk(ctx context.Context, messages [][]byte, contentType string, limit int) error {
+	// Предупреждаем только о том, чего дробление не лечит: одиночное
+	// сообщение больше предела. Батч, который был бы велик целиком, к этому
+	// моменту уже разрезан.
+	k.warnIfSingleOversized(messages, limit)
 
 	now := time.Now()
 	msgs := make([]kafka.Message, len(messages))
@@ -216,11 +251,10 @@ func (k *Kafka) SendBatchAs(ctx context.Context, messages [][]byte, contentType 
 		}
 	}
 
-	k.warnIfOversized(ctx, messages)
-
 	if err := k.writer.WriteMessages(ctx, msgs...); err != nil {
-		return classifyWriteError(err, messages, k.limits.value)
+		return classifyWriteError(err, messages, limit)
 	}
+
 	return nil
 }
 
