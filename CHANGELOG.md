@@ -2,6 +2,53 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.20.1] — 2026-07-28
+
+### Fixed — the audit log's time filter dropped records, and retention deleted the wrong ones
+
+`DatabaseAppender` bound `time.Time` values straight into SQL. With a driver
+that stores time as text — modernc.org/sqlite, the backend the examples use —
+comparison is then lexical on that text, and the text carried the writer's
+local zone. Two records written at the same instant from nodes in different
+zones therefore did not compare in chronological order.
+
+The damage was silent in both directions:
+
+- `Query` with a `StartTime`/`EndTime` returned fewer rows than it should. A
+  record written by a caller holding a UTC time sorted below a `+03:00`
+  boundary that it actually postdates, so it simply was not in the result.
+- `DeleteOlderThan` shares the comparison, so retention destroyed records
+  newer than the cutoff. In the regression test the pre-fix code deletes
+  *both* rows, including one an hour newer than the boundary it was given.
+
+Every timestamp entering SQL — the inserted row, both filter bounds, and the
+retention cutoff — is now normalized to UTC, so text order and chronological
+order are the same thing. Converting the location also drops the monotonic
+clock reading `time.Now()` carries, which had been persisted as a literal
+` m=+10.312223101` suffix inside a `TIMESTAMP` column: an offset from an
+arbitrary point in a process that has since exited.
+
+The SQLite audit DSN additionally gets `_time_format=sqlite`, which makes the
+driver write the canonical SQLite datetime instead of Go's `time.Time.String()`.
+The driver's own comment explains the default: "Before configurable write time
+formats were supported, time.Time.String was used. Maintain that default to
+keep existing driver users formatting times the same." That default is fine for
+a value nobody sorts on; an audit table's timestamp column is not that.
+
+Reading a row back through the driver hid all of this, because it re-parses
+`TIMESTAMP` columns — the stored bytes only differ when read as text, which is
+what the new test does.
+
+pgx, mysql and mssql send time natively and were never affected.
+
+**Existing SQLite audit databases keep their old rows.** The two forms do not
+sort against each other, so range queries and retention stay unreliable for
+those rows until they are rewritten or aged out. Nothing rewrites them
+automatically — an audit trail should not be edited as a side effect of an
+upgrade. `AuditDatabaseConfig`'s doc comment carries a verified migration
+statement that reads each row's own recorded offset, so a table spanning a DST
+change converts correctly.
+
 ## [1.20.0] — 2026-07-28
 
 ### Added — `--sync-incremental --to-broker`
