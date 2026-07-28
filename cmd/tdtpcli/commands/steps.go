@@ -29,18 +29,22 @@ import (
 //	    command: "--map mappings/sync.yaml --input out/export.tdtp.xml"
 //	    depends_on: [export]
 //	    on_error: retry(3)
-func RunSteps(ctx context.Context, path string, vars map[string]string) error {
+func RunSteps(ctx context.Context, path string, vars map[string]string, quiet bool) error {
 	cfg, err := workflow.LoadWorkflow(path)
 	if err != nil {
 		return fmt.Errorf("--steps: %w", err)
 	}
 
+	// The name survives --quiet: a captured log still has to say what it was.
+	// The description and step count do not — the workflow file states both.
 	fmt.Printf("Workflow: %s\n", cfg.Name)
-	if cfg.Description != "" {
-		fmt.Printf("   %s\n", workflow.ApplyVars(cfg.Description, vars))
+	if !quiet {
+		if cfg.Description != "" {
+			fmt.Printf("   %s\n", workflow.ApplyVars(cfg.Description, vars))
+		}
+		fmt.Printf("   Steps: %d\n", len(cfg.Steps))
 	}
-	fmt.Printf("   Steps: %d\n", len(cfg.Steps))
-	if len(vars) > 0 {
+	if len(vars) > 0 && !quiet {
 		keys := make([]string, 0, len(vars))
 		for k := range vars {
 			keys = append(keys, k)
@@ -52,10 +56,12 @@ func RunSteps(ctx context.Context, path string, vars map[string]string) error {
 		}
 		fmt.Printf("   Variables: %s\n", strings.Join(parts, ", "))
 	}
-	fmt.Println()
+	if !quiet {
+		fmt.Println()
+	}
 
 	t0 := time.Now()
-	if err := workflow.Run(ctx, cfg, vars); err != nil {
+	if err := workflow.Run(ctx, cfg, vars, workflow.RunOptions{Quiet: quiet}); err != nil {
 		return err
 	}
 

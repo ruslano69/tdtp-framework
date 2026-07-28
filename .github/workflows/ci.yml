@@ -131,5 +131,11 @@ jobs:
     - name: Run integration tests
       env:
         GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
-        GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
+        # No GOWORK: off here, unlike every other job. This suite launches
+        # the sibling module -- `go run ./xzmercury/cmd/xzmercury/` in
+        # tests/integration/xzmercury_pipeline_test.go -- and that path exists
+        # only while go.work is active. Without it the run fails with
+        # "main module does not contain package .../xzmercury/cmd/xzmercury",
+        # then hangs for the full 60s health-check wait before the suite
+        # times out. Spanning both modules is what this job is for.
       run: go test -tags "integration nokafka" -v -timeout 120s ./tests/integration/ ./pkg/adapters/postgres/...

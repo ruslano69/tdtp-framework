@@ -22,6 +22,12 @@ type SyncOptions struct {
 	Fields         []string // Column projection; tracking field is always included automatically
 	ProcessorMgr   ProcessorManager
 
+	// Quiet replaces the running commentary with one result line:
+	// "<table>  <n> rows  <elapsed>". Everything it drops -- the table name,
+	// the tracking field, the checkpoint path -- is already on the command
+	// line that invoked this.
+	Quiet bool
+
 	// BrokerCfg sends the result to a queue instead of writing files.
 	//
 	// Incremental sync tracked a checkpoint but could only write to disk;
@@ -42,9 +48,29 @@ type SyncOptions struct {
 
 // IncrementalSync performs incremental synchronization of a table
 func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOptions) error {
-	fmt.Printf("Starting incremental sync for table '%s'...\n", opts.TableName)
-	fmt.Printf("Tracking field: %s\n", opts.TrackingField)
-	fmt.Printf("Checkpoint file: %s\n", opts.CheckpointFile)
+	started := time.Now()
+
+	// say prints the running commentary; --quiet drops all of it. Everything it
+	// says — the table, the tracking field, the checkpoint path — is already on
+	// the command line that invoked this.
+	say := func(format string, a ...any) {
+		if !opts.Quiet {
+			fmt.Printf(format, a...)
+		}
+	}
+
+	// result is the one line --quiet leaves behind. Rows and elapsed are the
+	// only facts a captured run cannot reconstruct from its own arguments.
+	result := func(rows int64) {
+		if opts.Quiet {
+			fmt.Printf("%s  %d rows  %s\n",
+				opts.TableName, rows, time.Since(started).Round(time.Millisecond))
+		}
+	}
+
+	say("Starting incremental sync for table '%s'...\n", opts.TableName)
+	say("Tracking field: %s\n", opts.TrackingField)
+	say("Checkpoint file: %s\n", opts.CheckpointFile)
 
 	// Initialize state manager
 	stateMgr, err := sync.NewStateManager(opts.CheckpointFile, true)
@@ -57,11 +83,11 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	var lastSyncValue string
 	if state.LastSyncValue != "" {
 		lastSyncValue = state.LastSyncValue
-		fmt.Printf("Last sync: %s (value: %s)\n",
+		say("Last sync: %s (value: %s)\n",
 			state.LastSyncTime.Format("2006-01-02 15:04:05"),
 			lastSyncValue)
 	} else {
-		fmt.Printf("First sync - will export all records\n")
+		say("First sync - will export all records\n")
 	}
 
 	// Build TDTQL query for incremental sync
@@ -93,7 +119,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	}
 	defer func() { _ = adapter.Close(ctx) }()
 
-	fmt.Printf("Exporting incremental changes...\n")
+	say("Exporting incremental changes...\n")
 
 	// Export with incremental query
 	var packets []*packet.DataPacket
@@ -112,37 +138,39 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	}
 
 	if len(packets) == 0 {
-		fmt.Println("✓ No new changes to sync")
+		say("✓ No new changes to sync\n")
+		result(0)
 		return nil
 	}
 
-	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
+	say("✓ Exported %d packet(s)\n", len(packets))
 
 	// Count total rows
 	totalRows := int64(0)
 	for _, pkt := range packets {
 		totalRows += int64(len(pkt.Data.Rows))
 	}
-	fmt.Printf("✓ Total rows: %d\n", totalRows)
+	say("✓ Total rows: %d\n", totalRows)
 
 	// "Nothing new" arrives as one empty packet, not as zero packets, so the
 	// len(packets) check above does not catch it. Without this the run failed
 	// with "no valid tracking field values found" — an error for the ordinary
 	// case of a table that simply has not changed since the last sync.
 	if totalRows == 0 {
-		fmt.Println("✓ No new changes to sync")
+		say("✓ No new changes to sync\n")
+		result(0)
 		return nil
 	}
 
 	// Apply data processors if configured
 	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
-		fmt.Printf("Applying data processors...\n")
+		say("Applying data processors...\n")
 		for _, pkt := range packets {
 			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
 				return fmt.Errorf("processor failed: %w", err)
 			}
 		}
-		fmt.Printf("✓ Data processors applied\n")
+		say("✓ Data processors applied\n")
 	}
 
 	// Extract new last sync value from the data
@@ -170,11 +198,11 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 		if err := stateMgr.UpdateState(opts.TableName, newLastSyncValue, totalRows); err != nil {
 			fmt.Printf("⚠ Warning: failed to update sync state: %v\n", err)
 		} else {
-			fmt.Printf("✓ Checkpoint updated: %s\n", newLastSyncValue)
+			say("✓ Checkpoint updated: %s\n", newLastSyncValue)
 		}
 
-		fmt.Printf("✓ Incremental sync complete!\n")
-		fmt.Printf("  Records synced: %d\n", totalRows)
+		say("✓ Incremental sync complete!\n")
+		say("  Records synced: %d\n", totalRows)
 
 		return nil
 	}
@@ -192,7 +220,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 		if err := writePacketToFile(packets[0], outputFile); err != nil {
 			return err
 		}
-		fmt.Printf("✓ Written to: %s\n", outputFile)
+		say("✓ Written to: %s\n", outputFile)
 	} else {
 		// Multiple files (packets)
 		for i, pkt := range packets {
@@ -200,7 +228,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 			if err := writePacketToFile(pkt, filename); err != nil {
 				return err
 			}
-			fmt.Printf("✓ Written packet %d/%d to: %s\n", i+1, len(packets), filename)
+			say("✓ Written packet %d/%d to: %s\n", i+1, len(packets), filename)
 		}
 	}
 
@@ -208,12 +236,12 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	if err := stateMgr.UpdateState(opts.TableName, newLastSyncValue, totalRows); err != nil {
 		fmt.Printf("⚠ Warning: failed to update sync state: %v\n", err)
 	} else {
-		fmt.Printf("✓ Checkpoint updated: %s\n", newLastSyncValue)
+		say("✓ Checkpoint updated: %s\n", newLastSyncValue)
 	}
 
-	fmt.Printf("✓ Incremental sync complete!\n")
-	fmt.Printf("  Records synced: %d\n", totalRows)
-	fmt.Printf("  New checkpoint: %s\n", newLastSyncValue)
+	say("✓ Incremental sync complete!\n")
+	say("  Records synced: %d\n", totalRows)
+	say("  New checkpoint: %s\n", newLastSyncValue)
 
 	return nil
 }
@@ -340,8 +368,10 @@ func syncToBroker(ctx context.Context, packets []*packet.DataPacket, opts SyncOp
 	}
 	defer func() { _ = broker.Close() }()
 
-	fmt.Printf("Sending %d packet(s) to %s queue %q...\n",
-		len(packets), opts.BrokerCfg.Type, opts.BrokerCfg.Queue)
+	if !opts.Quiet {
+		fmt.Printf("Sending %d packet(s) to %s queue %q...\n",
+			len(packets), opts.BrokerCfg.Type, opts.BrokerCfg.Queue)
+	}
 
 	return sendPacketsToBroker(ctx, broker, packets, brokerSendOptions{
 		TableName:     opts.TableName,

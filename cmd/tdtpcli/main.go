@@ -51,7 +51,7 @@ func routeCommand(
 		operation = audit.OpTransform
 		metadata = map[string]string{"command": "steps", "workflow": *flags.Steps}
 
-		err = commands.RunSteps(ctx, *flags.Steps, flags.PipelineVars)
+		err = commands.RunSteps(ctx, *flags.Steps, flags.PipelineVars, *flags.Quiet)
 
 	} else if *flags.Map != "" {
 		operation = audit.OpTransform
@@ -549,6 +549,7 @@ func routeCommand(
 				Fields:         splitCommaSeparated(*flags.Fields),
 				ProcessorMgr:   procMgr,
 
+				Quiet:         *flags.Quiet,
 				BrokerCfg:     syncBrokerCfg,
 				Compress:      *flags.Compress || config.Export.Compress,
 				CompressLevel: *flags.CompressLevel,
@@ -802,7 +803,11 @@ func main() {
 	if err != nil {
 		fatal("%v", err)
 	}
-	if !lic.IsCommunity() {
+	// The banner is a notice for a person at a terminal. Under --quiet the
+	// output is being captured — a workflow step, an orchestrator job, cron —
+	// and with one process per step it was the single largest thing stored:
+	// seven copies of one line, 22% of a six-step workflow's log.
+	if !lic.IsCommunity() && !*flags.Quiet {
 		fmt.Printf("License: %s\n", lic.Summary())
 	}
 

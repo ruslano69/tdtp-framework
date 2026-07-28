@@ -2,6 +2,38 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.21.0] — 2026-07-28
+
+### Added — `--quiet`
+
+The output of a captured run is almost all preamble. Measured on one idle
+travel-agency tick, 4602 bytes:
+
+    [steps] echo of each command   38%
+    per-command preamble           29%
+    license banner                 22%   (once per process — seven times
+                                          across a six-step workflow)
+    the result itself              ~100 bytes
+
+`--quiet` drops the banner, drops the preamble, and leaves one line per
+operation: name, rows, elapsed. `--steps` prints the step id instead of the
+whole command, and passes `--quiet` down to its children so the whole tree
+stays terse. The same tick is now 527 bytes — 8.7× smaller.
+
+The command reappears in the failure line. A step that failed is exactly when
+you want to know what ran, and that is the one case where the log is read.
+
+Warnings are never suppressed: `--quiet` removes commentary, not problems.
+
+`--quiet` is prepended to a child's arguments, never appended — Go's flag
+package stops parsing at the first non-flag argument, so a trailing flag is
+silently ignored by any command taking a positional. There is a test for that
+ordering alone.
+
+`examples/travel-agency/orchestrator/runners.yaml` now invokes steps with it,
+since the orchestrator stores that output verbatim in its job log. At
+`@every 15s` this is the difference between ~27 MB and ~3 MB of job log a day.
+
 ## [1.20.4] — 2026-07-28
 
 ### Fixed — the SQLite adapter refused concurrent writers instead of waiting
@@ -47,6 +79,28 @@ slow job finishing late would overwrite a fresh `running` with a stale outcome.
 `examples/travel-agency/dashboard.py` stops relabelling the field. It had been
 showing `dispatched`/`refused` to say what the value actually meant; now that
 the value is honest, relabelling would be the lie.
+
+### Fixed — GOWORK: off broke the integration suite
+
+1.20.3 put `GOWORK: off` on every job that runs Go. One job needs the
+workspace: `tests/integration/xzmercury_pipeline_test.go` starts the sibling
+module with `go run ./xzmercury/cmd/xzmercury/`, and that path exists only
+while `go.work` is active. Without it the run failed with
+
+    main module (github.com/ruslano69/tdtp-framework) does not contain
+    package github.com/ruslano69/tdtp-framework/xzmercury/cmd/xzmercury
+
+and then sat through the full 60s health-check wait before the suite hit its
+2-minute timeout and panicked. The integration job now keeps the workspace;
+every other job still resolves from go.mod alone.
+
+Two things made this land unseen. The integration job runs only on
+`refs/heads/main`, so no branch build could exercise it — the change was
+green on its branch and red the moment it merged. And the measurement quoted
+in 1.20.3 — identical package set, five extra modules, no shared dependency
+moved — was taken from `go list` and `go build`, which see what the *test
+binary* compiles against. It cannot see a `go run` the test issues at runtime,
+which is the only place the sibling module is reached.
 
 ## [1.20.3] — 2026-07-28
 
