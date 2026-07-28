@@ -2,6 +2,38 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.21.0] — 2026-07-28
+
+### Added — `--quiet`
+
+The output of a captured run is almost all preamble. Measured on one idle
+travel-agency tick, 4602 bytes:
+
+    [steps] echo of each command   38%
+    per-command preamble           29%
+    license banner                 22%   (once per process — seven times
+                                          across a six-step workflow)
+    the result itself              ~100 bytes
+
+`--quiet` drops the banner, drops the preamble, and leaves one line per
+operation: name, rows, elapsed. `--steps` prints the step id instead of the
+whole command, and passes `--quiet` down to its children so the whole tree
+stays terse. The same tick is now 527 bytes — 8.7× smaller.
+
+The command reappears in the failure line. A step that failed is exactly when
+you want to know what ran, and that is the one case where the log is read.
+
+Warnings are never suppressed: `--quiet` removes commentary, not problems.
+
+`--quiet` is prepended to a child's arguments, never appended — Go's flag
+package stops parsing at the first non-flag argument, so a trailing flag is
+silently ignored by any command taking a positional. There is a test for that
+ordering alone.
+
+`examples/travel-agency/orchestrator/runners.yaml` now invokes steps with it,
+since the orchestrator stores that output verbatim in its job log. At
+`@every 15s` this is the difference between ~27 MB and ~3 MB of job log a day.
+
 ## [1.20.4] — 2026-07-28
 
 ### Fixed — the SQLite adapter refused concurrent writers instead of waiting

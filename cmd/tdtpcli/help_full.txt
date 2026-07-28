@@ -229,6 +229,10 @@ OPTIONS:
     --create-config-sqlite     Create SQLite config template
     --create-config-mysql      Create MySQL config template
 
+    --quiet                    Trim output to the result: no license banner, no
+                               per-command preamble, one line per operation
+                               (name, rows, elapsed). For captured runs:
+                               workflow steps, orchestrator jobs, cron.
   Misc:
     --version                  Show version information
     --help                     Show this help message

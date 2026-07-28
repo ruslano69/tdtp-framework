@@ -10,4 +10,7 @@
 runners:
   tdtpcli-steps:
     binary: ../../tdtpcli.exe
-    args: ["--steps", "{{.tmpfile}}"]
+    # --quiet: the orchestrator stores this output verbatim in its job log.
+    # Without it one idle tick was 4602 bytes, of which ~90% was preamble
+    # and seven copies of the license banner. With it, 527.
+    args: ["--quiet", "--steps", "{{.tmpfile}}"]

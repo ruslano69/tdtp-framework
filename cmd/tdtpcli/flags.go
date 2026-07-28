@@ -167,6 +167,11 @@ type Flags struct {
 	Version   *bool
 	Help      *bool
 	ShortHelp *bool
+
+	// Quiet trims output to the result. Meant for runs whose output is
+	// captured rather than read: a workflow step, an orchestrator job, cron.
+	// See the flag registration below for exactly what it suppresses.
+	Quiet *bool
 }
 
 // ParseFlags defines and parses all command-line flags
@@ -305,6 +310,12 @@ func ParseFlags() *Flags {
 	f.ShowConflicts = flag.Bool("show-conflicts", false, "Show detailed conflict information for merge")
 
 	// Misc
+	// --quiet exists because the output of a captured run is almost all
+	// preamble. Measured on one travel-agency tick: 4542 bytes, of which the
+	// license banner (printed once per process, so seven times across a
+	// six-step workflow) was 22%, the per-command preamble 29%, and the step
+	// echo 38%. The result itself was about a hundred bytes.
+	f.Quiet = flag.Bool("quiet", false, "Trim output to the result: no license banner, no per-command preamble, one line per operation (name, rows, elapsed)")
 	f.Version = flag.Bool("version", false, "Show version information")
 	f.Help = flag.Bool("help", false, "Show detailed help with examples")
 	f.ShortHelp = flag.Bool("h", false, "Show brief help (commands and options)")

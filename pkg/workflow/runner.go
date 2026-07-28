@@ -34,6 +34,15 @@ func applyVars(s string, vars map[string]string) string {
 	})
 }
 
+// RunOptions controls what the run prints and what it passes down.
+type RunOptions struct {
+	// Quiet drops the echoed command from each step's start line and adds
+	// --quiet to the child's arguments, so the whole tree stays terse. The
+	// command reappears in the failure line, which is the moment it is worth
+	// having.
+	Quiet bool
+}
+
 // Run executes the workflow using Kahn's topological-sort algorithm.
 // Steps in the same "wave" (no ordering constraint between them) run in
 // parallel. The next wave starts only when all steps of the current wave
@@ -45,7 +54,7 @@ func applyVars(s string, vars map[string]string) string {
 //     are also skipped (they print a one-line notice instead of running).
 //   - on_error:retry(N) — retry up to N times with exponential back-off (2s→30s).
 //     If all retries are exhausted, the step is treated as on_error:stop.
-func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string) error {
+func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string, opts RunOptions) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("cannot determine executable path: %w", err)
@@ -114,7 +123,7 @@ func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string) error
 					}
 				}
 
-				err := runStep(waveCtx, exe, step, vars)
+				err := runStep(waveCtx, exe, step, vars, opts)
 				// If this step's failure would stop the workflow, cancel the wave
 				// context so other goroutines' subprocesses exit immediately rather
 				// than running to their own timeouts.
@@ -181,7 +190,7 @@ func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string) error
 // runStep executes one step, respecting the retry policy from on_error.
 // Each attempt runs the tdtpcli binary as a subprocess with the step's command
 // as the argument list. stdout/stderr pass through directly.
-func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]string) error {
+func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]string, opts RunOptions) error {
 	policy, _ := ParseOnError(step.OnError)
 	maxAttempts := 1
 	if policy.Action == "retry" {
@@ -193,6 +202,7 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 	if err != nil {
 		return fmt.Errorf("parse command: %w", err)
 	}
+	args = childArgs(args, opts.Quiet)
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -208,7 +218,11 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 			}
 		}
 
-		fmt.Printf("[steps] ▶  %s: %s\n", step.ID, resolved)
+		if opts.Quiet {
+			fmt.Printf("[steps] ▶  %s\n", step.ID)
+		} else {
+			fmt.Printf("[steps] ▶  %s: %s\n", step.ID, resolved)
+		}
 		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -218,7 +232,9 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 			fmt.Printf("[steps] ✓  %s\n", step.ID)
 			return nil
 		}
-		fmt.Printf("[steps] ✗  %s: %v\n", step.ID, lastErr)
+		// The command is echoed here even under --quiet: a step that failed is
+		// exactly when you need to know what was run.
+		fmt.Printf("[steps] ✗  %s: %v\n    command: %s\n", step.ID, lastErr, resolved)
 	}
 	return lastErr
 }
@@ -278,4 +294,16 @@ func tokenize(s string) ([]string, error) {
 		tokens = append(tokens, string(cur))
 	}
 	return tokens, nil
+}
+
+// childArgs prepares the argument list for a step's subprocess.
+//
+// --quiet is prepended, never appended: Go's flag package stops parsing at the
+// first non-flag argument, so a trailing flag is silently ignored by any
+// command that takes a positional.
+func childArgs(args []string, quiet bool) []string {
+	if !quiet {
+		return args
+	}
+	return append([]string{"--quiet"}, args...)
 }
