@@ -21,7 +21,7 @@
    - [--diff](#--diff) · [--merge](#--merge)
    - [--to-compact](#--to-compact) · [--to-csv](#--to-csv) · [--to-html](#--to-html)
    - [--pipeline](#--pipeline) · [--process-request](#--process-request)
-5. [Рабочий процесс: --inspect → --test → --import](#рабочий-процесс-inspect--test--import)
+5. [Рабочий процесс: --inspect → --test → --import](#рабочий-процесс---inspect----test----import)
 6. [Compact Format (v1.3.1)](#compact-format-v131)
 7. [ETL Pipeline](#etl-pipeline)
 8. [Шифрование AES-256-GCM](#шифрование-aes-256-gcm)
@@ -686,6 +686,118 @@ sources:
 ```
 
 **Тестовые XML-файлы:** `tests/sanitize/` — `access_fields.tdtp.xml`, `cyrillic_fields.tdtp.xml`, `exotic_mixed.tdtp.xml`, `safe_import.tdtp.xml`
+
+---
+
+### --export-xlsx
+
+Выгрузить таблицу сразу в `.xlsx`, минуя TDTP-файл. Удобно, когда результат уходит человеку, а не в другую систему.
+
+**Синтаксис:**
+```bash
+tdtpcli --export-xlsx <table> [--output <file>] [--sheet <name>]
+        [--where <condition>] [--order-by <fields>] [--limit <n>] [--fields <col1,col2>]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--export-xlsx <table>` | Имя таблицы или представления |
+| `--output <file>` | Выходной `.xlsx` (по умолчанию — имя таблицы) |
+| `--sheet <name>` | Имя листа (по умолчанию `Sheet1`) |
+| `--where`, `--order-by`, `--limit`, `--fields` | Как в `--export` |
+
+**Заголовки несут схему.** Первая строка листа — `имя_поля (ТИП)`, у первичных ключей добавляется `*`. Это не украшение: именно из этой строки `--from-xlsx` и `--import-xlsx` восстанавливают типы. Отредактируешь заголовок — сломаешь обратный путь.
+
+**Что делается за тебя** — это ловушки Excel, каждая из которых иначе портит данные молча:
+
+| Случай | Поведение |
+|--------|-----------|
+| `BIGINT` длиннее 15 значащих цифр | Пишется текстовой ячейкой — иначе Excel округлит: его числа это float64 |
+| `NaN`, `±Inf` | Пустая ячейка (канонический NULL в Excel) |
+| Даты до 1900 года | ISO-строкой — серийный номер Excel их не представляет |
+| Строка начинается с `=`, `+`, `-`, `@` | Пишется через `SetCellStr`, так что Excel не примет её за формулу |
+| Маркер `[NULL]` в текстовом поле | Пустая ячейка |
+
+**Примеры:**
+```bash
+tdtpcli --export-xlsx orders --output orders.xlsx
+tdtpcli --export-xlsx orders --sheet Orders --where "status = 'active'" --limit 1000
+```
+
+---
+
+### --import-xlsx
+
+Загрузить `.xlsx` прямо в БД, минуя TDTP-файл.
+
+**Синтаксис:**
+```bash
+tdtpcli --import-xlsx <file> [--table <name>] [--sheet <name>] [--strategy <mode>]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--import-xlsx <file>` | Входной `.xlsx` |
+| `--table <name>` | Таблица-приёмник (по умолчанию — из заголовков/имени файла) |
+| `--sheet <name>` | Лист (по умолчанию первый) |
+| `--strategy <mode>` | `append`, `replace`, `upsert` — как в `--import` |
+
+**Требование к файлу:** заголовки в формате `имя_поля (ТИП)`, ключи помечены `*` — то есть файл, полученный из `--export-xlsx` или `--to-xlsx`. Произвольную таблицу из интернета так не загрузить: типы брать неоткуда.
+
+**Что делается за тебя:**
+
+| Случай | Поведение |
+|--------|-----------|
+| Ячейки с ошибками (`#N/A`, `#DIV/0!`, `#NUM!`, `#VALUE!`) | NULL — формула, не посчитавшаяся у отправителя, не должна стать строкой `"#N/A"` в БД |
+| Даты | Читается сырой серийный номер и пересчитывается через эпоху 1900, **с поправкой на високосный баг Excel** (серийный 60 = несуществующее 29 февраля 1900) |
+| Ведущие и хвостовые пробелы | Обрезаются |
+| Пустая ячейка | NULL для нетекстовых типов, пустая строка для `TEXT` — это разные вещи, и Excel их не различает |
+
+**Примеры:**
+```bash
+tdtpcli --import-xlsx orders.xlsx --strategy replace
+tdtpcli --import-xlsx orders.xlsx --table orders_2026 --sheet Orders
+```
+
+---
+
+### --to-xlsx
+
+Конвертировать существующий TDTP-файл в `.xlsx`, без подключения к БД.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-xlsx <tdtp-file> [--output <file>] [--sheet <name>]
+```
+
+Сжатые пакеты (zstd, kanzi) распаковываются автоматически. Заголовки и обработка ловушек — те же, что у [`--export-xlsx`](#--export-xlsx).
+
+**Примеры:**
+```bash
+tdtpcli --to-xlsx orders.tdtp.xml --output orders.xlsx --sheet Orders
+```
+
+---
+
+### --from-xlsx
+
+Конвертировать `.xlsx` в TDTP-файл, без подключения к БД. Обратная сторона `--to-xlsx`.
+
+**Синтаксис:**
+```bash
+tdtpcli --from-xlsx <xlsx-file> [--output <file>] [--sheet <name>]
+```
+
+Ожидает те же заголовки `имя_поля (ТИП)` и ту же обработку ловушек, что и [`--import-xlsx`](#--import-xlsx). Если `--sheet` не задан, берётся первый лист.
+
+**Примеры:**
+```bash
+tdtpcli --from-xlsx orders.xlsx --output orders.tdtp.xml
+```
 
 ---
 
