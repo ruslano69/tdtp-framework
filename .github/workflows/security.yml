@@ -28,6 +28,9 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
+        env:
+          GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
+          GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
         run: govulncheck ./...
 
   nancy:
@@ -52,5 +55,8 @@ jobs:
           sudo mv nancy /usr/local/bin/nancy
 
       - name: Run Nancy
+        env:
+          GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
+          GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
         run: go list -json -m all | nancy sleuth
         continue-on-error: true

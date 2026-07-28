@@ -75,6 +75,9 @@ jobs:
         cache: true
 
     - name: Build tdtpcli (nokafka)
+      env:
+        GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
+        GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
       run: go build -tags nokafka -v -o /tmp/tdtpcli ./cmd/tdtpcli/
 
     - name: Test tdtpcli binary
@@ -126,4 +129,7 @@ jobs:
         cache: true
 
     - name: Run integration tests
+      env:
+        GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
+        GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
       run: go test -tags "integration nokafka" -v -timeout 120s ./tests/integration/ ./pkg/adapters/postgres/...
