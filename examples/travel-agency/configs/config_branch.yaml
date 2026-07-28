@@ -24,3 +24,16 @@ resilience:
         initial_wait_ms: 500
         max_wait_ms: 10000
         jitter: true
+audit:
+    enabled: true
+    level: standard
+    # A SQLite file, not the node's own Postgres. The point of the separate
+    # sink is that the process being audited must not be able to rewrite its
+    # own trail -- pointing this at the database above would hand it exactly
+    # that. SQLite keeps the example self-contained; production would use a
+    # database on a host the writer has no credentials for.
+    database:
+        type: sqlite
+        dsn: ./state/audit_branch.db
+        table: audit_log
+        auto_create_table: true
