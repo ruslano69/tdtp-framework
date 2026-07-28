@@ -129,7 +129,6 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	return nil
 }
 
-
 // defaultIdleTimeout is how long --import-broker waits for the next message
 // before deciding the queue is empty and stopping.
 const defaultIdleTimeout = 5 * time.Second
