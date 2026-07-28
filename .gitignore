@@ -98,3 +98,10 @@ tdtp.lic
 *.lic
 *.priv
 vendor.priv
+
+# Python bytecode.
+# Пакет bindings/python и наборы tests/cli — обычные Python-модули, поэтому
+# __pycache__ появляется в четырёх местах дерева. Правило без слеша в начале
+# ловит их все, а не только корневое.
+__pycache__/
+*.py[cod]
