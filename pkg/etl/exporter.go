@@ -1063,10 +1063,39 @@ func (e *Exporter) exportStreamToBroker(ctx context.Context, broker brokers.Mess
 		result.ErrorsCount++
 	}
 
-	// Если были ошибки при отправке частей, возвращаем ошибку
+	// Если были ошибки при отправке частей, возвращаем ошибку.
+	//
+	// Причины перечисляются, а не сворачиваются в счётчик. Раньше отсюда
+	// уходило "streaming export completed with N errors", и всё, что собрано в
+	// result.Errors через %w, до пользователя не доезжало вовсе: отказ Kafka по
+	// размеру сообщения выглядел безымянным сбоем, а разбирать его приходилось
+	// по логам брокера.
+	//
+	// Первая ошибка оборачивается через %w — по ней работает errors.Is выше
+	// (isMercuryDegraded и подобные); остальные дописываются текстом.
 	if result.ErrorsCount > 0 {
-		return result, fmt.Errorf("streaming export completed with %d errors", result.ErrorsCount)
+		return result, fmt.Errorf("streaming export failed on %d of %d part(s): %w%s",
+			result.ErrorsCount, result.PartsSent+result.ErrorsCount,
+			result.Errors[0], formatExtraErrors(result.Errors[1:]))
 	}
 
 	return result, nil
+}
+
+// formatExtraErrors дописывает ошибки со второй и далее.
+//
+// Первая уходит через %w, чтобы errors.Is продолжал работать; остальные
+// добавляются текстом — потерять их означало бы вернуться к счётчику, из-за
+// которого причина отказа не доезжала до пользователя.
+func formatExtraErrors(errs []error) string {
+	if len(errs) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for i, err := range errs {
+		fmt.Fprintf(&b, "\n  error %d: %v", i+2, err)
+	}
+
+	return b.String()
 }

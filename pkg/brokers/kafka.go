@@ -170,7 +170,10 @@ func (k *Kafka) Send(ctx context.Context, message []byte) error {
 	k.warnIfOversized(ctx, [][]byte{message})
 
 	if err := k.writer.WriteMessages(ctx, msg); err != nil {
-		return fmt.Errorf("failed to write message to Kafka: %w", err)
+		// Тот же разбор, что и у батча: одиночная отправка — это путь
+		// streaming-экспорта, и раньше отказ по размеру доезжал до
+		// пользователя как безымянная ошибка.
+		return classifyWriteError(err, [][]byte{message}, k.limits.value)
 	}
 	return nil
 }
