@@ -108,3 +108,16 @@ __pycache__/
 
 # travel-agency runtime state: checkpoints, orchestrator DB, rendered scenarios
 examples/travel-agency/state/
+
+# Local scratch. The leading underscore also hides it from the go tool, so a
+# stray `package main` here cannot break `go build ./...` — see _local/README.md.
+_local/
+
+# Local run artifacts and machine-specific configs
+dump_users/
+baseline_*.yaml
+my_sqlite_config.yaml
+examples/travel-agency/logs/
+
+# Credentials for the S3 dev tests — never commit
+tests/cli/s3_dev_credentials.yaml
