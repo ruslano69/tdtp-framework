@@ -15,6 +15,31 @@ unparseable or out of range, so no existing caller changes behaviour. A listing
 endpoint asked for more rows than exist wants the rows, not an argument, which
 is why it clamps rather than returning 400.
 
+### Added — `examples/travel-agency/dashboard.py`
+
+    python dashboard.py     # http://localhost:8100
+
+One page joining the four things that already described the flow but had no
+single place to be seen together: the orchestrator's runs and schedules,
+RabbitMQ's queue depth and consumer count, the audit databases' imported
+messages, and the watermark files.
+
+Read-only throughout — it never publishes, consumes, writes to a database or
+moves a checkpoint, and opens the audit databases through a `file:` URI in
+`mode=ro` so it cannot take SQLite's write lock from a listener mid-upsert.
+Standard library only: no pika, redis, requests or PyYAML.
+
+The point of it is the failure with no other symptom: a queue holding messages
+with **no consumer**. A stalled import looks exactly like a healthy idle queue
+if you only watch depth, and the export side keeps reporting success because
+its own job did succeed. On first run it found the branch listeners down with
+286 messages waiting, and a `tdtp.coordinator` queue still holding 163,553
+messages left behind when `coordinator.py` was deleted.
+
+The entity list is derived from `workflows/*.yaml` and `configs/*.yaml` rather
+than restated in the dashboard — a dashboard carrying its own copy of the
+topology eventually describes a system that no longer exists.
+
 ## [1.20.2] — 2026-07-28
 
 ### Fixed — timestamps lost their sub-second precision on export
@@ -130,6 +155,56 @@ watermark with nothing left to bring them back.
 
 With `--map --input broker://<queue> --listen` on the receiving side this is
 continuous replication without any external state.
+
+### Added — an audit record per message in `--map --listen`
+
+The daemon wrote one audit entry for the run, so a listener up for a week
+produced a single record however many messages it upserted. Each message now
+records its own, on success and on failure, naming the queue it came from and
+the rows it wrote.
+
+### Changed — `examples/travel-agency` has no Python left in its data path
+
+The example's two orchestration scripts are gone, replaced by the framework
+doing the same work. What remains in Python is `activity.py`, which simulates
+what users do, and nothing else touches the data.
+
+**`consumer.py` → `listeners.ps1`.** It subscribed to a Redis channel and
+launched `tdtpcli --map` per notification — a new process and a new broker
+connection each time, acknowledging nothing. It is now one long-lived
+`tdtpcli --map --input broker://<queue> --listen` per queue, where the message
+is ACKed only after the upsert commits, so a process that dies mid-write
+returns the message to the queue instead of losing it. The Redis notification
+went with it: the queue is the signal, and announcing "there is something in
+the queue" only made sense while nothing was listening to the queue.
+
+**`coordinator.py` → the orchestrator.** Its four responsibilities each moved
+to something that already had them: the per-table cursor in Redis became
+`state/*.json` written by `--sync-incremental`; the `ROUTE_MAP` of event →
+tables became `workflows/sync_out.yaml`; the topic-exchange subscription with a
+10s debounce became a schedule; the Redis state key became the orchestrator's
+job log.
+
+Setting that cursor from `datetime.now()` had been quiet data loss — rows
+written between the start of the `SELECT` and the moment `now()` was read
+landed below the new watermark and were never sent. The watermark now comes
+from the rows actually exported, so a row absent from the result set cannot be
+skipped.
+
+Trading the event trigger for a schedule looks like a step back and is not.
+The event named which *simulated activity* ran, not which rows changed, and
+only worked because `activity.py` was the sole writer — any other writer
+changed rows no event announced, and `coordinator.py` never synced them.
+
+Scenarios must be checksum-approved before the schedule will run them, so
+editing a workflow stops its runs until it is re-approved rather than executing
+changed content unnoticed.
+
+**The audit sink the docs described now exists.** `configs/config_*.yaml` had
+no `audit:` section, so the per-message audit above was live but never switched
+on for this example. It writes to a SQLite file rather than the node's own
+Postgres, because the separation is the point: pointing the sink at the audited
+database would let the process being audited rewrite its own trail.
 
 ### Fixed — incremental sync failed on every run after the first
 
