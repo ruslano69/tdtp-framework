@@ -63,8 +63,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	// only facts a captured run cannot reconstruct from its own arguments.
 	result := func(rows int64) {
 		if opts.Quiet {
-			fmt.Printf("%s  %d rows  %s\n",
-				opts.TableName, rows, time.Since(started).Round(time.Millisecond))
+			reportQuietRows(opts.TableName, rows, time.Since(started))
 		}
 	}
 

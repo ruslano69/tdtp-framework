@@ -59,21 +59,34 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	}
 	defer func() { _ = adapter.Close(ctx) }()
 
-	fmt.Printf("Exporting table '%s' to broker...\n", tableName)
+	// --quiet is read from the process rather than taken as a parameter: this
+	// signature is already fourteen positional arguments, and a fifteenth bool
+	// sitting next to two others would be a step backwards from the thing it
+	// fixes.
+	quiet := QuietOutput()
+	started := time.Now()
+
+	if !quiet {
+		fmt.Printf("Exporting table '%s' to broker...\n", tableName)
+	}
 
 	// Configure packet size if requested
 	type packetSizeSetter interface{ SetMaxMessageSize(int) }
 	if packetSizeMB > 0 {
 		if sizer, ok := adapter.(packetSizeSetter); ok {
 			sizer.SetMaxMessageSize(packetSizeMB * 2 * 1024 * 1024)
-			fmt.Printf("Packet size set to %dMB (internal estimate: %dMB)\n", packetSizeMB, packetSizeMB*2)
+			if !quiet {
+				fmt.Printf("Packet size set to %dMB (internal estimate: %dMB)\n", packetSizeMB, packetSizeMB*2)
+			}
 		}
 	}
 
 	// Export data
 	var packets []*packet.DataPacket
 	if query != nil {
-		fmt.Printf("Applying filters...\n")
+		if !quiet {
+			fmt.Printf("Applying filters...\n")
+		}
 		packets, err = adapter.ExportTableWithQuery(ctx, tableName, query, "tdtpcli", "")
 	} else {
 		packets, err = adapter.ExportTable(ctx, tableName)
@@ -84,11 +97,24 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	}
 
 	if len(packets) == 0 {
-		fmt.Println("⚠ No data to export")
+		if quiet {
+			// An empty reload still has to say so: printing nothing would make
+			// "the table was empty" and "the step never ran" the same line.
+			reportQuietRows(tableName, 0, time.Since(started))
+		} else {
+			fmt.Println("⚠ No data to export")
+		}
 		return nil
 	}
 
-	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
+	var totalRows int64
+	for _, pkt := range packets {
+		totalRows += int64(len(pkt.GetRows()))
+	}
+
+	if !quiet {
+		fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
+	}
 
 	// Create broker (параллельно с подготовкой данных)
 	broker, err := createBroker(brokerCfg)
@@ -98,17 +124,19 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	defer func() { _ = broker.Close() }()
 
 	// Параллельное сжатие + сериализация всех пакетов
-	if compress {
+	if compress && !quiet {
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
 	}
 	if encrypt {
 		if mercuryURL == "" {
 			return fmt.Errorf("--enc/--enc13 requires --mercury-url pointing at a running xZMercury instance")
 		}
-		if encryptLegacy {
-			fmt.Println("Encrypting data (TDTP v1.3 whole-blob via xZMercury)...")
-		} else {
-			fmt.Println("Encrypting data (TDTP v1.5 section-level via xZMercury)...")
+		if !quiet {
+			if encryptLegacy {
+				fmt.Println("Encrypting data (TDTP v1.3 whole-blob via xZMercury)...")
+			} else {
+				fmt.Println("Encrypting data (TDTP v1.5 section-level via xZMercury)...")
+			}
 		}
 	}
 
@@ -120,13 +148,29 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 		Encrypt:       encrypt,
 		EncryptLegacy: encryptLegacy,
 		MercuryURL:    mercuryURL,
+		Quiet:         quiet,
 	}); err != nil {
 		return err
 	}
 
-	fmt.Println("✓ Export to broker complete!")
+	if quiet {
+		reportQuietRows(tableName, totalRows, time.Since(started))
+	} else {
+		fmt.Println("✓ Export to broker complete!")
+	}
 
 	return nil
+}
+
+// reportQuietRows prints the one line --quiet leaves behind: what moved, how
+// much of it, how long it took. Shared so every path reports the same shape —
+// a job log only reads as a table if every row in it was printed by one rule.
+//
+// Takes the duration rather than a start time because the paths do not measure
+// the same thing: export and sync report wall time, while --drain reports the
+// time it spent on messages, its wall clock being mostly the idle window.
+func reportQuietRows(name string, rows int64, d time.Duration) {
+	fmt.Printf("%s  %d rows  %s\n", name, rows, d.Round(time.Millisecond))
 }
 
 // defaultIdleTimeout is how long --import-broker waits for the next message

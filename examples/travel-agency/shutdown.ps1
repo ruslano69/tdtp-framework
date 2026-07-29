@@ -11,6 +11,7 @@
       2. orchestrator    -- stop both halves; import runs under it now
       3. drain           -- one last --drain pass per queue
       4. purge           -- whatever survived the drain timeout
+      5. dashboard.py    -- last, so the shutdown is visible while it happens
 
     Every stage that used to belong to a script of its own is gone with it:
     coordinator.py and its tdtp.coordinator queue, consumer.py, and finally
@@ -96,6 +97,7 @@ Write-Host ""
 if ($Force) {
     Write-Host "[ FORCE ] Killing all processes and purging queues..." -ForegroundColor Red
     Stop-PythonByScript "activity\.py" "activity"
+    Stop-PythonByScript "dashboard\.py" "dashboard"
     Stop-ByImage "orchestrator" "orchestrator"
     Stop-ByImage "tdtpcli" "import step"
     Stop-ByImage "xzmercury-mock" "mercury"
@@ -156,6 +158,15 @@ foreach ($q in $DATA_QUEUES) {
     $color = if ($d -eq 0) { "Green" } else { "Red" }
     Write-Host ("  {0,-42} {1} msg(s)" -f $q, $d) -ForegroundColor $color
 }
+
+# The dashboard goes last on purpose: it is read-only, and leaving it up until
+# here means the shutdown itself is visible in it. It was missing entirely
+# before, so it kept running for a day after the stand was down, serving an
+# empty picture of a system that no longer existed.
+Write-Host ""
+Write-Host "Stopping dashboard..." -ForegroundColor Yellow
+Stop-PythonByScript "dashboard\.py" "dashboard"
+
 Write-Host ""
 Write-Host "Checkpoints in state/ are left alone: they are the resume point," -ForegroundColor DarkGray
 Write-Host "not runtime state. Delete them only to force a full re-sync." -ForegroundColor DarkGray

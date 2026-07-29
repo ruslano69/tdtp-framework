@@ -298,7 +298,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	if opts.Quiet {
 		// Same shape as --sync-incremental reports on the way out, so one job
 		// log reads as a single table of what moved: name, rows, time.
-		fmt.Printf("%s  %d rows  %s\n", mapTargetName(cfg), total, work)
+		reportQuietRows(mapTargetName(cfg), int64(total), work)
 		return nil
 	}
 
