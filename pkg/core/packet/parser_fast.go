@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/xml"
 	"unicode/utf8"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 )
 
 // Ручной парсер Data-секции — зеркало writePacketTo (см. xmlwriter.go).
@@ -229,67 +231,14 @@ func decodeChardata(s []byte) (string, bool) {
 	return string(out), true
 }
 
-// isXMLChar — продукция Char из XML 1.0 §2.2: что вообще может стоять в
-// документе. Числовая ссылка на всё остальное (NUL, управляющие символы,
-// суррогаты, FFFE/FFFF) документ не спасает — encoding/xml такой вход
-// отвергает.
-//
-// Быстрый путь обязан отвергать его тоже. Иначе нарушается контракт из шапки
-// файла: «любое отклонение от ожидаемой формы даёт ok=false». Принимая
-// &#0;, он не откатывался в fallback, а молча возвращал значение с NUL внутри
-// — то есть тот же пакет проходил или не проходил в зависимости от того,
-// сработал быстрый путь или нет.
-func isXMLChar(r rune) bool {
-	switch {
-	case r == 0x9 || r == 0xA || r == 0xD:
-		return true
-	case r >= 0x20 && r <= 0xD7FF: // ниже суррогатов
-		return true
-	case r >= 0xE000 && r <= 0xFFFD: // выше суррогатов, без FFFE/FFFF
-		return true
-	case r >= 0x10000 && r <= utf8.MaxRune:
-		return true
-	}
-	return false
-}
+// isXMLChar и parseCharRef делегируют в pkg/core/xmlchar — единственную
+// реализацию правил XML 1.0 §2.2 в проекте. Обёртки оставлены, чтобы тесты
+// этого пакета (добавленные в 1.19.2 вместе с самой проверкой) продолжали
+// сторожить поведение с этой стороны.
+func isXMLChar(r rune) bool { return xmlchar.IsChar(r) }
 
 // parseCharRef разбирает числовую ссылку: "60" или "x3C".
-func parseCharRef(ref []byte) (rune, bool) {
-	if len(ref) == 0 {
-		return 0, false
-	}
-	base := 10
-	if ref[0] == 'x' || ref[0] == 'X' {
-		base = 16
-		ref = ref[1:]
-		if len(ref) == 0 {
-			return 0, false
-		}
-	}
-
-	var v int64
-	for _, c := range ref {
-		var d int64
-		switch {
-		case c >= '0' && c <= '9':
-			d = int64(c - '0')
-		case base == 16 && c >= 'a' && c <= 'f':
-			d = int64(c-'a') + 10
-		case base == 16 && c >= 'A' && c <= 'F':
-			d = int64(c-'A') + 10
-		default:
-			return 0, false
-		}
-		v = v*int64(base) + d
-		if v > utf8.MaxRune {
-			return 0, false
-		}
-	}
-	if !isXMLChar(rune(v)) {
-		return 0, false
-	}
-	return rune(v), true
-}
+func parseCharRef(ref []byte) (rune, bool) { return xmlchar.DecodeRef(ref) }
 
 // scanDataRows разбирает тело Data-секции в []Row.
 // Ожидает последовательность <R>chardata</R>, допускает пробелы между ними.

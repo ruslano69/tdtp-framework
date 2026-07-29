@@ -19,6 +19,9 @@ package xlsx
 import (
 	"bytes"
 	"strconv"
+	"unicode/utf8"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 )
 
 var (
@@ -380,22 +383,21 @@ func decodeXMLText(s []byte) (string, bool) {
 		case "apos":
 			sb = append(sb, '\'')
 		default:
+			// Numeric reference. Anything else is a named entity from a DTD,
+			// which needs the document's declarations to resolve.
 			if len(ent) < 2 || ent[0] != '#' {
 				return "", false
 			}
-			var (
-				n   int64
-				err error
-			)
-			if ent[1] == 'x' || ent[1] == 'X' {
-				n, err = strconv.ParseInt(string(ent[2:]), 16, 32)
-			} else {
-				n, err = strconv.ParseInt(string(ent[1:]), 10, 32)
-			}
-			if err != nil || n <= 0 || n > 0x10FFFF {
+			// xmlchar, not a local check: a hand-rolled one here already let
+			// through &#1;, &#xFFFE; and surrogates, which encoding/xml
+			// rejects outright — the fast path was accepting documents the
+			// fallback refuses. Same bug this framework fixed in 1.19.2 for
+			// the packet parser, reintroduced by copying instead of sharing.
+			r, ok := xmlchar.DecodeRef(ent[1:])
+			if !ok {
 				return "", false
 			}
-			sb = append(sb, []byte(string(rune(n)))...)
+			sb = utf8.AppendRune(sb, r)
 		}
 		i += j + 1
 	}

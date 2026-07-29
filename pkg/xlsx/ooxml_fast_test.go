@@ -193,3 +193,59 @@ func TestFastPathOversizeFallsBack(t *testing.T) {
 		t.Error("test helper drifted")
 	}
 }
+
+// TestFastPathRejectsIllegalCharRefs is a regression guard with a history.
+//
+// The scanner's first character-reference decoder was written by hand and
+// accepted &#1;, &#x0B; and &#xFFFE; — code points XML 1.0 forbids and
+// encoding/xml refuses the document over. That made the fast path *more*
+// permissive than the fallback, so the result depended on which one ran.
+//
+// It is the same defect this framework already found and fixed in 1.19.2 for
+// pkg/core/packet's scanner, reintroduced by copying the function instead of
+// sharing it. Both now call pkg/core/xmlchar.
+func TestFastPathRejectsIllegalCharRefs(t *testing.T) {
+	for _, ref := range []string{
+		"&#0;",     // NUL
+		"&#1;",     // C0 control
+		"&#x0B;",   // vertical tab, also a control
+		"&#xD800;", // lone surrogate: not a character at all
+		"&#xFFFE;", // permanently unassigned
+		"&#xFFFF;",
+		"&#x110000;", // past the Unicode maximum
+	} {
+		t.Run(ref, func(t *testing.T) {
+			data := []byte(sheetXML(`<row r="1"><c r="A1" t="inlineStr"><is><t>` + ref + `</t></is></c></row>`))
+
+			_, ok := parseSheetFast(data, nil)
+			if ok {
+				t.Fatalf("fast path accepted %s", ref)
+			}
+
+			// And the fallback must not silently accept it either: the
+			// document really is invalid, and saying so is the correct outcome.
+			if _, err := parseSheetXML(bytes.NewReader(data), nil); err == nil && ref != "&#xD800;" {
+				t.Errorf("decoder accepted %s without complaint", ref)
+			}
+		})
+	}
+}
+
+// TestLegalCharRefsStillWork keeps the guard above from being satisfied by a
+// decoder that rejects everything.
+func TestLegalCharRefsStillWork(t *testing.T) {
+	data := []byte(sheetXML(
+		`<row r="1"><c r="A1" t="inlineStr"><is><t>&#65;&#x42;&#9;&#x439;&#128512;</t></is></c></row>`))
+
+	got, ok := parseSheetFast(data, nil)
+	if !ok {
+		t.Fatal("fast path declined a document with only legal references")
+	}
+	want := "AB	й😀"
+	if len(got) != 1 || len(got[0]) != 1 {
+		t.Fatalf("unexpected shape: %#v", got)
+	}
+	if got[0][0] != want {
+		t.Errorf("got %q", got[0][0])
+	}
+}

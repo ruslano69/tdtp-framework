@@ -2,6 +2,28 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.22.1] — 2026-07-29
+
+### Fixed — the XLSX scanner accepted character references XML forbids
+
+`&#1;`, `&#x0B;`, `&#xFFFE;` and lone surrogates were decoded into values,
+while `encoding/xml` refuses a document containing them outright. The byte
+scanner was therefore *more permissive than the parser it falls back to*, which
+defeats the whole point of the fallback: the result depended on which path ran.
+
+This is the same defect 1.19.2 found and fixed in `pkg/core/packet`'s scanner,
+reintroduced three days later by copying the function into `pkg/xlsx` instead
+of sharing it. The copy was written from scratch and simply lacked the check.
+
+Both now call `pkg/core/xmlchar`, which holds one implementation of the Char
+production from XML 1.0 §2.2 and one set of tests for it.
+`pkg/core/packet`'s `isXMLChar` and `parseCharRef` remain as thin wrappers so
+the tests added in 1.19.2 keep guarding that side.
+
+Seven cases pin the rejection and one pins that legal references — including
+astral-plane ones — still decode. No measurable cost: reads stay at ~47 ms per
+10k rows, and the packet parser at ~698 MB/s.
+
 ## [1.22.0] — 2026-07-29
 
 ### Performance — byte-level scanner for <sheetData>
