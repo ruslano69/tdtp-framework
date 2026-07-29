@@ -16,9 +16,11 @@ reintroduced three days later by copying the function into `pkg/xlsx` instead
 of sharing it. The copy was written from scratch and simply lacked the check.
 
 Both now call `pkg/core/xmlchar`, which holds one implementation of the Char
-production from XML 1.0 §2.2 and one set of tests for it.
-`pkg/core/packet`'s `isXMLChar` and `parseCharRef` remain as thin wrappers so
-the tests added in 1.19.2 keep guarding that side.
+production from XML 1.0 §2.2 and one set of tests for it. `pkg/core/packet`
+calls it directly: the wrappers left there at first were kept on the belief
+that its 1.19.2 tests called them, and they do not — those tests go through
+`decodeChardata`, so they guard the behaviour either way. golangci-lint said so
+before anyone checked.
 
 Seven cases pin the rejection and one pins that legal references — including
 astral-plane ones — still decode. No measurable cost: reads stay at ~47 ms per

@@ -209,7 +209,10 @@ func decodeChardata(s []byte) (string, bool) {
 			case bytes.Equal(ent, []byte("apos")):
 				out = append(out, '\'')
 			case len(ent) > 1 && ent[0] == '#':
-				r, ok := parseCharRef(ent[1:])
+				// xmlchar — единственная реализация правил XML 1.0 §2.2
+				// в проекте; вторая копия в pkg/xlsx однажды разошлась с
+				// этой и вернула баг, закрытый в 1.19.2.
+				r, ok := xmlchar.DecodeRef(ent[1:])
 				if !ok {
 					return "", false
 				}
@@ -230,15 +233,6 @@ func decodeChardata(s []byte) (string, bool) {
 
 	return string(out), true
 }
-
-// isXMLChar и parseCharRef делегируют в pkg/core/xmlchar — единственную
-// реализацию правил XML 1.0 §2.2 в проекте. Обёртки оставлены, чтобы тесты
-// этого пакета (добавленные в 1.19.2 вместе с самой проверкой) продолжали
-// сторожить поведение с этой стороны.
-func isXMLChar(r rune) bool { return xmlchar.IsChar(r) }
-
-// parseCharRef разбирает числовую ссылку: "60" или "x3C".
-func parseCharRef(ref []byte) (rune, bool) { return xmlchar.DecodeRef(ref) }
 
 // scanDataRows разбирает тело Data-секции в []Row.
 // Ожидает последовательность <R>chardata</R>, допускает пробелы между ними.
