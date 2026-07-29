@@ -2223,8 +2223,7 @@ value := "123"  // String вместо int
 
 - **[SPECIFICATION.md](SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
 - **[USER_GUIDE.md](USER_GUIDE.md)** - Руководство пользователя CLI
-- **[SESSION_SUMMARY.md](SESSION_SUMMARY.md)** - Последние изменения
-- **[MAP_SUMMARY.md](analysis/MAP_SUMMARY.md)** - Карта проекта
+- **[CHANGELOG.md](../CHANGELOG.md)** - Последние изменения по версиям
 - **GitHub:** https://github.com/ruslano69/tdtp-framework
 - **Issues:** https://github.com/ruslano69/tdtp-framework/issues
 

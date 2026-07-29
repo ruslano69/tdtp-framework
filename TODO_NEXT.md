@@ -446,12 +446,25 @@ artifacts that happen to sit in the repository:
 
 `CLAUDE.md` (7 589, agent instructions), `AGENTS.md` (3 679),
 `docs/xZMercury-TDTP-TZ-v1.2.md` (8 639, a statement of work),
-`cmd/tdtpserve/AUTH_PLAN.md` (3 348), `docs/SESSION_SUMMARY.md` (2 790),
-`cmd/tdtp-xray/GO_PROXY_FIX.md`, `CAST_IN_WHERE_ORDER_BY.md`.
+`cmd/tdtp-xray/CAST_IN_WHERE_ORDER_BY.md` (1 463).
 
 Decision needed: move them under an internal path excluded from the published
 package, or leave them and accept that a reader meets Russian working notes
 scattered among the documentation. Translating them is the worst of the three.
+
+Three were deleted outright on 2026-07-29 rather than filed here, having no
+inbound references and describing a state that no longer exists:
+`docs/SESSION_SUMMARY.md` (a Feb 20 report on a branch long since merged),
+`docs/analysis/MAP_SUMMARY.md` (an auto-generated funcfinder map with stale
+figures — regenerable in seconds), and `cmd/tdtp-xray/GO_PROXY_FIX.md` (a proxy
+workaround pointing at a drive letter the repository no longer lives on).
+
+Two candidates were kept after checking, and the reasons are worth recording so
+they are not re-proposed: `cmd/tdtpserve/AUTH_PLAN.md` is cited by `auth.go:4`
+as the design rationale for code that exists, and `TRAVEL-AGENCY_NEXT.md` is
+half-delivered — its encryption and orchestrator phases shipped in 1.23/1.24,
+but Phase 0 (real `tdtp-ca` and xZMercury in compose) has not, so deleting it
+would discard the only written form of the part still outstanding.
 
 ### Go comments — 153 K, and mostly not worth translating
 
