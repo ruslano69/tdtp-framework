@@ -2,6 +2,50 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.22.0] — 2026-07-29
+
+### Changed — XLSX is written and read in-house; excelize is gone
+
+The binary lost **11 MB**, from 37.6 to 26.6 — 29% — and one dependency with a
+CVE history.
+
+Only 32 KB of the 11 MB was excelize's own code. The rest was the linker
+giving up: excelize's formula engine (`calc.go`) reaches
+`reflect.Value.MethodByName`, and once that is linked the Go linker can no
+longer know which methods reflection will call by name, so it stops pruning
+methods entirely. Packages excelize never touches paid for it — `runtime`
++4.0 MB, `aws-sdk-go-v2` +3.0 MB, `redis` +1.5 MB, type metadata +1.2 MB.
+Verified as unavoidable: a six-line program using only `NewFile`, `SetCellStr`,
+`SaveAs`, `OpenFile` and `GetRows` links `MethodByName` all the same.
+
+What replaced it is `archive/zip` plus `encoding/xml`, both already in the
+binary and neither of which defeats the linker. An .xlsx is a ZIP of XML parts;
+the fourteen calls this package made needed about 500 lines of them.
+
+The writer emits inline strings rather than a shared-string table — a database
+export is mostly distinct values, so sharing buys little and costs a second
+pass plus an index to keep consistent. The reader has to understand both,
+because Excel rewrites a file into shared strings the moment someone opens and
+saves it.
+
+Every trap the old code documented is preserved, and the 28 existing tests are
+unchanged — they were written against `ToXLSX`/`FromXLSX`, not against
+excelize, so they served as the acceptance suite without edits. Nine tests were
+added for the parts that used to be someone else's problem: reading a file with
+shared strings, split formatting runs, styles and a sheet whose part name does
+not match its position; `excelSerial` against `excelSerialToTime` including the
+phantom Feb 29 1900; `xml:space="preserve"`; sheet-name sanitising; cell
+reference parsing.
+
+One of them reads a fixture produced by excelize itself. Every other test
+proves the writer and reader agree with each other, which they would even if
+both were wrong about the format; that one is a file from a different
+implementation.
+
+Verified live end to end: exported five rows to XLSX and read them back —
+integers, text, booleans, JSON arrays and a timestamp all survived the trip
+through Excel serials.
+
 ## [1.21.0] — 2026-07-28
 
 ### Added — `--quiet`
