@@ -444,13 +444,20 @@ the `cmd/tdtp-xray/*` docs, `libcs/BUILD.md`, `docker/sprint4/README.md`,
 The cheapest translation is the one that is not done. These are internal working
 artifacts that happen to sit in the repository:
 
-`CLAUDE.md` (7 589, agent instructions), `AGENTS.md` (3 679),
 `docs/xZMercury-TDTP-TZ-v1.2.md` (8 639, a statement of work),
 `cmd/tdtp-xray/CAST_IN_WHERE_ORDER_BY.md` (1 463).
 
 Decision needed: move them under an internal path excluded from the published
 package, or leave them and accept that a reader meets Russian working notes
 scattered among the documentation. Translating them is the worst of the three.
+
+**`CLAUDE.md` (7 589) and `AGENTS.md` (3 679) are explicitly not in this tier**
+(decided 2026-07-29). They stay where they are, and they are product surface
+rather than working notes: a package meant to be operated by an agent should
+show that on arrival, and `AGENTS.md` is becoming a convention tools read on
+their own. That promotes them into the translation work rather than out of it —
+they are the two documents whose whole purpose is to be understood immediately,
+and 43% of `CLAUDE.md` is currently Cyrillic. Treat them as Tier 1.
 
 Three were deleted outright on 2026-07-29 rather than filed here, having no
 inbound references and describing a state that no longer exists:
