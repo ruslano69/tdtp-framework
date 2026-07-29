@@ -2,6 +2,31 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.22.2] — 2026-07-29
+
+### Fixed — `orchestrator_schedule_last_status` reported every healthy schedule as never run
+
+The gauge was written at dispatch, with the status the scheduler stamps at that
+moment — `running` — which mapped to the sentinel meaning "never run". So a
+schedule completing successfully every 15 seconds reported, permanently, that
+it had never run. An alert on the sentinel fired constantly; one on failure
+never fired at all.
+
+1.20.4 taught the *row* to reach its outcome and left the gauge behind, so the
+two then disagreed about the same schedule — `/schedules` said `done` while
+Prometheus said `-1`.
+
+Both now come from one place, next to the row update:
+
+- only an outcome writes the gauge — 1 for a finished run, 0 for one that
+  failed, was cancelled, or that the scheduler refused to start;
+- a schedule with no outcome yet has no series at all, which is how Prometheus
+  says "no data" without a sentinel that alerting rules must special-case;
+- the stale-job guard covers the gauge too: a slow run finishing after a newer
+  one started reports on neither.
+
+Four tests, three of which fail without the fix.
+
 ## [1.22.1] — 2026-07-29
 
 ### Fixed — the XLSX scanner accepted character references XML forbids

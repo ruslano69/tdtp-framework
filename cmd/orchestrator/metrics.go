@@ -31,11 +31,16 @@ var (
 		Help: "Current number of jobs in pending or running state.",
 	})
 
-	// scheduleLastStatus reports the last run outcome per schedule:
-	// 1 = done, 0 = failed, -1 = never run.
+	// scheduleLastStatus reports the outcome of a schedule's last run:
+	// 1 = the run finished, 0 = it failed, was cancelled, or the scheduler
+	// refused to start it.
+	//
+	// A schedule that has not produced an outcome yet has no series at all,
+	// which is how Prometheus says "no data" — better than a sentinel value
+	// that has to be explained and that alerting rules have to special-case.
 	scheduleLastStatus = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "orchestrator_schedule_last_status",
-		Help: "Last run outcome per schedule: 1=done 0=failed -1=never.",
+		Help: "Outcome of a schedule's last run: 1=done, 0=failed/cancelled/refused. Absent until the first outcome.",
 	}, []string{"id", "scenario"})
 
 	httpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -60,11 +65,17 @@ func RecordJobDone(scenario, status string, started time.Time) {
 	jobsActive.Dec()
 }
 
-// RecordScheduleRun sets the last-outcome gauge for a schedule after it fires.
-func RecordScheduleRun(id, scenario, status string) {
-	v := map[string]float64{"done": 1, "failed": 0}[status]
-	if status != "done" && status != "failed" {
-		v = -1
+// RecordScheduleOutcome sets the gauge once a schedule's run has an outcome.
+//
+// Only outcomes reach here. It used to be called at dispatch too, with the
+// status the scheduler writes at that moment — "running" — which mapped to the
+// sentinel for "never run". Every healthy schedule therefore reported that it
+// had never run, permanently: an alert on the sentinel fired constantly, and
+// one on failure never fired at all.
+func RecordScheduleOutcome(id, scenario, status string) {
+	v := 0.0
+	if status == "done" {
+		v = 1
 	}
 	scheduleLastStatus.WithLabelValues(id, scenario).Set(v)
 }

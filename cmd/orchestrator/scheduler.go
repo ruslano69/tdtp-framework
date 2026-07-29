@@ -129,7 +129,12 @@ func (s *Scheduler) register(r *ScheduleRecord) error {
 			nextRun = &t
 		}
 		_ = s.db.TouchScheduleRun(schedID, status, nextRun)
-		RecordScheduleRun(schedID, scene.Orchestrator.Name, status)
+		// A dispatched job has no outcome yet; UpdateJobDone records it when
+		// there is one. Only a refusal is final here — no job was created, so
+		// nothing else will ever report on this tick.
+		if status == "failed" {
+			RecordScheduleOutcome(schedID, scene.Orchestrator.Name, status)
+		}
 	})
 	if err != nil {
 		return err

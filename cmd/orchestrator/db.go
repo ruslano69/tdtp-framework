@@ -306,7 +306,7 @@ func (d *OrchestratorDB) UpdateJobDone(id string, status JobStatus, log, errMsg 
 // the next one started would otherwise overwrite a fresh "running" with a
 // stale outcome. Only the newest job of a schedule may set its status.
 func (d *OrchestratorDB) syncScheduleStatus(jobID string, status JobStatus) error {
-	_, err := d.db.Exec(`
+	res, err := d.db.Exec(`
 		UPDATE schedules
 		   SET last_status = ?
 		 WHERE id = (SELECT schedule_id FROM jobs WHERE id = ?)
@@ -316,7 +316,36 @@ func (d *OrchestratorDB) syncScheduleStatus(jobID string, status JobStatus) erro
 		            AND newer.started_at > (SELECT started_at FROM jobs WHERE id = ?)
 		       )`,
 		string(status), jobID, jobID)
-	return err
+	if err != nil {
+		return err
+	}
+	d.recordScheduleGauge(res, jobID, status)
+	return nil
+}
+
+// recordScheduleGauge mirrors a schedule's new status onto the Prometheus
+// gauge. Best-effort by signature: the row is already written, and a metric
+// that could not be updated is not worth failing a finished job over.
+//
+// It lives beside the row update because keeping the two apart is how they came
+// to disagree — the row learned the outcome while the gauge was still being
+// written at dispatch time, so /schedules said "done" about the same schedule
+// Prometheus reported as never run.
+func (d *OrchestratorDB) recordScheduleGauge(res sql.Result, jobID string, status JobStatus) {
+	// n == 0 is the ordinary case, not a fault: a manual run belongs to no
+	// schedule, and a stale job is refused by the guard in the UPDATE. A driver
+	// that cannot report the count is treated the same way.
+	n, err := res.RowsAffected()
+	if err != nil || n == 0 {
+		return
+	}
+	var id, scenario string
+	if err := d.db.QueryRow(
+		`SELECT s.id, s.scenario FROM schedules s
+		   JOIN jobs j ON j.schedule_id = s.id
+		  WHERE j.id = ?`, jobID).Scan(&id, &scenario); err == nil {
+		RecordScheduleOutcome(id, scenario, string(status))
+	}
 }
 
 // UpdateJobStatus updates just the status field (e.g. pending→running).
