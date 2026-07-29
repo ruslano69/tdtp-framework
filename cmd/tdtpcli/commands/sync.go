@@ -203,6 +203,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 
 		say("✓ Incremental sync complete!\n")
 		say("  Records synced: %d\n", totalRows)
+		result(totalRows)
 
 		return nil
 	}
@@ -242,6 +243,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	say("✓ Incremental sync complete!\n")
 	say("  Records synced: %d\n", totalRows)
 	say("  New checkpoint: %s\n", newLastSyncValue)
+	result(totalRows)
 
 	return nil
 }
@@ -381,5 +383,6 @@ func syncToBroker(ctx context.Context, packets []*packet.DataPacket, opts SyncOp
 		Encrypt:       opts.Encrypt,
 		EncryptLegacy: opts.EncryptLegacy,
 		MercuryURL:    opts.MercuryURL,
+		Quiet:         opts.Quiet,
 	})
 }

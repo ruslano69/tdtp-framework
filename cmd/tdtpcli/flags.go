@@ -78,6 +78,7 @@ type Flags struct {
 	Map            *string // --map: cross-system field mapping (mapping YAML file)
 	MapInput       *string // --input: source TDTP file for --map
 	MapDryRun      *bool   // --dry-run: validate mapping without writing to DB
+	MapDrain       *string // --drain: consume until the queue is idle this long, then exit
 	Steps          *string // --steps: execute multi-step workflow YAML (depends_on + on_error)
 
 	// TDTQL Filters
@@ -214,6 +215,11 @@ func ParseFlags() *Flags {
 	f.Map = flag.String("map", "", "Cross-system field mapping: apply mapping.yaml to a TDTP file and upsert into target DB")
 	f.MapInput = flag.String("input", "", "Source TDTP file for --map (e.g. out/emp_00247.tdtp.xml)")
 	f.MapDryRun = flag.Bool("dry-run", false, "Validate --map transformation without writing to DB")
+	// --drain sits between the two existing shapes: broker:// without --listen
+	// takes exactly one message and cannot keep up with a burst, while --listen
+	// never ends and so can never report a result. A scheduled run, an
+	// orchestrator job or a CI step needs work that finishes.
+	f.MapDrain = flag.String("drain", "", "With --map --input broker://: consume until the queue has been idle this long (e.g. 5s), then exit")
 	f.Steps = flag.String("steps", "", "Execute multi-step workflow from YAML (depends_on, parallel waves, on_error: stop|skip|retry(N))")
 
 	// TDTQL Filters

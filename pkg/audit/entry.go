@@ -1,6 +1,8 @@
 package audit
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync/atomic"
@@ -266,8 +268,29 @@ func (e *Entry) FilterByLevel(level Level) *Entry {
 // PRIMARY KEY insert after the first collision fail).
 var entryIDSeq uint64
 
+// entryIDNonce separates processes that share one audit table.
+//
+// The sequence above is per-process, so it does nothing across processes: eight
+// tdtpcli runs started by the same orchestrator step all write their first
+// entry with seq=1, and on Windows the clock is coarse enough that several of
+// them read the same UnixNano. The IDs then collide and every loser's insert
+// fails on the PRIMARY KEY — an audit entry lost precisely when the most work
+// is happening in parallel, which is when it is worth having.
+//
+// Random rather than the PID: PIDs are recycled, and a machine that reuses one
+// within the same nanosecond tick is not a case worth reasoning about.
+var entryIDNonce = func() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand does not fail in practice; if it ever does, the
+		// timestamp and sequence still carry within a process.
+		return "00000000"
+	}
+	return hex.EncodeToString(b[:])
+}()
+
 // generateID - генерация уникального ID
 func generateID() string {
 	seq := atomic.AddUint64(&entryIDSeq, 1)
-	return fmt.Sprintf("audit-%d-%d", time.Now().UnixNano(), seq)
+	return fmt.Sprintf("audit-%d-%d-%s", time.Now().UnixNano(), seq, entryIDNonce)
 }

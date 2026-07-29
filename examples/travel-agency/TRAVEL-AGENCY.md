@@ -147,7 +147,7 @@ packet, which is the point.
 
 **This is the mock, and it differs in one way that matters.** It does not sign
 its responses, so clients run with `MERCURY_SERVER_SECRET=dev-mode` — set for
-you by `listeners.ps1` and `orchestrator.ps1`. A real deployment runs real
+you by `orchestrator.ps1`. A real deployment runs real
 xZMercury with a real shared secret, and then that variable carries the secret
 instead: the verification it currently skips is what proves the key came from
 the server you meant, rather than from whoever answered first.
@@ -169,27 +169,33 @@ Each file runs on its own too, without the orchestrator:
 
     tdtpcli --steps workflows/sync_out.yaml
 
-### `listeners.ps1` — Import Listeners
+### Import — `workflows/sync_in.yaml`
 
-No Python here: `tdtpcli` listens to the queue itself.
+The receiving half is an orchestrator scenario, same as the sending half. One
+step per queue, each draining into its target table.
 
-    tdtpcli --map <mapping> --input broker://<queue> --listen
+    tdtpcli --map <mapping> --input broker:// --drain 5s
 
-One long-lived process per queue, started by `listeners.ps1 -Node <node>`.
-The message is ACKed only after the upsert succeeds, so a process that dies
-mid-write returns the message to the queue instead of losing it.
+`--drain` is what makes it schedulable. `--input broker://` on its own takes
+exactly one message and could never keep up with a burst; `--listen` never ends
+and so can never report a result. `--drain` consumes until the queue has been
+empty for the window, then exits with a total — work an orchestrator can own.
 
-This replaced `consumer.py`, which subscribed to a Redis channel and launched
-`tdtpcli --map` per notification — a new process and a new broker connection
-each time, with no acknowledgement. The Redis notification went with it: the
-queue is the signal, and announcing "there is something in the queue" only
-made sense while nothing was listening to the queue.
+This replaced `listeners.ps1` and its eight long-lived daemons. They did the job
+correctly, but nothing above them knew they existed: no job record, no approval,
+no quota, and a failure showed up only in a terminal nobody was watching. Half
+the pipeline was governed and half was not — and it was the ungoverned half that
+wrote to the database.
 
-Its S3 audit marker went too, replaced by a real audit record per message
-(`audit:` in the node config) written to a database kept separate from the one
-being written to.
+The message is still acknowledged only after the upsert commits, so an
+interrupted run returns its message to the queue rather than losing it. Each
+step is `on_error: skip`: a queue whose target is down must not hold up the other
+seven, and its messages simply wait for the next run.
 
----
+**What this gives up** is latency below the tick. A row now waits up to the
+schedule interval plus the drain window instead of arriving as it is published.
+For replication that is worth a job record; where seconds matter, `--listen` is
+still the right shape and the tool still has it.
 
 ## Quick Start
 
@@ -243,10 +249,6 @@ Then, each in a separate terminal:
 # Export trigger. -Approve is needed on the first run and after editing a workflow.
 ./orchestrator.ps1 -Approve
 
-# Import listeners (one tdtpcli process per queue)
-./listeners.ps1 -Node central
-./listeners.ps1 -Node branch
-
 # Traffic simulators
 python activity.py --node airline --interval 5
 python activity.py --node branch  --interval 3
@@ -280,10 +282,10 @@ All TDTP settings (compression, retries, circuit breaker) are in `configs/`:
 
 | File pattern | Used by | Purpose |
 |---|---|---|
-| `configs/config_central.yaml` | `listeners.ps1` | Central DB connection + audit sink |
-| `configs/config_branch.yaml` | `listeners.ps1` | Branch DB connection + audit sink |
+| `configs/config_central.yaml` | `workflows/sync_in.yaml` | Central DB connection + audit sink |
+| `configs/config_branch.yaml` | `workflows/sync_in.yaml` | Branch DB connection + audit sink |
 | `configs/config_src_tdtp_sync_*.yaml` | `workflows/sync_out.yaml` | Source DB + destination queue per entity |
-| `mappings/sync_*.yaml` | `listeners.ps1` | Queue + target table per entity |
+| `mappings/sync_*.yaml` | `workflows/sync_in.yaml` | Queue + target table per entity |
 | `configs/config_broker_*.yaml` | both | RabbitMQ broker settings |
 | `orchestrator/runners.yaml` | `orchestrator.ps1` | How the orchestrator invokes `tdtpcli` |
 | `schedules/travel.yaml` | `orchestrator.ps1` | Seed schedules (the DB owns them after first run) |

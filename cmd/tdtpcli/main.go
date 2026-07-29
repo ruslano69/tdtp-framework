@@ -65,6 +65,10 @@ func routeCommand(
 
 	} else if *flags.Map != "" {
 		operation = audit.OpTransform
+		mapDrain, drainErr := parseDrain(*flags.MapDrain)
+		if drainErr != nil {
+			fatal("--drain: %v", drainErr)
+		}
 		metadata = map[string]string{"command": "map", "mapping": *flags.Map, "input": *flags.MapInput}
 
 		err = commands.RunMap(ctx, commands.MapOptions{
@@ -73,9 +77,11 @@ func routeCommand(
 			DryRun:      *flags.MapDryRun,
 			MercuryURL:  mercuryURL,
 			Listen:      *flags.Listen,
-			// Только для демона. У одноразового запуска запись появится ниже,
-			// на выходе из routeCommand, и вторая была бы дублем.
-			Auditor: mapListenAuditor(prodFeatures, *flags.Listen, *flags.Map),
+			Drain:       mapDrain,
+			Quiet:       *flags.Quiet,
+			// Только для циклических режимов. У одноразового запуска запись
+			// появится ниже, на выходе из routeCommand, и вторая была бы дублем.
+			Auditor: mapListenAuditor(prodFeatures, *flags.Listen || mapDrain > 0, *flags.Map),
 		})
 
 	} else if flags.List.IsSet {
@@ -807,6 +813,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Record --quiet before anything can print. Commands that can carry the
+	// flag in their options still do; this reaches the prints buried too deep
+	// for that (see commands/quiet.go).
+	commands.SetQuietOutput(*flags.Quiet)
+
 	// Resolve and verify the license (offline). A present-but-invalid license
 	// is fatal; absent license → community floor (sqlite only, no enc/unsafe).
 	lic, err := commands.ResolveLicense(*flags.License)
@@ -1088,4 +1099,21 @@ func mapListenAuditor(pf *ProductionFeatures, listen bool, mappingFile string) c
 	}
 
 	return syncAuditor{pf: pf, mapping: mappingFile}
+}
+
+// parseDrain reads the --drain duration. An empty value means the flag was not
+// given, which is not an error — it selects the one-shot or daemon shape
+// instead.
+func parseDrain(v string) (time.Duration, error) {
+	if v == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a duration (try 5s): %w", v, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s is not positive; omit --drain for a single message", v)
+	}
+	return d, nil
 }

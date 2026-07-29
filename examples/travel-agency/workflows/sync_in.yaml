@@ -1,0 +1,98 @@
+orchestrator:
+  name: travel-sync-in
+  description: "Drain every queue into its destination"
+  runner: tdtpcli-steps
+
+name: travel-sync-in
+description: "Import: each queue drained into its target table"
+
+# Replaces listeners.ps1, and with it the last part of the flow that ran
+# outside the orchestrator.
+#
+# The daemons it started did the work correctly — one connection per queue,
+# ACK only after the upsert commits — but nothing above them knew they existed.
+# No job record, no approval, no quota, no place a failure showed up except a
+# terminal nobody was watching. Half the pipeline was governed and half was not,
+# which is the half that surprises you.
+#
+# --drain is what makes this schedulable at all. Plain `--input broker://` takes
+# exactly one message and could never keep up with a burst; --listen never ends
+# and so can never report a result. --drain consumes until the queue has been
+# empty for the given window, then exits with a total — a unit of work an
+# orchestrator can own.
+#
+# What is given up is latency below the tick: a row now waits up to the schedule
+# interval plus the drain window instead of arriving as soon as it is published.
+# For replication that trade is worth a job record; for anything where seconds
+# matter, --listen is still the right shape and the tool still has it.
+#
+# Every step is independent and every step is on_error: skip. A queue whose
+# target is down must not hold up the other seven, and its messages stay in the
+# broker for the next run — nothing is lost by skipping.
+
+steps:
+  # ── Central (localhost:5432) receives ────────────────────────────────────
+  - id: in_flights
+    command: >-
+      --config configs/config_central.yaml
+      --map ../../mappings/sync_flights.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip
+
+  - id: in_reservations
+    command: >-
+      --config configs/config_central.yaml
+      --map ../../mappings/sync_reservations.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip
+
+  - id: in_branch_customers
+    command: >-
+      --config configs/config_central.yaml
+      --map ../../mappings/sync_branch_customers.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip
+
+  - id: in_branch_sales
+    command: >-
+      --config configs/config_central.yaml
+      --map ../../mappings/sync_branch_sales.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip
+
+  # ── Branch (localhost:5433) receives ─────────────────────────────────────
+  - id: in_countries
+    command: >-
+      --config configs/config_branch.yaml
+      --map ../../mappings/sync_countries.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip
+
+  - id: in_guides
+    command: >-
+      --config configs/config_branch.yaml
+      --map ../../mappings/sync_guides.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip
+
+  - id: in_tours
+    command: >-
+      --config configs/config_branch.yaml
+      --map ../../mappings/sync_tours.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip
+
+  - id: in_schedule
+    command: >-
+      --config configs/config_branch.yaml
+      --map ../../mappings/sync_schedule.yaml
+      --input broker://
+      --drain 5s
+    on_error: skip

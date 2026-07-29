@@ -72,6 +72,11 @@ COMMANDS:
     --listen                   Daemon mode: loop on broker queue until SIGTERM/Ctrl+C.
                                Each message: receive → decrypt → parse → remap → upsert → ACK.
                                Loop guard is skipped in --listen mode (broker regulates rate).
+    --drain <duration>         Bounded import: same loop, but exits once the queue has been
+                               empty for <duration>, reporting the total. Use for scheduled
+                               runs — a plain broker:// takes one message and cannot keep up
+                               with a burst; --listen never ends and so never reports a result.
+                                 tdtpcli --map m.yaml --input broker:// --drain 5s
 
   Multi-Step Workflow:
     --steps <file>             Execute a multi-step workflow from a YAML file. Steps run as
