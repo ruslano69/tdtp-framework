@@ -2,6 +2,103 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.22.1] — 2026-07-29
+
+### Fixed — the XLSX scanner accepted character references XML forbids
+
+`&#1;`, `&#x0B;`, `&#xFFFE;` and lone surrogates were decoded into values,
+while `encoding/xml` refuses a document containing them outright. The byte
+scanner was therefore *more permissive than the parser it falls back to*, which
+defeats the whole point of the fallback: the result depended on which path ran.
+
+This is the same defect 1.19.2 found and fixed in `pkg/core/packet`'s scanner,
+reintroduced three days later by copying the function into `pkg/xlsx` instead
+of sharing it. The copy was written from scratch and simply lacked the check.
+
+Both now call `pkg/core/xmlchar`, which holds one implementation of the Char
+production from XML 1.0 §2.2 and one set of tests for it.
+`pkg/core/packet`'s `isXMLChar` and `parseCharRef` remain as thin wrappers so
+the tests added in 1.19.2 keep guarding that side.
+
+Seven cases pin the rejection and one pins that legal references — including
+astral-plane ones — still decode. No measurable cost: reads stay at ~47 ms per
+10k rows, and the packet parser at ~698 MB/s.
+
+## [1.22.0] — 2026-07-29
+
+### Performance — byte-level scanner for <sheetData>
+
+Reading 10k rows went from 213 ms with excelize to 46 ms — **4.6×** — with 6.5×
+less memory and 13× fewer allocations. Writing is 2.8× faster.
+
+|                     | excelize 2.11 | in-house | |
+|---------------------|--------------:|---------:|---|
+| write 10k rows      | 282 ms | 102 ms | 2.8× |
+| write, memory       | 104 MB | 43 MB | 2.4× |
+| write, allocations  | 1 033 127 | 499 101 | 2.1× |
+| read 10k rows       | 213 ms | 46 ms | 4.6× |
+| read, memory        | 82 MB | 12.7 MB | 6.5× |
+| read, allocations   | 1 439 607 | 110 329 | 13× |
+| file size           | 391.6 KB | 379.5 KB | 3% smaller |
+
+The first cut used encoding/xml throughout and read in 136 ms. The gain came
+from applying the strategy `pkg/core/packet/parser_fast.go` already uses on the
+`<Data>` section: the small structural parts stay with `xml.Unmarshal`, and the
+bulk — `<sheetData>` — is scanned over raw bytes.
+
+The safety property is copied along with the technique. The scanner never
+guesses: a comment, CDATA, formatting runs inside a cell, an entity needing a
+DTD, an out-of-range shared-string index, anything unrecognised returns
+ok=false and the decoder runs instead. No partial results.
+
+Thirteen differential tests assert the two paths return *identical* output on
+the same input, and six more assert the scanner declines the shapes it must.
+That pair found a real divergence on the way in: an empty sheet gave a nil
+slice from one path and an empty one from the other — indistinguishable to
+every caller, and exactly what a fast path is for.
+
+### Changed — XLSX is written and read in-house; excelize is gone
+
+The binary lost **11 MB**, from 37.6 to 26.6 — 29% — and one dependency with a
+CVE history.
+
+Only 32 KB of the 11 MB was excelize's own code. The rest was the linker
+giving up: excelize's formula engine (`calc.go`) reaches
+`reflect.Value.MethodByName`, and once that is linked the Go linker can no
+longer know which methods reflection will call by name, so it stops pruning
+methods entirely. Packages excelize never touches paid for it — `runtime`
++4.0 MB, `aws-sdk-go-v2` +3.0 MB, `redis` +1.5 MB, type metadata +1.2 MB.
+Verified as unavoidable: a six-line program using only `NewFile`, `SetCellStr`,
+`SaveAs`, `OpenFile` and `GetRows` links `MethodByName` all the same.
+
+What replaced it is `archive/zip` plus `encoding/xml`, both already in the
+binary and neither of which defeats the linker. An .xlsx is a ZIP of XML parts;
+the fourteen calls this package made needed about 500 lines of them.
+
+The writer emits inline strings rather than a shared-string table — a database
+export is mostly distinct values, so sharing buys little and costs a second
+pass plus an index to keep consistent. The reader has to understand both,
+because Excel rewrites a file into shared strings the moment someone opens and
+saves it.
+
+Every trap the old code documented is preserved, and the 28 existing tests are
+unchanged — they were written against `ToXLSX`/`FromXLSX`, not against
+excelize, so they served as the acceptance suite without edits. Nine tests were
+added for the parts that used to be someone else's problem: reading a file with
+shared strings, split formatting runs, styles and a sheet whose part name does
+not match its position; `excelSerial` against `excelSerialToTime` including the
+phantom Feb 29 1900; `xml:space="preserve"`; sheet-name sanitising; cell
+reference parsing.
+
+One of them reads a fixture produced by excelize itself. Every other test
+proves the writer and reader agree with each other, which they would even if
+both were wrong about the format; that one is a file from a different
+implementation.
+
+Verified live end to end: exported five rows to XLSX and read them back —
+integers, text, booleans, JSON arrays and a timestamp all survived the trip
+through Excel serials.
+
 ## [1.21.0] — 2026-07-28
 
 ### Added — `--quiet`

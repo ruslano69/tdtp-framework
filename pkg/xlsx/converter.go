@@ -11,7 +11,6 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
-	"github.com/xuri/excelize/v2"
 )
 
 // excel1900Epoch is the Excel date epoch (Jan 1, 1900 = serial 1).
@@ -41,10 +40,6 @@ const maxExcelInt int64 = 999_999_999_999_999
 //
 //	err := xlsx.ToXLSX(packet, "output.xlsx", "Orders")
 func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
-	// Create new Excel file
-	f := excelize.NewFile()
-	defer func() { _ = f.Close() }()
-
 	// Check if data is compressed and decompress if needed
 	if pkt.Data.Compression != "" {
 		if len(pkt.Data.Rows) != 1 {
@@ -73,33 +68,16 @@ func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 		}
 	}
 
-	// Create/rename sheet
-	index, err := f.NewSheet(sheetName)
-	if err != nil {
-		return fmt.Errorf("failed to create sheet: %w", err)
-	}
-	f.SetActiveSheet(index)
-	if sheetName != "Sheet1" {
-		_ = f.DeleteSheet("Sheet1")
-	}
+	sheet := newSheet(sheetName)
 
-	// Create header style
-	headerStyle, errStyle := f.NewStyle(&excelize.Style{
-		Font:      &excelize.Font{Bold: true, Size: 11, Color: "#FFFFFF"},
-		Fill:      excelize.Fill{Type: "pattern", Color: []string{"#4472C4"}, Pattern: 1},
-		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
-	})
-	_ = errStyle
-
-	// Write headers
+	// Write headers. The header row is the schema: "name (TYPE)", "*" for a
+	// key. FromXLSX reads the types back out of it.
 	for col, field := range pkt.Schema.Fields {
-		cell := columnName(col+1) + "1"
 		header := fmt.Sprintf("%s (%s)", field.Name, field.Type)
 		if field.Key {
 			header += " *"
 		}
-		_ = f.SetCellValue(sheetName, cell, header)
-		_ = f.SetCellStyle(sheetName, cell, cell, headerStyle)
+		sheet.setString(col+1, 1, header, styleHeader)
 	}
 
 	// Pre-build schema.FieldDef slice for the core converter (reuse across rows)
@@ -127,7 +105,6 @@ func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 			if col >= len(values) {
 				continue
 			}
-			cell := columnName(col+1) + strconv.Itoa(rowIdx+2)
 			tv, err := conv.ParseValue(values[col], fieldDefs[col])
 			if err != nil || tv.IsNull {
 				// Leave cell blank — do not call SetCellValue
@@ -141,28 +118,46 @@ func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 				continue
 			}
 
-			if forceStr {
-				// Use SetCellStr to guarantee the value is stored as text.
-				// This prevents Excel from interpreting strings starting with
-				// =, +, -, @ as formulas (formula injection trap).
-				_ = f.SetCellStr(sheetName, cell, cellVal.(string))
-				// Do NOT apply a numeric/date style to text-forced cells
-				// (e.g. pre-1900 date strings, big-integer strings).
-			} else {
-				_ = f.SetCellValue(sheetName, cell, cellVal)
-				applyCellFormat(f, sheetName, cell, fieldType)
-			}
+			writeCell(sheet, col+1, rowIdx+2, cellVal, forceStr, fieldType)
 		}
 	}
 
 	// Auto-fit columns
 	for col := range pkt.Schema.Fields {
-		colName := columnName(col + 1)
-		_ = f.SetColWidth(sheetName, colName, colName, 15)
+		sheet.setColWidth(col+1, 15)
 	}
 
-	// Save file
-	return f.SaveAs(filePath)
+	return writeXLSX(filePath, sheet)
+}
+
+// writeCell places one already-converted value into the sheet.
+//
+// forceStr is the formula-injection guard: a text cell is written as a typed
+// string, so Excel never re-reads a leading =, +, - or @ as a formula. It is
+// also how the values that must not become numbers — big integers past 15
+// significant digits, pre-1900 dates — keep every digit they had.
+func writeCell(sheet *sheetBuilder, col, row int, v any, forceStr bool, fieldType schema.DataType) {
+	if forceStr {
+		sheet.setString(col, row, fmt.Sprint(v), styleText)
+		return
+	}
+	switch n := v.(type) {
+	case int64:
+		sheet.setNumber(col, row, strconv.FormatInt(n, 10), styleInteger)
+	case float64:
+		sheet.setNumber(col, row, formatFloat(n), styleFloat)
+	case time.Time:
+		style := styleDatetime
+		if fieldType == schema.TypeDate {
+			style = styleDate
+		}
+		sheet.setNumber(col, row, formatFloat(excelSerial(n)), style)
+	default:
+		// Nothing else reaches here: typedValueToExcel returns only the three
+		// numeric kinds above with forceStr=false. Storing it as text keeps a
+		// future addition visible instead of silently dropped.
+		sheet.setString(col, row, fmt.Sprint(v), styleText)
+	}
 }
 
 // FromXLSX - convert XLSX file to TDTP packet
@@ -181,26 +176,16 @@ func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 //
 //	packet, err := xlsx.FromXLSX("input.xlsx", "Orders")
 func FromXLSX(filePath, sheetName string) (*packet.DataPacket, error) {
-	f, err := excelize.OpenFile(filePath)
+	// Raw values throughout: a date cell yields its Excel serial ("44927.5"),
+	// a numeric cell its decimal text, an error cell "#N/A". Number formats
+	// are never applied, so convertFromExcel below stays the only place that
+	// interprets any of it.
+	rows, err := readSheet(filePath, sheetName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-
-	// Get sheet name
 	if sheetName == "" {
-		sheetName = f.GetSheetName(0)
-	}
-
-	// Read raw cell values (before number formatting).
-	// RawCellValue: true gives us:
-	//   - Date cells as Excel serial number strings (e.g. "44927.5")
-	//   - Numeric cells as decimal strings
-	//   - Error cells as error strings ("#N/A" etc.)
-	//   - String cells as the string value
-	rows, err := f.GetRows(sheetName, excelize.Options{RawCellValue: true})
-	if err != nil {
-		return nil, fmt.Errorf("failed to read rows: %w", err)
+		sheetName = "Sheet1"
 	}
 	if len(rows) < 1 {
 		return nil, fmt.Errorf("file has no rows (not even a header)")
@@ -329,7 +314,7 @@ func typedValueToExcel(tv *schema.TypedValue, fieldType schema.DataType) (any, b
 			}
 			return t.Format("2006-01-02T15:04:05"), true
 		}
-		// For dates >= 1900-01-01 excelize handles serial conversion internally,
+		// For dates >= 1900-01-01 the writer converts to an Excel serial,
 		// including the 1900 leap-year bug (phantom serial 60 = Feb 29, 1900).
 		return t, false
 
@@ -434,24 +419,6 @@ func excelSerialToTime(serial float64) time.Time {
 	s := (totalMs % 60_000) / 1_000
 
 	return time.Date(base.Year(), base.Month(), base.Day(), h, m, s, 0, time.UTC)
-}
-
-// applyCellFormat applies an Excel number format based on the TDTP field type.
-// Only called for cells written with SetCellValue (numeric / date values).
-// String cells (forceStr=true) are deliberately left unformatted.
-func applyCellFormat(f *excelize.File, sheet, cell string, fieldType schema.DataType) {
-	switch fieldType {
-	case schema.TypeInteger, schema.TypeInt:
-		_ = f.SetCellStyle(sheet, cell, cell, 1)
-	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
-		_ = f.SetCellStyle(sheet, cell, cell, 2)
-	case schema.TypeDate:
-		_ = f.SetCellStyle(sheet, cell, cell, 14)
-	case schema.TypeDatetime, schema.TypeTimestamp:
-		_ = f.SetCellStyle(sheet, cell, cell, 22)
-	default:
-		_ = f.SetCellStyle(sheet, cell, cell, 49)
-	}
 }
 
 // columnName converts a 1-based column index to an Excel column letter (1→A, 27→AA).
