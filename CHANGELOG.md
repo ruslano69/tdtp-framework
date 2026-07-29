@@ -4,6 +4,35 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [1.24.0] — 2026-07-29
 
+### Added — job log retention in the orchestrator
+
+Job logs were kept forever. Measured on the travel-agency stand: 13 MB/day, 56%
+of the database being log text, and nothing anywhere to delete it.
+
+    orchestrator --log-retention-weeks 4 --vacuum-threshold-mb 64
+
+`--log-retention-weeks` (1-55, default 4, 0 keeps everything) clears the log
+text of finished jobs older than that, at startup and then once a day. The rows
+stay: the row is the fact that a scenario ran, a few dozen bytes that answer
+"when did this table last sync" long after the output stops being interesting,
+and it holds the only reference to that job's artifact file. Running jobs are
+skipped and `jobs.error` is never cleared.
+
+`--vacuum-threshold-mb` (default 64, 0 disables) runs VACUUM at startup when the
+database is at least that large. It only ever runs at startup: VACUUM copies the
+whole database under the write lock, so on a live orchestrator it would stall
+every dispatch for the length of the copy.
+
+The first implementation sized that VACUUM by asking SQLite's freelist how much
+it would reclaim, which is wrong for this data and was caught by testing against
+the real 851-job database rather than a synthetic one. Job logs average a few
+hundred bytes, so several share a page; clearing one leaves a hole *inside* a
+page still in use, and the freelist counts only whole free pages. It promised
+0.04 MB where the VACUUM actually returned 0.45 MB — eleven times more. A
+threshold built on that number would never have fired, and the feature would
+have looked present while doing nothing. It now triggers on database size, and
+a test pins the discrepancy so the "obvious" version cannot come back.
+
 ### Added — `--drain <duration>` for `--map`
 
 Import had two shapes and needed a third. Plain `--input broker://` takes
