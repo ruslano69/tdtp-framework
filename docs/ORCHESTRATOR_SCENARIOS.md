@@ -30,6 +30,37 @@ orchestrator --scenarios ./scenarios --schedules-seed ./schedules \
 New scenario files are picked up at **startup**. After dropping a file into
 `scenarios/`, restart the orchestrator (or POST it via a future hot-reload).
 
+### Job log retention
+
+Every job stores its runner's output in `jobs.log`, and on a busy stand that is
+the majority of the database — measured at 13 MB/day with eight tables on a
+15-second schedule, 56% of it log text. Two flags bound it:
+
+```bash
+orchestrator --log-retention-weeks 4 --vacuum-threshold-mb 64 ...
+```
+
+`--log-retention-weeks` (1–55, default 4, `0` keeps everything) clears the log
+text of finished jobs older than that. **The rows stay.** The row is the fact
+that a scenario ran — when, with what status — a few dozen bytes that answer
+"when did this table last sync" long after the output stops being interesting.
+Keeping it also means `artifact_path` keeps pointing at its file instead of
+orphaning it. Running jobs are never touched, and `jobs.error` is never cleared:
+it is small, rare, and the one part of a failed run still worth having.
+
+The purge runs at startup and then once a day.
+
+`--vacuum-threshold-mb` (default 64, `0` disables) runs `VACUUM` at startup when
+the database is at least that large. Clearing text does not shrink a SQLite
+file — freed space is reused by later writes, so the file plateaus rather than
+growing without bound, but it is never returned to the filesystem until a
+repack. `VACUUM` holds the write lock for a full copy of the database, which is
+why it only ever runs before the first schedule fires and never while jobs are
+being dispatched.
+
+Set the threshold **above** the size your database settles at, or every restart
+pays for a rewrite of data that is entirely live.
+
 ---
 
 ## 1. Plain scenario (one-off)

@@ -39,6 +39,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -69,9 +70,22 @@ func main() {
 	redisPassword := flag.String("redis-password", "", "Redis password (pubsub trigger only)")
 	redisDB := flag.Int("redis-db", 0, "Redis DB number (pubsub trigger only)")
 	pubsubPath := flag.String("pubsub", "", "path to pubsub.yaml mapping pipeline result_name -> scenario (requires --redis-addr)")
+	logRetentionWeeks := flag.Int("log-retention-weeks", 4,
+		fmt.Sprintf("clear job log text older than this many weeks (%d-%d, 0 = keep forever)",
+			MinRetentionWeeks, MaxRetentionWeeks))
+	vacuumThresholdMB := flag.Int("vacuum-threshold-mb", 64,
+		"at startup, VACUUM when the database is at least this many MB (0 = never)")
 	flag.Parse()
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
+	// Validated before the trust gate and before the DB is opened: a bad
+	// retention setting is a typo in a command line, and finding out about it
+	// after a licence check and a Mercury round-trip wastes both.
+	retention := RetentionPolicy{Weeks: *logRetentionWeeks, VacuumMB: *vacuumThresholdMB}
+	if err := retention.Validate(); err != nil {
+		log.Fatal().Err(err).Msg("invalid retention policy")
+	}
 
 	// Trust gate: verify own license (offline) and preflight Mercury (online).
 	trustCtx, trustCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -163,6 +177,13 @@ func main() {
 
 	// All fatal-risk init done — register cleanup defers.
 	defer func() { _ = db.Close() }()
+
+	// Before the scheduler: the startup pass may VACUUM, which holds the write
+	// lock for the length of a full database rewrite. Starting it after the
+	// first schedule could fire would stall that job behind the copy.
+	stopRetention := StartRetention(db, retention)
+	defer stopRetention()
+
 	scheduler.Start()
 	defer scheduler.Stop()
 
