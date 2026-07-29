@@ -40,17 +40,26 @@ parallel, which is when it is worth having. IDs now carry a per-process random
 nonce; the in-process sequence, which fixed the same class of bug within one
 process, is unchanged.
 
-### Changed — `--quiet` now covers the import side
+### Changed — `--quiet` now covers every path that moves rows
 
-`--quiet` reduced export to one line per table and left `--map` untouched, so an
-orchestrator job log was 3612 bytes of banners, per-packet UUIDs and duplicated
-totals against 527 for the export half. Import now reports the same shape:
+`--quiet` reduced `--sync-incremental` to one line per table and left the other
+paths untouched, so an orchestrator job log was 3612 bytes of banners,
+per-packet UUIDs and duplicated totals against 527 for that half. All four paths
+now report the same shape:
 
     public.flights  10 rows  418ms
 
+`--export-broker` was the last one, found by reading a job log rather than the
+code: it printed seven lines and no row count at all, which is why the reference
+reload showed `0 rows` while the import side counted 326 of them arriving. The
+successful `--sync-incremental` paths were also not reporting their row count,
+which nothing had noticed either.
+
 The time is work time, not wall time — a drain spends most of its wall clock
 waiting out the idle window, and reporting that would say "5s" for every table
-regardless of what it did. Errors are never suppressed.
+regardless of what it did. An empty table still prints its line: silence would
+make "nothing to send" and "the step never ran" identical. Errors are never
+suppressed.
 
 `mapping.Execute` keeps its signature; `mapping.ExecuteWithOptions` takes the
 new options.
@@ -68,6 +77,10 @@ wrote to the database.
 box-drawing characters, and a redirected stdout on Windows defaults to the ANSI
 code page, so they ran fine in a terminal and died with `UnicodeEncodeError` the
 moment anyone piped them to a file.
+
+`shutdown.ps1` stops `dashboard.py`, which it never did — the dashboard outlived
+the stand by a day, serving an empty picture of a system that no longer existed.
+It goes last, so the shutdown is visible in it while it happens.
 
 ## [1.23.0] — 2026-07-29
 

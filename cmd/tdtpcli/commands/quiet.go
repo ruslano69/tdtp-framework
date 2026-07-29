@@ -6,13 +6,20 @@ import "sync/atomic"
 //
 // Package-level state is normally the wrong answer, and every command that can
 // reasonably carry the flag does carry it — SyncOptions.Quiet, MapOptions.Quiet,
-// mapping.ExecOptions.Quiet. This exists for the prints buried several layers
-// below any of those: the v1.5 packet UUID is emitted by DecryptPacketV15,
-// reached through decryptV15PacketIfNeeded and parseAndDecryptBrokerMessage,
-// neither of which has any other reason to know about output formatting. A
-// per-message line there defeats --quiet in exactly the case it was added for
-// (a drain consuming a dozen messages), and threading a bool through three
-// signatures and five tests to silence one line buys nothing.
+// mapping.ExecOptions.Quiet. Two cases are left over.
+//
+// One is a print buried several layers below any of those: the v1.5 packet UUID
+// is emitted by DecryptPacketV15, reached through decryptV15PacketIfNeeded and
+// parseAndDecryptBrokerMessage, neither of which has any other reason to know
+// about output formatting. A per-message line there defeats --quiet in exactly
+// the case it was added for (a drain consuming a dozen messages), and threading
+// a bool through three signatures and five tests to silence one line buys
+// nothing.
+//
+// The other is ExportToBroker, whose signature is already fourteen positional
+// arguments including two adjacent bools. It could take the flag; adding a
+// fifteenth positional bool there would make the call sites less readable than
+// the noise this suppresses.
 //
 // Safe because it is what it looks like: one process, one CLI invocation, one
 // verbosity, set once before any command runs. It is deliberately not a general
