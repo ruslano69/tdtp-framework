@@ -280,7 +280,9 @@ func DecryptPacketV15(ctx context.Context, pkt *packet.DataPacket, mercuryURL st
 	if packageUUID == "" {
 		return fmt.Errorf("decrypt v1.5: packet Header.MessageID is empty — cannot retrieve a key without it")
 	}
-	fmt.Printf("  v1.5 encrypted packet UUID: %s\n", packageUUID)
+	if !QuietOutput() {
+		fmt.Printf("  v1.5 encrypted packet UUID: %s\n", packageUUID)
+	}
 
 	mc := mercury.NewClient(mercuryURL, 5000)
 	caller := os.Getenv("TDTPCLI_CALLER")

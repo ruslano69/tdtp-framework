@@ -711,6 +711,11 @@ type brokerSendOptions struct {
 	Encrypt       bool
 	EncryptLegacy bool
 	MercuryURL    string
+
+	// Quiet drops the per-packet progress lines. The caller still reports the
+	// outcome — under --quiet a scheduled run wants one line per table, not
+	// three per packet times eight tables every tick.
+	Quiet bool
 }
 
 // sendPacketsToBroker serialises ready packets and sends them.
@@ -803,10 +808,10 @@ func sendPacketsToBroker(ctx context.Context, broker brokers.MessageBroker, pack
 		}
 	}
 
-	if opts.Compress {
+	if opts.Compress && !opts.Quiet {
 		fmt.Printf("✓ Data compressed with %s\n", opts.CompressAlgo)
 	}
-	if opts.Encrypt {
+	if opts.Encrypt && !opts.Quiet {
 		fmt.Printf("✓ Data encrypted (%s)\n", map[bool]string{true: "v1.3 whole-blob", false: "v1.5 section-level"}[opts.EncryptLegacy])
 	}
 
@@ -831,6 +836,8 @@ func sendPacketsToBroker(ctx context.Context, broker brokers.MessageBroker, pack
 		}
 	}
 
-	fmt.Printf("✓ Sent %d packet(s)\n", len(packets))
+	if !opts.Quiet {
+		fmt.Printf("✓ Sent %d packet(s)\n", len(packets))
+	}
 	return nil
 }

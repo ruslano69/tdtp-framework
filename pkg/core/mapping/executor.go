@@ -9,9 +9,26 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
+// ExecOptions controls a mapping run.
+type ExecOptions struct {
+	// DryRun performs the transformation without writing anything.
+	DryRun bool
+
+	// Quiet drops the per-target progress line. The caller reports the result
+	// instead — a drain that consumes forty messages should not print forty
+	// lines when the scheduler only wants the total.
+	Quiet bool
+}
+
 // Execute applies cfg to pkt: remaps fields for each target and upserts into the target DB.
 // When dryRun is true the transformation is performed but no data is written.
 func Execute(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, dryRun bool) error {
+	return ExecuteWithOptions(ctx, cfg, pkt, ExecOptions{DryRun: dryRun})
+}
+
+// ExecuteWithOptions is Execute with room for settings that are not "dry run".
+func ExecuteWithOptions(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, opts ExecOptions) error {
+	dryRun := opts.DryRun
 	rows := pkt.GetRows()
 
 	for _, target := range cfg.Targets {
@@ -50,7 +67,9 @@ func Execute(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, dr
 			return fmt.Errorf("import to %s.%s: %w", schemaName, tableName, err)
 		}
 		_ = adapter.Close(ctx)
-		fmt.Printf("✓ %d rows upserted → %s.%s\n", len(rows), schemaName, tableName)
+		if !opts.Quiet {
+			fmt.Printf("✓ %d rows upserted → %s.%s\n", len(rows), schemaName, tableName)
+		}
 	}
 	return nil
 }

@@ -29,3 +29,10 @@ schedules:
   - id: travel-sync-reference
     scenario: travel-sync-reference
     schedule: "@every 5m"
+
+  # Import runs on its own tick, a beat behind the export, so a run usually
+  # finds something to do. It does not have to line up: whatever is not drained
+  # this time is still in the queue for the next one.
+  - id: travel-sync-in
+    scenario: travel-sync-in
+    schedule: "@every 20s"

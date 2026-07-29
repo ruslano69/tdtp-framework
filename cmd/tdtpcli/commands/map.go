@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,7 +39,21 @@ type MapOptions struct {
 	DryRun      bool        // print what would happen without writing to DB
 	MercuryURL  string      // xZMercury base URL for decrypting .enc input (burn-on-read)
 	Listen      bool        // daemon mode: loop on broker queue until SIGTERM
-	Auditor     SyncAuditor // per-message audit in daemon mode; nil = disabled
+	Auditor     SyncAuditor // per-message audit in loop mode; nil = disabled
+
+	// Drain turns the loop into a unit of work: consume until the queue has
+	// been idle this long, then exit. --listen never ends, which is right for
+	// a daemon and wrong for anything that has to report a result — a
+	// scheduled run, an orchestrator job, a CI step. One message per
+	// invocation (the plain broker:// path) is the other extreme: it cannot
+	// keep up with a burst.
+	Drain time.Duration
+
+	// Quiet reduces the run to its result: one line naming the target, the row
+	// count and the elapsed time. Errors are never suppressed — a skipped
+	// message still says why it was skipped, because that is the one thing a
+	// scheduled run cannot afford to lose.
+	Quiet bool
 }
 
 // RunMap executes a cross-system field mapping: reads a TDTP packet, applies
@@ -52,7 +67,9 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 		return fmt.Errorf("--map: %w", err)
 	}
 
-	fmt.Printf("Mapping: %s\n", cfg.ID)
+	if !opts.Quiet {
+		fmt.Printf("Mapping: %s\n", cfg.ID)
+	}
 
 	// Extract broker/S3 config from mapping YAML input_source section
 	var s3cfg *storage.S3Config
@@ -62,13 +79,18 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 		brokercfg = cfg.InputSource.Broker
 	}
 
-	// Daemon mode: hand off to the listen loop (no loop guard — broker regulates rate)
-	if opts.Listen {
+	// Loop modes — daemon (--listen) or bounded (--drain). Both use the same
+	// loop and skip the loop guard: the broker queue regulates the rate.
+	if opts.Listen || opts.Drain > 0 {
+		mode := "--listen"
+		if opts.Drain > 0 {
+			mode = "--drain"
+		}
 		if !isBrokerURI(opts.InputFile) {
-			return fmt.Errorf("--listen requires a broker:// URI in --input")
+			return fmt.Errorf("%s requires a broker:// URI in --input", mode)
 		}
 		if brokercfg == nil {
-			return fmt.Errorf("--listen: mapping YAML has no input_source.broker section")
+			return fmt.Errorf("%s: mapping YAML has no input_source.broker section", mode)
 		}
 		return runMapListen(ctx, cfg, opts, brokercfg)
 	}
@@ -136,13 +158,24 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		return fmt.Errorf("broker connect: %w", err)
 	}
 
-	fmt.Printf("[map:listen] started  mapping=%s  queue=%s\n", cfg.ID, bcfg.Queue)
-	fmt.Printf("[map:listen] source: %s → target: %s\n",
-		cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
-	if opts.DryRun {
-		fmt.Println("[map:listen] dry-run mode — no data will be written")
+	tag := "[map:listen]"
+	if opts.Drain > 0 {
+		tag = "[map:drain]"
 	}
-	fmt.Printf("[map:listen] Press Ctrl+C to stop\n\n")
+
+	if !opts.Quiet {
+		fmt.Printf("%s started  mapping=%s  queue=%s\n", tag, cfg.ID, bcfg.Queue)
+		fmt.Printf("%s source: %s → target: %s\n", tag,
+			cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
+		if opts.DryRun {
+			fmt.Printf("%s dry-run mode — no data will be written\n", tag)
+		}
+		if opts.Drain > 0 {
+			fmt.Printf("%s stops once the queue has been empty for %s\n\n", tag, opts.Drain)
+		} else {
+			fmt.Printf("%s Press Ctrl+C to stop\n\n", tag)
+		}
+	}
 
 	// Graceful shutdown: SIGTERM/SIGINT → cancel listenCtx → Receive unblocks.
 	sigCh := make(chan os.Signal, 1)
@@ -160,13 +193,35 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	parser := packet.NewParser()
 	var total int
 
+	// Time actually spent on messages, not wall time. A drain spends most of
+	// its wall clock waiting out the idle window, so reporting that would say
+	// "5s" for every table regardless of what it did.
+	var work time.Duration
+
 	for {
-		data, err := br.Receive(listenCtx)
+		// In drain mode the receive carries a deadline. Hitting it means the
+		// queue stayed empty for the whole window — the signal to finish, not
+		// an error to reconnect over.
+		recvCtx := listenCtx
+		var recvCancel context.CancelFunc
+		if opts.Drain > 0 {
+			recvCtx, recvCancel = context.WithTimeout(listenCtx, opts.Drain)
+		}
+		data, err := br.Receive(recvCtx)
+		// Read the deadline state before cancelling: afterwards every context
+		// reports an error and the two cases stop being distinguishable.
+		idle := opts.Drain > 0 && errors.Is(recvCtx.Err(), context.DeadlineExceeded)
+		if recvCancel != nil {
+			recvCancel()
+		}
 		if err != nil {
 			if listenCtx.Err() != nil {
 				break // clean shutdown
 			}
-			fmt.Printf("[map:listen] receive error: %v — reconnecting\n", err)
+			if idle {
+				break // nothing left to drain — the run is done
+			}
+			fmt.Printf("%s receive error: %v — reconnecting\n", tag, err)
 			if reconnectErr := reconnectBroker(listenCtx, br); reconnectErr != nil {
 				break // context cancelled during reconnect
 			}
@@ -181,35 +236,38 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		// "Consumer: dual-format detection").
 		data, err = decryptLegacyBlobIfNeeded(listenCtx, data, opts.MercuryURL)
 		if err != nil {
-			fmt.Printf("[map:listen] decrypt error (skipping): %v\n", err)
+			fmt.Printf("%s decrypt error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		pkt, err := parser.ParseBytes(data)
 		if err != nil {
-			fmt.Printf("[map:listen] parse error (skipping): %v\n", err)
+			fmt.Printf("%s parse error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := decryptV15PacketIfNeeded(listenCtx, pkt, opts.MercuryURL); err != nil {
-			fmt.Printf("[map:listen] decrypt error (skipping): %v\n", err)
+			fmt.Printf("%s decrypt error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := decompressPacketData(pkt); err != nil {
-			fmt.Printf("[map:listen] decompress error (skipping): %v\n", err)
+			fmt.Printf("%s decompress error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := parser.ExpandCompactRows(pkt); err != nil {
-			fmt.Printf("[map:listen] expand error (skipping): %v\n", err)
+			fmt.Printf("%s expand error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 
 		rows := len(pkt.Data.Rows)
-		if err := mapping.Execute(listenCtx, cfg, pkt, opts.DryRun); err != nil {
-			fmt.Printf("[map:listen] execute error: %v\n", err)
+		if err := mapping.ExecuteWithOptions(listenCtx, cfg, pkt, mapping.ExecOptions{
+			DryRun: opts.DryRun,
+			Quiet:  opts.Quiet,
+		}); err != nil {
+			fmt.Printf("%s execute error: %v\n", tag, err)
 			// Отказ пишется в аудит наравне с успехом: сообщение уходит в nack
 			// и возвращается в очередь, не оставляя следа нигде, кроме stdout
 			// демона — а его никто не читает через неделю работы.
@@ -221,7 +279,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		// ACK / commit offset only after successful upsert.
 		if a, ok := br.(acker); ok {
 			if err := a.AckLast(); err != nil {
-				fmt.Printf("[map:listen] ack error: %v\n", err)
+				fmt.Printf("%s ack error: %v\n", tag, err)
 			}
 		}
 		if committer, ok := br.(interface{ CommitLast(context.Context) error }); ok {
@@ -230,12 +288,32 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 
 		total += rows
 		elapsed := time.Since(t0).Round(time.Millisecond)
-		fmt.Printf("[map:listen] ✓  rows=%-6d  total=%-6d  %s\n", rows, total, elapsed)
+		work += elapsed
+		if !opts.Quiet {
+			fmt.Printf("%s ✓  rows=%-6d  total=%-6d  %s\n", tag, rows, total, elapsed)
+		}
 		recordSync(listenCtx, opts.Auditor, bcfg.Queue, int64(rows), elapsed, nil)
 	}
 
-	fmt.Printf("[map:listen] stopped. total rows upserted: %d\n", total)
+	if opts.Quiet {
+		// Same shape as --sync-incremental reports on the way out, so one job
+		// log reads as a single table of what moved: name, rows, time.
+		fmt.Printf("%s  %d rows  %s\n", mapTargetName(cfg), total, work)
+		return nil
+	}
+
+	fmt.Printf("%s stopped. total rows upserted: %d\n", tag, total)
 	return nil
+}
+
+// mapTargetName names the run in one word for the --quiet result line: the
+// target table when there is exactly one, otherwise the mapping's own ID,
+// since a list of tables would defeat the point of a single line.
+func mapTargetName(cfg *mapping.MappingConfig) string {
+	if len(cfg.Targets) == 1 {
+		return cfg.Targets[0].Table
+	}
+	return cfg.ID
 }
 
 // nackIfAble sends NACK with requeue=true when the broker supports it.

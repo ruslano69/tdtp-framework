@@ -5,21 +5,21 @@
 
 .DESCRIPTION
     Order matters: stop producing before stopping consuming, so nothing is
-    still arriving when the listeners go down.
+    still arriving when the importers go down.
 
       1. activity.py     -- stop simulating changes
-      2. orchestrator    -- stop triggering exports (no new packets enqueued)
-      3. drain           -- let the listeners finish what is already queued
-      4. listeners       -- stop tdtpcli --map --listen
-      5. purge           -- whatever survived the drain timeout
+      2. orchestrator    -- stop both halves; import runs under it now
+      3. drain           -- one last --drain pass per queue
+      4. purge           -- whatever survived the drain timeout
 
-    Two stages from the earlier version are gone with the scripts they served:
-    coordinator.py (replaced by the orchestrator) and its tdtp.coordinator
-    queue, and consumer.py (replaced by listeners.ps1).
+    Every stage that used to belong to a script of its own is gone with it:
+    coordinator.py and its tdtp.coordinator queue, consumer.py, and finally
+    listeners.ps1 — import is an orchestrator scenario now, so stopping the
+    orchestrator stops both halves of the flow.
 
-    An interrupted listener is safe: --listen acknowledges a message only
-    after the upsert commits, so anything in flight returns to the queue
-    rather than vanishing. A purge here does discard messages -- it runs only
+    An interrupted import is safe: the message is acknowledged only after the
+    upsert commits, so anything in flight returns to the queue rather than
+    vanishing. A purge here does discard messages -- it runs only
     after the drain timeout, and says how many.
 
 .PARAMETER DrainTimeoutSec
@@ -97,7 +97,7 @@ if ($Force) {
     Write-Host "[ FORCE ] Killing all processes and purging queues..." -ForegroundColor Red
     Stop-PythonByScript "activity\.py" "activity"
     Stop-ByImage "orchestrator" "orchestrator"
-    Stop-ByImage "tdtpcli" "listener"
+    Stop-ByImage "tdtpcli" "import step"
     Stop-ByImage "xzmercury-mock" "mercury"
     foreach ($q in $DATA_QUEUES) {
         docker exec $RABBIT_CONTAINER rabbitmqctl purge_queue $q 2>$null | Out-Null
@@ -132,10 +132,12 @@ while ($elapsed -lt $DrainTimeoutSec) {
     $elapsed += 3
 }
 
-# -- Step 4: stop the listeners, purge the remainder ---------------------------
-Write-Host "[ 4/4 ] Stopping listeners..." -ForegroundColor Yellow
-Stop-ByImage "tdtpcli" "listener"
-# Mercury last: a listener still draining needs it to decrypt what it holds.
+# -- Step 4: stop any import step still running, purge the remainder -----------
+# The orchestrator is already down, so no new step starts; this only catches one
+# mid-drain.
+Write-Host "[ 4/4 ] Stopping any import step in flight..." -ForegroundColor Yellow
+Stop-ByImage "tdtpcli" "import step"
+# Mercury last: a step still draining needs it to decrypt what it holds.
 Stop-ByImage "xzmercury-mock" "mercury"
 
 $depths = Get-AllDepths $DATA_QUEUES

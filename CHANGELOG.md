@@ -2,6 +2,73 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.24.0] — 2026-07-29
+
+### Added — `--drain <duration>` for `--map`
+
+Import had two shapes and needed a third. Plain `--input broker://` takes
+exactly one message per invocation and cannot keep up with a burst; `--listen`
+runs until SIGTERM, which is right for a daemon and wrong for anything that has
+to report a result. `--drain` consumes until the queue has been empty for the
+given window, then exits with a total:
+
+    tdtpcli --map sync_flights.yaml --input broker:// --drain 5s
+    public.flights  10 rows  418ms
+
+That is a unit of work an orchestrator can own — a job record, an approval, a
+quota, a failure that lands somewhere a person will see it. It reuses the
+`--listen` loop with a deadline on the receive, so acknowledgement still happens
+only after the upsert commits and an interrupted run returns its message to the
+queue.
+
+The cost is latency below the tick: a row waits up to the schedule interval plus
+the drain window instead of arriving as it is published. Where seconds matter,
+`--listen` is still the right shape and is unchanged.
+
+### Fixed — audit entries lost when processes run in parallel
+
+Audit IDs were `audit-<unixnano>-<seq>`, and the sequence is per-process. Eight
+`tdtpcli` runs started together by one orchestrator step each wrote their first
+entry with `seq=1`, and the Windows clock is coarse enough that several read the
+same `UnixNano`. The IDs collided, the losing inserts failed on the PRIMARY KEY,
+and the entries were dropped — silently, since the write is best-effort:
+
+    warning: audit log write failed: UNIQUE constraint failed: audit_log.id (1555)
+
+The audit record went missing precisely when the most work was running in
+parallel, which is when it is worth having. IDs now carry a per-process random
+nonce; the in-process sequence, which fixed the same class of bug within one
+process, is unchanged.
+
+### Changed — `--quiet` now covers the import side
+
+`--quiet` reduced export to one line per table and left `--map` untouched, so an
+orchestrator job log was 3612 bytes of banners, per-packet UUIDs and duplicated
+totals against 527 for the export half. Import now reports the same shape:
+
+    public.flights  10 rows  418ms
+
+The time is work time, not wall time — a drain spends most of its wall clock
+waiting out the idle window, and reporting that would say "5s" for every table
+regardless of what it did. Errors are never suppressed.
+
+`mapping.Execute` keeps its signature; `mapping.ExecuteWithOptions` takes the
+new options.
+
+### Changed — travel-agency runs its import under the orchestrator
+
+`listeners.ps1` and its eight long-lived daemons are gone, replaced by
+`workflows/sync_in.yaml` on a 20-second schedule. The daemons did the work
+correctly, but nothing above them knew they existed: no job record, no approval,
+no quota, and a failure appeared only in a terminal nobody was watching. Half
+the pipeline was governed and half was not — and it was the ungoverned half that
+wrote to the database.
+
+`activity.py` and `dashboard.py` now force UTF-8 on stdout: both print
+box-drawing characters, and a redirected stdout on Windows defaults to the ANSI
+code page, so they ran fine in a terminal and died with `UnicodeEncodeError` the
+moment anyone piped them to a file.
+
 ## [1.23.0] — 2026-07-29
 
 ### Added — `security.mercury_url` in the tdtpcli config

@@ -31,9 +31,18 @@ Dependencies:
 import argparse
 import json
 import random
+import sys
 import time
 import uuid
 from datetime import datetime, date, timedelta
+
+# The output below is full of box-drawing characters and check marks, and on
+# Windows a redirected stdout defaults to the ANSI code page rather than UTF-8 —
+# so the simulator ran fine in a terminal and died with UnicodeEncodeError the
+# moment anyone piped it to a file.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
 
 import psycopg2
 import psycopg2.extras

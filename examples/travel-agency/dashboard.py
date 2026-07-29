@@ -33,9 +33,16 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Same reason as activity.py: a redirected stdout on Windows is not UTF-8, and
+# the startup banner has box-drawing characters in it.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
 
 TRAVEL_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(TRAVEL_DIR, "state")
