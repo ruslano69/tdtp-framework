@@ -349,3 +349,128 @@ plan doc to match before starting Phase 1.5 implementation.
 
 Add/drop columns, type changes при schema drift між версіями пакета і target таблицею.
 Потрібно як основа для `--import-stream` (streaming import потребує schema negotiation).
+
+---
+
+## Package hygiene — funcfinder audit (2026-07-29, post-1.24.0)
+
+Standing practice after each sprint: map the touched package and look for
+hand-rolled stdlib. Run on `cmd/orchestrator`.
+
+### Reinvented stdlib (3 sites, mechanical)
+
+The package already imports `slices` in `preflight.go` and uses it correctly,
+so these are copies that predate it rather than a deliberate choice:
+
+- `auth.go:57` `AllowsScenario` — manual loop → `slices.Contains(p.Scenarios, name)`
+- `pubsub.go:93` `statusAllowed` — the whole function is `slices.Contains(allowed, status)`; delete it and inline
+- `routes.go:388` `queryLimit` — `if n > max { return max }` → `min(n, max)`. The
+  parameter is also named `max`, shadowing the builtin, which reads as a bug.
+
+None of these is a defect: the code works and is covered. They are on the list
+so they stop being copied.
+
+### `newRouter` — the one complexity outlier
+
+`routes.go:36`, depth 5, complexity 16, 255 lines, VERY_HIGH. Everything else in
+the package tops out at HIGH=8, which is ordinary for Go with error handling.
+
+It is a route table with handler closures nested inside. It splits along its own
+seams — one registration function per group (`/scenarios`, `/jobs`,
+`/schedules`, `/tokens`) — but that is a rearrangement, not a substitution, so
+it wants its own change rather than riding along with the cleanups above.
+
+---
+
+## Internationalization — what actually needs translating
+
+Goal: the package is usable by someone who does not read Russian.
+
+Measured 2026-07-29 across the repo (Cyrillic character counts, so a
+proportional measure of work, not of value).
+
+### Tier 0 — already done, no work
+
+**The binary is already fully English.** Zero Russian in any user-visible
+string: every `fmt.Errorf`, `Printf`, log line and help text. This was checked
+rather than assumed, and it is the part that would have been most expensive to
+fix, because a foreign user hits it at runtime with no way around it.
+
+25 documents are already English, including the ones a newcomer meets first:
+`README.md` (35 KB), `cmd/orchestrator/README.md`, `xzmercury/README.md` and
+its `docs/`, `pkg/audit/README.md`, `docs/DEPLOYMENT.md`,
+`docs/ORCHESTRATOR_SCENARIOS.md`, `ROADMAP.md`, and the whole travel-agency
+example.
+
+### Tier 1 — blocks adoption (~36 K)
+
+Without these an integrator cannot evaluate or use the product at all:
+
+| File | Cyrillic | Why it blocks |
+|------|---------:|---------------|
+| `docs/USER_GUIDE.md` | 16 477 | The reference for every flag |
+| `docs/SPECIFICATION.md` | 12 958 | The protocol itself — nobody can write a compatible reader without it |
+| `docs/ETL_PIPELINE.md` | 4 971 | Pipeline YAML reference |
+| `docs/README.md` | 1 784 | Index of `docs/` — a broken front door to everything else |
+
+### Tier 2 — blocks integration work (~45 K)
+
+Needed once they start building, not to decide whether to:
+
+- `pkg/python/libtdtp/README.md` (4 758) and `bindings/python/DEVELOPER_GUIDE.md` (3 852) —
+  likely first contact for a shop whose current tooling is Excel and CSV
+- `cmd/tdtpserve/README.md` (4 501)
+- `docs/SCENARIO_TRUST.md` (5 839), `docs/S3_AS_SYNC_BROKER.md` (2 694),
+  `docs/tdtp-v14-protocol-schema.md` (1 279), `docs/ACCESS_ADAPTER.md` (1 083)
+- Adapter READMEs — sqlite 2 880, access 2 572, mssql 2 422, base 2 149,
+  mysql 1 971, postgres 1 222
+- `pkg/processors/README.md` (2 959), `pkg/sync` (754), `pkg/retry` (415), `pkg/xlsx` (130)
+
+### Tier 3 — examples (~14 K)
+
+`examples/README.md` (2 990) plus fifteen per-example READMEs. Lower urgency
+only because the flagship example, travel-agency, is already English — and an
+example is the thing people actually copy, so this tier is worth more than its
+size suggests.
+
+### Tier 4 — contributor-facing (~20 K)
+
+`docs/DEVELOPER_GUIDE.md` (8 284), `pkg/adapters/base/MIGRATION_EXAMPLE.md`,
+the `cmd/tdtp-xray/*` docs, `libcs/BUILD.md`, `docker/sprint4/README.md`,
+`scripts/*`. Needed to accept outside contributions, not to be used.
+
+### Tier 5 — do NOT translate; decide whether to ship them at all (~26 K)
+
+The cheapest translation is the one that is not done. These are internal working
+artifacts that happen to sit in the repository:
+
+`CLAUDE.md` (7 589, agent instructions), `AGENTS.md` (3 679),
+`docs/xZMercury-TDTP-TZ-v1.2.md` (8 639, a statement of work),
+`cmd/tdtpserve/AUTH_PLAN.md` (3 348), `docs/SESSION_SUMMARY.md` (2 790),
+`cmd/tdtp-xray/GO_PROXY_FIX.md`, `CAST_IN_WHERE_ORDER_BY.md`.
+
+Decision needed: move them under an internal path excluded from the published
+package, or leave them and accept that a reader meets Russian working notes
+scattered among the documentation. Translating them is the worst of the three.
+
+### Go comments — 153 K, and mostly not worth translating
+
+Split by audience rather than by volume:
+
+- **Doc comments on exported symbols in `pkg/`: 39 K.** These are published API
+  documentation — they appear on pkg.go.dev for anyone importing the framework.
+  Same audience as Tier 1 and 2, so they belong at that priority. Heaviest:
+  `pkg/core/packet` 7 022, `pkg/processors` 4 878, `pkg/etl` 4 061,
+  `pkg/brokers` 3 279, `pkg/adapters/base` 2 749.
+- **Internal comments: 64 K in `pkg/`, more elsewhere.** These explain why a
+  branch exists to whoever changes it next. Leave them. Machine translation
+  would flatten exactly the reasoning that makes them worth having, and the
+  continuity model for this codebase does not depend on a human reading them
+  cold.
+
+Recommended order overall: Tier 1 → exported doc comments in the packages a
+consumer imports first (`pkg/core/packet`, `pkg/adapters`, `pkg/etl`) → Tier 2 →
+Tier 3. Tier 5 is a decision, not a task, and should be made before any of it.
+
+New sections in this file are written in English from here on, for the same
+reason the rest of this list exists.
