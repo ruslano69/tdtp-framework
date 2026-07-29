@@ -123,6 +123,35 @@ because its own job did succeed. The dashboard calls it out by name. It also
 lists queues no workflow step sends to, which is how leftovers from deleted
 scripts surface.
 
+### `mercury.ps1` — Encryption Keys
+
+Packets leave the source encrypted. `security.mercury_url` in each node config
+points every command at xZMercury, which binds an AES-256-GCM key to the
+packet's UUID; the key lives in Mercury's memory and never touches a file.
+
+    <Header>…<TableName>guides</TableName>…      plain — the queue still routes
+    <Schema  encryption="aes-256-gcm">s5fH0gVT… ciphertext
+    <Data    encryption="aes-256-gcm"><R>UzBKI7… ciphertext
+
+The header stays readable on purpose: a broker has to route the message, and an
+operator has to see which table a stuck packet belongs to, without holding a key.
+
+The URL sits in the config rather than on each command because it is needed
+symmetrically — the exporter binds the key, every listener resolves it — and one
+stale copy of it silently produces packets the other side cannot open.
+
+**Failure shape worth knowing.** If Mercury is down, the export fails at the
+encrypt step and the checkpoint stays put, so nothing is lost. But a packet
+already in a queue cannot be opened until Mercury is back: the key is not in the
+packet, which is the point.
+
+**This is the mock, and it differs in one way that matters.** It does not sign
+its responses, so clients run with `MERCURY_SERVER_SECRET=dev-mode` — set for
+you by `listeners.ps1` and `orchestrator.ps1`. A real deployment runs real
+xZMercury with a real shared secret, and then that variable carries the secret
+instead: the verification it currently skips is what proves the key came from
+the server you meant, rather than from whoever answered first.
+
 ### `workflows/` — What Gets Synced
 
 | File | Trigger | Contents |
@@ -208,6 +237,9 @@ go build -o tdtpcli.exe ./cmd/tdtpcli/ && go build -o orchestrator.exe ./cmd/orc
 Then, each in a separate terminal:
 
 ```bash
+# Encryption keys — start first: nothing exports without it.
+./mercury.ps1
+
 # Export trigger. -Approve is needed on the first run and after editing a workflow.
 ./orchestrator.ps1 -Approve
 

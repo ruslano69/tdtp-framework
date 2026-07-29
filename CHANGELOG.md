@@ -2,6 +2,54 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.23.0] — 2026-07-29
+
+### Added — `security.mercury_url` in the tdtpcli config
+
+The xZMercury URL was flag-only, and it is needed symmetrically: the exporter
+binds an encryption key, every listener resolves it back. Passing it as a flag
+meant repeating one URL across eight workflow steps and every listener process,
+where a single stale copy silently produces packets the other side cannot open.
+
+`--mercury-url` still overrides it, so a one-off run can point elsewhere.
+
+### Changed — travel-agency transports encrypted packets
+
+Encryption was code-complete on both sides and simply not switched on: the
+export path carries `--enc` through `--to-broker` into the shared sender,
+and `--map --listen` already decrypted either format. The example now uses it.
+
+    <Header>…<TableName>guides</TableName>…      plain — the queue still routes
+    <Schema  encryption="aes-256-gcm">s5fH0gVT… ciphertext
+    <Data    encryption="aes-256-gcm"><R>UzBKI7… ciphertext
+
+The header stays readable on purpose: a broker has to route the message, and an
+operator has to see which table a stuck packet belongs to, without holding a key.
+
+`mercury.ps1` starts the key server; `shutdown.ps1` stops it last, since a
+listener still draining needs it to open what it already holds. If Mercury is
+down the export fails at the encrypt step and the checkpoint stays put, so
+nothing is lost — but a packet already queued cannot be opened until it is back,
+because the key is not in the packet.
+
+Verified end to end through the example's own configuration rather than
+hand-passed flags: workflow run → encrypted packet on RabbitMQ → 8 rows upserted.
+
+The mock does not sign its responses, so clients run with
+`MERCURY_SERVER_SECRET=dev-mode`, stated wherever it is set. The verification
+it skips is what proves the key came from the intended server; a real deployment
+carries a real secret instead.
+
+### Fixed — a guard test for the version constant
+
+`pkg/core/version/version.go` has now been truncated to zero bytes twice by the
+same bad edit — `open(p,'w').write(open(p).read()...)`, where the outer open
+empties the file before the inner read runs. Both times it was committed and
+pushed, and both times the whole binary stopped building.
+
+A compile error is loud, but only for whoever builds next. The version is now
+under test, so a truncated or malformed file fails there instead.
+
 ## [1.22.2] — 2026-07-29
 
 ### Fixed — `orchestrator_schedule_last_status` reported every healthy schedule as never run

@@ -22,6 +22,7 @@ steps:
     command: >-
       --export-broker countries
       --fields country_id,country_code,country_name,continent,currency_code,is_visa_required
+      --enc
       --config configs/config_src_tdtp_sync_countries.yaml
     on_error: skip
 
@@ -29,5 +30,6 @@ steps:
     command: >-
       --export-broker tours
       --fields tour_id,tour_code,tour_name,description,destination_country_id,duration_days,difficulty_level,max_group_size,base_price,is_active
+      --enc
       --config configs/config_src_tdtp_sync_tours.yaml
     on_error: skip

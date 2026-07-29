@@ -39,6 +39,7 @@ steps:
       --tracking-field last_updated
       --batch-size 5000
       --checkpoint-file state/flights.json
+      --enc
       --config configs/config_src_tdtp_sync_flights.yaml
       --to-broker
     on_error: skip
@@ -50,6 +51,7 @@ steps:
       --tracking-field last_updated
       --batch-size 5000
       --checkpoint-file state/reservations.json
+      --enc
       --config configs/config_src_tdtp_sync_reservations.yaml
       --to-broker
     on_error: skip
@@ -62,6 +64,7 @@ steps:
       --tracking-field last_updated
       --batch-size 5000
       --checkpoint-file state/guides.json
+      --enc
       --config configs/config_src_tdtp_sync_guides.yaml
       --to-broker
     on_error: skip
@@ -73,6 +76,7 @@ steps:
       --tracking-field last_updated
       --batch-size 5000
       --checkpoint-file state/schedule.json
+      --enc
       --config configs/config_src_tdtp_sync_schedule.yaml
       --to-broker
     on_error: skip
@@ -84,6 +88,7 @@ steps:
       --tracking-field last_updated
       --batch-size 5000
       --checkpoint-file state/branch_customers.json
+      --enc
       --config configs/config_src_tdtp_sync_branch_customers.yaml
       --to-broker
     on_error: skip
@@ -94,6 +99,7 @@ steps:
       --tracking-field last_updated
       --batch-size 5000
       --checkpoint-file state/branch_sales.json
+      --enc
       --config configs/config_src_tdtp_sync_branch_sales.yaml
       --to-broker
     on_error: skip

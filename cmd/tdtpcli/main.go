@@ -36,6 +36,16 @@ func routeCommand(
 	procMgr *ProcessorManager,
 ) error {
 	startTime := time.Now()
+
+	// One resolved value instead of eleven call sites reading the flag: the
+	// Mercury URL is needed symmetrically — by the exporter binding a key and
+	// by every listener decrypting — so it belongs in the config the run
+	// already loads, with the flag as a per-run override.
+	mercuryURL := *flags.MercuryURL
+	if mercuryURL == "" {
+		mercuryURL = config.Security.MercuryURL
+	}
+
 	var err error
 	var operation audit.Operation
 	var metadata map[string]string
@@ -61,7 +71,7 @@ func routeCommand(
 			MappingFile: *flags.Map,
 			InputFile:   *flags.MapInput,
 			DryRun:      *flags.MapDryRun,
-			MercuryURL:  *flags.MercuryURL,
+			MercuryURL:  mercuryURL,
 			Listen:      *flags.Listen,
 			// Только для демона. У одноразового запуска запись появится ниже,
 			// на выходе из routeCommand, и вторая была бы дублем.
@@ -132,7 +142,7 @@ func routeCommand(
 				OutputFile: outputTDTP,
 				Query:      query,
 				Version:    version,
-				MercuryURL: *flags.MercuryURL,
+				MercuryURL: mercuryURL,
 			})
 		})
 
@@ -192,7 +202,7 @@ func routeCommand(
 				StorageCfg:       exportStorageCfg,
 				StorageKey:       exportStorageKey,
 				IntegrityV14:     *flags.Integrity,
-				MercuryURL:       *flags.MercuryURL,
+				MercuryURL:       mercuryURL,
 				MercuryCaller:    *flags.MercuryCaller,
 				Encrypt:          *flags.Encrypt || *flags.Enc13,
 				EncryptLegacy:    *flags.Enc13,
@@ -244,7 +254,7 @@ func routeCommand(
 				SanitizeClear:    *flags.Clear,
 				SanitizeTranslit: *flags.Translit,
 				ExpectVars:       flags.ExpectVars,
-				MercuryURL:       *flags.MercuryURL,
+				MercuryURL:       mercuryURL,
 			})
 		})
 
@@ -279,7 +289,7 @@ func routeCommand(
 				RowStart:    rowStart,
 				RowEnd:      rowEnd,
 				Query:       query,
-				MercuryURL:  *flags.MercuryURL,
+				MercuryURL:  mercuryURL,
 			})
 		})
 
@@ -322,7 +332,7 @@ func routeCommand(
 				CP:         *flags.CSVCP,
 				BOM:        *flags.CSVBOM,
 				Query:      query,
-				MercuryURL: *flags.MercuryURL,
+				MercuryURL: mercuryURL,
 			})
 		})
 
@@ -369,7 +379,7 @@ func routeCommand(
 				Query:      query,
 				StorageCfg: xlsxStorageCfg,
 				StorageKey: xlsxStorageKey,
-				MercuryURL: *flags.MercuryURL,
+				MercuryURL: mercuryURL,
 			})
 		})
 
@@ -482,7 +492,7 @@ func routeCommand(
 		}
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
-			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize, *flags.MercuryURL, *flags.Encrypt || *flags.Enc13, *flags.Enc13)
+			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize, mercuryURL, *flags.Encrypt || *flags.Enc13, *flags.Enc13)
 		})
 
 	} else if *flags.ImportBroker {
@@ -513,7 +523,7 @@ func routeCommand(
 				Raw:         *flags.RawBroker,
 				Keep:        *flags.KeepBroker,
 				ExpectVars:  flags.ExpectVars,
-				MercuryURL:  *flags.MercuryURL,
+				MercuryURL:  mercuryURL,
 			})
 		})
 
@@ -556,7 +566,7 @@ func routeCommand(
 				CompressAlgo:  *flags.CompressAlgo,
 				Encrypt:       *flags.Encrypt || *flags.Enc13,
 				EncryptLegacy: *flags.Enc13,
-				MercuryURL:    *flags.MercuryURL,
+				MercuryURL:    mercuryURL,
 			})
 		})
 
@@ -733,7 +743,7 @@ func routeCommand(
 		err = commands.ListenKafkaStream(ctx, adapterConfig, commands.ListenConfig{
 			BrokerCfg:  &brokerCfg,
 			Strategy:   strategy,
-			MercuryURL: *flags.MercuryURL,
+			MercuryURL: mercuryURL,
 		})
 	}
 

@@ -98,6 +98,7 @@ if ($Force) {
     Stop-PythonByScript "activity\.py" "activity"
     Stop-ByImage "orchestrator" "orchestrator"
     Stop-ByImage "tdtpcli" "listener"
+    Stop-ByImage "xzmercury-mock" "mercury"
     foreach ($q in $DATA_QUEUES) {
         docker exec $RABBIT_CONTAINER rabbitmqctl purge_queue $q 2>$null | Out-Null
         Write-Host "         Purged: $q" -ForegroundColor DarkYellow
@@ -134,6 +135,8 @@ while ($elapsed -lt $DrainTimeoutSec) {
 # -- Step 4: stop the listeners, purge the remainder ---------------------------
 Write-Host "[ 4/4 ] Stopping listeners..." -ForegroundColor Yellow
 Stop-ByImage "tdtpcli" "listener"
+# Mercury last: a listener still draining needs it to decrypt what it holds.
+Stop-ByImage "xzmercury-mock" "mercury"
 
 $depths = Get-AllDepths $DATA_QUEUES
 foreach ($q in $DATA_QUEUES) {

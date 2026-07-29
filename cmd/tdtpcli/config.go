@@ -19,6 +19,22 @@ type Config struct {
 	Resilience ResilienceConfig `yaml:"resilience,omitempty"`
 	Audit      AuditConfig      `yaml:"audit,omitempty"`
 	Processors ProcessorsConfig `yaml:"processors,omitempty"`
+	Security   SecurityConfig   `yaml:"security,omitempty"`
+}
+
+// SecurityConfig holds settings shared by every command that touches
+// encryption, so they do not have to be repeated on each invocation.
+//
+// It exists because the Mercury URL is needed symmetrically: by the exporter
+// that binds a key and by every listener that decrypts. Passing it as a flag
+// meant repeating one URL across eight workflow steps and every listener
+// process, where a single stale copy silently produces packets nobody on the
+// other side can open.
+type SecurityConfig struct {
+	// MercuryURL is the xZMercury base URL used to bind and resolve encryption
+	// keys. --mercury-url overrides it, so a one-off run can point elsewhere
+	// without editing the file.
+	MercuryURL string `yaml:"mercury_url,omitempty"`
 }
 
 // ExportConfig contains export settings

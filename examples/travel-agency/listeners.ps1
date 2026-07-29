@@ -108,7 +108,13 @@ foreach ($name in $NodeMappings[$Node]) {
     $queue = (Select-String -Path $mapping -Pattern '^\s*queue:\s*(\S+)' |
               Select-Object -First 1).Matches.Groups[1].Value
 
-    $proc = Start-Process -FilePath $TdtpCli -PassThru -NoNewWindow -ArgumentList @(
+    # The mock does not sign its responses, so the client must be told to skip HMAC
+# verification. Only correct against the mock: with real xZMercury this variable
+# carries the shared secret, and that verification is what proves the key came
+# from the server rather than from whoever answered first.
+$env:MERCURY_SERVER_SECRET = 'dev-mode'
+
+$proc = Start-Process -FilePath $TdtpCli -PassThru -NoNewWindow -ArgumentList @(
         '--config', $Config,
         '--map',    $mapping,
         '--input',  "broker://$queue",
