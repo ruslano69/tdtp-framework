@@ -15,6 +15,7 @@ package xlsx
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -59,7 +60,22 @@ func readSheet(filePath, sheetName string) ([][]string, error) {
 	}
 	defer func() { _ = rc.Close() }()
 
-	return parseSheetXML(rc, shared)
+	// Try the byte scanner first; it declines anything it does not recognise
+	// and the decoder below produces the identical result either way.
+	if data, err := io.ReadAll(io.LimitReader(rc, maxFastSheetBytes+1)); err == nil && len(data) <= maxFastSheetBytes {
+		if rows, ok := parseSheetFast(data, shared); ok {
+			return rows, nil
+		}
+		return parseSheetXML(bytes.NewReader(data), shared)
+	}
+
+	// Too large to hold, or a read error: reopen and stream.
+	rc2, err := sf.Open()
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", target, err)
+	}
+	defer func() { _ = rc2.Close() }()
+	return parseSheetXML(rc2, shared)
 }
 
 // workbookSheet is one <sheet> entry: its display name and the relationship id

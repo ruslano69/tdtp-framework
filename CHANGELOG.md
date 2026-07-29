@@ -4,6 +4,37 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [1.22.0] — 2026-07-29
 
+### Performance — byte-level scanner for <sheetData>
+
+Reading 10k rows went from 213 ms with excelize to 46 ms — **4.6×** — with 6.5×
+less memory and 13× fewer allocations. Writing is 2.8× faster.
+
+|                     | excelize 2.11 | in-house | |
+|---------------------|--------------:|---------:|---|
+| write 10k rows      | 282 ms | 102 ms | 2.8× |
+| write, memory       | 104 MB | 43 MB | 2.4× |
+| write, allocations  | 1 033 127 | 499 101 | 2.1× |
+| read 10k rows       | 213 ms | 46 ms | 4.6× |
+| read, memory        | 82 MB | 12.7 MB | 6.5× |
+| read, allocations   | 1 439 607 | 110 329 | 13× |
+| file size           | 391.6 KB | 379.5 KB | 3% smaller |
+
+The first cut used encoding/xml throughout and read in 136 ms. The gain came
+from applying the strategy `pkg/core/packet/parser_fast.go` already uses on the
+`<Data>` section: the small structural parts stay with `xml.Unmarshal`, and the
+bulk — `<sheetData>` — is scanned over raw bytes.
+
+The safety property is copied along with the technique. The scanner never
+guesses: a comment, CDATA, formatting runs inside a cell, an entity needing a
+DTD, an out-of-range shared-string index, anything unrecognised returns
+ok=false and the decoder runs instead. No partial results.
+
+Thirteen differential tests assert the two paths return *identical* output on
+the same input, and six more assert the scanner declines the shapes it must.
+That pair found a real divergence on the way in: an empty sheet gave a nil
+slice from one path and an empty one from the other — indistinguishable to
+every caller, and exactly what a fast path is for.
+
 ### Changed — XLSX is written and read in-house; excelize is gone
 
 The binary lost **11 MB**, from 37.6 to 26.6 — 29% — and one dependency with a
