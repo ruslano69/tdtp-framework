@@ -1,55 +1,61 @@
 # Claude Code Notes — tdtp-framework
 
-## Поддержка заметок о задачах (ВАЖНО!)
+## Keeping these notes honest (IMPORTANT)
 
-**Перед началом работы проверяй `TODO_NEXT.md` и заметки в этом файле на актуальность.**
+**Before starting work, check `TODO_NEXT.md` and the notes in this file for
+staleness.**
 
-Если задача, описанная в заметке, **уже реализована** — заметку нужно удалить или
-заменить актуальной, не дожидаясь напоминания. Признак выполненной задачи: код,
-который заметка предлагает написать, уже существует в репозитории.
+If a task a note describes is **already implemented**, delete the note or
+replace it with a current one — don't wait to be told. The tell-tale sign of a
+completed task: the code the note proposes writing already exists in the
+repository.
 
-Как проверять `TODO_NEXT.md`:
-1. Прочитать заголовок и план.
-2. Грепнуть ключевые артефакты плана (пакеты, файлы, функции, зависимости).
-3. Если всё на месте и компилируется — план выполнен → удалить/заменить.
+How to check `TODO_NEXT.md`:
+1. Read the heading and the plan.
+2. Grep for the plan's key artefacts — packages, files, functions, dependencies.
+3. If they are all there and it compiles, the plan is done → delete or replace it.
 
-Пример: S3-план (`pkg/storage`, AWS SDK) был полностью отгружен, но `TODO_NEXT.md`
-ещё месяц указывал на него как на «следующую» задачу. Не повторять — чистить вовремя.
+Example: the S3 plan (`pkg/storage`, AWS SDK) shipped in full, and `TODO_NEXT.md`
+went on pointing at it as the "next" task for another month. Don't repeat that —
+clean up on time.
 
-## Go module downloads (ВАЖНО!)
+## Go module downloads (IMPORTANT)
 
-Если `go build` не может скачать зависимости (blocked proxy, missing zip, etc.) — **СРАЗУ** используй:
+If `go build` cannot fetch dependencies (blocked proxy, missing zip, and so on),
+use this **immediately**:
 
 ```bash
 GOPROXY=https://goproxy.io GONOSUMDB='*' go build ...
 ```
 
-Или выставь переменные в сессии:
+Or set it for the session:
 ```bash
 export GOPROXY=https://goproxy.io
 export GONOSUMDB='*'
 ```
 
-`proxy.golang.org` → редиректит на `storage.googleapis.com` → заблокирован (`no_proxy=*.googleapis.com`).
-`goproxy.io` отдаёт пакеты напрямую без редиректов — **работает всегда**.
+`proxy.golang.org` redirects to `storage.googleapis.com`, which is blocked
+(`no_proxy=*.googleapis.com`). `goproxy.io` serves packages directly with no
+redirect — it **always works**.
 
 ---
 
 ## Test databases
 
-### Python-скрипты для БД уже есть в `/scripts/`!
+### The Python scripts already exist, in `/scripts/`
 
-- `scripts/create_postgres_test_db.py` — PostgreSQL (users, orders, products, activity_logs, 100/200/50 rows)
+- `scripts/create_postgres_test_db.py` — PostgreSQL (users, orders, products, activity_logs; 100/200/50 rows)
 - `scripts/create_test_db.py` — SQLite
 - `scripts/generate_test_db.py` — SQLite benchmark
-- `scripts/create_benchmark_db.py` — SQLite benchmark (large)
-- `tests/compact_v131/setup_db.py` — SQLite для compact-тестов
+- `scripts/create_benchmark_db.py` — SQLite benchmark, large
+- `tests/compact_v131/setup_db.py` — SQLite for the compact-format tests
 
-**Не создавать новые скрипты — использовать существующие!**
+**Do not write new ones — use these.**
 
-Существующий PostgreSQL user/password: `tdtp_user` / `tdtp_dev_pass_2025` (из `create_postgres_test_db.py`).
+The existing PostgreSQL credentials are `tdtp_user` / `tdtp_dev_pass_2025`, from
+`create_postgres_test_db.py`.
 
-Config для тестов:
+Config for tests:
 ```yaml
 database:
   type: postgres
@@ -61,7 +67,7 @@ database:
   sslmode: disable
 ```
 
-### Запуск PostgreSQL
+### Starting PostgreSQL
 ```bash
 pg_ctlcluster 16 main start
 pg_isready
@@ -69,38 +75,39 @@ pg_isready
 
 ---
 
-## Сжатие (zstd + kanzi)
+## Compression (zstd and kanzi)
 
-Бенчмарк на 100k строк SQLite (benchmark_100k.db, синтетические данные Users):
+Benchmarked on 100k SQLite rows (`benchmark_100k.db`, synthetic Users data):
 
-| Режим              | Время    | Размер | Коэф. |
-|--------------------|----------|--------|-------|
-| Без сжатия         | 673 мс   | 9.9 MB | —     |
-| zstd level 3       | 751 мс   | 2.9 MB | 3.4×  |
-| zstd level 19      | 2363 мс  | 2.4 MB | 4.1×  |
-| kanzi level 6      | 1279 мс  | 1.5 MB | 6.6×  |
-| kanzi level 7      | 1449 мс  | 1.4 MB | 7.1×  |
+| Mode | Time | Size | Ratio |
+|------|------|------|-------|
+| No compression | 673 ms | 9.9 MB | — |
+| zstd level 3 | 751 ms | 2.9 MB | 3.4× |
+| zstd level 19 | 2363 ms | 2.4 MB | 4.1× |
+| kanzi level 6 | 1279 ms | 1.5 MB | 6.6× |
+| kanzi level 7 | 1449 ms | 1.4 MB | 7.1× |
 
-**Вывод по алгоритмам:**
-- `zstd level 3` — дефолт для потоков реального времени: почти бесплатен, 3× экономия
-- `kanzi level 6` — оптимум для архивов и бэкапов: **в 2 раза плотнее zstd3**, быстрее zstd19
-- `kanzi level 7` — максимум плотности, +170 мс к level 6, выгоден только при медленном канале
+**What to pick:**
+- `zstd level 3` — the default for real-time streams: nearly free, 3× saving
+- `kanzi level 6` — the optimum for archives and backups: **twice as dense as zstd3**, and faster than zstd19
+- `kanzi level 7` — maximum density, +170 ms over level 6, only worth it on a slow link
 
-На реальных данных с разнородным текстом (кадровые приказы, нарративные описания) kanzi
-показывает x10-12 против исходного размера — BWT разворачивается на полную мощность.
-На синтетических коротких строках — 6-7×, но это всё равно **на 30-50% плотнее zstd**.
+On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
+reaches 10–12× against the original — BWT gets to do its work properly. On short
+synthetic strings it manages 6–7×, which is still **30–50% denser than zstd**.
 
-`compress: true` и `compress_level: 3` — дефолт в шаблоне конфига (`CreateSampleConfig`). Не менять.
-Для архивных задач: `--compress-algo kanzi --compress-level 6 --hash`.
+`compress: true` and `compress_level: 3` are the defaults in the config template
+(`CreateSampleConfig`). Leave them. For archival work:
+`--compress-algo kanzi --compress-level 6 --hash`.
 
 ---
 
 ## Build tags
 
-- `nokafka` — исключает kafka-go и его зависимости (для офлайн-сборок / без Kafka)
-- `nosqlite` — исключает modernc.org/sqlite (для сборок без SQLite)
+- `nokafka` — excludes kafka-go and its dependencies, for offline builds or builds without Kafka
+- `nosqlite` — excludes modernc.org/sqlite, for builds without SQLite
 
-Быстрая сборка без Kafka:
+A quick build without Kafka:
 ```bash
 GOPROXY=https://goproxy.io GONOSUMDB='*' go build -tags nokafka -o H:\Ruslan\Code\Go\TDTP\tdtp-main-clean\tdtpcli.exe ./cmd/tdtpcli/
 ```
@@ -113,214 +120,225 @@ Feature branches: `claude/wonderful-fermi-4qXUT`
 
 ---
 
-## Размеры пакета: что ограничено, а что нет (ВАЖНО!)
+## Packet sizes: what is capped and what is not (IMPORTANT)
 
-Ограничена **только схема**. Секция Data не ограничена ничем — сколько строк
-влезло в бюджет, столько и пишется, остальное уходит в следующую часть.
+**Only the schema is capped.** The Data section has no limit at all — however
+many rows fit the budget get written, and the rest goes into the next part.
 
-| Величина | К чему относится | Где |
+| Value | What it governs | Where |
 |---|---|---|
-| `DefaultMaxMessageSize` = 3 800 000 | бюджет части → **~1.9 МБ реального XML** | `generator.go` |
-| `packetOverheadSize` = 5000 | пол резерва под конверт | `generator.go` |
-| `MaxSchemaBytes` = 200 КБ | Schema **на записи** — отказ | `generator.go` |
-| `MaxSchemaBytesRead` = 1 МБ | Schema **на чтении** — отказ; между 200 КБ и 1 МБ читается с `WARNING` | `parser.go` |
-| `maxBufferedParse` = 64 МБ | порог выбора пути разбора, **не** предел размера | `parser.go` |
+| `DefaultMaxMessageSize` = 3 800 000 | the budget for one part → **about 1.9 MB of real XML** | `generator.go` |
+| `packetOverheadSize` = 5000 | the floor on the envelope reserve | `generator.go` |
+| `MaxSchemaBytes` = 200 KB | Schema **on write** — refused above it | `generator.go` |
+| `MaxSchemaBytesRead` = 1 MB | Schema **on read** — refused above it; between 200 KB and 1 MB it is read with a `WARNING` | `parser.go` |
+| `maxBufferedParse` = 64 MB | the threshold that picks a parse path, **not** a size limit | `parser.go` |
 
-**Бюджет считается в единицах, вдвое больших байт UTF-8.** `estimateRowSize`
-делает `len(value) * 2`, а `len()` в Go — это байты, не символы. Поэтому
-соотношение «бюджет → реальный XML = /2» держится на любом алфавите; комментарий
-про UTF-16 в коде вводит в заблуждение. Резерв 2× нужен под конверт, а не под
-перекодировку.
+**The budget is counted in units twice the size of a UTF-8 byte.**
+`estimateRowSize` does `len(value) * 2`, and `len()` in Go counts bytes, not
+characters. So the "budget → real XML = ÷2" relationship holds for any alphabet;
+the comment about UTF-16 in the code is misleading. The 2× reserve is there for
+the envelope, not for a re-encoding.
 
-**Пороги записи и чтения намеренно разные.** Предел записи — правило формата,
-касается только новых пакетов. Тот же предел на чтении отверг бы уже
-существующие данные: всё, записанное раньше, ничем не ограничено. Верхний порог
-чтения — защита от патологического входа, а не правило формата.
+**The write and read thresholds differ deliberately.** The write limit is a rule
+about the format and applies only to new packets. The same limit on read would
+reject data that already exists: nothing written earlier was bounded at all. The
+upper read threshold is protection against a pathological input, not a rule
+about the format.
 
-**Размер пакета задаётся пользователем и сверху не ограничен:**
-`--packet-size` у экспорта в брокер (`broker.go`, умножает на 2) и `packet_kb`
-в pipeline YAML (`etl/exporter.go`, **не** умножает).
+**The packet size is the user's to choose and has no upper bound:**
+`--packet-size` on a broker export (`broker.go`, which multiplies by 2) and
+`packet_kb` in a pipeline YAML (`etl/exporter.go`, which does **not**).
 
-### `packet_kb` — НЕ «выравнивать» с `--packet-size` (ВАЖНО!)
+### `packet_kb` — do NOT "align" it with `--packet-size` (IMPORTANT)
 
-Выглядит как несогласованность: `--packet-size N` даёт ~N МБ реального XML,
-а `packet_kb K` — только ~K/2 КБ. Тянет «починить», добавив тот же множитель 2.
+It looks inconsistent: `--packet-size N` yields about N MB of real XML, while
+`packet_kb K` yields only about K/2 KB. The urge is to "fix" it by adding the
+same factor of 2.
 
-**Делать этого нельзя.** Умножение удвоит размер пакета, а `packet_kb`
-востребован ровно там, где размер жёстко ограничен снаружи — Windows + экспорт
-в MSMQ. Удвоение приведёт к отказу приёма пакета брокером, то есть «исправление»
-положит обмен. Текущее поведение отдаёт вдвое меньше запрошенного — то есть
-ошибается в безопасную сторону, и это единственная сторона, в которую здесь
-можно ошибаться.
+**Do not.** Multiplying would double the packet size, and `packet_kb` is wanted
+precisely where the size is hard-limited from outside — Windows exporting to
+MSMQ. Doubling would make the broker refuse the packet, so the "fix" would break
+the exchange. The current behaviour delivers half of what was asked, which is to
+say it errs on the safe side, and that is the only side it can afford to err on
+here.
 
-Трогать только если реально возникнет отказ приёма, и тогда разбираться с
-конкретным лимитом брокера, а не выравнивать формулы между собой.
-
----
-
-## Парсер: гибридный разбор (ВАЖНО!)
-
-Writer давно снял reflection с горячего участка (`xmlwriter.go`): Header и Schema
-идут через `xml.Marshal` (они ~200 байт), а тысячи `<R>` пишутся вручную.
-Парсер теперь зеркалит это (`parser_fast.go`).
-
-`tryFastParse` вырезает тело Data и собирает «скелет» — тот же пакет с пустой
-Data-секцией, ~500 байт независимо от числа строк. Скелет отдаётся
-`xml.Unmarshal`, который разбирает корневые атрибуты, Header, Query,
-QueryContext, Schema, атрибуты Data и AlarmDetails. Вручную сканируются только
-строки.
-
-**Откат обязателен и не декоративен.** Любая неожиданная форма → `ok=false` →
-обычный `xml.Unmarshal`, включая выдачу ошибки на битом XML. Откат срабатывает
-на: CDATA, комментарии, сырой `<` внутри строки, `<R/>`, `<Data/>`,
-нераспознанную сущность, второй корневой `<Data>`, несобравшийся скелет.
-
-`ParseBytes`: 34.5 мс → 3.57 мс на 10k×10 (**9.7×**), 686 MB/s.
-`Parse`/`ParseFile` читают вход целиком до `maxBufferedParse` и идут тем же
-путём; выше порога — прежний потоковый `xml.Decoder` (перематывать reader не
-нужно, прочитанное подставляется через `io.MultiReader`).
-
-**Не мерить размер схемы через `xml.Marshal` в парсере.** Marshal схемы на
-10 полей стоит ~13.7 мкс против ~51 мкс на разбор небольшого пакета целиком —
-проверка съела бы четверть разбора. Используется `schemaSpanSize`: span
-`<Schema>...</Schema>` находится двумя `bytes.Index` прямо в исходных байтах и
-даёт то же число, что меряет запись (тест это фиксирует).
-
-**Асимметрия, закреплённая тестом:** `Parse`/`ParseFile` разворачивают
-compact-формат, `ParseBytes` — намеренно нет.
+Touch it only if a real refusal happens, and then work out that specific
+broker's limit rather than aligning the two formulas with each other.
 
 ---
 
-## `GetRows` — общий узел обоих путей, разбор параллельный (ВАЖНО!)
+## The parser: a hybrid parse (IMPORTANT)
 
-**Сжатый и несжатый пакет сходятся в одну точку.** `DecompressData` приводит
-`Data.Rows` к той же форме (pipe-joined строки), что и обычный разбор, поэтому
-дальше оба идут через `GetRows` и стоят там одинаково. Это проверено прямым
-замером, а не рассуждением: 2.6–2.8 мс на 10k×10 в обоих случаях, те же 10001
-аллокаций.
+The writer took reflection off the hot path long ago (`xmlwriter.go`): Header and
+Schema go through `xml.Marshal` (they are about 200 bytes), while the thousands
+of `<R>` elements are written by hand. The parser now mirrors that
+(`parser_fast.go`).
 
-**Не раскладывать стоимость вычитанием бенчмарков друг из друга.** Так была
-получена неверная картина «split в сжатом 3.7 мс против 2.2 в несжатом» —
-разницы нет, это был шум. Мерить нужную стадию отдельным бенчмарком.
+`tryFastParse` cuts out the Data body and assembles a "skeleton" — the same
+packet with an empty Data section, about 500 bytes regardless of row count. The
+skeleton goes to `xml.Unmarshal`, which parses the root attributes, Header,
+Query, QueryContext, Schema, the Data attributes and AlarmDetails. Only the rows
+are scanned by hand.
 
-Поэтому и параллелить надо здесь: одна правка чинит оба пути.
+**The fallback is mandatory and not decorative.** Any unexpected shape →
+`ok=false` → ordinary `xml.Unmarshal`, including raising an error on malformed
+XML. The fallback triggers on: CDATA, comments, a raw `<` inside a row, `<R/>`,
+`<Data/>`, an unrecognised entity, a second root `<Data>`, or a skeleton that
+would not assemble.
+
+`ParseBytes`: 34.5 ms → 3.57 ms on 10k×10 (**9.7×**), 686 MB/s. `Parse` and
+`ParseFile` read the input whole up to `maxBufferedParse` and take the same path;
+above the threshold, the previous streaming `xml.Decoder` is used (there is no
+need to rewind the reader — what was already read is spliced back in through
+`io.MultiReader`).
+
+**Do not measure the schema's size with `xml.Marshal` inside the parser.**
+Marshalling a ten-field schema costs about 13.7 µs against about 51 µs to parse a
+small packet end to end — the check would have eaten a quarter of the parse.
+`schemaSpanSize` is used instead: the `<Schema>...</Schema>` span is located with
+two `bytes.Index` calls straight in the source bytes, and yields the same number
+the writer measures (a test pins this).
+
+**An asymmetry, fixed by a test:** `Parse` and `ParseFile` expand the compact
+format; `ParseBytes` deliberately does not.
+
+---
+
+## `GetRows` — the shared node of both paths, and its parse is parallel (IMPORTANT)
+
+**A compressed and an uncompressed packet converge at one point.**
+`DecompressData` brings `Data.Rows` to the same form (pipe-joined strings) as an
+ordinary parse, so from there both go through `GetRows` and cost the same there.
+That was confirmed by direct measurement rather than reasoning: 2.6–2.8 ms on
+10k×10 either way, with the same 10001 allocations.
+
+**Do not decompose the cost by subtracting benchmarks from one another.** That is
+how the wrong picture of "split costs 3.7 ms compressed against 2.2 uncompressed"
+was produced — there is no difference, it was noise. Measure the stage you care
+about with its own benchmark.
+
+Which is also why this is the place to parallelise: one change fixes both paths.
 
 ```
-GetRows: 2.7 мс → 1.5 мс (1.8×), ~720 MB/s на 10k×10
+GetRows: 2.7 ms → 1.5 ms (1.8×), about 720 MB/s on 10k×10
 ```
 
-- порог `parallelGetRowsThreshold` = 512 строк; ниже — последовательно, накладные
-  на горутины дороже работы (10 строк: ~2 мкс, 11 аллокаций)
-- результат пишется **по индексу** в заранее выделенный слайс, поэтому порядок
-  задан конструкцией и не зависит от планировщика
-- `Parser` не имеет состояния (`struct{}`) — один экземпляр на все горутины
-- ветка `rawRows` (fast-path после `GenerateReference`) не затронута
+- the `parallelGetRowsThreshold` is 512 rows; below it the work runs sequentially, because goroutine overhead costs more than the work (10 rows: about 2 µs, 11 allocations)
+- results are written **by index** into a pre-allocated slice, so the ordering is structural and does not depend on the scheduler
+- `Parser` holds no state (`struct{}`) — one instance serves every goroutine
+- the `rawRows` branch (the fast path after `GenerateReference`) is untouched
 
-Тесты: совпадение с последовательным эталоном по обе стороны порога, стабильность
-порядка на повторах, экранированный медленный путь `GetRowValues`, неравномерные
-по длине строки. Прогонять с `-race`.
+Tests: agreement with the sequential reference on both sides of the threshold,
+order stability across repeats, the escaped slow path `GetRowValues`, and rows of
+uneven length. Run them with `-race`.
 
-### Расклад по сжатому пути (10k×10, payload 1.09 МБ)
+### Where the time goes on the compressed path (10k×10, 1.09 MB payload)
 
-| Стадия | Время | Замечание |
+| Stage | Time | Note |
 |---|---|---|
-| XML-разбор | 52 мкс | вся Data — один `<R>` с блобом, разбирать нечего |
-| распаковка zstd | ~2.8 мс | уже параллельная (`WithDecoderConcurrency(4)`) |
-| `GetRows` | 1.5 мс | было 2.7 до параллелизации |
+| XML parse | 52 µs | the whole Data is one `<R>` holding a blob — nothing to parse |
+| zstd decompression | about 2.8 ms | already parallel (`WithDecoderConcurrency(4)`) |
+| `GetRows` | 1.5 ms | was 2.7 before the parallelisation |
 
-**Сжатый путь целиком медленнее несжатого** (~6.5 мс против ~3.7 до правки):
-за сжатие платят распаковкой при каждом чтении. `compress: true` оправдан
-объёмом хранения и канала, а не скоростью чтения.
-
----
-
-## Разбиение на части и словарь (ВАЖНО!)
-
-`Schema` копируется в **каждую** часть (для самодостаточности файлового
-экспорта), а с v1.4 внутри Schema лежит Dictionary. Отсюда два неочевидных
-правила в `rowBudget`, оба закреплены тестами:
-
-1. **Резерв под конверт ограничен половиной бюджета.** Честное вычитание
-   крупного конверта делает хуже: каждая новая часть добавляет ещё одну копию
-   Schema, поэтому дробление не приближает части к бюджету, а отдаляет.
-   Замеряно: словарь на 400 записей при бюджете 200 КБ дал 1 часть → **4000**
-   (по строке в каждой, каждая тащит 431 КБ словаря).
-2. **Если Schema не влезает в бюджет — не дробить вообще.** Решение принимается
-   по `serializedSchemaSize` (без пола), а не по `measureEnvelopeSize` (с полом):
-   иначе консервативный пол 5000 запрещает дробление при маленьком бюджете и
-   крошечной схеме.
-
-Для схемы без словаря `measureEnvelopeSize` упирается в тот же пол 5000, то есть
-границы частей **не изменились** (тест `TestPartitionRows_UnchangedWithoutDictionary`
-воспроизводит старую формулу и требует совпадения).
-
-**Автопостроения словаря в фреймворке нет.** Есть только `ValidateDictionary`,
-`ExpandDictionary`, `ContractDictionary`. Реально словарь заполняется в двух
-местах: одна служебная запись `@MRC` с адресом Mercury (`export.go`) и
-статический словарь SVG на 5 записей. Крупный словарь может прийти только от
-внешнего продюсера через библиотечный API. Когда построение появится — оно
-должно укладываться в `MaxSchemaBytes`.
+**The compressed path is slower end to end than the uncompressed one** (about
+6.5 ms against about 3.7 before the change): you pay for compression with
+decompression on every read. `compress: true` is justified by storage and link
+capacity, not by read speed.
 
 ---
 
-## Чтение чужого пакета: что защищает подпись, а что нет (ВАЖНО!)
+## Splitting into parts, and the dictionary (IMPORTANT)
 
-**Проверка Mercury идёт ПОСЛЕ распаковки, и иначе быть не может.** В
-`import.go` так и написано: `// Security gate (after decompression)`. Причина в
-том, что хешируется: «Hash covers plain-text rows BEFORE compression»
-(`help_full.txt`, `pipeline/produce.go`). Чтобы сверить хеш, надо сначала
-получить распакованные строки.
+`Schema` is copied into **every** part, so that a file export is
+self-contained — and since v1.4 the Dictionary lives inside Schema. Two
+non-obvious rules in `rowBudget` follow, both pinned by tests:
 
-Отсюда следует то, что легко упустить: **всё, что ломает разбор, срабатывает
-раньше, чем подпись успевает что-либо сказать.**
+1. **The envelope reserve is capped at half the budget.** Subtracting a large
+   envelope honestly makes things worse: every new part adds another copy of
+   Schema, so splitting moves the parts further from the budget rather than
+   closer. Measured: a 400-entry dictionary against a 200 KB budget went from
+   1 part to **4000** — one row each, every one carrying 431 KB of dictionary.
+2. **If Schema does not fit the budget, do not split at all.** The decision is
+   made on `serializedSchemaSize` (without the floor), not on
+   `measureEnvelopeSize` (with it): otherwise the conservative floor of 5000
+   forbids splitting whenever the budget is small and the schema is tiny.
 
-| Угроза | Mercury помогает? |
+For a schema with no dictionary, `measureEnvelopeSize` hits that same floor of
+5000, so part boundaries are **unchanged**
+(`TestPartitionRows_UnchangedWithoutDictionary` reproduces the old formula and
+requires them to match).
+
+**The framework does not build dictionaries automatically.** There is only
+`ValidateDictionary`, `ExpandDictionary` and `ContractDictionary`. In practice a
+dictionary gets filled in exactly two places: one service entry, `@MRC`, holding
+the Mercury address (`export.go`), and a static five-entry SVG dictionary. A
+large dictionary can only arrive from an external producer through the library
+API. If automatic construction is ever added, it must fit inside
+`MaxSchemaBytes`.
+
+---
+
+## Reading someone else's packet: what the signature protects and what it does not (IMPORTANT)
+
+**The Mercury check runs AFTER decompression, and could not run anywhere else.**
+`import.go` says so outright: `// Security gate (after decompression)`. The
+reason is what gets hashed: "Hash covers plain-text rows BEFORE compression"
+(`help_full.txt`, `pipeline/produce.go`). To compare the hash you must first have
+the decompressed rows.
+
+From which follows the part that is easy to miss: **anything that breaks the
+parse fires before the signature gets to say anything at all.**
+
+| Threat | Does Mercury help? |
 |---|---|
-| Подмена содержимого | да — хеш не сойдётся |
-| Повтор старого пакета | да — регистрация по UUID/части |
-| Чужой пакет вместо ожидаемого | да |
-| Decompression bomb | **нет** — детонирует до гейта |
-| Раздутая Schema | **нет** — разбор до гейта |
-| Битый XML | **нет** — разбор до гейта |
+| Content substitution | yes — the hash will not match |
+| Replay of an old packet | yes — registration is per UUID and part |
+| A different packet than expected | yes |
+| Decompression bomb | **no** — it detonates before the gate |
+| Bloated Schema | **no** — parsed before the gate |
+| Malformed XML | **no** — parsed before the gate |
 
-Плюс `--mercury-url` опционален, а `applyV14SecurityGate` для до-v1.4 пакетов —
-no-op. В конфигурации без Mercury этого слоя нет вовсе.
+On top of that, `--mercury-url` is optional, and `applyV14SecurityGate` is a
+no-op for pre-v1.4 packets. In a configuration without Mercury this layer does
+not exist at all.
 
-**Вывод: пределы на чтении не дублируют подпись, а закрывают окно до неё.**
-Не снимать их «потому что пакеты подписаны» — в этом окне подписи ещё нет.
+**So: the read limits do not duplicate the signature, they close the window
+before it.** Do not remove them "because packets are signed" — inside that
+window there is no signature yet.
 
-### Decompression bomb — единственная измеренная эксплуатируемая проблема
+### The decompression bomb — the only measured, exploitable problem
 
-Коэффициент сжатия ничем не ограничен сверху, поэтому крошечный пакет
-разворачивается во сколько угодно. Замерено на **обычных повторяющихся данных**,
-не на подобранных:
+The compression ratio has no upper bound, so a tiny packet can expand into
+anything. Measured on **ordinary repetitive data**, not on a crafted input:
 
 ```
-25 КБ в пакете → 200 МБ после распаковки (8184×)
-1 МБ           → ~8 ГБ
+25 KB in the packet → 200 MB decompressed (8184×)
+1 MB                → about 8 GB
 ```
 
-Закрыто `MaxDecompressedBytes = 256 МБ` (`processors/compression.go`):
-zstd через `WithDecoderMaxMemory`, kanzi через `io.LimitReader` + проверку длины.
+Closed by `MaxDecompressedBytes = 256 MB` (`processors/compression.go`): zstd
+through `WithDecoderMaxMemory`, kanzi through `io.LimitReader` plus a length
+check.
 
-**Ни один другой предел сюда не достаёт** — это стоит держать в голове, потому
-что их несколько и легко решить, что уже прикрыто: `maxBufferedParse`
-ограничивает вход (а он крошечный), `MaxSchemaBytesRead` — секцию Schema
-(а бомба в Data).
+**No other limit reaches this** — worth holding on to, because there are several
+of them and it is easy to assume one already covers it: `maxBufferedParse` bounds
+the input (which is tiny here), and `MaxSchemaBytesRead` bounds the Schema
+section (and the bomb is in Data).
 
-Отклонение бомбы на kanzi-пути **не проверено в полном масштабе** — сжать 256 МБ
-через kanzi занимает десятки секунд. Там тест только на целостность round-trip.
+Rejection on the kanzi path is **not verified at full scale** — compressing
+256 MB through kanzi takes tens of seconds. The test there only covers
+round-trip integrity.
 
 ---
 
-## SeaweedFS S3 (локальное тестирование)
+## SeaweedFS S3 (local testing)
 
-### Бинарник
+### The binary
 ```
 /tmp/weed   (version 3.80, linux amd64)
 ```
 
-`/tmp` в контейнере периодически очищается — восстанавливается так:
+`/tmp` in the container is cleared periodically. To restore it:
 
 ```bash
 curl -sSL -o /tmp/weed.tar.gz \
@@ -329,64 +347,66 @@ tar xzf /tmp/weed.tar.gz -C /tmp/ && chmod +x /tmp/weed
 mkdir -p /tmp/seaweedfs-data
 ```
 
-**GitHub API заблокирован, прямые ссылки на релизы — нет.** `api.github.com`
-отдаёт 403 на чужие репозитории («access to this repository is not enabled»),
-а `github.com/.../releases/download/...` качается нормально. Значит версию
-надо указывать явно, «latest» через API узнать не выйдет.
+**The GitHub API is blocked; direct release links are not.** `api.github.com`
+returns 403 for other people's repositories ("access to this repository is not
+enabled"), while `github.com/.../releases/download/...` downloads fine. So the
+version has to be named explicitly — "latest" cannot be resolved through the API.
 
-Бакет `tdtp-test` после чистого старта не существует — создать:
+The `tdtp-test` bucket does not exist after a clean start. Create it:
 ```bash
 curl -s -X PUT http://127.0.0.1:8333/tdtp-test
 ```
 
-### ВАЖНО: `-ip` не работает в `weed server` — запускать компоненты отдельно!
+### IMPORTANT: `-ip` does not work in `weed server` — start the components separately
 
-`weed server -ip=127.0.0.1` **игнорирует флаг** и всё равно использует 192.0.2.2 (внешний IP).
-Envoy-прокси sandbox блокирует gRPC между компонентами через внешний IP.
-**Решение** — запускать каждый компонент отдельно с явным `-ip=127.0.0.1`:
+`weed server -ip=127.0.0.1` **ignores the flag** and uses 192.0.2.2 (the external
+IP) anyway. The sandbox's Envoy proxy blocks gRPC between components over an
+external IP. **The fix** is to start each component separately with an explicit
+`-ip=127.0.0.1`:
 
 ```bash
-# 1. Master (порт 9333)
+# 1. Master (port 9333)
 /tmp/weed master -ip=127.0.0.1 -defaultReplication=000 -volumeSizeLimitMB=100 -port=9333 &
-sleep 18  # ждём выборов лидера (~15с)
+sleep 18  # wait for the leader election (about 15s)
 
-# 2. Volume server (порт 8080)
+# 2. Volume server (port 8080)
 /tmp/weed volume -ip=127.0.0.1 -dir=/tmp/seaweedfs-data -mserver=127.0.0.1:9333 -port=8080 &
 sleep 2
 
-# 3. Filer (порт 8888) — создаёт filerldb2/ в CWD, добавлен в .gitignore
+# 3. Filer (port 8888) — creates filerldb2/ in the CWD; it is in .gitignore
 /tmp/weed filer -ip=127.0.0.1 -master=127.0.0.1:9333 -port=8888 &
 sleep 3
 
-# 4. S3 gateway (порт 8333) — флаг -ip не поддерживается, используем -ip.bind
+# 4. S3 gateway (port 8333) — does not support -ip, so use -ip.bind
 /tmp/weed s3 -ip.bind=127.0.0.1 -filer=127.0.0.1:8888 -port=8333 &
 sleep 2
 
-# Проверка
+# Check
 curl -s http://127.0.0.1:9333/cluster/status   # {"IsLeader":true,...}
 curl -s http://127.0.0.1:8333/                 # <ListAllMyBucketsResult>...
 ```
 
-### Существующий бакет
+### The existing bucket
 ```
-tdtp-test   — уже содержит volume, доступен для записи
+tdtp-test   — already has a volume, and is writable
 ```
-Бакет `tdtp-new-bucket` создан, но без выделенного volume (записи падают с 500).
-**Использовать `tdtp-test`** для всех S3-тестов.
+`tdtp-new-bucket` was created but has no volume assigned, so writes fail with a
+500. **Use `tdtp-test`** for every S3 test.
 
 ### Credentials
-Weed в dev-режиме принимает любые ключи:
+In dev mode weed accepts any keys:
 ```
 access_key: any
 secret_key: any
 ```
 
-### ВАЖНО: `curl -u` НЕ работает для проверки S3 авторизации!
+### IMPORTANT: `curl -u` does NOT test S3 authorisation
 
-`curl -u "tdtp_access:tdtp_secret" http://127.0.0.1:8333/` всегда возвращает `AccessDenied` —
-потому что curl отправляет **HTTP Basic Auth**, а S3 требует **AWS Signature V4**.
+`curl -u "tdtp_access:tdtp_secret" http://127.0.0.1:8333/` always returns
+`AccessDenied` — because curl sends **HTTP Basic Auth** and S3 requires **AWS
+Signature V4**.
 
-**Проверять доступ только через boto3 или tdtpcli:**
+**Test access only through boto3 or tdtpcli:**
 ```python
 import boto3, botocore.config
 s3 = boto3.client('s3', endpoint_url='http://127.0.0.1:8333',
@@ -395,31 +415,32 @@ s3 = boto3.client('s3', endpoint_url='http://127.0.0.1:8333',
 print([b['Name'] for b in s3.list_buckets()['Buckets']])
 ```
 
-### S3 для travel-agency (H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed)
+### S3 for travel-agency (`H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed`)
 
-Бинарник, данные и конфиги лежат в `H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed\`:
+The binary, data and configs live in
+`H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed\`:
 ```
 weed.exe          — SeaweedFS 30GB 4.17 (Windows)
 s3.json           — credentials: tdtp_access / tdtp_secret
-data/             — volume данные и filerldb2/
-config.yaml       — tdtpcli config для MSSQL + S3 (endpoint 8333, bucket tdtp-exports)
+data/             — volume data and filerldb2/
+config.yaml       — tdtpcli config for MSSQL plus S3 (endpoint 8333, bucket tdtp-exports)
 ```
 
-Запуск (компонентами отдельно, из папки weed/):
+Starting it — components separately, from the `weed/` directory:
 ```powershell
 cd H:\Ruslan\Code\Go\TDTP\tdtp-framework\weed
 
 .\weed.exe master -ip=127.0.0.1 -defaultReplication=000 -volumeSizeLimitMB=30000 -port=9333
-# ждать ~18с до выборов лидера
+# wait about 18s for the leader election
 
 .\weed.exe volume -ip=127.0.0.1 -dir=./data -mserver=127.0.0.1:9333 -port=8080
 .\weed.exe filer  -ip=127.0.0.1 -master=127.0.0.1:9333 -port=8888
 .\weed.exe s3     -ip.bind=127.0.0.1 -filer=127.0.0.1:8888 -port=8333 -config=./s3.json
 ```
 
-**Бакеты:** `travel-agency`, `tdtp-test`, `tdtp-exports`
+**Buckets:** `travel-agency`, `tdtp-test`, `tdtp-exports`
 
-### Config для тестов
+### Config for tests
 ```yaml
 storage:
   type: s3
@@ -433,7 +454,7 @@ storage:
     disable_ssl: true
 ```
 
-### Проверка --test с S3
+### Checking `--test` against S3
 ```bash
 H:\Ruslan\Code\Go\TDTP\tdtp-main-clean\tdtpcli.exe --config /tmp/test_s3_cfg.yaml \
   --export users --output "s3://tdtp-test/ci/users.tdtp.xml" --compress --hash
@@ -443,10 +464,9 @@ H:\Ruslan\Code\Go\TDTP\tdtp-main-clean\tdtpcli.exe --config /tmp/test_s3_cfg.yam
 # ✓ algo=zstd, 10 rows, decompressed 0s, checksum OK
 ```
 
-### Лог-файлы
+### Log files
 ```
-/tmp/seaweed.log        — предыдущая сессия (данные с 17 марта 2026)
-/tmp/seaweedfs-data/    — volume данные (8.dat, 8.idx, 8.vif)
-filerldb2/              — LevelDB filer (в .gitignore)
+/tmp/seaweed.log        — the previous session (data from 17 March 2026)
+/tmp/seaweedfs-data/    — volume data (8.dat, 8.idx, 8.vif)
+filerldb2/              — the LevelDB filer (in .gitignore)
 ```
-

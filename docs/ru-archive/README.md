@@ -32,6 +32,8 @@ Paths mirror the repository, so `docs/README.md` archives as
 | `docs/tdtp-v14-protocol-schema.md` | `docs/tdtp-v14-protocol-schema.md` | 2026-07-29 |
 | `docs/DEVELOPER_GUIDE.md` | `docs/DEVELOPER_GUIDE.md` | 2026-07-29 |
 | `docs/xZMercury-TDTP-TZ-v1.2.md` | `docs/xZMercury-TDTP-TZ-v1.2.md` | never — see below |
+| `CLAUDE.md` | `CLAUDE.md` | 2026-07-30 |
+| `AGENTS.md` | `AGENTS.md` | 2026-07-30 |
 
 ## The xZMercury statement of work is archived, not translated
 
