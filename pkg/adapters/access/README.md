@@ -1,66 +1,66 @@
-# MS Access Adapter для TDTP Framework
+# MS Access adapter
 
-Адаптер для экспорта данных из баз Microsoft Access (.mdb / .accdb) через 32-bit Jet 4.0 ODBC + ADOX.
+Exports data from Microsoft Access databases (`.mdb`, `.accdb`) through the 32-bit Jet 4.0 ODBC driver and ADOX.
 
-> ⚠️ **Критические ограничения — прочти перед использованием:**
+> **Hard limits — read these first:**
 >
-> | Ограничение | Причина |
+> | Limit | Why |
 > |-------------|---------|
-> | **Только Windows** | `//go:build windows` — использует Win32 COM (ADOX), ODBC MDAC и `SysWOW64\cscript.exe` |
-> | **Только x86 (32-bit)** | Microsoft Jet 4.0 ODBC — 32-bit компонент. Сборка обязательно с `GOARCH=386` |
+> | **Windows only** | `//go:build windows` — it uses Win32 COM (ADOX), ODBC MDAC and `SysWOW64\cscript.exe` |
+> | **x86 (32-bit) only** | Microsoft Jet 4.0 ODBC is a 32-bit component, so the build needs `GOARCH=386` |
 >
-> Бинарник `tdtpcli_x86.exe` нельзя запускать ни на Linux/macOS, ни как 64-bit процесс.
+> `tdtpcli_x86.exe` will not run on Linux or macOS, nor as a 64-bit process.
 
 ---
 
-## 🔨 Сборка для 32-битного ODBC
+## Building for the 32-bit ODBC driver
 
-### Почему обязателен GOARCH=386
+### Why GOARCH=386 is not optional
 
-Microsoft Jet 4.0 ODBC — **32-битный** In-Process COM-сервер (`msjet40.dll`).
-Windows не позволяет 64-битному процессу загрузить 32-битную DLL в своё адресное пространство.
+Microsoft Jet 4.0 ODBC is a **32-bit** in-process COM server (`msjet40.dll`).
+Windows will not let a 64-bit process load a 32-bit DLL into its address space.
 
-Последствия попытки запустить x64-бинарник:
+What happens if you try it with an x64 binary:
 
 ```
-sql: unknown driver "odbc" — драйвер не зарегистрирован
+sql: unknown driver "odbc" — the driver is not registered
 ```
-или
+or
 ```
 Architecture mismatch: cannot load 32-bit DLL into 64-bit process
 ```
 
-Единственное решение — собрать Go-бинарник как **32-битный** (`GOARCH=386`), чтобы он сам был
-32-битным процессом и мог загружать Jet ODBC DLL напрямую.
+The only fix is to build the Go binary as **32-bit** (`GOARCH=386`), so that it is itself a
+32-bit process and can load the Jet ODBC DLL directly.
 
-> **Примечание.** Microsoft Access Database Engine 2016 Redistributable существует в x64-варианте
-> и поддерживает `.accdb` и современные `.mdb` (Jet 4.0). Но для старых баз (Jet 2.x / 3.x)
-> он не всегда работает. Jet 4.0 32-bit — универсальное решение для любого формата `.mdb`.
+> **A note.** Microsoft Access Database Engine 2016 Redistributable does exist as x64
+> and handles `.accdb` and modern `.mdb` (Jet 4.0). But for older databases (Jet 2.x, 3.x)
+> it does not always work. Jet 4.0 32-bit handles every `.mdb` format there is.
 
 ---
 
-### 32-битный ODBC vs 64-битный ODBC на Windows
+### 32-bit versus 64-bit ODBC on Windows
 
-На Windows существуют **два независимых** диспетчера ODBC:
+Windows has **two independent** ODBC managers:
 
 | | 64-bit ODBC | 32-bit ODBC |
 |---|---|---|
-| Утилита настройки | `C:\Windows\System32\odbcad32.exe` | `C:\Windows\SysWOW64\odbcad32.exe` |
-| Реестр | `HKLM\SOFTWARE\ODBC` | `HKLM\SOFTWARE\WOW6432Node\ODBC` |
-| Драйверы Access | ❌ нет (Jet только 32-bit) | ✅ есть |
-| Используется | 64-bit процессами | 32-bit процессами |
+| Configuration tool | `C:\Windows\System32\odbcad32.exe` | `C:\Windows\SysWOW64\odbcad32.exe` |
+| Registry | `HKLM\SOFTWARE\ODBC` | `HKLM\SOFTWARE\WOW6432Node\ODBC` |
+| Access drivers | absent — Jet is 32-bit only | present |
+| Used by | 64-bit processes | 32-bit processes |
 
-Стандартный `odbcad32.exe` из `System32` — **64-битный**. Он не покажет драйверы Access.
-Чтобы убедиться что 32-bit драйвер установлен, нужно запустить именно `SysWOW64\odbcad32.exe`.
+The `odbcad32.exe` in `System32` is the **64-bit** one, and it will not show the Access drivers.
+To confirm the 32-bit driver is installed, run `SysWOW64\odbcad32.exe` specifically.
 
-Проверка из PowerShell:
+From PowerShell:
 ```powershell
-# 32-битные драйверы Access
+# The 32-bit Access drivers
 Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\ODBC\ODBCINST.INI\ODBC Drivers" |
     Select-Object -Property * | Where-Object { $_ -match "Access" }
 ```
 
-Или из Python:
+Or from Python:
 ```python
 import winreg
 key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
@@ -75,44 +75,44 @@ while True:
 
 ---
 
-### Сборка (PowerShell — одна строка)
+### Building it (PowerShell, one line)
 
 ```powershell
 $env:GOPROXY="https://goproxy.io"; $env:GONOSUMDB="*"; $env:GOARCH="386"; go build -tags nokafka -o tdtpcli_x86.exe ./cmd/tdtpcli/; $env:GOARCH=""
 ```
 
-По шагам:
+Step by step:
 ```powershell
-$env:GOPROXY   = "https://goproxy.io"   # прямой прокси, без googleapis redirect
-$env:GONOSUMDB = "*"                    # отключить sum-проверку для старых псевдоверсий
-$env:GOARCH    = "386"                  # цель: 32-bit x86
+$env:GOPROXY   = "https://goproxy.io"   # a direct proxy, with no googleapis redirect
+$env:GONOSUMDB = "*"                    # skip the sum check for old pseudo-versions
+$env:GOARCH    = "386"                  # target: 32-bit x86
 go build -tags nokafka -o tdtpcli_x86.exe ./cmd/tdtpcli/
-$env:GOARCH    = ""                     # сбросить, иначе все следующие сборки будут x86
+$env:GOARCH    = ""                     # reset it, or every later build is x86 too
 ```
 
-> **`-tags nokafka`** — kafka-go тянет CGo-зависимости, несовместимые с `GOARCH=386`.
-> Access-адаптеру Kafka не нужна, тег безопасно исключает её из сборки.
+> **`-tags nokafka`** — kafka-go pulls in cgo dependencies that do not work with `GOARCH=386`.
+> The Access adapter has no use for Kafka, and the tag leaves it out safely.
 
 ---
 
-### Почему GOPROXY=goproxy.io, а не proxy.golang.org
+### Why GOPROXY=goproxy.io rather than proxy.golang.org
 
-`proxy.golang.org` перенаправляет скачивание модулей на `storage.googleapis.com`.
-Если в окружении прописан `no_proxy=*.googleapis.com`, скачивание падает с 403/timeout.
+`proxy.golang.org` redirects module downloads to `storage.googleapis.com`.
+Where the environment sets `no_proxy=*.googleapis.com`, that download fails with a 403 or a timeout.
 
-`goproxy.io` отдаёт модули напрямую без редиректов — работает даже в закрытых сетях.
+`goproxy.io` serves modules directly with no redirect, and works even on a closed network.
 
-Альтернативная цепочка (если goproxy.io не доступен):
+An alternative chain, if goproxy.io is unreachable:
 ```powershell
 $env:GOPROXY = "https://goproxy.cn,https://goproxy.io,direct"
 ```
 
 ---
 
-### Регистрация адаптера в бинарнике
+### Registering the adapter in the binary
 
-Access-адаптер регистрируется через `init()` по blank-импорту. Файл использует build tag
-`//go:build windows`, поэтому на Linux/macOS он автоматически исключается из компиляции:
+The Access adapter registers itself in `init()`, via a blank import. The file carries the build tag
+`//go:build windows`, so on Linux and macOS it is excluded from the build automatically:
 
 ```go
 // cmd/tdtpcli/drivers_access.go
@@ -123,15 +123,15 @@ package main
 import _ "github.com/ruslano69/tdtp-framework/pkg/adapters/access"
 ```
 
-Без этого файла в бинарнике `access` не появится в списке адаптеров — `--list` вернёт
+Without that file `access` never appears in the adapter list, and `--list` returns
 `unknown database type: access`.
 
 ---
 
-### Схема работы 32-битного стека
+### How the 32-bit stack fits together
 
 ```
-tdtpcli_x86.exe (32-bit Go процесс)
+tdtpcli_x86.exe (a 32-bit Go process)
        │
        │  database/sql  →  odbc driver (alexbrainman/odbc)
        │                       │
@@ -140,7 +140,7 @@ tdtpcli_x86.exe (32-bit Go процесс)
        │              msjet40.dll  (Jet 4.0, 32-bit COM, In-Process)
        │                       │
        │                       ▼
-       │              DELO26.MDB  (Jet 2.x/3.x/4.x формат)
+       │              DELO26.MDB  (Jet 2.x/3.x/4.x format)
        │
        │  Schema introspection (ADOX)
        │       │
@@ -148,28 +148,28 @@ tdtpcli_x86.exe (32-bit Go процесс)
        │       │                       │
        │       │               VBScript  →  ADOX.Catalog  →  Jet OLE DB 4.0
        │       │                       │
-       │       └──────── JSON схема ◄──┘
+       │       └──────── JSON schema ◄──┘
        │
        ▼
-  TDTP XML (UTF-8, XML-escaped, windows-1251 → UTF-8 если charset задан)
+  TDTP XML (UTF-8, XML-escaped; windows-1251 → UTF-8 when charset is set)
 ```
 
-`alexbrainman/odbc` использует Unicode ODBC API (`SQL_C_WCHAR`) — имена колонок всегда
-приходят как UTF-16 и конвертируются в UTF-8 автоматически. Данные из Jet 2.x могут
-приходить как ANSI-байты (Windows-1251) — для них нужен параметр `charset: windows-1251`
-в конфиге, который активирует побайтовую конвертацию через `charmap.Windows1251`.
+`alexbrainman/odbc` uses the Unicode ODBC API (`SQL_C_WCHAR`), so column names always
+arrive as UTF-16 and are converted to UTF-8 for you. Data out of Jet 2.x may
+arrive as ANSI bytes (Windows-1251); those need `charset: windows-1251`
+in the config, which turns on byte-wise conversion through `charmap.Windows1251`.
 
 ---
 
-## ⚙️ Конфигурация
+## Configuration
 
-### Базовый формат DSN
+### The DSN
 
 ```
 Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=C:\path\to\db.mdb;UID=Admin;PWD=;
 ```
 
-### Минимальный config.yaml
+### A minimal config.yaml
 
 ```yaml
 database:
@@ -181,7 +181,7 @@ export:
   compress_level: 3
 ```
 
-### С паролем базы и workgroup (.mda/.mdw)
+### With a database password and a workgroup file (.mda/.mdw)
 
 ```yaml
 database:
@@ -189,7 +189,7 @@ database:
   dsn: "Driver={Microsoft Access Driver (*.mdb)};DBQ=C:\\path\\to\\db.mdb;SystemDB=C:\\SYSTEM.MDW;UID=sklad;PWD=secret;"
 ```
 
-### С кодировкой Windows-1251 (старые русские базы)
+### With Windows-1251 text (older Russian databases)
 
 ```yaml
 database:
@@ -200,47 +200,47 @@ database:
 
 ---
 
-## 🚀 Использование
+## Usage
 
 ```powershell
-# Экспорт таблицы в TDTP XML
-.\tdtpcli_x86.exe --config access.yaml --export Товары --output товары.tdtp.xml
+# Export a table to TDTP XML
+.\tdtpcli_x86.exe --config access.yaml --export Товары --output tovary.tdtp.xml
 
-# Экспорт в XLSX
-.\tdtpcli_x86.exe --config access.yaml --export-xlsx Товары --output товары.xlsx
+# Export to XLSX
+.\tdtpcli_x86.exe --config access.yaml --export-xlsx Товары --output tovary.xlsx
 
-# Список таблиц (требует прав на MSysObjects; если недоступно — указывай таблицу явно)
+# Listing tables needs rights on MSysObjects; without them, name the table explicitly
 .\tdtpcli_x86.exe --config access.yaml --list
 
-# Inspect (схема + статистика)
+# Inspect — schema and statistics
 .\tdtpcli_x86.exe --config access.yaml --inspect Товары
 ```
 
 ---
 
-## 🔍 Как работает определение типов
+## How column types are determined
 
-Jet ODBC не возвращает типы колонок через `DatabaseTypeName()` (всегда пусто).
-Адаптер читает схему через **ADOX** — 32-bit COM-провайдер Windows:
+Jet's ODBC driver does not report column types through `DatabaseTypeName()` — it always returns empty.
+The adapter reads the schema through **ADOX**, the 32-bit COM provider built into Windows:
 
 ```
 Go (x86) → exec SysWOW64\cscript.exe → VBScript → ADOX.Catalog (Jet OLE DB 4.0)
                                                      ↓
                                               JSON [{"name":"..","type":"TEXT",...}]
                                                      ↓
-                                              Go парсит → packet.Schema
+                                              Go parses it → packet.Schema
 ```
 
-1. Генерируется временный VBScript (`%TEMP%\tdtp-adox-*.vbs`)
-2. Запускается через `C:\Windows\SysWOW64\cscript.exe` (32-bit хост)
-3. Скрипт коннектится через `Microsoft.Jet.OLEDB.4.0` и читает `ADOX.Catalog`
-4. Возвращает типы в JSON → Go строит `packet.Schema`
+1. a temporary VBScript is generated at `%TEMP%\tdtp-adox-*.vbs`
+2. it runs under `C:\Windows\SysWOW64\cscript.exe`, the 32-bit host
+3. the script connects through `Microsoft.Jet.OLEDB.4.0` and reads `ADOX.Catalog`
+4. it returns the types as JSON, and Go builds a `packet.Schema`
 
-**Деградация:** если `cscript.exe` недоступен или ADOX не отвечает — автоматический fallback на sample-row inference (предупреждение в stderr, типы TEXT для NULL-колонок).
+**Degradation:** if `cscript.exe` is unavailable or ADOX does not answer, the adapter falls back to inferring types from a sample row — a warning on stderr, and TEXT for any column that was all NULL.
 
-### Маппинг типов ADOX → TDTP
+### ADOX to TDTP type mapping
 
-| Access / ADOX тип | Число | TDTP |
+| Access / ADOX type | Number | TDTP |
 |-------------------|-------|------|
 | AutoNumber, Long Integer | 3, 20 | INTEGER |
 | Integer, Byte, SmallInt | 2, 16, 18, 19, 21 | INTEGER |
@@ -249,13 +249,13 @@ Go (x86) → exec SysWOW64\cscript.exe → VBScript → ADOX.Catalog (Jet OLE DB
 | Date/Time | 7, 64, 133, 134, 135 | DATETIME |
 | OLE Object (BLOB) | 128, 204, 205 | BLOB |
 | GUID | 72 | TEXT |
-| Text, Memo и всё остальное | — | TEXT |
+| Text, Memo, and everything else | — | TEXT |
 
 ---
 
-## 🔄 Конвертация старых форматов
+## Converting older formats
 
-Jet 4.0 не открывает базы Access 2.0 / 95 / 97. Конвертация через DAO (32-bit cscript):
+Jet 4.0 will not open an Access 2.0, 95 or 97 database. Convert through DAO, using the 32-bit `cscript`:
 
 **convert_mdb.vbs:**
 ```vbscript
@@ -272,43 +272,43 @@ C:\Windows\SysWOW64\cscript.exe //nologo convert_mdb.vbs
 
 ---
 
-## 📦 Зависимости (Windows-only, встроено в ОС)
+## Dependencies — Windows only, and all part of the OS
 
-| Компонент | Путь | Назначение |
+| Component | Location | Purpose |
 |-----------|------|------------|
-| `cscript.exe` (32-bit) | `C:\Windows\SysWOW64\cscript.exe` | Хост VBScript для ADOX |
-| `ADOX.Catalog` | COM / MDAC | Чтение схемы БД |
-| `Microsoft.Jet.OLEDB.4.0` | COM / MDAC 32-bit | Подключение к .mdb |
-| `Microsoft Access Driver (*.mdb)` | ODBC 32-bit | Чтение строк данных |
+| `cscript.exe` (32-bit) | `C:\Windows\SysWOW64\cscript.exe` | The VBScript host for ADOX |
+| `ADOX.Catalog` | COM / MDAC | Reading the database schema |
+| `Microsoft.Jet.OLEDB.4.0` | COM / MDAC, 32-bit | Connecting to the `.mdb` |
+| `Microsoft Access Driver (*.mdb)` | ODBC, 32-bit | Reading the rows |
 
-Всё входит в состав Windows XP+ и **не требует дополнительной установки**.
+All of it ships with Windows XP and later, and **needs no separate installation**.
 
 ---
 
-## ⚡ Особенности и ограничения
+## What works and what does not
 
-| Операция | Поддерживается |
+| Operation | Supported |
 |----------|---------------|
-| Экспорт таблиц | ✅ |
-| TDTQL фильтрация | ✅ (SQL push-down) |
-| Экспорт VIEW (Queries) | ✅ |
-| Импорт данных | ❌ (read-only source) |
-| Инкрементальный экспорт | ❌ |
-| `--list` таблиц | ⚠️ Только если есть права на MSysObjects |
-| Компрессия (zstd/kanzi) | ✅ |
+| Exporting tables | yes |
+| TDTQL filtering | yes, pushed into SQL |
+| Exporting views (Access Queries) | yes |
+| Importing data | no — this is a read-only source |
+| Incremental export | no |
+| `--list` | only with rights on MSysObjects |
+| Compression (zstd, kanzi) | yes |
 | Compact format | ✅ |
 
 ---
 
-## 📝 Совместимость
+## Compatibility
 
 - ✅ Access 2000 / 2002 / 2003 (.mdb, Jet 4.0)
-- ✅ Access 2007+ (.accdb, ACE через Jet ODBC драйвер)
-- ⚠️ Access 97 и старше — нужна предварительная конвертация через DAO
-- ❌ Linux / macOS — не поддерживается (Windows COM зависимости)
+- Access 2007 and later (`.accdb`, ACE through the Jet ODBC driver)
+- Access 97 and older — convert through DAO first
+- Linux and macOS — unsupported, because of the Windows COM dependencies
 
-## 🔗 Ссылки
+## Links
 
-- [Документация: docs/ACCESS_ADAPTER.md](../../../docs/ACCESS_ADAPTER.md)
+- [docs/ACCESS_ADAPTER.md](../../../docs/ACCESS_ADAPTER.md)
 - [alexbrainman/odbc](https://github.com/alexbrainman/odbc)
 - [TDTP Specification](../../../docs/TDTP_SPEC.md)
