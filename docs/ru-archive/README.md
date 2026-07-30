@@ -25,6 +25,7 @@ Paths mirror the repository, so `docs/README.md` archives as
 | `docs/README.md` | `docs/README.md` | 2026-07-29 |
 | `docs/ETL_PIPELINE.md` | `docs/ETL_PIPELINE.md` | 2026-07-29 |
 | `docs/SPECIFICATION.md` | `docs/SPECIFICATION.md` | 2026-07-29 |
+| `docs/USER_GUIDE.md` | `docs/USER_GUIDE.md` | 2026-07-29 |
 
 ## When a document is only partly stale
 

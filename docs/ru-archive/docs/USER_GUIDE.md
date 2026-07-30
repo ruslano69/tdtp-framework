@@ -1,0 +1,2125 @@
+# TDTP CLI - Руководство пользователя
+
+**tdtpcli** - утилита командной строки для работы с TDTP (Table Data Transfer Protocol).
+
+**Версия:** 1.9.5
+**Дата:** 25.05.2026
+
+---
+
+## Содержание
+
+1. [Установка](#установка)
+2. [Быстрый старт](#быстрый-старт)
+3. [Конфигурация](#конфигурация)
+4. [Команды](#команды)
+   - [--list](#--list) · [--list-views](#--list-views) · [--inspect](#--inspect) · [--test](#--test)
+   - [--export](#--export) · [--import](#--import) · [Санитизация имён полей](#санитизация-имён-полей---translit---clear)
+   - [--export-xlsx](#--export-xlsx) · [--import-xlsx](#--import-xlsx) · [--to-xlsx](#--to-xlsx) · [--from-xlsx](#--from-xlsx)
+   - [--export-broker](#--export-broker) · [--import-broker](#--import-broker) · [--listen](#--listen-beta)
+   - [--sync-incremental](#--sync-incremental)
+   - [--diff](#--diff) · [--merge](#--merge)
+   - [--to-compact](#--to-compact) · [--to-csv](#--to-csv) · [--to-html](#--to-html)
+   - [--pipeline](#--pipeline) · [--process-request](#--process-request)
+5. [Рабочий процесс: --inspect → --test → --import](#рабочий-процесс---inspect----test----import)
+6. [Compact Format (v1.3.1)](#compact-format-v131)
+7. [ETL Pipeline](#etl-pipeline)
+8. [Шифрование AES-256-GCM](#шифрование-aes-256-gcm)
+9. [Фильтрация данных (TDTQL)](#фильтрация-данных-tdtql)
+10. [Работа с Message Brokers](#работа-с-message-brokers)
+11. [Примеры использования](#примеры-использования)
+12. [Устранение неполадок](#устранение-неполадок)
+
+---
+
+## Установка
+
+### Требования
+
+- **Go** 1.21 или выше (для сборки из исходников)
+- **Доступ к БД:** SQLite, PostgreSQL, или MS SQL Server
+- **Message Broker** (опционально): RabbitMQ или MSMQ
+
+### Сборка из исходников
+
+```bash
+git clone https://github.com/ruslano69/tdtp-framework
+cd tdtp-framework
+go mod tidy
+go build -o tdtpcli ./cmd/tdtpcli
+```
+
+### Проверка установки
+
+```bash
+./tdtpcli --help
+```
+
+---
+
+## Быстрый старт
+
+### 1. Создание конфигурации
+
+Выберите тип базы данных:
+
+**SQLite:**
+```bash
+./tdtpcli --create-config-sqlite
+```
+
+**PostgreSQL:**
+```bash
+./tdtpcli --create-config-pg
+```
+
+**MS SQL Server:**
+```bash
+./tdtpcli --create-config-mssql
+```
+
+**MySQL:**
+```bash
+./tdtpcli --create-config-mysql
+```
+
+Будет создан файл `config.{dbtype}.yaml` с шаблоном настроек.
+
+### 2. Редактирование конфигурации
+
+Откройте созданный файл и укажите параметры подключения:
+
+**config.postgres.yaml:**
+```yaml
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  user: myuser
+  password: mypassword
+  dbname: mydb
+  schema: public
+  sslmode: disable
+```
+
+### 3. Проверка подключения
+
+Получите список таблиц:
+
+```bash
+./tdtpcli -config config.postgres.yaml --list
+```
+
+### 4. Экспорт данных
+
+Экспортируйте таблицу в файл:
+
+```bash
+./tdtpcli -config config.postgres.yaml --export users --output users.tdtp.xml
+```
+
+### 5. Импорт данных
+
+Импортируйте данные из файла:
+
+```bash
+./tdtpcli -config config.postgres.yaml --import users.tdtp.xml
+```
+
+---
+
+## Конфигурация
+
+### Структура конфигурационного файла
+
+```yaml
+# Настройки базы данных
+database:
+  type: postgres         # sqlite | postgres | mssql
+
+  # SQLite
+  path: database.db     # Путь к файлу БД (только для SQLite)
+
+  # PostgreSQL / MS SQL
+  host: localhost
+  port: 5432            # 5432 для PostgreSQL, 1433 для MS SQL
+  user: username
+  password: password
+  dbname: database_name
+
+  # PostgreSQL specific
+  schema: public        # Схема БД (default: public)
+  sslmode: disable      # disable | require | verify-ca | verify-full
+
+  # MS SQL specific
+  instance: SQLEXPRESS  # Имя инстанса (опционально)
+  encrypt: false        # Шифрование соединения
+  trustServerCertificate: true
+
+# Настройки message broker (опционально)
+broker:
+  type: rabbitmq          # rabbitmq | msmq
+  host: localhost
+  port: 5672              # 5672 (plain) или 5671 (TLS)
+  user: guest
+  password: guest
+  queue: tdtp_queue       # Имя очереди
+  vhost: /                # Virtual host (RabbitMQ)
+  use_tls: false          # true → amqps:// (порт 5671)
+  tls_skip_verify: false  # true → пропустить проверку сертификата (self-signed)
+  durable: true           # Устойчивость очереди
+  auto_delete: false      # Автоудаление очереди
+  exclusive: false        # Эксклюзивность очереди
+  passive_declare: false  # true → не создавать очередь, просто подключиться к существующей
+```
+
+### Примеры конфигураций
+
+**SQLite:**
+```yaml
+database:
+  type: sqlite
+  path: ./database.db
+```
+
+**PostgreSQL с RabbitMQ:**
+```yaml
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  user: tdtp_user
+  password: secure_password
+  dbname: production_db
+  schema: public
+  sslmode: require
+
+broker:
+  type: rabbitmq
+  host: rabbitmq.example.com
+  port: 5672
+  user: tdtp
+  password: broker_password
+  queue: tdtp_production_queue
+  vhost: /
+  durable: true
+  auto_delete: false
+  exclusive: false
+  passive_declare: false  # установить true если очередь создана сторонней системой
+```
+
+**MS SQL Server:**
+```yaml
+database:
+  type: mssql
+  host: sql-server.example.com
+  port: 1433
+  user: sa
+  password: MyStr0ngP@ssw0rd
+  dbname: MyDatabase
+  instance: SQLEXPRESS
+  encrypt: true
+  trustServerCertificate: false
+```
+
+**MySQL:**
+```yaml
+database:
+  type: mysql
+  host: localhost
+  port: 3306
+  user: root
+  password: secret
+  dbname: mydb
+```
+
+### S3 / Object Storage
+
+`--export` и `--import` поддерживают `s3://`-URI вместо локального пути. Конфиг хранилища задаётся в `storage:` секции.
+
+```yaml
+storage:
+  type: s3
+  s3:
+    bucket: my-tdtp-bucket
+    region: us-east-1
+    access_key: AKIAIOSFODNN7EXAMPLE
+    secret_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    endpoint: ""       # оставить пустым для AWS; задать для MinIO/etc.
+```
+
+**Использование:**
+```bash
+# Экспорт в S3
+./tdtpcli -config config.yaml --export users --output s3://my-bucket/exports/users.tdtp.xml
+
+# Импорт из S3
+./tdtpcli -config config.yaml --import s3://my-bucket/exports/users.tdtp.xml
+
+# Inspect из S3 (без --config)
+./tdtpcli --inspect s3://my-bucket/exports/users.tdtp.xml
+```
+
+---
+
+## Команды
+
+### --list
+
+Показать список таблиц в базе данных.
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --list
+```
+
+**Пример:**
+```bash
+./tdtpcli -config config.postgres.yaml --list
+```
+
+**Вывод:**
+```
+📁 Using config: config.postgres.yaml
+🔌 Connecting to postgres...
+✅ Connected to postgres (PostgreSQL 15.15)
+
+📋 Tables in database (4):
+  1. users
+  2. products
+  3. orders
+  4. activity_logs
+```
+
+---
+
+### --list-views
+
+Показать список VIEW в базе данных с их статусом (updatable / read-only).
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --list-views
+```
+
+**Пример вывода:**
+```
+Views in database (2):
+  dept_employees_report  [read-only]
+  active_users_vw        [updatable]
+```
+
+---
+
+### --inspect
+
+Вывести YAML-сводку метаданных TDTP-файла без подключения к БД. Поддерживает локальные файлы и `s3://`-пути.
+
+**Синтаксис:**
+```bash
+tdtpcli --inspect <file>
+```
+
+**Пример:**
+```bash
+./tdtpcli --inspect report.tdtp.xml
+```
+
+**Вывод:**
+```yaml
+file: report.tdtp.xml
+version: "1.3.1"
+packet_type: reference
+table: users
+uuid: 550e8400-e29b-41d4-a716-446655440000
+compressed: false
+compact: false
+schema:
+  fields: 4
+  names: [id, name, email, age]
+data:
+  rows: 10000
+```
+
+---
+
+### --test
+
+Проверить целостность TDTP-файла без подключения к БД: распаковать в памяти, проверить XXH3-чексумму, сверить счётчик строк с заголовком.
+
+> **Отличие от `--inspect`:**
+> - `--inspect` отвечает на вопрос **"что внутри?"** — выводит имена полей, типы, имя таблицы, UUID.
+> - `--test` отвечает на вопрос **"файл не повреждён?"** — проверяет целостность данных и контрольные суммы.
+>
+> Рекомендуемый порядок перед импортом: `--inspect` → `--test` → `--import`
+
+**Синтаксис:**
+```bash
+tdtpcli --test <file>
+```
+
+**Что проверяется:**
+- Корректность XML-структуры
+- Счётчик строк (`<R>`) совпадает с `RecordsInPart` в заголовке
+- При `--compress`: распаковка без ошибок (zstd и kanzi)
+- При `--hash`: XXH3-контрольная сумма данных (`checksum OK` / `checksum MISMATCH`)
+- Для multi-part наборов: все `_part_N_of_M` части присутствуют, `InReplyTo` UUID совпадает у всех
+
+**Примеры:**
+```bash
+# Простая проверка
+tdtpcli --test users.tdtp.xml
+# ✓ 10 rows (uncompressed)   Total rows: 10
+
+# Сжатый + контрольная сумма
+tdtpcli --test orders.tdtp.xml
+# ✓ algo=zstd, 1000 rows, decompressed 12ms, checksum OK
+
+# S3-файл (без локального скачивания)
+tdtpcli --test s3://my-bucket/exports/users.tdtp.xml --config config.yaml
+
+# Проверка перед импортом (recommended)
+tdtpcli --test delivery.tdtp.xml && tdtpcli --import delivery.tdtp.xml
+```
+
+**Exit codes:**
+- `0` — файл прошёл все проверки
+- `1` — файл повреждён, отсутствуют части, или контрольная сумма не совпала
+
+---
+
+### --to-csv
+
+Конвертировать TDTP-файл в CSV без подключения к БД. Поддерживает сжатые файлы (zstd, kanzi), compact v1.3.1 и v1.4-integrity пакеты. Все TDTQL-фильтры применяются **в памяти** до записи CSV.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-csv <file> [--output <file>]
+        [--delimiter <sep>] [-d <sep>]
+        [--cp <encoding>] [--bom]
+        [--where <condition>] [-w <condition>]
+        [--order-by <fields>]
+        [--limit <n>] [-n <n>]
+        [--offset <n>]
+        [--fields <col1,col2,...>]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--to-csv <file>` | Входной TDTP-файл |
+| `--output <file>` | Выходной CSV (по умолчанию — то же имя с `.csv`) |
+| `--delimiter <sep>` / `-d` | Разделитель: `,` (по умолчанию), `;`, `\t` |
+| `--cp <encoding>` | Кодировка вывода: `utf8` (по умолчанию), `1251`, `866` |
+| `--bom` | Добавить UTF-8 BOM (нужен для автоопределения кодировки в Excel) |
+| `--where` / `-w` | Фильтр строк (TDTQL, повторяемый — объединяется через AND) |
+| `--order-by` | Сортировка строк |
+| `--limit` / `-n` | Первые N строк (`+N`) или последние N строк (`-N`, tail-режим) |
+| `--offset` | Пропустить N строк |
+| `--fields` | Только перечисленные колонки; пробелы в именах — в квадратных скобках |
+
+**Примеры:**
+```bash
+# Базовая конвертация
+tdtpcli --to-csv users.tdtp.xml
+
+# С указанием выходного файла
+tdtpcli --to-csv users.tdtp.xml --output users_export.csv
+
+# Разделитель точка с запятой + BOM для Excel
+tdtpcli --to-csv orders.tdtp.xml --delimiter ';' --bom --output orders.csv
+
+# Табуляция + кодировка Windows-1251 (для старых 1С/Excel)
+tdtpcli --to-csv report.tdtp.xml -d '\t' --cp 1251 --bom
+
+# Только нужные колонки
+tdtpcli --to-csv users.tdtp.xml --fields 'id,email,balance'
+
+# Колонки с пробелами в именах
+tdtpcli --to-csv staff.tdtp.xml --fields '[Last Name],[First Name],[Birth Date]'
+
+# Фильтрация + сортировка + лимит
+tdtpcli --to-csv orders.tdtp.xml \
+  --where 'status = completed' \
+  --order-by 'total DESC' \
+  --limit 50
+
+# Сжатый файл (распаковывается автоматически)
+tdtpcli --to-csv archive.tdtp.xml --where 'amount > 1000'
+
+# v1.4 integrity пакет (хэши верифицируются до вывода)
+tdtpcli --to-csv secure.tdtp.xml --fields 'id,name,amount'
+
+# Последние 100 строк (tail-режим)
+tdtpcli --to-csv events.tdtp.xml --limit -100 --order-by 'created_at ASC'
+
+# Пагинация из TDTP-архива
+tdtpcli --to-csv big_table.tdtp.xml --limit 100 --offset 500
+```
+
+> **Без конфига:** `--to-csv` не требует подключения к БД — работает с любым TDTP-файлом,
+> включая сжатые, compact и v1.4 пакеты с integrity-хешами.
+
+---
+
+### --to-html
+
+Конвертировать TDTP-файл в HTML для просмотра в браузере.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-html <input> [--output <file>] [--open] [--row <n1-n2>] [--limit N] [--where ...]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--to-html <file>` | Входной TDTP-файл |
+| `--output <file>` | Выходной HTML-файл (по умолчанию — автогенерация имени) |
+| `--open` | Открыть файл в браузере сразу после генерации |
+| `--row <n1-n2>` | Диапазон строк для отображения, 1-indexed (напр. `100-150`) |
+| `--limit N` | Ограничить число строк |
+| `--where` | Фильтрация строк (TDTQL, повторяемый) |
+
+**Примеры:**
+```bash
+# Конвертация и открытие в браузере
+./tdtpcli --to-html users.tdtp.xml --open
+
+# Просмотр строк 500–600
+./tdtpcli --to-html large_report.tdtp.xml --row 500-600 --open
+
+# Фильтрация перед просмотром
+./tdtpcli --to-html orders.tdtp.xml --where "status = active" --open
+```
+
+---
+
+### --process-request
+
+Обработать входящий TDTP request-файл и сгенерировать response. Конфиги БД ищутся в той же директории, что и файл запроса.
+
+**Синтаксис:**
+```bash
+tdtpcli --process-request <request-file> [--output <response-file>] [-config <config.yaml>]
+```
+
+**Пример:**
+```bash
+./tdtpcli --process-request ./requests/users_request.tdtp.xml \
+          --output ./responses/users_response.tdtp.xml
+```
+
+---
+
+### --listen `[BETA]`
+
+Потоковый consumer-демон для Kafka: слушает топик и импортирует данные по мере поступления. Работает до SIGTERM.
+
+> Только Kafka. Для RabbitMQ используйте `--import-broker`.
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --listen [--strategy <strategy>]
+```
+
+**Пример:**
+```bash
+./tdtpcli -config config.kafka.yaml --listen --strategy replace
+```
+
+**Остановка:** `Ctrl+C` (graceful shutdown).
+
+---
+
+### --export
+
+Экспортировать таблицу в файл или stdout.
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --export <table> [--output <file>]
+         [--compact [--fixed-fields <поля>]]
+```
+
+**Параметры:**
+- `<table>` - имя таблицы или VIEW (обязательно)
+- `--output <file>` - выходной файл (опционально, по умолчанию stdout)
+- `--fields <cols>` - выбрать только нужные колонки, через запятую (например, `id,email,status`)
+- `--compress` - сжать вывод zstd (level 3 по умолчанию)
+- `--compress-level <1-19>` - уровень сжатия (1 = быстрее, 19 = компактнее)
+- `--hash` - добавить XXH3-чексумму для проверки целостности (требует `--compress`)
+- `--readonly-fields` - включить в экспорт read-only поля (timestamp, computed, identity)
+- `--compact` - включить compact-формат TDTP v1.3.1 (carry-forward для fixed-полей)
+- `--fixed-fields <поля>` - список fixed-полей через запятую (используется совместно с `--compact`); если не задан, определяются автоматически по `_prefix` или данным
+- `--compact-tail` - дописать tail-строку со всеми fixed-полями явно (для stream-валидации и передачи состояния)
+
+**Примеры:**
+
+Экспорт в stdout:
+```bash
+./tdtpcli -config config.postgres.yaml --export users
+```
+
+Экспорт в файл:
+```bash
+./tdtpcli -config config.postgres.yaml --export users --output users.tdtp.xml
+```
+
+Автоматическое добавление расширения:
+```bash
+./tdtpcli -config config.postgres.yaml --export users --output users
+# Создаст файл: users.tdtp.xml
+```
+
+Compact-экспорт VIEW с `_prefix`-колонками (auto-detect):
+```bash
+./tdtpcli -config config.yaml --export dept_employees_report \
+  --compact --output report_compact.tdtp.xml
+```
+
+Compact-экспорт с явным указанием fixed-полей:
+```bash
+./tdtpcli -config config.yaml --export employees \
+  --compact --fixed-fields dept_id --output emp_compact.tdtp.xml
+```
+
+---
+
+### --import
+
+Импортировать данные из TDTP файла.
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --import <file> [--table <name>] [--strategy <strategy>]
+```
+
+**Параметры:**
+- `<file>` - путь к TDTP файлу (обязательно)
+- `--table <name>` - имя целевой таблицы (опционально, по умолчанию из пакета)
+- `--strategy <strategy>` - стратегия импорта: `replace` | `copy` (опционально)
+- `--fields <cols>` - импортировать только указанные колонки (через запятую)
+
+**Пример:**
+```bash
+./tdtpcli -config config.postgres.yaml --import users.tdtp.xml
+```
+
+**Вывод:**
+```
+📁 Using config: config.postgres.yaml
+🔌 Connecting to postgres...
+✅ Connected to postgres (PostgreSQL 15.15)
+
+📥 Importing from file: users.tdtp.xml
+✅ Imported 100 rows into table 'users'
+```
+
+**Compact-формат (v1.3.1):**
+
+При импорте файла с атрибутом `compact="true"` carry-forward раскрывается **автоматически** — все строки восстанавливаются до полных значений до записи в БД. Дополнительных флагов не требуется.
+
+```bash
+# Compact-файл импортируется так же, как обычный
+./tdtpcli -config config.yaml --import dept_report_compact.tdtp.xml --table dept_emp_imported --strategy replace
+```
+
+**Стратегии импорта:**
+
+По умолчанию используется стратегия на основе типа пакета:
+- **reference** → REPLACE (полная замена через temp table)
+- **delta** → COPY (вставка новых записей)
+- **response** → REPLACE
+
+---
+
+### Санитизация имён полей (`--translit`, `--clear`)
+
+Флаги применяются **только при `--import`**. Экспорт всегда сохраняет оригинальные имена — они являются источником истины.
+
+| Флаг | Что делает |
+|------|-----------|
+| `--clear` | Заменяет спецсимволы в именах полей безопасными токенами: `%` → `_pct_`, `$` → `_usd_`, `#` → `_xh_`, `@` → `_at_`, `&` → `_and_`, `?` → `_is_`, `~` → `_not_`, пробел/`.`/`,`/`-` → `_`. Оставшиеся не-ASCII → `_`. |
+| `--translit` | Транслитерирует не-ASCII символы в ближайший ASCII через go-unidecode: `Имя` → `Imia`, `Österreich` → `Osterreich`, `Ñoño` → `Nono`. |
+
+Флаги можно комбинировать: `--translit` выполняется первым, затем `--clear`.
+
+**Оригинальные имена сохраняются как комментарии к колонкам:**
+- PostgreSQL: `COMMENT ON COLUMN t.col IS 'original: Имя пользователя'`
+- MySQL: `col TEXT COMMENT 'original: Имя пользователя'`
+
+**Примеры:**
+
+```bash
+# MS Access экспорт: поля "Order ID", "Total Cost $", "Discount %"
+tdtpcli --import access_orders.tdtp.xml --clear --strategy replace
+# Order ID  → Order_ID
+# Total Cost $ → Total_Cost_usd_
+# Discount % → Discount_pct_
+
+# 1С / ERP с кириллическими именами полей
+tdtpcli --import erp_export.tdtp.xml --translit --clear --strategy replace
+# Имя пользователя → Imia_polzovatelia
+# Дата рождения   → Data_rozhdeniia
+
+# Европейские диакритики (без спецсимволов)
+tdtpcli --import eu_staff.tdtp.xml --translit --strategy replace
+# Österreich → Osterreich
+
+# Предварительный просмотр: посмотреть схему перед импортом
+tdtpcli --inspect access_orders.tdtp.xml
+```
+
+**В ETL pipeline** санитизация настраивается на уровне источника в YAML:
+
+```yaml
+sources:
+  - name: legacy_erp
+    type: tdtp
+    dsn: erp_export.tdtp.xml
+    sanitize:
+      translit: true   # "Имя" → "Imia"
+      clear: true      # "Total %" → "Total_pct_"
+```
+
+**Тестовые XML-файлы:** `tests/sanitize/` — `access_fields.tdtp.xml`, `cyrillic_fields.tdtp.xml`, `exotic_mixed.tdtp.xml`, `safe_import.tdtp.xml`
+
+---
+
+### --export-xlsx
+
+Выгрузить таблицу сразу в `.xlsx`, минуя TDTP-файл. Удобно, когда результат уходит человеку, а не в другую систему.
+
+**Синтаксис:**
+```bash
+tdtpcli --export-xlsx <table> [--output <file>] [--sheet <name>]
+        [--where <condition>] [--order-by <fields>] [--limit <n>] [--fields <col1,col2>]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--export-xlsx <table>` | Имя таблицы или представления |
+| `--output <file>` | Выходной `.xlsx` (по умолчанию — имя таблицы) |
+| `--sheet <name>` | Имя листа (по умолчанию `Sheet1`) |
+| `--where`, `--order-by`, `--limit`, `--fields` | Как в `--export` |
+
+**Заголовки несут схему.** Первая строка листа — `имя_поля (ТИП)`, у первичных ключей добавляется `*`. Это не украшение: именно из этой строки `--from-xlsx` и `--import-xlsx` восстанавливают типы. Отредактируешь заголовок — сломаешь обратный путь.
+
+**Что делается за тебя** — это ловушки Excel, каждая из которых иначе портит данные молча:
+
+| Случай | Поведение |
+|--------|-----------|
+| `BIGINT` длиннее 15 значащих цифр | Пишется текстовой ячейкой — иначе Excel округлит: его числа это float64 |
+| `NaN`, `±Inf` | Пустая ячейка (канонический NULL в Excel) |
+| Даты до 1900 года | ISO-строкой — серийный номер Excel их не представляет |
+| Строка начинается с `=`, `+`, `-`, `@` | Пишется через `SetCellStr`, так что Excel не примет её за формулу |
+| Маркер `[NULL]` в текстовом поле | Пустая ячейка |
+
+**Примеры:**
+```bash
+tdtpcli --export-xlsx orders --output orders.xlsx
+tdtpcli --export-xlsx orders --sheet Orders --where "status = 'active'" --limit 1000
+```
+
+---
+
+### --import-xlsx
+
+Загрузить `.xlsx` прямо в БД, минуя TDTP-файл.
+
+**Синтаксис:**
+```bash
+tdtpcli --import-xlsx <file> [--table <name>] [--sheet <name>] [--strategy <mode>]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--import-xlsx <file>` | Входной `.xlsx` |
+| `--table <name>` | Таблица-приёмник (по умолчанию — из заголовков/имени файла) |
+| `--sheet <name>` | Лист (по умолчанию первый) |
+| `--strategy <mode>` | `append`, `replace`, `upsert` — как в `--import` |
+
+**Требование к файлу:** заголовки в формате `имя_поля (ТИП)`, ключи помечены `*` — то есть файл, полученный из `--export-xlsx` или `--to-xlsx`. Произвольную таблицу из интернета так не загрузить: типы брать неоткуда.
+
+**Что делается за тебя:**
+
+| Случай | Поведение |
+|--------|-----------|
+| Ячейки с ошибками (`#N/A`, `#DIV/0!`, `#NUM!`, `#VALUE!`) | NULL — формула, не посчитавшаяся у отправителя, не должна стать строкой `"#N/A"` в БД |
+| Даты | Читается сырой серийный номер и пересчитывается через эпоху 1900, **с поправкой на високосный баг Excel** (серийный 60 = несуществующее 29 февраля 1900) |
+| Ведущие и хвостовые пробелы | Обрезаются |
+| Пустая ячейка | NULL для нетекстовых типов, пустая строка для `TEXT` — это разные вещи, и Excel их не различает |
+
+**Примеры:**
+```bash
+tdtpcli --import-xlsx orders.xlsx --strategy replace
+tdtpcli --import-xlsx orders.xlsx --table orders_2026 --sheet Orders
+```
+
+---
+
+### --to-xlsx
+
+Конвертировать существующий TDTP-файл в `.xlsx`, без подключения к БД.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-xlsx <tdtp-file> [--output <file>] [--sheet <name>]
+```
+
+Сжатые пакеты (zstd, kanzi) распаковываются автоматически. Заголовки и обработка ловушек — те же, что у [`--export-xlsx`](#--export-xlsx).
+
+**Примеры:**
+```bash
+tdtpcli --to-xlsx orders.tdtp.xml --output orders.xlsx --sheet Orders
+```
+
+---
+
+### --from-xlsx
+
+Конвертировать `.xlsx` в TDTP-файл, без подключения к БД. Обратная сторона `--to-xlsx`.
+
+**Синтаксис:**
+```bash
+tdtpcli --from-xlsx <xlsx-file> [--output <file>] [--sheet <name>]
+```
+
+Ожидает те же заголовки `имя_поля (ТИП)` и ту же обработку ловушек, что и [`--import-xlsx`](#--import-xlsx). Если `--sheet` не задан, берётся первый лист.
+
+**Примеры:**
+```bash
+tdtpcli --from-xlsx orders.xlsx --output orders.tdtp.xml
+```
+
+---
+
+### --export-broker
+
+Экспортировать таблицу в message broker queue.
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --export-broker <table>
+```
+
+**Параметры:**
+- `<table>` - имя таблицы (обязательно)
+
+**Пример:**
+```bash
+./tdtpcli -config config.postgres.yaml --export-broker users
+```
+
+**Вывод:**
+```
+📁 Using config: config.postgres.yaml
+🔌 Connecting to postgres...
+✅ Connected to postgres (PostgreSQL 15.15)
+
+📡 Connecting to rabbitmq broker...
+✅ Connected to broker
+
+📤 Exporting table: users
+✅ Successfully published 1 packets to queue 'tdtp_queue'
+   Total rows: 100
+```
+
+---
+
+### --import-broker
+
+Импортировать данные из message broker queue.
+
+**Синтаксис:**
+```bash
+tdtpcli -config <config.yaml> --import-broker
+```
+
+**Работа:**
+- Подключается к очереди
+- Ожидает сообщения (blocking mode)
+- Импортирует данные в БД
+- Подтверждает получение (manual ACK)
+- Продолжает ожидать следующих сообщений
+
+**Пример:**
+```bash
+./tdtpcli -config config.postgres.yaml --import-broker
+```
+
+**Вывод:**
+```
+📁 Using config: config.postgres.yaml
+🔌 Connecting to postgres...
+✅ Connected to postgres (PostgreSQL 15.15)
+
+📡 Connecting to rabbitmq broker...
+✅ Connected to broker
+
+🎧 Listening for messages on queue 'tdtp_queue'...
+   Press Ctrl+C to stop
+
+📦 Received reference packet for table 'users' (100 rows)
+   Type: REFERENCE - full sync via temp table
+📋 Import to temporary table: users_tmp_20251116_204210
+✅ Data loaded to temporary table
+🔄 Replacing production table: users
+✅ Production table replaced successfully
+   ✓ Message acknowledged and removed from queue
+✅ Imported 100 rows into table 'users' (total: 1 packets, 100 rows)
+
+🎧 Waiting for next message...
+```
+
+**Остановка:**
+- Нажмите `Ctrl+C` для корректного завершения
+
+---
+
+### --sync-incremental
+
+Выгрузить из таблицы только то, что изменилось с прошлого раза.
+
+Отметка последней выгрузки (watermark) хранится в файле чекпоинта; на каждом
+запуске tdtpcli берёт строки, у которых поле `--tracking-field` строго больше
+сохранённого значения, и после успешной выгрузки двигает отметку на новый
+максимум.
+
+```bash
+tdtpcli --sync-incremental orders --tracking-field updated_at --checkpoint-file orders.json
+```
+
+| Флаг | Назначение |
+|------|-----------|
+| `--tracking-field <field>` | Поле-водораздел: `updated_at`, `id`, версия. По умолчанию `updated_at` |
+| `--checkpoint-file <file>` | Где хранится отметка. По умолчанию `checkpoint.yaml` |
+| `--batch-size <n>` | Потолок строк за один запуск (`LIMIT`). По умолчанию 1000 |
+| `--fields <a,b,c>` | Проекция колонок; поле-водораздел добавляется всегда |
+| `--to-broker` | Отправить в брокер из `--config` вместо записи файлов |
+
+**Требования к полю-водоразделу.** Оно должно только расти и не переиспользоваться:
+монотонная временная метка, автоинкрементный ключ, счётчик версий. Поле,
+которое может уменьшиться, приведёт к молчаливой потере строк — они окажутся
+ниже отметки, и следующий запуск их не увидит. Строки, чей `updated_at` равен
+уже сохранённой отметке, не попадут в выгрузку: сравнение строгое, иначе
+последняя строка уезжала бы на каждом запуске.
+
+**Первый запуск** отметки не имеет и потому выгружает таблицу целиком —
+с `--batch-size` это займёт несколько запусков подряд.
+
+#### --to-broker
+
+Тот же инкремент, но в очередь, а не в файл:
+
+```bash
+tdtpcli --sync-incremental orders --tracking-field updated_at \
+        --checkpoint-file orders.json --to-broker --config rabbitmq.yaml
+```
+
+Отправка идёт тем же путём, что и `--export-broker`, поэтому работают все его
+опции: `--compress`, `--compress-algo`, `--compress-level`, `--enc`, `--enc13`,
+`--mercury-url`.
+
+**Отметка двигается только после успешной отправки.** Если брокер недоступен
+или отказал, чекпоинт остаётся на месте, а причина записывается в `last_error`
+того же файла — следующий запуск повторит те же строки. Продвинуть отметку
+раньше отправки значило бы потерять данные без следа: строки уже ниже
+водораздела, и вернуться к ним нечему.
+
+Пара `--sync-incremental --to-broker` на стороне-источнике и
+`--map --input broker://<queue> --listen` на стороне-приёмнике даёт
+непрерывную репликацию без внешнего планировщика состояния.
+
+**`--drain <длительность>` — приём как единица работы.** У импорта было две
+формы, и обе плохо ложатся под расписание: голый `--input broker://` берёт ровно
+одно сообщение за запуск и не догоняет всплеск, а `--listen` не заканчивается
+никогда и потому не может отчитаться о результате. `--drain` разбирает очередь,
+пока она не простоит пустой заданное время, и выходит с итогом:
+
+```bash
+tdtpcli --map sync_flights.yaml --input broker:// --drain 5s
+public.flights  10 rows  418ms
+```
+
+Это уже работа, которой владеет оркестратор: запись задания, согласование,
+квота, отказ в месте, куда кто-то смотрит. Внутри — тот же цикл `--listen` с
+дедлайном на приёме, поэтому подтверждение по-прежнему уходит только после
+коммита upsert'а, а прерванный запуск возвращает сообщение в очередь.
+
+Плата — задержка ниже такта: строка ждёт до интервала расписания плюс окно
+простоя вместо мгновенной доставки. Там, где важны секунды, `--listen` остаётся
+правильной формой.
+
+---
+
+### --diff
+
+Сравнить два TDTP файла и показать различия.
+
+**Синтаксис:**
+```bash
+tdtpcli --diff <file-a> <file-b> [опции]
+```
+
+**Параметры:**
+- `<file-a>` - первый TDTP файл (обязательно)
+- `<file-b>` - второй TDTP файл (обязательно)
+- `--key-fields <поля>` - ключевые поля для сравнения (опционально, через запятую)
+- `--ignore-fields <поля>` - поля для игнорирования (опционально, через запятую)
+- `--case-sensitive` - учитывать регистр при сравнении (по умолчанию - нет)
+
+**Примеры:**
+
+Сравнить два файла:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml
+```
+
+Сравнить с указанием ключевого поля:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml --key-fields user_id
+```
+
+Игнорировать временные поля:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml --ignore-fields created_at,updated_at
+```
+
+Сравнение с учетом регистра:
+```bash
+./tdtpcli --diff users-old.xml users-new.xml --case-sensitive
+```
+
+**Вывод:**
+```
+=== Diff Statistics ===
+Total in A: 100
+Total in B: 105
+Added:      5
+Removed:    2
+Modified:   3
+Unchanged:  95
+
+=== Added (5) ===
++ 101 | John Doe | john@example.com
++ 102 | Jane Smith | jane@example.com
+...
+
+=== Removed (2) ===
+- 50 | Old User | old@example.com
+...
+
+=== Modified (3) ===
+~ Key: 10
+  [2] email: 'old@mail.com' → 'new@mail.com'
+...
+```
+
+**Exit codes:**
+- 0 - Файлы идентичны или сравнение успешно
+- 1 - Произошла ошибка
+
+---
+
+### --merge
+
+Объединить несколько TDTP файлов в один.
+
+**Синтаксис:**
+```bash
+tdtpcli --merge <file1,file2,file3,...> --output <result> [опции]
+```
+
+**Параметры:**
+- `<file1,file2,...>` - список файлов через запятую (минимум 2 файла)
+- `--output <file>` - выходной файл (обязательно)
+- `--merge-strategy <strategy>` - стратегия объединения (опционально, по умолчанию `union`)
+- `--key-fields <поля>` - ключевые поля для дедупликации (опционально, через запятую)
+- `--show-conflicts` - показать детальную информацию о конфликтах
+- `--compress` - сжимать результат с помощью zstd
+- `--compress-level <1-22>` - уровень сжатия (по умолчанию 3)
+
+**Стратегии объединения:**
+
+1. **union** (по умолчанию) - объединение всех уникальных строк с дедупликацией по ключу
+2. **intersection** - только строки, присутствующие во ВСЕХ файлах
+3. **left** / **left-priority** - при конфликте оставлять значение из первого файла
+4. **right** / **right-priority** - при конфликте оставлять значение из последнего файла
+5. **append** - просто объединить все строки без дедупликации
+
+**Примеры:**
+
+Объединить 3 файла (union с дедупликацией):
+```bash
+./tdtpcli --merge users-1.xml,users-2.xml,users-3.xml --output users-merged.xml
+```
+
+Intersection (только общие записи):
+```bash
+./tdtpcli --merge file1.xml,file2.xml --output common.xml --merge-strategy intersection
+```
+
+Left priority (при конфликтах - первый файл):
+```bash
+./tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy left --key-fields user_id
+```
+
+Right priority (при конфликтах - последний файл):
+```bash
+./tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy right --key-fields user_id
+```
+
+Append (без дедупликации):
+```bash
+./tdtpcli --merge part1.xml,part2.xml,part3.xml --output all.xml --merge-strategy append
+```
+
+С сжатием:
+```bash
+./tdtpcli --merge file1.xml,file2.xml --output merged.xml --compress --compress-level 9
+```
+
+Показать конфликты:
+```bash
+./tdtpcli --merge old.xml,new.xml --output result.xml --show-conflicts
+```
+
+**Вывод:**
+```
+=== Merge Statistics ===
+Packets merged: 3
+Total rows in:  300
+Total rows out: 250
+Duplicates:     50
+Conflicts:      10
+
+=== Conflicts ===
+Key 42: used_new
+Key 55: used_new
+...
+```
+
+**Примечания:**
+- Все файлы должны относиться к одной таблице
+- Схема (список полей) должна совпадать
+- Для дедупликации требуются ключевые поля (или primary key в схеме)
+
+---
+
+### --to-compact
+
+Конвертировать существующий TDTP v1.x файл в compact-формат v1.3.1.
+
+**Синтаксис:**
+```bash
+tdtpcli --to-compact <input-file> [--output <output-file>] --fixed-fields <поля> [-config <config.yaml>]
+```
+
+**Параметры:**
+- `<input-file>` - исходный TDTP файл (v1.0 или v1.3.x, обязательно)
+- `--output <file>` - выходной файл (опционально; если не задан — файл перезаписывается на месте)
+- `--fixed-fields <поля>` - список fixed-полей через запятую (если не задан — auto-detect по `_prefix` или данным)
+- `-config <config.yaml>` - конфигурационный файл (опционально, нужен только при подключении к БД)
+
+**Приоритет определения fixed-полей:**
+1. Явный `--fixed-fields f1,f2` — используются указанные поля
+2. `_prefix` — поля с именем, начинающимся на `_`, становятся fixed (имя `_dept_id` → `dept_id`)
+3. Анализ данных — поля с одинаковым значением по всем строкам помечаются как fixed
+
+**Примеры:**
+
+Конвертация с явным указанием fixed-полей:
+```bash
+./tdtpcli --to-compact employees_plain.tdtp.xml \
+  --output employees_compact.tdtp.xml \
+  --fixed-fields dept_id
+```
+
+Auto-detect по данным (VIEW с `_prefix`):
+```bash
+./tdtpcli --to-compact dept_report.tdtp.xml --output dept_report_compact.tdtp.xml
+```
+
+Конвертация на месте (overwrite):
+```bash
+./tdtpcli --to-compact report.tdtp.xml --fixed-fields dept_id,region
+```
+
+**Примечания:**
+- Версия пакета устанавливается в `1.3.1`, добавляется атрибут `compact="true"` в `<Data>`
+- Fixed-поля в `<Schema>` получают атрибут `fixed="true"`
+- Строки кодируются carry-forward: в каждой группе только первая строка содержит значения fixed-полей, остальные — пустые (`||`)
+- Совместим с `--compress`: можно скомбинировать compact + zstd-сжатие
+
+---
+
+## Рабочий процесс: --inspect → --test → --import
+
+### Понимание структуры vs. Контроль целостности
+
+Перед импортом внешнего файла рекомендуется выполнить два проверочных шага:
+
+```
+📋 --inspect   →  ЧТО в файле?       (структура, поля, типы, число строк)
+🔍 --test      →  ЦЕЛО ли это?       (распаковка, чексумма, completeness)
+📥 --import    →  Загрузка в БД
+```
+
+| Команда | Нужна БД? | Что проверяет |
+|---------|-----------|---------------|
+| `--inspect` | ❌ | Имена полей и типы, UUID, имя таблицы, число строк, сжатие, compact-формат |
+| `--test` | ❌ | Целостность данных: распаковка без ошибок, XXH3-чексумма, счётчик строк, все части multi-part набора |
+| `--import` | ✅ | Загружает данные в БД (меняет данные!) |
+
+### Типовой сценарий
+
+```bash
+# 1. Изучить файл — понять структуру
+tdtpcli --inspect delivery.tdtp.xml
+# file: delivery.tdtp.xml
+# table: orders
+# schema:
+#   fields: 8
+#   names: [OrderID, CustomerID, Total, ...]
+# data:
+#   rows: 5000
+# compressed: true  algo: zstd
+
+# 2. Убедиться в целостности
+tdtpcli --test delivery.tdtp.xml
+# ✓ algo=zstd, 5000 rows, decompressed 23ms, checksum OK
+
+# 3. Только после этого — импортировать
+tdtpcli --import delivery.tdtp.xml --config pg.yaml --strategy replace
+```
+
+### Параллельный экспорт и порядок пакетов
+
+Начиная с v1.8.0, экспорт использует **параллельную обработку пакетов** для максимальной скорости. Это означает:
+
+> ⚠️ **Порядок пакетов в multi-part файлах не гарантирован.**
+> `_part_1_of_4`, `_part_2_of_4` и т.д. — нумерация частей определяется порядком завершения
+> параллельных горутин, а не порядком строк в таблице.
+
+Это **не влияет на корректность данных** при импорте — `--import` собирает все части по `InReplyTo` UUID и восстанавливает полный набор независимо от порядка. Но важно понимать при ручной работе с файлами.
+
+`--test` всегда проверяет наличие **всех** частей и корректность `InReplyTo` у каждой.
+
+---
+
+## Compact Format (v1.3.1)
+
+TDTP v1.3.1 вводит **compact-формат** для эффективного хранения данных с повторяющимися значениями в группах строк.
+
+### Принцип работы
+
+Поля, помеченные как `fixed="true"` в схеме, записываются только один раз на группу строк (при первом появлении). Остальные строки группы содержат пустые значения на месте fixed-полей — это **carry-forward** (перенос значения вперёд).
+
+**Пример compact-файла:**
+```xml
+<DataPacket version="1.3.1" ...>
+  <Schema>
+    <Field name="dept_id"   type="INTEGER" fixed="true"/>
+    <Field name="dept_name" type="TEXT"    fixed="true"/>
+    <Field name="emp_id"    type="INTEGER"/>
+    <Field name="full_name" type="TEXT"/>
+  </Schema>
+  <Data compact="true">
+    <R>10|Sales|101|Ivan Petrov</R>     <!-- dept 10: header row -->
+    <R>|||102|Anna Sidorova</R>          <!-- dept 10: carry-forward -->
+    <R>|||103|Boris Kozlov</R>           <!-- dept 10: carry-forward -->
+    <R>20|Engineering|201|Alice Volkov</R> <!-- dept 20: новая группа -->
+    <R>|||202|Charlie Morozov</R>        <!-- dept 20: carry-forward -->
+  </Data>
+</DataPacket>
+```
+
+### Соглашение `_prefix`
+
+При экспорте VIEW, где колонки с групповыми данными имеют имя с `_` в начале, `--compact` автоматически:
+- Определяет эти поля как fixed
+- Удаляет `_` из имени в Schema (`_dept_id` → `dept_id`)
+
+```sql
+CREATE VIEW dept_employees_report AS
+SELECT
+    d.dept_id   AS _dept_id,    -- станет fixed="true", имя dept_id
+    d.dept_name AS _dept_name,  -- станет fixed="true", имя dept_name
+    e.emp_id,
+    e.full_name
+FROM employees e JOIN departments d ON e.dept_id = d.dept_id
+ORDER BY d.dept_id, e.emp_id;
+```
+
+### Экономия размера
+
+| Таблица | Обычный | Compact | Экономия |
+|---------|---------|---------|----------|
+| 15 строк, 3 группы × 5 emp, 3 fixed поля | 100% | ~60% | ~40% |
+| 1000 строк, 10 групп × 100 emp, 5 fixed полей | 100% | ~30% | ~70% |
+
+Эффективность растёт с количеством строк в группе и количеством fixed-полей.
+
+---
+
+## ETL Pipeline
+
+### --pipeline
+
+Выполнить ETL pipeline из YAML-конфигурации: загрузить несколько источников, трансформировать в in-memory SQLite workspace, экспортировать результат.
+
+Подробная документация с примерами: [docs/ETL_PIPELINE.md](ETL_PIPELINE.md)
+
+**Синтаксис:**
+```bash
+tdtpcli --pipeline <config.yaml> [--unsafe] [--enc] [--enc-dev]
+```
+
+**Параметры:**
+
+| Флаг | Описание |
+|------|----------|
+| `--pipeline <file>` | Путь к YAML-конфигурации pipeline |
+| `--unsafe` | Разрешить все SQL операции (требует права admin) |
+| `--enc` | Переопределить `output.tdtp.encryption: true` (шифрование через xZMercury) |
+| `--enc-dev` | Dev-режим: локальная генерация ключа без xZMercury (только !production сборки) |
+
+**Режимы безопасности SQL:**
+
+| Режим | SQL операции | Права |
+|-------|-------------|-------|
+| Safe (по умолчанию) | Только SELECT / WITH | Нет |
+| Unsafe (`--unsafe`) | Все операции | Admin |
+
+**Примеры:**
+
+Базовый запуск:
+```bash
+./tdtpcli --pipeline pipeline.yaml
+```
+
+Запуск с шифрованием (override):
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc
+```
+
+Dev-режим шифрования (ключ генерируется локально):
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc-dev
+```
+
+Unsafe mode:
+```bash
+sudo ./tdtpcli --pipeline pipeline.yaml --unsafe
+```
+
+**Вывод при успехе:**
+```
+Pipeline: employee-dept-report
+   Зарплатный отчёт по отделам
+   Version: 1.0
+   Mode: SAFE (READ-ONLY: SELECT/WITH only)
+   Sources: 2
+   Workspace: sqlite (:memory:)
+   Output: tdtp [ENC: xZMercury]
+
+Starting ETL pipeline execution...
+
+ETL Pipeline completed successfully!
+   Duration: 1.23s
+   Sources loaded: 2
+   Rows loaded: 14
+   Rows exported: 4
+   Package UUID: 550e8400-e29b-41d4-a716-446655440000
+```
+
+**Вывод при деградации xZMercury:**
+```
+WARNING: Encryption degraded: bind key: MERCURY_UNAVAILABLE: ...
+   Error packet written to output. Pipeline completed with errors (exit 0).
+```
+
+---
+
+## Шифрование AES-256-GCM
+
+TDTP CLI поддерживает шифрование выходного файла через **xZMercury UUID-binding флоу**:
+
+```
+tdtpcli ──→ POST /api/keys/bind ──→ xZMercury
+                                       │
+                                ┌──────┘
+                                │ {key_b64, hmac}
+                                ▼
+              Verify HMAC (MERCURY_SERVER_SECRET)
+                                │
+                                ▼
+              AES-256-GCM encrypt(XML, key)
+                                │
+                                ▼
+              Write .tdtp.enc (binary header + ciphertext)
+```
+
+### Конфигурация YAML
+
+```yaml
+output:
+  type: tdtp
+  tdtp:
+    destination: "out/report.tdtp.enc"
+    encryption: true          # активирует шифрование
+
+security:
+  mercury_url: "http://mercury:3000"
+  key_ttl_seconds: 86400      # TTL ключа (24 часа)
+  mercury_timeout_ms: 5000    # таймаут обращения к Mercury
+```
+
+### Переменные окружения
+
+```bash
+MERCURY_SERVER_SECRET=<secret>   # для верификации HMAC подписи ключа
+```
+
+### Тестирование с mock-сервером
+
+```bash
+# 1. Запустить mock xZMercury
+go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
+
+# 2. Установить секрет
+export MERCURY_SERVER_SECRET=dev-secret
+
+# 3. Запустить pipeline
+./tdtpcli --pipeline examples/encryption-test/pipeline-enc.yaml
+```
+
+### Dev-режим (без xZMercury)
+
+В dev-сборках (`go build` без тега `production`) доступен `--enc-dev`:
+
+```bash
+./tdtpcli --pipeline pipeline.yaml --enc-dev
+```
+
+- Ключ AES-256 генерируется локально
+- xZMercury НЕ нужен
+- HMAC не верифицируется
+- В production-сборке (`-tags production`) флаг недоступен
+
+### Формат зашифрованного файла
+
+```
+[2 байта: версия] [1 байт: алгоритм] [16 байт: package UUID]
+[12 байт: nonce AES-GCM] [N байт: ciphertext+tag]
+```
+
+### Graceful degradation
+
+При недоступности xZMercury:
+- Незашифрованные данные **не записываются**
+- В destination записывается `error` пакет (TDTP `Type=error`)
+- Pipeline завершается с **exit code 0**
+- ResultLog получает статус `completed_with_errors` с `package_uuid`
+
+---
+
+## Фильтрация данных (TDTQL)
+
+### Параметры фильтрации
+
+| Параметр | Описание | Пример |
+|----------|----------|--------|
+| `--where` | Условие фильтрации; **повторяемый** — несколько флагов объединяются через AND | `--where "age > 25"` |
+| `--order-by` | Сортировка | `--order-by "balance DESC"` |
+| `--limit` | Лимит записей | `--limit 100` |
+| `--offset` | Пропустить записей | `--offset 50` |
+
+### Имена полей с пробелами и спецсимволами
+
+Поля из MSSQL / MS Access часто содержат пробелы, `$`, `%`, `#` и другие символы. В TDTQL используйте **синтаксис квадратных скобок** — аналогично SSMS:
+
+```bash
+# Поле "Termination Date" из ZTR$Employee (MSSQL)
+# bash/zsh: таблица со $ — обязательно в одинарных кавычках с квадратными скобками
+tdtpcli --export '[ZTR$Employee]' --where '[Termination Date] = '"'"'1753-01-01'"'"'
+# PowerShell: таблица в одинарных, --where в двойных со значением в одинарных
+.\tdtpcli.exe --export '[ZTR$Employee]' --where "[Termination Date] = '1753-01-01'"
+
+# Поле "Total Cost $" из Access экспорта
+tdtpcli --export orders --where '[Total Cost $] > 100'
+
+# Поле с вопросительным знаком
+tdtpcli --export leads --where '[Is Active?] = 1'
+```
+
+Скобки снимаются при парсинге и имя поля правильно квотируется для каждой СУБД:
+- MSSQL: `[Termination Date]`
+- PostgreSQL / SQLite: `"Termination Date"`
+- MySQL: `` `Termination Date` ``
+
+Это работает для всех операторов: `=`, `>`, `IN`, `BETWEEN`, `IS NULL`, `LIKE`.
+
+### Операторы WHERE
+
+**Числовые сравнения:**
+```bash
+--where "age > 25"
+--where "balance >= 1000.50"
+--where "quantity < 10"
+--where "price <= 99.99"
+```
+
+**Текстовые совпадения:**
+```bash
+--where "username = 'admin'"
+--where "status != 'deleted'"
+```
+
+**Boolean:**
+```bash
+--where "is_active = 1"
+--where "is_verified = 0"
+```
+
+**NULL проверки:**
+```bash
+--where "deleted_at IS NULL"
+--where "email IS NOT NULL"
+```
+
+> **Важно:** Для проверки NULL всегда используй `IS NULL` / `IS NOT NULL`.
+> Конструкция `field = NULL` в SQL некорректна — всегда возвращает false.
+
+**Список значений (IN / NOT IN):**
+```bash
+--where "status IN (active,pending,review)"
+--where "dept_id IN (10,11,12)"
+--where "role NOT IN (guest,banned)"
+```
+
+Работает как с числами, так и со строками. Скобки обязательны.
+
+**Диапазон (BETWEEN):**
+```bash
+--where "age BETWEEN 18 AND 65"
+--where "salary BETWEEN 50000 AND 150000"
+```
+
+**Поиск по шаблону (LIKE):**
+```bash
+--where "email LIKE '%@gmail.com'"
+--where "name LIKE 'Иван%'"
+```
+
+**Несколько `--where` флагов (AND):**
+
+Каждый `--where` добавляет отдельное условие; все условия объединяются через AND:
+```bash
+./tdtpcli --export staff \
+  --where "dept_id IN (10,11,12)" \
+  --where "employment_type IN (1,2)" \
+  --where "salary > 30000"
+```
+
+Эквивалентно: `WHERE dept_id IN (10,11,12) AND employment_type IN (1,2) AND salary > 30000`
+
+### Сортировка
+
+**Одиночная:**
+```bash
+--order-by "created_at DESC"
+--order-by "username ASC"
+```
+
+**Множественная:**
+```bash
+--order-by "balance DESC, age ASC"
+--order-by "city ASC, created_at DESC"
+```
+
+### Пагинация
+
+**Первые 100 записей:**
+```bash
+--limit 100
+```
+
+**Записи 51-100 (пропустить первые 50):**
+```bash
+--limit 50 --offset 50
+```
+
+### Комбинированные запросы
+
+**Фильтр + Сортировка + Лимит:**
+```bash
+./tdtpcli -config config.postgres.yaml --export users \
+  --where "balance >= 5000" \
+  --order-by "balance DESC" \
+  --limit 20
+```
+
+**Пагинация + Фильтр:**
+```bash
+./tdtpcli -config config.postgres.yaml --export orders \
+  --where "status = 'completed'" \
+  --order-by "order_date DESC" \
+  --limit 50 --offset 100
+```
+
+### Фильтрация при экспорте в broker
+
+```bash
+./tdtpcli -config config.postgres.yaml --export-broker users \
+  --where "is_active = 1" \
+  --limit 1000
+```
+
+### Фильтрация при конвертации в CSV (`--to-csv`)
+
+`--to-csv` поддерживает **все те же TDTQL-фильтры**, что и `--export`. Фильтры применяются
+в памяти после чтения и декомпрессии пакета — без подключения к БД.
+
+**Совместимость:**
+- Обычные TDTP-файлы ✓
+- Сжатые (zstd / kanzi) ✓ — декомпрессия до фильтрации
+- Compact v1.3.1 ✓
+- v1.4 integrity-пакеты ✓ — хэши верифицируются до фильтрации
+
+**Только нужные колонки (`--fields`):**
+```bash
+# Простые имена
+tdtpcli --to-csv users.tdtp.xml --fields 'id,email,balance'
+
+# Имена с пробелами — квадратные скобки
+tdtpcli --to-csv staff.tdtp.xml --fields '[Last Name],[Birth Date],salary'
+```
+
+**Фильтрация строк (`--where`):**
+```bash
+# Числовое условие
+tdtpcli --to-csv orders.tdtp.xml --where 'total > 1000'
+
+# Текстовое условие
+tdtpcli --to-csv users.tdtp.xml --where "status = 'active'"
+
+# Несколько условий (AND)
+tdtpcli --to-csv orders.tdtp.xml \
+  --where 'total > 500' \
+  --where "status = 'completed'"
+```
+
+**Сортировка и лимит:**
+```bash
+# Топ-10 по сумме
+tdtpcli --to-csv orders.tdtp.xml \
+  --order-by 'total DESC' \
+  --limit 10
+
+# Последние 100 событий (tail-режим)
+tdtpcli --to-csv events.tdtp.xml \
+  --order-by 'created_at ASC' \
+  --limit -100
+```
+
+**Комбинированный запрос:**
+```bash
+tdtpcli --to-csv orders.tdtp.xml \
+  --fields 'id,customer_id,total,status' \
+  --where "status = 'completed'" \
+  --where 'total >= 1000' \
+  --order-by 'total DESC' \
+  --limit 50 \
+  --delimiter ';' --bom \
+  --output top_orders.csv
+```
+
+---
+
+## Работа с Message Brokers
+
+### RabbitMQ
+
+**Локальный RabbitMQ (без TLS):**
+```yaml
+broker:
+  type: rabbitmq
+  host: localhost
+  port: 5672
+  user: guest
+  password: guest
+  queue: tdtp_queue
+  vhost: /
+  durable: true
+  auto_delete: false
+  exclusive: false
+```
+
+**Managed RabbitMQ с TLS (CloudAMQP, Amazon MQ и т.д.):**
+```yaml
+broker:
+  type: rabbitmq
+  host: seal.lmq.cloudamqp.com
+  port: 5671              # TLS порт
+  user: myuser
+  password: mypassword
+  vhost: myuser           # у CloudAMQP vhost = имя пользователя
+  queue: myqueue
+  use_tls: true
+  tls_skip_verify: true   # если сертификат self-signed или от managed-провайдера
+  passive_declare: true   # очередь уже существует — не трогаем её параметры
+```
+
+**Параметры очереди:**
+- `durable: true` — очередь сохраняется при перезапуске RabbitMQ
+- `auto_delete: false` — очередь не удаляется автоматически
+- `exclusive: false` — очередь доступна для нескольких подключений
+- `passive_declare: true` — **не создавать** очередь, только подключиться к существующей; спасает от ошибки `406 PRECONDITION_FAILED` когда очередь создана сторонней системой с другими параметрами
+
+> **Когда использовать `passive_declare: true`?**
+> Когда очередь создана другим сервисом (Spring Boot, PHP consumer и т.д.) и вы не знаете или не контролируете её параметры. tdtpcli просто подключится к очереди не пытаясь её пересоздать.
+
+**Типичный workflow:**
+
+1. **Система A** - экспорт данных:
+```bash
+./tdtpcli -config config.postgres.yaml --export-broker users --where "updated_at >= '2025-11-16'"
+```
+
+2. **Система B** - импорт данных:
+```bash
+./tdtpcli -config config.sqlite.yaml --import-broker
+```
+
+### MSMQ (Windows)
+
+**Настройка конфигурации:**
+```yaml
+broker:
+  type: msmq
+  queue: .\\private$\\tdtp_queue
+```
+
+**Особенности:**
+- Работает только на Windows
+- Использует локальные или сетевые очереди MSMQ
+- Поддерживает транзакционные очереди
+
+**Пример:**
+```bash
+tdtpcli.exe -config config.mssql.yaml --export-broker users
+```
+
+---
+
+## Примеры использования
+
+### Пример 1: Синхронизация справочников между PostgreSQL и SQLite
+
+**Задача:** Синхронизировать справочник пользователей из PostgreSQL в SQLite.
+
+**Шаг 1:** Экспорт из PostgreSQL в файл
+```bash
+./tdtpcli -config config.postgres.yaml --export users --output users.tdtp.xml
+```
+
+**Шаг 2:** Импорт в SQLite
+```bash
+./tdtpcli -config config.sqlite.yaml --import users.tdtp.xml
+```
+
+### Пример 2: Выборочный экспорт активных пользователей
+
+**Задача:** Экспортировать только активных пользователей с балансом > 1000.
+
+```bash
+./tdtpcli -config config.postgres.yaml --export users \
+  --where "is_active = 1" \
+  --where "balance > 1000" \
+  --order-by "balance DESC" \
+  --output active_users.tdtp.xml
+```
+
+**Примечание:** `--where` — повторяемый флаг; несколько условий автоматически объединяются через AND.
+
+### Пример 3: Репликация через RabbitMQ
+
+**Задача:** Непрерывная репликация заказов из MS SQL в PostgreSQL через RabbitMQ.
+
+**Терминал 1 (MS SQL - Publisher):**
+```bash
+# Экспорт новых заказов каждые 5 минут (через cron/scheduled task)
+./tdtpcli -config config.mssql.yaml --export-broker orders \
+  --where "created_at >= '2025-11-16 12:00:00'"
+```
+
+**Терминал 2 (PostgreSQL - Subscriber):**
+```bash
+# Непрерывное ожидание сообщений
+./tdtpcli -config config.postgres.yaml --import-broker
+```
+
+### Пример 4: Топ-20 клиентов по балансу
+
+**Задача:** Получить топ-20 клиентов с максимальным балансом.
+
+```bash
+./tdtpcli -config config.postgres.yaml --export customers \
+  --order-by "balance DESC" \
+  --limit 20 \
+  --output top_customers.tdtp.xml
+```
+
+### Пример 5: Пагинация больших таблиц
+
+**Задача:** Экспортировать таблицу с миллионом записей порциями по 10000.
+
+```bash
+# Первая порция (0-9999)
+./tdtpcli -config config.postgres.yaml --export large_table \
+  --limit 10000 --offset 0 --output part_01.tdtp.xml
+
+# Вторая порция (10000-19999)
+./tdtpcli -config config.postgres.yaml --export large_table \
+  --limit 10000 --offset 10000 --output part_02.tdtp.xml
+
+# И так далее...
+```
+
+### Пример 6: Экспорт в stdout и обработка
+
+**Задача:** Экспортировать данные и сразу обработать через pipe.
+
+```bash
+./tdtpcli -config config.postgres.yaml --export users | \
+  grep "balance" | \
+  wc -l
+```
+
+---
+
+## Устранение неполадок
+
+### Проблема: "Database connection failed"
+
+**Симптомы:**
+```
+❌ Error connecting to database: connection refused
+```
+
+**Решение:**
+1. Проверьте, что БД запущена:
+   ```bash
+   # PostgreSQL
+   sudo systemctl status postgresql
+
+   # MS SQL (Docker)
+   docker ps | grep mssql
+   ```
+
+2. Проверьте параметры подключения в config.yaml
+3. Проверьте firewall и доступность порта:
+   ```bash
+   telnet localhost 5432
+   ```
+
+### Проблема: "Table not found"
+
+**Симптомы:**
+```
+❌ Table 'users' does not exist
+```
+
+**Решение:**
+1. Проверьте список таблиц:
+   ```bash
+   ./tdtpcli -config config.yaml --list
+   ```
+
+2. Для PostgreSQL проверьте схему:
+   ```yaml
+   database:
+     schema: public  # или другая схема
+   ```
+
+### Проблема: "Permission denied"
+
+**Симптомы:**
+```
+❌ Error: permission denied for table users
+```
+
+**Решение:**
+1. Проверьте права пользователя БД
+2. Для PostgreSQL:
+   ```sql
+   GRANT SELECT, INSERT, UPDATE ON TABLE users TO tdtp_user;
+   ```
+
+### Проблема: "Broker connection failed"
+
+**Симптомы:**
+```
+❌ Failed to connect to broker: dial tcp: connection refused
+```
+
+**Решение:**
+1. Проверьте, что RabbitMQ запущен:
+   ```bash
+   sudo systemctl status rabbitmq-server
+   ```
+
+2. Проверьте параметры подключения:
+   ```yaml
+   broker:
+     host: localhost  # правильный хост?
+     port: 5672       # правильный порт?
+   ```
+
+3. Проверьте учетные данные:
+   ```bash
+   # RabbitMQ default: guest/guest (только для localhost)
+   ```
+
+### Проблема: "Packet too large"
+
+**Симптомы:**
+```
+⚠️ Warning: Packet size exceeds recommended limit
+```
+
+**Решение:**
+1. Используйте фильтрацию для уменьшения размера:
+   ```bash
+   --limit 1000
+   ```
+
+2. Модифицируйте `MaxMessageSize` в коде:
+   ```go
+   generator.SetMaxMessageSize(5000000) // 5MB
+   ```
+
+### Проблема: "Invalid TDTP format"
+
+**Симптомы:**
+```
+❌ Failed to parse TDTP file: invalid XML
+```
+
+**Решение:**
+1. Проверьте, что файл является валидным XML:
+   ```bash
+   xmllint --noout users.tdtp.xml
+   ```
+
+2. Убедитесь, что файл не поврежден
+3. Проверьте, что файл создан tdtpcli, а не вручную
+
+---
+
+## Дополнительные ресурсы
+
+- **[SPECIFICATION.md](SPECIFICATION.md)** - полная спецификация TDTP v1.3.1 (включая Compact Format и Special Values)
+- **[MODULES.md](MODULES.md)** - описание модулей фреймворка
+- **[PACKET_MODULE.md](PACKET_MODULE.md)** - API для работы с пакетами
+- **[SCHEMA_MODULE.md](SCHEMA_MODULE.md)** - валидация и типы данных
+- **[TDTQL_TRANSLATOR.md](TDTQL_TRANSLATOR.md)** - язык запросов TDTQL
+
+---
+
+## Обратная связь
+
+Нашли баг или хотите предложить улучшение?
+
+- **GitHub Issues:** https://github.com/ruslano69/tdtp-framework/issues
+- **Email:** ruslano69@gmail.com
+
+---
+
+---
+
+## CLI Usage Examples
+
+```bash
+# List tables
+tdtpcli --list --config pg.yaml
+
+# Export table
+tdtpcli --export users --output users.xml
+
+# Inspect TDTP file metadata (no database connection needed)
+tdtpcli --inspect users.xml
+
+# Test file integrity before import (checksum, row count, multi-part)
+tdtpcli --test users.xml
+
+# Recommended pre-import workflow:
+tdtpcli --inspect delivery.xml   # understand structure
+tdtpcli --test    delivery.xml   # verify integrity
+tdtpcli --import  delivery.xml   # load to DB
+
+# Export only specific columns (column projection)
+tdtpcli --export clients --fields id,email,status --output clients_slim.xml
+
+# Export with bracket-quoted field names (spaces/special chars)
+tdtpcli --export orders --where "[Termination Date] = '1753-01-01'"
+tdtpcli --export orders --fields "id,[Birth Date],status"
+
+# Export with column projection + filter + compression
+tdtpcli --export orders --fields order_id,amount,status --where 'status = active' --compress
+
+# Export with kanzi compression (4× denser than raw, ideal for large text)
+tdtpcli --export operations_log --compress --compress-algo kanzi --compress-level 6 --output ops.xml
+
+# Export with compression + XXH3 integrity checksum
+tdtpcli --export orders --compress --hash --output orders.xml
+
+# Archive-quality: kanzi max + checksum + large packet for broker
+tdtpcli --export payroll --compress --compress-algo kanzi --compress-level 7 --hash --packet-size 8 --output archive.xml
+
+# Encrypt export (AES-256-GCM, burn-on-read key via xZMercury)
+tdtpcli --export financials --enc --output financials.tdtp.xml
+# → writes financials.tdtp.enc
+
+# Import encrypted file (auto-detected by .tdtp.enc extension)
+tdtpcli --import financials.tdtp.enc
+
+# Convert encrypted file to Excel or HTML
+tdtpcli --to-xlsx financials.tdtp.enc --output financials.xlsx
+tdtpcli --to-html financials.tdtp.enc --open
+
+# Import only specific columns from a wide TDTP file
+tdtpcli --import clients_full.xml --fields id,email,status --table clients_slim
+
+# Import Access export with exotic field names (%, spaces, #, etc.)
+tdtpcli --import access_export.xml --clear --strategy replace
+
+# Import ERP export with Cyrillic field names — transliterate + clean
+tdtpcli --import erp_orders.xml --translit --clear --strategy replace
+
+# Export with filters and compression
+tdtpcli --export orders --where 'status = active AND amount > 1000' --limit 100 --compress
+
+# Filter by list of values (IN operator)
+tdtpcli --export staff --where 'dept_id IN (10,11,12)'
+
+# Multiple --where flags combined with AND
+tdtpcli --export staff --where 'dept_id IN (10,11,12)' --where 'employment_type IN (1,2)'
+
+# Export last 50 rows (tail mode)
+tdtpcli --export logs --order-by 'created_at DESC' --limit -50
+
+# View data in browser
+tdtpcli --to-html customers.xml --open
+
+# View rows 100-500
+tdtpcli --to-html data.xml --row 100-500 --open
+
+# View last 20 rows from range
+tdtpcli --to-html data.xml --row 100-500 --limit -20 --open
+
+# Export directly to Excel
+tdtpcli --export-xlsx orders --output orders.xlsx
+
+# Convert TDTP to Excel with sheet name
+tdtpcli --to-xlsx orders.xml --output orders.xlsx --sheet Orders
+
+# Convert Excel to TDTP
+tdtpcli --from-xlsx orders.xlsx --output orders.xml
+
+# Import Excel to database
+tdtpcli --import-xlsx orders.xlsx --strategy replace
+
+# Compare two TDTP files
+tdtpcli --diff users-old.xml users-new.xml
+
+# Compare with key fields and ignore fields
+tdtpcli --diff old.xml new.xml --key-fields user_id --ignore-fields updated_at
+
+# Merge multiple files (union strategy)
+tdtpcli --merge file1.xml,file2.xml,file3.xml --output merged.xml
+
+# Merge with conflict resolution
+tdtpcli --merge old.xml,new.xml --output result.xml --merge-strategy right --show-conflicts
+
+# Incremental synchronization
+tdtpcli --sync-incremental orders --tracking-field updated_at --checkpoint-file orders.yaml
+
+# Export with PII masking
+tdtpcli --export customers --mask email,phone
+
+# ETL pipeline (safe mode)
+tdtpcli --pipeline pipeline.yaml
+
+# ETL pipeline (unsafe mode, requires admin)
+sudo tdtpcli --pipeline pipeline.yaml --unsafe
+
+# Create configuration file
+tdtpcli --create-config-pg > config.yaml
+tdtpcli --create-config-mysql > mysql.yaml
+
+# --- Broker Operations ---
+
+# Export to Kafka with kanzi compression (parallel compress + SendBatch)
+tdtpcli --export-broker users --compress --compress-algo kanzi --compress-level 6 --config kafka.yaml
+
+# Import from RabbitMQ / Kafka to database (atomic by default)
+tdtpcli --import-broker --config rabbitmq.yaml
+tdtpcli --import-broker --config kafka.yaml --strategy replace
+
+# Import from broker — save as TDTP files instead of importing to DB
+tdtpcli --import-broker --output users.xml --config kafka.yaml
+
+# Import from broker — save raw bytes (no parse/decompress)
+tdtpcli --import-broker --raw --output users.bin --config kafka.yaml
+
+# Streaming consumer daemon — Kafka only (production-ready)
+tdtpcli --listen --config kafka.yaml --strategy replace
+
+# --- Object Storage (S3 / SeaweedFS / MinIO) ---
+
+# Export table to S3 (multi-part automatic)
+tdtpcli --export users --output s3://my-bucket/exports/users.tdtp.xml
+
+# Export with compression + filter → S3
+tdtpcli --export orders \
+  --where "status = active" --where "amount > 1000" \
+  --compress --compress-level 3 \
+  --output s3://my-bucket/exports/orders_active.tdtp.xml
+
+# Export with checksum integrity
+tdtpcli --export users --compress --hash \
+  --output s3://my-bucket/exports/users.tdtp.xml
+
+# Import from S3 (all _part_N_of_M files discovered automatically)
+tdtpcli --import s3://my-bucket/exports/users.tdtp.xml --strategy replace
+
+# Import only selected columns from S3
+tdtpcli --import s3://my-bucket/exports/users.tdtp.xml \
+  --fields "id,email,balance" --table users_slim
+
+# Inspect a packet in S3 without downloading full data
+tdtpcli --inspect s3://my-bucket/exports/users.tdtp_part_1_of_6.xml
+
+# Test a file in S3 before import
+tdtpcli --test s3://my-bucket/exports/users.tdtp.xml
+
+# Export table directly to XLSX in S3
+tdtpcli --export-xlsx users --output s3://my-bucket/reports/users.xlsx
+
+# Convert local TDTP to XLSX and upload to S3
+tdtpcli --to-xlsx users.tdtp.xml --output s3://my-bucket/reports/users.xlsx
+
+# S3 → S3: convert compressed TDTP in S3 to XLSX in S3
+tdtpcli --to-xlsx s3://my-bucket/exports/users.tdtp_part_1_of_6.xml \
+  --output s3://my-bucket/reports/users_part1.xlsx
+```
