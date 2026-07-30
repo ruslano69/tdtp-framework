@@ -34,6 +34,11 @@ Paths mirror the repository, so `docs/README.md` archives as
 | `docs/xZMercury-TDTP-TZ-v1.2.md` | `docs/xZMercury-TDTP-TZ-v1.2.md` | never — see below |
 | `CLAUDE.md` | `CLAUDE.md` | 2026-07-30 |
 | `AGENTS.md` | `AGENTS.md` | 2026-07-30 |
+| `pkg/xlsx/README.md` | `pkg/xlsx/README.md` | 2026-07-30 |
+| `pkg/retry/README.md` | `pkg/retry/README.md` | 2026-07-30 |
+| `pkg/sync/README.md` | `pkg/sync/README.md` | 2026-07-30 |
+| `pkg/adapters/postgres/README.md` | `pkg/adapters/postgres/README.md` | 2026-07-30 |
+| `pkg/adapters/mysql/README.md` | `pkg/adapters/mysql/README.md` | 2026-07-30 |
 
 ## The xZMercury statement of work is archived, not translated
 

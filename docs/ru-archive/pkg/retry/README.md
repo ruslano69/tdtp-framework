@@ -91,36 +91,36 @@ for _, entry := range entries {
 
 ```go
 type Config struct {
-    // Enabled turns retrying on
+    // Enabled - включить retry механизм
     Enabled bool
 
-    // MaxAttempts caps the attempts (0 = unlimited)
+    // MaxAttempts - максимальное количество попыток (0 = бесконечно)
     MaxAttempts int
 
-    // InitialDelay is the first wait between attempts
+    // InitialDelay - начальная задержка между попытками
     InitialDelay time.Duration
 
-    // MaxDelay caps the wait between attempts
+    // MaxDelay - максимальная задержка между попытками
     MaxDelay time.Duration
 
-    // BackoffStrategy is how the wait grows
-    // One of: BackoffConstant, BackoffLinear, BackoffExponential
+    // BackoffStrategy - стратегия увеличения задержки
+    // Варианты: BackoffConstant, BackoffLinear, BackoffExponential
     BackoffStrategy BackoffStrategy
 
-    // BackoffMultiplier is the factor for exponential backoff
+    // BackoffMultiplier - множитель для exponential backoff
     BackoffMultiplier float64
 
-    // Jitter adds randomness to avoid a thundering herd (0.0-1.0)
+    // Jitter - случайность для предотвращения thundering herd (0.0-1.0)
     Jitter float64
 
-    // RetryableErrors lists the errors worth retrying
-    // Empty means retry on any error
+    // RetryableErrors - список ошибок, для которых делать retry
+    // Если пустой, retry для всех ошибок
     RetryableErrors []string
 
-    // OnRetry is called before each retry
+    // OnRetry - callback функция перед каждой попыткой retry
     OnRetry func(attempt int, err error, delay time.Duration)
 
-    // DLQ configures the dead letter queue
+    // DLQ - конфигурация Dead Letter Queue
     DLQ DLQConfig
 }
 ```
@@ -198,17 +198,17 @@ DLQ stores messages that failed after maximum retry attempts for later analysis 
 
 ```go
 type DLQConfig struct {
-    // Enabled turns the DLQ on
+    // Enabled - включить DLQ
     Enabled bool
 
-    // FilePath is where the DLQ is stored
+    // FilePath - путь к файлу для хранения DLQ
     FilePath string
 
-    // MaxSize caps the entry count (0 = unlimited)
-    // Past the cap, the oldest entries are dropped
+    // MaxSize - максимальное количество записей (0 = без ограничений)
+    // При превышении удаляются самые старые
     MaxSize int
 
-    // RetentionPeriod is how long entries are kept (0 = forever)
+    // RetentionPeriod - период хранения записей (0 = вечно)
     RetentionPeriod time.Duration
 }
 ```

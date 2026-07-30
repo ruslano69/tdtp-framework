@@ -1,29 +1,29 @@
-# MySQL Adapter для TDTP Framework
+# MySQL adapter
 
-Высокопроизводительный адаптер для работы с MySQL/MariaDB базами данных.
+A high-throughput adapter for MySQL and MariaDB.
 
-> **Статус: полностью рабочий** — 58/58 CLI integration tests pass (MySQL 8.4, 2026-04-21)
+> **Status: fully working** — 58/58 CLI integration tests pass (MySQL 8.4, 2026-04-21)
 
-## 🎯 Особенности
+## What it does
 
-- ✅ **Полная поддержка TDTP спецификации**
-- ✅ **Использование schema.Converter** для строгой типизации
-- ✅ **Все стратегии импорта**: Replace (ON DUPLICATE KEY UPDATE), Ignore (INSERT IGNORE), Fail, Copy
-- ✅ **TDTQL фильтрация** с оптимизацией на уровне SQL (WHERE, ORDER BY, LIMIT/OFFSET, IN)
-- ✅ **Bracket-quoted имена** с пробелами и `$` (NAV/BC/ERP-стиль)
-- ✅ **Правильная обработка ошибок** через MySQL driver типы
-- ✅ **Транзакционная безопасность**
-- ✅ **Поддержка всех MySQL типов данных**
-- ✅ **Compact format** (v1.3.1), сжатие zstd/kanzi, хэш-верификация
-- ✅ **Cross-DB roundtrip**: MySQL → MySQL и MySQL → SQLite
+- **The full TDTP specification**
+- **Uses `schema.Converter`** for strict typing
+- **Every import strategy**: Replace (ON DUPLICATE KEY UPDATE), Ignore (INSERT IGNORE), Fail, Copy
+- **TDTQL filtering** pushed down into SQL (WHERE, ORDER BY, LIMIT/OFFSET, IN)
+- **Bracket-quoted names** containing spaces and `$` — the NAV, BC and ERP style
+- **Errors handled properly**, through the MySQL driver's own types
+- **Transactional safety**
+- **Every MySQL data type**
+- **Compact format** (v1.3.1), zstd and kanzi compression, hash verification
+- **Cross-database round-trip**: MySQL to MySQL, and MySQL to SQLite
 
-## 📦 Установка
+## Installing
 
 ```bash
 go get github.com/go-sql-driver/mysql
 ```
 
-## 🚀 Быстрый старт
+## Quick start
 
 ```go
 package main
@@ -39,7 +39,7 @@ import (
 func main() {
     ctx := context.Background()
 
-    // Подключение к MySQL
+    // Connect to MySQL
     adapter, err := adapters.New("mysql", adapters.Config{
         DSN: "user:password@tcp(localhost:3306)/dbname?parseTime=true",
     })
@@ -48,7 +48,7 @@ func main() {
     }
     defer adapter.Close(ctx)
 
-    // Экспорт данных
+    // Export the data
     packets, err := adapter.ExportTable(ctx, "users")
     if err != nil {
         panic(err)
@@ -58,77 +58,77 @@ func main() {
 }
 ```
 
-## 🔧 Конфигурация DSN
+## The DSN
 
-### Базовый формат
+### Basic form
 ```
-user:password@tcp(host:port)/dbname?параметры
+user:password@tcp(host:port)/dbname?parameters
 ```
 
-### Рекомендуемые параметры
+### Recommended parameters
 ```
 user:password@tcp(localhost:3306)/mydb?parseTime=true&charset=utf8mb4&loc=UTC
 ```
 
-**Важные параметры:**
-- `parseTime=true` - автоматический парсинг DATE/DATETIME/TIMESTAMP
-- `charset=utf8mb4` - полная поддержка Unicode
-- `loc=UTC` - временная зона для TIMESTAMP
+**The ones that matter:**
+- `parseTime=true` — parses DATE, DATETIME and TIMESTAMP for you
+- `charset=utf8mb4` — full Unicode
+- `loc=UTC` — the time zone for TIMESTAMP
 
-## 📋 Поддерживаемые типы данных
+## Supported data types
 
-### Маппинг TDTP → MySQL
+### TDTP to MySQL
 
-| TDTP Type | MySQL Type | Примечания |
+| TDTP type | MySQL type | Notes |
 |-----------|------------|------------|
-| INTEGER | BIGINT | INT для Length ≤ 4 |
+| INTEGER | BIGINT | INT when Length ≤ 4 |
 | REAL | FLOAT | - |
 | DOUBLE | DOUBLE | - |
-| DECIMAL(p,s) | DECIMAL(p,s) | По умолчанию (18,2) |
-| TEXT | VARCHAR(n) / TEXT | VARCHAR до 65535 |
-| VARCHAR(n) | VARCHAR(n) | По умолчанию 255 |
-| CHAR(n) | CHAR(n) | По умолчанию 1 |
+| DECIMAL(p,s) | DECIMAL(p,s) | Defaults to (18,2) |
+| TEXT | VARCHAR(n) / TEXT | VARCHAR up to 65535 |
+| VARCHAR(n) | VARCHAR(n) | Defaults to 255 |
+| CHAR(n) | CHAR(n) | Defaults to 1 |
 | BOOLEAN | TINYINT(1) | 0/1 |
 | DATE | DATE | YYYY-MM-DD |
-| DATETIME | DATETIME | С timezone |
+| DATETIME | DATETIME | With a time zone |
 | TIMESTAMP | TIMESTAMP | UTC |
-| BLOB | BLOB | Base64 в TDTP |
+| BLOB | BLOB | Base64 inside TDTP |
 
-## 🔄 Стратегии импорта
+## Import strategies
 
 ### 1. StrategyReplace (UPSERT)
 ```go
 // INSERT ... ON DUPLICATE KEY UPDATE
 err := adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
 ```
-- При совпадении PK → UPDATE существующей записи
-- При отсутствии PK → использует REPLACE INTO
+- On a primary-key match → UPDATE the existing row
+- With no primary key → REPLACE INTO
 
 ### 2. StrategyIgnore
 ```go
 // INSERT IGNORE
 err := adapter.ImportPacket(ctx, pkt, adapters.StrategyIgnore)
 ```
-- Пропускает дубликаты без ошибок
-- Оптимальная производительность
+- Duplicates are skipped without an error
+- The fastest option
 
 ### 3. StrategyFail
 ```go
 // INSERT
 err := adapter.ImportPacket(ctx, pkt, adapters.StrategyFail)
 ```
-- Возвращает ошибку при дубликатах
-- Строгий контроль данных
+- Returns an error on a duplicate
+- Strict control over what lands
 
 ### 4. StrategyCopy
 ```go
-// Аналог INSERT (MySQL не имеет COPY)
+// Equivalent to INSERT — MySQL has no COPY
 err := adapter.ImportPacket(ctx, pkt, adapters.StrategyCopy)
 ```
 
-## 🔍 TDTQL Фильтрация
+## TDTQL filtering
 
-### Оптимизированный SQL-путь
+### The pushed-down SQL path
 ```go
 query := &packet.Query{
     Filters: &packet.Filters{
@@ -145,49 +145,49 @@ query := &packet.Query{
 packets, err := adapter.ExportTableWithQuery(ctx, "users", query, "", "")
 ```
 
-**Автоматическая трансляция** TDTQL → MySQL SQL с:
-- Обратными кавычками для идентификаторов
-- Нативной поддержкой LIMIT/OFFSET
-- Оптимизацией на уровне БД
+**TDTQL is translated into MySQL SQL automatically**, with:
+- backticks around identifiers
+- native LIMIT and OFFSET
+- the database doing the optimising
 
-### Fallback на in-memory
-Если SQL-трансляция невозможна → автоматическая фильтрация в памяти.
+### The in-memory fallback
+Where the translation is not possible, filtering falls back to memory automatically.
 
-## ⚡ Производительность
+## Performance
 
 ### Batch Insert
 ```go
 packets := []*packet.DataPacket{pkt1, pkt2, pkt3}
 err := adapter.ImportPackets(ctx, packets, adapters.StrategyReplace)
-// Все пакеты в одной транзакции
+// Every packet in one transaction
 ```
 
-### Оптимизация запросов
-- Использование подготовленных statements
-- Транзакционная обработка множественных пакетов
-- Прямая SQL-фильтрация (избегает загрузки всей таблицы)
+### Query handling
+- prepared statements throughout
+- multiple packets handled in one transaction
+- filtering in SQL, so the whole table is never loaded
 
-## 🛡️ Обработка ошибок
+## Error handling
 
 ### Duplicate Key
 ```go
 if err != nil {
     if mysqlErr, ok := err.(*mysql.MySQLError); ok {
         if mysqlErr.Number == 1062 {
-            // Обработка дубликата ключа
+            // Handle a duplicate key
         }
     }
 }
 ```
 
-### Типы ошибок
+### Error kinds
 - **1062** - Duplicate entry (PRIMARY/UNIQUE KEY)
 - **1451** - Foreign key constraint
 - **1452** - Cannot add or update child row
 
-## 📊 Примеры использования
+## Worked examples
 
-### Экспорт с фильтрацией
+### Export with a filter
 ```go
 query := &packet.Query{
     Filters: &packet.Filters{
@@ -206,57 +206,57 @@ query := &packet.Query{
 packets, _ := adapter.ExportTableWithQuery(ctx, "users", query, "sender", "recipient")
 ```
 
-### Импорт с автосозданием таблицы
+### Import, creating the table
 ```go
-// Адаптер автоматически создаст таблицу если её нет
+// The adapter creates the table if it is missing
 err := adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
 ```
 
-### Получение метаданных
+### Reading metadata
 ```go
-// Схема таблицы
+// The table's schema
 schema, err := adapter.GetTableSchema(ctx, "users")
 
-// Количество строк
+// Row count
 count, err := adapter.GetTableRowCount(ctx, "users")
 
-// Размер таблицы
+// Table size
 size, err := adapter.GetTableSize(ctx, "users")
 ```
 
-## 🔧 Технические детали
+## Implementation notes
 
 ### Type Conversion
-Использует `schema.Converter` для:
-- Валидации типов данных
-- Конвертации TDTP ↔ MySQL
-- Поддержки precision/scale для DECIMAL
-- Правильного форматирования DATE/DATETIME/TIMESTAMP
-- Base64 кодирования для BLOB
+`schema.Converter` handles:
+- type validation
+- conversion between TDTP and MySQL
+- precision and scale for DECIMAL
+- formatting DATE, DATETIME and TIMESTAMP correctly
+- base64 for BLOB
 
 ### Transaction Safety
-- Все операции импорта выполняются в транзакциях
-- Автоматический ROLLBACK при ошибках
-- Поддержка множественных пакетов в одной транзакции
+- every import runs in a transaction
+- ROLLBACK on any error
+- several packets can share one transaction
 
 ### SQL Generation
-- Автоматическое экранирование идентификаторов (`)
-- Параметризованные запросы (защита от SQL-injection)
-- Оптимизация с использованием индексов
+- identifiers are escaped automatically (with backticks)
+- parameterised queries, against SQL injection
+- indexes are used where they help
 
 ## 🎓 Best Practices
 
-1. **Всегда используйте `parseTime=true`** в DSN для работы с временными типами
-2. **Используйте `charset=utf8mb4`** для полной поддержки Unicode
-3. **Создавайте индексы** на полях, используемых в фильтрах
-4. **Используйте StrategyReplace** для idempotent операций
-5. **Обрабатывайте ошибки** через типы MySQL driver
+1. **Always set `parseTime=true`** in the DSN if you touch temporal types
+2. **Use `charset=utf8mb4`** for full Unicode
+3. **Index the fields you filter on**
+4. **Use StrategyReplace** where the operation must be idempotent
+5. **Handle errors** through the MySQL driver's types
 
-## ✅ Статус тестирования
+## Test status
 
 CLI integration tests: **58 / 58 PASS** (MySQL 8.4.9, 2026-04-21)
 
-| Группа | Описание | Тесты |
+| Group | What it covers | Tests |
 |--------|----------|-------|
 | T1 | Basic Export (rows, fields, list) | 4 |
 | T2 | TDTQL Filters (WHERE, IN, ORDER BY, LIMIT, bracket-quoted) | 9 |
@@ -269,26 +269,26 @@ CLI integration tests: **58 / 58 PASS** (MySQL 8.4.9, 2026-04-21)
 | T9 | Diff | 7 |
 | T10 | Merge (union, intersection, append, left/right priority) | 9 |
 
-Запуск тестов:
+Running them:
 ```bash
-# 1. Поднять контейнер (из корня репозитория)
+# 1. Start the container, from the repository root
 docker compose up -d mysql
 
-# 2. Запустить тесты
+# 2. Run the tests
 TDTPCLI_BIN=/tmp/tdtpcli.exe py -3 tests/cli/test_mysql.py
 
-# 3. Только одна группа
+# 3. Just one group
 TDTPCLI_BIN=/tmp/tdtpcli.exe py -3 tests/cli/test_mysql.py T4
 ```
 
-## 📝 Совместимость
+## Compatibility
 
 - ✅ MySQL 5.7+
 - ✅ MySQL 8.0+ (integration-tested on 8.4.9)
 - ✅ MariaDB 10.3+
 - ✅ Percona Server 5.7+
 
-## 🔗 Ссылки
+## Links
 
 - [MySQL Driver Documentation](https://github.com/go-sql-driver/mysql)
 - [TDTP Specification](../../docs/TDTP_SPEC.md)

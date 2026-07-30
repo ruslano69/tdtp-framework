@@ -1,27 +1,27 @@
 # PostgreSQL Adapter - TDTP Framework
 
-The PostgreSQL adapter: two-way integration with PostgreSQL 12 and later.
+PostgreSQL адаптер для двунаправленной интеграции с PostgreSQL 12+.
 
-## Status
+## Статус
 
-**In development** (v0.9)
+🚧 **В разработке** (v0.9)
 
-**Done:**
-- `types.go` — PostgreSQL to TDTP type mapping
-- `adapter.go` — connection through a pgx pool
-- `export.go` — table export (in progress)
-- `import.go` — data import (in progress)
-- `integration_test.go` — integration tests (in progress)
+**Готово:**
+- ✅ `types.go` - маппинг типов PostgreSQL ↔ TDTP
+- ✅ `adapter.go` - подключение через pgx connection pool
+- 🚧 `export.go` - экспорт таблиц (в процессе)
+- 🚧 `import.go` - импорт данных (в процессе)
+- 🚧 `integration_test.go` - интеграционные тесты (в процессе)
 
 ---
 
-## What it does
+## Возможности
 
-### Data types
+### Поддержка типов данных
 
-**Standard types:**
+**Стандартные типы:**
 ```
-PostgreSQL          TDTP            Back again
+PostgreSQL          TDTP            Обратно
 ─────────────────────────────────────────────
 INTEGER             INTEGER         INTEGER
 BIGINT              INTEGER         BIGINT
@@ -34,9 +34,9 @@ TIMESTAMP           TIMESTAMP       TIMESTAMP
 BYTEA               BLOB            BYTEA
 ```
 
-**PostgreSQL-specific types, carried through `subtype`:**
+**Специальные типы PostgreSQL (через subtype):**
 ```
-PostgreSQL          TDTP                        Back again
+PostgreSQL          TDTP                        Обратно
 ───────────────────────────────────────────────────────────
 UUID                TEXT (subtype="uuid")       UUID
 JSONB               TEXT (subtype="jsonb")      JSONB
@@ -49,7 +49,7 @@ TIMESTAMPTZ         TIMESTAMP (subtype="tz")    TIMESTAMPTZ
 SERIAL              INTEGER (subtype="serial")  SERIAL
 ```
 
-### Migration scenarios
+### Миграционные сценарии
 
 **SQLite → PostgreSQL:**
 ```go
@@ -58,7 +58,7 @@ target := postgres.NewAdapter("postgresql://user:pass@localhost/db")
 
 packets, _ := source.ExportTable("Users")
 target.ImportPackets(packets, postgres.StrategyReplace)
-// Types are converted for you
+// Автоматическая конвертация типов!
 ```
 
 **PostgreSQL → SQLite (downgrade):**
@@ -66,27 +66,27 @@ target.ImportPackets(packets, postgres.StrategyReplace)
 source := postgres.NewAdapter("postgresql://...")
 target := sqlite.NewAdapter("backup.db")
 
-// UUID and JSONB become TEXT on export
+// UUID, JSONB → TEXT при экспорте
 packets, _ := source.ExportTable("Users")
 target.ImportPackets(packets, sqlite.StrategyReplace)
 ```
 
 ---
 
-## Usage
+## Использование
 
-### Connecting
+### Подключение
 
 ```go
 import "github.com/queuebridge/tdtp/pkg/adapters/postgres"
 
-// The ordinary case (schema: public)
+// Стандартное подключение (schema: public)
 adapter, err := postgres.NewAdapter(
     "postgresql://tdtp_user:password@localhost:5432/tdtp_test"
 )
 defer adapter.Close()
 
-// Naming a schema
+// С указанием схемы
 adapter, err := postgres.NewAdapterWithSchema(
     "postgresql://...",
     "myschema",
@@ -96,10 +96,10 @@ adapter, err := postgres.NewAdapterWithSchema(
 ### Export (TODO)
 
 ```go
-// A full export
+// Полный экспорт
 packets, err := adapter.ExportTable("Users")
 
-// With a filter
+// С фильтрацией
 translator := tdtql.NewTranslator()
 query, _ := translator.Translate("SELECT * FROM Users WHERE active = true")
 packets, err := adapter.ExportTableWithQuery("Users", query, "App", "Server")
@@ -108,19 +108,19 @@ packets, err := adapter.ExportTableWithQuery("Users", query, "App", "Server")
 ### Import (TODO)
 
 ```go
-// Import, replacing
+// Импорт с заменой
 err := adapter.ImportPacket(packet, postgres.StrategyReplace)
 
-// Import, ignoring duplicates
+// Импорт с игнорированием дубликатов
 err := adapter.ImportPacket(packet, postgres.StrategyIgnore)
 
-// Several packets, imported atomically
+// Атомарный импорт нескольких пакетов
 err := adapter.ImportPackets(packets, postgres.StrategyReplace)
 ```
 
 ---
 
-## Installing dependencies
+## Установка зависимостей
 
 ```bash
 go get github.com/jackc/pgx/v5
@@ -129,24 +129,24 @@ go get github.com/jackc/pgx/v5/pgxpool
 
 ---
 
-## Testing
+## Тестирование
 
-### PostgreSQL in Docker (already running)
+### Docker PostgreSQL (уже запущен!)
 
 ```bash
-# Check the container
+# Проверка контейнера
 docker ps | grep postgres
 
-# Connect, to confirm
+# Подключение для проверки
 docker exec -it tdtp-postgres psql -U tdtp_user -d tdtp_test
 ```
 
-**Connection string for tests:**
+**Connection string для тестов:**
 ```
 postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test
 ```
 
-### Running the tests, once they exist
+### Запуск тестов (когда будут готовы)
 
 ```bash
 cd pkg/adapters/postgres
@@ -156,32 +156,32 @@ go test -bench=. -benchmem
 
 ---
 
-## Implementation notes
+## Технические детали
 
 ### Connection Pooling
 
-- **MaxConns:** 10 — the connection ceiling
-- **MinConns:** 2 — kept warm
-- **Driver:** pgx/v5 — current and fast
+- **MaxConns:** 10 (максимум подключений)
+- **MinConns:** 2 (минимум активных)
+- **Driver:** pgx/v5 (современный, быстрый)
 
-### Working with schemas
+### Работа со схемами
 
 ```go
-// List every schema
+// Список всех схем
 schemas, _ := adapter.GetSchemas()
 
-// Switch schema
+// Переключение схемы
 adapter.SetSchema("custom_schema")
 
-// Check for a table in the current schema
+// Проверка таблицы в текущей схеме
 exists, _ := adapter.TableExists("Users")
 ```
 
-### Identifier handling
+### Обработка идентификаторов
 
-PostgreSQL is case-sensitive for quoted identifiers:
+PostgreSQL case-sensitive для quoted identifiers:
 ```go
-// Quoted for you
+// Автоматическое квотирование
 QuoteIdentifier("User")   → "User"
 QuoteIdentifier("user")   → user
 QuoteIdentifier("order")  → "order" (reserved word)
@@ -191,29 +191,29 @@ QuoteIdentifier("order")  → "order" (reserved word)
 
 ## Roadmap
 
-### v0.9 (current)
-- [ ] `export.go` — read the schema through information_schema
-- [ ] `export.go` — export data, every type supported
+### v0.9 (текущая)
+- [ ] `export.go` - чтение схемы через information_schema
+- [ ] `export.go` - экспорт данных с поддержкой всех типов
 - [ ] `import.go` - COPY-based bulk insert
-- [ ] `import.go` — handle sequences
-- [ ] `integration_test.go` — full coverage
-- [ ] Array support (PostgreSQL-specific)
+- [ ] `import.go` - работа с sequences
+- [ ] `integration_test.go` - полное тестирование
+- [ ] Поддержка Arrays (PostgreSQL-specific)
 - [ ] Benchmark PostgreSQL vs SQLite
 
-### v1.0 (planned)
-- [ ] Partitioned tables
-- [ ] Foreign keys and constraints
-- [ ] Schema migration (ALTER TABLE)
-- [ ] Incremental synchronisation
+### v1.0 (будущее)
+- [ ] Поддержка partitioned tables
+- [ ] Поддержка foreign keys и constraints
+- [ ] Миграция схем (ALTER TABLE)
+- [ ] Инкрементальная синхронизация
 
 ---
 
-## Worked examples
+## Примеры использования
 
-### A migration involving PostgreSQL types
+### Миграция с типами PostgreSQL
 
 ```go
-// A PostgreSQL table with UUID and JSONB
+// Таблица в PostgreSQL с UUID и JSONB
 CREATE TABLE users (
     id UUID PRIMARY KEY,
     name VARCHAR(100),
@@ -221,10 +221,10 @@ CREATE TABLE users (
     ip INET
 );
 
-// Export through TDTP
+// Экспорт через TDTP
 packets, _ := pgAdapter.ExportTable("users")
 
-// In the TDTP packet:
+// В TDTP пакете:
 <Schema>
   <Field name="id" type="TEXT" subtype="uuid" key="true"/>
   <Field name="name" type="TEXT" length="100"/>
@@ -232,19 +232,19 @@ packets, _ := pgAdapter.ExportTable("users")
   <Field name="ip" type="TEXT" subtype="inet"/>
 </Schema>
 
-// Import back into PostgreSQL
+// Импорт обратно в PostgreSQL
 pgAdapter2.ImportPacket(packet, postgres.StrategyReplace)
-// → UUID, JSONB and INET are restored
+// → Восстанавливает UUID, JSONB, INET
 ```
 
-### Cross-platform migration
+### Кросс-платформенная миграция
 
 ```go
 // PostgreSQL (source)
 pgSrc, _ := postgres.NewAdapter("postgresql://src/db")
 packets, _ := pgSrc.ExportTable("products")
 
-// SQLite as the target — types downgrade automatically
+// SQLite (target) - автоматическое downgrade типов
 sqliteTgt, _ := sqlite.NewAdapter("products.db")
 sqliteTgt.ImportPackets(packets, sqlite.StrategyReplace)
 // UUID → TEXT, JSONB → TEXT, etc.
@@ -252,15 +252,15 @@ sqliteTgt.ImportPackets(packets, sqlite.StrategyReplace)
 
 ---
 
-## Known limitations
+## Известные ограничения
 
-1. **Arrays:** stored as TEXT with `subtype="array"`; the exact element type is not preserved
-2. **Composite types:** unsupported (TODO v1.1)
-3. **Domains:** treated as their base type
-4. **Enums:** stored as TEXT (TODO v1.1)
+1. **Arrays:** Хранятся как TEXT с subtype="array", точная структура типа не сохраняется
+2. **Composite types:** Не поддерживаются (TODO v1.1)
+3. **Domains:** Обрабатываются как базовый тип
+4. **Enums:** Хранятся как TEXT (TODO v1.1)
 
 ---
 
-**The PostgreSQL adapter** is the workhorse for enterprise migrations.
+**PostgreSQL Adapter** - мощный инструмент для enterprise миграций! 🐘
 
-*Part of TDTP Framework v0.9*
+*Часть TDTP Framework v0.9*
