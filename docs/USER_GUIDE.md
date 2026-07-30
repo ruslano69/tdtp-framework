@@ -15,7 +15,8 @@
    - [--list](#--list) · [--list-views](#--list-views) · [--inspect](#--inspect) · [--test](#--test)
    - [--export](#--export) · [--import](#--import) · [Sanitising field names](#sanitising-field-names---translit---clear)
    - [--export-xlsx](#--export-xlsx) · [--import-xlsx](#--import-xlsx) · [--to-xlsx](#--to-xlsx) · [--from-xlsx](#--from-xlsx)
-   - [--to-csv](#--to-csv) · [--to-html](#--to-html) · [--to-compact](#--to-compact)
+   - [--to-csv](#--to-csv) · [--to-html](#--to-html) · [--to-compact](#--to-compact) · [--to-tdtp](#--to-tdtp)
+   - [--steps](#--steps) · [--inspect-table](#--inspect-table) · [Integrity](#integrity---integrity---mercury-caller) · [Other flags](#other-flags)
    - [--export-broker](#--export-broker) · [--import-broker](#--import-broker) · [--listen](#--listen-beta)
    - [--sync-incremental](#--sync-incremental) · [--map](#--map)
    - [--diff](#--diff) · [--merge](#--merge)
@@ -97,7 +98,7 @@ database:
   port: 5432
   user: myuser
   password: mypassword
-  dbname: mydb
+  database: mydb
   schema: public
   sslmode: disable
 ```
@@ -128,29 +129,35 @@ List the tables:
 
 ### File structure
 
+> The quickest way to a correct file is to let the tool write one:
+> `tdtpcli --create-config-pg` and edit the result. What follows describes the
+> same keys.
+
 ```yaml
 # Database
 database:
-  type: postgres         # sqlite | postgres | mssql | mysql
+  type: postgres          # sqlite | postgres | mssql | mysql | access
 
-  # SQLite
-  path: database.db     # path to the database file (SQLite only)
+  # The database name, or — for SQLite — the path to the file.
+  # One key for both: there is no separate `path` or `dbname`.
+  database: mydb
 
-  # PostgreSQL / MS SQL
-  host: localhost
-  port: 5432            # 5432 for PostgreSQL, 1433 for MS SQL
+  host: localhost         # network databases only
+  port: 5432              # 5432 PostgreSQL, 1433 MS SQL, 3306 MySQL
   user: username
   password: password
-  dbname: database_name
 
-  # PostgreSQL specific
-  schema: public        # database schema (default: public)
-  sslmode: disable      # disable | require | verify-ca | verify-full
+  schema: public          # PostgreSQL: schema (default public)
+  sslmode: disable        # PostgreSQL: disable | require | verify-ca | verify-full
+  windows_auth: false     # MS SQL: authenticate as the current Windows user
 
-  # MS SQL specific
-  instance: SQLEXPRESS  # instance name (optional)
-  encrypt: false        # encrypt the connection
-  trustServerCertificate: true
+  # A raw connection string. Overrides every field above, and is required for
+  # the Access adapter, which has no other way to be configured.
+  dsn: ""
+
+  # Charset for decoding strings from drivers that do not report one
+  # (ODBC and other legacy drivers), e.g. "windows-1251".
+  charset: ""
 
 # Message broker (optional)
 broker:
@@ -159,14 +166,29 @@ broker:
   port: 5672              # 5672 plain, 5671 TLS
   user: guest
   password: guest
-  queue: tdtp_queue
-  vhost: /                # virtual host (RabbitMQ)
+  queue: tdtp_queue       # queue or topic name
+  vhost: /                # RabbitMQ virtual host
   use_tls: false          # true → amqps:// (port 5671)
   tls_skip_verify: false  # true → skip certificate verification (self-signed)
+  exchange: ""            # RabbitMQ exchange (default: the empty exchange)
+  routing_key: ""         # RabbitMQ routing key (defaults to the queue name)
   durable: true           # queue survives a broker restart
-  auto_delete: false      # queue is not deleted automatically
+  auto_delete: false      # queue is not deleted when the last consumer leaves
   exclusive: false        # queue accepts more than one connection
   passive_declare: false  # true → do not create the queue, attach to the existing one
+  queue_path: ""          # MSMQ: full queue path, e.g. ".\private$\tdtp_in"
+  brokers: []             # Kafka: broker list, e.g. ["localhost:9092"]
+  consumer_group: ""      # Kafka: consumer group ID
+
+# Export defaults (optional)
+export:
+  compress: true
+  compress_level: 3       # 1-19 zstd, 6-7 kanzi
+  compress_algo: zstd     # zstd | kanzi
+
+# Encryption (optional)
+security:
+  mercury_url: "http://mercury:3000"   # xZMercury; --mercury-url overrides it
 ```
 
 ### Example configurations
@@ -175,7 +197,7 @@ broker:
 ```yaml
 database:
   type: sqlite
-  path: ./database.db
+  database: ./database.db
 ```
 
 **PostgreSQL with RabbitMQ:**
@@ -186,7 +208,7 @@ database:
   port: 5432
   user: tdtp_user
   password: secure_password
-  dbname: production_db
+  database: production_db
   schema: public
   sslmode: require
 
@@ -212,10 +234,16 @@ database:
   port: 1433
   user: sa
   password: MyStr0ngP@ssw0rd
-  dbname: MyDatabase
-  instance: SQLEXPRESS
-  encrypt: true
-  trustServerCertificate: false
+  database: MyDatabase
+```
+
+For a named instance, Windows authentication, or any other MS SQL connection
+option, use `dsn` — it overrides the individual fields:
+
+```yaml
+database:
+  type: mssql
+  dsn: "server=sql-server.example.com\SQLEXPRESS;database=MyDatabase;trusted_connection=yes"
 ```
 
 **MySQL:**
@@ -226,7 +254,7 @@ database:
   port: 3306
   user: root
   password: secret
-  dbname: mydb
+  database: mydb
 ```
 
 ### S3 and object storage
@@ -554,7 +582,7 @@ tdtpcli -config <config.yaml> --export <table> [--output <file>]
 - `--fields <cols>` — export only these columns, comma-separated (for example `id,email,status`)
 - `--compress` — compress with zstd (level 3 by default)
 - `--compress-level <1-19>` — 1 is fastest, 19 is smallest
-- `--hash` — add an XXH3 checksum for integrity (requires `--compress`)
+- `--hash` — **deprecated, does nothing.** The XXH3 checksum is added automatically whenever `--compress` is used. The flag is still accepted so existing scripts keep working
 - `--readonly-fields` — include read-only fields (timestamp, computed, identity)
 - `--compact` — use the v1.3.1 compact format (carry-forward for fixed fields)
 - `--fixed-fields <fields>` — comma-separated list of fixed fields, used with `--compact`; detected automatically from `_prefix` or from the data when omitted
@@ -1197,6 +1225,180 @@ In place:
 - fixed fields in `<Schema>` gain `fixed="true"`
 - rows are encoded carry-forward: within a group only the first row carries the fixed values, the rest leave them empty (`||`)
 - compatible with `--compress`: compact and zstd combine
+
+---
+
+### --to-tdtp
+
+Re-filter or re-version an existing TDTP file into a new one, with no database
+round-trip.
+
+**Syntax:**
+```bash
+tdtpcli --to-tdtp <input> [--output <file>] [--v1 | --v13 | --v14]
+        [--where <condition>] [--order-by <fields>]
+        [--limit <n>] [--offset <n>] [--fields <col1,col2>]
+```
+
+It takes the same TDTQL options as [`--to-csv`](#--to-csv), applied in memory,
+and writes TDTP instead of CSV. Use it to cut a large export down to the rows a
+particular consumer needs, or to hand a v1.4 packet to a reader that predates
+v1.4.
+
+**Version flags:**
+
+| Flag | Result |
+|------|--------|
+| `--v14` | v1.4 with the xxh3 integrity hashes **recomputed** — the default when none is given |
+| `--v13` | v1.3.1: expands and clears the Dictionary, leaves any v1.4 hashes untouched |
+| `--v1` | Plain v1.0: strips the v1.4 hashes and the Dictionary, expanding its tokens first |
+
+Recomputing rather than copying the v1.4 hashes matters: filtering changes the
+rows, so a copied hash would describe data that is no longer there and every
+consumer would reject the packet.
+
+**Examples:**
+```bash
+# Narrow a big export down for one consumer
+tdtpcli --to-tdtp all_orders.tdtp.xml --where "region = 'EU'" \
+        --fields 'order_id,customer_id,total' --output eu_orders.tdtp.xml
+
+# Downgrade for a reader that predates v1.4
+tdtpcli --to-tdtp secure.tdtp.xml --v1 --output legacy.tdtp.xml
+
+# Re-stamp fresh integrity hashes after filtering
+tdtpcli --to-tdtp orders.tdtp.xml --limit 1000 --v14 --output sample.tdtp.xml
+```
+
+---
+
+### --steps
+
+Run a multi-step workflow from a YAML file. Each step is a `tdtpcli`
+sub-process, and steps with no ordering constraint between them run in parallel.
+
+**Syntax:**
+```bash
+tdtpcli --steps <workflow.yaml> [@name=value ...] [--quiet]
+```
+
+**The workflow file:**
+
+```yaml
+name: sync-out
+description: "Push every changed row into its queue"
+
+steps:
+  - id: flights
+    command: >-
+      --config configs/config_airline.yaml
+      --sync-incremental v_flights --tracking-field updated_at
+      --to-broker --enc
+    on_error: skip
+
+  - id: reservations
+    command: >-
+      --config configs/config_airline.yaml
+      --sync-incremental flight_reservations --tracking-field updated_at
+      --to-broker --enc
+    depends_on: [flights]
+    on_error: retry(3)
+```
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Step name, used by `depends_on` and printed in the log |
+| `command` | Arguments passed to `tdtpcli` — the binary itself is implied |
+| `depends_on` | Steps that must finish first; absent means "may start immediately" |
+| `on_error` | `stop` (default), `skip`, or `retry(N)` |
+
+**Ordering.** Steps are sorted topologically and executed in waves: everything
+whose dependencies are satisfied starts at once. Independent steps therefore
+finish in whatever order they finish in, and the log interleaves.
+
+**With `--quiet`** the flag is passed down to every child, so a workflow of
+eight steps produces eight result lines rather than eight banners. This is what
+makes the output usable as an orchestrator job log — see
+[ORCHESTRATOR_SCENARIOS.md](ORCHESTRATOR_SCENARIOS.md).
+
+**Variables** work as they do for `--pipeline`: `@name=value` on the command
+line is substituted for `{{name}}` in a step's command and in the description.
+
+```bash
+tdtpcli --steps workflows/sync_out.yaml @period=2026-07 --quiet
+```
+
+---
+
+### --inspect-table
+
+Print extended metadata about a **live database table**, as opposed to
+[`--inspect`](#--inspect), which reads a file: native column types, foreign-key
+relationships, row count and a sample row.
+
+**Syntax:**
+```bash
+tdtpcli -config <config.yaml> --inspect-table <table>
+```
+
+Intended for finding your way around a schema you did not design — which table
+holds what, what the real column types are, and what a row actually looks like —
+before writing the query.
+
+```bash
+./tdtpcli -config config.mssql.yaml --inspect-table '[ZTR$Employee]'
+```
+
+> Exit code 255 from this command does not indicate failure, and it works on
+> views as well as tables.
+
+---
+
+### Integrity: --integrity, --mercury-caller
+
+Stamp an export with TDTP v1.4 integrity hashes — xxh3_128 over the Schema, the
+Data and the packet as a whole. The full model is in
+[SPECIFICATION.md](SPECIFICATION.md#integrity).
+
+| Flag | Purpose |
+|------|---------|
+| `--integrity` | Compute the three hashes, set the attributes, set `version="1.4"` |
+| `--mercury-url <url>` | Also register the fingerprint with xzMercury |
+| `--mercury-caller <name>` | Caller identity sent as the `X-Caller` header (default `tdtpcli`) |
+
+Hashes are computed **before** compression, so a receiver decompresses first and
+verifies second.
+
+```bash
+# Local hashes only
+tdtpcli --export users --compress --integrity --output users.tdtp.xml
+
+# Registered with the fingerprint registry, under a service account name
+tdtpcli --export orders --compress --integrity \
+        --mercury-url http://mercury:3000 --mercury-caller svc-exporter \
+        --output orders.tdtp.xml
+```
+
+Verification is automatic on the way back in — `--import`, `--to-csv`,
+`--to-xlsx`, `--to-html` and `--test` all check the hashes, and a packet without
+them is simply passed through.
+
+---
+
+### Other flags
+
+| Flag | Purpose |
+|------|---------|
+| `--version` | Print the version and exit |
+| `--license <file>` | Path to `tdtp.lic`. Without it: the `TDTP_LICENSE` environment variable, then `./tdtp.lic`, then community mode |
+| `--quiet` | Reduce output to one result line per table: name, rows, elapsed. Also suppresses the licence banner. Intended for captured output — a workflow step, an orchestrator job, cron |
+| `--keep` | Import each broker part as it arrives, accepting partial writes. The default is atomic: every part in one transaction, all or nothing. Use this for batches too large for a single transaction |
+| `--expect-var <name=value>` | Require a PipelineContext variable to match before importing; repeatable. The import fails **before** any database write if it does not |
+| `--fast` | Skip SpecialValues detection for maximum export speed — no NULL, NaN or Inf markers in the schema |
+| `--fallback-row-limit <n>` | Row ceiling for the in-memory fallback when SQL pushdown fails (default 1000000, `0` for unlimited). It exists to stop a broken query turning into a full-table scan against a production database |
+| `--validate <file>` | Apply field validation rules from a YAML file |
+| `--normalize <file>` | Apply field normalisation rules from a YAML file |
+| `--unsafe-cert <file>` | Path to an `unsafe-op.cert` capability certificate, required for privileged operations |
 
 ---
 

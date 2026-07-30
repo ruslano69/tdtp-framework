@@ -22,6 +22,14 @@ COMMANDS:
     --diff <file-a> <file-b>   Compare two TDTP files and show differences
     --merge <files>            Merge multiple TDTP files into one
     --to-compact <tdtp-file>   Convert existing TDTP v1.x file to compact v1.3.1 format
+    --to-tdtp <tdtp-file>      Re-filter or re-version a TDTP file into a new TDTP file, with no
+                               DB round-trip. Takes the same --where/--order-by/--limit/--offset/
+                               --fields as --to-csv, applied in memory.
+                               Target version: --v14 recomputes the xxh3 integrity hashes and is
+                               the default; --v13 writes v1.3.1; --v1 strips hashes and Dictionary.
+                               The hashes are recomputed rather than copied because filtering
+                               changes the rows a copied hash would still be describing.
+                                 tdtpcli --to-tdtp all.tdtp.xml --where "region = 'EU'" -o eu.tdtp.xml
 
   XLSX Operations:
     --to-xlsx <tdtp-file>      Convert TDTP XML to XLSX
@@ -67,7 +75,7 @@ COMMANDS:
                                  file path:       out/export.tdtp.xml
                                  broker queue:    broker://tdtp.sync.orders
                                  S3 object:       s3://bucket/path/data.tdtp.xml
-    --map-dry-run              Parse and validate mapping without writing anything to the target DB.
+    --dry-run                  Parse and validate mapping without writing anything to the target DB.
                                Prints field remapping plan and row count. Safe for CI checks.
     --listen                   Daemon mode: loop on broker queue until SIGTERM/Ctrl+C.
                                Each message: receive → decrypt → parse → remap → upsert → ACK.
@@ -90,6 +98,12 @@ COMMANDS:
 
   Incremental Sync:
     --sync-incremental <table> Incremental sync from table
+    --to-broker                Send the increment to the broker from --config instead of writing
+                               files. The checkpoint advances only after a successful send.
+
+  Request/Response:
+    --process-request <file>   Process a TDTP request file and generate the response packet.
+                               DB configs are looked up beside the request file.
 
   ETL Pipeline:
     --pipeline <file>          Execute ETL pipeline from YAML config
@@ -104,6 +118,7 @@ OPTIONS:
   General:
     --config <file>            Configuration file (default: config.yaml)
     --license <file>           tdtp.lic license (default: TDTP_LICENSE env, ./tdtp.lic, else community)
+    --unsafe-cert <file>       unsafe-op.cert capability certificate, required for privileged ops
     --output <file>            Output file path
     --table <name>             Override target table name on import (default: table name from
                                packet header — the same table it was exported from)
@@ -185,8 +200,13 @@ OPTIONS:
     --unsafe                   Enable unsafe mode (allows all SQL, requires admin)
     --expect-var <name=value>  Require PipelineContext variable to match before import (repeatable)
                                Fails fast before any DB writes on mismatch or missing variable
-    --enc                      Encrypt output via xZMercury (AES-256-GCM, UUID-binding)
-                               Requires security.mercury_url in pipeline YAML
+    --enc                      Encrypt output via xZMercury (AES-256-GCM, UUID-binding).
+                               Produces TDTP v1.5 section-level encryption: the Header stays
+                               plain so a broker can still route the message, while Schema and
+                               Data become ciphertext.
+                               Requires security.mercury_url in the config or --mercury-url.
+    --enc13                    Encrypt using the legacy v1.3 whole-packet binary blob instead,
+                               for consumers not yet updated to v1.5. Same xZMercury key flow.
 
   Pipeline Variable Substitution (@name=value):
     SQL string context:        WHERE col = '@dept'       → WHERE col = '97-256'
@@ -447,7 +467,7 @@ EXAMPLES:
   tdtpcli --map mappings/sync_orders.yaml --input broker://tdtp.sync.orders
 
   # Dry-run: validate mapping without writing to DB
-  tdtpcli --map mappings/sync_orders.yaml --input broker://tdtp.sync.orders --map-dry-run
+  tdtpcli --map mappings/sync_orders.yaml --input broker://tdtp.sync.orders --dry-run     
 
   # Daemon mode: loop on broker queue until Ctrl+C / SIGTERM
   tdtpcli --map mappings/sync_flights.yaml --input broker://tdtp.sync.flights --listen
