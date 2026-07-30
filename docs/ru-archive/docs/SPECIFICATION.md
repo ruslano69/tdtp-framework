@@ -1,0 +1,1407 @@
+# TDTP Specification
+
+**Table Data Transfer Protocol** - спецификация формата обмена табличными данными через message brokers.
+
+**Версия:** 1.5 (базовый протокол v1.0; расширения: v1.2 — compression, v1.3 — encryption, v1.3.1 — compact format / fixed fields / special values, v1.4 — integrity xxh3_128 hashes + xzMercury, v1.5 — section-level encryption)
+**Дата:** 22.07.2026
+**Статус:** Production Ready
+
+---
+
+## Содержание
+
+1. [Введение](#введение)
+2. [Архитектура](#архитектура)
+3. [Формат пакетов](#формат-пакетов)
+   - [Header](#header)
+   - [Schema](#schema)
+   - [Data](#data)
+   - [Integrity (контроль целостности)](#integrity-контроль-целостности)
+   - [Query (TDTQL)](#query-tdtql)
+   - [QueryContext](#querycontext)
+4. [Типы данных](#типы-данных)
+5. [TDTQL - Query Language](#tdtql---query-language)
+6. [Compact Format v1.3.1](#compact-format-v131)
+7. [Примеры](#примеры)
+
+---
+
+## Введение
+
+### Назначение
+
+TDTP (Table Data Transfer Protocol) - это протокол для универсального обмена табличными данными между системами через message brokers (RabbitMQ, MSMQ, Kafka). Протокол разработан для:
+
+- **Синхронизации справочников** между информационными системами
+- **Репликации данных** между БД разных типов (SQLite, PostgreSQL, MS SQL)
+- **Обмена данными** через очереди сообщений
+- **Статистических выгрузок** с фильтрацией и сортировкой
+
+### Ключевые особенности
+
+- ✅ **Самодокументируемость** - каждый пакет содержит полную схему данных
+- ✅ **Stateless** - каждое сообщение независимо и содержит весь контекст
+- ✅ **Валидация** - строгая типизация с проверкой на уровне схемы
+- ✅ **Пагинация** - автоматическое разбиение больших таблиц на части (до 3.8MB)
+- ✅ **Фильтрация** - встроенный язык запросов TDTQL
+- ✅ **Универсальность** - работает с любыми СУБД и message brokers
+- ✅ **Сжатие данных** - опциональное сжатие zstd для больших пакетов (v1.2+)
+- ✅ **Шифрование** - AES-256-GCM с UUID-binding через xZMercury (v1.3+)
+- ✅ **Контроль целостности** - XXH3-128 хеши Schema + Data + Packet с опциональной регистрацией в xzMercury (v1.4)
+
+### Формат данных
+
+- **Контейнер:** XML (UTF-8)
+- **Разделитель данных:** Pipe `|` (ASCII 124)
+- **Максимальный размер пакета:** 3.8 MB (настраивается)
+- **Кодировка:** UTF-8
+
+---
+
+## Архитектура
+
+### Структура пакета
+
+```
+DataPacket
+├── Header              (обязательный)
+│   ├── Type            (reference|delta|request|response|alarm|error)
+│   ├── TableName       (имя таблицы)
+│   ├── MessageID       (UUID)
+│   ├── Timestamp       (ISO 8601)
+│   └── Pagination      (PartNumber/TotalParts)
+│
+├── Schema              (обязательный для data packets)
+│   └── Field[]         (описание полей)
+│       ├── Name
+│       ├── Type        (INTEGER|TEXT|DECIMAL|...)
+│       ├── Length/Precision/Scale
+│       └── Attributes  (key, nullable, timezone, subtype)
+│
+├── Data                (обязательный для data packets)
+│   ├── compression     (опциональный атрибут: "zstd")  🆕 v1.2
+│   └── Row[]           (данные в формате pipe-delimited или сжатые)
+│
+├── Query               (опциональный, для request/response)
+│   ├── Filters         (TDTQL условия)
+│   ├── OrderBy         (сортировка)
+│   └── Limit/Offset    (пагинация)
+│
+└── QueryContext        (опциональный, для response)
+    └── ExecutionResults (статистика выполнения)
+```
+
+### Типы пакетов
+
+| Тип | Назначение | Обязательные элементы |
+|-----|------------|-----------------------|
+| **reference** | Полная синхронизация справочника | Header, Schema, Data |
+| **delta** | Инкрементальное обновление | Header, Schema, Data, Query |
+| **request** | Запрос данных | Header, Query, Sender, Recipient |
+| **response** | Ответ на запрос | Header, Schema, Data, QueryContext |
+| **alarm** | Уведомление мониторинга | Header, AlarmDetails (Severity, Code, Message) |
+| **error** | Управляемая ошибка ETL pipeline | Header, Schema, Data (запись в `tdtp_errors`) |
+
+> **alarm vs error:** `alarm` использует нестандартный блок `<AlarmDetails>` — предназначен для систем мониторинга (не совместим с ETL pipeline). `error` — стандартный `DataPacket` с `Schema+Data`, пишется в таблицу `tdtp_errors` и совместим с любым downstream-потребителем. Генерируется автоматически при деградации xZMercury.
+
+---
+
+## Формат пакетов
+
+### Header
+
+Заголовок пакета содержит метаданные о сообщении.
+
+**XML структура:**
+```xml
+<Header>
+  <Type>reference</Type>
+  <TableName>users</TableName>
+  <MessageID>REF-2025-a1b2c3d4-P1</MessageID>
+  <PartNumber>1</PartNumber>
+  <TotalParts>3</TotalParts>
+  <RecordsInPart>1000</RecordsInPart>
+  <Timestamp>2025-11-16T12:00:00Z</Timestamp>
+  <Sender>SourceSystem</Sender>
+  <Recipient>TargetSystem</Recipient>
+  <InReplyTo>REQ-2025-xyz123</InReplyTo>
+</Header>
+```
+
+**Поля:**
+
+| Поле | Тип | Обязательное | Описание |
+|------|-----|--------------|----------|
+| Type | enum | ✅ | reference, delta, request, response, alarm |
+| TableName | string | ✅ | Имя таблицы/справочника |
+| MessageID | UUID | ✅ | Уникальный идентификатор сообщения |
+| PartNumber | int | ✅ | Номер части (для пагинации) |
+| TotalParts | int | ✅ | Общее количество частей |
+| RecordsInPart | int | ⚪ | Количество записей в части |
+| Timestamp | ISO8601 | ✅ | Время создания пакета |
+| Sender | string | ⚪ | Система-отправитель |
+| Recipient | string | ⚪ | Система-получатель |
+| InReplyTo | string | ⚪ | ID запроса (для response) |
+
+### Schema
+
+Схема описывает структуру таблицы и типы данных.
+
+**XML структура:**
+```xml
+<Schema>
+  <Field name="id" type="INTEGER" key="true"></Field>
+  <Field name="username" type="TEXT" length="100"></Field>
+  <Field name="email" type="TEXT" length="255"></Field>
+  <Field name="balance" type="DECIMAL" precision="12" scale="2"></Field>
+  <Field name="created_at" type="TIMESTAMP" timezone="UTC"></Field>
+  <Field name="user_id" type="TEXT" length="-1" subtype="uuid"></Field>
+  <Field name="metadata" type="TEXT" length="-1" subtype="jsonb"></Field>
+</Schema>
+```
+
+**XML структура (v1.3.1 — с fixed и SpecialValues):** 🆕 v1.3.1
+```xml
+<Schema>
+  <!-- fixed=true: значение не меняется в пределах пакета (compact-оптимизация) -->
+  <Field name="dept_id"   type="INTEGER"           fixed="true"></Field>
+  <Field name="dept_name" type="TEXT" length="100" fixed="true"></Field>
+  <Field name="emp_id"    type="INTEGER"></Field>
+
+  <!-- SpecialValues: маркеры для NULL, Infinity, NaN, NoDate -->
+  <Field name="notes" type="TEXT" length="500">
+    <SpecialValues>
+      <Null marker="[NULL]"/>
+    </SpecialValues>
+  </Field>
+
+  <Field name="sensor_value" type="REAL">
+    <SpecialValues>
+      <Infinity    marker="INF"/>
+      <NegInfinity marker="-INF"/>
+      <NaN         marker="NaN"/>
+    </SpecialValues>
+  </Field>
+
+  <Field name="graduation_date" type="DATE">
+    <SpecialValues>
+      <NoDate marker="1900-01-01"/>
+    </SpecialValues>
+  </Field>
+</Schema>
+```
+
+**Атрибуты Field:**
+
+| Атрибут | Тип | Применимо к | Default | Описание |
+|---------|-----|-------------|---------|----------|
+| name | string | все | — | Имя поля (обязательное) |
+| type | enum | все | — | Тип данных TDTP (обязательное) |
+| length | int | TEXT, BLOB | — | Максимальная длина (-1 = unlimited) |
+| precision | int | DECIMAL | — | Общее количество цифр |
+| scale | int | DECIMAL | — | Количество цифр после запятой |
+| timezone | string | TIMESTAMP, TIME | UTC | Часовой пояс (UTC, Local, +03:00) |
+| key | bool | любой | false | Первичный ключ |
+| subtype | string | любой | — | Подтип (uuid, jsonb, inet, array) |
+| **fixed** | bool | любой | false | 🆕 v1.3.1: значение не меняется в пределах пакета |
+
+**Дочерний элемент `<SpecialValues>`** 🆕 v1.3.1
+
+Задаёт строковые маркеры для значений, которые нельзя выразить стандартно:
+
+| Элемент | Атрибут | Применимо к | Описание |
+|---------|---------|-------------|----------|
+| `<Null>` | `marker` | TEXT | NULL (отличается от пустой строки `""`) |
+| `<Infinity>` | `marker` | REAL, DECIMAL | Положительная бесконечность |
+| `<NegInfinity>` | `marker` | REAL, DECIMAL | Отрицательная бесконечность |
+| `<NaN>` | `marker` | REAL | Not a Number (0/0, sqrt(-1)) |
+| `<NoDate>` | `marker` | DATE, TIMESTAMP | Отсутствие даты (не то же самое, что NULL) |
+
+**Логика декодера для SpecialValues:**
+- Если значение совпадает с маркером → применить соответствующее специальное значение
+- Для TEXT: пустая строка `||` = `""` (empty string, хранится); маркер `[NULL]` = NULL (не хранится)
+- Для DATE: маркер NoDate = sentinel-значение «нет даты», отличное от NULL
+
+### Data
+
+Данные передаются в формате pipe-delimited (разделитель `|`).
+
+**XML структура (без сжатия):**
+```xml
+<Data>
+  <R>1|john_doe|john@example.com|1500.50|2025-01-15 10:30:00</R>
+  <R>2|jane_smith|jane@example.com|2300.00|2025-01-16 14:20:00</R>
+</Data>
+```
+
+**XML структура (со сжатием zstd):** 🆕 v1.2
+```xml
+<Data compression="zstd">
+  <R>KLUv/WBgVKEAAYsBAHNvbWUtY29tcHJlc3NlZC1kYXRhLWhlcmU=</R>
+</Data>
+```
+
+**Атрибуты Data:**
+
+| Атрибут | Тип | Значения | Описание |
+|---------|-----|----------|----------|
+| compression | string | `"zstd"` | Алгоритм сжатия (опционально, v1.2+) |
+| checksum | string | hex | XXH3 хеш сжатых данных (v1.2+) |
+| **compact** | bool | `"true"` | 🆕 v1.3.1: compact format — fixed поля пишутся только при смене значения |
+
+**Сжатие данных (v1.2+):**
+
+При установке атрибута `compression="zstd"`:
+- Все строки данных объединяются и сжимаются алгоритмом zstd
+- Сжатые данные кодируются в base64
+- Результат помещается в единственный элемент `<R>`
+- При распаковке данные восстанавливаются в исходный формат pipe-delimited
+
+**Когда использовать сжатие:**
+- Для пакетов размером > 1KB (настраивается)
+- Для больших таблиц с многими строками
+- Для экономии bandwidth при передаче через message brokers
+- Типичный коэффициент сжатия: 50-80%
+
+**Правила форматирования:**
+
+- **Разделитель:** Pipe `|` (ASCII 124)
+- **Пустое значение:** Пустая строка между разделителями: `field1||field3`
+- **NULL:** Отсутствие значения = NULL
+- **Escape разделителя:** Backslash escaping для pipe внутри значений:
+  - `|` → `\|` (pipe внутри значения)
+  - `\` → `\\` (backslash внутри значения)
+- **XML entities:** XML специальные символы экранируются автоматически:
+  - `<` → `&lt;`
+  - `>` → `&gt;`
+  - `&` → `&amp;`
+  - `"` → `&quot;`
+  - `'` → `&apos;`
+
+**Примеры экранирования:**
+```xml
+<!-- Простое значение -->
+<R>value1|value2|value3</R>
+
+<!-- Pipe внутри первого значения -->
+<R>path\|to\|file|value2|value3</R>
+<!-- Декодируется как: ["path|to|file", "value2", "value3"] -->
+
+<!-- Backslash внутри значения -->
+<R>C:\\Windows\\System32|value2</R>
+<!-- Декодируется как: ["C:\Windows\System32", "value2"] -->
+
+<!-- Комбинация pipe и backslash -->
+<R>C:\\path\|to\|file|value2</R>
+<!-- Декодируется как: ["C:\path|to|file", "value2"] -->
+```
+
+### Integrity (контроль целостности)
+
+> **v1.4+** — пакет должен нести атрибут `version="1.4"` на корневом элементе.
+
+#### Модель хешей
+
+TDTP v1.4 вводит трёхуровневую схему контроля целостности на основе **XXH3-128** (алгоритм Cyan4973, 128-бит, неcryptographic, детерминирован для одинакового ввода).
+
+| Уровень | Поле в XML | Что хешируется | Соль |
+|---------|------------|----------------|------|
+| Schema | `<Schema xxh3="...">` | Канонический XML схемы (без атрибута `xxh3` самой схемы) | MessageID |
+| Data | `<Data xxh3="...">` | Сырые строки до сжатия: `row₀\nrow₁\n…rowN\n` | MessageID |
+| Packet | `<DataPacket … xxh3="...">` | `SchemaXXH3 + "|" + DataXXH3` | — (уже встроена в компоненты) |
+
+**Соль:** первые байты каждого хеш-ввода — это `MessageID` пакета (UUID). Это предотвращает повторное использование захваченного хеша против другого пакета. Соль не секретна — она хранится в открытом тексте в `<Header>`.
+
+Все три значения — 32-символьные строки hex lowercase (128 бит = 16 байт).
+
+#### XML структура (v1.4)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.4"
+            xxh3="c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6">
+  <Header>
+    <Type>reference</Type>
+    <TableName>users</TableName>
+    <MessageID>550e8400-e29b-41d4-a716-446655440000</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>3</RecordsInPart>
+    <Timestamp>2026-05-26T10:00:00Z</Timestamp>
+  </Header>
+  <Schema xxh3="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6">
+    <Field name="id"   type="INTEGER" key="true"></Field>
+    <Field name="name" type="TEXT" length="100"></Field>
+  </Schema>
+  <Data xxh3="f8e7d6c5b4a3928171605040302010ff">
+    <R>1|Alice</R>
+    <R>2|Bob</R>
+    <R>3|Carol</R>
+  </Data>
+</DataPacket>
+```
+
+С компрессией (`--compress --integrity`) — хеши вычисляются по **несжатым** строкам, сохраняются до сжатия, а затем пакет сжимается. Получатель сначала распаковывает, потом верифицирует.
+
+```xml
+<Data compression="zstd" xxh3="f8e7d6c5b4a3928171605040302010ff">
+  <R>KLUv/WBgVKEA...</R>
+</Data>
+```
+
+> **Различие `Data.checksum` и `Data.xxh3`:**
+> - `checksum` (v1.2) — XXH3-64 хеш **сжатого** blob (base64 блок), backward-compat
+> - `xxh3` (v1.4) — XXH3-128 хеш **несжатых** строк, часть трёхуровневой схемы
+
+#### CLI: экспорт с integrity
+
+```
+--integrity             Вычислить xxh3_128 хеши (Schema + Data + Packet),
+                        проставить атрибуты, установить version="1.4".
+                        Хеши вычисляются ДО сжатия.
+--mercury-url <url>     Зарегистрировать fingerprint пакета в xzMercury
+                        (например http://mercury:3000).
+                        Если не указан — только локальные хеши (local integrity).
+--mercury-caller <name> Идентификатор сервиса для xzMercury (по умолчанию "tdtpcli").
+```
+
+Примеры:
+
+```bash
+# Экспорт с integrity, только локальные хеши
+tdtpcli --export users --compress --integrity --output users_v14.tdtp.xml
+
+# Экспорт с integrity + регистрация в Mercury
+tdtpcli --export orders --compress --integrity \
+        --mercury-url http://mercury:3000 --mercury-caller svc-exporter \
+        --output orders_v14.tdtp.xml
+```
+
+При экспорте в консоль выводятся первые 8 hex-символов каждого хеша:
+
+```
+  → Integrity: schema=a1b2c3d4… data=f8e7d6c5… packet=c3d4e5f6…
+```
+
+#### Верификация
+
+Верификация запускается автоматически при любой команде, которая читает пакет (`--import`, `--to-csv`, `--to-xlsx`, `--to-html`, `--test`):
+
+1. **Mercury pre-flight** (если пакет несёт `@MRC` в словаре): `GET /api/hashes/{uuid}/{part}?xxh3=...`
+2. **Локальная проверка xxh3**: пересчитать три хеша и сравнить с атрибутами в XML
+3. **Dictionary expansion**: заменить `@-токены` в данных
+
+Если Mercury недоступен — система переходит в **FallbackDegrade**: выполняется только шаг 2.
+
+Поведение при несовпадении хешей:
+- `--import`: прерывается **до** любых записей в БД
+- `--to-csv` / `--to-xlsx` / `--to-html`: возвращает ошибку, файл не создаётся
+- `--test`: выводит сообщение об ошибке, exit code ≠ 0
+
+Если пакет не несёт `xxh3` атрибута (создан до v1.4) — верификация молча пропускается.
+
+#### xzMercury hash registry
+
+xzMercury — опциональный сервис-реестр fingerprint'ов. Хранит запись по `(uuid, part_number)`:
+
+```
+POST /api/hashes
+  { "uuid": "550e...", "part": 1, "xxh3": "c3d4...", "table": "users",
+    "caller": "svc-exporter", "version": "1.4" }
+
+GET /api/hashes/{uuid}/{part}?xxh3=c3d4...
+  → 200 OK  (хеш совпадает)
+  → 409 Conflict  (хеш зарегистрирован, но другой — возможная подмена)
+  → 404 Not Found (пакет не зарегистрирован)
+```
+
+Адрес Mercury встраивается в словарь пакета как токен `@MRC` при регистрации, чтобы потребитель мог найти реестр без дополнительной конфигурации.
+
+### Query (TDTQL)
+
+Структура запроса для фильтрации данных.
+
+**XML структура:**
+```xml
+<Query language="TDTQL" version="1.0">
+  <Filters>
+    <And>
+      <Filter field="balance" operator="gte" value="1000"></Filter>
+      <Filter field="is_active" operator="eq" value="1"></Filter>
+    </And>
+  </Filters>
+  <OrderBy field="balance" direction="DESC"></OrderBy>
+  <Limit>100</Limit>
+  <Offset>0</Offset>
+</Query>
+```
+
+Подробнее см. [TDTQL - Query Language](#tdtql---query-language)
+
+### QueryContext
+
+Контекст выполнения запроса (только для response).
+
+**XML структура:**
+```xml
+<QueryContext>
+  <OriginalQuery language="TDTQL" version="1.0">
+    <!-- Копия исходного запроса -->
+  </OriginalQuery>
+  <ExecutionResults>
+    <TotalRecordsInTable>10000</TotalRecordsInTable>
+    <RecordsAfterFilters>150</RecordsAfterFilters>
+    <RecordsReturned>100</RecordsReturned>
+    <MoreDataAvailable>true</MoreDataAvailable>
+  </ExecutionResults>
+</QueryContext>
+```
+
+---
+
+## Типы данных
+
+### Базовые типы
+
+| TDTP Type | Описание | SQL аналоги | Формат в Data |
+|-----------|----------|-------------|---------------|
+| **INTEGER** | Целое число | INT, BIGINT, SERIAL | `123`, `-456` |
+| **REAL** | Число с плавающей точкой | FLOAT, DOUBLE | `123.45`, `-0.001` |
+| **DECIMAL** | Точное число | DECIMAL(p,s), NUMERIC | `1234.56` |
+| **TEXT** | Строка | VARCHAR, TEXT, NVARCHAR | `Hello World` |
+| **BLOB** | Бинарные данные | BLOB, BYTEA, VARBINARY | Base64 encoded |
+| **BOOLEAN** | Логический | BOOLEAN, BIT | `0` (false), `1` (true) |
+| **DATE** | Дата | DATE | `2025-01-15` (ISO 8601) |
+| **TIME** | Время | TIME | `14:30:00` (ISO 8601) |
+| **TIMESTAMP** | Дата и время | TIMESTAMP, DATETIME | `2025-01-15 14:30:00` |
+
+### Атрибуты типов
+
+**LENGTH** (для TEXT, BLOB):
+- Положительное число: максимальная длина
+- `-1`: неограниченная длина (TEXT, JSONB, UUID)
+
+**PRECISION и SCALE** (для DECIMAL):
+- `precision`: общее количество значащих цифр
+- `scale`: количество цифр после запятой
+- Пример: `DECIMAL(12,2)` → `precision="12" scale="2"` → `9999999999.99`
+
+**TIMEZONE** (для TIMESTAMP, TIME):
+- `UTC`: время в UTC
+- `Local`: локальное время системы
+- `+03:00`, `-05:00`: конкретный часовой пояс
+
+**KEY**:
+- `true`: поле является первичным ключом
+- `false` или отсутствует: обычное поле
+
+**SUBTYPE**:
+- `uuid`: UUID/GUID (TEXT length="-1" subtype="uuid")
+- `jsonb`: JSON Binary (TEXT length="-1" subtype="jsonb")
+- `json`: JSON Text (TEXT length="-1" subtype="json")
+- `inet`: IP адрес (TEXT subtype="inet")
+- `array`: Массив (TEXT subtype="array")
+- `timestamptz`: Timestamp с timezone (TIMESTAMP timezone="UTC" subtype="timestamptz")
+
+### Специальные типы (через subtype)
+
+**UUID:**
+```xml
+<Field name="user_id" type="TEXT" length="-1" subtype="uuid"></Field>
+<R>e5f1c2a3-8d7b-4c9e-a1f0-2b3c4d5e6f7a</R>
+```
+
+**JSONB:**
+```xml
+<Field name="metadata" type="TEXT" length="-1" subtype="jsonb"></Field>
+<R>{&quot;key&quot;:&quot;value&quot;,&quot;count&quot;:42}</R>
+```
+
+**INET:**
+```xml
+<Field name="ip_address" type="TEXT" length="-1" subtype="inet"></Field>
+<R>192.168.1.100</R>
+```
+
+**ARRAY:**
+```xml
+<Field name="tags" type="TEXT" length="-1" subtype="array"></Field>
+<R>{tag1,tag2,tag3}</R>
+```
+
+---
+
+## Compact Format v1.3.1
+
+### Проблема
+
+В 1-to-many JOIN паттернах (view-ы, отчёты) многие столбцы повторяют одно и то же значение в каждой строке. В базовом формате v1.0 дублирование приводит к 50–70% overhead.
+
+**Пример дублирования (v1.0):**
+```xml
+<Data>
+  <R>10|Sales|Moscow|101|Ivan Petrov|45000</R>
+  <R>10|Sales|Moscow|102|Anna Sidorova|52000</R>
+  <R>10|Sales|Moscow|103|Boris Kozlov|48000</R>
+</Data>
+```
+
+Поля `dept_id`, `dept_name`, `location` повторяются в каждой строке.
+
+### Решение
+
+Три дополняющих механизма v1.3.1:
+
+1. **`fixed="true"`** на Field — объявляет, что поле не меняется в пределах группы
+2. **`compact="true"`** на Data — значения fixed полей пишутся только при смене
+3. **`<SpecialValues>`** на Field — маркеры для NULL, Infinity, NaN, NoDate
+
+### Fixed Fields
+
+Атрибут `fixed="true"` на `<Field>` сигнализирует процессору, что значение поля постоянно в пределах группы строк.
+
+```xml
+<Schema>
+  <Field name="dept_id"   type="INTEGER" fixed="true"></Field>   <!-- постоянное -->
+  <Field name="dept_name" type="TEXT"    fixed="true"></Field>   <!-- постоянное -->
+  <Field name="emp_id"    type="INTEGER"></Field>                <!-- переменное -->
+  <Field name="emp_name"  type="TEXT"></Field>                   <!-- переменное -->
+</Schema>
+```
+
+**Соглашение для SQL view (`_prefix`):**
+
+При создании view используйте префикс `_` для обозначения fixed полей. tdtpcli автоматически обнаруживает их, убирает `_` из имени и устанавливает `fixed="true"`:
+
+```sql
+CREATE VIEW dept_employees_report AS
+SELECT
+  d.dept_id   AS _dept_id,     -- будет: name="dept_id" fixed="true"
+  d.dept_name AS _dept_name,   -- будет: name="dept_name" fixed="true"
+  d.location  AS _location,    -- будет: name="location" fixed="true"
+  e.emp_id,                    -- переменное
+  e.full_name
+FROM employees e
+JOIN departments d ON e.dept_id = d.dept_id
+ORDER BY dept_id, emp_id;
+```
+
+### Compact Format
+
+При `compact="true"` на `<Data>` значения fixed полей записываются только:
+- в первой строке (первая строка группы — **header row**)
+- при смене значения fixed поля (начало новой группы)
+
+В остальных строках группы на позициях fixed полей стоят пустые строки (`||`).
+
+**Пример (3 отдела по 5 сотрудников):**
+```xml
+<Data compact="true">
+  <!-- dept 10 — header row: все значения -->
+  <R>10|Sales|Moscow|101|Ivan Petrov|45000</R>
+  <!-- carry-forward: dept_id/dept_name/location из предыдущей строки -->
+  <R>|||102|Anna Sidorova|52000</R>
+  <R>|||103|Boris Kozlov|48000</R>
+  <R>|||104|Elena Novikova|55000</R>
+  <R>|||105|Dmitry Smirnov|49500</R>
+  <!-- dept 20 — новая группа: снова все значения -->
+  <R>20|Engineering|Saint Petersburg|201|Alice Volkov|72000</R>
+  <R>|||202|Charlie Morozov|65000</R>
+  <R>|||203|Diana Popova|69000</R>
+  <R>|||204|Egor Lebedev|61000</R>
+  <R>|||205|Fiona Kuznetsova|78000</R>
+</Data>
+```
+
+**Алгоритм декодера (carry-forward):**
+
+```
+currentFixed = []
+
+для каждой строки:
+  для каждой позиции i:
+    если поле[i].fixed == true:
+      если values[i] != "":
+        currentFixed[i] = values[i]   // новое значение → обновить carry
+      иначе:
+        values[i] = currentFixed[i]   // пропуск → взять из carry
+```
+
+**Важно:** декодер не проверяет корректность `fixed="true"` — ответственность на отправителе.
+
+### Порядок обработки (кодирование)
+
+```
+1. Определить fixed поля из Schema (или по _prefix, или по --fixed-fields)
+2. Для каждой строки:
+   - если значение fixed поля = предыдущему → записать ""
+   - иначе → записать значение явно
+3. Установить compact="true" на <Data>
+4. Установить version="1.3.1" на пакете
+5. Опционально: сжать данные compression="zstd"
+```
+
+**Порядок обработки (декодирование):**
+
+```
+1. Распаковать zstd (если compression="zstd")
+2. Если compact="true": expand carry-forward → нормализованные строки
+3. Обработать <SpecialValues> маркеры
+4. Импортировать как обычный набор строк
+```
+
+### Комбинация с compression
+
+Оба механизма совместимы:
+
+```xml
+<Data compression="zstd" compact="true">
+  <R>KLUv/WBgVKEAAesEA...base64-compressed-compact-data...</R>
+</Data>
+```
+
+### Экономия размера
+
+| Сценарий | v1.0 | v1.3.1 compact | Экономия |
+|----------|------|----------------|----------|
+| 3 fixed поля × 15 строк | 100% | ~30% | ~70% |
+| + zstd compression | 100% | ~10–15% | ~85–90% |
+
+---
+
+## TDTQL - Query Language
+
+**TDTQL** (Table Data Transfer Query Language) - язык запросов для фильтрации и сортировки табличных данных.
+
+### Структура запроса
+
+```xml
+<Query language="TDTQL" version="1.0">
+  <Filters>
+    <!-- Условия фильтрации -->
+  </Filters>
+  <OrderBy>
+    <!-- Сортировка -->
+  </OrderBy>
+  <Limit>100</Limit>
+  <Offset>0</Offset>
+</Query>
+```
+
+### Операторы сравнения
+
+| Operator | Описание | SQL аналог | Пример |
+|----------|----------|------------|--------|
+| `eq` | Равно | `=` | `<Filter field="age" operator="eq" value="25"/>` |
+| `ne` | Не равно | `!=`, `<>` | `<Filter field="status" operator="ne" value="deleted"/>` |
+| `gt` | Больше | `>` | `<Filter field="balance" operator="gt" value="1000"/>` |
+| `gte` | Больше или равно | `>=` | `<Filter field="age" operator="gte" value="18"/>` |
+| `lt` | Меньше | `<` | `<Filter field="price" operator="lt" value="100"/>` |
+| `lte` | Меньше или равно | `<=` | `<Filter field="quantity" operator="lte" value="10"/>` |
+
+### Операторы диапазонов и списков
+
+| Operator | Описание | SQL аналог | Пример |
+|----------|----------|------------|--------|
+| `between` | В диапазоне | `BETWEEN` | `<Filter field="age" operator="between" value="18" value2="65"/>` |
+| `in` | В списке | `IN` | `<Filter field="city" operator="in" value="Moscow,SPb,Kazan"/>` |
+| `not_in` | Не в списке | `NOT IN` | `<Filter field="status" operator="not_in" value="deleted,archived"/>` |
+
+### Операторы паттернов
+
+| Operator | Описание | SQL аналог | Пример |
+|----------|----------|------------|--------|
+| `like` | Соответствует паттерну | `LIKE` | `<Filter field="email" operator="like" value="%@example.com"/>` |
+| `not_like` | Не соответствует паттерну | `NOT LIKE` | `<Filter field="username" operator="not_like" value="test%"/>` |
+
+Wildcards:
+- `%` - любое количество символов
+- `_` - один символ
+
+### Операторы NULL
+
+| Operator | Описание | SQL аналог | Пример |
+|----------|----------|------------|--------|
+| `is_null` | Значение NULL | `IS NULL` | `<Filter field="deleted_at" operator="is_null"/>` |
+| `is_not_null` | Значение НЕ NULL | `IS NOT NULL` | `<Filter field="email" operator="is_not_null"/>` |
+
+### Логические операторы
+
+**AND:**
+```xml
+<Filters>
+  <And>
+    <Filter field="age" operator="gte" value="18"/>
+    <Filter field="is_active" operator="eq" value="1"/>
+  </And>
+</Filters>
+```
+
+**OR:**
+```xml
+<Filters>
+  <Or>
+    <Filter field="city" operator="eq" value="Moscow"/>
+    <Filter field="city" operator="eq" value="SPb"/>
+  </Or>
+</Filters>
+```
+
+**Вложенные группы:**
+```xml
+<Filters>
+  <And>
+    <Filter field="is_active" operator="eq" value="1"/>
+    <Or>
+      <Filter field="city" operator="eq" value="Moscow"/>
+      <Filter field="city" operator="eq" value="SPb"/>
+    </Or>
+  </And>
+</Filters>
+```
+
+SQL эквивалент:
+```sql
+WHERE is_active = 1 AND (city = 'Moscow' OR city = 'SPb')
+```
+
+### Сортировка (OrderBy)
+
+**Одиночная:**
+```xml
+<OrderBy field="balance" direction="DESC"></OrderBy>
+```
+
+**Множественная:**
+```xml
+<OrderBy>
+  <Fields>
+    <OrderField name="balance" direction="DESC"/>
+    <OrderField name="created_at" direction="ASC"/>
+  </Fields>
+</OrderBy>
+```
+
+**Direction:**
+- `ASC` - по возрастанию (default)
+- `DESC` - по убыванию
+
+### Пагинация
+
+```xml
+<Limit>100</Limit>
+<Offset>200</Offset>
+```
+
+- **Limit** - максимальное количество записей
+- **Offset** - пропустить N записей
+
+SQL эквивалент:
+```sql
+LIMIT 100 OFFSET 200
+```
+
+### Полный пример TDTQL
+
+**Запрос:**
+```
+Найти активных пользователей старше 18 лет с балансом >= 1000,
+из Москвы или СПб, отсортировать по балансу (убывание),
+вернуть первые 50 записей
+```
+
+**TDTQL:**
+```xml
+<Query language="TDTQL" version="1.0">
+  <Filters>
+    <And>
+      <Filter field="is_active" operator="eq" value="1"/>
+      <Filter field="age" operator="gte" value="18"/>
+      <Filter field="balance" operator="gte" value="1000"/>
+      <Or>
+        <Filter field="city" operator="eq" value="Moscow"/>
+        <Filter field="city" operator="eq" value="SPb"/>
+      </Or>
+    </And>
+  </Filters>
+  <OrderBy field="balance" direction="DESC"></OrderBy>
+  <Limit>50</Limit>
+  <Offset>0</Offset>
+</Query>
+```
+
+**SQL эквивалент:**
+```sql
+SELECT * FROM users
+WHERE is_active = 1
+  AND age >= 18
+  AND balance >= 1000
+  AND (city = 'Moscow' OR city = 'SPb')
+ORDER BY balance DESC
+LIMIT 50 OFFSET 0
+```
+
+---
+
+## Примеры
+
+### Reference Packet (Полный справочник)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>users</TableName>
+    <MessageID>REF-2025-abc123-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>3</RecordsInPart>
+    <Timestamp>2025-11-16T12:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="id" type="INTEGER" key="true"></Field>
+    <Field name="username" type="TEXT" length="100"></Field>
+    <Field name="email" type="TEXT" length="255"></Field>
+    <Field name="balance" type="DECIMAL" precision="12" scale="2"></Field>
+    <Field name="is_active" type="BOOLEAN"></Field>
+    <Field name="created_at" type="TIMESTAMP" timezone="UTC"></Field>
+  </Schema>
+  <Data>
+    <R>1|john_doe|john@example.com|1500.50|1|2025-01-15 10:30:00</R>
+    <R>2|jane_smith|jane@example.com|2300.00|1|2025-01-16 14:20:00</R>
+    <R>3|bob_jones|bob@example.com|750.25|0|2025-01-17 09:15:00</R>
+  </Data>
+</DataPacket>
+```
+
+### Request Packet (Запрос данных)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>request</Type>
+    <TableName>users</TableName>
+    <MessageID>REQ-2025-xyz789</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <Timestamp>2025-11-16T12:00:00Z</Timestamp>
+    <Sender>ClientApp</Sender>
+    <Recipient>ServerDB</Recipient>
+  </Header>
+  <Query language="TDTQL" version="1.0">
+    <Filters>
+      <And>
+        <Filter field="balance" operator="gte" value="1000"></Filter>
+        <Filter field="is_active" operator="eq" value="1"></Filter>
+      </And>
+    </Filters>
+    <OrderBy field="balance" direction="DESC"></OrderBy>
+    <Limit>100</Limit>
+  </Query>
+</DataPacket>
+```
+
+### Response Packet (Ответ на запрос)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>response</Type>
+    <TableName>users</TableName>
+    <MessageID>RESP-2025-def456-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>2</RecordsInPart>
+    <Timestamp>2025-11-16T12:00:01Z</Timestamp>
+    <Sender>ServerDB</Sender>
+    <Recipient>ClientApp</Recipient>
+    <InReplyTo>REQ-2025-xyz789</InReplyTo>
+  </Header>
+  <QueryContext>
+    <OriginalQuery language="TDTQL" version="1.0">
+      <Filters>
+        <And>
+          <Filter field="balance" operator="gte" value="1000"></Filter>
+          <Filter field="is_active" operator="eq" value="1"></Filter>
+        </And>
+      </Filters>
+      <OrderBy field="balance" direction="DESC"></OrderBy>
+      <Limit>100</Limit>
+    </OriginalQuery>
+    <ExecutionResults>
+      <TotalRecordsInTable>1000</TotalRecordsInTable>
+      <RecordsAfterFilters>2</RecordsAfterFilters>
+      <RecordsReturned>2</RecordsReturned>
+      <MoreDataAvailable>false</MoreDataAvailable>
+    </ExecutionResults>
+  </QueryContext>
+  <Schema>
+    <Field name="id" type="INTEGER" key="true"></Field>
+    <Field name="username" type="TEXT" length="100"></Field>
+    <Field name="balance" type="DECIMAL" precision="12" scale="2"></Field>
+    <Field name="is_active" type="BOOLEAN"></Field>
+  </Schema>
+  <Data>
+    <R>2|jane_smith|2300.00|1</R>
+    <R>1|john_doe|1500.50|1</R>
+  </Data>
+</DataPacket>
+```
+
+### Delta Packet (Инкрементальное обновление)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>delta</Type>
+    <TableName>users</TableName>
+    <MessageID>DELTA-2025-ghi012</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>1</RecordsInPart>
+    <Timestamp>2025-11-16T12:05:00Z</Timestamp>
+  </Header>
+  <Query language="TDTQL" version="1.0">
+    <Filters>
+      <And>
+        <Filter field="updated_at" operator="gte" value="2025-11-16 12:00:00"></Filter>
+      </And>
+    </Filters>
+  </Query>
+  <Schema>
+    <Field name="id" type="INTEGER" key="true"></Field>
+    <Field name="username" type="TEXT" length="100"></Field>
+    <Field name="balance" type="DECIMAL" precision="12" scale="2"></Field>
+    <Field name="updated_at" type="TIMESTAMP" timezone="UTC"></Field>
+  </Schema>
+  <Data>
+    <R>1|john_doe|1600.00|2025-11-16 12:03:00</R>
+  </Data>
+</DataPacket>
+```
+
+### Alarm Packet (Уведомление об ошибке)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>alarm</Type>
+    <TableName>users</TableName>
+    <MessageID>ALARM-2025-err404</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <Timestamp>2025-11-16T12:00:00Z</Timestamp>
+    <Sender>ServerDB</Sender>
+    <Recipient>MonitoringSystem</Recipient>
+  </Header>
+  <Alarm>
+    <Severity>error</Severity>
+    <Code>DB_CONNECTION_FAILED</Code>
+    <Message>Failed to connect to PostgreSQL database: connection timeout</Message>
+    <AffectedRecords>0</AffectedRecords>
+  </Alarm>
+</DataPacket>
+```
+
+### Error Packet (Управляемая ошибка ETL, v1.3+) 🆕
+
+Генерируется автоматически ETL pipeline при деградации xZMercury (encryption enabled, Mercury недоступен).
+Пишется в выходной файл вместо незашифрованных данных. Pipeline завершается с exit 0.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>error</Type>
+    <TableName>tdtp_errors</TableName>
+    <MessageID>ERR-2026-a1b2c3d4-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>1</RecordsInPart>
+    <Timestamp>2026-02-26T10:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="package_uuid"  type="TEXT" length="36" key="true"></Field>
+    <Field name="pipeline"      type="TEXT" length="255"></Field>
+    <Field name="error_code"    type="TEXT" length="64"></Field>
+    <Field name="error_message" type="TEXT" length="1000"></Field>
+    <Field name="created_at"    type="TIMESTAMP" timezone="UTC"></Field>
+  </Schema>
+  <Data>
+    <R>550e8400-e29b-41d4-a716-446655440000|employee-dept-report|MERCURY_UNAVAILABLE|connect: connection refused|2026-02-26T10:00:00Z</R>
+  </Data>
+</DataPacket>
+```
+
+**Коды ошибок:**
+
+| Код | Причина |
+|-----|---------|
+| `MERCURY_UNAVAILABLE` | xZMercury недоступен (таймаут, connection refused) |
+| `MERCURY_ERROR` | xZMercury вернул HTTP 5xx |
+| `HMAC_VERIFICATION_FAILED` | Подпись ключа не прошла верификацию |
+| `KEY_BIND_REJECTED` | xZMercury отклонил запрос (HTTP 403/429) |
+
+---
+
+### Reference Packet в compact-формате (v1.3.1+) 🆕
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.3.1">
+  <Header>
+    <Type>reference</Type>
+    <TableName>dept_employees_report</TableName>
+    <MessageID>REF-2026-compact-001-P1</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>10</RecordsInPart>
+    <Timestamp>2026-03-10T10:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <!-- Три fixed поля (_prefix в SQL view → stripped + fixed=true) -->
+    <Field name="dept_id"   type="INTEGER"            fixed="true"></Field>
+    <Field name="dept_name" type="TEXT" length="100"  fixed="true"></Field>
+    <Field name="location"  type="TEXT" length="100"  fixed="true"></Field>
+    <!-- Переменные поля -->
+    <Field name="emp_id"    type="INTEGER"></Field>
+    <Field name="full_name" type="TEXT" length="100"></Field>
+    <Field name="salary"    type="DECIMAL" precision="10" scale="2"></Field>
+    <!-- SpecialValues: для NULL в TEXT поле -->
+    <Field name="notes" type="TEXT" length="500">
+      <SpecialValues>
+        <Null marker="[NULL]"/>
+      </SpecialValues>
+    </Field>
+  </Schema>
+  <Data compact="true">
+    <!-- dept 10 — header row: все 7 значений -->
+    <R>10|Sales|Moscow|101|Ivan Petrov|45000.00|on probation</R>
+    <!-- carry-forward: dept_id/dept_name/location из строки выше -->
+    <R>|||102|Anna Sidorova|52000.00|[NULL]</R>
+    <R>|||103|Boris Kozlov|48000.00|[NULL]</R>
+    <R>|||104|Elena Novikova|55000.00|team lead</R>
+    <R>|||105|Dmitry Smirnov|49500.00|[NULL]</R>
+    <!-- dept 20 — новая группа: снова все значения -->
+    <R>20|Engineering|Saint Petersburg|201|Alice Volkov|72000.00|[NULL]</R>
+    <R>|||202|Charlie Morozov|65000.00|[NULL]</R>
+    <R>|||203|Diana Popova|69000.00|[NULL]</R>
+    <R>|||204|Egor Lebedev|61000.00|[NULL]</R>
+    <R>|||205|Fiona Kuznetsova|78000.00|[NULL]</R>
+  </Data>
+</DataPacket>
+```
+
+**Декодированный результат:**
+
+| dept_id | dept_name | location | emp_id | full_name | salary | notes |
+|---------|-----------|----------|--------|-----------|--------|-------|
+| 10 | Sales | Moscow | 101 | Ivan Petrov | 45000.00 | on probation |
+| 10 | Sales | Moscow | 102 | Anna Sidorova | 52000.00 | NULL |
+| 10 | Sales | Moscow | 103 | Boris Kozlov | 48000.00 | NULL |
+| ... | ... | ... | ... | ... | ... | ... |
+| 20 | Engineering | Saint Petersburg | 201 | Alice Volkov | 72000.00 | NULL |
+
+---
+
+### Reference Packet со сжатием (v1.2+) 🆕
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<DataPacket protocol="TDTP" version="1.0">
+  <Header>
+    <Type>reference</Type>
+    <TableName>orders</TableName>
+    <MessageID>REF-2025-compressed-001</MessageID>
+    <PartNumber>1</PartNumber>
+    <TotalParts>1</TotalParts>
+    <RecordsInPart>1000</RecordsInPart>
+    <Timestamp>2025-12-08T10:00:00Z</Timestamp>
+  </Header>
+  <Schema>
+    <Field name="id" type="INTEGER" key="true"></Field>
+    <Field name="customer_id" type="INTEGER"></Field>
+    <Field name="product_name" type="TEXT" length="200"></Field>
+    <Field name="quantity" type="INTEGER"></Field>
+    <Field name="price" type="DECIMAL" precision="10" scale="2"></Field>
+    <Field name="order_date" type="TIMESTAMP" timezone="UTC"></Field>
+  </Schema>
+  <Data compression="zstd">
+    <R>KLUv/WBgUKEAAesEABWsAgBZCwIIbGFy...base64-encoded-compressed-data...</R>
+  </Data>
+</DataPacket>
+```
+
+**Пояснения к сжатию:**
+
+1. **Атрибут compression="zstd"** указывает, что данные сжаты алгоритмом zstd
+2. **Один элемент `<R>`** содержит все сжатые данные (вместо множества строк)
+3. **Base64 кодирование** обеспечивает безопасную передачу бинарных данных в XML
+4. **RecordsInPart=1000** показывает реальное количество записей после распаковки
+5. При распаковке получается 1000 строк в обычном pipe-delimited формате
+
+**Преимущества:**
+- Размер пакета уменьшается на 50-80%
+- Экономия bandwidth при передаче через message brokers
+- Автоматическая обработка в TDTP framework (v1.2+)
+
+**Когда используется:**
+- Автоматически для пакетов > 1KB (настраивается)
+- Особенно эффективно для больших таблиц
+- Рекомендуется для передачи через медленные каналы
+
+---
+
+## Адаптер-специфичное поведение SpecialValues
+
+Маркеры SpecialValues (v1.3.1) имеют единую семантику на уровне протокола, но каждый
+адаптер сталкивается с ограничениями целевой системы. В этом разделе зафиксированы
+конкретные оговорки для каждого адаптера.
+
+### PostgreSQL
+
+| Маркер | Тип поля | Поведение при импорте |
+|--------|----------|----------------------|
+| `[NULL]` | TEXT | `NULL` (не пустая строка) |
+| `NaN` | REAL / NUMERIC | `'NaN'::numeric` (PostgreSQL поддерживает NaN нативно) |
+| `INF` | REAL / NUMERIC | `'infinity'::numeric` |
+| `-INF` | REAL / NUMERIC | `'-infinity'::numeric` |
+| `0000-00-00` | DATE | `NULL` (NoDate sentinel) |
+| `infinity` / `-infinity` | DATE, TIMESTAMP | `'infinity'::timestamp` / `'-infinity'::timestamp` (PostgreSQL-специфично) |
+
+> PostgreSQL — единственный адаптер, где `NaN`, `INF`, `-INF` хранятся как **числовые значения**,
+> а не NULL. При экспорте из PostgreSQL эти значения автоматически кодируются в маркеры SpecialValues.
+
+### MS SQL Server
+
+| Маркер | Тип поля | Поведение при импорте |
+|--------|----------|----------------------|
+| `[NULL]` | TEXT | `NULL` |
+| `NaN`, `INF`, `-INF` | FLOAT | `NULL` (MSSQL не поддерживает NaN/Inf в числовых типах) |
+| `0000-00-00` | DATE / DATETIME | `NULL` |
+
+> MSSQL: при импорте `NaN`/`INF`/`-INF` в числовое поле значение заменяется на `NULL`.
+> Это потеря семантики — если целевая бизнес-логика различает «нет данных» и «математически
+> недопустимое значение», необходимо использовать отдельный флаговый столбец.
+
+### MySQL
+
+| Маркер | Тип поля | Поведение при импорте |
+|--------|----------|----------------------|
+| `[NULL]` | TEXT | `NULL` |
+| `NaN`, `INF`, `-INF` | FLOAT / DOUBLE | `NULL` (строгий режим SQL) |
+| `0000-00-00` | DATE | `'0000-00-00'` если `NO_ZERO_DATE` не установлен; иначе `NULL` |
+
+> MySQL в strict mode (`sql_mode=STRICT_TRANS_TABLES`) отклонит `0000-00-00` как невалидную дату.
+> Если целевая база работает в non-strict режиме, NoDate sentinel сохраняется как `0000-00-00`.
+> Фреймворк применяет `NoDateSentinels` конфигурацию для управления этим поведением.
+
+### SQLite
+
+| Маркер | Тип поля | Поведение при импорте |
+|--------|----------|----------------------|
+| `[NULL]` | TEXT | `NULL` |
+| `NaN`, `INF`, `-INF` | REAL | `NULL` (SQLite хранит числа как float64, не различает NaN/Inf) |
+| `0000-00-00` | TEXT (дата как строка) | Хранится как строка `"0000-00-00"` |
+
+> SQLite не имеет выделенного типа DATE — даты хранятся как TEXT или INTEGER.
+> NoDate sentinel (`0000-00-00`) сохраняется буквально как строка.
+
+### XLSX (Excel)
+
+Excel — наиболее ограниченная целевая система. Используйте эту таблицу как справочник
+при проектировании ETL-пайплайнов с Excel на выходе.
+
+**Экспорт (TDTP → XLSX):**
+
+| Значение | Тип поля | Что записывается в ячейку | Тип ячейки |
+|----------|----------|--------------------------|------------|
+| `[NULL]` | любой | пустая ячейка | Blank |
+| `NaN` | REAL | пустая ячейка | Blank |
+| `INF` | REAL | пустая ячейка | Blank |
+| `-INF` | REAL | пустая ячейка | Blank |
+| int64 ≤ 15 цифр | INTEGER | число | Number |
+| int64 > 15 цифр | INTEGER | строка `"1234567890123456789"` | Text |
+| дата ≥ 1900-01-01 | DATE | float serial + формат даты | Date |
+| дата < 1900-01-01 | DATE | строка `"1899-10-12"` | Text |
+| строки `=`, `+`, `-`, `@` | TEXT | строка (через `SetCellStr`) | Text |
+
+> **Почему NaN/Inf → Blank, а не текст?**
+> Текстовая строка `"NaN"` в числовом столбце ломает Excel-формулы (`=СУММ()` вернёт `#ЗНАЧ!`).
+> Пустая ячейка — безопасный canonical NULL для бизнес-пользователей.
+>
+> **Почему BIGINT > 15 цифр → строка?**
+> Excel хранит все числа как IEEE-754 float64. Максимальная точность — 15 значащих цифр.
+> `1234567890123456789` превратится в `1234567890123456800` при записи как число — тихая потеря данных.
+>
+> **1900 leap-year bug:** Excel некорректно считает 1900 год високосным (serial 60 = Feb 29, 1900,
+> которого не существует). Фреймворк компенсирует этот сдвиг при импорте через обратное
+> вычисление серийного номера с коррекцией на phantom-день.
+
+**Импорт (XLSX → TDTP):**
+
+| Тип ячейки Excel | Что читается | Что записывается в TDTP |
+|-----------------|--------------|------------------------|
+| Number (дата-стиль) | serial float | ISO дата/datetime через epoch-math |
+| Number (обычное) | raw decimal string | значение as-is |
+| String | trimmed строка | значение as-is |
+| Error (`#N/A`, `#DIV/0!`, `#NUM!`, ...) | код ошибки | `""` → NULL |
+| Blank | `""` | `""` → NULL (для не-TEXT типов) |
+| Boolean | `TRUE`/`FALSE`/`1`/`0` | `"1"` / `"0"` |
+
+### Python (pandas)
+
+| Маркер | Тип колонки pandas | Поведение |
+|--------|--------------------|-----------|
+| `[NULL]` | любой | `None` → `NaN` в float-колонках, `pd.NA` в nullable int/string |
+| `NaN` | float64 | `float('nan')` — нативный NaN, `pd.isna()` = True |
+| `INF` | float64 | `float('inf')` — нативный +∞ |
+| `-INF` | float64 | `float('-inf')` — нативный -∞ |
+| `0000-00-00` | datetime / object | `None` → `NaT` при datetime-конвертации |
+
+> Маркеры применяются **до** вызова `astype()`. Это предотвращает `ValueError` при конвертации
+> строки `"NaN"` в числовой тип. Конвертация `"INF"` → `float('inf')` выполняется через
+> строки `"inf"`/`"-inf"`, которые `pandas.to_numeric()` понимает нативно.
+
+---
+
+## Версионирование
+
+**Текущая версия:** 1.5
+
+**Changelog:**
+
+- **v1.5** (22.07.2026) 🆕
+  - **Section-level encryption** — шифрование заменило собой непрозрачный
+    целый пакет (v1.3) на выборочное шифрование секций, зеркалируя схему
+    compression (v1.2): `<Header>` остаётся открытым XML (маршрутизация,
+    дедупликация, сборка multi-part не требуют ключа); `<QueryContext>`,
+    `<Schema>`, `<Data>` — каждая становится непрозрачным ciphertext с
+    атрибутом `encryption="aes-256-gcm"`
+    - Формат секции: `BASE64(nonce || ciphertext)`, свой nonce на каждую
+      секцию под одним ключом (AES-256-GCM запрещает повтор nonce с одним
+      ключом)
+    - Ключ привязывается к `Header.MessageID` пакета (`POST
+      /api/keys/bind`) — не к отдельно сгенерированному UUID, как в v1.3 —
+      чтобы получатель мог узнать, каким uuid делать `RetrieveKey`, читая
+      только открытый Header, без расшифровки чего-либо
+    - Multi-part пакеты не требуют специальной обработки: каждая часть уже
+      несёт свой уникальный `MessageID` (`{base}-P{n}`), поэтому `BindKey`
+      просто вызывается один раз на часть — то же место, что и раньше
+    - Порядок преобразований фиксирован, не настраивается: хеш (v1.4) →
+      сжатие → шифрование при записи; расшифровка → распаковка →
+      верификация хеша при чтении
+    - **v1.4-интеграция обязательна:** `ComputeIntegrity` + `RegisterHash`
+      теперь выполняются перед каждым v1.5-шифрованием, даже без явного
+      `--integrity` — иначе консьюмерский pre-flight (`VerifyAndPrepare`)
+      блокирует пакет как `HASH_NOT_REGISTERED`, поскольку он уже
+      применяется к любому пакету версии ≥1.4 при заданном
+      `--mercury-url`, который v1.5-расшифровка требует всегда
+  - **CLI:** `--enc` теперь по умолчанию производит v1.5 (было: v1.3);
+    новый флаг `--enc13` явно запрашивает legacy whole-blob формат для
+    консьюмеров, ещё не обновлённых до v1.5. Доступно на `--export`,
+    `--export-broker`, `--pipeline` (`output.tdtp.encryption`)
+  - **Обратная совместимость:** `--import`, `--map`, `--import-broker`
+    определяют формат автоматически по содержимому байтов (бинарный
+    заголовок v1.0–v1.4 vs. XML-атрибут `encryption` v1.5) — старые
+    зашифрованные пакеты продолжают расшифровываться без изменений,
+    ничего не ломается
+  - **Backward compatibility:** reader v1.4 и ниже не понимает формат
+    v1.5 (не пытается его расшифровать — он видит непрозрачный `<Schema
+    encryption="...">`/`<Data encryption="...">` с пустым содержимым
+    полей и просто не сможет прочитать данные без обновления)
+  - Полная схема, диаграммы producer/consumer, разбор атак и решённые
+    вопросы дизайна — [`docs/tdtp-protocol-schema.md`](tdtp-protocol-schema.md) → "v1.5"
+
+- **v1.4** (26.05.2026) 🆕
+  - **Integrity xxh3_128** — трёхуровневый контроль целостности пакета
+    - Атрибут `xxh3` на `<DataPacket>` — PacketXXH3 = xxh3_128(SchemaXXH3 + "|" + DataXXH3)
+    - Атрибут `xxh3` на `<Schema>` — xxh3_128(salt + canonical Schema XML)
+    - Атрибут `xxh3` на `<Data>` — xxh3_128(salt + raw rows before compression)
+    - Соль = MessageID (UUID) пакета — предотвращает replay-атаки
+    - Хеши вычисляются **до** сжатия; получатель сначала распаковывает, затем верифицирует
+    - CLI: `--integrity` (экспорт), верификация автоматическая при `--import`, `--to-csv`, `--to-xlsx`, `--to-html`, `--test`
+  - **xzMercury hash registry** — опциональная регистрация fingerprint'а
+    - `--mercury-url` — адрес реестра; при регистрации URL встраивается в словарь пакета как токен `@MRC`
+    - `--mercury-caller` — идентификатор сервиса-отправителя (default: "tdtpcli")
+    - FallbackDegrade: при недоступности Mercury → только локальная проверка xxh3
+  - **Backward compatibility:** reader v1.3.1 и ниже читает пакеты v1.4, игнорируя атрибуты `xxh3`
+
+- **v1.3.1** (10.03.2026) 🆕
+  - **Fixed Fields** — атрибут `fixed="true"` на `<Field>`
+    - Поле объявляется постоянным в пределах группы строк
+    - Конвенция `_fieldname` в SQL view для auto-detect (tdtpcli убирает `_`, ставит `fixed=true`)
+  - **Compact Format** — атрибут `compact="true"` на `<Data>`
+    - Значения fixed полей записываются только в первой строке группы (header row)
+    - Остальные строки группы имеют пустые слоты `||` на позициях fixed полей
+    - Смена значения fixed поля инициирует новую группу (carry-forward сбрасывается)
+    - Совместим с `compression="zstd"` (порядок: decode zstd → expand compact)
+    - Экономия: 50–70% на повторяющихся значениях; до 85–90% в комбинации с zstd
+  - **Special Values** — дочерний элемент `<SpecialValues>` на `<Field>`
+    - `<Null marker="..."/>` — для TEXT: различает NULL и `""` (empty string)
+    - `<Infinity marker="..."/>`, `<NegInfinity marker="..."/>`, `<NaN marker="..."/>` — для REAL/DECIMAL
+    - `<NoDate marker="..."/>` — для DATE/TIMESTAMP: sentinel «нет даты», отличный от NULL
+  - **Backward compatibility:** reader v1.0 читает пакеты v1.3.1, игнорируя compact/fixed/SpecialValues
+  - **Forward compatibility:** reader v1.3.1 читает пакеты v1.0 без изменений
+
+- **v1.3** (26.02.2026) 🆕
+  - **Тип пакета `error`** — стандартный DataPacket для фиксации ошибок в ETL pipeline
+    - Таблица `tdtp_errors` с полями: `package_uuid`, `pipeline`, `error_code`, `error_message`, `created_at`
+    - Генерируется автоматически при деградации xZMercury
+    - Совместим со всеми downstream-потребителями (в отличие от `alarm`)
+  - **Шифрование AES-256-GCM** через xZMercury (UUID-binding флоу)
+    - Бинарный заголовок: `[2B version][1B algo][16B package_uuid][12B nonce][ciphertext]`
+    - Ключ получается из xZMercury, НЕ передаётся через CLI
+    - HMAC-SHA256 верификация ключа (`MERCURY_SERVER_SECRET`)
+    - При недоступности Mercury → error-пакет вместо данных, exit 0
+  - **pkg/mercury**: HTTP клиент для xZMercury UUID-binding + burn-on-read флоу
+  - **pkg/crypto**: AES-256-GCM шифрование/дешифрование
+  - **cmd/xzmercury-mock**: standalone mock-сервер для E2E тестирования
+  - **ETL CLI**: флаги `--enc` (override encryption) и `--enc-dev` (локальный ключ, !production)
+  - **ResultLog**: статус `completed_with_errors`, поле `package_uuid`
+
+- **v1.2** (08.12.2025)
+  - **Поддержка сжатия данных zstd**
+    - Атрибут `compression="zstd"` для элемента Data
+    - Base64-кодирование сжатых данных
+    - Автоматическое сжатие для пакетов > 1KB
+    - Коэффициент сжатия: 50-80%
+  - Production Features: Circuit Breaker, Retry, Audit, Incremental Sync
+  - Data Processors: Compression, Masking, Validation, Normalization
+  - XLSX Converter (Database ↔ Excel)
+  - Kafka broker integration
+  - MySQL adapter
+
+- **v1.0** (16.11.2025)
+  - Первый production release
+  - Полная реализация Core Modules (Packet, Schema, TDTQL)
+  - Адаптеры: SQLite, PostgreSQL, MS SQL Server
+  - Message Brokers: RabbitMQ, MSMQ
+  - CLI утилита tdtpcli
+  - Максимальный размер пакета: 3.8MB
+  - Поддержка subtypes: UUID, JSONB, INET, ARRAY
+
+---
+
+## Лицензия
+
+MIT License
+
+Copyright (c) 2025 TDTP Framework
+
+---
+
+## Контакты
+
+- **GitHub:** https://github.com/ruslano69/tdtp-framework
+- **Email:** ruslano69@gmail.com
+- **Документация:** https://github.com/ruslano69/tdtp-framework/tree/main/docs
+
+---
+
+*Последнее обновление: 22.07.2026*

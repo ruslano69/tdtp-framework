@@ -1,118 +1,129 @@
 # TDTP Specification
 
-**Table Data Transfer Protocol** - спецификация формата обмена табличными данными через message brokers.
+**Table Data Transfer Protocol** — the format for exchanging tabular data
+through message brokers.
 
-**Версия:** 1.5 (базовый протокол v1.0; расширения: v1.2 — compression, v1.3 — encryption, v1.3.1 — compact format / fixed fields / special values, v1.4 — integrity xxh3_128 hashes + xzMercury, v1.5 — section-level encryption)
-**Дата:** 22.07.2026
-**Статус:** Production Ready
+**Version:** 1.5 (base protocol v1.0; extensions: v1.2 compression, v1.3
+encryption, v1.3.1 compact format / fixed fields / special values, v1.4
+integrity xxh3_128 hashes + xzMercury, v1.5 section-level encryption)
+**Date:** 2026-07-22
+**Status:** Production ready
 
 ---
 
-## Содержание
+## Contents
 
-1. [Введение](#введение)
-2. [Архитектура](#архитектура)
-3. [Формат пакетов](#формат-пакетов)
+1. [Introduction](#introduction)
+2. [Architecture](#architecture)
+3. [Packet format](#packet-format)
    - [Header](#header)
    - [Schema](#schema)
    - [Data](#data)
-   - [Integrity (контроль целостности)](#integrity-контроль-целостности)
+   - [Integrity](#integrity)
    - [Query (TDTQL)](#query-tdtql)
    - [QueryContext](#querycontext)
-4. [Типы данных](#типы-данных)
-5. [TDTQL - Query Language](#tdtql---query-language)
-6. [Compact Format v1.3.1](#compact-format-v131)
-7. [Примеры](#примеры)
+4. [Data types](#data-types)
+5. [TDTQL query language](#tdtql-query-language)
+6. [Compact format v1.3.1](#compact-format-v131)
+7. [Examples](#examples)
+8. [Adapter-specific behaviour of SpecialValues](#adapter-specific-behaviour-of-specialvalues)
+9. [Versioning](#versioning)
 
 ---
 
-## Введение
+## Introduction
 
-### Назначение
+### Purpose
 
-TDTP (Table Data Transfer Protocol) - это протокол для универсального обмена табличными данными между системами через message brokers (RabbitMQ, MSMQ, Kafka). Протокол разработан для:
+TDTP (Table Data Transfer Protocol) is a protocol for exchanging tabular data
+between systems through message brokers — RabbitMQ, MSMQ, Kafka. It was designed
+for:
 
-- **Синхронизации справочников** между информационными системами
-- **Репликации данных** между БД разных типов (SQLite, PostgreSQL, MS SQL)
-- **Обмена данными** через очереди сообщений
-- **Статистических выгрузок** с фильтрацией и сортировкой
+- **synchronising reference data** between information systems
+- **replicating data** between databases of different kinds (SQLite, PostgreSQL, MS SQL)
+- **exchanging data** through message queues
+- **statistical extracts** with filtering and sorting
 
-### Ключевые особенности
+### Key properties
 
-- ✅ **Самодокументируемость** - каждый пакет содержит полную схему данных
-- ✅ **Stateless** - каждое сообщение независимо и содержит весь контекст
-- ✅ **Валидация** - строгая типизация с проверкой на уровне схемы
-- ✅ **Пагинация** - автоматическое разбиение больших таблиц на части (до 3.8MB)
-- ✅ **Фильтрация** - встроенный язык запросов TDTQL
-- ✅ **Универсальность** - работает с любыми СУБД и message brokers
-- ✅ **Сжатие данных** - опциональное сжатие zstd для больших пакетов (v1.2+)
-- ✅ **Шифрование** - AES-256-GCM с UUID-binding через xZMercury (v1.3+)
-- ✅ **Контроль целостности** - XXH3-128 хеши Schema + Data + Packet с опциональной регистрацией в xzMercury (v1.4)
+- **Self-describing** — every packet carries its full schema
+- **Stateless** — every message is independent and carries its whole context
+- **Validated** — strict typing, checked at the schema level
+- **Paginated** — large tables are split into parts automatically (up to 3.8 MB)
+- **Filterable** — TDTQL, a built-in query language
+- **Portable** — works with any database and any message broker
+- **Compressible** — optional zstd compression for large packets (v1.2+)
+- **Encrypted** — AES-256-GCM with UUID binding through xZMercury (v1.3+)
+- **Integrity-checked** — XXH3-128 hashes over Schema, Data and Packet, optionally registered with xzMercury (v1.4)
 
-### Формат данных
+### Data format
 
-- **Контейнер:** XML (UTF-8)
-- **Разделитель данных:** Pipe `|` (ASCII 124)
-- **Максимальный размер пакета:** 3.8 MB (настраивается)
-- **Кодировка:** UTF-8
+- **Container:** XML (UTF-8)
+- **Field separator:** pipe `|` (ASCII 124)
+- **Maximum packet size:** 3.8 MB (configurable)
+- **Encoding:** UTF-8
 
 ---
 
-## Архитектура
+## Architecture
 
-### Структура пакета
+### Packet structure
 
 ```
 DataPacket
-├── Header              (обязательный)
+├── Header              (required)
 │   ├── Type            (reference|delta|request|response|alarm|error)
-│   ├── TableName       (имя таблицы)
+│   ├── TableName
 │   ├── MessageID       (UUID)
 │   ├── Timestamp       (ISO 8601)
 │   └── Pagination      (PartNumber/TotalParts)
 │
-├── Schema              (обязательный для data packets)
-│   └── Field[]         (описание полей)
+├── Schema              (required for data packets)
+│   └── Field[]         (field descriptions)
 │       ├── Name
 │       ├── Type        (INTEGER|TEXT|DECIMAL|...)
 │       ├── Length/Precision/Scale
 │       └── Attributes  (key, nullable, timezone, subtype)
 │
-├── Data                (обязательный для data packets)
-│   ├── compression     (опциональный атрибут: "zstd")  🆕 v1.2
-│   └── Row[]           (данные в формате pipe-delimited или сжатые)
+├── Data                (required for data packets)
+│   ├── compression     (optional attribute: "zstd")     v1.2
+│   └── Row[]           (pipe-delimited, or compressed)
 │
-├── Query               (опциональный, для request/response)
-│   ├── Filters         (TDTQL условия)
-│   ├── OrderBy         (сортировка)
-│   └── Limit/Offset    (пагинация)
+├── Query               (optional, for request/response)
+│   ├── Filters         (TDTQL conditions)
+│   ├── OrderBy
+│   └── Limit/Offset
 │
-└── QueryContext        (опциональный, для response)
-    └── ExecutionResults (статистика выполнения)
+└── QueryContext        (optional, for response)
+    └── ExecutionResults
 ```
 
-### Типы пакетов
+### Packet types
 
-| Тип | Назначение | Обязательные элементы |
-|-----|------------|-----------------------|
-| **reference** | Полная синхронизация справочника | Header, Schema, Data |
-| **delta** | Инкрементальное обновление | Header, Schema, Data, Query |
-| **request** | Запрос данных | Header, Query, Sender, Recipient |
-| **response** | Ответ на запрос | Header, Schema, Data, QueryContext |
-| **alarm** | Уведомление мониторинга | Header, AlarmDetails (Severity, Code, Message) |
-| **error** | Управляемая ошибка ETL pipeline | Header, Schema, Data (запись в `tdtp_errors`) |
+| Type | Purpose | Required elements |
+|------|---------|-------------------|
+| **reference** | Full synchronisation of a reference table | Header, Schema, Data |
+| **delta** | Incremental update | Header, Schema, Data, Query |
+| **request** | Request for data | Header, Query, Sender, Recipient |
+| **response** | Answer to a request | Header, Schema, Data, QueryContext |
+| **alarm** | Monitoring notification | Header, AlarmDetails (Severity, Code, Message) |
+| **error** | Handled ETL pipeline failure | Header, Schema, Data (a row in `tdtp_errors`) |
 
-> **alarm vs error:** `alarm` использует нестандартный блок `<AlarmDetails>` — предназначен для систем мониторинга (не совместим с ETL pipeline). `error` — стандартный `DataPacket` с `Schema+Data`, пишется в таблицу `tdtp_errors` и совместим с любым downstream-потребителем. Генерируется автоматически при деградации xZMercury.
+> **alarm versus error:** `alarm` uses a non-standard `<AlarmDetails>` block and
+> is meant for monitoring systems — it is not compatible with an ETL pipeline.
+> `error` is an ordinary `DataPacket` with Schema and Data, written into a
+> `tdtp_errors` table, and any downstream consumer can read it. It is produced
+> automatically when xZMercury degrades.
 
 ---
 
-## Формат пакетов
+## Packet format
 
 ### Header
 
-Заголовок пакета содержит метаданные о сообщении.
+Metadata about the message.
 
-**XML структура:**
+**XML:**
 ```xml
 <Header>
   <Type>reference</Type>
@@ -128,26 +139,26 @@ DataPacket
 </Header>
 ```
 
-**Поля:**
+**Fields:**
 
-| Поле | Тип | Обязательное | Описание |
-|------|-----|--------------|----------|
-| Type | enum | ✅ | reference, delta, request, response, alarm |
-| TableName | string | ✅ | Имя таблицы/справочника |
-| MessageID | UUID | ✅ | Уникальный идентификатор сообщения |
-| PartNumber | int | ✅ | Номер части (для пагинации) |
-| TotalParts | int | ✅ | Общее количество частей |
-| RecordsInPart | int | ⚪ | Количество записей в части |
-| Timestamp | ISO8601 | ✅ | Время создания пакета |
-| Sender | string | ⚪ | Система-отправитель |
-| Recipient | string | ⚪ | Система-получатель |
-| InReplyTo | string | ⚪ | ID запроса (для response) |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| Type | enum | yes | reference, delta, request, response, alarm, error |
+| TableName | string | yes | Table or reference-list name |
+| MessageID | UUID | yes | Unique message identifier |
+| PartNumber | int | yes | Part number, for pagination |
+| TotalParts | int | yes | Total number of parts |
+| RecordsInPart | int | no | Rows in this part |
+| Timestamp | ISO 8601 | yes | When the packet was created |
+| Sender | string | no | Sending system |
+| Recipient | string | no | Receiving system |
+| InReplyTo | string | no | Request ID, for a response |
 
 ### Schema
 
-Схема описывает структуру таблицы и типы данных.
+The structure of the table and the types of its fields.
 
-**XML структура:**
+**XML:**
 ```xml
 <Schema>
   <Field name="id" type="INTEGER" key="true"></Field>
@@ -160,15 +171,15 @@ DataPacket
 </Schema>
 ```
 
-**XML структура (v1.3.1 — с fixed и SpecialValues):** 🆕 v1.3.1
+**XML with `fixed` and `SpecialValues` (v1.3.1):**
 ```xml
 <Schema>
-  <!-- fixed=true: значение не меняется в пределах пакета (compact-оптимизация) -->
+  <!-- fixed=true: the value does not change within the packet (compact optimisation) -->
   <Field name="dept_id"   type="INTEGER"           fixed="true"></Field>
   <Field name="dept_name" type="TEXT" length="100" fixed="true"></Field>
   <Field name="emp_id"    type="INTEGER"></Field>
 
-  <!-- SpecialValues: маркеры для NULL, Infinity, NaN, NoDate -->
+  <!-- SpecialValues: markers for NULL, Infinity, NaN, NoDate -->
   <Field name="notes" type="TEXT" length="500">
     <SpecialValues>
       <Null marker="[NULL]"/>
@@ -191,42 +202,42 @@ DataPacket
 </Schema>
 ```
 
-**Атрибуты Field:**
+**Field attributes:**
 
-| Атрибут | Тип | Применимо к | Default | Описание |
-|---------|-----|-------------|---------|----------|
-| name | string | все | — | Имя поля (обязательное) |
-| type | enum | все | — | Тип данных TDTP (обязательное) |
-| length | int | TEXT, BLOB | — | Максимальная длина (-1 = unlimited) |
-| precision | int | DECIMAL | — | Общее количество цифр |
-| scale | int | DECIMAL | — | Количество цифр после запятой |
-| timezone | string | TIMESTAMP, TIME | UTC | Часовой пояс (UTC, Local, +03:00) |
-| key | bool | любой | false | Первичный ключ |
-| subtype | string | любой | — | Подтип (uuid, jsonb, inet, array) |
-| **fixed** | bool | любой | false | 🆕 v1.3.1: значение не меняется в пределах пакета |
+| Attribute | Type | Applies to | Default | Description |
+|-----------|------|------------|---------|-------------|
+| name | string | all | — | Field name (required) |
+| type | enum | all | — | TDTP data type (required) |
+| length | int | TEXT, BLOB | — | Maximum length (-1 = unlimited) |
+| precision | int | DECIMAL | — | Total number of digits |
+| scale | int | DECIMAL | — | Digits after the decimal point |
+| timezone | string | TIMESTAMP, TIME | UTC | Time zone (UTC, Local, +03:00) |
+| key | bool | any | false | Primary key |
+| subtype | string | any | — | Subtype (uuid, jsonb, inet, array) |
+| **fixed** | bool | any | false | v1.3.1: the value does not change within the packet |
 
-**Дочерний элемент `<SpecialValues>`** 🆕 v1.3.1
+**Child element `<SpecialValues>`** (v1.3.1)
 
-Задаёт строковые маркеры для значений, которые нельзя выразить стандартно:
+Declares string markers for values that cannot be expressed directly:
 
-| Элемент | Атрибут | Применимо к | Описание |
-|---------|---------|-------------|----------|
-| `<Null>` | `marker` | TEXT | NULL (отличается от пустой строки `""`) |
-| `<Infinity>` | `marker` | REAL, DECIMAL | Положительная бесконечность |
-| `<NegInfinity>` | `marker` | REAL, DECIMAL | Отрицательная бесконечность |
+| Element | Attribute | Applies to | Meaning |
+|---------|-----------|------------|---------|
+| `<Null>` | `marker` | TEXT | NULL, as distinct from the empty string `""` |
+| `<Infinity>` | `marker` | REAL, DECIMAL | Positive infinity |
+| `<NegInfinity>` | `marker` | REAL, DECIMAL | Negative infinity |
 | `<NaN>` | `marker` | REAL | Not a Number (0/0, sqrt(-1)) |
-| `<NoDate>` | `marker` | DATE, TIMESTAMP | Отсутствие даты (не то же самое, что NULL) |
+| `<NoDate>` | `marker` | DATE, TIMESTAMP | Absence of a date — not the same as NULL |
 
-**Логика декодера для SpecialValues:**
-- Если значение совпадает с маркером → применить соответствующее специальное значение
-- Для TEXT: пустая строка `||` = `""` (empty string, хранится); маркер `[NULL]` = NULL (не хранится)
-- Для DATE: маркер NoDate = sentinel-значение «нет даты», отличное от NULL
+**Decoder rules for SpecialValues:**
+- If a value equals a marker, apply the corresponding special value
+- For TEXT: an empty field `||` is `""`, an empty string that is stored; the `[NULL]` marker is NULL, which is not
+- For DATE: the NoDate marker is a sentinel meaning "no date", distinct from NULL
 
 ### Data
 
-Данные передаются в формате pipe-delimited (разделитель `|`).
+Rows are pipe-delimited.
 
-**XML структура (без сжатия):**
+**XML, uncompressed:**
 ```xml
 <Data>
   <R>1|john_doe|john@example.com|1500.50|2025-01-15 10:30:00</R>
@@ -234,87 +245,91 @@ DataPacket
 </Data>
 ```
 
-**XML структура (со сжатием zstd):** 🆕 v1.2
+**XML, zstd-compressed (v1.2):**
 ```xml
 <Data compression="zstd">
   <R>KLUv/WBgVKEAAYsBAHNvbWUtY29tcHJlc3NlZC1kYXRhLWhlcmU=</R>
 </Data>
 ```
 
-**Атрибуты Data:**
+**Data attributes:**
 
-| Атрибут | Тип | Значения | Описание |
-|---------|-----|----------|----------|
-| compression | string | `"zstd"` | Алгоритм сжатия (опционально, v1.2+) |
-| checksum | string | hex | XXH3 хеш сжатых данных (v1.2+) |
-| **compact** | bool | `"true"` | 🆕 v1.3.1: compact format — fixed поля пишутся только при смене значения |
+| Attribute | Type | Values | Description |
+|-----------|------|--------|-------------|
+| compression | string | `"zstd"` | Compression algorithm (optional, v1.2+) |
+| checksum | string | hex | XXH3 hash of the compressed data (v1.2+) |
+| **compact** | bool | `"true"` | v1.3.1: fixed fields are written only when they change |
 
-**Сжатие данных (v1.2+):**
+**Compression (v1.2+):**
 
-При установке атрибута `compression="zstd"`:
-- Все строки данных объединяются и сжимаются алгоритмом zstd
-- Сжатые данные кодируются в base64
-- Результат помещается в единственный элемент `<R>`
-- При распаковке данные восстанавливаются в исходный формат pipe-delimited
+With `compression="zstd"` set:
+- every data row is concatenated and compressed with zstd
+- the compressed bytes are base64-encoded
+- the result goes into a single `<R>` element
+- on decompression the original pipe-delimited rows are restored
 
-**Когда использовать сжатие:**
-- Для пакетов размером > 1KB (настраивается)
-- Для больших таблиц с многими строками
-- Для экономии bandwidth при передаче через message brokers
-- Типичный коэффициент сжатия: 50-80%
+**When to compress:**
+- packets over 1 KB (configurable)
+- large tables with many rows
+- to save bandwidth over a message broker
+- typical ratio: 50–80%
 
-**Правила форматирования:**
+**Formatting rules:**
 
-- **Разделитель:** Pipe `|` (ASCII 124)
-- **Пустое значение:** Пустая строка между разделителями: `field1||field3`
-- **NULL:** Отсутствие значения = NULL
-- **Escape разделителя:** Backslash escaping для pipe внутри значений:
-  - `|` → `\|` (pipe внутри значения)
-  - `\` → `\\` (backslash внутри значения)
-- **XML entities:** XML специальные символы экранируются автоматически:
+- **Separator:** pipe `|` (ASCII 124)
+- **Empty value:** nothing between two separators — `field1||field3`
+- **NULL:** an absent value is NULL
+- **Escaping the separator:** backslash escaping for a pipe inside a value
+  - `|` → `\|`
+  - `\` → `\\`
+- **XML entities:** XML special characters are escaped automatically
   - `<` → `&lt;`
   - `>` → `&gt;`
   - `&` → `&amp;`
   - `"` → `&quot;`
   - `'` → `&apos;`
 
-**Примеры экранирования:**
+**Escaping examples:**
 ```xml
-<!-- Простое значение -->
+<!-- Plain values -->
 <R>value1|value2|value3</R>
 
-<!-- Pipe внутри первого значения -->
+<!-- Pipe inside the first value -->
 <R>path\|to\|file|value2|value3</R>
-<!-- Декодируется как: ["path|to|file", "value2", "value3"] -->
+<!-- decodes to: ["path|to|file", "value2", "value3"] -->
 
-<!-- Backslash внутри значения -->
+<!-- Backslash inside a value -->
 <R>C:\\Windows\\System32|value2</R>
-<!-- Декодируется как: ["C:\Windows\System32", "value2"] -->
+<!-- decodes to: ["C:\Windows\System32", "value2"] -->
 
-<!-- Комбинация pipe и backslash -->
+<!-- Both -->
 <R>C:\\path\|to\|file|value2</R>
-<!-- Декодируется как: ["C:\path|to|file", "value2"] -->
+<!-- decodes to: ["C:\path|to|file", "value2"] -->
 ```
 
-### Integrity (контроль целостности)
+### Integrity
 
-> **v1.4+** — пакет должен нести атрибут `version="1.4"` на корневом элементе.
+> **v1.4+** — the packet must carry `version="1.4"` on its root element.
 
-#### Модель хешей
+#### The hash model
 
-TDTP v1.4 вводит трёхуровневую схему контроля целостности на основе **XXH3-128** (алгоритм Cyan4973, 128-бит, неcryptographic, детерминирован для одинакового ввода).
+TDTP v1.4 introduces a three-level integrity scheme built on **XXH3-128**
+(Cyan4973's algorithm; 128-bit, non-cryptographic, deterministic for identical
+input).
 
-| Уровень | Поле в XML | Что хешируется | Соль |
-|---------|------------|----------------|------|
-| Schema | `<Schema xxh3="...">` | Канонический XML схемы (без атрибута `xxh3` самой схемы) | MessageID |
-| Data | `<Data xxh3="...">` | Сырые строки до сжатия: `row₀\nrow₁\n…rowN\n` | MessageID |
-| Packet | `<DataPacket … xxh3="...">` | `SchemaXXH3 + "|" + DataXXH3` | — (уже встроена в компоненты) |
+| Level | XML field | What is hashed | Salt |
+|-------|-----------|----------------|------|
+| Schema | `<Schema xxh3="...">` | Canonical schema XML, excluding the schema's own `xxh3` attribute | MessageID |
+| Data | `<Data xxh3="...">` | Raw rows before compression: `row₀\nrow₁\n…rowN\n` | MessageID |
+| Packet | `<DataPacket … xxh3="...">` | `SchemaXXH3 + "|" + DataXXH3` | — (already carried by the components) |
 
-**Соль:** первые байты каждого хеш-ввода — это `MessageID` пакета (UUID). Это предотвращает повторное использование захваченного хеша против другого пакета. Соль не секретна — она хранится в открытом тексте в `<Header>`.
+**The salt** is the packet's `MessageID` (a UUID), prepended to each hash input.
+It prevents a captured hash from being reused against a different packet. The
+salt is not a secret — it sits in plain text in the `<Header>`.
 
-Все три значения — 32-символьные строки hex lowercase (128 бит = 16 байт).
+All three values are 32-character lowercase hex strings (128 bits = 16 bytes).
 
-#### XML структура (v1.4)
+#### XML (v1.4)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -341,7 +356,9 @@ TDTP v1.4 вводит трёхуровневую схему контроля ц
 </DataPacket>
 ```
 
-С компрессией (`--compress --integrity`) — хеши вычисляются по **несжатым** строкам, сохраняются до сжатия, а затем пакет сжимается. Получатель сначала распаковывает, потом верифицирует.
+With compression (`--compress --integrity`) the hashes are computed over the
+**uncompressed** rows and stored before compression runs. The receiver
+decompresses first and verifies second.
 
 ```xml
 <Data compression="zstd" xxh3="f8e7d6c5b4a3928171605040302010ff">
@@ -349,60 +366,64 @@ TDTP v1.4 вводит трёхуровневую схему контроля ц
 </Data>
 ```
 
-> **Различие `Data.checksum` и `Data.xxh3`:**
-> - `checksum` (v1.2) — XXH3-64 хеш **сжатого** blob (base64 блок), backward-compat
-> - `xxh3` (v1.4) — XXH3-128 хеш **несжатых** строк, часть трёхуровневой схемы
+> **`Data.checksum` versus `Data.xxh3`:**
+> - `checksum` (v1.2) is an XXH3-64 hash of the **compressed** blob, kept for backward compatibility
+> - `xxh3` (v1.4) is an XXH3-128 hash of the **uncompressed** rows, and part of the three-level scheme
 
-#### CLI: экспорт с integrity
+#### CLI: exporting with integrity
 
 ```
---integrity             Вычислить xxh3_128 хеши (Schema + Data + Packet),
-                        проставить атрибуты, установить version="1.4".
-                        Хеши вычисляются ДО сжатия.
---mercury-url <url>     Зарегистрировать fingerprint пакета в xzMercury
-                        (например http://mercury:3000).
-                        Если не указан — только локальные хеши (local integrity).
---mercury-caller <name> Идентификатор сервиса для xzMercury (по умолчанию "tdtpcli").
+--integrity             Compute the xxh3_128 hashes (Schema + Data + Packet),
+                        set the attributes, set version="1.4".
+                        Hashes are computed BEFORE compression.
+--mercury-url <url>     Register the packet fingerprint with xzMercury
+                        (for example http://mercury:3000).
+                        Omitted: local hashes only.
+--mercury-caller <name> Service identifier for xzMercury (default "tdtpcli").
 ```
 
-Примеры:
+Examples:
 
 ```bash
-# Экспорт с integrity, только локальные хеши
+# Local hashes only
 tdtpcli --export users --compress --integrity --output users_v14.tdtp.xml
 
-# Экспорт с integrity + регистрация в Mercury
+# Hashes plus registration with Mercury
 tdtpcli --export orders --compress --integrity \
         --mercury-url http://mercury:3000 --mercury-caller svc-exporter \
         --output orders_v14.tdtp.xml
 ```
 
-При экспорте в консоль выводятся первые 8 hex-символов каждого хеша:
+The export prints the first eight hex characters of each hash:
 
 ```
   → Integrity: schema=a1b2c3d4… data=f8e7d6c5… packet=c3d4e5f6…
 ```
 
-#### Верификация
+#### Verification
 
-Верификация запускается автоматически при любой команде, которая читает пакет (`--import`, `--to-csv`, `--to-xlsx`, `--to-html`, `--test`):
+Verification runs automatically in any command that reads a packet: `--import`,
+`--to-csv`, `--to-xlsx`, `--to-html`, `--test`.
 
-1. **Mercury pre-flight** (если пакет несёт `@MRC` в словаре): `GET /api/hashes/{uuid}/{part}?xxh3=...`
-2. **Локальная проверка xxh3**: пересчитать три хеша и сравнить с атрибутами в XML
-3. **Dictionary expansion**: заменить `@-токены` в данных
+1. **Mercury pre-flight**, when the packet carries `@MRC` in its dictionary: `GET /api/hashes/{uuid}/{part}?xxh3=...`
+2. **Local xxh3 check**: recompute the three hashes and compare them with the XML attributes
+3. **Dictionary expansion**: replace `@` tokens in the data
 
-Если Mercury недоступен — система переходит в **FallbackDegrade**: выполняется только шаг 2.
+If Mercury is unreachable the system falls back to **FallbackDegrade** and runs
+step 2 only.
 
-Поведение при несовпадении хешей:
-- `--import`: прерывается **до** любых записей в БД
-- `--to-csv` / `--to-xlsx` / `--to-html`: возвращает ошибку, файл не создаётся
-- `--test`: выводит сообщение об ошибке, exit code ≠ 0
+On a hash mismatch:
+- `--import` aborts **before** anything is written to the database
+- `--to-csv`, `--to-xlsx`, `--to-html` return an error and create no file
+- `--test` prints the error and exits non-zero
 
-Если пакет не несёт `xxh3` атрибута (создан до v1.4) — верификация молча пропускается.
+A packet with no `xxh3` attribute — anything produced before v1.4 — skips
+verification silently.
 
-#### xzMercury hash registry
+#### The xzMercury hash registry
 
-xzMercury — опциональный сервис-реестр fingerprint'ов. Хранит запись по `(uuid, part_number)`:
+xzMercury is an optional fingerprint registry. It stores one record per
+`(uuid, part_number)`:
 
 ```
 POST /api/hashes
@@ -410,18 +431,20 @@ POST /api/hashes
     "caller": "svc-exporter", "version": "1.4" }
 
 GET /api/hashes/{uuid}/{part}?xxh3=c3d4...
-  → 200 OK  (хеш совпадает)
-  → 409 Conflict  (хеш зарегистрирован, но другой — возможная подмена)
-  → 404 Not Found (пакет не зарегистрирован)
+  → 200 OK        hash matches
+  → 409 Conflict  registered under a different hash — possible tampering
+  → 404 Not Found packet not registered
 ```
 
-Адрес Mercury встраивается в словарь пакета как токен `@MRC` при регистрации, чтобы потребитель мог найти реестр без дополнительной конфигурации.
+On registration the Mercury address is embedded in the packet dictionary as the
+token `@MRC`, so a consumer can find the registry without being configured for
+it.
 
 ### Query (TDTQL)
 
-Структура запроса для фильтрации данных.
+The filter structure.
 
-**XML структура:**
+**XML:**
 ```xml
 <Query language="TDTQL" version="1.0">
   <Filters>
@@ -436,17 +459,17 @@ GET /api/hashes/{uuid}/{part}?xxh3=c3d4...
 </Query>
 ```
 
-Подробнее см. [TDTQL - Query Language](#tdtql---query-language)
+See [TDTQL query language](#tdtql-query-language).
 
 ### QueryContext
 
-Контекст выполнения запроса (только для response).
+Execution context, present only in a response.
 
-**XML структура:**
+**XML:**
 ```xml
 <QueryContext>
   <OriginalQuery language="TDTQL" version="1.0">
-    <!-- Копия исходного запроса -->
+    <!-- copy of the original request -->
   </OriginalQuery>
   <ExecutionResults>
     <TotalRecordsInTable>10000</TotalRecordsInTable>
@@ -459,51 +482,51 @@ GET /api/hashes/{uuid}/{part}?xxh3=c3d4...
 
 ---
 
-## Типы данных
+## Data types
 
-### Базовые типы
+### Base types
 
-| TDTP Type | Описание | SQL аналоги | Формат в Data |
-|-----------|----------|-------------|---------------|
-| **INTEGER** | Целое число | INT, BIGINT, SERIAL | `123`, `-456` |
-| **REAL** | Число с плавающей точкой | FLOAT, DOUBLE | `123.45`, `-0.001` |
-| **DECIMAL** | Точное число | DECIMAL(p,s), NUMERIC | `1234.56` |
-| **TEXT** | Строка | VARCHAR, TEXT, NVARCHAR | `Hello World` |
-| **BLOB** | Бинарные данные | BLOB, BYTEA, VARBINARY | Base64 encoded |
-| **BOOLEAN** | Логический | BOOLEAN, BIT | `0` (false), `1` (true) |
-| **DATE** | Дата | DATE | `2025-01-15` (ISO 8601) |
-| **TIME** | Время | TIME | `14:30:00` (ISO 8601) |
-| **TIMESTAMP** | Дата и время | TIMESTAMP, DATETIME | `2025-01-15 14:30:00` |
+| TDTP type | Description | SQL equivalents | Representation in Data |
+|-----------|-------------|-----------------|------------------------|
+| **INTEGER** | Whole number | INT, BIGINT, SERIAL | `123`, `-456` |
+| **REAL** | Floating point | FLOAT, DOUBLE | `123.45`, `-0.001` |
+| **DECIMAL** | Exact number | DECIMAL(p,s), NUMERIC | `1234.56` |
+| **TEXT** | String | VARCHAR, TEXT, NVARCHAR | `Hello World` |
+| **BLOB** | Binary | BLOB, BYTEA, VARBINARY | Base64 |
+| **BOOLEAN** | Boolean | BOOLEAN, BIT | `0` (false), `1` (true) |
+| **DATE** | Date | DATE | `2025-01-15` (ISO 8601) |
+| **TIME** | Time | TIME | `14:30:00` (ISO 8601) |
+| **TIMESTAMP** | Date and time | TIMESTAMP, DATETIME | `2025-01-15 14:30:00` |
 
-### Атрибуты типов
+### Type attributes
 
-**LENGTH** (для TEXT, BLOB):
-- Положительное число: максимальная длина
-- `-1`: неограниченная длина (TEXT, JSONB, UUID)
+**LENGTH** (TEXT, BLOB):
+- a positive number is the maximum length
+- `-1` means unlimited (TEXT, JSONB, UUID)
 
-**PRECISION и SCALE** (для DECIMAL):
-- `precision`: общее количество значащих цифр
-- `scale`: количество цифр после запятой
-- Пример: `DECIMAL(12,2)` → `precision="12" scale="2"` → `9999999999.99`
+**PRECISION and SCALE** (DECIMAL):
+- `precision` — total significant digits
+- `scale` — digits after the decimal point
+- `DECIMAL(12,2)` → `precision="12" scale="2"` → `9999999999.99`
 
-**TIMEZONE** (для TIMESTAMP, TIME):
-- `UTC`: время в UTC
-- `Local`: локальное время системы
-- `+03:00`, `-05:00`: конкретный часовой пояс
+**TIMEZONE** (TIMESTAMP, TIME):
+- `UTC`
+- `Local` — the system's local time
+- `+03:00`, `-05:00` — a specific offset
 
 **KEY**:
-- `true`: поле является первичным ключом
-- `false` или отсутствует: обычное поле
+- `true` — the field is part of the primary key
+- `false` or absent — an ordinary field
 
 **SUBTYPE**:
-- `uuid`: UUID/GUID (TEXT length="-1" subtype="uuid")
-- `jsonb`: JSON Binary (TEXT length="-1" subtype="jsonb")
-- `json`: JSON Text (TEXT length="-1" subtype="json")
-- `inet`: IP адрес (TEXT subtype="inet")
-- `array`: Массив (TEXT subtype="array")
-- `timestamptz`: Timestamp с timezone (TIMESTAMP timezone="UTC" subtype="timestamptz")
+- `uuid` — UUID/GUID (`TEXT length="-1" subtype="uuid"`)
+- `jsonb` — JSON binary (`TEXT length="-1" subtype="jsonb"`)
+- `json` — JSON text (`TEXT length="-1" subtype="json"`)
+- `inet` — IP address (`TEXT subtype="inet"`)
+- `array` — array (`TEXT subtype="array"`)
+- `timestamptz` — timestamp with time zone (`TIMESTAMP timezone="UTC" subtype="timestamptz"`)
 
-### Специальные типы (через subtype)
+### Special types through subtype
 
 **UUID:**
 ```xml
@@ -531,13 +554,15 @@ GET /api/hashes/{uuid}/{part}?xxh3=c3d4...
 
 ---
 
-## Compact Format v1.3.1
+## Compact format v1.3.1
 
-### Проблема
+### The problem
 
-В 1-to-many JOIN паттернах (view-ы, отчёты) многие столбцы повторяют одно и то же значение в каждой строке. В базовом формате v1.0 дублирование приводит к 50–70% overhead.
+In one-to-many join patterns — views, reports — many columns repeat the same
+value on every row. In the base v1.0 format that duplication costs 50–70%
+overhead.
 
-**Пример дублирования (v1.0):**
+**Duplication in v1.0:**
 ```xml
 <Data>
   <R>10|Sales|Moscow|101|Ivan Petrov|45000</R>
@@ -546,65 +571,68 @@ GET /api/hashes/{uuid}/{part}?xxh3=c3d4...
 </Data>
 ```
 
-Поля `dept_id`, `dept_name`, `location` повторяются в каждой строке.
+`dept_id`, `dept_name` and `location` repeat on every row.
 
-### Решение
+### The solution
 
-Три дополняющих механизма v1.3.1:
+Three complementary mechanisms in v1.3.1:
 
-1. **`fixed="true"`** на Field — объявляет, что поле не меняется в пределах группы
-2. **`compact="true"`** на Data — значения fixed полей пишутся только при смене
-3. **`<SpecialValues>`** на Field — маркеры для NULL, Infinity, NaN, NoDate
+1. **`fixed="true"`** on a Field — declares that the field does not change within a group
+2. **`compact="true"`** on Data — fixed values are written only when they change
+3. **`<SpecialValues>`** on a Field — markers for NULL, Infinity, NaN, NoDate
 
-### Fixed Fields
+### Fixed fields
 
-Атрибут `fixed="true"` на `<Field>` сигнализирует процессору, что значение поля постоянно в пределах группы строк.
+`fixed="true"` on a `<Field>` tells the processor that the value is constant
+across a run of rows.
 
 ```xml
 <Schema>
-  <Field name="dept_id"   type="INTEGER" fixed="true"></Field>   <!-- постоянное -->
-  <Field name="dept_name" type="TEXT"    fixed="true"></Field>   <!-- постоянное -->
-  <Field name="emp_id"    type="INTEGER"></Field>                <!-- переменное -->
-  <Field name="emp_name"  type="TEXT"></Field>                   <!-- переменное -->
+  <Field name="dept_id"   type="INTEGER" fixed="true"></Field>   <!-- constant -->
+  <Field name="dept_name" type="TEXT"    fixed="true"></Field>   <!-- constant -->
+  <Field name="emp_id"    type="INTEGER"></Field>                <!-- varies -->
+  <Field name="emp_name"  type="TEXT"></Field>                   <!-- varies -->
 </Schema>
 ```
 
-**Соглашение для SQL view (`_prefix`):**
+**Convention for SQL views (`_prefix`):**
 
-При создании view используйте префикс `_` для обозначения fixed полей. tdtpcli автоматически обнаруживает их, убирает `_` из имени и устанавливает `fixed="true"`:
+Prefix a view's column with `_` to mark it fixed. `tdtpcli` detects those
+automatically, strips the `_` from the name, and sets `fixed="true"`:
 
 ```sql
 CREATE VIEW dept_employees_report AS
 SELECT
-  d.dept_id   AS _dept_id,     -- будет: name="dept_id" fixed="true"
-  d.dept_name AS _dept_name,   -- будет: name="dept_name" fixed="true"
-  d.location  AS _location,    -- будет: name="location" fixed="true"
-  e.emp_id,                    -- переменное
+  d.dept_id   AS _dept_id,     -- becomes: name="dept_id" fixed="true"
+  d.dept_name AS _dept_name,   -- becomes: name="dept_name" fixed="true"
+  d.location  AS _location,    -- becomes: name="location" fixed="true"
+  e.emp_id,                    -- varies
   e.full_name
 FROM employees e
 JOIN departments d ON e.dept_id = d.dept_id
 ORDER BY dept_id, emp_id;
 ```
 
-### Compact Format
+### The compact format
 
-При `compact="true"` на `<Data>` значения fixed полей записываются только:
-- в первой строке (первая строка группы — **header row**)
-- при смене значения fixed поля (начало новой группы)
+With `compact="true"` on `<Data>`, a fixed field's value is written only:
+- on the first row, which is the group's **header row**
+- when the value changes, which starts a new group
 
-В остальных строках группы на позициях fixed полей стоят пустые строки (`||`).
+Everywhere else in the group, the fixed field's position holds an empty string
+(`||`).
 
-**Пример (3 отдела по 5 сотрудников):**
+**Example — three departments, five employees each:**
 ```xml
 <Data compact="true">
-  <!-- dept 10 — header row: все значения -->
+  <!-- dept 10 — header row: every value present -->
   <R>10|Sales|Moscow|101|Ivan Petrov|45000</R>
-  <!-- carry-forward: dept_id/dept_name/location из предыдущей строки -->
+  <!-- carry-forward: dept_id/dept_name/location from the row above -->
   <R>|||102|Anna Sidorova|52000</R>
   <R>|||103|Boris Kozlov|48000</R>
   <R>|||104|Elena Novikova|55000</R>
   <R>|||105|Dmitry Smirnov|49500</R>
-  <!-- dept 20 — новая группа: снова все значения -->
+  <!-- dept 20 — new group: every value again -->
   <R>20|Engineering|Saint Petersburg|201|Alice Volkov|72000</R>
   <R>|||202|Charlie Morozov|65000</R>
   <R>|||203|Diana Popova|69000</R>
@@ -613,46 +641,47 @@ ORDER BY dept_id, emp_id;
 </Data>
 ```
 
-**Алгоритм декодера (carry-forward):**
+**Decoder algorithm (carry-forward):**
 
 ```
 currentFixed = []
 
-для каждой строки:
-  для каждой позиции i:
-    если поле[i].fixed == true:
-      если values[i] != "":
-        currentFixed[i] = values[i]   // новое значение → обновить carry
-      иначе:
-        values[i] = currentFixed[i]   // пропуск → взять из carry
+for each row:
+  for each position i:
+    if field[i].fixed == true:
+      if values[i] != "":
+        currentFixed[i] = values[i]   // new value → update the carry
+      else:
+        values[i] = currentFixed[i]   // gap → take from the carry
 ```
 
-**Важно:** декодер не проверяет корректность `fixed="true"` — ответственность на отправителе.
+**Note:** the decoder does not verify that `fixed="true"` is correct. That is
+the sender's responsibility.
 
-### Порядок обработки (кодирование)
+### Processing order
 
+**Encoding:**
 ```
-1. Определить fixed поля из Schema (или по _prefix, или по --fixed-fields)
-2. Для каждой строки:
-   - если значение fixed поля = предыдущему → записать ""
-   - иначе → записать значение явно
-3. Установить compact="true" на <Data>
-4. Установить version="1.3.1" на пакете
-5. Опционально: сжать данные compression="zstd"
-```
-
-**Порядок обработки (декодирование):**
-
-```
-1. Распаковать zstd (если compression="zstd")
-2. Если compact="true": expand carry-forward → нормализованные строки
-3. Обработать <SpecialValues> маркеры
-4. Импортировать как обычный набор строк
+1. Determine the fixed fields from the Schema (or by _prefix, or from --fixed-fields)
+2. For each row:
+   - value equals the previous one → write ""
+   - otherwise → write it explicitly
+3. Set compact="true" on <Data>
+4. Set version="1.3.1" on the packet
+5. Optionally compress: compression="zstd"
 ```
 
-### Комбинация с compression
+**Decoding:**
+```
+1. Decompress zstd, if compression="zstd"
+2. If compact="true": expand the carry-forward into normalised rows
+3. Apply the <SpecialValues> markers
+4. Import as an ordinary set of rows
+```
 
-Оба механизма совместимы:
+### Combining with compression
+
+The two are compatible:
 
 ```xml
 <Data compression="zstd" compact="true">
@@ -660,72 +689,72 @@ currentFixed = []
 </Data>
 ```
 
-### Экономия размера
+### Size saved
 
-| Сценарий | v1.0 | v1.3.1 compact | Экономия |
-|----------|------|----------------|----------|
-| 3 fixed поля × 15 строк | 100% | ~30% | ~70% |
-| + zstd compression | 100% | ~10–15% | ~85–90% |
+| Case | v1.0 | v1.3.1 compact | Saved |
+|------|------|----------------|-------|
+| 3 fixed fields × 15 rows | 100% | ~30% | ~70% |
+| plus zstd compression | 100% | ~10–15% | ~85–90% |
 
 ---
 
-## TDTQL - Query Language
+## TDTQL query language
 
-**TDTQL** (Table Data Transfer Query Language) - язык запросов для фильтрации и сортировки табличных данных.
+**TDTQL** (Table Data Transfer Query Language) filters and sorts tabular data.
 
-### Структура запроса
+### Query structure
 
 ```xml
 <Query language="TDTQL" version="1.0">
   <Filters>
-    <!-- Условия фильтрации -->
+    <!-- conditions -->
   </Filters>
   <OrderBy>
-    <!-- Сортировка -->
+    <!-- sorting -->
   </OrderBy>
   <Limit>100</Limit>
   <Offset>0</Offset>
 </Query>
 ```
 
-### Операторы сравнения
+### Comparison operators
 
-| Operator | Описание | SQL аналог | Пример |
-|----------|----------|------------|--------|
-| `eq` | Равно | `=` | `<Filter field="age" operator="eq" value="25"/>` |
-| `ne` | Не равно | `!=`, `<>` | `<Filter field="status" operator="ne" value="deleted"/>` |
-| `gt` | Больше | `>` | `<Filter field="balance" operator="gt" value="1000"/>` |
-| `gte` | Больше или равно | `>=` | `<Filter field="age" operator="gte" value="18"/>` |
-| `lt` | Меньше | `<` | `<Filter field="price" operator="lt" value="100"/>` |
-| `lte` | Меньше или равно | `<=` | `<Filter field="quantity" operator="lte" value="10"/>` |
+| Operator | Meaning | SQL | Example |
+|----------|---------|-----|---------|
+| `eq` | Equal | `=` | `<Filter field="age" operator="eq" value="25"/>` |
+| `ne` | Not equal | `!=`, `<>` | `<Filter field="status" operator="ne" value="deleted"/>` |
+| `gt` | Greater than | `>` | `<Filter field="balance" operator="gt" value="1000"/>` |
+| `gte` | Greater or equal | `>=` | `<Filter field="age" operator="gte" value="18"/>` |
+| `lt` | Less than | `<` | `<Filter field="price" operator="lt" value="100"/>` |
+| `lte` | Less or equal | `<=` | `<Filter field="quantity" operator="lte" value="10"/>` |
 
-### Операторы диапазонов и списков
+### Range and list operators
 
-| Operator | Описание | SQL аналог | Пример |
-|----------|----------|------------|--------|
-| `between` | В диапазоне | `BETWEEN` | `<Filter field="age" operator="between" value="18" value2="65"/>` |
-| `in` | В списке | `IN` | `<Filter field="city" operator="in" value="Moscow,SPb,Kazan"/>` |
-| `not_in` | Не в списке | `NOT IN` | `<Filter field="status" operator="not_in" value="deleted,archived"/>` |
+| Operator | Meaning | SQL | Example |
+|----------|---------|-----|---------|
+| `between` | Within a range | `BETWEEN` | `<Filter field="age" operator="between" value="18" value2="65"/>` |
+| `in` | In a list | `IN` | `<Filter field="city" operator="in" value="Moscow,SPb,Kazan"/>` |
+| `not_in` | Not in a list | `NOT IN` | `<Filter field="status" operator="not_in" value="deleted,archived"/>` |
 
-### Операторы паттернов
+### Pattern operators
 
-| Operator | Описание | SQL аналог | Пример |
-|----------|----------|------------|--------|
-| `like` | Соответствует паттерну | `LIKE` | `<Filter field="email" operator="like" value="%@example.com"/>` |
-| `not_like` | Не соответствует паттерну | `NOT LIKE` | `<Filter field="username" operator="not_like" value="test%"/>` |
+| Operator | Meaning | SQL | Example |
+|----------|---------|-----|---------|
+| `like` | Matches a pattern | `LIKE` | `<Filter field="email" operator="like" value="%@example.com"/>` |
+| `not_like` | Does not match | `NOT LIKE` | `<Filter field="username" operator="not_like" value="test%"/>` |
 
 Wildcards:
-- `%` - любое количество символов
-- `_` - один символ
+- `%` — any number of characters
+- `_` — exactly one character
 
-### Операторы NULL
+### NULL operators
 
-| Operator | Описание | SQL аналог | Пример |
-|----------|----------|------------|--------|
-| `is_null` | Значение NULL | `IS NULL` | `<Filter field="deleted_at" operator="is_null"/>` |
-| `is_not_null` | Значение НЕ NULL | `IS NOT NULL` | `<Filter field="email" operator="is_not_null"/>` |
+| Operator | Meaning | SQL | Example |
+|----------|---------|-----|---------|
+| `is_null` | Is NULL | `IS NULL` | `<Filter field="deleted_at" operator="is_null"/>` |
+| `is_not_null` | Is not NULL | `IS NOT NULL` | `<Filter field="email" operator="is_not_null"/>` |
 
-### Логические операторы
+### Logical operators
 
 **AND:**
 ```xml
@@ -747,7 +776,7 @@ Wildcards:
 </Filters>
 ```
 
-**Вложенные группы:**
+**Nested groups:**
 ```xml
 <Filters>
   <And>
@@ -760,19 +789,19 @@ Wildcards:
 </Filters>
 ```
 
-SQL эквивалент:
+SQL equivalent:
 ```sql
 WHERE is_active = 1 AND (city = 'Moscow' OR city = 'SPb')
 ```
 
-### Сортировка (OrderBy)
+### Sorting
 
-**Одиночная:**
+**Single field:**
 ```xml
 <OrderBy field="balance" direction="DESC"></OrderBy>
 ```
 
-**Множественная:**
+**Several fields:**
 ```xml
 <OrderBy>
   <Fields>
@@ -783,31 +812,30 @@ WHERE is_active = 1 AND (city = 'Moscow' OR city = 'SPb')
 ```
 
 **Direction:**
-- `ASC` - по возрастанию (default)
-- `DESC` - по убыванию
+- `ASC` — ascending (default)
+- `DESC` — descending
 
-### Пагинация
+### Pagination
 
 ```xml
 <Limit>100</Limit>
 <Offset>200</Offset>
 ```
 
-- **Limit** - максимальное количество записей
-- **Offset** - пропустить N записей
+- **Limit** — maximum rows returned
+- **Offset** — rows to skip
 
-SQL эквивалент:
+SQL equivalent:
 ```sql
 LIMIT 100 OFFSET 200
 ```
 
-### Полный пример TDTQL
+### A complete TDTQL example
 
-**Запрос:**
+**In words:**
 ```
-Найти активных пользователей старше 18 лет с балансом >= 1000,
-из Москвы или СПб, отсортировать по балансу (убывание),
-вернуть первые 50 записей
+Find active users over 18 with a balance of at least 1000, in Moscow or
+Saint Petersburg, sorted by balance descending, first 50 rows.
 ```
 
 **TDTQL:**
@@ -830,7 +858,7 @@ LIMIT 100 OFFSET 200
 </Query>
 ```
 
-**SQL эквивалент:**
+**SQL equivalent:**
 ```sql
 SELECT * FROM users
 WHERE is_active = 1
@@ -843,9 +871,9 @@ LIMIT 50 OFFSET 0
 
 ---
 
-## Примеры
+## Examples
 
-### Reference Packet (Полный справочник)
+### Reference packet — a full reference table
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -875,7 +903,7 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-### Request Packet (Запрос данных)
+### Request packet
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -903,7 +931,7 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-### Response Packet (Ответ на запрос)
+### Response packet
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -951,7 +979,7 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-### Delta Packet (Инкрементальное обновление)
+### Delta packet — incremental update
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -984,7 +1012,7 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-### Alarm Packet (Уведомление об ошибке)
+### Alarm packet — monitoring notification
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1008,10 +1036,11 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-### Error Packet (Управляемая ошибка ETL, v1.3+) 🆕
+### Error packet — handled ETL failure (v1.3+)
 
-Генерируется автоматически ETL pipeline при деградации xZMercury (encryption enabled, Mercury недоступен).
-Пишется в выходной файл вместо незашифрованных данных. Pipeline завершается с exit 0.
+Produced automatically by the ETL pipeline when xZMercury degrades — encryption
+is enabled and Mercury is unreachable. It is written to the output file in place
+of unencrypted data, and the pipeline exits 0.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1038,18 +1067,18 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-**Коды ошибок:**
+**Error codes:**
 
-| Код | Причина |
-|-----|---------|
-| `MERCURY_UNAVAILABLE` | xZMercury недоступен (таймаут, connection refused) |
-| `MERCURY_ERROR` | xZMercury вернул HTTP 5xx |
-| `HMAC_VERIFICATION_FAILED` | Подпись ключа не прошла верификацию |
-| `KEY_BIND_REJECTED` | xZMercury отклонил запрос (HTTP 403/429) |
+| Code | Cause |
+|------|-------|
+| `MERCURY_UNAVAILABLE` | xZMercury unreachable (timeout, connection refused) |
+| `MERCURY_ERROR` | xZMercury returned HTTP 5xx |
+| `HMAC_VERIFICATION_FAILED` | The key signature did not verify |
+| `KEY_BIND_REJECTED` | xZMercury refused the request (HTTP 403/429) |
 
 ---
 
-### Reference Packet в compact-формате (v1.3.1+) 🆕
+### Reference packet in compact format (v1.3.1+)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1064,15 +1093,15 @@ LIMIT 50 OFFSET 0
     <Timestamp>2026-03-10T10:00:00Z</Timestamp>
   </Header>
   <Schema>
-    <!-- Три fixed поля (_prefix в SQL view → stripped + fixed=true) -->
+    <!-- Three fixed fields (_prefix in the SQL view → stripped, fixed=true) -->
     <Field name="dept_id"   type="INTEGER"            fixed="true"></Field>
     <Field name="dept_name" type="TEXT" length="100"  fixed="true"></Field>
     <Field name="location"  type="TEXT" length="100"  fixed="true"></Field>
-    <!-- Переменные поля -->
+    <!-- Varying fields -->
     <Field name="emp_id"    type="INTEGER"></Field>
     <Field name="full_name" type="TEXT" length="100"></Field>
     <Field name="salary"    type="DECIMAL" precision="10" scale="2"></Field>
-    <!-- SpecialValues: для NULL в TEXT поле -->
+    <!-- SpecialValues: NULL in a TEXT field -->
     <Field name="notes" type="TEXT" length="500">
       <SpecialValues>
         <Null marker="[NULL]"/>
@@ -1080,14 +1109,14 @@ LIMIT 50 OFFSET 0
     </Field>
   </Schema>
   <Data compact="true">
-    <!-- dept 10 — header row: все 7 значений -->
+    <!-- dept 10 — header row: all seven values -->
     <R>10|Sales|Moscow|101|Ivan Petrov|45000.00|on probation</R>
-    <!-- carry-forward: dept_id/dept_name/location из строки выше -->
+    <!-- carry-forward: dept_id/dept_name/location from the row above -->
     <R>|||102|Anna Sidorova|52000.00|[NULL]</R>
     <R>|||103|Boris Kozlov|48000.00|[NULL]</R>
     <R>|||104|Elena Novikova|55000.00|team lead</R>
     <R>|||105|Dmitry Smirnov|49500.00|[NULL]</R>
-    <!-- dept 20 — новая группа: снова все значения -->
+    <!-- dept 20 — new group: all values again -->
     <R>20|Engineering|Saint Petersburg|201|Alice Volkov|72000.00|[NULL]</R>
     <R>|||202|Charlie Morozov|65000.00|[NULL]</R>
     <R>|||203|Diana Popova|69000.00|[NULL]</R>
@@ -1097,19 +1126,19 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-**Декодированный результат:**
+**Decoded:**
 
 | dept_id | dept_name | location | emp_id | full_name | salary | notes |
 |---------|-----------|----------|--------|-----------|--------|-------|
 | 10 | Sales | Moscow | 101 | Ivan Petrov | 45000.00 | on probation |
 | 10 | Sales | Moscow | 102 | Anna Sidorova | 52000.00 | NULL |
 | 10 | Sales | Moscow | 103 | Boris Kozlov | 48000.00 | NULL |
-| ... | ... | ... | ... | ... | ... | ... |
+| … | … | … | … | … | … | … |
 | 20 | Engineering | Saint Petersburg | 201 | Alice Volkov | 72000.00 | NULL |
 
 ---
 
-### Reference Packet со сжатием (v1.2+) 🆕
+### Reference packet with compression (v1.2+)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1137,258 +1166,265 @@ LIMIT 50 OFFSET 0
 </DataPacket>
 ```
 
-**Пояснения к сжатию:**
+**Notes on the compressed form:**
 
-1. **Атрибут compression="zstd"** указывает, что данные сжаты алгоритмом zstd
-2. **Один элемент `<R>`** содержит все сжатые данные (вместо множества строк)
-3. **Base64 кодирование** обеспечивает безопасную передачу бинарных данных в XML
-4. **RecordsInPart=1000** показывает реальное количество записей после распаковки
-5. При распаковке получается 1000 строк в обычном pipe-delimited формате
+1. `compression="zstd"` states that the data is zstd-compressed
+2. A **single `<R>` element** holds all of it, instead of many rows
+3. Base64 keeps binary data safe inside XML
+4. `RecordsInPart=1000` is the real row count after decompression
+5. Decompressing yields 1000 ordinary pipe-delimited rows
 
-**Преимущества:**
-- Размер пакета уменьшается на 50-80%
-- Экономия bandwidth при передаче через message brokers
-- Автоматическая обработка в TDTP framework (v1.2+)
+**Benefits:**
+- 50–80% smaller packets
+- less bandwidth over a message broker
+- handled automatically by the framework (v1.2+)
 
-**Когда используется:**
-- Автоматически для пакетов > 1KB (настраивается)
-- Особенно эффективно для больших таблиц
-- Рекомендуется для передачи через медленные каналы
+**When it applies:**
+- automatically for packets over 1 KB (configurable)
+- most effective on large tables
+- recommended over slow links
 
 ---
 
-## Адаптер-специфичное поведение SpecialValues
+## Adapter-specific behaviour of SpecialValues
 
-Маркеры SpecialValues (v1.3.1) имеют единую семантику на уровне протокола, но каждый
-адаптер сталкивается с ограничениями целевой системы. В этом разделе зафиксированы
-конкретные оговорки для каждого адаптера.
+SpecialValues markers (v1.3.1) have one meaning at the protocol level, but every
+adapter meets the limits of its target system. This section records what each
+one actually does.
 
 ### PostgreSQL
 
-| Маркер | Тип поля | Поведение при импорте |
-|--------|----------|----------------------|
-| `[NULL]` | TEXT | `NULL` (не пустая строка) |
-| `NaN` | REAL / NUMERIC | `'NaN'::numeric` (PostgreSQL поддерживает NaN нативно) |
+| Marker | Field type | On import |
+|--------|-----------|-----------|
+| `[NULL]` | TEXT | `NULL`, not an empty string |
+| `NaN` | REAL / NUMERIC | `'NaN'::numeric` — PostgreSQL supports NaN natively |
 | `INF` | REAL / NUMERIC | `'infinity'::numeric` |
 | `-INF` | REAL / NUMERIC | `'-infinity'::numeric` |
 | `0000-00-00` | DATE | `NULL` (NoDate sentinel) |
-| `infinity` / `-infinity` | DATE, TIMESTAMP | `'infinity'::timestamp` / `'-infinity'::timestamp` (PostgreSQL-специфично) |
+| `infinity` / `-infinity` | DATE, TIMESTAMP | `'infinity'::timestamp` / `'-infinity'::timestamp` (PostgreSQL-specific) |
 
-> PostgreSQL — единственный адаптер, где `NaN`, `INF`, `-INF` хранятся как **числовые значения**,
-> а не NULL. При экспорте из PostgreSQL эти значения автоматически кодируются в маркеры SpecialValues.
+> PostgreSQL is the only adapter that stores `NaN`, `INF` and `-INF` as
+> **numeric values** rather than NULL. Exporting from PostgreSQL encodes those
+> values back into SpecialValues markers automatically.
 
 ### MS SQL Server
 
-| Маркер | Тип поля | Поведение при импорте |
-|--------|----------|----------------------|
+| Marker | Field type | On import |
+|--------|-----------|-----------|
 | `[NULL]` | TEXT | `NULL` |
-| `NaN`, `INF`, `-INF` | FLOAT | `NULL` (MSSQL не поддерживает NaN/Inf в числовых типах) |
+| `NaN`, `INF`, `-INF` | FLOAT | `NULL` — MSSQL has no NaN or Inf in its numeric types |
 | `0000-00-00` | DATE / DATETIME | `NULL` |
 
-> MSSQL: при импорте `NaN`/`INF`/`-INF` в числовое поле значение заменяется на `NULL`.
-> Это потеря семантики — если целевая бизнес-логика различает «нет данных» и «математически
-> недопустимое значение», необходимо использовать отдельный флаговый столбец.
+> On MSSQL, importing `NaN`/`INF`/`-INF` into a numeric column stores `NULL`.
+> That is a loss of meaning: if the business logic distinguishes "no data" from
+> "mathematically undefined", carry a separate flag column.
 
 ### MySQL
 
-| Маркер | Тип поля | Поведение при импорте |
-|--------|----------|----------------------|
+| Marker | Field type | On import |
+|--------|-----------|-----------|
 | `[NULL]` | TEXT | `NULL` |
-| `NaN`, `INF`, `-INF` | FLOAT / DOUBLE | `NULL` (строгий режим SQL) |
-| `0000-00-00` | DATE | `'0000-00-00'` если `NO_ZERO_DATE` не установлен; иначе `NULL` |
+| `NaN`, `INF`, `-INF` | FLOAT / DOUBLE | `NULL` (strict SQL mode) |
+| `0000-00-00` | DATE | `'0000-00-00'` when `NO_ZERO_DATE` is unset; otherwise `NULL` |
 
-> MySQL в strict mode (`sql_mode=STRICT_TRANS_TABLES`) отклонит `0000-00-00` как невалидную дату.
-> Если целевая база работает в non-strict режиме, NoDate sentinel сохраняется как `0000-00-00`.
-> Фреймворк применяет `NoDateSentinels` конфигурацию для управления этим поведением.
+> MySQL in strict mode (`sql_mode=STRICT_TRANS_TABLES`) rejects `0000-00-00` as
+> an invalid date. In non-strict mode the NoDate sentinel is stored as
+> `0000-00-00`. The framework's `NoDateSentinels` configuration controls this.
 
 ### SQLite
 
-| Маркер | Тип поля | Поведение при импорте |
-|--------|----------|----------------------|
+| Marker | Field type | On import |
+|--------|-----------|-----------|
 | `[NULL]` | TEXT | `NULL` |
-| `NaN`, `INF`, `-INF` | REAL | `NULL` (SQLite хранит числа как float64, не различает NaN/Inf) |
-| `0000-00-00` | TEXT (дата как строка) | Хранится как строка `"0000-00-00"` |
+| `NaN`, `INF`, `-INF` | REAL | `NULL` — SQLite stores numbers as float64 and does not distinguish NaN from Inf |
+| `0000-00-00` | TEXT (date as string) | Stored literally as `"0000-00-00"` |
 
-> SQLite не имеет выделенного типа DATE — даты хранятся как TEXT или INTEGER.
-> NoDate sentinel (`0000-00-00`) сохраняется буквально как строка.
+> SQLite has no dedicated DATE type — dates live in TEXT or INTEGER columns, so
+> the NoDate sentinel is stored verbatim as a string.
 
 ### XLSX (Excel)
 
-Excel — наиболее ограниченная целевая система. Используйте эту таблицу как справочник
-при проектировании ETL-пайплайнов с Excel на выходе.
+Excel is the most constrained target. Use this table when designing a pipeline
+whose output is a spreadsheet.
 
-**Экспорт (TDTP → XLSX):**
+**Export (TDTP → XLSX):**
 
-| Значение | Тип поля | Что записывается в ячейку | Тип ячейки |
-|----------|----------|--------------------------|------------|
-| `[NULL]` | любой | пустая ячейка | Blank |
-| `NaN` | REAL | пустая ячейка | Blank |
-| `INF` | REAL | пустая ячейка | Blank |
-| `-INF` | REAL | пустая ячейка | Blank |
-| int64 ≤ 15 цифр | INTEGER | число | Number |
-| int64 > 15 цифр | INTEGER | строка `"1234567890123456789"` | Text |
-| дата ≥ 1900-01-01 | DATE | float serial + формат даты | Date |
-| дата < 1900-01-01 | DATE | строка `"1899-10-12"` | Text |
-| строки `=`, `+`, `-`, `@` | TEXT | строка (через `SetCellStr`) | Text |
+| Value | Field type | Written to the cell | Cell type |
+|-------|-----------|---------------------|-----------|
+| `[NULL]` | any | empty cell | Blank |
+| `NaN` | REAL | empty cell | Blank |
+| `INF` | REAL | empty cell | Blank |
+| `-INF` | REAL | empty cell | Blank |
+| int64 ≤ 15 digits | INTEGER | number | Number |
+| int64 > 15 digits | INTEGER | string `"1234567890123456789"` | Text |
+| date ≥ 1900-01-01 | DATE | float serial plus a date format | Date |
+| date < 1900-01-01 | DATE | string `"1899-10-12"` | Text |
+| strings starting `=`, `+`, `-`, `@` | TEXT | string (written with `SetCellStr`) | Text |
 
-> **Почему NaN/Inf → Blank, а не текст?**
-> Текстовая строка `"NaN"` в числовом столбце ломает Excel-формулы (`=СУММ()` вернёт `#ЗНАЧ!`).
-> Пустая ячейка — безопасный canonical NULL для бизнес-пользователей.
+> **Why NaN and Inf become blank rather than text?**
+> The literal string `"NaN"` in a numeric column breaks Excel formulas — `=SUM()`
+> returns `#VALUE!`. An empty cell is the safe canonical NULL for a business user.
 >
-> **Почему BIGINT > 15 цифр → строка?**
-> Excel хранит все числа как IEEE-754 float64. Максимальная точность — 15 значащих цифр.
-> `1234567890123456789` превратится в `1234567890123456800` при записи как число — тихая потеря данных.
+> **Why BIGINT over 15 digits becomes a string?**
+> Excel stores every number as IEEE-754 float64, giving 15 significant digits.
+> Written as a number, `1234567890123456789` becomes `1234567890123456800` —
+> silent data loss.
 >
-> **1900 leap-year bug:** Excel некорректно считает 1900 год високосным (serial 60 = Feb 29, 1900,
-> которого не существует). Фреймворк компенсирует этот сдвиг при импорте через обратное
-> вычисление серийного номера с коррекцией на phantom-день.
+> **The 1900 leap-year bug:** Excel wrongly treats 1900 as a leap year (serial 60
+> is 29 February 1900, a date that never existed). The framework compensates for
+> the shift on import by inverting the serial calculation with a correction for
+> the phantom day.
 
-**Импорт (XLSX → TDTP):**
+**Import (XLSX → TDTP):**
 
-| Тип ячейки Excel | Что читается | Что записывается в TDTP |
-|-----------------|--------------|------------------------|
-| Number (дата-стиль) | serial float | ISO дата/datetime через epoch-math |
-| Number (обычное) | raw decimal string | значение as-is |
-| String | trimmed строка | значение as-is |
-| Error (`#N/A`, `#DIV/0!`, `#NUM!`, ...) | код ошибки | `""` → NULL |
-| Blank | `""` | `""` → NULL (для не-TEXT типов) |
+| Excel cell type | What is read | What is written to TDTP |
+|-----------------|--------------|-------------------------|
+| Number, date-styled | serial float | ISO date/datetime via epoch arithmetic |
+| Number, ordinary | raw decimal string | the value as-is |
+| String | trimmed string | the value as-is |
+| Error (`#N/A`, `#DIV/0!`, `#NUM!`, …) | the error code | `""` → NULL |
+| Blank | `""` | `""` → NULL (for non-TEXT types) |
 | Boolean | `TRUE`/`FALSE`/`1`/`0` | `"1"` / `"0"` |
 
 ### Python (pandas)
 
-| Маркер | Тип колонки pandas | Поведение |
+| Marker | pandas column type | Behaviour |
 |--------|--------------------|-----------|
-| `[NULL]` | любой | `None` → `NaN` в float-колонках, `pd.NA` в nullable int/string |
-| `NaN` | float64 | `float('nan')` — нативный NaN, `pd.isna()` = True |
-| `INF` | float64 | `float('inf')` — нативный +∞ |
-| `-INF` | float64 | `float('-inf')` — нативный -∞ |
-| `0000-00-00` | datetime / object | `None` → `NaT` при datetime-конвертации |
+| `[NULL]` | any | `None` → `NaN` in float columns, `pd.NA` in nullable int/string |
+| `NaN` | float64 | `float('nan')` — native NaN, `pd.isna()` is True |
+| `INF` | float64 | `float('inf')` — native +∞ |
+| `-INF` | float64 | `float('-inf')` — native −∞ |
+| `0000-00-00` | datetime / object | `None` → `NaT` on datetime conversion |
 
-> Маркеры применяются **до** вызова `astype()`. Это предотвращает `ValueError` при конвертации
-> строки `"NaN"` в числовой тип. Конвертация `"INF"` → `float('inf')` выполняется через
-> строки `"inf"`/`"-inf"`, которые `pandas.to_numeric()` понимает нативно.
-
----
-
-## Версионирование
-
-**Текущая версия:** 1.5
-
-**Changelog:**
-
-- **v1.5** (22.07.2026) 🆕
-  - **Section-level encryption** — шифрование заменило собой непрозрачный
-    целый пакет (v1.3) на выборочное шифрование секций, зеркалируя схему
-    compression (v1.2): `<Header>` остаётся открытым XML (маршрутизация,
-    дедупликация, сборка multi-part не требуют ключа); `<QueryContext>`,
-    `<Schema>`, `<Data>` — каждая становится непрозрачным ciphertext с
-    атрибутом `encryption="aes-256-gcm"`
-    - Формат секции: `BASE64(nonce || ciphertext)`, свой nonce на каждую
-      секцию под одним ключом (AES-256-GCM запрещает повтор nonce с одним
-      ключом)
-    - Ключ привязывается к `Header.MessageID` пакета (`POST
-      /api/keys/bind`) — не к отдельно сгенерированному UUID, как в v1.3 —
-      чтобы получатель мог узнать, каким uuid делать `RetrieveKey`, читая
-      только открытый Header, без расшифровки чего-либо
-    - Multi-part пакеты не требуют специальной обработки: каждая часть уже
-      несёт свой уникальный `MessageID` (`{base}-P{n}`), поэтому `BindKey`
-      просто вызывается один раз на часть — то же место, что и раньше
-    - Порядок преобразований фиксирован, не настраивается: хеш (v1.4) →
-      сжатие → шифрование при записи; расшифровка → распаковка →
-      верификация хеша при чтении
-    - **v1.4-интеграция обязательна:** `ComputeIntegrity` + `RegisterHash`
-      теперь выполняются перед каждым v1.5-шифрованием, даже без явного
-      `--integrity` — иначе консьюмерский pre-flight (`VerifyAndPrepare`)
-      блокирует пакет как `HASH_NOT_REGISTERED`, поскольку он уже
-      применяется к любому пакету версии ≥1.4 при заданном
-      `--mercury-url`, который v1.5-расшифровка требует всегда
-  - **CLI:** `--enc` теперь по умолчанию производит v1.5 (было: v1.3);
-    новый флаг `--enc13` явно запрашивает legacy whole-blob формат для
-    консьюмеров, ещё не обновлённых до v1.5. Доступно на `--export`,
-    `--export-broker`, `--pipeline` (`output.tdtp.encryption`)
-  - **Обратная совместимость:** `--import`, `--map`, `--import-broker`
-    определяют формат автоматически по содержимому байтов (бинарный
-    заголовок v1.0–v1.4 vs. XML-атрибут `encryption` v1.5) — старые
-    зашифрованные пакеты продолжают расшифровываться без изменений,
-    ничего не ломается
-  - **Backward compatibility:** reader v1.4 и ниже не понимает формат
-    v1.5 (не пытается его расшифровать — он видит непрозрачный `<Schema
-    encryption="...">`/`<Data encryption="...">` с пустым содержимым
-    полей и просто не сможет прочитать данные без обновления)
-  - Полная схема, диаграммы producer/consumer, разбор атак и решённые
-    вопросы дизайна — [`docs/tdtp-protocol-schema.md`](tdtp-protocol-schema.md) → "v1.5"
-
-- **v1.4** (26.05.2026) 🆕
-  - **Integrity xxh3_128** — трёхуровневый контроль целостности пакета
-    - Атрибут `xxh3` на `<DataPacket>` — PacketXXH3 = xxh3_128(SchemaXXH3 + "|" + DataXXH3)
-    - Атрибут `xxh3` на `<Schema>` — xxh3_128(salt + canonical Schema XML)
-    - Атрибут `xxh3` на `<Data>` — xxh3_128(salt + raw rows before compression)
-    - Соль = MessageID (UUID) пакета — предотвращает replay-атаки
-    - Хеши вычисляются **до** сжатия; получатель сначала распаковывает, затем верифицирует
-    - CLI: `--integrity` (экспорт), верификация автоматическая при `--import`, `--to-csv`, `--to-xlsx`, `--to-html`, `--test`
-  - **xzMercury hash registry** — опциональная регистрация fingerprint'а
-    - `--mercury-url` — адрес реестра; при регистрации URL встраивается в словарь пакета как токен `@MRC`
-    - `--mercury-caller` — идентификатор сервиса-отправителя (default: "tdtpcli")
-    - FallbackDegrade: при недоступности Mercury → только локальная проверка xxh3
-  - **Backward compatibility:** reader v1.3.1 и ниже читает пакеты v1.4, игнорируя атрибуты `xxh3`
-
-- **v1.3.1** (10.03.2026) 🆕
-  - **Fixed Fields** — атрибут `fixed="true"` на `<Field>`
-    - Поле объявляется постоянным в пределах группы строк
-    - Конвенция `_fieldname` в SQL view для auto-detect (tdtpcli убирает `_`, ставит `fixed=true`)
-  - **Compact Format** — атрибут `compact="true"` на `<Data>`
-    - Значения fixed полей записываются только в первой строке группы (header row)
-    - Остальные строки группы имеют пустые слоты `||` на позициях fixed полей
-    - Смена значения fixed поля инициирует новую группу (carry-forward сбрасывается)
-    - Совместим с `compression="zstd"` (порядок: decode zstd → expand compact)
-    - Экономия: 50–70% на повторяющихся значениях; до 85–90% в комбинации с zstd
-  - **Special Values** — дочерний элемент `<SpecialValues>` на `<Field>`
-    - `<Null marker="..."/>` — для TEXT: различает NULL и `""` (empty string)
-    - `<Infinity marker="..."/>`, `<NegInfinity marker="..."/>`, `<NaN marker="..."/>` — для REAL/DECIMAL
-    - `<NoDate marker="..."/>` — для DATE/TIMESTAMP: sentinel «нет даты», отличный от NULL
-  - **Backward compatibility:** reader v1.0 читает пакеты v1.3.1, игнорируя compact/fixed/SpecialValues
-  - **Forward compatibility:** reader v1.3.1 читает пакеты v1.0 без изменений
-
-- **v1.3** (26.02.2026) 🆕
-  - **Тип пакета `error`** — стандартный DataPacket для фиксации ошибок в ETL pipeline
-    - Таблица `tdtp_errors` с полями: `package_uuid`, `pipeline`, `error_code`, `error_message`, `created_at`
-    - Генерируется автоматически при деградации xZMercury
-    - Совместим со всеми downstream-потребителями (в отличие от `alarm`)
-  - **Шифрование AES-256-GCM** через xZMercury (UUID-binding флоу)
-    - Бинарный заголовок: `[2B version][1B algo][16B package_uuid][12B nonce][ciphertext]`
-    - Ключ получается из xZMercury, НЕ передаётся через CLI
-    - HMAC-SHA256 верификация ключа (`MERCURY_SERVER_SECRET`)
-    - При недоступности Mercury → error-пакет вместо данных, exit 0
-  - **pkg/mercury**: HTTP клиент для xZMercury UUID-binding + burn-on-read флоу
-  - **pkg/crypto**: AES-256-GCM шифрование/дешифрование
-  - **cmd/xzmercury-mock**: standalone mock-сервер для E2E тестирования
-  - **ETL CLI**: флаги `--enc` (override encryption) и `--enc-dev` (локальный ключ, !production)
-  - **ResultLog**: статус `completed_with_errors`, поле `package_uuid`
-
-- **v1.2** (08.12.2025)
-  - **Поддержка сжатия данных zstd**
-    - Атрибут `compression="zstd"` для элемента Data
-    - Base64-кодирование сжатых данных
-    - Автоматическое сжатие для пакетов > 1KB
-    - Коэффициент сжатия: 50-80%
-  - Production Features: Circuit Breaker, Retry, Audit, Incremental Sync
-  - Data Processors: Compression, Masking, Validation, Normalization
-  - XLSX Converter (Database ↔ Excel)
-  - Kafka broker integration
-  - MySQL adapter
-
-- **v1.0** (16.11.2025)
-  - Первый production release
-  - Полная реализация Core Modules (Packet, Schema, TDTQL)
-  - Адаптеры: SQLite, PostgreSQL, MS SQL Server
-  - Message Brokers: RabbitMQ, MSMQ
-  - CLI утилита tdtpcli
-  - Максимальный размер пакета: 3.8MB
-  - Поддержка subtypes: UUID, JSONB, INET, ARRAY
+> Markers are applied **before** `astype()` is called. That prevents a
+> `ValueError` when converting the string `"NaN"` to a numeric type. `"INF"` is
+> converted through the strings `"inf"`/`"-inf"`, which `pandas.to_numeric()`
+> understands natively.
 
 ---
 
-## Лицензия
+## Versioning
+
+**Current version:** 1.5
+
+### Changelog
+
+**v1.5** (2026-07-22)
+
+- **Section-level encryption** replaces v1.3's opaque whole packet with
+  selective encryption of sections, mirroring how compression works in v1.2.
+  `<Header>` stays as plain XML — routing, deduplication and multi-part
+  reassembly need no key — while `<QueryContext>`, `<Schema>` and `<Data>` each
+  become opaque ciphertext carrying `encryption="aes-256-gcm"`.
+  - Section format: `BASE64(nonce || ciphertext)`, with a distinct nonce per
+    section under one key (AES-256-GCM forbids reusing a nonce with the same key)
+  - The key is bound to the packet's `Header.MessageID` (`POST /api/keys/bind`)
+    rather than to a separately generated UUID as in v1.3, so a receiver can
+    learn which UUID to `RetrieveKey` for by reading only the plain Header,
+    without decrypting anything
+  - Multi-part packets need no special handling: each part already carries its
+    own unique `MessageID` (`{base}-P{n}`), so `BindKey` is simply called once
+    per part, in the same place as before
+  - The order of transformations is fixed and not configurable: hash (v1.4) →
+    compress → encrypt when writing; decrypt → decompress → verify when reading
+  - **v1.4 integration is mandatory:** `ComputeIntegrity` and `RegisterHash` now
+    run before every v1.5 encryption even without an explicit `--integrity`.
+    Otherwise the consumer's pre-flight (`VerifyAndPrepare`) blocks the packet
+    with `HASH_NOT_REGISTERED`, because that pre-flight already applies to any
+    packet of version ≥1.4 whenever `--mercury-url` is set — which v1.5
+    decryption always requires
+- **CLI:** `--enc` now produces v1.5 by default, where it previously produced
+  v1.3. The new `--enc13` explicitly requests the legacy whole-blob format for
+  consumers not yet updated. Available on `--export`, `--export-broker` and
+  `--pipeline` (`output.tdtp.encryption`)
+- **Compatibility:** `--import`, `--map` and `--import-broker` detect the format
+  from the bytes themselves — a v1.0–v1.4 binary header versus a v1.5
+  `encryption` XML attribute — so previously encrypted packets keep decrypting
+  unchanged
+- **Backward compatibility:** a v1.4-or-earlier reader does not understand v1.5.
+  It will not attempt to decrypt it; it sees an opaque `<Schema encryption="…">`
+  and `<Data encryption="…">` with no readable fields, and simply cannot read
+  the data without being updated
+- Full schema, producer and consumer diagrams, the threat analysis and the
+  resolved design questions are in
+  [`docs/tdtp-protocol-schema.md`](tdtp-protocol-schema.md), section "v1.5"
+
+**v1.4** (2026-05-26)
+
+- **Integrity xxh3_128** — three-level packet integrity
+  - `xxh3` on `<DataPacket>` — PacketXXH3 = xxh3_128(SchemaXXH3 + "|" + DataXXH3)
+  - `xxh3` on `<Schema>` — xxh3_128(salt + canonical Schema XML)
+  - `xxh3` on `<Data>` — xxh3_128(salt + raw rows before compression)
+  - The salt is the packet's MessageID (UUID), which prevents replay
+  - Hashes are computed **before** compression; the receiver decompresses first and verifies second
+  - CLI: `--integrity` on export; verification is automatic in `--import`, `--to-csv`, `--to-xlsx`, `--to-html` and `--test`
+- **xzMercury hash registry** — optional fingerprint registration
+  - `--mercury-url` — the registry address; on registration it is embedded in the packet dictionary as the `@MRC` token
+  - `--mercury-caller` — the sending service's identifier (default "tdtpcli")
+  - FallbackDegrade: with Mercury unreachable, only the local xxh3 check runs
+- **Backward compatibility:** a v1.3.1-or-earlier reader reads v1.4 packets, ignoring the `xxh3` attributes
+
+**v1.3.1** (2026-03-10)
+
+- **Fixed fields** — `fixed="true"` on `<Field>`
+  - Declares the field constant across a run of rows
+  - The `_fieldname` convention in a SQL view is auto-detected: `tdtpcli` strips the `_` and sets `fixed=true`
+- **Compact format** — `compact="true"` on `<Data>`
+  - Fixed values are written only on a group's first row, its header row
+  - Other rows in the group leave `||` at the fixed positions
+  - A change of value starts a new group and resets the carry-forward
+  - Compatible with `compression="zstd"` (order: decode zstd → expand compact)
+  - Saves 50–70% on repeated values, up to 85–90% combined with zstd
+- **Special values** — the `<SpecialValues>` child of `<Field>`
+  - `<Null marker="…"/>` — for TEXT: distinguishes NULL from `""`
+  - `<Infinity marker="…"/>`, `<NegInfinity marker="…"/>`, `<NaN marker="…"/>` — for REAL and DECIMAL
+  - `<NoDate marker="…"/>` — for DATE and TIMESTAMP: a "no date" sentinel distinct from NULL
+- **Backward compatibility:** a v1.0 reader reads v1.3.1 packets, ignoring compact, fixed and SpecialValues
+- **Forward compatibility:** a v1.3.1 reader reads v1.0 packets unchanged
+
+**v1.3** (2026-02-26)
+
+- **The `error` packet type** — an ordinary DataPacket recording an ETL failure
+  - Table `tdtp_errors` with `package_uuid`, `pipeline`, `error_code`, `error_message`, `created_at`
+  - Generated automatically when xZMercury degrades
+  - Readable by every downstream consumer, unlike `alarm`
+- **AES-256-GCM encryption** through xZMercury (UUID-binding flow)
+  - Binary header: `[2B version][1B algo][16B package_uuid][12B nonce][ciphertext]`
+  - The key comes from xZMercury and is never passed on the command line
+  - HMAC-SHA256 verification of the key (`MERCURY_SERVER_SECRET`)
+  - With Mercury unreachable, an error packet is written instead of the data, exit 0
+- **pkg/mercury** — HTTP client for the xZMercury UUID-binding and burn-on-read flow
+- **pkg/crypto** — AES-256-GCM encryption and decryption
+- **cmd/xzmercury-mock** — standalone mock server for end-to-end testing
+- **ETL CLI** — `--enc` (override encryption) and `--enc-dev` (local key, non-production builds)
+- **ResultLog** — the `completed_with_errors` status and the `package_uuid` field
+
+**v1.2** (2025-12-08)
+
+- **zstd compression**
+  - `compression="zstd"` on the Data element
+  - Compressed data base64-encoded
+  - Automatic for packets over 1 KB
+  - Ratio 50–80%
+- Production features: circuit breaker, retry, audit, incremental sync
+- Data processors: compression, masking, validation, normalisation
+- XLSX converter (database ↔ Excel)
+- Kafka broker integration
+- MySQL adapter
+
+**v1.0** (2025-11-16)
+
+- First production release
+- Core modules complete: Packet, Schema, TDTQL
+- Adapters: SQLite, PostgreSQL, MS SQL Server
+- Message brokers: RabbitMQ, MSMQ
+- The `tdtpcli` command-line tool
+- Maximum packet size 3.8 MB
+- Subtypes: UUID, JSONB, INET, ARRAY
+
+---
+
+## Licence
 
 MIT License
 
@@ -1396,12 +1432,12 @@ Copyright (c) 2025 TDTP Framework
 
 ---
 
-## Контакты
+## Contact
 
 - **GitHub:** https://github.com/ruslano69/tdtp-framework
 - **Email:** ruslano69@gmail.com
-- **Документация:** https://github.com/ruslano69/tdtp-framework/tree/main/docs
+- **Documentation:** https://github.com/ruslano69/tdtp-framework/tree/main/docs
 
 ---
 
-*Последнее обновление: 22.07.2026*
+*Last updated: 2026-07-22*
