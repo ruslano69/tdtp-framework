@@ -1,248 +1,141 @@
-# TDTP Framework Documentation
+# TDTP Framework documentation
 
-Полная документация TDTP Framework v1.3.
+Protocol v1.5 · `tdtpcli` v1.24.0
 
----
-
-## 📚 Основные руководства
-
-### Для новых пользователей
-
-1. **[../README.md](../README.md)** ⭐ **НАЧНИТЕ ЗДЕСЬ**
-   - Обзор фреймворка
-   - Быстрый старт
-   - Установка
-   - Основные концепции
-
-2. **[USER_GUIDE.md](./USER_GUIDE.md)** - CLI утилита tdtpcli
-   - Команды и параметры
-   - ETL Pipeline (`--pipeline`, `--enc`, `--enc-dev`)
-   - Шифрование AES-256-GCM через xZMercury
-   - Конфигурация YAML
-   - Работа с TDTQL фильтрами
-   - Message Brokers интеграция
-   - Примеры использования
-
-### Для разработчиков
-
-3. **[ETL_PIPELINE.md](./ETL_PIPELINE.md)** - ETL Pipeline сценарии 🆕
-   - Справочник конфигурации YAML
-   - Сценарии: TDTP JOIN, PostgreSQL→TDTP, шифрование, Redis оркестрация
-   - Graceful degradation при отказе xZMercury
-   - CLI флаги, exit codes
-
-4. **[DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)** - Руководство разработчика
-   - Архитектура фреймворка
-   - Настройка тестовой среды
-   - Core Modules (Packet, Schema, TDTQL)
-   - Database Adapters (SQLite, PostgreSQL, MSSQL, MySQL)
-   - Message Brokers (RabbitMQ, MSMQ, Kafka)
-   - Production Features (Circuit Breaker, Retry, Audit, Processors)
-   - Security: Encryption v1.3 (pkg/mercury, pkg/crypto, xzmercury-mock)
-   - Разработка нового адаптера
-   - Best Practices
-   - Testing
-
-5. **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Развёртывание системы оркестрации
-   - Карта сервисов и зависимости между ними
-   - Минимальная локальная установка (dev)
-   - Продакшн-развёртывание (Redis, TLS, LDAP)
-   - Порядок запуска сервисов
-   - Air-gap / offline cert
-   - Audit log: text/JSON/syslog форматы
-
-6. **[SPECIFICATION.md](./SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
-   - XML формат сообщений
-   - Типы данных
-   - TDTQL язык запросов
-   - Протокол обмена
-   - Примеры пакетов
+Start at the [project README](../README.md) if you have not used the framework
+before. This page is the map of everything else.
 
 ---
 
-## 📦 Package-specific документация
+## I want to…
 
-Каждый production-ready пакет имеет свой README:
-
-### Resilience & Production Features
-
-- **[pkg/resilience/README.md](../pkg/resilience/README.md)** - Circuit Breaker
-  - Три состояния (Closed, Half-Open, Open)
-  - Automatic recovery
-  - Concurrent call limiting
-  - State change callbacks
-  - Custom trip logic
-
-- **[pkg/retry/README.md](../pkg/retry/README.md)** - Retry Mechanism
-  - Exponential backoff
-  - Jitter strategies
-  - Context-aware retry
-  - Dead Letter Queue (DLQ) support
-
-- **[pkg/audit/README.md](../pkg/audit/README.md)** - Audit Logger
-  - File, Database, Console appenders
-  - Три уровня (Minimal, Standard, Full)
-  - GDPR/HIPAA/SOX compliance
-  - Async/Sync modes
-  - Query и filter операции
-
-- **[pkg/processors/README.md](../pkg/processors/README.md)** - Data Processors
-  - FieldMasker (PII protection)
-  - FieldValidator (data validation)
-  - FieldNormalizer (data normalization)
-  - Processor chains
-
-- **[pkg/sync/README.md](../pkg/sync/README.md)** - Incremental Sync
-  - StateManager with checkpoint tracking
-  - Timestamp/sequence-based sync
-  - Batch processing
-  - Recovery mechanisms
-
-### Data Conversion
-
-- **[pkg/xlsx/README.md](../pkg/xlsx/README.md)** - XLSX Converter 🍒
-  - TDTP → Excel export
-  - Excel → TDTP import
-  - Type preservation
-  - Business value для non-technical users
-
-### Database Adapters
-
-- **[pkg/adapters/sqlite/README.md](../pkg/adapters/sqlite/README.md)** - SQLite
-- **[pkg/adapters/postgres/README.md](../pkg/adapters/postgres/README.md)** - PostgreSQL
-- **[pkg/adapters/mysql/README.md](../pkg/adapters/mysql/README.md)** - MySQL
-- **[pkg/adapters/mssql/README.md](../pkg/adapters/mssql/README.md)** - MS SQL Server
+| Task | Document |
+|------|----------|
+| Install the framework and run something | [README.md](../README.md) |
+| Use the CLI | [USER_GUIDE.md](./USER_GUIDE.md) |
+| Write an ETL pipeline | [ETL_PIPELINE.md](./ETL_PIPELINE.md) |
+| Understand the wire format | [SPECIFICATION.md](./SPECIFICATION.md) |
+| Encrypt what leaves the system | [SPECIFICATION.md](./SPECIFICATION.md) · [ETL_PIPELINE.md](./ETL_PIPELINE.md) |
+| Schedule work and govern it | [ORCHESTRATOR_SCENARIOS.md](./ORCHESTRATOR_SCENARIOS.md) |
+| Decide what a scenario is allowed to do | [SCENARIO_TRUST.md](./SCENARIO_TRUST.md) |
+| Deploy the whole thing | [DEPLOYMENT.md](./DEPLOYMENT.md) |
+| Build against the framework | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) |
+| Write a new database adapter | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) · [pkg/adapters/base](../pkg/adapters/base/README.md) |
+| Use S3 instead of a broker | [S3_AS_SYNC_BROKER.md](./S3_AS_SYNC_BROKER.md) |
+| Read or write Microsoft Access | [ACCESS_ADAPTER.md](./ACCESS_ADAPTER.md) |
+| See a full working deployment | [examples/travel-agency](../examples/travel-agency/TRAVEL-AGENCY.md) |
 
 ---
 
-## 💡 Примеры использования
+## Core guides
 
-Полные production-ready примеры:
+**[USER_GUIDE.md](./USER_GUIDE.md)** — the `tdtpcli` reference. Every command
+and flag: export and import, TDTQL filters, brokers, incremental sync,
+encryption, XLSX and CSV conversion, multi-step workflows.
 
-**[examples/README.md](../examples/README.md)** - Каталог всех примеров
+**[SPECIFICATION.md](./SPECIFICATION.md)** — the protocol. The XML format, the
+type system, TDTQL, and how packets are exchanged. This is what you need to
+write a reader or writer that is not this implementation.
 
-**Рекомендуемые примеры:**
+**[ETL_PIPELINE.md](./ETL_PIPELINE.md)** — pipeline YAML: the configuration
+reference and worked scenarios, including encrypted output through xZMercury and
+what happens when the key server is unreachable.
 
-1. **[examples/01-basic-export/](../examples/01-basic-export/)** - Начните здесь
-2. **[examples/04-tdtp-xlsx/](../examples/04-tdtp-xlsx/)** - XLSX converter 🍒
-3. **[examples/02-rabbitmq-mssql/](../examples/02-rabbitmq-mssql/)** - Production integration
-4. **[examples/03-incremental-sync/](../examples/03-incremental-sync/)** - Incremental sync
-5. **[examples/encryption-test/](../examples/encryption-test/)** - ETL с шифрованием 🆕
+**[DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)** — the architecture. Core modules,
+adapters, brokers, the production features (circuit breaker, retry, audit,
+processors), and how to add an adapter of your own.
 
----
-
-## 🗺️ Roadmap
-
-См. **[ROADMAP.md](../ROADMAP.md)** для:
-- Текущий статус (v1.2)
-- Запланированные фичи (v1.3, v1.5, v2.0)
-- Use cases
-
----
-
-## 📖 Быстрая навигация
-
-**Я хочу...**
-
-| Задача | Документ |
-|--------|----------|
-| **Установить фреймворк** | [README.md](../README.md) |
-| **Использовать CLI** | [USER_GUIDE.md](./USER_GUIDE.md) |
-| **Запустить ETL pipeline** | [ETL_PIPELINE.md](./ETL_PIPELINE.md) 🆕 |
-| **Шифрование через xZMercury** | [ETL_PIPELINE.md § Сценарий 3](./ETL_PIPELINE.md#сценарий-3-шифрованный-вывод-через-xzmercury) 🆕 |
-| **Развернуть оркестрацию** | [DEPLOYMENT.md](./DEPLOYMENT.md) |
-| **LDAP auth в оркестраторе** | [DEPLOYMENT.md § LDAP auth](./DEPLOYMENT.md#ldap-auth) |
-| **Air-gap / offline cert** | [DEPLOYMENT.md § Air-gapped](./DEPLOYMENT.md#air-gapped-environments) |
-| **Audit log JSON/syslog** | [DEPLOYMENT.md § Audit log](./DEPLOYMENT.md#audit-log-tdtpcli) |
-| **Понять TDTP формат** | [SPECIFICATION.md](./SPECIFICATION.md) |
-| **Разрабатывать с фреймворком** | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) |
-| **Настроить тестовую среду** | [DEVELOPER_GUIDE.md § Настройка тестовой среды](./DEVELOPER_GUIDE.md#настройка-тестовой-среды) |
-| **Работать с пакетами** | [DEVELOPER_GUIDE.md § Packet Module](./DEVELOPER_GUIDE.md#packet-module) |
-| **Работать с типами данных** | [DEVELOPER_GUIDE.md § Schema Module](./DEVELOPER_GUIDE.md#schema-module) |
-| **Использовать TDTQL** | [DEVELOPER_GUIDE.md § TDTQL Module](./DEVELOPER_GUIDE.md#tdtql-module) |
-| **Интеграция с БД** | [DEVELOPER_GUIDE.md § Database Adapters](./DEVELOPER_GUIDE.md#database-adapters) |
-| **Разработать свой адаптер** | [DEVELOPER_GUIDE.md § Разработка нового адаптера](./DEVELOPER_GUIDE.md#разработка-нового-адаптера) |
-| **pkg/mercury, pkg/crypto** | [DEVELOPER_GUIDE.md § Security Encryption](./DEVELOPER_GUIDE.md#security-encryption-v13) 🆕 |
-| **Circuit Breaker** | [pkg/resilience/README.md](../pkg/resilience/README.md) |
-| **Retry mechanism** | [pkg/retry/README.md](../pkg/retry/README.md) |
-| **Audit Logging** | [pkg/audit/README.md](../pkg/audit/README.md) |
-| **Data Processors** | [pkg/processors/README.md](../pkg/processors/README.md) |
-| **Incremental Sync** | [pkg/sync/README.md](../pkg/sync/README.md) |
-| **Excel конвертер** | [pkg/xlsx/README.md](../pkg/xlsx/README.md) 🍒 |
-| **Примеры кода** | [examples/README.md](../examples/README.md) |
+**[DEPLOYMENT.md](./DEPLOYMENT.md)** — running it for real: service map and
+dependencies, local development, production with Redis and TLS and LDAP, startup
+order, air-gapped certificate handling, audit log formats.
 
 ---
 
-## 🔄 История изменений
+## Orchestration
 
-### v1.3 (26.02.2026) - Current 🆕
+**[ORCHESTRATOR_SCENARIOS.md](./ORCHESTRATOR_SCENARIOS.md)** — turning a
+pipeline into a scenario the orchestration server can run: one-off and
+scheduled, plain and encrypted, the permission model, the client-submit and
+admin-approve workflow, and job log retention.
 
-✅ **Новые фичи:**
-- AES-256-GCM шифрование через xZMercury (UUID-binding флоу)
-- Тип пакета `error` для управляемых ошибок ETL pipeline
-- pkg/mercury — HTTP клиент, HMAC верификация, DevClient для dev-сборок
-- pkg/crypto — AES-256-GCM с бинарным заголовком
-- cmd/xzmercury-mock — standalone mock-сервер для тестирования
-- `--enc` / `--enc-dev` флаги для tdtpcli
-- ResultLog: статус `completed_with_errors`, поле `package_uuid`
-- Graceful degradation: error-пакет при недоступности xZMercury, exit 0
+**[SCENARIO_TRUST.md](./SCENARIO_TRUST.md)** — why a scenario is allowed to run
+at all: the licence and Mercury permission intersection, checksum approval, and
+what is refused when either side says no.
 
-✅ **Документация:**
-- Новый ETL_PIPELINE.md — полное руководство с 5 сценариями
-- Обновлены SPECIFICATION.md (v1.3), USER_GUIDE.md, DEVELOPER_GUIDE.md
-
-### v1.2 (17.11.2025)
-
-✅ **Новые фичи:**
-- XLSX Converter (Database ↔ Excel) 🍒
-- Circuit Breaker для resilience
-- Audit Logger для compliance
-- Production-ready CLI с всеми v1.2 фичами
-
-✅ **Документация:**
-- ✨ Новый DEVELOPER_GUIDE.md (комплексное руководство разработчика)
-- Обновлены USER_GUIDE.md и SPECIFICATION.md
-
-### v1.1 (16.11.2025)
-
-- Retry mechanism с DLQ
-- Incremental Sync
-- Data processors (Masker, Validator, Normalizer)
-- Kafka broker
-- Docker Compose generator
-
-### v1.0 (15.11.2025)
-
-- Core modules (Packet, Schema, TDTQL)
-- Database adapters (SQLite, PostgreSQL, MSSQL)
-- Message brokers (RabbitMQ, MSMQ)
-- CLI utility (tdtpcli)
+**[cmd/orchestrator/README.md](../cmd/orchestrator/README.md)** — the server
+itself: HTTP API, tokens and roles, runners, metrics.
 
 ---
 
-## 📋 Структура документации
+## Protocol and format
 
-```
-docs/
-├── README.md              # Этот файл - навигация по документации
-├── DEVELOPER_GUIDE.md     # Руководство разработчика (архитектура, модули, адаптеры)
-├── ETL_PIPELINE.md        # ETL Pipeline — сценарии и примеры 🆕
-├── USER_GUIDE.md          # Руководство пользователя CLI
-└── SPECIFICATION.md       # Спецификация TDTP v1.0-v1.3 & TDTQL
-
-Root:
-├── README.md              # Главная страница проекта
-└── ROADMAP.md             # Дорожная карта развития
-```
+- **[SPECIFICATION.md](./SPECIFICATION.md)** — TDTP and TDTQL
+- **[tdtp-protocol-schema.md](./tdtp-protocol-schema.md)** — schema reference
+- **[tdtp-v14-protocol-schema.md](./tdtp-v14-protocol-schema.md)** — v1.4 integrity additions
+- **[dictionary-as-dependency-manifest.md](./dictionary-as-dependency-manifest.md)** — the dictionary as a dependency manifest
+- **[xzmercury/](../xzmercury/README.md)** — the key server: [architecture](../xzmercury/docs/architecture.md) · [API](../xzmercury/docs/api.md) · [security](../xzmercury/docs/security.md) · [configuration](../xzmercury/docs/configuration.md) · [deployment](../xzmercury/docs/deployment.md)
 
 ---
 
-## 📞 Поддержка
+## Packages
 
-**GitHub Issues:** https://github.com/ruslano69/tdtp-framework/issues
-**Email:** ruslano69@gmail.com
+Each production package documents itself.
+
+**Reliability**
+- [pkg/resilience](../pkg/resilience/README.md) — circuit breaker: three states, automatic recovery, concurrency limits, custom trip logic
+- [pkg/retry](../pkg/retry/README.md) — exponential backoff, jitter, context-aware retry, dead letter queue
+- [pkg/audit](../pkg/audit/README.md) — audit log: file, database and console sinks, three detail levels, sync and async
+
+**Data**
+- [pkg/processors](../pkg/processors/README.md) — masking, validation, normalisation, and chains of them
+- [pkg/sync](../pkg/sync/README.md) — incremental sync: checkpoint tracking, timestamp and sequence modes, recovery
+- [pkg/xlsx](../pkg/xlsx/README.md) — Excel in and out, with types preserved
+
+**Adapters**
+- [sqlite](../pkg/adapters/sqlite/README.md) · [postgres](../pkg/adapters/postgres/README.md) · [mysql](../pkg/adapters/mysql/README.md) · [mssql](../pkg/adapters/mssql/README.md) · [access](../pkg/adapters/access/README.md)
+- [pkg/adapters/base](../pkg/adapters/base/README.md) — the shared helpers a new adapter builds on
+
+**Other binaries**
+- [cmd/tdtpserve](../cmd/tdtpserve/README.md) — HTTP service
+- [cmd/tdtp-xray](../cmd/tdtp-xray/README.md) — packet inspector
 
 ---
 
-**Версия:** v1.3
-**Последнее обновление:** 26.02.2026
+## Examples
+
+**[examples/README.md](../examples/README.md)** — the catalogue.
+
+Worth reading first:
+
+1. [01-basic-export](../examples/01-basic-export/) — the smallest thing that works
+2. [travel-agency](../examples/travel-agency/TRAVEL-AGENCY.md) — a complete deployment: three databases, a broker, encryption, and an orchestrator governing both halves of the flow
+3. [02-rabbitmq-mssql](../examples/02-rabbitmq-mssql/) — broker integration
+4. [03-incremental-sync](../examples/03-incremental-sync/) — moving only what changed
+5. [08-pipeline-encrypted](../examples/08-pipeline-encrypted/) — encrypted pipeline output
+
+---
+
+## Release history
+
+**[CHANGELOG.md](../CHANGELOG.md)** is the record, and the only one kept current.
+This page used to carry its own copy of the release notes; it fell five versions
+behind, which is the usual fate of a second place to write the same thing.
+
+**[ROADMAP.md](../ROADMAP.md)** — what is planned.
+**[TODO_NEXT.md](../TODO_NEXT.md)** — what is being worked on now, in detail.
+
+---
+
+## A note on language
+
+Documentation is being translated from Russian to English. Originals of
+translated documents are kept under [ru-archive/](./ru-archive/) and are no
+longer maintained — corrections belong in the English version.
+
+Documents still in Russian are listed with their priority in
+[TODO_NEXT.md](../TODO_NEXT.md) under *Internationalization*.
+
+---
+
+**Issues:** https://github.com/ruslano69/tdtp-framework/issues
+**Contact:** ruslano69@gmail.com

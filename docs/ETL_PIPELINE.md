@@ -1,30 +1,33 @@
-# ETL Pipeline — Руководство и сценарии
+# ETL Pipeline — guide and scenarios
 
-Документация по ETL pipeline функциональности `tdtpcli --pipeline`.
+Reference for `tdtpcli --pipeline`.
 
-**Версия:** 1.4
-**Дата:** 08.05.2026
+> **Encryption in this document is the v1.3 whole-blob format** (`.tdtp.enc`).
+> Protocol v1.5 adds section-level encryption, where the `Header` stays plain so
+> a broker can still route the message while `Schema` and `Data` are ciphertext.
+> See [SPECIFICATION.md](./SPECIFICATION.md). Both formats work; the examples
+> below have not yet been rewritten for v1.5.
 
 ---
 
-## Содержание
+## Contents
 
-1. [Обзор](#обзор)
-2. [Справочник конфигурации](#справочник-конфигурации)
-3. [Переменные пайплайна (CLI Variables)](#переменные-пайплайна-cli-variables)
-4. [Сценарий 1: Два TDTP-источника → JOIN → TDTP](#сценарий-1-два-tdtp-источника--join--tdtp)
-5. [Сценарий 2: PostgreSQL → TDTP](#сценарий-2-postgresql--tdtp)
-6. [Сценарий 3: Шифрованный вывод через xZMercury](#сценарий-3-шифрованный-вывод-через-xzmercury)
-7. [Сценарий 4: Redis оркестрация](#сценарий-4-redis-оркестрация)
-8. [Сценарий 5: Graceful degradation при отказе xZMercury](#сценарий-5-graceful-degradation)
-9. [CLI-флаги pipeline](#cli-флаги-pipeline)
+1. [Overview](#overview)
+2. [Configuration reference](#configuration-reference)
+3. [Pipeline variables](#pipeline-variables)
+4. [Scenario 1: two TDTP sources, joined](#scenario-1-two-tdtp-sources-joined)
+5. [Scenario 2: PostgreSQL to TDTP](#scenario-2-postgresql-to-tdtp)
+6. [Scenario 3: encrypted output through xZMercury](#scenario-3-encrypted-output-through-xzmercury)
+7. [Scenario 4: Redis orchestration](#scenario-4-redis-orchestration)
+8. [Scenario 5: graceful degradation](#scenario-5-graceful-degradation)
+9. [Pipeline CLI flags](#pipeline-cli-flags)
 10. [Exit codes](#exit-codes)
 
 ---
 
-## Обзор
+## Overview
 
-ETL Pipeline выполняет три фазы:
+A pipeline runs in three phases:
 
 ```
 Extract                Transform              Load
@@ -36,55 +39,57 @@ MySQL ──────┘                              └─→ XLSX
 SQLite ─────┘
 ```
 
-Все источники загружаются как таблицы в in-memory SQLite. SQL трансформация объединяет их и формирует результат. Экспорт пишет результат в сконфигурированный выход.
+Every source is loaded as a table into an in-memory SQLite workspace. One SQL
+transformation joins them and produces the result. The export writes that result
+wherever the output section points.
 
 ---
 
-## Справочник конфигурации
+## Configuration reference
 
-### Полная схема YAML
+### Full YAML schema
 
 ```yaml
-name: "pipeline-name"       # обязательно — имя pipeline
-version: "1.0"              # опционально
-description: "..."          # опционально
+name: "pipeline-name"       # required
+version: "1.0"              # optional
+description: "..."          # optional
 
-# ─── ИСТОЧНИКИ ────────────────────────────────────────────────────────────────
+# ─── SOURCES ──────────────────────────────────────────────────────────────────
 sources:
-  - name: table_alias       # имя таблицы в SQLite workspace (обязательно)
+  - name: table_alias       # table name in the SQLite workspace (required)
     type: sqlite            # sqlite | postgres | mssql | mysql | tdtp
-    dsn: "path/to/db.db"   # DSN или путь к TDTP файлу
-    query: |               # SQL запрос (не для type: tdtp)
+    dsn: "path/to/db.db"    # DSN, or path to a TDTP file
+    query: |                # SQL query (not used by type: tdtp)
       SELECT id, name FROM users
-    timeout: 30             # таймаут в секундах (0 = без таймаута)
-    multi_part: false       # для type: tdtp — загружать все части набора
+    timeout: 30             # seconds (0 = no timeout)
+    multi_part: false       # type: tdtp — load every part of the set
 
 # ─── WORKSPACE ────────────────────────────────────────────────────────────────
 workspace:
   type: sqlite
-  mode: ":memory:"          # ":memory:" или путь к файлу ("workspace.db")
+  mode: ":memory:"          # ":memory:" or a file path ("workspace.db")
 
-# ─── ТРАНСФОРМАЦИЯ ────────────────────────────────────────────────────────────
+# ─── TRANSFORM ────────────────────────────────────────────────────────────────
 transform:
-  result_table: "result"    # имя таблицы с результатом (опционально)
-  timeout: 60               # таймаут выполнения в секундах
+  result_table: "result"    # name of the result table (optional)
+  timeout: 60               # seconds
   sql: |
     SELECT ...
     FROM table_alias_1 t1
     JOIN table_alias_2 t2 ON t1.id = t2.fk_id
     WHERE ...
 
-# ─── ВЫВОД ────────────────────────────────────────────────────────────────────
+# ─── OUTPUT ───────────────────────────────────────────────────────────────────
 output:
   type: tdtp                # tdtp | rabbitmq | kafka | xlsx
 
   tdtp:
     destination: "out/result.xml"
-    format: "xml"           # xml (единственный поддерживаемый)
-    compression: false      # zstd сжатие (true/false)
-    encryption: false       # AES-256-GCM через xZMercury (true/false)
+    format: "xml"           # xml (the only supported value)
+    compression: false      # zstd
+    encryption: false       # AES-256-GCM through xZMercury
 
-  rabbitmq:                 # если type: rabbitmq
+  rabbitmq:                 # when type: rabbitmq
     host: localhost
     port: 5672
     user: guest
@@ -92,39 +97,39 @@ output:
     queue: etl_results
     vhost: "/"
 
-  kafka:                    # если type: kafka
+  kafka:                    # when type: kafka
     brokers: "localhost:9092"
     topic: etl_results
-    packet_kb: 750          # размер пакета до сжатия, КБ (см. «Размер сообщения»)
-    batch_send: 10          # сколько пакетов уходит одним запросом
+    packet_kb: 750          # packet size before compression, KB (see "Message size")
+    batch_send: 10          # packets per produce request
 
-  xlsx:                     # если type: xlsx
+  xlsx:                     # when type: xlsx
     destination: "out/result.xlsx"
     sheet: "Sheet1"
 
-# ─── БЕЗОПАСНОСТЬ (для encryption: true) ────────────────────────────────────
+# ─── SECURITY (for encryption: true) ──────────────────────────────────────────
 security:
-  mercury_url: "http://mercury:3000"  # URL xZMercury
-  key_ttl_seconds: 86400              # TTL ключа в Redis (по умолчанию 86400)
-  mercury_timeout_ms: 5000            # таймаут обращения (по умолчанию 5000)
+  mercury_url: "http://mercury:3000"  # xZMercury URL
+  key_ttl_seconds: 86400              # key TTL in Redis (default 86400)
+  mercury_timeout_ms: 5000            # request timeout (default 5000)
 
-# ─── RESULTLOG ────────────────────────────────────────────────────────────────
+# ─── RESULT LOG ───────────────────────────────────────────────────────────────
 result_log:
-  type: redis               # redis (пустое = отключено)
+  type: redis               # redis (empty = disabled)
   address: "127.0.0.1:6379"
-  name: "PIPELINE_V001"     # ключ/канал в Redis
-  password: ""              # опционально
-  db: 0                     # индекс Redis БД
-  ttl: 3600                 # TTL в секундах
+  name: "PIPELINE_V001"     # Redis key/channel
+  password: ""              # optional
+  db: 0                     # Redis database index
+  ttl: 3600                 # seconds
 
-# ─── ПРОИЗВОДИТЕЛЬНОСТЬ ──────────────────────────────────────────────────────
+# ─── PERFORMANCE ──────────────────────────────────────────────────────────────
 performance:
-  timeout: 300              # максимальное время pipeline (секунды)
+  timeout: 300              # whole-pipeline limit, seconds
   batch_size: 10000
-  parallel_sources: true    # загружать источники параллельно
+  parallel_sources: true    # load sources concurrently
   max_memory_mb: 2048
 
-# ─── ОБРАБОТКА ОШИБОК ────────────────────────────────────────────────────────
+# ─── ERROR HANDLING ───────────────────────────────────────────────────────────
 error_handling:
   on_source_error: "fail"   # fail | continue
   on_transform_error: "fail"
@@ -133,109 +138,110 @@ error_handling:
   retry_delay_sec: 5
 ```
 
-### Kafka: размер сообщения
+### Kafka: message size
 
-Kafka отвергает produce-запрос по `message.max.bytes`, и меряет он **сжатый
-record batch целиком**, а не отдельную запись. Отсюда два следствия, каждое из
-которых ловили на практике.
+Kafka rejects a produce request against `message.max.bytes`, and what it
+measures is **the whole compressed record batch**, not the individual record.
+Two consequences follow, and both have been hit in practice.
 
-**Батч считается вместе.** Десять пакетов по 270 КБ — это 2.7 МБ в одном
-запросе, и брокер с дефолтным лимитом 1 МБ отвергнет все десять, хотя по
-отдельности прошёл бы любой. Уменьшать надо `batch_send`, а не `packet_kb`.
+**The batch counts as one.** Ten packets of 270 KB are 2.7 MB in a single
+request, and a broker with the default 1 MB limit rejects all ten — though any
+one of them would have passed alone. The setting to reduce is `batch_send`, not
+`packet_kb`.
 
-**Сжатие решает не всегда.** Клиент сжимает Snappy, и обычные табличные данные
-ужимаются втрое — поэтому проблема годами не всплывала. Но коэффициент задаётся
-данными: UUID, base64, шифротекст и уже сжатые поля не ужимаются вовсе, и тот
-же экспорт на них отвергается. Проверять надо на своих данных, а не на
-демонстрационных.
+**Compression does not always save you.** The client compresses with Snappy, and
+ordinary tabular data shrinks about threefold, which is why this went unnoticed
+for years. But the ratio belongs to the data: UUIDs, base64, ciphertext and
+already-compressed fields do not shrink at all, and the same export is rejected
+on them. Test against your data, not against the demo set.
 
-**Рекомендуемая настройка брокера — 4 МБ на сообщение:**
+**Recommended broker setting is 4 MB per message:**
 
 ```properties
 message.max.bytes=4194304
-replica.fetch.max.bytes=4194304   # обязан быть не меньше message.max.bytes
+replica.fetch.max.bytes=4194304   # must not be lower than message.max.bytes
 ```
 
-Четыре мегабайта покрывают часть TDTP целиком (около 1.9 МБ несжатого XML) даже
-когда сжатие не помогает, и оставляют запас на батч из нескольких мелких частей.
+Four megabytes cover a whole TDTP part (roughly 1.9 MB of uncompressed XML) even
+when compression does nothing, and leave room for a batch of several small ones.
 
-`replica.fetch.max.bytes` поднимается вместе с `message.max.bytes` и не ниже
-его. Иначе лидер примет сообщение, которое реплики не смогут вычитать, и
-партиция уедет в under-replicated — при факторе репликации 1 это незаметно, на
-настоящем кластере это тихая потеря отказоустойчивости.
+`replica.fetch.max.bytes` must rise with `message.max.bytes` and never sit below
+it. Otherwise the leader accepts a message the replicas cannot fetch and the
+partition goes under-replicated — invisible at replication factor 1, and a quiet
+loss of fault tolerance on a real cluster.
 
-Если менять настройки брокера нельзя — managed-сервисы вроде Confluent Cloud,
-Event Hubs и MSK держат дефолт в 1 МБ, — уменьшайте `packet_kb` и `batch_send`.
-При превышении tdtpcli предупреждает заранее, а при отказе печатает размер
-каждого пакета в батче.
+Where broker settings cannot be changed — managed services such as Confluent
+Cloud, Event Hubs and MSK keep the 1 MB default — reduce `packet_kb` and
+`batch_send`. `tdtpcli` warns before exceeding the limit, and on rejection
+prints the size of every packet in the batch.
 
-### Типы источников
+### Source types
 
-| type | DSN формат | query |
+| type | DSN format | query |
 |------|-----------|-------|
 | `sqlite` | `path/to/db.sqlite` | SQL SELECT |
 | `postgres` | `postgres://user:pass@host:5432/db?sslmode=disable` | SQL SELECT |
 | `mssql` | `server=host;user id=sa;password=X;database=DB` | SQL SELECT |
 | `mysql` | `user:pass@tcp(host:3306)/db?parseTime=true` | SQL SELECT |
-| `tdtp` | `path/to/file.tdtp.xml` | не используется |
+| `tdtp` | `path/to/file.tdtp.xml` | not used |
 
 ---
 
-## Переменные пайплайна (CLI Variables)
+## Pipeline variables
 
-Переменные позволяют создавать **параметрические пайплайны** — один YAML-файл,
-множество запусков с разными фильтрами (подразделение, период, код объекта и т.п.).
+Variables make a pipeline parametric: one YAML file, many runs with different
+filters — department, period, object code and so on.
 
-### Синтаксис передачи
+### Passing them
 
 ```bash
-# Одна переменная
+# One variable
 ./tdtpcli.exe --pipeline report.yaml @dept=97-256
 
-# Кавычки вокруг значения снимаются автоматически — эквивалентно
+# Quotes around the value are stripped automatically — equivalent
 ./tdtpcli.exe --pipeline report.yaml @dept="97-256"
 
-# Несколько переменных
+# Several
 ./tdtpcli.exe --pipeline report.yaml @dept=97-256 @date_from=2025-01-01 @date_to=2025-12-31
 ```
 
-### Синтаксис в YAML
+### Using them in YAML
 
-| Контекст              | Паттерн    | Пример                                     |
-|-----------------------|------------|--------------------------------------------|
-| SQL — строковый литерал | `'@name'` | `WHERE dept = '@dept'`                     |
-| SQL — числовой/bare   | `@name`    | `WHERE year = @year`                       |
-| YAML-поля             | `{{name}}` | `destination: "out/dept_{{dept}}.tdtp.xml"` |
+| Context | Pattern | Example |
+|---------|---------|---------|
+| SQL — string literal | `'@name'` | `WHERE dept = '@dept'` |
+| SQL — numeric or bare | `@name` | `WHERE year = @year` |
+| YAML fields | `{{name}}` | `destination: "out/dept_{{dept}}.tdtp.xml"` |
 
-Одна и та же переменная может использоваться в обоих контекстах одновременно.
+The same variable may be used in both contexts at once.
 
-### Поля, поддерживающие подстановку
+### Fields that accept substitution
 
-- `sources[].query` — SQL-запросы источников (`'@name'` и `@name`)
-- `sources[].dsn` — строка подключения (`{{name}}`)
-- `transform.sql` — SQL трансформации (`'@name'` и `@name`)
-- `description` — описание пайплайна (`{{name}}`)
-- `output.tdtp.destination` — путь к выходному файлу (`{{name}}`)
-- `output.xlsx.destination` — путь к XLSX (`{{name}}`)
-- `output.fallback.tdtp.destination` — fallback-цепочка (`{{name}}`)
+- `sources[].query` — source SQL (`'@name'` and `@name`)
+- `sources[].dsn` — connection string (`{{name}}`)
+- `transform.sql` — transformation SQL (`'@name'` and `@name`)
+- `description` — pipeline description (`{{name}}`)
+- `output.tdtp.destination` — output path (`{{name}}`)
+- `output.xlsx.destination` — XLSX path (`{{name}}`)
+- `output.fallback.tdtp.destination` — fallback chain (`{{name}}`)
 
-### Валидация
+### Validation
 
-- Переменная **объявлена в конфиге** (`'@dept'` или `{{dept}}`), но **не передана** на CLI → **ошибка** (pipeline не запускается).
-- Переменная **передана на CLI**, но **не используется** в конфиге → **предупреждение** (pipeline продолжает работу).
+- Declared in the config (`'@dept'` or `{{dept}}`) but **not passed** on the CLI → **error**, the pipeline does not start.
+- Passed on the CLI but **not used** in the config → **warning**, the pipeline continues.
 
-### Безопасность
+### Safety
 
-Подстановка выполняется **до** SQL-валидатора. Попытки SQL-инъекции через значения
-переменных блокируются существующим валидатором (`SELECT/WITH only` в safe mode).
-Для строковых литералов (`'@name'`) одиночные кавычки внутри значения экранируются
-автоматически (`'` → `''`).
+Substitution happens **before** the SQL validator, so injection attempts through
+a variable value are blocked by the existing validator (`SELECT`/`WITH` only in
+safe mode). Inside string literals (`'@name'`) single quotes in the value are
+escaped automatically (`'` → `''`).
 
-### Пример: отчёт по подразделению за период
+### Example: a departmental report over a period
 
 ```yaml
 name: "dept-staff-hiredate"
-description: "Список відділу {{dept}} за {{date_from}} – {{date_to}}"
+description: "Department {{dept}} roster, {{date_from}} - {{date_to}}"
 version: "1.0"
 
 sources:
@@ -273,16 +279,21 @@ output:
     compress_level: 3
 ```
 
+> The Cyrillic identifiers above are deliberate: they are the real column names
+> in the system this example came from, and renaming them would leave an example
+> that does not run. Non-ASCII identifiers work wherever the underlying database
+> supports them.
+
 ```bash
 ./tdtpcli.exe --pipeline pipelines/dept_staff_hiredate.yaml \
   @dept=97-256 @date_from=2025-01-01 @date_to=2025-12-31
 ```
 
-Вывод при запуске:
+Output on start:
 
 ```
 Pipeline: dept-staff-hiredate
-   Список відділу 97-256 за 2025-01-01 – 2025-12-31
+   Department 97-256 roster, 2025-01-01 - 2025-12-31
    Version: 1.0
    Mode: 🔒 SAFE (READ-ONLY: SELECT/WITH only)
    Variables: @date_from=2025-01-01, @date_to=2025-12-31, @dept=97-256
@@ -290,24 +301,25 @@ Pipeline: dept-staff-hiredate
    ...
 ```
 
-Результат записывается в `pipelines/out/dept_97-256_2025-01-01_2025-12-31.tdtp.xml`.
+The result lands in `pipelines/out/dept_97-256_2025-01-01_2025-12-31.tdtp.xml`.
 
 ---
 
-## Сценарий 1: Два TDTP-источника → JOIN → TDTP
+## Scenario 1: two TDTP sources, joined
 
-**Задача:** Объединить данные из двух TDTP-файлов (сотрудники + отделы), вычислить зарплатную статистику по отделам, записать в новый TDTP-файл.
+**Goal:** join two TDTP files (employees and departments), compute salary
+statistics per department, write a new TDTP file.
 
-**Файлы:**
-- `employees.tdtp.xml` — 10 записей (employee_id, full_name, department_id, salary, ...)
-- `departments.tdtp.xml` — 4 записи (department_id, department_name, ...)
+**Inputs:**
+- `employees.tdtp.xml` — 10 records (employee_id, full_name, department_id, salary, …)
+- `departments.tdtp.xml` — 4 records (department_id, department_name, …)
 
 **`pipeline-basic.yaml`:**
 
 ```yaml
 name: "employee-dept-report"
 version: "1.0"
-description: "Зарплатный отчёт по отделам"
+description: "Salary report by department"
 
 sources:
   - name: employees
@@ -347,13 +359,13 @@ error_handling:
   on_source_error: "fail"
 ```
 
-**Запуск:**
+**Run:**
 ```bash
 mkdir -p out
 ./tdtpcli --pipeline pipeline-basic.yaml
 ```
 
-**Результат** (`out/dept_salary_report.xml`):
+**Result** (`out/dept_salary_report.xml`):
 ```xml
 <DataPacket protocol="TDTP" version="1.0">
   <Header>
@@ -380,9 +392,9 @@ mkdir -p out
 
 ---
 
-## Сценарий 2: PostgreSQL → TDTP
+## Scenario 2: PostgreSQL to TDTP
 
-**Задача:** Выгрузить данные о заказах из PostgreSQL, отфильтровать активные, записать в TDTP-файл.
+**Goal:** export orders from PostgreSQL, keep the active ones, write a TDTP file.
 
 **`pipeline-pg-orders.yaml`:**
 
@@ -438,46 +450,49 @@ output:
   type: tdtp
   tdtp:
     destination: "out/active_orders.xml"
-    compression: true     # zstd сжатие для больших файлов
+    compression: true     # zstd, for large files
 
 performance:
-  parallel_sources: true  # загружать обе таблицы одновременно
+  parallel_sources: true  # load both tables at once
   timeout: 120
 ```
 
-**Запуск:**
+**Run:**
 ```bash
 ./tdtpcli --pipeline pipeline-pg-orders.yaml
 ```
 
-**Multi-source из разных СУБД** — просто укажи разные DSN и type для каждого источника. Workspace объединит их через JOIN.
+**Sources from different database engines** need nothing special: give each one
+its own `type` and `dsn`. The workspace joins them regardless of where they came
+from.
 
 ---
 
-## Сценарий 3: Шифрованный вывод через xZMercury
+## Scenario 3: encrypted output through xZMercury
 
-**Задача:** Выгрузить конфиденциальные данные (зарплаты), зашифровать AES-256-GCM через xZMercury, записать `.tdtp.enc`.
+**Goal:** export confidential data (salaries), encrypt it with AES-256-GCM
+through xZMercury, write `.tdtp.enc`.
 
-### Шаг 1: Запустить mock xZMercury
+### Step 1: start the xZMercury mock
 
 ```bash
 go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
-# или через Docker:
+# or with Docker:
 # docker run -p 3000:3000 -e MERCURY_SERVER_SECRET=dev-secret xzmercury-mock
 ```
 
-### Шаг 2: Установить секрет
+### Step 2: set the shared secret
 
 ```bash
 export MERCURY_SERVER_SECRET=dev-secret
 ```
 
-### Шаг 3: Создать `pipeline-enc.yaml`
+### Step 3: write `pipeline-enc.yaml`
 
 ```yaml
 name: "employee-dept-report-encrypted"
 version: "1.0"
-description: "Зарплатный отчёт — AES-256-GCM через xZMercury"
+description: "Salary report — AES-256-GCM through xZMercury"
 
 sources:
   - name: employees
@@ -508,7 +523,7 @@ output:
   type: tdtp
   tdtp:
     destination: "out/dept_salary_report.tdtp.enc"
-    encryption: true          # AES-256-GCM через xZMercury
+    encryption: true          # AES-256-GCM through xZMercury
 
 security:
   mercury_url: "http://localhost:3000"
@@ -522,13 +537,13 @@ result_log:
   ttl: 3600
 ```
 
-### Шаг 4: Запустить
+### Step 4: run it
 
 ```bash
 ./tdtpcli --pipeline pipeline-enc.yaml
 ```
 
-**Вывод:**
+**Output:**
 ```
 Pipeline: employee-dept-report-encrypted
    Version: 1.0
@@ -547,31 +562,33 @@ ETL Pipeline completed successfully!
    Package UUID: 550e8400-e29b-41d4-a716-446655440000
 ```
 
-### Альтернатива: --enc-dev (без xZMercury)
+### Alternative: `--enc-dev`, without xZMercury
 
-В dev-сборках можно использовать `--enc-dev` — ключ генерируется локально:
+Development builds accept `--enc-dev`, which generates the key locally:
 
 ```bash
 ./tdtpcli --pipeline pipeline-enc.yaml --enc-dev
 ```
 
-Полезно для разработки и CI без развёрнутого xZMercury. В production-сборке (`-tags production`) флаг недоступен.
+Useful for development and CI with no xZMercury deployed. The flag does not
+exist in a production build (`-tags production`).
 
-### --enc: переопределить encryption из CLI
+### `--enc`: turning encryption on from the CLI
 
-Можно включить шифрование без изменения YAML (например, в CD/CD):
+Encryption can be enabled without editing the YAML — in CI/CD, for instance:
 
 ```bash
 ./tdtpcli --pipeline pipeline-basic.yaml --enc
-# эквивалентно output.tdtp.encryption: true в YAML
-# требует секции security.mercury_url в YAML
+# equivalent to output.tdtp.encryption: true
+# still requires the security.mercury_url section in the YAML
 ```
 
 ---
 
-## Сценарий 4: Redis оркестрация
+## Scenario 4: Redis orchestration
 
-**Задача:** Несколько pipeline запускаются параллельно, оркестратор отслеживает их статусы через Redis.
+**Goal:** several pipelines run in parallel and an orchestrator follows their
+status through Redis.
 
 **`pipeline-with-resultlog.yaml`:**
 
@@ -606,18 +623,18 @@ output:
 result_log:
   type: redis
   address: "redis:6379"
-  name: "DAILY_SUMMARY_V2"   # ключ в Redis
+  name: "DAILY_SUMMARY_V2"   # Redis key
   password: "redispass"
   db: 0
-  ttl: 7200                  # 2 часа
+  ttl: 7200                  # 2 hours
 ```
 
-**Запуск:**
+**Run:**
 ```bash
 ./tdtpcli --pipeline pipeline-with-resultlog.yaml
 ```
 
-**Что пишется в Redis после завершения:**
+**What lands in Redis when it finishes:**
 
 ```json
 {
@@ -634,41 +651,42 @@ result_log:
 ```
 
 **Statuses:**
-- `success` — pipeline выполнен без ошибок
-- `failed` — pipeline завершился с ошибкой
-- `completed_with_errors` — pipeline завершён, но xZMercury недоступен (error-пакет записан)
+- `success` — finished with no errors
+- `failed` — finished with an error
+- `completed_with_errors` — finished, but xZMercury was unreachable and an error packet was written
 
-**Чтение статуса из Python:**
+**Reading the status from Python:**
 
 ```python
 import redis, json
 
 r = redis.Redis(host='redis', port=6379, password='redispass')
 result = json.loads(r.get('pipeline:DAILY_SUMMARY_V2'))
-print(result['status'])   # "success"
-print(result['package_uuid'])  # UUID для расшифровки (при encryption: true)
+print(result['status'])        # "success"
+print(result['package_uuid'])  # UUID for decryption, when encryption: true
 ```
 
-**Graceful degradation Redis:** Если Redis недоступен — pipeline записывает предупреждение в лог и завершается с exit 0. Отсутствие resultlog не считается ошибкой.
+**If Redis is down**, the pipeline logs a warning and exits 0. A missing result
+log is not treated as a failure.
 
 ---
 
-## Сценарий 5: Graceful Degradation
+## Scenario 5: graceful degradation
 
-**Задача:** Понять поведение системы при недоступности xZMercury.
+**Goal:** understand what happens when xZMercury is unreachable.
 
-**Условие:** `encryption: true`, но xZMercury недоступен.
+**Condition:** `encryption: true`, xZMercury down.
 
-**Поведение:**
+**Behaviour:**
 
-1. ETL-процесс загружает данные, выполняет SQL трансформацию — всё нормально
-2. При попытке `POST /api/keys/bind` → connection refused (или timeout)
-3. Незашифрованные данные **НЕ записываются**
-4. В destination записывается `error` пакет (`Type=error`, таблица `tdtp_errors`)
-5. ResultLog получает статус `completed_with_errors` с `package_uuid`
-6. Pipeline завершается с **exit code 0**
+1. Data is loaded and the SQL transformation runs — all normal
+2. `POST /api/keys/bind` gets connection refused, or times out
+3. Unencrypted data is **not written**
+4. An `error` packet goes to the destination (`Type=error`, table `tdtp_errors`)
+5. The result log records `completed_with_errors` with a `package_uuid`
+6. The pipeline exits **0**
 
-**Вывод:**
+**Output:**
 ```
 Pipeline: employee-dept-report-encrypted
    ...
@@ -678,7 +696,7 @@ WARNING: Encryption degraded: bind key: MERCURY_UNAVAILABLE: connect: connection
    Error packet written to output. Pipeline completed with errors (exit 0).
 ```
 
-**Содержимое destination (`out/dept_salary_report.tdtp.enc`):**
+**What the destination contains** (`out/dept_salary_report.tdtp.enc`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -702,39 +720,39 @@ WARNING: Encryption degraded: bind key: MERCURY_UNAVAILABLE: connect: connection
 </DataPacket>
 ```
 
-**Downstream-потребитель** получает стандартный TDTP-пакет и может:
-- Записать запись в таблицу `tdtp_errors`
-- Уведомить оркестратор о необходимости повтора
-- Не падать — `error` пакет имеет стандартную структуру Schema+Data
+A **downstream consumer** receives an ordinary TDTP packet, and can:
+- insert the row into a `tdtp_errors` table
+- tell the orchestrator a retry is needed
+- carry on — an `error` packet has the same Schema-plus-Data structure as any other
 
-**Коды ошибок:**
+**Error codes:**
 
-| Код | Ситуация |
-|-----|---------|
+| Code | Situation |
+|------|-----------|
 | `MERCURY_UNAVAILABLE` | connection refused, timeout |
-| `MERCURY_ERROR` | HTTP 5xx от xZMercury |
-| `HMAC_VERIFICATION_FAILED` | HMAC подпись не совпала (неверный `MERCURY_SERVER_SECRET`) |
-| `KEY_BIND_REJECTED` | HTTP 403 (нет прав) или 429 (rate limit) |
+| `MERCURY_ERROR` | HTTP 5xx from xZMercury |
+| `HMAC_VERIFICATION_FAILED` | signature mismatch — wrong `MERCURY_SERVER_SECRET` |
+| `KEY_BIND_REJECTED` | HTTP 403 (not permitted) or 429 (rate limited) |
 
 ---
 
-## CLI-флаги pipeline
+## Pipeline CLI flags
 
 ```
---pipeline <file>     Путь к YAML-конфигурации
---unsafe              Разрешить все SQL (требует admin, используй sudo)
---enc                 Override: включить output.tdtp.encryption=true
---enc-dev             Dev-режим: локальный ключ (только !production сборки)
+--pipeline <file>     Path to the YAML configuration
+--unsafe              Allow any SQL (requires admin; use sudo)
+--enc                 Override: set output.tdtp.encryption=true
+--enc-dev             Dev mode: local key (non-production builds only)
 ```
 
-**Приоритеты:**
-- `--enc` / `--enc-dev` **переопределяют** `output.tdtp.encryption` в YAML
-- `encryption: true` в YAML без флагов работает так же как `--enc`
-- При `--enc` без `security.mercury_url` в YAML → ошибка конфигурации
+**Precedence:**
+- `--enc` and `--enc-dev` **override** `output.tdtp.encryption` in the YAML
+- `encryption: true` in the YAML behaves exactly like `--enc`
+- `--enc` without `security.mercury_url` in the YAML is a configuration error
 
-**Production сборка:**
+**Production build:**
 ```bash
-# Исключает --enc-dev, DevClient и любой dev-only код
+# Excludes --enc-dev, DevClient, and every other dev-only path
 go build -tags production -o tdtpcli ./cmd/tdtpcli/
 ```
 
@@ -742,9 +760,9 @@ go build -tags production -o tdtpcli ./cmd/tdtpcli/
 
 ## Exit codes
 
-| Code | Ситуация |
-|------|---------|
-| 0 | Pipeline выполнен успешно |
-| 0 | `completed_with_errors` — Mercury недоступен, error-пакет записан |
-| 1 | Ошибка конфигурации, SQL validation, источник данных, экспорт |
-| 1 | Unsafe mode без прав admin |
+| Code | Situation |
+|------|-----------|
+| 0 | Pipeline succeeded |
+| 0 | `completed_with_errors` — Mercury unreachable, error packet written |
+| 1 | Configuration, SQL validation, source or export failure |
+| 1 | Unsafe mode without admin rights |

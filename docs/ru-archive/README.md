@@ -1,0 +1,34 @@
+# Russian documentation archive
+
+The originals of documents that have been translated into English, kept at their
+original paths under this directory.
+
+They are here rather than deleted for two reasons. A translation can lose a
+detail, and the original is the only way to tell whether something is missing or
+was never there. And several of these were written while the feature was being
+built, so they carry reasoning that never made it into the finished document.
+
+**These files are not maintained.** Once a document is translated, the English
+version is the one that gets corrected; the copy here is a snapshot of what was
+translated from, frozen at that moment. Do not fix an error here — fix it in the
+English document, which is the only one anybody reads.
+
+## Layout
+
+Paths mirror the repository, so `docs/README.md` archives as
+`docs/ru-archive/docs/README.md`.
+
+## Contents
+
+| Original | Archived as | Translated |
+|----------|-------------|------------|
+| `docs/README.md` | `docs/README.md` | 2026-07-29 |
+| `docs/ETL_PIPELINE.md` | `docs/ETL_PIPELINE.md` | 2026-07-29 |
+
+## When a document is only partly stale
+
+Some of these were out of date in Russian before they were translated — the
+documentation index claimed v1.3 while the protocol was at v1.5 and the CLI at
+1.24.0. Where that happened, the English version states the current facts rather
+than reproducing the old ones, and the archived copy is the record of what the
+document used to claim. Differences between the two are deliberate.
