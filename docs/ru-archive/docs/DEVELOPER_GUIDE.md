@@ -1,43 +1,44 @@
 # TDTP Framework - Developer Guide
 
-**Developer guide** for the TDTP (Table Data Transfer Protocol) framework.
+**Руководство разработчика** для TDTP (Table Data Transfer Protocol) Framework.
 
-**Version:** 1.4
-**Repository:** https://github.com/ruslano69/tdtp-framework
-
----
-
-## Do not reinvent what is already here
-
-**Read this before writing new code.**
-
-This is a mature codebase with an architecture already in place. Most of the problems are solved:
-
-1. **Type conversion** → `pkg/core/schema.Converter`
-2. **Data validation** → `pkg/core/schema.Validator`
-3. **XML parsing** → `pkg/core/packet.Parser`
-4. **SQL generation** → `pkg/core/tdtql.SQLGenerator`
-5. **Database access** → `pkg/adapters.Adapter`
-6. **XLSX in and out** → `pkg/xlsx.Converter`
-7. **In-memory workspace** → `pkg/etl.Workspace`
-8. **Data processing** → `pkg/processors`
-9. **Encryption** → `pkg/processors.FileEncryptor` with `pkg/mercury.Client`
-10. **AES-256-GCM** → `pkg/crypto.Encrypt`/`Decrypt`
-
-**Do not write your own:**
-- Type mappers — use `schema.Converter`
-- XML parsers — use `packet.Parser`
-- SQL builders — use `tdtql.SQLGenerator`
-- Database connectors — use `adapters.New()`
-- Excel converters — use `xlsx.ToXLSX` and `xlsx.FromXLSX`
+**Версия:** 1.4
+**Дата:** 2026-02-26
+**Репозиторий:** https://github.com/ruslano69/tdtp-framework
 
 ---
 
-## Contents
+## ⚠️ НЕ ИЗОБРЕТАЙ ВЕЛОСИПЕДЫ!
 
-1. [Do not reinvent what is already here](#do-not-reinvent-what-is-already-here)
-2. [Architecture](#architecture)
-3. [Setting up a test environment](#setting-up-a-test-environment)
+**Перед написанием нового кода прочитай эту секцию!**
+
+TDTP Framework — это зрелый проект с готовой архитектурой. Большинство задач уже решены:
+
+1. **Type Conversion** → Используй `pkg/core/schema.Converter` ✅
+2. **Data Validation** → Используй `pkg/core/schema.Validator` ✅
+3. **XML Parsing** → Используй `pkg/core/packet.Parser` ✅
+4. **SQL Generation** → Используй `pkg/core/tdtql.SQLGenerator` ✅
+5. **Database Access** → Используй `pkg/adapters.Adapter` ✅
+6. **XLSX Import/Export** → Используй `pkg/xlsx.Converter` ✅
+7. **In-memory Workspace** → Используй `pkg/etl.Workspace` ✅
+8. **Data Processing** → Используй `pkg/processors` ✅
+9. **Encryption** → Используй `pkg/processors.FileEncryptor` + `pkg/mercury.Client` ✅
+10. **AES-256-GCM** → Используй `pkg/crypto.Encrypt/Decrypt` ✅
+
+**НЕ пиши свои:**
+- ❌ Type mappers (используй `schema.Converter`)
+- ❌ XML parsers (используй `packet.Parser`)
+- ❌ SQL builders (используй `tdtql.SQLGenerator`)
+- ❌ Database connectors (используй `adapters.New()`)
+- ❌ Excel converters (используй `xlsx.ToXLSX/FromXLSX`)
+
+---
+
+## Содержание
+
+1. [НЕ ИЗОБРЕТАЙ ВЕЛОСИПЕДЫ](#-не-изобретай-велосипеды)
+2. [Архитектура фреймворка](#архитектура-фреймворка)
+3. [Настройка тестовой среды](#настройка-тестовой-среды)
 4. [Core Modules](#core-modules)
    - [Packet Module](#packet-module)
    - [Schema Module](#schema-module)
@@ -55,32 +56,32 @@ This is a mature codebase with an architecture already in place. Most of the pro
 7. [Message Brokers](#message-brokers)
 8. [Production Features](#production-features-v12)
 9. [Security: Encryption (v1.3)](#security-encryption-v13)
-10. [Writing a new adapter](#writing-a-new-adapter)
-11. [Common mistakes and antipatterns](#common-mistakes-and-antipatterns)
-12. [Architectural principles](#architectural-principles)
+10. [Разработка нового адаптера](#разработка-нового-адаптера)
+11. [Частые Ошибки и Антипаттерны](#-частые-ошибки-и-антипаттерны)
+12. [Архитектурные Принципы](#-архитектурные-принципы)
 13. [Best Practices](#best-practices)
 14. [Testing](#testing)
 
 ---
 
-## Architecture
+## Архитектура фреймворка
 
-### Overall layout
+### Общая структура
 
 ```
 tdtp-framework/
 ├── pkg/
-│   ├── core/              # Protocol core
-│   │   ├── packet/        # TDTP XML parser and generator
-│   │   ├── schema/        # Data type validation
+│   ├── core/              # Ядро протокола
+│   │   ├── packet/        # Парсер и генератор TDTP XML
+│   │   ├── schema/        # Валидация типов данных
 │   │   └── tdtql/         # Query language translator
 │   │
-│   ├── adapters/          # Database adapters
-│   │   ├── adapter.go     # The common interface
-│   │   ├── sqlite/        # SQLite
-│   │   ├── postgres/      # PostgreSQL
-│   │   ├── mssql/         # MS SQL Server
-│   │   └── mysql/         # MySQL
+│   ├── adapters/          # Адаптеры БД
+│   │   ├── adapter.go     # Универсальный интерфейс
+│   │   ├── sqlite/        # SQLite адаптер
+│   │   ├── postgres/      # PostgreSQL адаптер
+│   │   ├── mssql/         # MS SQL Server адаптер
+│   │   └── mysql/         # MySQL адаптер
 │   │
 │   ├── brokers/           # Message brokers
 │   │   ├── rabbitmq.go    # RabbitMQ
@@ -97,28 +98,28 @@ tdtp-framework/
 │   └── crypto/            # AES-256-GCM encrypt/decrypt 🆕 v1.3
 │
 ├── cmd/
-│   ├── tdtpcli/           # The CLI
+│   ├── tdtpcli/           # CLI утилита
 │   └── xzmercury-mock/    # Mock xZMercury HTTP server (dev/testing) 🆕 v1.3
 │
-├── docs/                  # Documentation
-├── examples/              # Examples
-└── tests/                 # Integration tests
+├── docs/                  # Документация
+├── examples/              # Примеры
+└── tests/                 # Интеграционные тесты
 ```
 
-### The layers
+### Слои архитектуры
 
 **Layer 1: Protocol Core**
-- `packet` — TDTP XML serialisation and parsing
-- `schema` — typing and validation
-- `tdtql` — the query language
+- `packet` - сериализация/десериализация TDTP XML
+- `schema` - типизация и валидация данных
+- `tdtql` - язык запросов
 
 **Layer 2: Data Access**
-- `adapters` — two-way integration with databases
-- Import strategies: REPLACE, IGNORE, FAIL, COPY
-- TDTQL to SQL pushdown
+- `adapters` - двунаправленная интеграция с СУБД
+- Стратегии импорта (REPLACE, IGNORE, FAIL, COPY)
+- TDTQL → SQL оптимизация
 
 **Layer 3: Transport**
-- `brokers` — asynchronous exchange through queues
+- `brokers` - асинхронный обмен через очереди
 - RabbitMQ, MSMQ, Kafka
 
 **Layer 4: Production Features**
@@ -131,38 +132,38 @@ tdtp-framework/
 **Layer 5: Security (v1.3)**
 - `mercury` - xZMercury HTTP client, UUID-binding, HMAC verification
 - `crypto` - AES-256-GCM encryption with binary header
-- `cmd/xzmercury-mock` — a standalone mock server for end-to-end tests
+- `cmd/xzmercury-mock` - standalone mock server для E2E тестов
 
 **Layer 6: Applications**
-- `tdtpcli` — the CLI
+- `tdtpcli` - CLI утилита
 - Custom applications
 
 ---
 
-## Setting up a test environment
+## Настройка тестовой среды
 
-### Requirements
+### Требования
 
-- **Go** 1.21 or later; 1.22+ recommended
-- **Docker**, optional, for databases and brokers
-- **Make**, optional
+- **Go:** 1.21+ (рекомендуется 1.22+)
+- **Docker** (опционально, для БД и брокеров)
+- **Make** (опционально, для автоматизации)
 
-### Step 1: clone and install dependencies
+### Шаг 1: Клонирование и установка зависимостей
 
 ```bash
-# Clone
+# Клонирование
 git clone https://github.com/ruslano69/tdtp-framework.git
 cd tdtp-framework
 
-# Dependencies
+# Установка зависимостей
 go mod tidy
 go mod download
 
-# Check it builds
+# Проверка сборки
 go build ./...
 ```
 
-### Step 2: start the test databases in Docker
+### Шаг 2: Запуск тестовых БД через Docker
 
 **PostgreSQL:**
 ```bash
@@ -174,7 +175,7 @@ docker run -d \
   -p 5432:5432 \
   postgres:15-alpine
 
-# Check
+# Проверка
 docker exec tdtp-postgres psql -U tdtp_user -d tdtp_test -c '\dt'
 ```
 
@@ -187,7 +188,7 @@ docker run -d \
   -p 1433:1433 \
   mcr.microsoft.com/mssql/server:2022-latest
 
-# Check
+# Проверка
 docker exec tdtp-mssql /opt/mssql-tools/bin/sqlcmd \
   -S localhost -U sa -P 'MyStr0ng@Passw0rd' \
   -Q "SELECT @@VERSION"
@@ -204,11 +205,11 @@ docker run -d \
   -p 3306:3306 \
   mysql:8.0
 
-# Check
+# Проверка
 docker exec tdtp-mysql mysql -u tdtp_user -ptdtp_pass -e "SHOW DATABASES;"
 ```
 
-### Step 3: start RabbitMQ
+### Шаг 3: Запуск RabbitMQ
 
 ```bash
 docker run -d \
@@ -220,50 +221,50 @@ docker run -d \
 # Web UI: http://localhost:15672 (guest/guest)
 ```
 
-### Step 4: generate test data
+### Шаг 4: Генерация тестовых данных
 
 ```bash
-# SQLite test database
+# SQLite тестовая БД
 go run scripts/generate_sqlite_testdb.go
 
-# Check
+# Проверка
 sqlite3 test_database.db ".tables"
 sqlite3 test_database.db "SELECT COUNT(*) FROM CustTable;"
 ```
 
-### Step 5: run the unit tests
+### Шаг 5: Запуск unit тестов
 
 ```bash
-# Everything
+# Все тесты
 go test ./... -v
 
-# Core modules only
+# Только core модули
 go test ./pkg/core/... -v
 
-# With coverage
+# С покрытием
 go test ./pkg/core/packet -cover
 go test ./pkg/core/schema -cover
 go test ./pkg/core/tdtql -cover
 
-# Integration tests — these need Docker
+# Интеграционные тесты (требуют Docker)
 go test ./tests/integration/... -v
 ```
 
-### Step 6: build the CLI
+### Шаг 6: Сборка CLI
 
 ```bash
-# Build
+# Сборка
 go build -o tdtpcli ./cmd/tdtpcli
 
-# Check
+# Проверка
 ./tdtpcli --help
 ./tdtpcli --create-config-sqlite
 ./tdtpcli -config config.sqlite.yaml --list
 ```
 
-### Environment variables for the tests
+### Переменные окружения для тестов
 
-Create a `.env` file:
+Создайте `.env` файл:
 
 ```bash
 # PostgreSQL
@@ -300,37 +301,37 @@ RABBITMQ_PASSWORD=guest
 
 ### Packet Module
 
-**Location:** `pkg/core/packet/`
+**Расположение:** `pkg/core/packet/`
 
-**Purpose:** parsing and generating TDTP XML packets.
+**Назначение:** Парсинг и генерация TDTP XML пакетов.
 
-#### The main types
+#### Основные типы
 
 ```go
-// DataPacket is the top-level TDTP container
+// DataPacket - основной контейнер TDTP
 type DataPacket struct {
     Protocol     string        // "TDTP"
     Version      string        // "1.0"
-    Header       Header        // header
-    Schema       Schema        // data schema
-    Data         Data          // the rows
-    Query        *Query        // query, optional
-    QueryContext *QueryContext // execution context, optional
-    Alarm        *Alarm        // alarm, optional
+    Header       Header        // Заголовок
+    Schema       Schema        // Схема данных
+    Data         Data          // Данные
+    Query        *Query        // Запрос (опционально)
+    QueryContext *QueryContext // Контекст (опционально)
+    Alarm        *Alarm        // Тревога (опционально)
 }
 
-// Header is the packet header
+// Header - заголовок пакета
 type Header struct {
     Type           string    // reference | delta | request | response | alarm
-    TableName      string    // table name
-    MessageID      string    // message UUID
-    PartNumber     int       // part number
-    TotalParts     int       // total parts
-    RecordsInPart  int       // rows in this part
-    Timestamp      time.Time // creation time
-    Sender         string    // sending system
-    Recipient      string    // receiving system
-    InReplyTo      string    // request ID, for a response
+    TableName      string    // Имя таблицы
+    MessageID      string    // UUID сообщения
+    PartNumber     int       // Номер части
+    TotalParts     int       // Всего частей
+    RecordsInPart  int       // Записей в части
+    Timestamp      time.Time // Время создания
+    Sender         string    // Отправитель
+    Recipient      string    // Получатель
+    InReplyTo      string    // ID запроса (для response)
 }
 ```
 
@@ -339,24 +340,24 @@ type Header struct {
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/core/packet"
 
-// Create a parser
+// Создание парсера
 parser := packet.NewParser()
 
-// Parse from a file
+// Парсинг из файла
 pkt, err := parser.ParseFile("data.tdtp.xml")
 if err != nil {
     log.Fatal(err)
 }
 
-// Parse from []byte
+// Парсинг из []byte
 xmlData := []byte(`<DataPacket>...</DataPacket>`)
 pkt, err = parser.ParseBytes(xmlData)
 
-// Parse from an io.Reader
+// Парсинг из io.Reader
 file, _ := os.Open("data.tdtp.xml")
 pkt, err = parser.Parse(file)
 
-// Extract a row's values
+// Извлечение значений строки
 for _, row := range pkt.Data.Rows {
     values := parser.GetRowValues(row)
     fmt.Println(values) // []string{"1", "John", "john@example.com"}
@@ -368,13 +369,13 @@ for _, row := range pkt.Data.Rows {
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/core/packet"
 
-// Create a generator
+// Создание генератора
 generator := packet.NewGenerator()
 
-// Set the maximum packet size, optional
+// Настройка максимального размера пакета (опционально)
 generator.SetMaxMessageSize(3800000) // 3.8MB
 
-// Generate a reference packet - a full table
+// Генерация Reference (полный справочник)
 schema := packet.Schema{
     Fields: []packet.Field{
         {Name: "id", Type: "INTEGER", Key: true},
@@ -393,17 +394,17 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Write to a file
+// Сохранение в файл
 err = generator.WriteToFile(packets[0], "users.tdtp.xml")
 
-// Or to an XML string
-xmlData, err := generator.ToXML(packets[0], true) // true = indented
+// Или в XML string
+xmlData, err := generator.ToXML(packets[0], true) // true = с отступами
 fmt.Println(string(xmlData))
 ```
 
-#### Automatic splitting into parts
+#### Автоматическое разбиение на части
 
-The generator splits a large result into parts of roughly 3.8 MB on its own:
+Генератор автоматически разбивает большие наборы данных на части по ~3.8MB:
 
 ```go
 generator.SetMaxMessageSize(3800000)
@@ -414,24 +415,24 @@ packets, _ := generator.GenerateReference(tableName, schema, bigData)
 // ...
 ```
 
-#### Validation
+#### Валидация
 
-The parser checks, without being asked:
-- the required fields: Type, TableName, MessageID, Timestamp
-- that the message type is one of the known ones
-- that a response carries InReplyTo
-- that PartNumber and TotalParts are consistent
-- that Data is accompanied by a Schema
+Parser автоматически проверяет:
+- Обязательные поля (Type, TableName, MessageID, Timestamp)
+- Валидность типа сообщения
+- InReplyTo для response
+- Корректность PartNumber/TotalParts
+- Наличие Schema при наличии Data
 
 ---
 
 ### Schema Module
 
-**Location:** `pkg/core/schema/`
+**Расположение:** `pkg/core/schema/`
 
-**Purpose:** validating data types, converting values, building schemas.
+**Назначение:** Валидация типов данных, конвертация значений, построение схем.
 
-#### Supported types
+#### Поддерживаемые типы данных
 
 ```go
 TypeInteger   // INTEGER, INT
@@ -440,19 +441,19 @@ TypeDecimal   // DECIMAL(precision, scale)
 TypeText      // TEXT, VARCHAR, CHAR, STRING
 TypeBoolean   // BOOLEAN, BOOL (0/1)
 TypeDate      // DATE (YYYY-MM-DD)
-TypeDatetime  // DATETIME (RFC3339 with a time zone)
-TypeTimestamp // TIMESTAMP (RFC3339, always UTC)
+TypeDatetime  // DATETIME (RFC3339 с таймзоной)
+TypeTimestamp // TIMESTAMP (RFC3339, всегда UTC)
 TypeBlob      // BLOB (Base64)
 ```
 
-#### Builder - assembling a schema
+#### Builder - построение схем
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/core/schema"
 
 builder := schema.NewBuilder()
 
-// Add fields
+// Добавление полей
 schemaObj := builder.
     AddInteger("id", true).                    // key=true
     AddText("username", 100).
@@ -462,20 +463,20 @@ schemaObj := builder.
     AddTimestamp("created_at", "UTC", false).
     Build()
 
-// Use it
+// Использование
 for _, field := range schemaObj.Fields {
     fmt.Printf("%s: %s\n", field.Name, field.Type)
 }
 ```
 
-#### Converter - converting values
+#### Converter - конвертация значений
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/core/schema"
 
 converter := schema.NewConverter()
 
-// Parse a value
+// Парсинг значения
 field := schema.FieldDef{
     Name: "balance",
     Type: schema.TypeDecimal,
@@ -488,19 +489,19 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Format it back to a string
+// Форматирование обратно в строку
 formatted := converter.FormatValue(value)
 fmt.Println(formatted) // "1234.56"
 ```
 
-#### Validator - checking data
+#### Validator - валидация данных
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/core/schema"
 
 validator := schema.NewValidator()
 
-// Validate a whole row
+// Валидация строки данных
 row := []string{"1", "john_doe", "john@example.com", "1500.50", "1"}
 
 err := validator.ValidateRow(row, schemaObj)
@@ -508,7 +509,7 @@ if err != nil {
     fmt.Println("Validation error:", err)
 }
 
-// Validate one value
+// Валидация отдельного значения
 err = validator.ValidateValue("1500.50", schemaObj.Fields[3])
 ```
 
@@ -516,9 +517,9 @@ err = validator.ValidateValue("1500.50", schemaObj.Fields[3])
 
 ### TDTQL Module
 
-**Location:** `pkg/core/tdtql/`
+**Расположение:** `pkg/core/tdtql/`
 
-**Purpose:** translating SQL to TDTQL, running queries in memory, generating SQL.
+**Назначение:** Трансляция SQL → TDTQL, выполнение запросов in-memory, генерация SQL.
 
 #### Translator (SQL → TDTQL)
 
@@ -527,7 +528,7 @@ import "github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 
 translator := tdtql.NewTranslator()
 
-// Translate a SQL WHERE clause into TDTQL
+// Трансляция SQL WHERE в TDTQL
 sqlQuery := "SELECT * FROM users WHERE age >= 18 AND is_active = 1 ORDER BY balance DESC LIMIT 100"
 
 query, err := translator.Translate(sqlQuery)
@@ -535,33 +536,33 @@ if err != nil {
     log.Fatal(err)
 }
 
-// query now holds the TDTQL structure
+// query теперь содержит TDTQL структуру
 fmt.Printf("Filters: %+v\n", query.Filters)
 fmt.Printf("OrderBy: %+v\n", query.OrderBy)
 fmt.Printf("Limit: %d\n", query.Limit)
 ```
 
-#### Supported operators
+#### Поддерживаемые операторы
 
-**Comparison:**
-- `=`, `!=`, `<>` - equality and inequality
-- `>`, `>=`, `<`, `<=` - ordering
-- `LIKE`, `NOT LIKE` - patterns with the `%` and `_` wildcards
+**Сравнение:**
+- `=`, `!=`, `<>` - равенство/неравенство
+- `>`, `>=`, `<`, `<=` - сравнение
+- `LIKE`, `NOT LIKE` - паттерны с wildcards (`%`, `_`)
 
-**Ranges and lists:**
-- `IN (value1, value2, ...)`
-- `NOT IN (...)`
-- `BETWEEN value1 AND value2`
+**Диапазоны:**
+- `IN (value1, value2, ...)` - в списке
+- `NOT IN (...)` - не в списке
+- `BETWEEN value1 AND value2` - в диапазоне
 
 **NULL:**
-- `IS NULL`
-- `IS NOT NULL`
+- `IS NULL` - значение NULL
+- `IS NOT NULL` - значение НЕ NULL
 
-**Logical:**
-- `AND`
-- `OR`
-- `NOT`
-- parentheses for precedence
+**Логические:**
+- `AND` - логическое И
+- `OR` - логическое ИЛИ
+- `NOT` - отрицание
+- Поддержка скобок для приоритета
 
 #### Executor (in-memory filtering)
 
@@ -570,7 +571,7 @@ import "github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 
 executor := tdtql.NewExecutor()
 
-// Build a query
+// Создание запроса
 query := packet.NewQuery()
 query.Filters = &packet.Filters{
     And: &packet.LogicalGroup{
@@ -582,7 +583,7 @@ query.Filters = &packet.Filters{
 query.OrderBy = &packet.OrderBy{Field: "age", Direction: "DESC"}
 query.Limit = 10
 
-// The data to filter
+// Данные для фильтрации
 rows := [][]string{
     {"1", "john", "25"},
     {"2", "jane", "17"},
@@ -597,13 +598,13 @@ schema := packet.Schema{
     },
 }
 
-// Run it
+// Выполнение
 result, err := executor.Execute(query, rows, schema)
 if err != nil {
     log.Fatal(err)
 }
 
-// Results
+// Результаты
 fmt.Printf("Total rows: %d\n", len(rows))
 fmt.Printf("Filtered rows: %d\n", len(result.FilteredRows))
 ```
@@ -615,9 +616,9 @@ import "github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 
 generator := tdtql.NewSQLGenerator()
 
-// Can this be pushed down?
+// Проверка возможности трансляции
 if generator.CanTranslateToSQL(query) {
-    // Generate SQL
+    // Генерация SQL
     sql, err := generator.GenerateSQL("users", query)
     if err != nil {
         log.Fatal(err)
@@ -632,51 +633,51 @@ if generator.CanTranslateToSQL(query) {
 
 ## ETL Pipeline
 
-**Location:** `pkg/etl/`
+**Расположение:** `pkg/etl/`
 
-**Purpose:** extract, transform and load, through an in-memory SQLite workspace.
+**Назначение:** ETL (Extract-Transform-Load) операции с данными через in-memory SQLite workspace.
 
 ### Workspace Module
 
-**Location:** `pkg/etl/workspace.go`
+**Расположение:** `pkg/etl/workspace.go`
 
-**What it is:** an in-memory SQLite database for transforming data without touching disk.
+**Что это:** In-memory SQLite database для трансформации данных без создания файлов.
 
-#### What it does
+#### Основные возможности
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/etl"
 
 ctx := context.Background()
 
-// Create the workspace (in-memory SQLite)
+// Создание workspace (in-memory SQLite)
 ws, err := etl.NewWorkspace(ctx)
 if err != nil {
     log.Fatal(err)
 }
 defer ws.Close(ctx)
 
-// Load a TDTP packet into it
+// Загрузка TDTP пакета в workspace
 packet, _ := parser.ParseFile("data.tdtp.xml")
 err = ws.LoadDataPacket(ctx, packet)
 
-// Run the SQL transformation
+// Выполнение SQL трансформаций
 results, err := ws.ExecuteSQL(ctx, "SELECT * FROM users WHERE age > 18")
 
-// Build a new TDTP packet from the result
+// Создание нового TDTP пакета из результатов
 outputPacket, err := ws.CreateDataPacket(ctx, "adults", results)
 ```
 
-#### CreateTable
+#### CreateTable - создание таблиц
 
-**Do not write your own type mapper.**
+**⚠️ НЕ ПИШИ СВОЙ TYPE MAPPER!**
 
-The workspace already maps TDTP types to SQLite correctly:
+Workspace уже имеет правильный маппинг TDTP → SQLite:
 
 ```go
-// Right: use the built-in CreateTable
+// ✅ ПРАВИЛЬНО: Используй встроенный CreateTable
 err = ws.CreateTable(ctx, "users", packet.Schema.Fields)
-// It maps the types for you:
+// Автоматически маппит типы:
 // INTEGER → INTEGER ✅
 // REAL, DECIMAL → REAL ✅
 // TEXT → TEXT ✅
@@ -684,27 +685,27 @@ err = ws.CreateTable(ctx, "users", packet.Schema.Fields)
 // DATE, DATETIME, TIMESTAMP → TEXT ✅
 // BLOB → BLOB ✅
 
-// Wrong: do not write your own type mapper
+// ❌ НЕПРАВИЛЬНО: Не пиши свой type mapper!
 func myCustomTypeMapper(tdtpType string) string {
-    // Unnecessary - workspace.go already does this
+    // НЕ НУЖНО! Уже есть в workspace.go
 }
 ```
 
-#### LoadData
+#### LoadData - загрузка данных
 
-**Do not INSERT in a loop.**
+**⚠️ НЕ ИСПОЛЬЗУЙ INSERT В ЦИКЛЕ!**
 
 ```go
-// Right: LoadData does a bulk insert
+// ✅ ПРАВИЛЬНО: Используй LoadData (bulk insert)
 ws.LoadData(ctx, tableName, dataPacket)
 
-// Wrong: INSERT in a loop - slow
+// ❌ НЕПРАВИЛЬНО: INSERT в цикле (медленно!)
 for _, row := range rows {
     ws.ExecuteSQL(ctx, "INSERT INTO table VALUES (?)", row)
 }
 ```
 
-#### ExecuteSQL
+#### ExecuteSQL - выполнение запросов
 
 ```go
 // SELECT
@@ -725,27 +726,27 @@ rows, err := ws.ExecuteSQL(ctx, "SELECT COUNT(*), AVG(balance) FROM accounts")
 
 ### Pipeline Processing
 
-**Location:** `pkg/etl/pipeline.go`
+**Расположение:** `pkg/etl/pipeline.go`
 
-**What it is:** multi-step transformations, chained together.
+**Что это:** Multi-step data transformations с поддержкой цепочек операций.
 
 #### Pipeline Stages
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/etl"
 
-// Create the pipeline
+// Создание пайплайна
 pipeline := etl.NewPipeline()
 
-// Add stages
+// Добавление стадий
 pipeline.AddStage("extract", func(ctx context.Context, data interface{}) (interface{}, error) {
-    // Extract
+    // Извлечение данных
     adapter := data.(adapters.Adapter)
     return adapter.ExportTable(ctx, "source_table")
 })
 
 pipeline.AddStage("transform", func(ctx context.Context, data interface{}) (interface{}, error) {
-    // Transform in the workspace
+    // Трансформация через workspace
     packets := data.([]*packet.DataPacket)
     ws, _ := etl.NewWorkspace(ctx)
     defer ws.Close(ctx)
@@ -757,18 +758,18 @@ pipeline.AddStage("transform", func(ctx context.Context, data interface{}) (inte
 })
 
 pipeline.AddStage("load", func(ctx context.Context, data interface{}) (interface{}, error) {
-    // Load into the target database
+    // Загрузка в целевую БД
     pkt := data.(*packet.DataPacket)
     return nil, targetAdapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
 })
 
-// Run it
+// Выполнение
 result, err := pipeline.Execute(ctx, sourceAdapter)
 ```
 
-#### The built-in processors
+#### Встроенные Processors
 
-**Do not write your own processors** - use `pkg/processors`:
+**⚠️ НЕ ПИШИ СВОИ ПРОЦЕССОРЫ!** Используй `pkg/processors`:
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/processors"
@@ -795,11 +796,11 @@ normalizer, err := processors.NewFieldNormalizer(map[string]processors.Normaliza
 
 // ✅ Processor Chain
 chain := processors.NewChain()
-chain.Add(validator)    // 1: validate
-chain.Add(normalizer)   // 2: normalise
-chain.Add(masker)       // 3: mask
+chain.Add(validator)    // Шаг 1: Валидация
+chain.Add(normalizer)   // Шаг 2: Нормализация
+chain.Add(masker)       // Шаг 3: Маскирование
 
-// Apply the chain
+// Применение
 result, err := chain.Process(ctx, packet.Data, packet.Schema)
 ```
 
@@ -807,16 +808,16 @@ result, err := chain.Process(ctx, packet.Data, packet.Schema)
 
 ### XLSX Adapter
 
-**Location:** `pkg/xlsx/converter.go`
+**Расположение:** `pkg/xlsx/converter.go`
 
-**What it is:** conversion both ways between TDTP and Excel (.xlsx).
+**Что это:** Двунаправленная конвертация TDTP ↔ Excel (.xlsx).
 
-#### Types are not lost
+#### ⚠️ ВАЖНО: Типы НЕ теряются!
 
-The XLSX adapter **preserves the types**, in two places:
+XLSX adapter **сохраняет типы данных** двумя способами:
 
-1. **in the header row:** `field_name (TYPE)`
-2. **in the cell formatting:** Excel's own number formats
+1. **В заголовках:** `field_name (TYPE)`
+2. **В форматировании:** Excel native formats
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/xlsx"
@@ -825,10 +826,10 @@ import "github.com/ruslano69/tdtp-framework/pkg/xlsx"
 
 packets, _ := adapter.ExportTable(ctx, "users")
 
-// Types are written into the headers
+// ✅ Типы сохраняются в заголовках
 err := xlsx.ToXLSX(packets[0], "users.xlsx", "Sheet1")
 
-// What Excel shows:
+// Результат в Excel:
 // | id (INTEGER) | name (TEXT) | balance (DECIMAL) | created_at (TIMESTAMP) |
 // |--------------|-------------|-------------------|------------------------|
 // | 1            | John        | 1500.50           | 2024-01-15T10:30:00Z  |
@@ -837,15 +838,15 @@ err := xlsx.ToXLSX(packets[0], "users.xlsx", "Sheet1")
 
 packet, err := xlsx.FromXLSX("users.xlsx", "Sheet1")
 
-// Types are read back from the headers
+// ✅ Типы восстанавливаются из заголовков
 fmt.Println(packet.Schema.Fields[0].Type)  // "INTEGER"
 fmt.Println(packet.Schema.Fields[2].Type)  // "DECIMAL"
 ```
 
-#### Do not write your own Excel converter
+#### НЕ ПИШИ СВОЙ EXCEL CONVERTER!
 
 ```go
-// Wrong
+// ❌ НЕПРАВИЛЬНО: Не делай так!
 func myExcelExport(data [][]string) {
     f := excelize.NewFile()
     for i, row := range data {
@@ -855,13 +856,13 @@ func myExcelExport(data [][]string) {
     }
 }
 
-// Right: use the one that exists
+// ✅ ПРАВИЛЬНО: Используй готовый!
 xlsx.ToXLSX(packet, "output.xlsx", "Sheet1")
 ```
 
 #### Type-aware Excel Formatting
 
-The converter applies the right formats itself:
+Converter автоматически применяет правильные форматы:
 
 | TDTP Type | Excel Format |
 |-----------|--------------|
@@ -878,32 +879,32 @@ The converter applies the right formats itself:
 
 ## Database Adapters
 
-**Do not write your own database connector.**
+**⚠️ НЕ ПИШИ СВОЙ DATABASE CONNECTOR!**
 
-The framework already supports:
+Фреймворк уже поддерживает:
 - ✅ SQLite (modernc.org/sqlite)
 - ✅ PostgreSQL (pgx/v5)
 - ✅ MySQL (go-sql-driver)
 - ✅ MS SQL Server (go-mssqldb)
 
-Every adapter presents **the same interface** and maps types **automatically**.
+Все адаптеры используют **одинаковый интерфейс** и **автоматически** маппят типы данных.
 
 ### Universal Interface
 
-**Location:** `pkg/adapters/adapter.go`
+**Расположение:** `pkg/adapters/adapter.go`
 
-**Purpose:** one interface for every database, with no code changes between them.
+**Назначение:** Единый интерфейс для работы со всеми БД без изменения кода.
 
-#### The Adapter interface
+#### Интерфейс Adapter
 
 ```go
 type Adapter interface {
-    // Connecting and closing
+    // Подключение и закрытие
     Connect(ctx context.Context) error
     Close(ctx context.Context) error
     Ping(ctx context.Context) error
 
-    // Metadata
+    // Метаданные
     GetDatabaseType() string
     GetVersion(ctx context.Context) (string, error)
     ListTables(ctx context.Context) ([]string, error)
@@ -917,35 +918,35 @@ type Adapter interface {
     // Import
     ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy ImportStrategy) error
 
-    // Transactions
+    // Транзакции
     BeginTx(ctx context.Context) (Tx, error)
 
-    // Utilities
+    // Утилиты
     Exec(ctx context.Context, query string, args ...interface{}) error
 }
 ```
 
-#### The adapter factory
+#### Фабрика адаптеров
 
-**Always go through `adapters.New()`.**
+**⚠️ ВСЕГДА используй фабрику `adapters.New()`!**
 
-Do not construct an adapter directly with `postgres.NewAdapter()` — use the factory:
+Не создавай адаптеры напрямую (`postgres.NewAdapter()`), используй фабрику:
 
 ```go
 import (
     "github.com/ruslano69/tdtp-framework/pkg/adapters"
-    _ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"   // registers itself
-    _ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres" // registers itself
-    _ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"    // registers itself
+    _ "github.com/ruslano69/tdtp-framework/pkg/adapters/sqlite"   // Регистрация
+    _ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres" // Регистрация
+    _ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"    // Регистрация
 )
 
 ctx := context.Background()
 
-// Right: the factory
+// ✅ ПРАВИЛЬНО: Фабрика
 cfg := adapters.Config{
     Type:   "postgres",  // "sqlite", "postgres", "mysql", "mssql"
     DSN:    "postgresql://myuser:mypass@localhost:5432/mydb?sslmode=disable",
-    Schema: "public",    // default schema, for PostgreSQL and MSSQL
+    Schema: "public",    // Схема по умолчанию (для PostgreSQL/MSSQL)
     SSL: adapters.SSLConfig{
         Mode: "disable", // "disable", "require", "verify-ca", "verify-full"
     },
@@ -957,16 +958,16 @@ if err != nil {
 }
 defer adapter.Close(ctx)
 
-// Wrong: direct construction
-// adapter := postgres.NewAdapter(...)  // do not do this
+// ❌ НЕПРАВИЛЬНО: Прямое создание
+// adapter := postgres.NewAdapter(...)  // НЕ ДЕЛАЙ ТАК!
 ```
 
-#### The same code against any database
+#### Универсальный код для всех БД
 
-**The point of the interface:** this code runs against **any** of them, unchanged.
+**Ключевая особенность:** Код работает с **любой БД** без изменений!
 
 ```go
-// Works with PostgreSQL, MySQL, MSSQL and SQLite
+// Этот код работает с PostgreSQL, MySQL, MSSQL, SQLite
 func exportAndTransform(ctx context.Context, adapter adapters.Adapter) error {
     // 1. Export
     packets, err := adapter.ExportTable(ctx, "users")
@@ -986,27 +987,27 @@ func exportAndTransform(ctx context.Context, adapter adapters.Adapter) error {
     return adapter.ImportPacket(ctx, newPacket, adapters.StrategyReplace)
 }
 
-// Use it:
+// Использование:
 pgAdapter, _ := adapters.New(ctx, postgresConfig)
 exportAndTransform(ctx, pgAdapter)  // ✅ PostgreSQL
 
 mysqlAdapter, _ := adapters.New(ctx, mysqlConfig)
 exportAndTransform(ctx, mysqlAdapter)  // ✅ MySQL
 
-// The very same code
+// Тот же код!
 ```
 
-#### Import strategies
+#### Стратегии импорта
 
 ```go
 const (
-    StrategyReplace ImportStrategy = "replace" // full replacement through a temp table
-    StrategyIgnore  ImportStrategy = "ignore"  // skip conflicting rows
-    StrategyFail    ImportStrategy = "fail"    // abort on the first conflict
-    StrategyCopy    ImportStrategy = "copy"    // plain INSERT
+    StrategyReplace ImportStrategy = "replace" // Полная замена через temp table
+    StrategyIgnore  ImportStrategy = "ignore"  // Игнорировать конфликты
+    StrategyFail    ImportStrategy = "fail"    // Прервать при конфликте
+    StrategyCopy    ImportStrategy = "copy"    // Копировать (INSERT)
 )
 
-// Use it
+// Использование
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
 ```
 
@@ -1014,15 +1015,15 @@ err = adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
 
 ### SQLite Adapter
 
-**Location:** `pkg/adapters/sqlite/`
+**Расположение:** `pkg/adapters/sqlite/`
 
-**Notes:**
-- Driver: `modernc.org/sqlite` — pure Go, no cgo
-- Creates tables as needed
-- TDTQL to SQL pushdown
+**Особенности:**
+- Драйвер: `modernc.org/sqlite` (pure Go, без CGo)
+- Автоматическое создание таблиц
+- TDTQL → SQL оптимизация
 - Transaction support
 
-**Example:**
+**Пример использования:**
 
 ```go
 import (
@@ -1032,7 +1033,7 @@ import (
 
 cfg := adapters.Config{
     Type: "sqlite",
-    DSN:  "file:./database.db",  // or simply "./database.db"
+    DSN:  "file:./database.db",  // или просто "./database.db"
 }
 
 adapter, err := adapters.New(ctx, cfg)
@@ -1044,7 +1045,7 @@ defer adapter.Close(ctx)
 // Export
 packets, err := adapter.ExportTable(ctx, "users")
 
-// Export with a filter
+// Export с фильтрацией
 query := packet.NewQuery()
 query.Filters = &packet.Filters{
     And: &packet.LogicalGroup{
@@ -1059,7 +1060,7 @@ packets, err = adapter.ExportTableWithQuery(ctx, "users", query, "", "")
 err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 ```
 
-**Type mapping:**
+**Маппинг типов:**
 
 | TDTP | SQLite |
 |------|--------|
@@ -1075,16 +1076,16 @@ err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 
 ### PostgreSQL Adapter
 
-**Location:** `pkg/adapters/postgres/`
+**Расположение:** `pkg/adapters/postgres/`
 
-**Notes:**
-- Driver: `github.com/jackc/pgx/v5`, with a connection pool
-- Schemas supported, public or otherwise
-- COPY for bulk import, which is much faster
-- Special types: UUID, JSONB, INET, ARRAY, NUMERIC
-- ON CONFLICT backs the import strategies
+**Особенности:**
+- Драйвер: `github.com/jackc/pgx/v5` (connection pool)
+- Поддержка schemas (public/custom)
+- COPY для bulk import (высокая производительность)
+- Специальные типы: UUID, JSONB, INET, ARRAY, NUMERIC
+- ON CONFLICT для стратегий импорта
 
-**Example:**
+**Пример использования:**
 
 ```go
 import (
@@ -1103,10 +1104,10 @@ cfg := adapters.Config{
 
 adapter, err := adapters.New(ctx, cfg)
 
-// Export with schema-aware SQL
+// Export с schema-aware SQL
 packets, err := adapter.ExportTable(ctx, "users")
 
-// Export with TDTQL filters pushed down into SQL
+// Export с TDTQL фильтрами (SQL-level optimization)
 query := packet.NewQuery()
 query.Filters = &packet.Filters{
     And: &packet.LogicalGroup{
@@ -1121,7 +1122,7 @@ query.Limit = 20
 packets, err = adapter.ExportTableWithQuery(ctx, "users", query, "", "")
 ```
 
-**Type mapping:**
+**Маппинг типов:**
 
 | TDTP | PostgreSQL |
 |------|------------|
@@ -1139,16 +1140,16 @@ packets, err = adapter.ExportTableWithQuery(ctx, "users", query, "", "")
 
 ### MSSQL Adapter
 
-**Location:** `pkg/adapters/mssql/`
+**Расположение:** `pkg/adapters/mssql/`
 
-**Notes:**
-- Driver: `github.com/microsoft/go-mssqldb`
-- IDENTITY_INSERT, for importing rows that carry their keys
-- NVARCHAR, UNIQUEIDENTIFIER and DATETIME2 supported
-- Compatible with MS SQL 2012 and later
-- Parameterised queries throughout, against SQL injection
+**Особенности:**
+- Драйвер: `github.com/microsoft/go-mssqldb`
+- IDENTITY_INSERT для импорта с ключевыми полями
+- Поддержка NVARCHAR, UNIQUEIDENTIFIER, DATETIME2
+- Совместимость с MS SQL 2012+
+- Параметризованные запросы (защита от SQL injection)
 
-**Example:**
+**Пример использования:**
 
 ```go
 import (
@@ -1159,7 +1160,7 @@ import (
 cfg := adapters.Config{
     Type:   "mssql",
     DSN:    "sqlserver://sa:YourStrong@Passw0rd@localhost:1433?database=TestDB&encrypt=disable&TrustServerCertificate=true",
-    Schema: "dbo",  // default schema
+    Schema: "dbo",  // Схема по умолчанию
 }
 
 adapter, err := adapters.New(ctx, cfg)
@@ -1167,11 +1168,11 @@ adapter, err := adapters.New(ctx, cfg)
 // Export
 packets, err := adapter.ExportTable(ctx, "dbo.users")
 
-// Import with IDENTITY_INSERT
+// Import с IDENTITY_INSERT
 err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 ```
 
-**Type mapping:**
+**Маппинг типов:**
 
 | TDTP | MS SQL |
 |------|--------|
@@ -1187,16 +1188,16 @@ err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 
 ### MySQL Adapter
 
-**Location:** `pkg/adapters/mysql/`
+**Расположение:** `pkg/adapters/mysql/`
 
-**Notes:**
-- Driver: `github.com/go-sql-driver/mysql`
-- LOAD DATA LOCAL INFILE for bulk import
-- JSON and GEOMETRY types
+**Особенности:**
+- Драйвер: `github.com/go-sql-driver/mysql`
+- Поддержка LOAD DATA LOCAL INFILE для bulk import
+- JSON и GEOMETRY типы
 - Auto-increment handling
 - Charset UTF-8
 
-**Example:**
+**Пример использования:**
 
 ```go
 import (
@@ -1224,15 +1225,15 @@ err = adapter.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 
 ### RabbitMQ Broker
 
-**Location:** `pkg/brokers/rabbitmq.go`
+**Расположение:** `pkg/brokers/rabbitmq.go`
 
-**Notes:**
-- AMQP 0.9.1
-- Manual ACK, for delivery you can rely on
+**Особенности:**
+- AMQP 0.9.1 протокол
+- Manual ACK для надежной доставки
 - Queue parameters (durable, auto_delete, exclusive)
 - Connection pooling
 
-**Example:**
+**Пример использования:**
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/brokers"
@@ -1268,7 +1269,7 @@ for _, pkt := range packets {
         log.Printf("Import error: %v", err)
         continue
     }
-    // The ACK is sent automatically once the import succeeds
+    // ACK происходит автоматически после успешного импорта
 }
 ```
 
@@ -1278,12 +1279,12 @@ for _, pkt := range packets {
 
 ### Circuit Breaker (pkg/resilience)
 
-**Stops one failure cascading:**
+**Защита от каскадных сбоев:**
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/resilience"
 
-// Configuration
+// Конфигурация
 config := resilience.Config{
     MaxFailures:        5,
     Timeout:            30 * time.Second,
@@ -1293,17 +1294,17 @@ config := resilience.Config{
 
 cb, err := resilience.NewCircuitBreaker(config)
 
-// Run the operation through it
+// Выполнение операции
 err = cb.Execute(ctx, func(ctx context.Context) error {
     return adapter.ExportTable(ctx, "large_table")
 })
 
-// States: Closed -> Open -> Half-Open -> Closed
+// Состояния: Closed → Open → Half-Open → Closed
 ```
 
 ### Retry Mechanism (pkg/retry)
 
-**Automatic retries with backoff:**
+**Автоматические повторы с backoff:**
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/retry"
@@ -1318,7 +1319,7 @@ config := retry.Config{
 
 retryer, err := retry.NewRetryer(config)
 
-// Retry, honouring the context
+// Retry с контекстом
 err = retryer.Do(ctx, func(ctx context.Context) error {
     return adapter.ExportTable(ctx, "users")
 })
@@ -1326,7 +1327,7 @@ err = retryer.Do(ctx, func(ctx context.Context) error {
 
 ### Audit Logger (pkg/audit)
 
-**Operation logging for GDPR and HIPAA:**
+**Логирование операций для GDPR/HIPAA:**
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/audit"
@@ -1342,7 +1343,7 @@ appender, err := audit.NewFileAppender(audit.FileAppenderConfig{
 
 logger, err := audit.NewAuditLogger([]audit.Appender{appender})
 
-// Log an operation
+// Логирование операции
 logger.Log(ctx, audit.Entry{
     Operation:  audit.OpExport,
     Table:      "users",
@@ -1357,7 +1358,7 @@ logger.Log(ctx, audit.Entry{
 
 ### Data Processors (pkg/processors)
 
-**Masking, validation, normalisation:**
+**Маскирование, валидация, нормализация:**
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/processors"
@@ -1387,13 +1388,13 @@ chain.Add(validator)
 chain.Add(normalizer)
 chain.Add(masker)
 
-// Apply the chain to the data
+// Применение к данным
 result, err := chain.Process(ctx, data, schema)
 ```
 
 ### Incremental Sync (pkg/sync)
 
-**Synchronisation with checkpoint tracking:**
+**Синхронизация с checkpoint tracking:**
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/sync"
@@ -1401,11 +1402,11 @@ import "github.com/ruslano69/tdtp-framework/pkg/sync"
 // State Manager
 stateMgr, err := sync.NewStateManager("checkpoints.json", true)
 
-// Read the last state
+// Получить последнее состояние
 state := stateMgr.GetState("users")
 lastValue := state.LastSyncValue
 
-// Export what has changed
+// Экспорт инкрементальных изменений
 query := packet.NewQuery()
 query.Filters = &packet.Filters{
     And: &packet.LogicalGroup{
@@ -1417,7 +1418,7 @@ query.Filters = &packet.Filters{
 
 packets, err := adapter.ExportTableWithQuery(ctx, "users", query, "", "")
 
-// Move the checkpoint
+// Обновить checkpoint
 newLastValue := extractMaxValue(packets, "updated_at")
 stateMgr.UpdateState("users", newLastValue, len(packets))
 ```
@@ -1426,17 +1427,17 @@ stateMgr.UpdateState("users", newLastValue, len(packets))
 
 ## Security: Encryption (v1.3)
 
-### Overview
+### Обзор
 
-xZMercury and the framework together implement zero-knowledge delivery: the encryption key never travels through the command line or the environment, only over HTTP with an HMAC to verify it.
+xZMercury + TDTP Framework реализует Zero-Knowledge Delivery: ключ шифрования никогда не передаётся через CLI или переменные окружения — только через HTTP с HMAC верификацией.
 
 ```
-ETL pipeline ──→ the UUID is generated at the start of Execute()
+ETL Pipeline ──→ UUID генерируется в начале Execute()
                      │
                      ▼
               POST /api/keys/bind {package_uuid, pipeline_name}
                      │
-              xZMercury keeps the key in Redis under a TTL
+              xZMercury хранит ключ в Redis с TTL
                      │
                      ▼
               {key_b64, hmac} ←── Verify HMAC (MERCURY_SERVER_SECRET)
@@ -1450,20 +1451,20 @@ ETL pipeline ──→ the UUID is generated at the start of Execute()
 
 ### pkg/mercury
 
-**Location:** `pkg/mercury/`
+**Расположение:** `pkg/mercury/`
 
-#### Types and errors
+#### Типы и ошибки
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/mercury"
 
-// Error codes
+// Коды ошибок
 mercury.ErrCodeMercuryUnavailable     // "MERCURY_UNAVAILABLE"
 mercury.ErrCodeMercuryError           // "MERCURY_ERROR"
 mercury.ErrCodeHMACVerificationFailed // "HMAC_VERIFICATION_FAILED"
 mercury.ErrCodeKeyBindRejected        // "KEY_BIND_REJECTED"
 
-// Sentinel errors - test them with errors.Is
+// Sentinel errors (используй errors.Is для проверки)
 mercury.ErrMercuryUnavailable
 mercury.ErrMercuryError
 mercury.ErrHMACVerificationFailed
@@ -1473,25 +1474,25 @@ mercury.ErrKeyBindRejected
 #### Production Client
 
 ```go
-// Create a client
+// Создание клиента
 client := mercury.NewClient("http://mercury:3000", 5000) // URL, timeoutMs
 
-// UUID binding: fetch the key from xZMercury
+// UUID-binding: получить ключ от xZMercury
 binding, err := client.BindKey(ctx, packageUUID, pipelineName)
 if err != nil {
     // errors.Is(err, mercury.ErrMercuryUnavailable) — timeout/refused
     // errors.Is(err, mercury.ErrKeyBindRejected)    — HTTP 403/429
 }
 
-// Verify the HMAC
+// Верификация HMAC
 if !mercury.VerifyHMAC(packageUUID, binding.HMAC, serverSecret) {
-    // the key is not trustworthy
+    // ключ не доверен
 }
 
-// Decode the key
-key, err := mercury.DecodeKey(binding.KeyB64) // []byte, 32 bytes
+// Декодирование ключа
+key, err := mercury.DecodeKey(binding.KeyB64) // []byte, 32 байта
 
-// Pull out the error code for the error packet
+// Извлечение кода ошибки для error-пакета
 code := mercury.ErrorCode(err) // "MERCURY_UNAVAILABLE" | ...
 ```
 
@@ -1500,7 +1501,7 @@ code := mercury.ErrorCode(err) // "MERCURY_UNAVAILABLE" | ...
 ```go
 //go:build !production
 
-// DevClient generates the key locally and never calls xZMercury
+// DevClient генерирует ключ локально, не обращаясь к xZMercury
 devClient := mercury.NewDevClient()
 binding, err := devClient.BindKey(ctx, packageUUID, pipelineName)
 // binding.HMAC = "dev-mode-no-hmac-verification"
@@ -1510,12 +1511,12 @@ binding, err := devClient.BindKey(ctx, packageUUID, pipelineName)
 #### MercuryBinder interface
 
 ```go
-// The interface to substitute in tests and in dev mode
+// Интерфейс для подмены в тестах и dev-режиме
 type MercuryBinder interface {
     BindKey(ctx context.Context, packageUUID, pipelineName string) (*KeyBinding, error)
 }
 
-// Using it in a test
+// Использование в тесте
 type MockBinder struct{}
 func (m *MockBinder) BindKey(_ context.Context, uuid, _ string) (*mercury.KeyBinding, error) {
     key := make([]byte, 32)
@@ -1526,28 +1527,28 @@ func (m *MockBinder) BindKey(_ context.Context, uuid, _ string) (*mercury.KeyBin
 
 ### pkg/crypto
 
-**Location:** `pkg/crypto/`
+**Расположение:** `pkg/crypto/`
 
 ```go
 import tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
 
-// Encrypt
-// key is 32 bytes (AES-256); packageUUID is used as the additional authenticated data
+// Шифрование
+// key — 32 байта (AES-256), packageUUID — используется как Additional Data
 blob, err := tdtpcrypto.Encrypt(key, xmlBytes, packageUUID)
 
-// Decrypt
-// Reads packageUUID out of the header and decrypts
+// Дешифрование
+// Извлекает packageUUID из заголовка и расшифровывает
 uuid, plaintext, err := tdtpcrypto.Decrypt(key, blob)
 ```
 
-**The binary blob layout:**
+**Формат бинарного блоба:**
 ```
-Offset  Size  Meaning
-0       2     Format version (0x0001)
-2       1     Algorithm (0x01 = AES-256-GCM)
-3       16    Package UUID, binary
+Offset  Size  Описание
+0       2     Версия формата (0x0001)
+2       1     Алгоритм (0x01 = AES-256-GCM)
+3       16    Package UUID (бинарный)
 19      12    Nonce AES-GCM
-31      N     Ciphertext plus the 16-byte GCM auth tag
+31      N     Ciphertext + GCM Auth Tag (16 байт)
 ```
 
 ### pkg/processors.FileEncryptor
@@ -1555,36 +1556,36 @@ Offset  Size  Meaning
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/processors"
 
-// Create a FileEncryptor
+// Создание FileEncryptor
 enc := processors.NewFileEncryptor(
-    mercuryClient,   // a MercuryBinder: Client or DevClient
+    mercuryClient,   // MercuryBinder (Client или DevClient)
     serverSecret,    // MERCURY_SERVER_SECRET (env var)
-    packageUUID,     // generated in Execute()
+    packageUUID,     // сгенерирован в Execute()
     pipelineName,    // config.Name
 )
 
-// Encrypt the XML blob
+// Шифрование XML блоба
 result, errCode, err := enc.Encrypt(ctx, xmlData)
 if err != nil {
-    // errCode: one of mercury.ErrCode*, for the error packet
+    // errCode: mercury.ErrCode* — для записи в error-пакет
 }
-// result.Encrypted is the binary blob to write
+// result.Encrypted — бинарный blob для записи
 
-// Write the encrypted file with mode 0600
+// Запись зашифрованного файла (права 0600)
 processors.WriteEncrypted("output.tdtp.enc", result.Encrypted)
 ```
 
-### Wiring it into the ETL processor
+### Интеграция в ETL Processor
 
 ```go
-// The processor turns encryption on by itself when encryption: true
+// Processor автоматически включает шифрование при encryption: true
 processor := etl.NewProcessor(config)
 
-// Optional: substitute the Mercury client, for dev mode
+// Опционально: подменить Mercury клиент (dev-режим)
 processor.WithMercuryBinder(mercury.NewDevClient())
 
 processor.Execute(ctx)
-// Internally:
+// Внутри:
 // 1. GenerateUUID() → packageUUID
 // 2. initWorkspace() → exporter.WithSecurity() → exporter.WithMercuryBinder()
 // 3. exportEncrypted() → FileEncryptor.Encrypt() → WriteEncrypted()
@@ -1592,38 +1593,38 @@ processor.Execute(ctx)
 
 ### Mock xZMercury Server
 
-**Location:** `cmd/xzmercury-mock/`
+**Расположение:** `cmd/xzmercury-mock/`
 
-A standalone HTTP server for end-to-end testing of the UUID-binding flow:
+Standalone HTTP server для E2E тестирования UUID-binding флоу:
 
 ```bash
-# Start it
+# Запуск
 go run ./cmd/xzmercury-mock/ --addr :3000 --secret dev-secret
 
-# Or through environment variables
+# Или через env vars
 MOCK_ADDR=:3000 MERCURY_SERVER_SECRET=dev-secret go run ./cmd/xzmercury-mock/
 ```
 
 **Endpoints:**
-- `POST /api/keys/bind` — generates an AES-256 key, computes the HMAC, keeps it in memory
-- `POST /api/keys/retrieve` — burn on read: the key is destroyed once it has been handed out
+- `POST /api/keys/bind` — генерирует AES-256 ключ, вычисляет HMAC, хранит в памяти
+- `POST /api/keys/retrieve` — burn-on-read (после чтения ключ удаляется)
 - `GET /healthz` — `{"status":"ok"}`
 
 ### Build Tags
 
 ```bash
-# Dev build: includes --enc-dev and DevClient
+# Dev сборка (включает --enc-dev, DevClient)
 go build ./cmd/tdtpcli/
 
-# Production build: excludes every dev-only path
+# Production сборка (исключает dev-only код)
 go build -tags production ./cmd/tdtpcli/
 ```
 
 ---
 
-## Writing a new adapter
+## Разработка нового адаптера
 
-### The adapter template
+### Шаблон адаптера
 
 ```go
 package mydb
@@ -1634,24 +1635,24 @@ import (
     "github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
-// Adapter for MyDB
+// Adapter для MyDB
 type Adapter struct {
     db     *MyDBClient
     config adapters.DatabaseConfig
 }
 
-// Register with the factory
+// Регистрация в фабрике
 func init() {
     adapters.Register("mydb", func(ctx context.Context, cfg adapters.Config) (adapters.Adapter, error) {
         return NewAdapter(ctx, cfg.DatabaseConfig)
     })
 }
 
-// NewAdapter constructs the adapter
+// NewAdapter создает новый адаптер
 func NewAdapter(ctx context.Context, config adapters.DatabaseConfig) (*Adapter, error) {
     adapter := &Adapter{config: config}
 
-    // Connection
+    // Подключение
     if err := adapter.Connect(ctx); err != nil {
         return nil, err
     }
@@ -1659,13 +1660,13 @@ func NewAdapter(ctx context.Context, config adapters.DatabaseConfig) (*Adapter, 
     return adapter, nil
 }
 
-// Connect opens the database
+// Connect подключается к БД
 func (a *Adapter) Connect(ctx context.Context) error {
-    // Connection logic goes here
+    // Реализация подключения
     return nil
 }
 
-// Close releases the connection
+// Close закрывает соединение
 func (a *Adapter) Close(ctx context.Context) error {
     if a.db != nil {
         return a.db.Close()
@@ -1673,48 +1674,48 @@ func (a *Adapter) Close(ctx context.Context) error {
     return nil
 }
 
-// GetDatabaseType names the database
+// GetDatabaseType возвращает тип БД
 func (a *Adapter) GetDatabaseType() string {
     return "mydb"
 }
 
-// ExportTable exports one table
+// ExportTable экспортирует таблицу
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
-    // 1. read the table's schema
+    // 1. Получить схему таблицы
     schema, err := a.GetTableSchema(ctx, tableName)
     if err != nil {
         return nil, err
     }
 
-    // 2. read the rows
+    // 2. Прочитать данные
     rows, err := a.queryRows(ctx, fmt.Sprintf("SELECT * FROM %s", tableName))
     if err != nil {
         return nil, err
     }
 
-    // 3. generate the packets
+    // 3. Сгенерировать пакеты
     generator := packet.NewGenerator()
     packets, err := generator.GenerateReference(tableName, schema, rows)
 
     return packets, err
 }
 
-// ImportPacket imports one packet
+// ImportPacket импортирует пакет
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, strategy adapters.ImportStrategy) error {
-    // 1. does the table exist?
+    // 1. Проверить существование таблицы
     exists, err := a.TableExists(ctx, pkt.Header.TableName)
     if err != nil {
         return err
     }
 
-    // 2. create it if it does not
+    // 2. Создать таблицу если нужно
     if !exists {
         if err := a.createTable(ctx, pkt.Header.TableName, pkt.Schema); err != nil {
             return err
         }
     }
 
-    // 3. import according to the strategy
+    // 3. Импортировать данные согласно стратегии
     switch strategy {
     case adapters.StrategyReplace:
         return a.importReplace(ctx, pkt)
@@ -1727,12 +1728,12 @@ func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket, stra
     }
 }
 
-// ...and the rest of the interface
+// Остальные методы интерфейса...
 ```
 
-### Type mapping
+### Маппинг типов
 
-Add a `types.go` mapping TDTP types onto MyDB's:
+Создайте файл `types.go` с маппингом TDTP → MyDB:
 
 ```go
 func tdtpToMyDB(field packet.Field) string {
@@ -1762,13 +1763,13 @@ func tdtpToMyDB(field packet.Field) string {
 }
 
 func myDBToTDTP(mydbType string) string {
-    // And the reverse
+    // Обратный маппинг
 }
 ```
 
-### Testing it
+### Тестирование
 
-Add an `adapter_test.go`:
+Создайте `adapter_test.go`:
 
 ```go
 func TestAdapter_ExportImport(t *testing.T) {
@@ -1794,9 +1795,9 @@ func TestAdapter_ExportImport(t *testing.T) {
 
 ## Best Practices
 
-### 1. Pass a context
+### 1. Использование Context
 
-Always pass a `context.Context`, so the work can be cancelled:
+Всегда передавайте context.Context для возможности отмены операций:
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1805,9 +1806,9 @@ defer cancel()
 packets, err := adapter.ExportTable(ctx, "large_table")
 ```
 
-### 2. Handle errors
+### 2. Обработка ошибок
 
-Check them at every step:
+Проверяйте ошибки на каждом этапе:
 
 ```go
 adapter, err := adapters.New(ctx, cfg)
@@ -1821,9 +1822,9 @@ if err := adapter.Connect(ctx); err != nil {
 }
 ```
 
-### 3. Close what you open
+### 3. Закрытие ресурсов
 
-Use `defer`, so it happens on every path:
+Используйте defer для гарантированного закрытия:
 
 ```go
 adapter, _ := adapters.New(ctx, cfg)
@@ -1833,9 +1834,9 @@ broker, _ := brokers.NewBroker(config)
 defer broker.Close()
 ```
 
-### 4. Page through large tables
+### 4. Пагинация больших таблиц
 
-Use LIMIT and OFFSET:
+Для больших таблиц используйте LIMIT/OFFSET:
 
 ```go
 pageSize := 10000
@@ -1851,13 +1852,13 @@ for {
         break
     }
 
-    // handle the packets
+    // Обработка пакетов...
 
     offset += pageSize
 }
 ```
 
-### 5. Wrap batches in a transaction
+### 5. Транзакции для batch операций
 
 ```go
 tx, err := adapter.BeginTx(ctx)
@@ -1875,7 +1876,7 @@ for _, pkt := range packets {
 return tx.Commit(ctx)
 ```
 
-### 6. A production-ready configuration
+### 6. Production-ready конфигурация
 
 ```go
 // Circuit Breaker + Retry + Audit
@@ -1897,23 +1898,23 @@ err := features.ExecuteWithResilience(ctx, "export-users", func() error {
 ### Unit Tests
 
 ```bash
-# Everything
+# Все тесты
 go test ./... -v
 
-# One package
+# Конкретный пакет
 go test ./pkg/core/packet -v
 
-# With coverage
+# С покрытием
 go test ./pkg/core/... -cover
 
-# Benchmarks
+# Бенчмарки
 go test ./pkg/core/packet -bench=. -benchmem
 ```
 
 ### Integration Tests
 
 ```bash
-# These need Docker with the databases up
+# Требуют Docker с БД
 export POSTGRES_HOST=localhost
 export POSTGRES_PORT=5432
 export POSTGRES_USER=tdtp_user
@@ -1925,20 +1926,20 @@ go test ./tests/integration/... -v
 ### End-to-End Tests
 
 ```bash
-# The full cycle: export -> broker -> import
+# Полный цикл Export → Broker → Import
 go test ./tests/e2e/... -v
 ```
 
 ---
 
-## Common mistakes and antipatterns
+## 🚫 Частые Ошибки и Антипаттерны
 
-### 1. Duplicating what exists
+### 1. Дублирование функциональности
 
-#### Wrong: writing your own type converter
+#### ❌ НЕПРАВИЛЬНО: Писать свой type converter
 
 ```go
-// Do not do this
+// НЕ ДЕЛАЙ ТАК!
 func convertTDTPType(value string, fieldType string) (interface{}, error) {
     switch fieldType {
     case "INTEGER":
@@ -1950,7 +1951,7 @@ func convertTDTPType(value string, fieldType string) (interface{}, error) {
 }
 ```
 
-#### Right: use schema.Converter
+#### ✅ ПРАВИЛЬНО: Использовать schema.Converter
 
 ```go
 import "github.com/ruslano69/tdtp-framework/pkg/core/schema"
@@ -1961,82 +1962,82 @@ value, err := converter.ParseValue(stringValue, fieldDef)
 
 ---
 
-### 2. Bypassing the adapters
+### 2. Игнорирование встроенных адаптеров
 
-#### Wrong: database/sql directly
+#### ❌ НЕПРАВИЛЬНО: database/sql напрямую
 
 ```go
-// Do not do this
+// НЕ ДЕЛАЙ ТАК!
 db, _ := sql.Open("postgres", connString)
 rows, _ := db.Query("SELECT * FROM users")
 
-// Parsing types by hand, building TDTP packets by hand...
+// Ручной парсинг типов, создание TDTP пакетов...
 ```
 
-#### Right: use the adapters
+#### ✅ ПРАВИЛЬНО: Использовать adapters
 
 ```go
 adapter, _ := adapters.New(ctx, config)
 packets, _ := adapter.ExportTable(ctx, "users")
-// The types are mapped for you
+// Типы автоматически маппятся! ✅
 ```
 
 ---
 
-### 3. Moving data inefficiently
+### 3. Неэффективная работа с данными
 
-#### Wrong: INSERT in a loop
+#### ❌ НЕПРАВИЛЬНО: INSERT в цикле
 
 ```go
-// Slow. Do not do this.
+// МЕДЛЕННО! Не делай так!
 for _, row := range rows {
     db.Exec("INSERT INTO table VALUES (?, ?)", row[0], row[1])
 }
 ```
 
-#### Right: bulk operations
+#### ✅ ПРАВИЛЬНО: Bulk operations
 
 ```go
-// The adapters bulk-insert without being asked
+// Адаптеры используют bulk insert автоматически
 adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
 
-// So does the workspace
+// Workspace тоже использует bulk
 ws.LoadData(tableName, rows)
 ```
 
 ---
 
-### 4. "UI adapters" - when a second service is legitimate
+### 4. Создание "UI адаптеров"
 
-**ConnectionService in tdtp-xray is not a duplicate.**
+**⚠️ ConnectionService в tdtp-xray — это НЕ дубликат!**
 
-#### Why it exists
+#### Почему ConnectionService нужен:
 
 ```go
-// UI-specific methods, which pkg/adapters does not have:
+// UI-специфичные методы (НЕТ в pkg/adapters):
 type ConnectionService interface {
-    GetTables(ctx context.Context) ([]string, error)      // for a dropdown
-    GetViews(ctx context.Context) ([]string, error)       // for a dropdown
-    GetTablePreview(ctx, table, limit) (PreviewResult, error)  // for the preview pane
+    GetTables(ctx context.Context) ([]string, error)      // ✅ Для dropdown
+    GetViews(ctx context.Context) ([]string, error)       // ✅ Для dropdown
+    GetTablePreview(ctx, table, limit) (PreviewResult, error)  // ✅ Для UI
 }
 
 // pkg/adapters.Adapter:
 type Adapter interface {
-    ListTables(ctx context.Context) ([]string, error)     // no GetViews here
-    ExportTable(ctx, table) ([]*DataPacket, error)        // and no Preview
+    ListTables(ctx context.Context) ([]string, error)     // ❌ Нет GetViews
+    ExportTable(ctx, table) ([]*DataPacket, error)        // ❌ Нет Preview
 }
 ```
 
-**So:** the UI layer may have services of its own. That is **not** duplication.
+**Вывод:** UI-слой (tdtp-xray) может иметь свои сервисы! Это **не дублирование**.
 
 ---
 
-### 5. Re-implementing the XLSX converter
+### 5. Переизобретение XLSX converter
 
-#### Wrong: reaching for an Excel library directly
+#### ❌ НЕПРАВИЛЬНО: github.com/xuri/excelize напрямую
 
 ```go
-// Do not do this
+// НЕ ДЕЛАЙ ТАК!
 f := excelize.NewFile()
 for i, row := range data {
     for j, cell := range row {
@@ -2044,24 +2045,24 @@ for i, row := range data {
         f.SetCellValue("Sheet1", axis, cell)
     }
 }
-// The types are gone
+// Типы потеряны! ❌
 ```
 
-#### Right: use pkg/xlsx
+#### ✅ ПРАВИЛЬНО: Использовать pkg/xlsx
 
 ```go
 xlsx.ToXLSX(packet, "output.xlsx", "Sheet1")
-// The types survive, in the headers and in the cell formats
+// Типы сохранены в заголовках и форматировании! ✅
 ```
 
 ---
 
-### 6. Mapping database types by hand
+### 6. Ручной маппинг типов БД
 
-#### Wrong: one mapper per database, written by you
+#### ❌ НЕПРАВИЛЬНО: Свой маппер для каждой БД
 
 ```go
-// Do not do this
+// НЕ ДЕЛАЙ ТАК!
 func postgresTypeToTDTP(pgType string) string {
     switch pgType {
     case "int4": return "INTEGER"
@@ -2071,36 +2072,36 @@ func postgresTypeToTDTP(pgType string) string {
 }
 
 func mysqlTypeToTDTP(mysqlType string) string {
-    // Duplicated logic
+    // Дубликат логики!
 }
 ```
 
-#### Right: the adapters already do it
+#### ✅ ПРАВИЛЬНО: Адаптеры делают это автоматически
 
 ```go
-// The adapter knows its own types
+// Адаптер сам знает свои типы!
 schema, _ := adapter.GetTableSchema(ctx, "users")
-// schema.Fields[0].Type is already a TDTP type
+// schema.Fields[0].Type уже в TDTP формате ✅
 
-// In the UI layer (tdtp-xray):
+// Для UI-слоя (tdtp-xray):
 func mapDatabaseTypeToSQLite(dbType string, sourceDB string) string {
-    // Fine for the UI: the input is a string, not a schema.DataType
+    // Это OK для UI! Разные входные данные (string, а не schema.DataType)
 }
 ```
 
-**The rule:** a function taking a `string` — the database's own type name — rather than a `schema.DataType` is legitimate in the UI layer.
+**Правило:** Если твоя функция принимает `string` (название типа БД), а не `schema.DataType` — это нормально для UI-слоя.
 
 ---
 
-### 7. Ignoring TDTQL
+### 7. Игнорирование TDTQL
 
-#### Wrong: filtering after loading
+#### ❌ НЕПРАВИЛЬНО: Фильтрация после загрузки
 
 ```go
-// Wasteful
-packets, _ := adapter.ExportTable(ctx, "users")  // all million rows
+// НЕЭФФЕКТИВНО!
+packets, _ := adapter.ExportTable(ctx, "users")  // Все 1M записей!
 
-// ...then filtered in memory
+// Фильтрация in-memory
 filtered := []Row{}
 for _, row := range packets[0].Data.Rows {
     if row.Age > 18 {
@@ -2109,10 +2110,10 @@ for _, row := range packets[0].Data.Rows {
 }
 ```
 
-#### Right: filter in SQL
+#### ✅ ПРАВИЛЬНО: Фильтрация на SQL-level
 
 ```go
-// Efficient
+// ЭФФЕКТИВНО!
 query := packet.NewQuery()
 query.Filters = &packet.Filters{
     And: &packet.LogicalGroup{
@@ -2123,22 +2124,22 @@ query.Filters = &packet.Filters{
 }
 
 packets, _ := adapter.ExportTableWithQuery(ctx, "users", query, "", "")
-// Only the rows you asked for ever leave the database
+// Только нужные записи с БД! ✅
 ```
 
 ---
 
-### 8. Using the context wrongly
+### 8. Неправильное использование Context
 
-#### Wrong: context.Background() everywhere
+#### ❌ НЕПРАВИЛЬНО: context.Background() везде
 
 ```go
-// No timeout
+// Нет timeout!
 packets, _ := adapter.ExportTable(context.Background(), "huge_table")
-// This can hang forever
+// Может зависнуть навсегда!
 ```
 
-#### Right: a timeout on anything slow
+#### ✅ ПРАВИЛЬНО: Timeout для долгих операций
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -2154,78 +2155,78 @@ if err != nil {
 
 ---
 
-## Architectural principles
+## 📚 Архитектурные Принципы
 
 ### 1. Separation of Concerns
 
 **Framework (pkg/):**
-- data types (schema)
-- the protocol (packet)
-- database adapters (adapters)
-- transformations (etl, processors)
+- Типы данных (schema)
+- Протокол (packet)
+- Адаптеры БД (adapters)
+- Трансформации (etl, processors)
 
 **UI Layer (cmd/tdtp-xray/):**
-- UI-specific services (ConnectionService, PreviewService)
+- UI-специфичные сервисы (ConnectionService, PreviewService)
 - HTTP handlers
 - Frontend integration
 
-**The rule:** the UI may have its own services, as long as they build on the framework's primitives.
+**Правило:** UI может иметь свои сервисы, если они используют Framework primitives.
 
 ---
 
 ### 2. Type Safety
 
-**Always** use typed values:
+**ВСЕГДА** используй типизированные значения:
 
 ```go
-// Right
+// ✅ ПРАВИЛЬНО
 converter := schema.NewConverter()
 typedValue, _ := converter.ParseValue("123", intField)
 
-// Wrong
-value := "123"  // a string where an int belongs
+// ❌ НЕПРАВИЛЬНО
+value := "123"  // String вместо int
 ```
 
 ---
 
 ### 3. Reuse Framework Primitives
 
-**Before writing anything, ask:**
+**Перед написанием кода спроси себя:**
 
-1. Is it in `pkg/core`? Use it.
-2. Is it in `pkg/adapters`? Use it.
-3. Is it in `pkg/etl`? Use it.
-4. Is it in `pkg/processors`? Use it.
+1. Есть ли это в `pkg/core`? → Используй!
+2. Есть ли это в `pkg/adapters`? → Используй!
+3. Есть ли это в `pkg/etl`? → Используй!
+4. Есть ли это в `pkg/processors`? → Используй!
 
-**Only if none of them has it** should you write something new.
+**Только если нет** — тогда создавай новое.
 
 ---
 
 ## 🎓 Best Practices Summary
 
-| Task | Use | Do not use |
+| Задача | ✅ Используй | ❌ Не используй |
 |--------|--------------|-----------------|
-| Type conversion | `schema.Converter` | your own switch |
-| Data validation | `schema.Validator` | your own function |
+| Type conversion | `schema.Converter` | Свой switch |
+| Data validation | `schema.Validator` | Свою функцию |
 | XML parsing | `packet.Parser` | encoding/xml |
 | SQL generation | `tdtql.SQLGenerator` | fmt.Sprintf |
 | Database access | `adapters.New()` | database/sql |
-| XLSX export | `xlsx.ToXLSX()` | an Excel library directly |
-| In-memory SQL | `etl.Workspace` | your own SQLite |
-| Data masking | `processors.FieldMasker` | your own function |
-| Bulk insert | `adapter.ImportPacket()` | INSERT in a loop |
+| XLSX export | `xlsx.ToXLSX()` | excelize напрямую |
+| In-memory SQL | `etl.Workspace` | Свой SQLite |
+| Data masking | `processors.FieldMasker` | Свою функцию |
+| Bulk insert | `adapter.ImportPacket()` | INSERT в цикле |
 | Filtering | TDTQL + ExportTableWithQuery | In-memory filter |
 
 ---
 
-## Further reading
+## Дополнительные ресурсы
 
-- **[SPECIFICATION.md](SPECIFICATION.md)** — the TDTP and TDTQL specification
-- **[USER_GUIDE.md](USER_GUIDE.md)** — the CLI reference
-- **[CHANGELOG.md](../CHANGELOG.md)** — what changed in each release
+- **[SPECIFICATION.md](SPECIFICATION.md)** - Спецификация TDTP v1.0 & TDTQL
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Руководство пользователя CLI
+- **[CHANGELOG.md](../CHANGELOG.md)** - Последние изменения по версиям
 - **GitHub:** https://github.com/ruslano69/tdtp-framework
 - **Issues:** https://github.com/ruslano69/tdtp-framework/issues
 
 ---
 
-
+*Последнее обновление: 2026-02-20*
