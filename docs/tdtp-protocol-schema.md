@@ -3,7 +3,7 @@
 One running document instead of one file per version, so the evolution and
 the reasoning behind each change stays visible in one place, tied to the
 release version that shipped it. See `docs/SPECIFICATION.md` →
-"Версионирование" for the terse changelog form of the same history; this
+"Versioning" for the terse changelog form of the same history; this
 document is the deep-dive flow/sequence-diagram form, superseding the
 now-historical `docs/tdtp-v14-protocol-schema.md` (kept in place,
 not deleted, for anyone with existing links to it).

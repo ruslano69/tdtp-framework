@@ -1,77 +1,104 @@
-# Scenario Trust — подпись и целостность оркестраторных сценариев
+# Scenario trust — signing and integrity for orchestrator scenarios
 
-> Статус: **design draft**, не реализовано. Ничего из описанного здесь не существует
-> в коде — этот документ фиксирует обсуждённую модель, чтобы было что предметно
-> критиковать и от чего отталкиваться при реализации.
+> **Status: partly implemented.** Stage 0 below shipped, and shipped stronger
+> than it was drafted — see [What exists today](#what-exists-today). Stages 1
+> through 5 remain a design draft: no signing code exists. This document records
+> the agreed model so there is something concrete to argue with and to build
+> from.
 >
-> Связанные пункты: [ROADMAP.md](../ROADMAP.md) — "Schema migration" и
-> "Orchestrator scenario integrity registration".
+> Related: [ROADMAP.md](../ROADMAP.md) — "Schema migration" and "Orchestrator
+> scenario integrity registration".
 
 ---
 
-## 1. Проблема
+## 1. The problem
 
-Обсуждались две независимые угрозы, которые ошибочно можно спутать друг с другом или
-попытаться закрыть одним и тем же механизмом — на самом деле нужны оба слоя одновременно:
+Two independent threats. They are easy to confuse, and tempting to try to close
+with one mechanism, but both layers are needed at once.
 
-| # | Угроза | Кто атакующий | Что компрометируется |
-|---|---|---|---|
-| A | Скомпрометированный **producer** шлёт пакет с "эволюционировавшей" схемой через легитимный, неизменный `--map --listen`/pipeline | владелец учётных данных брокера/branch-узла | данные внутри честного пайплайна |
-| B | Кто-то с доступом к `--scenarios/` подменяет **сам YAML** сценария (добавляет `--unsafe`, меняет DSN, включает несанкционированный DDL) | тот, у кого есть запись в директорию сценариев / в CI | инструкции, которые исполняет оркестратор |
+| # | Threat | The attacker | What is compromised |
+|---|--------|--------------|---------------------|
+| A | A compromised **producer** sends a packet with an "evolved" schema through a legitimate, unmodified `--map --listen` or pipeline | whoever holds the broker or branch-node credentials | the data inside an honest pipeline |
+| B | Someone with write access to `--scenarios/` alters **the YAML itself** — adds `--unsafe`, changes a DSN, enables unauthorised DDL | whoever can write to the scenarios directory or to CI | the instructions the orchestrator executes |
 
-Сегодня ни то, ни другое не защищено:
+Threat A remains open. The packet's `<Schema>` is composed entirely by the
+producer and used for `CREATE TABLE IF NOT EXISTS` with no gate at all, which
+becomes architecturally dangerous the moment auto-`ALTER TABLE` arrives (see the
+roadmap).
 
-- Схема пакета (`<Schema>`) полностью формируется producer'ом и используется для
-  `CREATE TABLE IF NOT EXISTS` без какого-либо гейта — угроза A открыта архитектурно,
-  как только появится auto-`ALTER TABLE` (см. roadmap).
-- `cmd/orchestrator` грузит `--scenarios/*.yaml` один раз при старте
-  (`LoadScenariosDir`, без `fsnotify`), `POST /scenarios/{name}/run` исполняет то, что
-  уже лежит в памяти, не перечитывая и не хэшируя файл. `TrustGate.GateScenario`
-  проверяет только строки прав (`scenario.permissions ⊆ license ∩ Mercury`) — никогда
-  содержимое файла. Угроза B открыта уже сейчас, независимо от schema migration.
+Threat B is now closed at the file level — see below — but not
+cryptographically: an approval records that an admin accepted a hash, not that a
+named authority signed it.
 
-## 2. Что уже есть и можно переиспользовать
+## What exists today
 
-Вывод предыдущего анализа: инфраструктура подписи в основном уже существует, не хватает
-только *правильного корня доверия* и *точки применения*.
+`cmd/orchestrator/scenario_approval.go` implements content pinning, and it went
+further than the Stage 0 draft below proposed:
 
-| Кирпич | Файл | Что даёт |
-|---|---|---|
-| `CapabilityCert` | `pkg/license/cert.go` | Ed25519-подписанный токен: операция (уже есть `"schema-write"`), scope по таблицам/БД (`CoversTable`, glob), host-lock, срок действия, **nonce + replay-защита через audit log** |
-| `applyUnsafeGate` | `cmd/tdtpcli/commands/unsafe_gate.go` | пример гейта: cert или fallback на `IsAdmin()` |
-| CA / EnvCert | `xzmercury/internal/ca`, `cmd/tdtp-ca` | challenge-response, hardware attestation, отдельный корень для окружений |
-| `tdtp-certify` | `xzmercury/cmd/tdtp-certify` | vendor-side `issue-license`/`revoke-cert`/`list-active` — готовый паттерн CLI для выпуска/отзыва |
-| `ProjectRequest` workflow | `cmd/orchestrator/requests.go` | staged approve (`submit → test → approve/reject`) — сейчас это просто флаг статуса в SQLite, не крипто-акт, но UX-точка для встраивания подписи уже есть |
-| Job artifact hash | `cmd/orchestrator/executor.go` (`fileHashAndSize`) | SHA-256 уже считается для *выходного* артефакта — по аналогии добавить хэш для *входного* определения сценария |
+- `scenarioChecksum` takes the SHA-256 of the scenario's raw YAML.
+- `VerifyScenarioChecksum` runs at **every execution entry point** — cron, manual
+  run, request approval — and **refuses to run** the scenario unless an admin has
+  registered that exact hash through `POST /scenarios/{name}/approve`.
+- A missing registration and a mismatched hash fail identically. A brand-new
+  scenario file dropped into the directory cannot run until someone approves it,
+  and an edited one stops running until someone re-approves it.
+- An approval can be revoked (`DELETE /scenarios/{name}/approval`), and a revoked
+  approval fails with its own message.
+- The failure text names when the approval was made and by whom.
 
-Расхождение с целевой моделью — сегодня `CapabilityCert` подписывает **вендор**. Для
-DDL-прав над конкретной базой это неправильный корень: право должен выдавать тот, кто
-владеет базой (DBA), а не поставщик софта.
+The draft's Stage 0 suggested logging a warning and requiring a reindex. The
+implementation blocks instead, which is the stricter and better choice: a
+warning in a log nobody reads is not a gate.
 
-## 3. Целевая модель
+**What Stage 0 still lacks:** the job record does not carry
+`scenario_content_hash` or `signed_by`, so the provenance of a completed run is
+not recoverable from the job alone, and there is no monotonic version, so the
+downgrade concern in [4.3](#43-downgrade-attack) is untouched.
 
-### 3.1 Роли и корни доверия
+## 2. What already exists and can be reused
+
+The conclusion of the earlier analysis: most of the signing infrastructure is
+already here. What is missing is the *right root of trust* and the *point of
+enforcement*.
+
+| Building block | File | What it gives |
+|----------------|------|---------------|
+| `CapabilityCert` | `pkg/license/cert.go` | An Ed25519-signed token: the operation (`"schema-write"` already exists), a scope over tables and databases (`CoversTable`, globs), host locking, an expiry, and **a nonce with replay protection through the audit log** |
+| `applyUnsafeGate` | `cmd/tdtpcli/commands/unsafe_gate.go` | A worked example of a gate: a certificate, or a fallback to `IsAdmin()` |
+| CA / EnvCert | `xzmercury/internal/ca`, `cmd/tdtp-ca` | Challenge-response, hardware attestation, a separate root for environments |
+| `tdtp-certify` | `xzmercury/cmd/tdtp-certify` | Vendor-side `issue-license`, `revoke-cert`, `list-active` — an established CLI pattern for issuing and revoking |
+| `ProjectRequest` workflow | `cmd/orchestrator/requests.go` | Staged approval (`submit → test → approve/reject`). Today it is a status flag in SQLite rather than a cryptographic act, but the place to attach a signature already exists |
+| Job artifact hash | `cmd/orchestrator/executor.go` (`fileHashAndSize`) | SHA-256 is already computed for the *output* artifact; the same treatment for the *input* definition follows by analogy |
+
+One divergence from the target model: `CapabilityCert` is signed by **the
+vendor**. For DDL rights over a particular database that is the wrong root — the
+right belongs to whoever owns the database, the DBA, not to the software
+supplier.
+
+## 3. The target model
+
+### 3.1 Roles and roots of trust
 
 ```
-Vendor root (Ed25519, offline)          — уже есть: подписывает tdtp.lic
+Vendor root (Ed25519, offline)          — exists: signs tdtp.lic
         │
-        ├─ CA root (xzmercury)          — уже есть: подписывает EnvCert окружениям
+        ├─ CA root (xzmercury)          — exists: signs an EnvCert per environment
         │
-        └─ Signer cert (НОВОЕ)          — вендор/CA делегирует конкретному DBA
-              │                            право подписывать сценарии
+        └─ Signer cert (NEW)            — the vendor or CA delegates, to one DBA,
+              │                            the right to sign scenarios
               ▼
-        DBA подписывает сценарий (НОВОЕ) — акт "я одобряю именно это содержимое"
+        DBA signs a scenario (NEW)      — "I approve exactly this content"
 ```
 
-`Signer cert` — это делегирование полномочий, а не отдельный независимый корень:
-вендор (или CA, если решаем держать это в xzmercury) удостоверяет, что публичный ключ
-конкретного DBA имеет право подписывать сценарии с DDL-операциями в заданном scope.
-Отзыв — тем же реестром, что уже используется для `tdtp-certify revoke-cert`.
+A `SignerCert` is a delegation, not an independent root: the vendor — or the CA,
+if that is where this ends up living — certifies that a particular DBA's public
+key may sign scenarios carrying DDL operations within a given scope. Revocation
+goes through the same registry `tdtp-certify revoke-cert` already uses.
 
-### 3.2 Новые структуры данных
+### 3.2 New data structures
 
 ```go
-// pkg/license/signer.go (новый файл, по образцу cert.go)
+// pkg/license/signer.go (new file, modelled on cert.go)
 
 // SignerCert delegates scenario-signing authority to a DBA/privileged user.
 // Signed by the vendor or CA root — NOT self-signed.
@@ -91,137 +118,138 @@ type ScenarioSignature struct {
     ScenarioName string    `json:"scenario_name"`
     ContentHash  string    `json:"content_hash"`  // sha256(canonical scenario YAML)
     Version      int       `json:"version"`       // monotonic — see 4.3 downgrade protection
-    SignedBy     string    `json:"signed_by"`      // must match a SignerCert.IssuedTo
+    SignedBy     string    `json:"signed_by"`     // must match a SignerCert.IssuedTo
     IssuedAt     time.Time `json:"issued_at"`
     Expires      time.Time `json:"expires"`
-    Signature    string    `json:"signature"`      // base64(Ed25519 over canonical JSON, by DBA key)
+    Signature    string    `json:"signature"`     // base64(Ed25519 over canonical JSON, by DBA key)
 }
 ```
 
-### 3.3 Порядок проверки при запуске сценария
+### 3.3 The check performed when a scenario runs
 
-`POST /scenarios/{name}/run` (и cron-триггер) выполняет **на каждый запуск**, не только
-при старте процесса:
+`POST /scenarios/{name}/run`, and the cron trigger, would perform this **on every
+run**, not once at process start:
 
-1. Прочитать файл сценария с диска заново (закрывает TOCTOU — проверка при старте
-   недостаточна, файл мог поменяться после загрузки).
-2. Посчитать `sha256(канонический YAML)`.
-3. Найти зарегистрированную `ScenarioSignature` по имени; сверить `content_hash` —
-   несовпадение → отказ (сценарий на диске отличается от одобренного).
-4. Проверить `version` не ниже последней известной для этого имени (защита от
-   downgrade, см. 4.3).
-5. Загрузить `SignerCert` по `SignedBy`; проверить его подпись корнем (вендор/CA), срок
-   действия, что `Scope` покрывает целевые таблицы сценария, что не отозван.
-6. Проверить подпись `ScenarioSignature` публичным ключом из `SignerCert`.
-7. Только если сценарий требует DDL-операций (`schema-write`/`create-table`/
-   `create-view` — то же множество, что уже объявлено в `Orchestrator.Permissions`),
-   требовать, чтобы `SignerCert.Operations` включал соответствующую строку. **Флаг
-   auto-migration в самом YAML не проверяется и не учитывается** — право даёт только
-   валидная подпись, потому что YAML — это ровно то, что могут подменить.
-8. Записать в job: `scenario_content_hash`, `signed_by`, `signer_cert_id` — полный
-   provenance выполнения, по аналогии с уже существующим `ArtifactSHA256`.
+1. Re-read the scenario file from disk. This closes the TOCTOU: a check at
+   startup is not enough, because the file may have changed since it was loaded.
+2. Compute `sha256(canonical YAML)`.
+3. Find the registered `ScenarioSignature` by name and compare `content_hash`.
+   A mismatch is a refusal — what is on disk differs from what was approved.
+4. Check that `version` is not below the highest seen for this name (downgrade
+   protection, see 4.3).
+5. Load the `SignerCert` named by `SignedBy`; verify its signature against the
+   root, its expiry, that its `Scope` covers the scenario's target tables, and
+   that it has not been revoked.
+6. Verify the `ScenarioSignature` against the public key from the `SignerCert`.
+7. **Only** if the scenario declares DDL operations — `schema-write`,
+   `create-table`, `create-view`, the same set already declared in
+   `Orchestrator.Permissions` — require that `SignerCert.Operations` contains
+   the matching string. **An auto-migration flag in the YAML itself is neither
+   read nor honoured**: the right comes from a valid signature only, because the
+   YAML is precisely what an attacker can change.
+8. Record `scenario_content_hash`, `signed_by` and `signer_cert_id` on the job —
+   full provenance for the execution, by analogy with the existing
+   `ArtifactSHA256`.
 
-### 3.4 Связь со Schema Migration (roadmap)
+### 3.4 The link to schema migration
 
-Auto-`ALTER TABLE` из producer-предоставленной схемы пакета разрешается **только**
-если у выполняемого сценария есть валидная `ScenarioSignature` от подписанта, чей
-`SignerCert.Operations` содержит `schema-write` для целевой таблицы. Без такой подписи
-— поведение по умолчанию: детект дрейфа + отчёт, без применения. Это единственная
-точка, где два ранее обсуждённых пункта roadmap физически пересекаются.
+Auto-`ALTER TABLE` driven by a producer-supplied packet schema would be
+permitted **only** where the running scenario carries a valid
+`ScenarioSignature` from a signer whose `SignerCert.Operations` includes
+`schema-write` for the target table. Without one, the default holds: detect the
+drift, report it, apply nothing.
 
-## 4. Открытые риски / вопросы для додумывания
+This is the single point where the two roadmap items physically meet.
 
-### 4.1 Хранение ключа DBA
-Самое слабое звено всей схемы. Минимум — passphrase-защищённый файл ключа
-(аналогично `ca.ed25519.priv` в `tdtp-ca`); в идеале — вынесение подписи на отдельную
-машину/аппаратный токен, оркестратор никогда не видит приватный ключ DBA.
+## 4. Open risks and questions
 
-### 4.2 Кто подписывает: вендор или CA?
-Вендорский корень уже подписывает `tdtp.lic` и `CapabilityCert` — переиспользовать его
-для `SignerCert` проще всего, но семантически права на DDL в конкретной базе — это
-решение эксплуатирующей организации, а не поставщика ПО. Более чистый вариант: делегировать
-выпуск `SignerCert` в CA (`xzmercury/internal/ca`), т.к. CA уже отвечает за
-доверие внутри окружения заказчика, а не продукта. Требует решения до реализации.
+### 4.1 Storing the DBA's key
 
-### 4.3 Downgrade-атака
-Старая, честно подписанная версия сценария (например, без ограничений на таблицы)
-остаётся криптографически валидной после того, как вышла новая, более строгая версия.
-Монотонный `version` в `ScenarioSignature` (п. 3.2) закрывает это только если
-оркестратор **хранит** последнюю известную версию на инстанс — то есть реестр подписей
-должен быть персистентным (расширение уже предложенной в roadmap checksum-регистрации:
-храним не просто hash, а `{hash, version, signed_by}` с монотонной проверкой при каждой
-проверке).
+The weakest link in the whole scheme. The minimum is a passphrase-protected key
+file, as `tdtp-ca` does with `ca.ed25519.priv`. Better is signing on a separate
+machine or a hardware token, so the orchestrator never sees the private key.
 
-### 4.4 UX точка одобрения
-`requests.go`'s `approve` сегодня — просто смена статуса в SQLite. Нужно решить: подпись
-создаётся отдельным CLI-шагом DBA заранее (сценарий кладётся в `--scenarios/` уже
-подписанным, `approve` в UI не нужен), или `POST /requests/{id}/approve` сам запрашивает
-подпись интерактивно (сложнее: требует держать приватный ключ доступным HTTP-серверу —
-нежелательно, см. 4.1). Рекомендация: подпись — offline-шаг, `tdtp-scenario-sign`
-CLI-утилита по образцу `tdtp-certify`, `approve` в оркестраторе остаётся просто UX-record.
+### 4.2 Who issues the SignerCert — the vendor or the CA?
 
----
+The vendor root already signs `tdtp.lic` and `CapabilityCert`, so reusing it is
+the least work. But semantically, DDL rights over a specific database are the
+operating organisation's decision, not the software supplier's. The cleaner
+option is to delegate issuance to the CA (`xzmercury/internal/ca`), which
+already carries trust *inside the customer's environment* rather than trust in
+the product. This needs deciding before any code is written.
 
-## 5. Этапы доработки
+### 4.3 Downgrade attack
 
-Порядок выбран так, чтобы каждый этап был самостоятельно полезен и не блокировал
-остальную разработку — schema migration (roadmap "Next") не должна ждать всей цепочки
-подписи целиком.
+An older, honestly signed version of a scenario — one without the table
+restrictions, say — stays cryptographically valid after a newer and stricter
+version is issued. The monotonic `version` in `ScenarioSignature` closes this
+only if the orchestrator **stores** the highest version it has seen, per
+instance. The signature registry therefore has to be persistent: not just a
+hash, but `{hash, version, signed_by}`, checked monotonically on every run.
 
-### Этап 0 — Fingerprint без подписи (быстрый, закрывает TOCTOU)
-- Пересчитывать `sha256(scenario.yaml)` на каждый `run`, не только при старте.
-- Хранить последний известный хэш в БД оркестратора (`scenarios` таблица: `name`,
-  `content_hash`, `first_seen_at`).
-- Если хэш изменился relative к запомненному — не блокировать автоматически (ещё нет
-  подписи, которая скажет "это одобрено"), но **логировать WARN + требовать явного
-  `POST /scenarios/{name}/reindex`** перед следующим запуском. Это уже устраняет
-  "подменили файл — никто не заметил", даже без крипто.
-- Добавить `scenario_content_hash` в запись job (провенанс появляется сразу, подпись
-  можно добавить позже без изменения схемы job).
+### 4.4 Where approval happens
 
-### Этап 1 — `SignerCert` (делегирование)
-- `pkg/license/signer.go`: структура + `Verify()`/`VerifyWith()` по образцу
-  `cert.go` (переиспользовать `CertScope`, `matchGlob`).
-- Решить вопрос 4.2 (вендор vs CA) до написания кода выпуска.
-- CLI-утилита выпуска: `tdtp-certify issue-signer --key <root> --dba <email> \
-  --ops schema-write,create-table --scope-db orders --expires ...` (по образцу
-  существующего `issue-license`).
-- Пока без применения в оркестраторе — только выпуск и верификация в изоляции +
-  unit-тесты (аналог `cert_test.go`).
+`approve` in `requests.go` is a status change in SQLite today. The choice is
+between the DBA signing offline in advance — the scenario arrives in
+`--scenarios/` already signed and the UI approval is unnecessary — or
+`POST /requests/{id}/approve` asking for a signature interactively, which is
+harder and requires the private key to be reachable from an HTTP server, exactly
+what 4.1 argues against.
 
-### Этап 2 — `ScenarioSignature` + офлайн-подпись
-- `pkg/license/scenario_sig.go`: структура + верификация (сигнатура зависит от
-  предварительно проверенного `SignerCert`, см. 3.3 пп. 5-6).
-- `tdtp-scenario-sign` CLI: `tdtp-scenario-sign --scenario flights.yaml \
-  --dba-key dba.ed25519.priv --signer-cert dba.cert.json --version 1 \
-  --out flights.yaml.sig`.
-- Формат хранения: `flights.yaml.sig` рядом с `flights.yaml` в `--scenarios/`, либо
-  запись в БД оркестратора — выбрать по итогам этапа 0 (реестр уже есть).
-
-### Этап 3 — Enforcement в оркестраторе
-- `TrustGate.GateScenario` расширяется шагами 1-7 из раздела 3.3.
-- Без подписи — сценарий работает как сегодня (permissions ⊆ license ∩ Mercury), но
-  **не может** декларировать DDL-операции (`schema-write` и т.п.) — те требуют подписи
-  обязательно, остальные permissions — как раньше, обратная совместимость сохранена.
-- Job record расширяется: `scenario_content_hash`, `signed_by`, `signer_cert_id`.
-- Downgrade-защита (4.3): персистентный монотонный `version` в реестре из этапа 0.
-
-### Этап 4 — Привязка Schema Migration
-- Реализуется только после этапа 3.
-- Auto-`ALTER TABLE` (roadmap "Schema migration") читает `Operations` уже
-  верифицированного `SignerCert` текущего запуска; без `schema-write` в scope —
-  fallback на detect-only, независимо от любых флагов в самом YAML.
-
-### Этап 5 — Отзыв и мониторинг
-- `tdtp-certify revoke-cert` расширяется на `SignerCert` (реестр уже существует для
-  license-сертификатов — тот же механизм).
-- Метрика в оркестраторе (`orchestrator_scenario_signature_status{name,status}`) —
-  по аналогии с уже существующими Prometheus-метриками джобов.
-- Audit log: каждая проверка подписи (успех/отказ) — отдельная запись, не только
-  facт запуска джобы.
+Recommendation: signing is an offline step, through a `tdtp-scenario-sign` CLI
+modelled on `tdtp-certify`, and the orchestrator's `approve` stays a UX record.
 
 ---
 
-Каждый этап оставляет систему в рабочем, обратно-совместимом состоянии — можно
-остановиться после этапа 0 или 1 и уже получить ощутимое усиление, не обязательно
-доводить до этапа 5 за один заход.
+## 5. Stages
+
+Ordered so that each stage is useful on its own and none blocks the rest of the
+work — schema migration should not have to wait for the entire signing chain.
+
+### Stage 0 — fingerprint without signatures — **DONE, and stricter than drafted**
+
+Delivered in `cmd/orchestrator/scenario_approval.go`: the checksum is verified at
+every execution entry point and a scenario cannot run at all until an admin
+registers its hash. See [What exists today](#what-exists-today).
+
+Still outstanding from this stage:
+- `scenario_content_hash` on the job record, so a finished run's provenance
+  survives in the job itself
+- a persistent monotonic version, which stage 3 needs for downgrade protection
+
+### Stage 1 — `SignerCert`, the delegation
+
+- `pkg/license/signer.go`: the struct plus `Verify()`/`VerifyWith()`, modelled on `cert.go`, reusing `CertScope` and `matchGlob`
+- Resolve question 4.2 (vendor or CA) before writing the issuing code
+- An issuing CLI: `tdtp-certify issue-signer --key <root> --dba <email> --ops schema-write,create-table --scope-db orders --expires ...`, following the existing `issue-license`
+- No enforcement yet — issuance and verification in isolation, with unit tests along the lines of `cert_test.go`
+
+### Stage 2 — `ScenarioSignature` and offline signing
+
+- `pkg/license/scenario_sig.go`: the struct and its verification, which depends on an already-verified `SignerCert` (3.3, steps 5–6)
+- `tdtp-scenario-sign` CLI: `tdtp-scenario-sign --scenario flights.yaml --dba-key dba.ed25519.priv --signer-cert dba.cert.json --version 1 --out flights.yaml.sig`
+- Storage: `flights.yaml.sig` beside `flights.yaml` in `--scenarios/`, or a row in the orchestrator database. The registry from stage 0 already exists, which argues for the database
+
+### Stage 3 — enforcement in the orchestrator
+
+- `TrustGate.GateScenario` gains steps 1–7 from section 3.3
+- Without a signature a scenario runs as it does today (`permissions ⊆ license ∩ Mercury`) but **cannot** declare DDL operations; those require a signature. Every other permission behaves as before, so this is backward compatible
+- The job record gains `scenario_content_hash`, `signed_by`, `signer_cert_id`
+- Downgrade protection (4.3): the persistent monotonic version in the stage 0 registry
+
+### Stage 4 — binding schema migration
+
+- Only after stage 3
+- Auto-`ALTER TABLE` reads `Operations` from the already-verified `SignerCert` of the current run. Without `schema-write` in scope it falls back to detect-only, regardless of any flag in the YAML
+
+### Stage 5 — revocation and monitoring
+
+- `tdtp-certify revoke-cert` extended to `SignerCert` — the registry already exists for licence certificates, and it is the same mechanism
+- An orchestrator metric, `orchestrator_scenario_signature_status{name,status}`, alongside the existing job metrics
+- Audit log: every signature check, pass or fail, as its own record — not only the fact that a job ran
+
+---
+
+Each stage leaves the system working and backward compatible. Stopping after
+stage 1 is a real improvement on its own; there is no need to reach stage 5 in
+one go.

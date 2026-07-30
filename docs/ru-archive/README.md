@@ -26,6 +26,10 @@ Paths mirror the repository, so `docs/README.md` archives as
 | `docs/ETL_PIPELINE.md` | `docs/ETL_PIPELINE.md` | 2026-07-29 |
 | `docs/SPECIFICATION.md` | `docs/SPECIFICATION.md` | 2026-07-29 |
 | `docs/USER_GUIDE.md` | `docs/USER_GUIDE.md` | 2026-07-29 |
+| `docs/ACCESS_ADAPTER.md` | `docs/ACCESS_ADAPTER.md` | 2026-07-29 |
+| `docs/S3_AS_SYNC_BROKER.md` | `docs/S3_AS_SYNC_BROKER.md` | 2026-07-29 |
+| `docs/SCENARIO_TRUST.md` | `docs/SCENARIO_TRUST.md` | 2026-07-29 |
+| `docs/tdtp-v14-protocol-schema.md` | `docs/tdtp-v14-protocol-schema.md` | 2026-07-29 |
 
 ## When a document is only partly stale
 

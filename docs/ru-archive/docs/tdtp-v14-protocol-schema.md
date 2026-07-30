@@ -3,9 +3,9 @@
 > (including v1.5's encryption redesign). Kept here unchanged for anyone
 > with an existing link to this file; not maintained going forward.
 
-# TDTP v1.4 — how the protocol is used
+# TDTP v1.4 — схема использования протокола
 
-## Participants
+## Участники
 
 ```
 ┌─────────────┐        ┌──────────────────┐        ┌─────────────┐
@@ -21,7 +21,7 @@
 
 ---
 
-## PRODUCER: preparing a packet
+## PRODUCER: подготовка пакета
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -37,13 +37,13 @@
 │     POST /api/hashes                                             │
 │     → Mercury: SET NX mercury:hash:{uuid}:{part}                │
 │     → 201 Created  ✓                                            │
-│     → 409 Conflict ✗ (slot taken — attacker got there first)    │
+│     → 409 Conflict ✗ (слот занят — атакер опередил, LOG+ALERT)  │
 │                                                                  │
 │  4. Send packet to queue / S3 / broker                          │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-The packet's XML:
+XML заголовок пакета:
 ```xml
 <DataPacket protocol="TDTP" version="1.4"
             xxh3="a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5">
@@ -69,7 +69,7 @@ The packet's XML:
 
 ---
 
-## CONSUMER: pre-flight, then processing
+## CONSUMER: pre-flight → обработка
 
 ```
 receive packet
@@ -90,8 +90,8 @@ receive packet
                            │
           ┌────────────────┼───────────────────────────────────┐
           │                │                                    │
-    registered=true  registered=false              Mercury unreachable  
-    match=true       (no such slot)                (ErrMercuryUnavailable)
+    registered=true  registered=false              Mercury недоступен
+    match=true       (слот не найден)              (ErrMercuryUnavailable)
           │                │                                    │
           │       ErrHashNotRegistered              ┌───────────┴──────────────┐
           │          BLOCK + LOG ✗           policy=Block  policy=Degrade  policy=Downgrade
@@ -140,57 +140,57 @@ receive packet
 
 ---
 
-## The three fallback policies
+## Три политики fallback
 
-| Policy | When Mercury is unreachable | Security | Availability |
+| Policy | Mercury недоступен | Безопасность | Доступность |
 |---|---|---|---|
-| `FallbackBlock` | Block, return an error | ★★★ | ★ |
-| `FallbackDegrade` | Continue with the local xxh3 check only | ★★ | ★★★ |
-| `FallbackDowngrade` | Convert to v1.3.1 in place | ★ | ★★★ |
+| `FallbackBlock` | Блок, ошибка | ★★★ | ★ |
+| `FallbackDegrade` | Продолжить, только локальный xxh3 | ★★ | ★★★ |
+| `FallbackDowngrade` | Конвертировать в v1.3.1 in-place | ★ | ★★★ |
 
-**Choosing one:**
+**Рекомендации по выбору политики:**
 
 ```yaml
-# Financial reports, medical data, legally significant documents:
-fallback_policy: block        # no Mercury means no data
+# Финансовые отчёты, медицинские данные, юридически значимые документы:
+fallback_policy: block        # нет Mercury = нет данных
 
-# Operational data that must keep flowing (logs, metrics):
-fallback_policy: degrade      # local integrity is still guaranteed
+# Операционные данные с требованием непрерывности (логи, метрики):
+fallback_policy: degrade      # локальная целостность гарантирована
 
-# Integrating with legacy systems that only speak v1.3.1:
-fallback_policy: downgrade    # drop the version automatically
+# Интеграция с legacy-системами только v1.3.1:
+fallback_policy: downgrade    # автоматический откат версии
 ```
 
 ---
 
-## What each level actually checks
+## Что проверяет каждый уровень
 
 ```
 Level 1: Mercury (executor control)
-  ✓ The packet was registered by an authenticated producer
-  ✓ UUID+part → stored_xxh3 == pkt.xxh3 (not swapped after registration)
-  ✓ Re-registration is refused (SET NX)
-  ✗ Protects nothing while Mercury is unreachable
+  ✓ Пакет зарегистрирован аутентифицированным продюсером
+  ✓ UUID+part → stored_xxh3 == pkt.xxh3 (не подменён после регистрации)
+  ✓ Повторная регистрация заблокирована (SET NX)
+  ✗ Не защищает: если Mercury недоступен
 
 Level 2: Local xxh3_128 (integrity)
-  ✓ The Schema is unaltered (fields, types, Dictionary)
-  ✓ The data rows are unaltered
-  ✓ The UUID salts the hash, so it is unique per packet
-  ✗ Protects nothing against an attacker who knows the algorithm and the UUID — both are public
+  ✓ Schema не изменена (поля, типы, Dictionary)
+  ✓ Строки данных не изменены
+  ✓ UUID использован как соль — хэш уникален для каждого пакета
+  ✗ Не защищает: атакер знает алгоритм и UUID (публичны)
 
 Level 3: Dictionary expansion (transparency)
-  ✓ @tokens are expanded to full values before anything reaches the database
-  ✓ The downstream system sees plain values only
-  ✓ Backward compatible with pre-v1.4 adapters
+  ✓ @tokens заменены полными значениями до записи в БД
+  ✓ Downstream-система видит только plain-значения
+  ✓ Обратная совместимость с pre-v1.4 адаптерами
 
 Data.checksum (legacy, v1.3.1+):
-  ✓ xxh3_64 of the compressed blob — catches corrupted compression
-  ✗ Does not replace levels 1 and 2
+  ✓ xxh3_64 сжатого блоба — защита от битого сжатия
+  ✗ Не заменяет уровни 1-2
 ```
 
 ---
 
-## Pre-v1.4 packets are untouched
+## Pre-v1.4 пакеты — без изменений
 
 ```
 v1.0 / v1.3.1 packet
@@ -207,11 +207,11 @@ pass-through (return immediately)
 DB write / adapter
 ```
 
-None of the new checks run. The behaviour is identical to earlier versions.
+Ни одна из новых проверок не запускается. Поведение идентично предыдущим версиям.
 
 ---
 
-## Using it from code
+## Использование в коде
 
 ```go
 // PRODUCER
@@ -235,23 +235,23 @@ if err != nil {
 if result.Degraded {
     log.Warn().Str("reason", result.DegradedReason).Msg("degraded mode")
 }
-// received is now ready for the database:
-// - the Dictionary has been expanded
-// - Version may read "1.3.1" if FallbackDowngrade was applied
+// received теперь готов к записи в БД:
+// - Dictionary развёрнут
+// - Version может быть "1.3.1" если применён FallbackDowngrade
 adapter.Write(received)
 broker.Ack(received)
 ```
 
 ---
 
-## Attacks, and what stops them
+## Атаки и защита
 
-| Attack | What stops it |
+| Атака | Защита |
 |---|---|
-| Alter the data rows | Level 2: Data.xxh3 will not match |
-| Alter the schema (a field, a type) | Level 2: Schema.xxh3 will not match |
-| Recompute pkt.xxh3 to match the new content | Level 1: stored_xxh3 in Mercury no longer equals pkt.xxh3 |
-| Pre-register a forgery with Mercury | SET NX: the producer already holds the slot |
-| DDoS Mercury to bypass the check | FallbackBlock: no Mercury means no data |
-| Replay an old packet | The UUID is unique; Level 1 returns the stored hash |
-| Alter only the Dictionary | Level 2: Schema.xxh3 covers the Dictionary bytes |
+| Изменить строки данных | Level 2: Data.xxh3 не совпадёт |
+| Изменить схему (поле/тип) | Level 2: Schema.xxh3 не совпадёт |
+| Обновить pkt.xxh3 под новый контент | Level 1: stored_xxh3 в Mercury ≠ pkt.xxh3 |
+| Зарегистрировать фейк в Mercury заранее | SET NX: слот уже занят продюсером |
+| DDoS Mercury для обхода проверки | FallbackBlock: без Mercury = нет данных |
+| Replay: отправить старый пакет ещё раз | UUID уникален; Level 1 вернёт stored hash |
+| Изменить только Dictionary | Level 2: Schema.xxh3 включает Dictionary bytes |

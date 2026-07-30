@@ -1,146 +1,160 @@
-# S3 как брокер синхронизации данных в TDTP
+# S3 as a synchronisation broker for TDTP
 
-## Зачем это нужно
+## Why
 
-Классические message brokers (RabbitMQ, Kafka) работают по модели **push/subscribe** — данные
-исчезают из очереди после получения. Это отлично для потоков событий, но плохо подходит для
-передачи **снапшотов таблиц** между изолированными узлами: нет гарантий повторного чтения, нет
-встроенного хранения, сложна маршрутизация между дата-центрами с закрытыми сетями.
+Classic message brokers — RabbitMQ, Kafka — are **push/subscribe**: the data
+leaves the queue once it has been consumed. That is right for event streams and
+wrong for moving **table snapshots** between isolated nodes, where there is no
+guarantee of a second read, no storage to speak of, and routing between data
+centres on closed networks is awkward.
 
-S3-совместимое хранилище (AWS S3, MinIO, **SeaweedFS**) даёт другую модель:
-**store-and-forward** — производитель записал объект, потребитель прочитал когда готов.
-Объект живёт столько, сколько нужно.
+S3-compatible storage (AWS S3, MinIO, **SeaweedFS**) offers the other model:
+**store and forward**. The producer writes an object; the consumer reads it when
+it is ready. The object lives as long as it needs to.
 
-TDTP + S3 = **асинхронная, decoupled, самодокументируемая передача таблиц** между любыми узлами.
+TDTP over S3 is asynchronous, decoupled, self-describing table transfer between
+any two nodes.
 
 ---
 
-## Что S3 даёт как транспортный слой
+## What S3 gives as a transport
 
-### 1. Persist-первый, consume-по-готовности
+### 1. Persist first, consume when ready
 
 ```
-Node A (PostgreSQL)                         Node B (PostgreSQL / другая СУБД)
-──────────────────                          ──────────────────────────────────
+Node A (PostgreSQL)                         Node B (PostgreSQL, or any other DBMS)
+──────────────────                          ──────────────────────────────────────
 tdtpcli --export users                      tdtpcli --import s3://bucket/users_20260317.tdtp.xml
-  → s3://bucket/users_20260317.tdtp.xml         → import в локальную таблицу
+  → s3://bucket/users_20260317.tdtp.xml         → imports into its own table
 ```
 
-Node A и Node B не знают друг о друге. Не нужен прямой сетевой тоннель между ними.
-Достаточно, чтобы оба имели доступ к одному S3-endpoint.
+Node A and node B know nothing about each other, and need no direct tunnel
+between them. It is enough that both can reach the same S3 endpoint.
 
-### 2. Объект — самодокументируемый пакет
+### 2. The object describes itself
 
-Каждый объект несёт TDTP-метаданные в S3 headers (`x-amz-meta-tdtp-*`):
+Every uploaded object carries TDTP metadata in its S3 user metadata, which the
+AWS SDK sends as `x-amz-meta-` headers:
+
+| Key | Value | Set by |
+|-----|-------|--------|
+| `protocol` | `TDTP 1.0`, `TDTP 1.5`, or `TDTP-ENC 1.0` for a v1.3 encrypted blob | every upload |
+| `table` | the table name from the packet header | every upload |
+| `rows` | `RecordsInPart` — the number of **rows**, not packets | every upload |
+| `checksum` | the packet checksum, when one is present | `--export` |
+| `package_uuid` | the encryption package UUID | encrypted `--export` |
+| `pipeline` | the pipeline name | `--pipeline` with an S3 destination |
+
+So a consumer can `HEAD` the key and learn what is there without downloading it,
+which is enough to build routing, filtering and orchestration on top of the
+object store alone.
+
+> Note the keys have no `tdtp-` prefix: the header is `x-amz-meta-table`, not
+> `x-amz-meta-tdtp-table`. An earlier version of this document said otherwise.
+> XLSX uploads (`--export-xlsx` to an `s3://` path) carry no metadata at all.
+
+### 3. Compression at no extra cost
+
+The data reaches S3 already compressed — zstd level 3, roughly 4×:
 
 ```
-x-amz-meta-tdtp-protocol: TDTP 1.0
-x-amz-meta-tdtp-table:    users
-x-amz-meta-tdtp-rows:     1          ← число пакетов в файле
+PostgreSQL, 100 rows → 24 932 bytes of TDTP XML → 6 024 bytes of zstd → S3
 ```
 
-Потребитель может вызвать `HEAD /key` и понять **что** лежит, без скачивания.
-Это позволяет строить роутинг, фильтрацию и оркестрацию на уровне S3 metadata.
+Bandwidth between data centres is expensive, and the 4× is built into the
+protocol rather than bolted on.
 
-### 3. Compression без накладных расходов
+### 4. Fault tolerance without an orchestrator
 
-Данные уходят в S3 уже сжатыми (zstd level 3, ~4× ratio):
-
-```
-PostgreSQL 100 строк → 24 932 байт TDTP XML → 6 024 байт zstd → S3
-```
-
-Bandwidth между дата-центрами — дорогой ресурс. 4× экономия встроена в протокол.
-
-### 4. Отказоустойчивость без оркестратора
-
-Нет единой точки отказа. Если потребитель упал — объект остался в S3.
-Перезапустился — читает с того же ключа. Логика идемпотентности на стороне TDTP:
-стратегии `replace`, `upsert`, `append`.
+There is no single point of failure. If the consumer dies the object is still in
+S3; when it restarts it reads the same key. Idempotency is TDTP's side of the
+contract: the `replace`, `upsert` and `append` strategies.
 
 ---
 
-## Топологии синхронизации
+## Topologies
 
-### Hub-and-spoke (звезда через центральный S3)
+### Hub and spoke — a central bucket
 
 ```
-  ДЦ-1 (PostgreSQL)                ДЦ-2 (PostgreSQL)
+  DC-1 (PostgreSQL)                DC-2 (PostgreSQL)
        │  export                         │  import
        ▼                                 ▼
   s3://central-bucket/          s3://central-bucket/
        │                                 │
-       └─────────── S3 Broker ───────────┘
+       └─────────── S3 broker ───────────┘
                          │
-               ДЦ-3 (MSSQL / SQLite)
+               DC-3 (MSSQL / SQLite)
                     import
 ```
 
-Все узлы пишут/читают в один бакет. Нет прямых соединений ДЦ↔ДЦ.
+Every node reads and writes one bucket. No direct connections between data
+centres.
 
-### Pipeline (ETL → S3 → потребители)
+### Pipeline — ETL, then S3, then consumers
 
 ```
 PostgreSQL (source A)  ─┐
-PostgreSQL (source B)  ─┤─ ETL pipeline (JOIN + transform) ──► s3://reports/daily_2026-03-17.tdtp.xml
+PostgreSQL (source B)  ─┤─ ETL pipeline (join + transform) ──► s3://reports/daily_2026-03-17.tdtp.xml
                         │
                    (zstd 4×)
                         │
               ┌─────────┴──────────────┐
               ▼                        ▼
-      ДЦ Аналитика               ДЦ Архив
-  tdtpcli --import ...       tdtpcli --import ...
+      Analytics DC                 Archive DC
+  tdtpcli --import ...         tdtpcli --import ...
 ```
 
-Один объект в S3 — несколько потребителей. Данные прошли ETL (маскировка PII, JOIN, агрегация)
-**до** попадания в S3, не после.
+One object, several consumers. The data went through ETL — PII masking, joins,
+aggregation — **before** it reached S3, not after.
 
-### Edge-to-cloud (периферийный узел)
+### Edge to cloud
 
 ```
-Промышленный объект (закрытая сеть)     Облако / корпоративный ДЦ
+Industrial site (closed network)        Cloud or corporate DC
 ─────────────────────────────────       ──────────────────────────
-SQLite / PostgreSQL на edge-узле        Центральный PostgreSQL
+SQLite / PostgreSQL on the edge node    Central PostgreSQL
 tdtpcli --export sensors                tdtpcli --import s3://...
-  → s3://seaweedfs-edge:8333/...    ──► читает тот же SeaweedFS
-     (SeaweedFS локально)               или AWS S3
+  → s3://seaweedfs-edge:8333/...    ──► reads the same SeaweedFS,
+     (SeaweedFS running locally)         or AWS S3
 ```
 
-Edge-узел разворачивает **SeaweedFS локально** — полноценный S3 без интернета.
-При восстановлении сети — объект реплицируется или вычитывается централизованно.
+The edge node runs **SeaweedFS locally** — a complete S3 with no internet. When
+connectivity returns the object is replicated, or read centrally.
 
 ---
 
-## S3 vs классические message brokers
+## S3 against a classic message broker
 
-| Характеристика        | RabbitMQ / Kafka     | S3 / SeaweedFS           |
-|-----------------------|----------------------|--------------------------|
-| Модель                | Push / Subscribe     | Store-and-Forward        |
-| Хранение после чтения | ❌ Удаляется          | ✅ Остаётся              |
-| Повторное чтение      | Kafka: да; RMQ: нет  | ✅ Всегда                |
-| Маршрутизация         | Exchange / Topics    | Бакеты / префиксы        |
-| Доступ без прямой сети | Сложно              | ✅ Через любой HTTP       |
-| Размер сообщения      | Ограничен (МБ)       | ✅ Гигабайты             |
-| Schema / формат       | Нет стандарта        | ✅ TDTP metadata в headers|
-| Оффлайн-узлы          | Проблема             | ✅ Читают при подключении |
-| Self-hosted без cloud | Да                   | ✅ SeaweedFS              |
+| | RabbitMQ / Kafka | S3 / SeaweedFS |
+|---|---|---|
+| Model | push / subscribe | store and forward |
+| Kept after reading | no | yes |
+| Re-readable | Kafka yes, RabbitMQ no | always |
+| Routing | exchanges and topics | buckets and prefixes |
+| Reachable without a direct network | awkward | over any HTTP |
+| Message size | megabytes | gigabytes |
+| Schema or format | no standard | TDTP metadata in the headers |
+| Offline nodes | a problem | they read when they connect |
+| Self-hosted without a cloud | yes | yes, SeaweedFS |
 
-**Вывод**: S3 — не замена брокерам событий. Это другая ниша:
-передача **батчевых снапшотов** между узлами с разной доступностью сети и разным расписанием.
+**This does not replace an event broker.** It is a different niche: batch
+snapshots between nodes with different network availability and different
+schedules.
 
 ---
 
-## SeaweedFS как self-hosted S3-брокер
+## SeaweedFS as a self-hosted S3 broker
 
-Ключевое преимущество SeaweedFS перед AWS S3 / MinIO в контексте TDTP:
+What it offers over AWS S3 and MinIO in this context:
 
-1. **Один бинарник** — `weed server` запускает master + volume + filer + S3 gateway
-2. **Нет cloud-зависимости** — работает в изолированных сетях, на edge, в air-gap ДЦ
-3. **IAM через локальный JSON** — не нужен AWS IAM, Vault, или внешний identity provider
-4. **Тот же AWS SDK** — `ForcePathStyle: true`, и любой S3-клиент работает без изменений
-5. **Встроенная репликация** — volume replication между несколькими SeaweedFS-узлами
+1. **One binary** — `weed server` brings up master, volume, filer and the S3 gateway
+2. **No cloud dependency** — works on isolated networks, at the edge, in air-gapped data centres
+3. **IAM from a local JSON file** — no AWS IAM, no Vault, no external identity provider
+4. **The same AWS SDK** — set `ForcePathStyle: true` and any S3 client works unchanged
+5. **Replication built in** — volume replication across SeaweedFS nodes
 
-Запуск (обязательные флаги для sandbox / private network):
+Starting it, with the flags a sandbox or private network needs:
 ```bash
 /tmp/weed server \
     -ip=127.0.0.1 \
@@ -152,7 +166,13 @@ Edge-узел разворачивает **SeaweedFS локально** — по
     -s3.config=/etc/seaweedfs/iam.json
 ```
 
-IAM конфиг (`/etc/seaweedfs/iam.json`):
+> **On Windows, and on SeaweedFS 4.17 in particular, this single-command form
+> has not worked reliably.** Start the four components separately and give the
+> S3 gateway its own config — `weed s3 -config=./s3.json` — and bind everything
+> to `127.0.0.1` explicitly. Check against your own version before assuming the
+> combined form works.
+
+The IAM configuration (`/etc/seaweedfs/iam.json`):
 ```json
 {
   "identities": [
@@ -165,13 +185,14 @@ IAM конфиг (`/etc/seaweedfs/iam.json`):
 }
 ```
 
-> **Критично**: `identities`, не `accounts` — SeaweedFS отличается от документации MinIO.
+> **This matters:** the key is `identities`, not `accounts`. SeaweedFS differs
+> from MinIO's documentation here, and the error it gives is unhelpful.
 
 ---
 
-## Как TDTP-инструмент использует S3
+## Using S3 from the tool
 
-### Экспорт таблицы → S3 URI
+### Exporting a table to an S3 URI
 
 ```bash
 tdtpcli --config config.yaml \
@@ -180,7 +201,7 @@ tdtpcli --config config.yaml \
         --compress
 ```
 
-Конфиг `config.yaml`:
+`config.yaml`:
 ```yaml
 storage:
   type: s3
@@ -192,7 +213,7 @@ storage:
     secret_key: "testsecret"
 ```
 
-### Импорт из S3 URI
+### Importing from an S3 URI
 
 ```bash
 tdtpcli --config config.yaml \
@@ -201,7 +222,10 @@ tdtpcli --config config.yaml \
         --strategy replace
 ```
 
-### ETL pipeline с S3 destination
+A multi-part export is discovered automatically: naming the base key is enough,
+and every `_part_N_of_M` object is found and reassembled.
+
+### An ETL pipeline writing to S3
 
 ```yaml
 output:
@@ -219,18 +243,19 @@ output:
 
 ---
 
-## Что это даёт инструменту в целом
+## What this changes
 
-До S3-интеграции TDTP был **точка-в-точку**: экспорт в файл → ручная передача → импорт.
+Before the S3 integration TDTP was point to point: export to a file, move the
+file somehow, import it.
 
-После S3-интеграции TDTP стал **распределённым**: любой узел с доступом к S3-endpoint
-может быть производителем или потребителем данных, без прямой связи с источником.
+With it, any node that can reach an S3 endpoint can be a producer or a consumer,
+with no direct link to the source. That turns the tool from an ETL utility into
+a synchronisation protocol between:
 
-Это превращает TDTP из утилиты ETL в **протокол синхронизации данных** между:
-- географически разнесёнными дата-центрами
-- cloud и on-premise узлами
-- edge-устройствами и центральным хранилищем
-- любыми СУБД с разными расписаниями работы
+- geographically separated data centres
+- cloud and on-premise nodes
+- edge devices and central storage
+- databases of any kind running on unrelated schedules
 
-S3-bucket становится **точкой рандеву** — производитель и потребитель встречаются
-в хранилище, а не в сети.
+The bucket becomes the meeting point: producer and consumer meet in storage
+rather than on the network.
