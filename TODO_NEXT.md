@@ -439,17 +439,34 @@ size suggests.
 the `cmd/tdtp-xray/*` docs, `libcs/BUILD.md`, `docker/sprint4/README.md`,
 `scripts/*`. Needed to accept outside contributions, not to be used.
 
-### Tier 5 — do NOT translate; decide whether to ship them at all (~26 K)
+### Tier 5 — do NOT translate; decide whether to ship them at all (~1.5 K left)
 
 The cheapest translation is the one that is not done. These are internal working
 artifacts that happen to sit in the repository:
 
-`docs/xZMercury-TDTP-TZ-v1.2.md` (8 639, a statement of work),
 `cmd/tdtp-xray/CAST_IN_WHERE_ORDER_BY.md` (1 463).
 
 Decision needed: move them under an internal path excluded from the published
 package, or leave them and accept that a reader meets Russian working notes
 scattered among the documentation. Translating them is the worst of the three.
+
+**`docs/xZMercury-TDTP-TZ-v1.2.md` was resolved on 2026-07-30, not left
+pending.** Checked against the code rather than translated, and the check
+found it did not merely need a translation — it needed retiring. §15 frames
+Ed25519 signing, a certificate authority and tiered licensing as a
+speculative, unbuilt, separately-sold future product ("chiptdtp"). All three
+exist today, shipped inside the same product the document calls free:
+`pkg/license` (three real tiers), `xzmercury/internal/ca` (challenge-response
+enrollment), and the orchestrator's trust gate that intersects them
+(`cmd/orchestrator/preflight.go`). Translating it would have produced a
+fluent, confident, wrong account of the licensing model — worse than a stale
+one nobody reads by mistake. It is archived at
+`docs/ru-archive/docs/xZMercury-TDTP-TZ-v1.2.md` as the historical record of
+what was planned, and replaced by `docs/XZMERCURY_SERVICE.md`, written from
+the code, which also names the real gaps found along the way (no admin check
+on hash revocation, no audit trail for hash operations, no quota on hash
+registration — distinct from the key-bind quota, which does exist) and a
+suggested order for closing them.
 
 **`CLAUDE.md` (7 589) and `AGENTS.md` (3 679) are explicitly not in this tier**
 (decided 2026-07-29). They stay where they are, and they are product surface
