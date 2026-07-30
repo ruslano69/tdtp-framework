@@ -1,50 +1,50 @@
-# Data Processors для TDTP Framework
+# Data processors
 
-Модуль процессоров обеспечивает трансформацию данных "на лету" при экспорте и импорте.
+Processors transform data in flight, on export and on import.
 
-## 🎯 Назначение
+## Purpose
 
-**Pre-processors** (выполняются при экспорте):
-- 🔒 Маскирование чувствительных данных
-- 🎭 Анонимизация персональной информации
-- 📏 Нормализация форматов
-- ✅ Валидация данных
+**Pre-processors** run on export:
+- masking sensitive data
+- anonymising personal information
+- normalising formats
+- validating data
 
-**Post-processors** (выполняются при импорте):
-- 🔍 Обогащение данных
-- 🔄 Трансформация под целевую систему
-- 🎲 Присвоение значений по умолчанию
-- 📊 Бизнес-логика на принимающей стороне
+**Post-processors** run on import:
+- enriching data
+- reshaping it for the target system
+- filling in defaults
+- business logic on the receiving side
 
-## 📦 Архитектура
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Экспорт (Export Flow)                              │
+│  Export flow                                        │
 │  ─────────────────────                              │
-│  БД → [Pre-processors] → TDTP пакет → Брокер        │
+│  DB → [pre-processors] → TDTP packet → broker       │
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│  Импорт (Import Flow)                               │
+│  Import flow                                        │
 │  ─────────────────────                              │
-│  Брокер → TDTP пакет → [Post-processors] → БД       │
+│  Broker → TDTP packet → [post-processors] → DB      │
 └─────────────────────────────────────────────────────┘
 ```
 
-## 🔧 Встроенные процессоры
+## The built-in processors
 
-### 1. FieldMasker - Маскирование данных
+### 1. FieldMasker — masking
 
-Скрывает чувствительную информацию для защиты PII.
+Hides sensitive information, to protect PII.
 
-**Типы маскирования:**
-- `partial` - маскирует середину (email: j***@example.com)
-- `middle` - маскирует среднюю часть (phone: +1 (555) XXX-X567)
-- `stars` - заменяет всё на звездочки (**** *****)
-- `first2_last2` - показывает только первые 2 и последние 2 символа
+**Masking modes:**
+- `partial` — masks the middle (email: j***@example.com)
+- `middle` — masks the central part (phone: +1 (555) XXX-X567)
+- `stars` — replaces everything with asterisks (**** *****)
+- `first2_last2` — shows only the first two and last two characters
 
-**Примеры:**
+**Examples:**
 ```yaml
 processors:
   pre_export:
@@ -58,23 +58,23 @@ processors:
 ```
 
 **Use cases:**
-- Выгрузка данных для тестовых окружений
-- Соответствие GDPR / 152-ФЗ
-- Безопасный обмен данными с подрядчиками
+- exporting data for a test environment
+- GDPR compliance, and the Russian 152-FZ equivalent
+- sharing data safely with a contractor
 
-### 2. FieldNormalizer - Нормализация данных
+### 2. FieldNormalizer — normalisation
 
-Приводит данные к единому формату.
+Brings data to one consistent format.
 
-**Правила нормализации:**
-- `phone` - приводит к международному формату (только цифры)
-- `email` - нижний регистр, без пробелов
-- `whitespace` - убирает лишние пробелы
-- `uppercase` - верхний регистр
-- `lowercase` - нижний регистр
-- `date` - формат YYYY-MM-DD
+**Normalisation rules:**
+- `phone` — international format, digits only
+- `email` — lower-cased, spaces stripped
+- `whitespace` — collapses redundant spaces
+- `uppercase`
+- `lowercase`
+- `date` — YYYY-MM-DD
 
-**Примеры:**
+**Examples:**
 ```yaml
 processors:
   pre_export:
@@ -89,32 +89,32 @@ processors:
 ```
 
 **Use cases:**
-- Очистка данных перед интеграцией
-- Приведение к стандартам целевой системы
-- Исправление ошибок ввода пользователей
+- cleaning data before an integration
+- conforming to the target system's conventions
+- fixing user-entry mistakes
 
-### 3. FieldValidator - Валидация данных
+### 3. FieldValidator — validation
 
-Проверяет качество данных перед экспортом или импортом.
+Checks data quality before an export or an import.
 
-**Правила валидации:**
-- `regex:pattern` - валидация по регулярному выражению
-- `range:min-max` - проверка числового диапазона (например: `range:0-150`)
-- `enum:val1,val2,...` - проверка по списку допустимых значений
-- `required` - проверка обязательности поля (не пустое)
-- `length:min-max` - проверка длины строки (например: `length:3-50`)
-- `email` - валидация email адреса
-- `phone` - валидация телефонного номера
-- `url` - валидация URL
-- `date` - валидация даты (формат YYYY-MM-DD)
+**Validation rules:**
+- `regex:pattern` — match a regular expression
+- `range:min-max` — a numeric range, for example `range:0-150`
+- `enum:val1,val2,...` — one of a list of permitted values
+- `required` — the field must not be empty
+- `length:min-max` — string length, for example `length:3-50`
+- `email` — a valid email address
+- `phone` — a valid telephone number
+- `url` — a valid URL
+- `date` — a valid date, YYYY-MM-DD
 
-**Примеры:**
+**Examples:**
 ```yaml
 processors:
   pre_export:
     - type: field_validator
       params:
-        stop_on_first_error: false  # false = собрать все ошибки, true = остановиться на первой
+        stop_on_first_error: false  # false = collect every error; true = stop at the first
         rules:
           email: email                         # john@example.com ✓
           age: range:18-65                     # 25 ✓, 17 ✗
@@ -127,44 +127,44 @@ processors:
   post_import:
     - type: field_validator
       params:
-        stop_on_first_error: true  # Остановиться на первой ошибке
+        stop_on_first_error: true  # stop at the first error
         rules:
           name:
-            - required              # Поле обязательно
-            - length:2-100          # Длина от 2 до 100 символов
+            - required              # must be present
+            - length:2-100          # between 2 and 100 characters
           price:
             - required
-            - range:0-1000000       # Цена от 0 до 1млн
+            - range:0-1000000       # a price from 0 to a million
 ```
 
-**Кастомные regex и сообщения об ошибках:**
+**Custom regexes and error messages:**
 ```yaml
 processors:
   pre_export:
     - type: field_validator
       params:
         rules:
-          sku: regex:^[A-Z]{3}-\d{5}$          # SKU формат: ABC-12345
+          sku: regex:^[A-Z]{3}-\d{5}$          # SKU format: ABC-12345
           postal_code: regex:^\d{5}(-\d{4})?$  # US ZIP code
 ```
 
 **Use cases:**
-- Проверка качества данных перед экспортом
-- Предотвращение импорта невалидных данных
-- Соответствие бизнес-правилам
-- Ранее обнаружение проблем в данных
+- checking data quality before an export
+- stopping invalid data from being imported
+- enforcing business rules
+- catching data problems early
 
-## 🚀 Использование
+## Usage
 
-### В конфигурации (config.yaml)
+### In the configuration (config.yaml)
 
 ```yaml
 database:
-  # ... конфигурация БД ...
+  # ... database configuration ...
 
-# Конфигурация процессоров
+# Processor configuration
 processors:
-  # Процессоры для экспорта
+  # Processors for export
   pre_export:
     - type: field_masker
       params:
@@ -179,7 +179,7 @@ processors:
           phone: phone
           email: email
 
-  # Процессоры для импорта
+  # Processors for import
   post_import:
     - type: field_normalizer
       params:
@@ -188,7 +188,7 @@ processors:
           status: lowercase
 ```
 
-### В коде
+### In code
 
 ```go
 package main
@@ -202,7 +202,7 @@ import (
 func main() {
     ctx := context.Background()
 
-    // Создание процессоров через фабрику
+    // Build the processors through the factory
     factory := processors.NewFactory()
 
     config := processors.Config{
@@ -220,7 +220,7 @@ func main() {
         panic(err)
     }
 
-    // Применение процессора
+    // Apply one
     data := [][]string{
         {"john.doe@example.com", "+1 (555) 123-4567"},
         {"jane.smith@test.com", "+1 (555) 987-6543"},
@@ -246,13 +246,13 @@ func main() {
 }
 ```
 
-### Цепочка процессоров
+### A chain of processors
 
 ```go
-// Создание цепочки
+// Create the chain
 chain := processors.NewChain()
 
-// Добавление процессоров
+// Add processors
 masker := processors.NewFieldMasker(map[string]processors.MaskPattern{
     "email": processors.MaskPartial,
 })
@@ -263,11 +263,11 @@ normalizer := processors.NewFieldNormalizer(map[string]processors.NormalizeRule{
 chain.Add(masker)
 chain.Add(normalizer)
 
-// Применение всей цепочки
+// Apply the whole chain
 processed, err := chain.Process(ctx, data, schema)
 ```
 
-### Создание цепочки из конфигурации
+### Building a chain from configuration
 
 ```go
 configs := []processors.Config{
@@ -297,7 +297,7 @@ if err != nil {
 processed, err := chain.Process(ctx, data, schema)
 ```
 
-## 🔌 Создание собственного процессора
+## Writing your own processor
 
 ```go
 package myprocessors
@@ -308,10 +308,10 @@ import (
     "github.com/queuebridge/tdtp/pkg/processors"
 )
 
-// MyCustomProcessor - пример кастомного процессора
+// MyCustomProcessor is an example
 type MyCustomProcessor struct {
     name string
-    // ... параметры
+    // ... parameters
 }
 
 func (p *MyCustomProcessor) Name() string {
@@ -319,13 +319,13 @@ func (p *MyCustomProcessor) Name() string {
 }
 
 func (p *MyCustomProcessor) Process(ctx context.Context, data [][]string, schema packet.Schema) ([][]string, error) {
-    // Ваша логика обработки
+    // Your processing logic
     result := make([][]string, len(data))
     for i, row := range data {
         newRow := make([]string, len(row))
         copy(newRow, row)
 
-        // Трансформация данных
+        // Transform the value
         // ...
 
         result[i] = newRow
@@ -333,20 +333,20 @@ func (p *MyCustomProcessor) Process(ctx context.Context, data [][]string, schema
     return result, nil
 }
 
-// Регистрация в фабрике
+// Register it with the factory
 func init() {
     processors.DefaultFactory.Register("my_custom", func(params map[string]interface{}) (processors.Processor, error) {
         return &MyCustomProcessor{
             name: "my_custom",
-            // ... парсинг параметров
+            // ... parse the parameters
         }, nil
     })
 }
 ```
 
-## 📊 Примеры use cases
+## Worked use cases
 
-### 1. Безопасный экспорт для тестирования
+### 1. A safe export for testing
 
 ```yaml
 processors:
@@ -361,7 +361,7 @@ processors:
           ssn: stars
 ```
 
-### 2. Интеграция с внешней системой
+### 2. Integrating with an external system
 
 ```yaml
 processors:
@@ -369,7 +369,7 @@ processors:
     - type: field_normalizer
       params:
         fields:
-          phone: phone              # Международный формат (только цифры)
+          phone: phone              # international format, digits only
           email: email              # Lowercase
           country_code: uppercase   # ISO 3166-1 alpha-2
           created_at: date          # YYYY-MM-DD
@@ -378,11 +378,11 @@ processors:
     - type: field_normalizer
       params:
         fields:
-          status: lowercase         # Приведение к enum
+          status: lowercase         # to match the target's enum
           priority: uppercase       # HIGH, MEDIUM, LOW
 ```
 
-### 3. Очистка данных перед импортом
+### 3. Cleaning data before an import
 
 ```yaml
 processors:
@@ -390,41 +390,41 @@ processors:
     - type: field_normalizer
       params:
         fields:
-          name: whitespace          # Убрать лишние пробелы
+          name: whitespace          # collapse redundant spaces
           email: email              # Lowercase + trim
-          phone: phone              # Единый формат
+          phone: phone              # one consistent format
 ```
 
-## ⚙️ Производительность
+## Performance
 
-- Процессоры работают **in-memory** - быстро и эффективно
-- Регулярные выражения **предкомпилированы** при создании процессора
-- Обработка данных **построчная** - не требует загрузки всей таблицы в память
-- Цепочки процессоров выполняются **последовательно** - предсказуемый результат
+- processors work **in memory** — fast, and cheap
+- regular expressions are **compiled once**, when the processor is created
+- data is handled **row by row** — the whole table never needs to be in memory
+- chains run **in order**, so the result is predictable
 
-## 🔐 Безопасность
+## Security
 
-- Маскирование данных происходит **до отправки** через сеть
-- Оригинальные данные **не модифицируются** в исходной БД
-- Процессоры не имеют **доступа к сети** - только к данным в памяти
-- Конфигурация процессоров **хранится в config файле** - под контролем версий
+- masking happens **before** anything crosses the network
+- the original data in the source database is **never modified**
+- processors have **no network access** — only the data in memory
+- processor configuration **lives in the config file**, under version control
 
 ## 📝 Roadmap
 
-Планируемые процессоры:
-- [ ] **field_validator** - валидация данных (regex, ranges, enums)
-- [ ] **field_enricher** - обогащение данных из внешних источников
-- [ ] **field_transformer** - математические/строковые трансформации
-- [ ] **field_anonymizer** - замена на псевдонимы с сохранением ссылочной целостности
-- [ ] **field_encryptor** - шифрование/дешифрование полей
-- [ ] **conditional_processor** - условная обработка на основе значений других полей
+Planned processors:
+- [ ] **field_validator** — validation (regex, ranges, enums)
+- [ ] **field_enricher** — enrichment from an external source
+- [ ] **field_transformer** — arithmetic and string transformations
+- [ ] **field_anonymizer** — pseudonyms that preserve referential integrity
+- [ ] **field_encryptor** — encrypting and decrypting individual fields
+- [ ] **conditional_processor** — behaviour conditional on other fields' values
 
-## 🤝 Вклад
+## Contributing
 
-Процессоры легко расширяемы! Создавайте свои процессоры и делитесь ими с сообществом.
+Processors are easy to extend. Write your own and share them.
 
-**Требования к процессору:**
-1. Реализует интерфейс `Processor`
-2. Не имеет побочных эффектов (pure function)
-3. Покрыт unit-тестами
-4. Документирован с примерами
+**What a processor must do:**
+1. implement the `Processor` interface
+2. have no side effects — a pure function
+3. come with unit tests
+4. be documented, with examples

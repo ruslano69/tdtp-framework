@@ -39,6 +39,9 @@ Paths mirror the repository, so `docs/README.md` archives as
 | `pkg/sync/README.md` | `pkg/sync/README.md` | 2026-07-30 |
 | `pkg/adapters/postgres/README.md` | `pkg/adapters/postgres/README.md` | 2026-07-30 |
 | `pkg/adapters/mysql/README.md` | `pkg/adapters/mysql/README.md` | 2026-07-30 |
+| `pkg/processors/README.md` | `pkg/processors/README.md` | 2026-07-30 |
+| `pkg/adapters/base/README.md` | `pkg/adapters/base/README.md` | 2026-07-30 |
+| `pkg/adapters/sqlite/README.md` | `pkg/adapters/sqlite/README.md` | 2026-07-30 |
 
 ## The xZMercury statement of work is archived, not translated
 

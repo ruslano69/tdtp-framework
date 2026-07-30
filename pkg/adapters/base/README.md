@@ -1,42 +1,42 @@
-# Package base - Общие хелперы для адаптеров БД
+# Package base — shared helpers for database adapters
 
-## Обзор
+## Overview
 
-Пакет `base` предоставляет переиспользуемые компоненты для всех адаптеров БД, устраняя дублирование кода между SQLite, PostgreSQL, MS SQL Server и MySQL адаптерами.
+`base` holds the reusable pieces every database adapter needs, so the SQLite, PostgreSQL, MS SQL Server and MySQL adapters do not each carry their own copy.
 
-## Проблема
+## The problem
 
-До создания пакета `base`:
-- **~800 строк** дублированного кода экспорта в 4 адаптерах
-- **~600 строк** дублированного кода импорта в 4 адаптерах
-- **~300 строк** дублированного кода конвертации типов
-- **ИТОГО: ~1700 строк дублированного кода (33% кодовой базы адаптеров)**
+Before `base` existed:
+- **about 800 lines** of duplicated export code across four adapters
+- **about 600 lines** of duplicated import code across four adapters
+- **about 300 lines** of duplicated type conversion
+- **1700 lines of duplication in total — a third of the adapters' code**
 
-## Решение
+## The solution
 
-Пакет `base` централизует общую логику в переиспользуемых компонентах:
+`base` centralises the shared logic into reusable components:
 
 ```
 pkg/adapters/base/
-├── export_helper.go      - Общая логика экспорта
-├── import_helper.go      - Общая логика импорта
-├── type_converter.go     - Универсальная конвертация типов
-├── sql_adapter.go        - Адаптация SQL под разные СУБД
-└── doc.go                - Документация пакета
+├── export_helper.go      - shared export logic
+├── import_helper.go      - shared import logic
+├── type_converter.go     - type conversion for every adapter
+├── sql_adapter.go        - SQL dialect differences
+└── doc.go                - package documentation
 ```
 
-## Компоненты
+## The components
 
 ### 1. ExportHelper
 
-Общая логика экспорта данных в TDTP пакеты.
+Shared logic for exporting data into TDTP packets.
 
-**Методы:**
-- `ExportTable()` - экспорт всей таблицы
-- `ExportTableWithQuery()` - экспорт с TDTQL фильтрацией и SQL оптимизацией
-- `ExportTableIncremental()` - инкрементальная синхронизация
+**Methods:**
+- `ExportTable()` — export a whole table
+- `ExportTableWithQuery()` — export with TDTQL filtering, pushed down into SQL
+- `ExportTableIncremental()` — incremental synchronisation
 
-**Интерфейсы:**
+**Interfaces:**
 ```go
 type SchemaReader interface {
     GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error)
@@ -55,14 +55,14 @@ type SQLAdapter interface {
 
 ### 2. ImportHelper
 
-Общая логика импорта TDTP пакетов в БД.
+Shared logic for importing TDTP packets into a database.
 
-**Методы:**
-- `ImportPacket()` - импорт одного пакета
-- `ImportPackets()` - импорт нескольких пакетов атомарно
-- Поддержка временных таблиц для атомарной замены
+**Methods:**
+- `ImportPacket()` — import one packet
+- `ImportPackets()` — import several packets atomically
+- temporary tables, for an atomic replacement
 
-**Интерфейсы:**
+**Interfaces:**
 ```go
 type TableManager interface {
     TableExists(ctx context.Context, tableName string) (bool, error)
@@ -79,28 +79,28 @@ type DataInserter interface {
 
 ### 3. UniversalTypeConverter
 
-Универсальная конвертация типов данных между БД и TDTP форматом.
+Type conversion between a database's types and TDTP's.
 
-**Методы:**
-- `ConvertValueToTDTP()` - БД → TDTP формат
-- `DBValueToString()` - значение БД → строка (с учетом специфики СУБД)
-- `TypedValueToSQL()` - TDTP → SQL значение для PreparedStatement
+**Methods:**
+- `ConvertValueToTDTP()` — database value to TDTP
+- `DBValueToString()` — database value to a string, respecting that database's quirks
+- `TypedValueToSQL()` — TDTP value to a SQL parameter for a prepared statement
 
-**Поддержка специфичных типов:**
+**Database-specific types handled:**
 - **PostgreSQL**: UUID, JSONB, INET, ARRAY, NUMERIC
 - **MS SQL Server**: UNIQUEIDENTIFIER, TIMESTAMP/ROWVERSION, NVARCHAR
 
 ### 4. SQLAdapter
 
-Адаптация SQL под синтаксис разных СУБД.
+Papers over SQL dialect differences.
 
-**Реализации:**
-- `StandardSQLAdapter` - для SQLite, PostgreSQL, MySQL (LIMIT/OFFSET)
-- `MSSQLAdapter` - для MS SQL Server (OFFSET/FETCH)
+**Implementations:**
+- `StandardSQLAdapter` — SQLite, PostgreSQL, MySQL (LIMIT/OFFSET)
+- `MSSQLAdapter` — MS SQL Server (OFFSET/FETCH)
 
-## Использование
+## Usage
 
-### Шаг 1: Реализовать интерфейсы в адаптере
+### Step 1: implement the interfaces in your adapter
 
 ```go
 package sqlite
@@ -116,36 +116,36 @@ type Adapter struct {
     converter    *base.UniversalTypeConverter
 }
 
-// Реализуем SchemaReader
+// SchemaReader
 func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.Schema, error) {
-    // Специфичная логика для SQLite
+    // The SQLite-specific part
 }
 
-// Реализуем DataReader
+// DataReader
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema packet.Schema) ([][]string, error) {
-    // Специфичная логика для SQLite
+    // The SQLite-specific part
 }
 
 func (a *Adapter) ReadRowsWithSQL(ctx context.Context, sql string, schema packet.Schema) ([][]string, error) {
-    // Специфичная логика для SQLite
+    // The SQLite-specific part
 }
 
 func (a *Adapter) GetRowCount(ctx context.Context, tableName string) (int64, error) {
-    // Специфичная логика для SQLite
+    // The SQLite-specific part
 }
 
-// Реализуем TableManager
+// TableManager
 func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, error) { ... }
 func (a *Adapter) CreateTable(ctx context.Context, tableName string, schema packet.Schema) error { ... }
 func (a *Adapter) DropTable(ctx context.Context, tableName string) error { ... }
 func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) error { ... }
 
-// Реализуем DataInserter
+// DataInserter
 func (a *Adapter) InsertRows(ctx context.Context, tableName string, schema packet.Schema,
                              rows []packet.Row, strategy adapters.ImportStrategy) error { ... }
 ```
 
-### Шаг 2: Инициализировать хелперы
+### Step 2: wire up the helpers
 
 ```go
 func NewAdapter(dsn string) (*Adapter, error) {
@@ -156,23 +156,23 @@ func NewAdapter(dsn string) (*Adapter, error) {
 
     a := &Adapter{db: db}
 
-    // Инициализируем конвертер
+    // The converter
     a.converter = base.NewUniversalTypeConverter()
 
-    // Инициализируем export helper (без SQL адаптера для SQLite)
+    // The export helper — SQLite needs no SQL adapter
     a.exportHelper = base.NewExportHelper(a, a, a.converter, nil)
 
-    // Инициализируем import helper (с временными таблицами)
+    // The import helper, with temporary tables
     a.importHelper = base.NewImportHelper(a, a, a, true)
 
     return a, nil
 }
 ```
 
-### Шаг 3: Делегировать методы интерфейса Adapter
+### Step 3: delegate the Adapter interface methods
 
 ```go
-// Делегируем экспорт
+// Delegate the export
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {
     return a.exportHelper.ExportTable(ctx, tableName)
 }
@@ -182,7 +182,7 @@ func (a *Adapter) ExportTableWithQuery(ctx context.Context, tableName string,
     return a.exportHelper.ExportTableWithQuery(ctx, tableName, query, sender, recipient)
 }
 
-// Делегируем импорт
+// Delegate the import
 func (a *Adapter) ImportPacket(ctx context.Context, pkt *packet.DataPacket,
                                strategy adapters.ImportStrategy) error {
     return a.importHelper.ImportPacket(ctx, pkt, strategy)
@@ -194,7 +194,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 }
 ```
 
-## Примеры для разных СУБД
+## Examples per database
 
 ### SQLite
 
@@ -227,66 +227,66 @@ a.exportHelper = base.NewExportHelper(a, a, a.converter, sqlAdapter)
 a.importHelper = base.NewImportHelper(a, a, a, true)
 ```
 
-## Эффект от использования
+## What it bought
 
-| Метрика | До | После | Улучшение |
+| Measure | Before | After | Change |
 |---------|-----|-------|-----------|
-| Строк кода в одном адаптере | ~1000 | ~300 | **-70%** |
-| Дублирование кода | ~1700 строк | 0 | **-100%** |
-| Общий размер адаптеров | ~4500 строк | ~2800 строк | **-38%** |
-| Время добавления нового адаптера | ~2 дня | ~4 часа | **-75%** |
+| Lines in one adapter | about 1000 | about 300 | **-70%** |
+| Duplicated lines | about 1700 | 0 | **-100%** |
+| Total across the adapters | about 4500 lines | about 2800 | **-38%** |
+| Time to add an adapter | about 2 days | about 4 hours | **-75%** |
 
-## Преимущества
+## Why it is worth it
 
-✅ **Устранение дублирования** - общая логика в одном месте
-✅ **Упрощение поддержки** - изменения в одном месте применяются ко всем адаптерам
-✅ **Консистентность** - одинаковое поведение всех адаптеров
-✅ **Быстрое добавление новых адаптеров** - только специфичная логика
-✅ **Тестируемость** - хелперы легко тестировать отдельно
-✅ **Совместимость** - работает с ETL, streaming, compression
+- **No duplication** — the shared logic lives in one place
+- **Easier maintenance** — one change reaches every adapter
+- **Consistency** — every adapter behaves the same way
+- **A new adapter is quick** — you write only what is specific to it
+- **Testable** — the helpers can be tested on their own
+- **Compatible** — works with ETL, streaming and compression
 
-## Совместимость
+## Compatibility
 
-Пакет совместим с:
-- ✅ `pkg/core/packet` - генерация и парсинг TDTP пакетов
-- ✅ `pkg/core/schema` - система типов данных
-- ✅ `pkg/core/tdtql` - язык запросов и SQL оптимизация
-- ✅ `pkg/etl` - ETL конвейеры
-- ✅ Все существующие адаптеры
+It works with:
+- `pkg/core/packet` — generating and parsing TDTP packets
+- `pkg/core/schema` — the type system
+- `pkg/core/tdtql` — the query language and its SQL pushdown
+- `pkg/etl` — ETL pipelines
+- every existing adapter
 
-## Тестирование
+## Testing
 
-Создайте unit-тесты для хелперов:
+Write unit tests against the helpers:
 
 ```go
 func TestExportHelper_ExportTable(t *testing.T) {
     // Mock SchemaReader, DataReader
-    // Тестируем ExportTable()
+    // Test ExportTable()
 }
 
 func TestImportHelper_ImportPacket(t *testing.T) {
     // Mock TableManager, DataInserter
-    // Тестируем ImportPacket()
+    // Test ImportPacket()
 }
 
 func TestUniversalTypeConverter_ConvertValueToTDTP(t *testing.T) {
-    // Тестируем конвертацию для разных типов
+    // Test conversion across the types
 }
 ```
 
-## Миграция существующих адаптеров
+## Migrating an existing adapter
 
-См. пример миграции SQLite адаптера в `docs/MIGRATION_GUIDE.md` (будет создан).
+See [MIGRATION_EXAMPLE.md](MIGRATION_EXAMPLE.md) for the SQLite adapter's migration, worked through step by step.
 
-## Вопросы и поддержка
+## Where to look next
 
-При возникновении вопросов см.:
-- `pkg/adapters/base/doc.go` - полная документация пакета
-- `docs/REFACTORING_ROADMAP.md` - план рефакторинга
-- `docs/ARCHITECTURE_ANALYSIS.md` - анализ архитектуры
+If something here is unclear:
+- `pkg/adapters/base/doc.go` — the full package documentation
+- [MIGRATION_EXAMPLE.md](MIGRATION_EXAMPLE.md) — a complete before-and-after
+- [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md) — the framework's architecture, and how to write an adapter
 
 ---
 
-**Версия**: 1.0
-**Дата создания**: 2025-12-25
-**Автор**: Claude Code (refactoring initiative)
+**Version:** 1.0
+**Created:** 2025-12-25
+**Author:** Claude Code, as part of the refactoring initiative
