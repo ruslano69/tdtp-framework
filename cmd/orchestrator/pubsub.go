@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -88,15 +89,6 @@ func ValidatePubSubScenarios(subs []SubscriptionDef, scenes map[string]*Scenario
 		}
 	}
 	return nil
-}
-
-func statusAllowed(status string, allowed []string) bool {
-	for _, a := range allowed {
-		if a == status {
-			return true
-		}
-	}
-	return false
 }
 
 // setupPubSub wires the Redis pub/sub trigger and starts its Run loop in the
@@ -215,7 +207,7 @@ func (s *Subscriber) dispatch(payload string) {
 	if !ok {
 		return // no subscription cares about this result_name
 	}
-	if !statusAllowed(result.Status, def.OnStatus) {
+	if !slices.Contains(def.OnStatus, result.Status) {
 		return
 	}
 	scene, ok := s.scenes[def.Scenario]

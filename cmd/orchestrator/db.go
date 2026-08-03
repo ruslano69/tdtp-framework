@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	_ "modernc.org/sqlite"
 )
 
@@ -90,17 +91,73 @@ type OrchestratorDB struct {
 	db *sql.DB
 }
 
+// openPragmas are applied to the single connection before any schema work.
+//
+// busy_timeout goes FIRST, before journal_mode — the same ordering, for the
+// same reason, as pkg/adapters/sqlite's applyPragmaOptimizations: switching
+// the journal mode takes a write lock itself, so a race landing on that
+// statement has nothing to wait on if the timeout isn't in force yet.
+//
+// WAL matters here beyond write speed: /healthz calls CountActiveJobs on
+// every request, and in rollback-journal mode those readers block behind the
+// executor's writes. WAL lets them run concurrently. synchronous=NORMAL is
+// safe under WAL — a power loss can cost the last transactions, never the
+// integrity of the file.
+var openPragmas = []string{
+	"PRAGMA busy_timeout = 5000",
+	"PRAGMA journal_mode = WAL",
+	"PRAGMA synchronous = NORMAL",
+}
+
 // OpenOrchestratorDB opens (or creates) the orchestrator database.
+//
+// Schema and migrations run inside ONE transaction, not as ~21 separate
+// statements. SQLite DDL is transactional, so this is a change in the number
+// of commits, not in what the statements do — measured at 1.66s to open a
+// fresh database (1.14s for the schema, 0.52s across the eight ALTERs), which
+// is fsync per statement and nothing else. Every test that opens its own
+// database paid it: the orchestrator package took 555s, of which the great
+// majority was this function called 100-odd times.
 func OpenOrchestratorDB(path string) (*OrchestratorDB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("orchestrator db: open: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(orchSchema); err != nil {
-		return nil, fmt.Errorf("orchestrator db: schema: %w", err)
+
+	// One connection (SetMaxOpenConns(1)), so these stick for the process —
+	// no per-connection drift to worry about. A failure here is not fatal:
+	// WAL is unavailable on some network filesystems, and an orchestrator
+	// that runs slower is better than one that refuses to start.
+	for _, p := range openPragmas {
+		if _, err := db.Exec(p); err != nil {
+			log.Warn().Err(err).Str("pragma", p).Msg("orchestrator db: pragma failed, continuing")
+		}
 	}
-	// Idempotent migrations.
+
+	if err := applySchema(db); err != nil {
+		return nil, err
+	}
+	return &OrchestratorDB{db: db}, nil
+}
+
+// applySchema creates the tables and runs the idempotent column migrations in
+// a single transaction. Must not run inside another transaction — the caller
+// applies journal_mode first, which SQLite refuses to change mid-transaction.
+func applySchema(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("orchestrator db: begin schema: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op once committed
+
+	if _, err := tx.Exec(orchSchema); err != nil {
+		return fmt.Errorf("orchestrator db: schema: %w", err)
+	}
+
+	// Idempotent migrations. A duplicate-column error is expected on every
+	// open after the first; SQLite rejects it at prepare time, so the
+	// statement never runs and the surrounding transaction stays usable.
 	migrations := []struct {
 		col string
 		ddl string
@@ -115,13 +172,17 @@ func OpenOrchestratorDB(path string) (*OrchestratorDB, error) {
 		{"runner", `ALTER TABLE jobs ADD COLUMN runner TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, m := range migrations {
-		if _, err := db.Exec(m.ddl); err != nil {
+		if _, err := tx.Exec(m.ddl); err != nil {
 			if !isDuplicateColumnErr(err) {
-				return nil, fmt.Errorf("orchestrator db: migrate %s: %w", m.col, err)
+				return fmt.Errorf("orchestrator db: migrate %s: %w", m.col, err)
 			}
 		}
 	}
-	return &OrchestratorDB{db: db}, nil
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("orchestrator db: commit schema: %w", err)
+	}
+	return nil
 }
 
 // isDuplicateColumnErr returns true when SQLite rejects an ALTER TABLE ADD COLUMN

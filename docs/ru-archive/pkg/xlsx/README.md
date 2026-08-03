@@ -2,11 +2,11 @@
 
 Bidirectional converter between TDTP packets and Excel XLSX files.
 
-**What you get immediately:**
-- export from a database into Excel for analysis
-- import from Excel into a database with no programming
-- people work in the Excel they already know
-- ideal for business users
+**Мгновенный профит** 🍒:
+- Экспорт данных из БД в Excel для анализа
+- Импорт из Excel в БД без программирования
+- Работа в привычном Excel интерфейсе
+- Идеально для бизнес-пользователей
 
 ## Features
 

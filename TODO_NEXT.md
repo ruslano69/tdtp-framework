@@ -323,6 +323,84 @@ plan doc to match before starting Phase 1.5 implementation.
 
 ---
 
+## Oracle adapter — estimate (2026-08-03, not started)
+
+Raised while comparing the framework against Soft Review's integration
+services (their stack is Oracle PL/SQL + J2EE): Oracle is the one mainstream
+DBMS `pkg/adapters` does not cover, and in the banking/enterprise segment
+that is the gap that decides whether the framework is evaluated at all.
+
+**No architectural obstacle.** `adapters.Adapter` (17 methods) and the
+`base` helpers apply to Oracle unchanged; nothing in the shared layer needs
+redesigning. The reference point is the MySQL adapter — written last, "с нуля
+с использованием base helpers" (`pkg/adapters/mysql/adapter.go:22`), so it is
+a direct measurement of what a new adapter costs on the finished layer:
+**~1000 non-test lines** (adapter 249 / import 188 / inspect 213 /
+types 219 / export 133).
+
+### Estimate: 14–20 man-days, plan for 15–16
+
+| Work | Days | Risk |
+|---|---:|---|
+| Driver, DSN, pool, TNS/wallet, `Connect`/`Ping`/`Close` | 1–2 | med |
+| `types.go` — TDTP ↔ NUMBER/VARCHAR2/DATE/TIMESTAMP/CLOB/BLOB | 1.5–2 | low |
+| `SQLAdapter` — pagination + identifier quoting | 2–3 | **high** |
+| `inspect.go` — `ALL_TAB_COLUMNS`/`ALL_CONSTRAINTS`/`ALL_VIEWS` | 1–1.5 | low |
+| `import.go` — `MERGE INTO`, bulk insert, GTT | 2–3 | **high** |
+| Wiring: factory + `pkg/etl/config.go`, `cmd/tdtpcli` (4 files), `cmd/tdtpserve` (2), `cmd/tdtp-xray` (2) | 0.5 | low |
+| Tests (unit + integration, modelled on `pkg/adapters/mssql/integration_test.go`) | 3–4 | med |
+| Docs, CHANGELOG, help | 0.5 | low |
+| Shakeout against a real customer database | 2–3 | med |
+
+### The two high-risk items
+
+**Pagination.** `base.MSSQLAdapter.AdaptSQL` is 170 lines for three
+strategies (`TOP N` / `OFFSET-FETCH` / tail mode) precisely because SQL
+Server had no `OFFSET` before 2012. Oracle repeats the situation:
+`OFFSET .. FETCH NEXT` is 12c+, 11g needs `ROW_NUMBER()` in a subquery. If
+the target installations are 11g — normal in banking — budget the upper end.
+
+**`MERGE` + temporary tables.** `base.ImportHelper` takes
+`useTemporaryTables bool` and creates temp tables on the fly. Oracle global
+temporary tables are DDL objects, not per-session ones, so they cannot be
+created per import. Needs either a third mode in `ImportHelper` or an
+Oracle-specific `TableManager` — a boolean flag does not cover it.
+
+### Two round-trip traps
+
+- **`'' IS NULL`.** Oracle does not distinguish empty string from NULL, so a
+  packet value that is empty comes back as NULL after import→export. Not an
+  adapter bug — DBMS semantics. Needs a format-level decision (sentinel) and
+  an explicit round-trip test.
+- **Identifier case.** Unquoted names fold to upper case, quoted ones do not;
+  `Users` and `USERS` are different objects. Pick one policy and carry it
+  through `QuoteIdentifier` and `inspect`.
+
+### Config selectors (precedent already exists)
+
+MSSQL already carries `CompatibilityMode`, `StrictCompatibility`,
+`WarnOnIncompatible` in `adapters.Config` (`adapter.go:42`). Oracle fits the
+same shape: `CompatibilityMode: "11g"|"12c"|"auto"` selecting the pagination
+strategy, plus `EmptyStringMode` and `IdentifierCase` for the two traps
+above. `NoDateSentinels` and `Charset` already exist and only need Oracle
+values. Note the split: the selectors are configuration, but GTT handling and
+the empty-string policy are code behind them — those are the 4–6 days of
+high-risk work, not a settings change.
+
+### Driver decision — make it before starting
+
+- `go-ora` — pure Go, no Instant Client, keeps the single-static-binary
+  property the rest of the project relies on. **Recommended.**
+- `godror` — cgo + Oracle Instant Client on every machine and in CI; fuller
+  type coverage and faster bulk. If bulk import turns out to be the
+  bottleneck, add it as a second adapter behind a build tag, the way
+  `nokafka`/`nosqlite` already work.
+
+Oracle XE is free and enough for integration tests — no licensing obstacle
+to CI.
+
+---
+
 ## v2.0 Roadmap — Масштабування, паралелізм, стрімінг
 
 Великий перехід: від single-threaded ETL до паралельної та потокової обробки.
@@ -357,28 +435,44 @@ Add/drop columns, type changes при schema drift між версіями па�
 Standing practice after each sprint: map the touched package and look for
 hand-rolled stdlib. Run on `cmd/orchestrator`.
 
-### Reinvented stdlib (3 sites, mechanical)
+### Reinvented stdlib (3 sites, mechanical) — DONE 2026-08-03
 
-The package already imports `slices` in `preflight.go` and uses it correctly,
-so these are copies that predate it rather than a deliberate choice:
+The package already imported `slices` in `preflight.go` and used it correctly,
+so these were copies that predated it rather than a deliberate choice:
 
-- `auth.go:57` `AllowsScenario` — manual loop → `slices.Contains(p.Scenarios, name)`
-- `pubsub.go:93` `statusAllowed` — the whole function is `slices.Contains(allowed, status)`; delete it and inline
-- `routes.go:388` `queryLimit` — `if n > max { return max }` → `min(n, max)`. The
-  parameter is also named `max`, shadowing the builtin, which reads as a bug.
+- [x] `auth.go` `AllowsScenario` — manual loop → `slices.Contains(p.Scenarios, name)`.
+      The empty-allowlist early return stays: "no list = everything allowed" is
+      its own rule, not part of the search.
+- [x] `pubsub.go` `statusAllowed` — function deleted, inlined as
+      `slices.Contains(def.OnStatus, result.Status)`. `TestStatusAllowed` went
+      with it (it would now be testing stdlib); the behaviour it covered is
+      already exercised end-to-end by `TestSubscriber_IgnoresDisallowedStatus`
+      through a real miniredis.
+- [x] `routes.go` `queryLimit` — `min(n, maxRows)`. The parameter was renamed off
+      `max`, which had been shadowing the builtin — that shadowing was itself the
+      reason `min`/`max` could not be used there.
 
-None of these is a defect: the code works and is covered. They are on the list
-so they stop being copied.
+None of these was a defect: the code worked and was covered. They were on the
+list so they stopped being copied.
 
-### `newRouter` — the one complexity outlier
+### `newRouter` — the one complexity outlier — DONE 2026-08-03
 
-`routes.go:36`, depth 5, complexity 16, 255 lines, VERY_HIGH. Everything else in
-the package tops out at HIGH=8, which is ordinary for Go with error handling.
+Was `routes.go:36`, depth 5, complexity 16, VERY_HIGH — and **308 lines by the
+time it was split, up from the 255 measured on 2026-07-29**: every endpoint
+added in the meantime (`/jobs?limit`, stop/cancel) landed in the same body.
+Everything else in the package tops out at HIGH=8, ordinary for Go with error
+handling.
 
-It is a route table with handler closures nested inside. It splits along its own
-seams — one registration function per group (`/scenarios`, `/jobs`,
-`/schedules`, `/tokens`) — but that is a rearrangement, not a substitution, so
-it wants its own change rather than riding along with the cleanups above.
+Split along its own seams — the section comments already in the body became one
+`registerXxxRoutes` function each (public, scenarios, jobs, results, schedules,
+tokens, requests), `newRouter` down to 22 lines. Each takes `routerDeps` and
+binds only the fields it uses. Pure rearrangement: middleware, registration
+order and handler bodies untouched.
+
+**Why it kept growing, recorded so the split holds:** handler closures make
+length invisible — nothing in a diff that appends one more `r.Get(...)` looks
+like it is adding forty lines to a function. Adding an endpoint now means
+picking a group.
 
 ---
 
@@ -439,17 +533,34 @@ size suggests.
 the `cmd/tdtp-xray/*` docs, `libcs/BUILD.md`, `docker/sprint4/README.md`,
 `scripts/*`. Needed to accept outside contributions, not to be used.
 
-### Tier 5 — do NOT translate; decide whether to ship them at all (~26 K)
+### Tier 5 — do NOT translate; decide whether to ship them at all (~1.5 K left)
 
 The cheapest translation is the one that is not done. These are internal working
 artifacts that happen to sit in the repository:
 
-`docs/xZMercury-TDTP-TZ-v1.2.md` (8 639, a statement of work),
 `cmd/tdtp-xray/CAST_IN_WHERE_ORDER_BY.md` (1 463).
 
 Decision needed: move them under an internal path excluded from the published
 package, or leave them and accept that a reader meets Russian working notes
 scattered among the documentation. Translating them is the worst of the three.
+
+**`docs/xZMercury-TDTP-TZ-v1.2.md` was resolved on 2026-07-30, not left
+pending.** Checked against the code rather than translated, and the check
+found it did not merely need a translation — it needed retiring. §15 frames
+Ed25519 signing, a certificate authority and tiered licensing as a
+speculative, unbuilt, separately-sold future product ("chiptdtp"). All three
+exist today, shipped inside the same product the document calls free:
+`pkg/license` (three real tiers), `xzmercury/internal/ca` (challenge-response
+enrollment), and the orchestrator's trust gate that intersects them
+(`cmd/orchestrator/preflight.go`). Translating it would have produced a
+fluent, confident, wrong account of the licensing model — worse than a stale
+one nobody reads by mistake. It is archived at
+`docs/ru-archive/docs/xZMercury-TDTP-TZ-v1.2.md` as the historical record of
+what was planned, and replaced by `docs/XZMERCURY_SERVICE.md`, written from
+the code, which also names the real gaps found along the way (no admin check
+on hash revocation, no audit trail for hash operations, no quota on hash
+registration — distinct from the key-bind quota, which does exist) and a
+suggested order for closing them.
 
 **`CLAUDE.md` (7 589) and `AGENTS.md` (3 679) are explicitly not in this tier**
 (decided 2026-07-29). They stay where they are, and they are product surface

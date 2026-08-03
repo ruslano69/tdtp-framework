@@ -31,6 +31,38 @@ Paths mirror the repository, so `docs/README.md` archives as
 | `docs/SCENARIO_TRUST.md` | `docs/SCENARIO_TRUST.md` | 2026-07-29 |
 | `docs/tdtp-v14-protocol-schema.md` | `docs/tdtp-v14-protocol-schema.md` | 2026-07-29 |
 | `docs/DEVELOPER_GUIDE.md` | `docs/DEVELOPER_GUIDE.md` | 2026-07-29 |
+| `docs/xZMercury-TDTP-TZ-v1.2.md` | `docs/xZMercury-TDTP-TZ-v1.2.md` | never — see below |
+| `CLAUDE.md` | `CLAUDE.md` | 2026-07-30 |
+| `AGENTS.md` | `AGENTS.md` | 2026-07-30 |
+| `pkg/xlsx/README.md` | `pkg/xlsx/README.md` | 2026-07-30 |
+| `pkg/retry/README.md` | `pkg/retry/README.md` | 2026-07-30 |
+| `pkg/sync/README.md` | `pkg/sync/README.md` | 2026-07-30 |
+| `pkg/adapters/postgres/README.md` | `pkg/adapters/postgres/README.md` | 2026-07-30 |
+| `pkg/adapters/mysql/README.md` | `pkg/adapters/mysql/README.md` | 2026-07-30 |
+| `pkg/processors/README.md` | `pkg/processors/README.md` | 2026-07-30 |
+| `pkg/adapters/base/README.md` | `pkg/adapters/base/README.md` | 2026-07-30 |
+| `pkg/adapters/sqlite/README.md` | `pkg/adapters/sqlite/README.md` | 2026-07-30 |
+| `pkg/adapters/mssql/README.md` | `pkg/adapters/mssql/README.md` | 2026-07-30 |
+| `pkg/adapters/access/README.md` | `pkg/adapters/access/README.md` | 2026-07-30 |
+
+## The xZMercury statement of work is archived, not translated
+
+`xZMercury-TDTP-TZ-v1.2.md` is a different case from everything else here: it was
+checked against the code on 2026-07-30 rather than translated, and the check
+found it actively misleading rather than merely stale. It frames signing,
+licensing and a certificate authority as a speculative future paid tier
+("chiptdtp", separate from the free product) — but that tier shipped, under a
+different shape, built directly into the product this document calls free:
+`pkg/license` (three real tiers, Ed25519-signed), `xzmercury/internal/ca`
+(enrollment and re-authorization), and the orchestrator's trust gate that
+intersects the two. A reader would come away believing licensing was an
+unbuilt idea.
+
+Translating a wrong document produces a fluent wrong document, which is worse
+than a Russian one nobody reads by mistake. The replacement is
+[`docs/XZMERCURY_SERVICE.md`](../XZMERCURY_SERVICE.md), written from the code
+rather than from this file. This one stays here as the historical record of
+what was originally planned, in the language it was planned in.
 
 ## When a document is only partly stale
 

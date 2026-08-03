@@ -18,6 +18,7 @@ before. This page is the map of everything else.
 | Encrypt what leaves the system | [SPECIFICATION.md](./SPECIFICATION.md) · [ETL_PIPELINE.md](./ETL_PIPELINE.md) |
 | Schedule work and govern it | [ORCHESTRATOR_SCENARIOS.md](./ORCHESTRATOR_SCENARIOS.md) |
 | Decide what a scenario is allowed to do | [SCENARIO_TRUST.md](./SCENARIO_TRUST.md) |
+| Understand xZMercury's integrity, trust and licensing | [XZMERCURY_SERVICE.md](./XZMERCURY_SERVICE.md) |
 | Deploy the whole thing | [DEPLOYMENT.md](./DEPLOYMENT.md) |
 | Build against the framework | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) |
 | Write a new database adapter | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) · [pkg/adapters/base](../pkg/adapters/base/README.md) |
@@ -64,6 +65,11 @@ what is refused when either side says no.
 
 **[cmd/orchestrator/README.md](../cmd/orchestrator/README.md)** — the server
 itself: HTTP API, tokens and roles, runners, metrics.
+
+**[XZMERCURY_SERVICE.md](./XZMERCURY_SERVICE.md)** — what xZMercury actually
+does beyond key binding: the packet integrity notary, consumer pre-flight and
+fallback policies, and the licence/CA trust layer the orchestrator's gate
+above depends on.
 
 ---
 

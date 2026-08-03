@@ -188,6 +188,7 @@ func TestVacuumReclaimsSpace(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
+	checkpoint(t, db)
 	sizeBefore := fileSize(t, path)
 
 	if _, err := db.PurgeJobLogs(RetentionPolicy{Weeks: 2}.Cutoff(now)); err != nil {
@@ -196,6 +197,7 @@ func TestVacuumReclaimsSpace(t *testing.T) {
 
 	// Clearing the text does not shrink the file — this is the whole reason a
 	// VACUUM exists in this design.
+	checkpoint(t, db)
 	if got := fileSize(t, path); got < sizeBefore {
 		t.Fatalf("file shrank from %d to %d without a VACUUM — assumption is wrong", sizeBefore, got)
 	}
@@ -226,6 +228,7 @@ func TestVacuumReclaimsSpace(t *testing.T) {
 	if err := db.Vacuum(); err != nil {
 		t.Fatalf("vacuum: %v", err)
 	}
+	checkpoint(t, db)
 	sizeAfter := fileSize(t, path)
 	if sizeAfter >= sizeBefore {
 		t.Fatalf("vacuum did not shrink the file: %d -> %d", sizeBefore, sizeAfter)
@@ -236,6 +239,22 @@ func TestVacuumReclaimsSpace(t *testing.T) {
 		t.Fatalf("freelist estimated %d of %d actually reclaimed — if these now agree, "+
 			"re-check whether sizing the vacuum by freelist is viable after all",
 			freelistEstimate, actual)
+	}
+}
+
+// checkpoint forces the WAL back into the main database file.
+//
+// Needed only by this test, and only because it is the one test that reasons
+// about the file on disk rather than about rows. Under WAL a committed write
+// lives in orch.db-wal until a checkpoint moves it, so os.Stat on orch.db
+// reports 4 KB for a database holding 2.7 MB of jobs — and SizeBytes, which
+// counts pages rather than bytes on disk, would disagree with it by that whole
+// amount. Production never needs this: SizeBytes is deliberately written to
+// need no path and no reasoning about the files sitting next to it.
+func checkpoint(t *testing.T, db *OrchestratorDB) {
+	t.Helper()
+	if _, err := db.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatalf("wal_checkpoint: %v", err)
 	}
 }
 

@@ -1,37 +1,37 @@
 # MS SQL Server Adapter - TDTP Framework
 
-The MS SQL Server adapter: two-way integration with Microsoft SQL Server 2012 and later.
+MS SQL Server адаптер для двунаправленной интеграции с Microsoft SQL Server 2012+.
 
-## Status
+## Статус
 
 ✅ **Production Ready** (v1.0)
 
-**Implemented:**
-- `types.go` — the full MS SQL Server/TDTP type mapping
-- `adapter.go` — connection through github.com/microsoft/go-mssqldb
-- `export.go` — table export with TDTQL pushed into SQL
-- `import.go` — import, handling IDENTITY_INSERT
-- `integration_test.go` — full integration coverage
+**Реализовано:**
+- ✅ `types.go` - полный маппинг типов MS SQL Server ↔ TDTP
+- ✅ `adapter.go` - подключение через github.com/microsoft/go-mssqldb
+- ✅ `export.go` - экспорт таблиц с TDTQL оптимизацией
+- ✅ `import.go` - импорт данных с IDENTITY_INSERT
+- ✅ `integration_test.go` - полное интеграционное тестирование
 - ✅ Transaction support - BEGIN/COMMIT/ROLLBACK
-- import strategies — REPLACE, IGNORE, FAIL
+- ✅ Стратегии импорта - REPLACE, IGNORE, FAIL
 
 ---
 
-## Requirements
+## Требования
 
-- **MS SQL Server:** 2012 or later, for DATE, DATETIME2 and OFFSET/FETCH
+- **MS SQL Server:** 2012 или выше (поддержка DATE, DATETIME2, OFFSET/FETCH)
 - **Driver:** `github.com/microsoft/go-mssqldb`
 - **Go:** 1.21+
 
 ---
 
-## What it does
+## Возможности
 
-### Data types
+### Поддержка типов данных
 
-**Standard types:**
+**Стандартные типы:**
 ```
-MS SQL Server       TDTP            Back again
+MS SQL Server       TDTP            Обратно
 ─────────────────────────────────────────────────
 INT                 INTEGER         INT
 BIGINT              INTEGER         BIGINT
@@ -51,9 +51,9 @@ VARBINARY(n)        BLOB            VARBINARY(n)
 VARBINARY(MAX)      BLOB            VARBINARY(MAX)
 ```
 
-**MS SQL Server-specific types, carried through `subtype`:**
+**Специальные типы MS SQL Server (через subtype):**
 ```
-MS SQL Server       TDTP                        Back again
+MS SQL Server       TDTP                        Обратно
 ─────────────────────────────────────────────────────────────────
 UNIQUEIDENTIFIER    TEXT(36) (subtype="uuid")   UNIQUEIDENTIFIER
 MONEY               DECIMAL(19,4) (subtype="money") MONEY
@@ -63,53 +63,53 @@ FLOAT               REAL (subtype="float")      FLOAT
 REAL                REAL (subtype="real")       REAL
 ```
 
-### Implementation notes
+### Особенности реализации
 
 **IDENTITY_INSERT:**
-- turned on automatically when importing into a table with an IDENTITY column
-- lets explicit values go into IDENTITY fields
-- turned off again once the import finishes
+- Автоматически включается при импорте таблиц с IDENTITY-колонками
+- Позволяет вставлять явные значения в IDENTITY-поля
+- Автоматически отключается после импорта
 
-**Unicode:**
-- NVARCHAR is the default
-- VARCHAR only when the subtype says so
-- NVARCHAR is the right choice for anything international
+**Unicode поддержка:**
+- По умолчанию используется NVARCHAR (Unicode)
+- VARCHAR только если указан subtype
+- Рекомендуется NVARCHAR для международных приложений
 
-**Transactions:**
-- full support: BEGIN TRANSACTION, COMMIT, ROLLBACK
-- READ COMMITTED isolation by default
-- automatic rollback on error
+**Транзакции:**
+- Полная поддержка transactions: BEGIN TRANSACTION, COMMIT, ROLLBACK
+- Изоляция на уровне READ COMMITTED (по умолчанию)
+- Автоматический rollback при ошибках
 
-**TDTQL pushdown:**
-- TDTQL filters become a native SQL WHERE
-- the database does the filtering
-- ORDER BY, LIMIT and OFFSET, in SQL Server's own syntax
+**TDTQL Оптимизация:**
+- Фильтры TDTQL транслируются в native SQL WHERE
+- Push-down execution на уровне БД
+- Поддержка ORDER BY, LIMIT, OFFSET через SQL Server синтаксис
 
 ---
 
-## Installing
+## Установка
 
 ```bash
 go get github.com/queuebridge/tdtp/pkg/adapters/mssql
 ```
 
-### Importing the package
+### Импорт
 
 ```go
 import (
     "context"
     "github.com/queuebridge/tdtp/pkg/adapters"
-    _ "github.com/queuebridge/tdtp/pkg/adapters/mssql"  // registers the adapter
+    _ "github.com/queuebridge/tdtp/pkg/adapters/mssql"  // Регистрация адаптера
 )
 ```
 
 ---
 
-## Usage
+## Использование
 
-### Connecting
+### Подключение
 
-**Through the factory:**
+**Через Factory:**
 ```go
 import (
     "context"
@@ -130,7 +130,7 @@ if err != nil {
 defer adapter.Close(ctx)
 ```
 
-**Constructed directly:**
+**Прямое создание:**
 ```go
 import "github.com/queuebridge/tdtp/pkg/adapters/mssql"
 
@@ -139,19 +139,19 @@ adapter, err := mssql.NewAdapter(ctx,
 defer adapter.Close(ctx)
 ```
 
-**DSN forms:**
+**DSN форматы:**
 
 ```go
-// The standard form
+// Стандартный формат
 "sqlserver://username:password@host:port?database=dbname"
 
-// Naming an instance
+// С указанием instance
 "sqlserver://user:pass@localhost:1433?database=MyDB&instance=SQLEXPRESS"
 
 // Windows Authentication
 "sqlserver://localhost?database=MyDB&trusted_connection=yes"
 
-// With extra parameters
+// Дополнительные параметры
 "sqlserver://user:pass@localhost:1433?database=MyDB&connection+timeout=30&encrypt=true"
 ```
 
@@ -159,14 +159,14 @@ defer adapter.Close(ctx)
 
 ### Export
 
-**Exporting a whole table:**
+**Полный экспорт таблицы:**
 ```go
 packets, err := adapter.ExportTable(ctx, "Users")
 if err != nil {
     panic(err)
 }
 
-// Write it to a file
+// Сохранение в файл
 for i, pkt := range packets {
     filename := fmt.Sprintf("users_part_%d.xml", i+1)
     generator := packet.NewGenerator()
@@ -174,23 +174,23 @@ for i, pkt := range packets {
 }
 ```
 
-**Exporting with a TDTQL filter:**
+**Экспорт с TDTQL фильтром:**
 ```go
 import "github.com/queuebridge/tdtp/pkg/core/tdtql"
 
-// SQL translated into TDTQL
+// SQL → TDTQL трансляция
 translator := tdtql.NewTranslator()
 query, err := translator.TranslateSQL(
     "SELECT * FROM Users WHERE is_active = 1 AND balance > 1000 ORDER BY created_at DESC LIMIT 100"
 )
 
-// Exported with the filtering done by the database
+// Экспорт с оптимизацией на уровне БД
 packets, err := adapter.ExportTableWithQuery(ctx, "Users", query)
 ```
 
-**Exporting the special types:**
+**Экспорт специальных типов:**
 ```go
-// A table with UNIQUEIDENTIFIER and XML
+// Таблица с UNIQUEIDENTIFIER и XML
 /*
 CREATE TABLE Documents (
     id UNIQUEIDENTIFIER PRIMARY KEY,
@@ -202,39 +202,39 @@ CREATE TABLE Documents (
 
 packets, err := adapter.ExportTable(ctx, "Documents")
 
-// In the TDTP packet:
-// id: TEXT(36) with subtype="uuid"
-// content: TEXT with subtype="xml"
-// price: DECIMAL(19,4) with subtype="money"
+// В TDTP пакете:
+// id: TEXT(36) с subtype="uuid"
+// content: TEXT с subtype="xml"
+// price: DECIMAL(19,4) с subtype="money"
 ```
 
 ---
 
 ### Import
 
-**The REPLACE strategy — full replacement:**
+**Стратегия REPLACE (полная замена):**
 ```go
 import "github.com/queuebridge/tdtp/pkg/adapters"
 
-// Deletes every row, then inserts the new ones
+// Удаляет все записи, затем вставляет новые
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
 ```
 
-**The IGNORE strategy — skip duplicates:**
+**Стратегия IGNORE (пропуск дубликатов):**
 ```go
-// Skips rows whose primary key already exists
+// Игнорирует записи с существующими PRIMARY KEY
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyIgnore)
 ```
 
-**The FAIL strategy — error on a duplicate:**
+**Стратегия FAIL (ошибка при дубликатах):**
 ```go
-// Raises an error on a duplicate primary key
+// Выдает ошибку при дублировании PRIMARY KEY
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyFail)
 ```
 
-**Importing into IDENTITY fields:**
+**Импорт с IDENTITY-полями:**
 ```go
-// IDENTITY_INSERT is turned on and off for you
+// IDENTITY_INSERT автоматически включается/выключается
 /*
 CREATE TABLE Users (
     id INT IDENTITY(1,1) PRIMARY KEY,
@@ -242,17 +242,17 @@ CREATE TABLE Users (
 )
 */
 
-// Import carrying explicit id values
+// Импорт с явными значениями id
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
-// The framework does this by itself:
+// Фреймворк автоматически:
 // 1. SET IDENTITY_INSERT Users ON
 // 2. INSERT INTO Users (id, username) VALUES (...)
 // 3. SET IDENTITY_INSERT Users OFF
 ```
 
-**Batch import:**
+**Batch импорт:**
 ```go
-// Import several packets
+// Импорт множества пакетов
 for _, pkt := range packets {
     err = adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
     if err != nil {
@@ -263,16 +263,16 @@ for _, pkt := range packets {
 
 ---
 
-### Transactions
+### Транзакции
 
 ```go
-// Begin
+// Начало транзакции
 tx, err := adapter.BeginTx(ctx)
 if err != nil {
     panic(err)
 }
 
-// Import inside the transaction
+// Импорт в транзакции
 err = tx.ImportPacket(ctx, packet1, adapters.StrategyReplace)
 if err != nil {
     tx.Rollback(ctx)
@@ -294,7 +294,7 @@ if err != nil {
 
 ---
 
-### Listing tables
+### Список таблиц
 
 ```go
 tables, err := adapter.ListTables(ctx)
@@ -313,7 +313,7 @@ for _, table := range tables {
 
 ---
 
-## Migration scenarios
+## Миграционные сценарии
 
 ### SQLite → MS SQL Server
 
@@ -343,11 +343,11 @@ targetCfg := adapters.Config{
 target, _ := adapters.New(ctx, targetCfg)
 defer target.Close(ctx)
 
-// Migrate
+// Миграция
 packets, _ := source.ExportTable(ctx, "Users")
 target.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 
-// Types are converted for you:
+// Автоматическая конвертация типов:
 // SQLite INTEGER → MS SQL INT
 // SQLite TEXT → MS SQL NVARCHAR
 // SQLite REAL → MS SQL FLOAT
@@ -373,13 +373,13 @@ target, _ := adapters.New(ctx, targetCfg)
 packets, _ := source.ExportTable(ctx, "customers")
 target.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 
-// The special types convert like this:
+// Специальные типы конвертируются:
 // PostgreSQL UUID → MS SQL UNIQUEIDENTIFIER
-// PostgreSQL JSONB → MS SQL NVARCHAR — the JSON is kept as text
+// PostgreSQL JSONB → MS SQL NVARCHAR (JSON хранится как текст)
 // PostgreSQL TIMESTAMPTZ → MS SQL DATETIME2
 ```
 
-### MS SQL Server to MS SQL Server — replication
+### MS SQL Server → MS SQL Server (репликация)
 
 ```go
 // Source: Production
@@ -390,7 +390,7 @@ source, _ := mssql.NewAdapter(ctx,
 target, _ := mssql.NewAdapter(ctx,
     "sqlserver://writer:pass@report-server:1433?database=Reporting")
 
-// Incremental replication
+// Инкрементальная репликация
 translator := tdtql.NewTranslator()
 query, _ := translator.TranslateSQL(
     "SELECT * FROM Orders WHERE modified_at > '2025-12-01'")
@@ -401,9 +401,9 @@ target.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 
 ---
 
-## Examples
+## Примеры
 
-### 1. A plain export and import
+### Пример 1: Простой экспорт/импорт
 
 ```go
 package main
@@ -448,7 +448,7 @@ func main() {
 }
 ```
 
-### 2. A filtered export through a message broker
+### Пример 2: Экспорт с фильтром через message broker
 
 ```go
 package main
@@ -478,22 +478,22 @@ func main() {
     broker.Connect()
     defer broker.Close()
 
-    // The TDTQL filter
+    // TDTQL фильтр
     translator := tdtql.NewTranslator()
     query, _ := translator.TranslateSQL(
         "SELECT * FROM Orders WHERE total > 1000 AND status = 'completed'")
 
-    // Export with it applied
+    // Export с фильтром
     packets, _ := adapter.ExportTableWithQuery(ctx, "Orders", query)
 
-    // Publish to RabbitMQ
+    // Publish в RabbitMQ
     for _, pkt := range packets {
         broker.Publish("sales_queue", pkt)
     }
 }
 ```
 
-### 3. Working with transactions
+### Пример 3: Работа с транзакциями
 
 ```go
 package main
@@ -515,13 +515,13 @@ func main() {
     adapter, _ := adapters.New(ctx, cfg)
     defer adapter.Close(ctx)
 
-    // Begin the transaction
+    // Начинаем транзакцию
     tx, err := adapter.BeginTx(ctx)
     if err != nil {
         panic(err)
     }
 
-    // Import several tables inside it
+    // Импортируем несколько таблиц в одной транзакции
     usersPacket, _ := /* load packet */
     ordersPacket, _ := /* load packet */
 
@@ -537,7 +537,7 @@ func main() {
         panic(err)
     }
 
-    // Commit
+    // Commit транзакции
     err = tx.Commit(ctx)
     if err != nil {
         panic(err)
@@ -547,13 +547,13 @@ func main() {
 
 ---
 
-## Performance
+## Производительность
 
 ### Benchmarks
 
-Measured on MS SQL Server 2019, Windows Server 2019, an SSD:
+Тестирование на MS SQL Server 2019, Windows Server 2019, SSD:
 
-| Operation | Throughput |
+| Операция | Производительность |
 |----------|-------------------|
 | Export (1000 rows) | ~50ms |
 | Export (10,000 rows) | ~300ms |
@@ -562,76 +562,76 @@ Measured on MS SQL Server 2019, Windows Server 2019, an SSD:
 | Import IGNORE (1000 rows) | ~120ms |
 | TDTQL filter (10K rows) | ~100ms |
 
-### What is optimised
+### Оптимизации
 
-- **Prepared statements** — every query is parameterised
-- **Batch inserts** — INSERTs grouped, for speed
-- **IDENTITY_INSERT** — managed automatically
-- **Pushdown** — TDTQL becomes a SQL WHERE and ORDER BY
-- **Connection pooling** — connections are reused
+✅ **Prepared statements** - все запросы используют параметризацию
+✅ **Batch inserts** - группировка INSERT для ускорения
+✅ **IDENTITY_INSERT** - автоматическое управление
+✅ **Push-down execution** - TDTQL транслируется в SQL WHERE/ORDER BY
+✅ **Connection pooling** - реиспользование соединений
 
-### Advice
+### Рекомендации
 
-1. **Use NVARCHAR** rather than VARCHAR for Unicode data
-2. **Prefer DATETIME2** to DATETIME — it is more precise
-3. **Batch** anything over about 1000 rows
-4. **Use a transaction** when importing related tables together
-5. **Use TDTQL filters** to export a subset
+1. **Используйте NVARCHAR** вместо VARCHAR для Unicode данных
+2. **DATETIME2** предпочтительнее DATETIME (выше точность)
+3. **Batch operations** для больших объемов (>1000 rows)
+4. **Транзакции** для атомарности при импорте связанных таблиц
+5. **TDTQL фильтры** для экспорта подмножества данных
 
 ---
 
 ## Troubleshooting
 
-### "Login failed for user"
+### Ошибка: "Login failed for user"
 ```
-Fix: check the credentials in the DSN, and the user's rights in SQL Server
-```
-
-### "Cannot insert explicit value for identity column"
-```
-Cause: IDENTITY_INSERT is not on.
-Fix: the framework does this for you — check the user's rights
+Решение: Проверьте credentials в DSN и права пользователя в SQL Server
 ```
 
-### "Violation of PRIMARY KEY constraint"
+### Ошибка: "Cannot insert explicit value for identity column"
 ```
-Fix: use StrategyIgnore or StrategyReplace instead of StrategyFail
+Причина: IDENTITY_INSERT не включен
+Решение: Фреймворк делает это автоматически - проверьте права пользователя
 ```
 
-### A large import is slow
+### Ошибка: "Violation of PRIMARY KEY constraint"
 ```
-Fix 1: use a transaction for the batch
-Fix 2: drop the indexes for the duration of the import
-Fix 3: raise the adapter's batch size
+Решение: Используйте StrategyIgnore или StrategyReplace вместо StrategyFail
+```
+
+### Медленный импорт больших таблиц
+```
+Решение 1: Используйте транзакции для batch импорта
+Решение 2: Временно отключите индексы перед импортом
+Решение 3: Увеличьте размер batch в настройках адаптера
 ```
 
 ---
 
-## Compatibility
+## Совместимость
 
 - **MS SQL Server:** 2012, 2014, 2016, 2017, 2019, 2022
-- **Azure SQL Database:** fully supported
-- **Azure SQL Managed Instance:** fully supported
-- **SQL Server Express:** fully supported
+- **Azure SQL Database:** Полная поддержка
+- **Azure SQL Managed Instance:** Полная поддержка
+- **SQL Server Express:** Полная поддержка
 
 ---
 
-## See also
+## См. также
 
-- **[Adapter interface](../adapter.go)** — the interface every adapter implements
-- **[TDTP specification](../../../docs/SPECIFICATION.md)** — the protocol
-- **[PostgreSQL adapter](../postgres/README.md)**
-- **[MySQL adapter](../mysql/README.md)**
-- **[SQLite adapter](../sqlite/README.md)**
-- **[examples/02-rabbitmq-mssql](../../../examples/02-rabbitmq-mssql/)** — a complete worked example
+- **[Adapter Interface](../adapter.go)** - унифицированный интерфейс
+- **[TDTP Specification](../../../docs/SPECIFICATION.md)** - спецификация протокола
+- **[PostgreSQL Adapter](../postgres/README.md)** - PostgreSQL интеграция
+- **[MySQL Adapter](../mysql/README.md)** - MySQL интеграция
+- **[SQLite Adapter](../sqlite/README.md)** - SQLite интеграция
+- **[examples/02-rabbitmq-mssql](../../../examples/02-rabbitmq-mssql/)** - полный пример
 
 ---
 
-## Licence
+## Лицензия
 
 MIT
 
 ---
 
-**Version:** 1.0
-**Last updated:** 2025-12-08
+**Версия:** 1.0
+**Последнее обновление:** 08.12.2025

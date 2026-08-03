@@ -1,48 +1,48 @@
 # SQLite Adapter - TDTP Framework
 
-The SQLite adapter: two-way integration with SQLite 3.x.
+SQLite адаптер для двунаправленной интеграции с SQLite 3.x базами данных.
 
-## Status
+## Статус
 
 ✅ **Production Ready** (v1.0)
 
-**Implemented:**
-- `types.go` — the full SQLite/TDTP type mapping
-- `adapter.go` — connection through modernc.org/sqlite: pure Go, no cgo
-- `export.go` — table export with TDTQL pushed into SQL
-- `import.go` — import, creating tables as needed
-- `integration_test.go` — integration tests
-- `benchmark_test.go` — benchmarks
+**Реализовано:**
+- ✅ `types.go` - полный маппинг типов SQLite ↔ TDTP
+- ✅ `adapter.go` - подключение через modernc.org/sqlite (Pure Go, без CGO)
+- ✅ `export.go` - экспорт таблиц с TDTQL оптимизацией
+- ✅ `import.go` - импорт данных с автосозданием таблиц
+- ✅ `integration_test.go` - интеграционное тестирование
+- ✅ `benchmark_test.go` - бенчмарки производительности
 - ✅ Transaction support - BEGIN/COMMIT/ROLLBACK
-- import strategies — REPLACE, IGNORE, FAIL
+- ✅ Стратегии импорта - REPLACE, IGNORE, FAIL
 
 ---
 
-## Requirements
+## Требования
 
-- **SQLite:** 3.x, any version
-- **Driver:** `modernc.org/sqlite` — pure Go, no cgo needed
+- **SQLite:** 3.x (любая версия)
+- **Driver:** `modernc.org/sqlite` (Pure Go, CGO не требуется)
 - **Go:** 1.21+
 
 ---
 
-## Why pure Go matters here
+## Преимущества Pure Go реализации
 
-- **Portable** — runs on any OS with no C library to compile
-- **Simple to deploy** — no system library dependencies
-- **Docker-friendly** — small images, no build tools
-- **Fast to build** — no cgo overhead
-- **Stable** — fewer version-compatibility surprises
+✅ **Кросс-платформенность** - работает на любой ОС без компиляции C-библиотек
+✅ **Простота деплоя** - нет зависимостей от системных библиотек
+✅ **Docker-friendly** - легкие контейнеры без build-tools
+✅ **Быстрая сборка** - нет CGO overhead при компиляции
+✅ **Стабильность** - меньше проблем с совместимостью версий
 
 ---
 
-## What it does
+## Возможности
 
-### Data types
+### Поддержка типов данных
 
-**SQLite's core types:**
+**Основные типы SQLite:**
 ```
-SQLite Type         TDTP Type       Back again
+SQLite Type         TDTP Type       Обратно
 ─────────────────────────────────────────────────
 INTEGER             INTEGER         INTEGER
 REAL                REAL            REAL
@@ -54,9 +54,9 @@ DATETIME            TIMESTAMP       DATETIME
 BLOB                BLOB            BLOB
 ```
 
-**Type aliases, per SQLite's affinity rules:**
+**Алиасы типов (SQLite affinity rules):**
 ```
-SQLite Type         TDTP Type       Note
+SQLite Type         TDTP Type       Примечание
 ─────────────────────────────────────────────────
 INT, BIGINT,        INTEGER         INTEGER affinity
 TINYINT, SMALLINT
@@ -69,53 +69,53 @@ CHAR(n), CLOB
 DECIMAL(p,s)        DECIMAL         NUMERIC affinity
 ```
 
-### SQLite's peculiarities
+### Особенности SQLite
 
-**Dynamic typing:**
-- SQLite does not enforce types strictly
-- any column can hold any type
-- the adapter goes by the declared type in the schema
+**Динамическая типизация:**
+- SQLite не enforces типы строго
+- Любая колонка может хранить любой тип данных
+- Adapter использует declared type из schema
 
-**How BOOLEAN is stored:**
-- SQLite has no native BOOLEAN
-- it is stored as INTEGER: 0 for false, 1 for true
-- converted automatically on export and import
+**BOOLEAN хранение:**
+- SQLite не имеет native BOOLEAN
+- Хранится как INTEGER: 0 (false), 1 (true)
+- Автоматическая конвертация при экспорте/импорте
 
 **AUTOINCREMENT:**
-- detected automatically for an INTEGER PRIMARY KEY
-- preserved on import when the data carries the ID
-- can be omitted, to let SQLite generate it
+- Автоматически определяется для INTEGER PRIMARY KEY
+- Сохраняется при импорте если данные содержат ID
+- Можно пропустить для автогенерации
 
-**Transactions:**
-- full ACID transactions
-- the default isolation level is SERIALIZABLE
-- automatic rollback on error
+**Транзакции:**
+- Полная поддержка ACID транзакций
+- Изоляция по умолчанию: SERIALIZABLE
+- Автоматический rollback при ошибках
 
 ---
 
-## Installing
+## Установка
 
 ```bash
 go get github.com/queuebridge/tdtp/pkg/adapters/sqlite
 ```
 
-### Importing the package
+### Импорт
 
 ```go
 import (
     "context"
     "github.com/queuebridge/tdtp/pkg/adapters"
-    _ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"  // registers the adapter
+    _ "github.com/queuebridge/tdtp/pkg/adapters/sqlite"  // Регистрация адаптера
 )
 ```
 
 ---
 
-## Usage
+## Использование
 
-### Connecting
+### Подключение
 
-**Through the factory:**
+**Через Factory:**
 ```go
 import (
     "context"
@@ -136,7 +136,7 @@ if err != nil {
 defer adapter.Close(ctx)
 ```
 
-**Constructed directly:**
+**Прямое создание:**
 ```go
 import "github.com/queuebridge/tdtp/pkg/adapters/sqlite"
 
@@ -144,18 +144,18 @@ adapter, err := sqlite.NewAdapter(ctx, "database.db")
 defer adapter.Close(ctx)
 ```
 
-**DSN forms:**
+**DSN форматы:**
 
 ```go
-// A plain file path
+// Простой путь к файлу
 "app.db"
 "./data/database.db"
 "/var/lib/myapp/data.db"
 
-// An in-memory database, for tests
+// In-memory база (для тестов)
 ":memory:"
 
-// A SQLite URI, for the extended options
+// SQLite URI (расширенные опции)
 "file:test.db?mode=rw&cache=shared"
 "file:readonly.db?mode=ro"
 ```
@@ -164,7 +164,7 @@ defer adapter.Close(ctx)
 
 ### Export
 
-**Exporting a whole table:**
+**Полный экспорт таблицы:**
 ```go
 import "github.com/queuebridge/tdtp/pkg/core/packet"
 
@@ -173,7 +173,7 @@ if err != nil {
     panic(err)
 }
 
-// Write it to a file
+// Сохранение в файл
 for i, pkt := range packets {
     filename := fmt.Sprintf("users_part_%d.xml", i+1)
     generator := packet.NewGenerator()
@@ -181,21 +181,21 @@ for i, pkt := range packets {
 }
 ```
 
-**Exporting with a TDTQL filter:**
+**Экспорт с TDTQL фильтром:**
 ```go
 import "github.com/queuebridge/tdtp/pkg/core/tdtql"
 
-// SQL translated into TDTQL
+// SQL → TDTQL трансляция
 translator := tdtql.NewTranslator()
 query, err := translator.TranslateSQL(
     "SELECT * FROM users WHERE age >= 18 AND status = 'active' ORDER BY created_at DESC LIMIT 100"
 )
 
-// Exported with the filtering done by the database
+// Экспорт с оптимизацией на уровне БД
 packets, err := adapter.ExportTableWithQuery(ctx, "users", query)
 ```
 
-**What the exported schema looks like:**
+**Пример экспортированной схемы:**
 ```xml
 <Schema>
   <Field name="id" type="INTEGER" key="true"></Field>
@@ -211,13 +211,13 @@ packets, err := adapter.ExportTableWithQuery(ctx, "users", query)
 
 ### Import
 
-**Tables are created for you:**
+**Автоматическое создание таблиц:**
 ```go
-// A missing table is created automatically,
-// from the schema in the TDTP packet
+// Если таблица не существует, она будет создана автоматически
+// на основе схемы из TDTP пакета
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
 
-// The table created:
+// Создается таблица:
 // CREATE TABLE users (
 //     id INTEGER PRIMARY KEY,
 //     username TEXT,
@@ -228,27 +228,27 @@ err = adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
 // )
 ```
 
-**The REPLACE strategy — full replacement:**
+**Стратегия REPLACE (полная замена):**
 ```go
-// Deletes every row, then inserts the new ones
+// Удаляет все записи, затем вставляет новые
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyReplace)
 ```
 
-**The IGNORE strategy — skip duplicates:**
+**Стратегия IGNORE (пропуск дубликатов):**
 ```go
-// Uses INSERT OR IGNORE to skip existing primary keys
+// Использует INSERT OR IGNORE для пропуска существующих PRIMARY KEY
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyIgnore)
 ```
 
-**The FAIL strategy — error on a duplicate:**
+**Стратегия FAIL (ошибка при дубликатах):**
 ```go
-// Raises an error on a primary-key violation
+// Выдает ошибку при нарушении PRIMARY KEY constraint
 err = adapter.ImportPacket(ctx, packet, adapters.StrategyFail)
 ```
 
-**Batch import:**
+**Batch импорт:**
 ```go
-// Import several packets
+// Импорт множества пакетов
 for _, pkt := range packets {
     err = adapter.ImportPacket(ctx, pkt, adapters.StrategyReplace)
     if err != nil {
@@ -259,16 +259,16 @@ for _, pkt := range packets {
 
 ---
 
-### Transactions
+### Транзакции
 
 ```go
-// Begin
+// Начало транзакции
 tx, err := adapter.BeginTx(ctx)
 if err != nil {
     panic(err)
 }
 
-// Import inside the transaction
+// Импорт в транзакции
 err = tx.ImportPacket(ctx, usersPacket, adapters.StrategyReplace)
 if err != nil {
     tx.Rollback(ctx)
@@ -290,7 +290,7 @@ if err != nil {
 
 ---
 
-### Listing tables
+### Список таблиц
 
 ```go
 tables, err := adapter.ListTables(ctx)
@@ -309,7 +309,7 @@ for _, table := range tables {
 
 ---
 
-## Migration scenarios
+## Миграционные сценарии
 
 ### SQLite → PostgreSQL (upgrade)
 
@@ -339,7 +339,7 @@ targetCfg := adapters.Config{
 target, _ := adapters.New(ctx, targetCfg)
 defer target.Close(ctx)
 
-// Migrate every table
+// Миграция всех таблиц
 tables, _ := source.ListTables(ctx)
 for _, table := range tables {
     packets, _ := source.ExportTable(ctx, table)
@@ -347,7 +347,7 @@ for _, table := range tables {
         target.ImportPacket(ctx, pkt, adapters.StrategyReplace)
     }
 }
-// Types are converted for you:
+// Автоматическая конвертация типов:
 // SQLite INTEGER → PostgreSQL INT
 // SQLite TEXT → PostgreSQL VARCHAR
 // SQLite REAL → PostgreSQL DOUBLE PRECISION
@@ -368,17 +368,17 @@ target, _ := adapters.New(ctx, adapters.Config{
     DSN:  "backup.db",
 })
 
-// Making a local backup
+// Создание локального бэкапа
 packets, _ := source.ExportTable(ctx, "critical_data")
 target.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 
-// PostgreSQL's special types convert like this:
+// Специальные PostgreSQL типы конвертируются:
 // UUID → TEXT
-// JSONB → TEXT — the JSON is kept as a string
+// JSONB → TEXT (JSON сохраняется как строка)
 // TIMESTAMPTZ → DATETIME
 ```
 
-### SQLite to SQLite — replication
+### SQLite → SQLite (репликация)
 
 ```go
 // Master database
@@ -387,16 +387,16 @@ master, _ := sqlite.NewAdapter(ctx, "master.db")
 // Replica database
 replica, _ := sqlite.NewAdapter(ctx, "replica.db")
 
-// Replicate a table
+// Репликация таблицы
 packets, _ := master.ExportTable(ctx, "users")
 replica.ImportPacket(ctx, packets[0], adapters.StrategyReplace)
 ```
 
 ---
 
-## Examples
+## Примеры
 
-### 1. Basic SQLite use
+### Пример 1: Простая работа с SQLite
 
 ```go
 package main
@@ -423,7 +423,7 @@ func main() {
     }
     defer adapter.Close(ctx)
 
-    // List the tables
+    // Список таблиц
     tables, _ := adapter.ListTables(ctx)
     fmt.Println("Tables:", tables)
 
@@ -439,7 +439,7 @@ func main() {
 }
 ```
 
-### 2. SQLite to a message queue
+### Пример 2: SQLite → Message Queue
 
 ```go
 package main
@@ -476,7 +476,7 @@ func main() {
 }
 ```
 
-### 3. An in-memory database for tests
+### Пример 3: In-memory database для тестов
 
 ```go
 package myapp
@@ -492,7 +492,7 @@ import (
 func TestMyFunction(t *testing.T) {
     ctx := context.Background()
 
-    // In-memory, so each test is isolated
+    // In-memory база для изоляции тестов
     cfg := adapters.Config{
         Type: "sqlite",
         DSN:  ":memory:",
@@ -504,14 +504,14 @@ func TestMyFunction(t *testing.T) {
     }
     defer adapter.Close(ctx)
 
-    // Load the fixtures
-    // ... import TDTP packets holding the test data
+    // Загрузка тестовых данных
+    // ... импорт TDTP пакетов с тестовыми данными
 
-    // Your tests go here
+    // Ваши тесты здесь
 }
 ```
 
-### 4. Incremental synchronisation
+### Пример 4: Инкрементальная синхронизация
 
 ```go
 package main
@@ -538,7 +538,7 @@ func main() {
         DSN:  "target.db",
     })
 
-    // Export only what changed in the last hour
+    // Экспортируем только изменения за последний час
     translator := tdtql.NewTranslator()
     lastHour := time.Now().Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
 
@@ -547,7 +547,7 @@ func main() {
 
     packets, _ := source.ExportTableWithQuery(ctx, "orders", query)
 
-    // Import the changes
+    // Импорт изменений
     for _, pkt := range packets {
         target.ImportPacket(ctx, pkt, adapters.StrategyReplace)
     }
@@ -556,13 +556,13 @@ func main() {
 
 ---
 
-## Performance
+## Производительность
 
 ### Benchmarks
 
-Measured on SQLite 3.x, an SSD, and the modernc.org/sqlite driver:
+Тестирование на SQLite 3.x, SSD, modernc.org/sqlite driver:
 
-| Operation | Throughput |
+| Операция | Производительность |
 |----------|-------------------|
 | Export (1000 rows) | ~15ms |
 | Export (10,000 rows) | ~100ms |
@@ -572,103 +572,103 @@ Measured on SQLite 3.x, an SSD, and the modernc.org/sqlite driver:
 | TDTQL filter (10K rows) | ~50ms |
 | Table creation | ~5ms |
 
-**Straight from benchmark_test.go:**
+**Реальные данные из benchmark_test.go:**
 ```
 BenchmarkExport1000Rows-8        500     2,500,000 ns/op   (2.5ms)
 BenchmarkExport10000Rows-8        50    20,000,000 ns/op   (20ms)
 BenchmarkImportReplace1000-8     400     3,000,000 ns/op   (3ms)
 ```
 
-### What is optimised
+### Оптимизации
 
-- **Prepared statements** — every query is cached
-- **Batch inserts** — INSERTs grouped inside transactions
-- **WAL mode** — write-ahead logging, for better concurrency
-- **PRAGMA synchronous=NORMAL** — fast writes that still hold their guarantees
+✅ **Prepared statements** - все запросы кэшируются
+✅ **Batch inserts** - группировка INSERT в транзакциях
+✅ **WAL mode** - Write-Ahead Logging для лучшей concurrency
+✅ **PRAGMA synchronous=NORMAL** - быстрая запись с гарантиями
 ✅ **Push-down execution** - TDTQL → SQL WHERE/ORDER BY
-- **Indexes** — created automatically for the primary key
+✅ **Indexes** - автоматическое создание для PRIMARY KEY
 
-### Advice
+### Рекомендации
 
-1. **Use transactions** for batch work
-2. **WAL mode** for concurrent reads and writes (`PRAGMA journal_mode=WAL`)
-3. **A batch of 1000–5000 rows** is the sweet spot
-4. **`:memory:`** for tests and throwaway data
-5. **VACUUM regularly** to keep the file size down
+1. **Используйте транзакции** для batch операций
+2. **WAL mode** для concurrent read/write (PRAGMA journal_mode=WAL)
+3. **Batch size 1000-5000** rows для оптимальной производительности
+4. **:memory:** для тестов и временных данных
+5. **Регулярный VACUUM** для оптимизации размера БД
 
 ---
 
 ## Troubleshooting
 
-### "database is locked"
+### Ошибка: "database is locked"
 ```
-Cause: concurrent write access.
-Fix 1: use WAL mode (PRAGMA journal_mode=WAL)
-Fix 2: retry with exponential backoff
-Fix 3: reduce the number of concurrent writers
-```
-
-### "no such table"
-```
-Fix: the adapter creates tables automatically on import.
-Check that the TDTP packet carries a valid schema.
+Причина: Concurrent write доступ
+Решение 1: Используйте WAL mode (PRAGMA journal_mode=WAL)
+Решение 2: Retry с exponential backoff
+Решение 3: Уменьшите concurrent writers
 ```
 
-### A large import is slow
+### Ошибка: "no such table"
 ```
-Fix 1: use transactions — batching is automatic
-Fix 2: drop the indexes before importing
-Fix 3: PRAGMA synchronous=OFF — for an initial bulk load only
+Решение: Adapter создает таблицы автоматически при импорте.
+Убедитесь, что TDTP пакет содержит корректную схему.
 ```
 
-### The database file is large
+### Медленный импорт больших таблиц
 ```
-Fix: run VACUUM to defragment it
+Решение 1: Используйте транзакции (auto batch)
+Решение 2: Отключите indeces перед импортом
+Решение 3: PRAGMA synchronous=OFF (только для начальной загрузки!)
+```
+
+### Большой размер файла БД
+```
+Решение: Запустите VACUUM для дефрагментации
 ```
 
 ---
 
-## Compatibility
+## Совместимость
 
-- **SQLite:** 3.x, any version
-- **OS:** Linux, Windows, macOS, BSD — pure Go runs everywhere
-- **Architecture:** amd64, arm64, 386, arm — all supported
-- **Docker:** fully supported, with no cgo dependencies
+- **SQLite:** 3.x (любая версия)
+- **OS:** Linux, Windows, macOS, BSD (Pure Go - работает везде)
+- **Architecture:** amd64, arm64, 386, arm (все поддерживаются)
+- **Docker:** Полная поддержка (без CGO dependencies)
 
 ---
 
-## Against the other driver
+## Сравнение с другими драйверами
 
-| | modernc.org/sqlite (pure Go) | mattn/go-sqlite3 (cgo) |
+| Фича | modernc.org/sqlite (Pure Go) | mattn/go-sqlite3 (CGO) |
 |------|------------------------------|------------------------|
-| Needs cgo | no | yes |
-| Cross-compiling | easy | awkward |
-| Docker image | small | large, needs build tools |
-| Build speed | fast | slow, there is C to compile |
-| Throughput | about 90% of cgo | 100% |
+| CGO required | ❌ Нет | ✅ Да |
+| Cross-compile | ✅ Легко | ❌ Сложно |
+| Docker size | ✅ Маленький | ❌ Большой (build-tools) |
+| Build speed | ✅ Быстро | ❌ Медленно (C compile) |
+| Performance | ✅ ~90% от CGO | ✅ 100% |
 | Maintenance | ✅ Pure Go | ⚠️ C dependencies |
 
-**In short:** the pure Go driver is the better choice in almost every case.
+**Вывод:** Pure Go driver предпочтительнее для большинства случаев.
 
 ---
 
-## See also
+## См. также
 
-- **[Adapter interface](../adapter.go)** — the interface every adapter implements
-- **[TDTP specification](../../../docs/SPECIFICATION.md)** — the protocol
-- **[PostgreSQL adapter](../postgres/README.md)**
-- **[MySQL adapter](../mysql/README.md)**
-- **[MS SQL Server adapter](../mssql/README.md)**
-- **[examples/01-basic-export](../../../examples/01-basic-export/)** — the simplest worked example
+- **[Adapter Interface](../adapter.go)** - унифицированный интерфейс
+- **[TDTP Specification](../../../docs/SPECIFICATION.md)** - спецификация протокола
+- **[PostgreSQL Adapter](../postgres/README.md)** - PostgreSQL интеграция
+- **[MySQL Adapter](../mysql/README.md)** - MySQL интеграция
+- **[MS SQL Server Adapter](../mssql/README.md)** - MS SQL интеграция
+- **[examples/01-basic-export](../../../examples/01-basic-export/)** - базовый пример
 
 ---
 
-## Licence
+## Лицензия
 
 MIT
 
 ---
 
-**Version:** 1.0
+**Версия:** 1.0
 **Driver:** modernc.org/sqlite (Pure Go)
-**Last updated:** 2025-12-08
+**Последнее обновление:** 08.12.2025

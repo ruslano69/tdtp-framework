@@ -1,52 +1,52 @@
 # Incremental Sync Package
 
-Incremental data synchronisation with change tracking.
+Пакет для инкрементальной синхронизации данных с отслеживанием изменений.
 
-## Purpose
+## 🎯 Назначение
 
-**IncrementalSync** loads only what changed since the last synchronisation, instead of exporting the whole table. That matters for:
+**IncrementalSync** позволяет загружать только измененные данные с момента последней синхронизации вместо полной выгрузки таблицы. Это критично для:
 
 - Database Migration (ETL pipelines)
 - Real-time Data Integration
-- data replication between regions
+- Data Replication между регионами
 - Analytics pipelines
 
-## Components
+## 📦 Компоненты
 
 ### StateManager
 
-Tracks synchronisation state per table:
+Управляет состоянием синхронизации для таблиц:
 
 ```go
 sm, err := sync.NewStateManager("./sync_state.json", true) // autosave=true
 defer sm.Save()
 
-// Read the last synchronisation
+// Получить последнюю синхронизацию
 state := sm.GetState("orders")
 fmt.Printf("Last sync: %s\n", state.LastSyncValue)
 
-// Update it after a run
+// Обновить после синхронизации
 sm.UpdateState("orders", "2024-01-15T10:30:00Z", 1000)
 ```
 
 ### IncrementalConfig
 
-Configuration for an incremental export:
+Конфигурация для инкрементальной выгрузки:
 
 ```go
 config := sync.EnableIncrementalSync("updated_at")
 config.BatchSize = 5000
 config.Strategy = sync.TrackingTimestamp
 
-// Validation
+// Валидация
 if err := config.Validate(); err != nil {
     log.Fatal(err)
 }
 ```
 
-## Usage
+## 🚀 Использование
 
-### A basic example
+### Базовый пример
 
 ```go
 package main
@@ -63,7 +63,7 @@ import (
 func main() {
     ctx := context.Background()
 
-    // Connect to the database
+    // Подключаемся к БД
     adapter := &postgres.Adapter{}
     cfg := adapters.Config{
         DSN: "postgresql://localhost:5432/mydb",
@@ -71,7 +71,7 @@ func main() {
     adapter.Connect(ctx, cfg)
     defer adapter.Close(ctx)
 
-    // Configure the incremental sync
+    // Настраиваем инкрементальную синхронизацию
     sm, _ := sync.NewStateManager("./sync_state.json", true)
     state := sm.GetState("orders")
 
@@ -79,7 +79,7 @@ func main() {
     config.InitialValue = state.LastSyncValue  // Checkpoint
     config.BatchSize = 10000
 
-    // Run the incremental export
+    // Выполняем инкрементальную выгрузку
     packets, lastValue, err := adapter.ExportTableIncremental(ctx, "orders", config)
     if err != nil {
         panic(err)
@@ -87,7 +87,7 @@ func main() {
 
     fmt.Printf("Exported %d packets\n", len(packets))
 
-    // Save the checkpoint
+    // Сохраняем checkpoint
     sm.UpdateState("orders", lastValue, int64(len(packets)))
 }
 ```
@@ -95,23 +95,23 @@ func main() {
 ### E-commerce Migration Example
 
 ```go
-// A daily incremental migration of orders
+// Ежедневная инкрементальная миграция заказов
 func DailyOrdersMigration() error {
     sm, _ := sync.NewStateManager("./orders_state.json", true)
 
-    // Source: production PostgreSQL
+    // Источник: Production PostgreSQL
     source := &postgres.Adapter{}
     source.Connect(ctx, adapters.Config{
         DSN: "postgresql://prod:5432/orders",
     })
 
-    // Target: analytics MySQL
+    // Приемник: Analytics MySQL
     target := &mysql.Adapter{}
     target.Connect(ctx, adapters.Config{
         DSN: "mysql://analytics:3306/warehouse",
     })
 
-    // Incremental export
+    // Инкрементальная выгрузка
     state := sm.GetState("orders")
     config := sync.EnableIncrementalSync("updated_at")
     config.InitialValue = state.LastSyncValue
@@ -122,7 +122,7 @@ func DailyOrdersMigration() error {
         return err
     }
 
-    // Load into the target
+    // Загрузка в target
     for _, pkt := range packets {
         if err := target.ImportPacket(ctx, pkt, adapters.StrategyReplace); err != nil {
             sm.UpdateStateWithError("orders", err)
@@ -130,16 +130,16 @@ func DailyOrdersMigration() error {
         }
     }
 
-    // Save the checkpoint
+    // Сохраняем checkpoint
     sm.UpdateState("orders", lastValue, int64(len(packets)))
     return nil
 }
 ```
 
-### Real-time sync through Kafka
+### Real-time Sync через Kafka
 
 ```go
-// Continuous synchronisation, publishing to Kafka
+// Непрерывная синхронизация с отправкой в Kafka
 func RealtimeSync() {
     sm, _ := sync.NewStateManager("./realtime_state.json", true)
     adapter := &postgres.Adapter{}
@@ -160,7 +160,7 @@ func RealtimeSync() {
         packets, lastValue, _ := adapter.ExportTableIncremental(ctx, "orders", config)
 
         for _, pkt := range packets {
-            // Serialise the packet to XML
+            // Сериализуем пакет в XML
             xmlData, _ := pkt.ToXML()
             broker.Send(ctx, xmlData)
         }
@@ -176,7 +176,7 @@ func RealtimeSync() {
 
 ### 1. Timestamp Tracking
 
-Tracking on `updated_at` or `modified_at`:
+Отслеживание по полю `updated_at` или `modified_at`:
 
 ```go
 config := sync.IncrementalConfig{
@@ -195,7 +195,7 @@ LIMIT 10000
 
 ### 2. Sequence Tracking
 
-Tracking on an auto-increment `id`:
+Отслеживание по auto-increment `id`:
 
 ```go
 config := sync.IncrementalConfig{
@@ -214,7 +214,7 @@ LIMIT 10000
 
 ### 3. Version Tracking
 
-Tracking on a version field:
+Отслеживание по version field:
 
 ```go
 config := sync.IncrementalConfig{
@@ -235,7 +235,7 @@ config := sync.IncrementalConfig{
 - Network: 5MB transferred
 - CPU: 5% for 2 seconds
 
-**200× faster** in typical cases.
+**200x faster** для типичных сценариев!
 
 ## 🔧 Configuration
 
@@ -252,9 +252,9 @@ sync:
 
 ## 🎯 Use Cases Coverage
 
-IncrementalSync widens the range of use cases covered:
+Реализация IncrementalSync увеличивает покрытие use cases:
 
-| Use case | Before | After |
+| Use Case | До | После |
 |----------|----|----|
 | Database Migration | 60% | **85%** |
 | Real-time Integration | 50% | **65%** |
@@ -263,9 +263,9 @@ IncrementalSync widens the range of use cases covered:
 
 ## 🚀 Next Steps
 
-For production readiness you still need:
+Для production-ready нужны:
 1. ✅ IncrementalSync - DONE
 2. 🔥 ErrorHandler + Retry + DLQ - NEXT
 3. 🔥 AuditLogger - NEXT
 
-See [USE_CASES.md](../../USE_CASES.md) for the full roadmap.
+См. [USE_CASES.md](../../USE_CASES.md) для полного roadmap.

@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	goldap "github.com/go-ldap/ldap/v3"
@@ -54,12 +55,7 @@ func (p *Principal) AllowsScenario(name string) bool {
 	if len(p.Scenarios) == 0 {
 		return true // no allowlist = all
 	}
-	for _, s := range p.Scenarios {
-		if s == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(p.Scenarios, name)
 }
 
 type principalCtxKey struct{}
