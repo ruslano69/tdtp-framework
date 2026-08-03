@@ -1,0 +1,12 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ruslano69/tdtp-framework/security/advisories/new
+    about: >
+      Report privately, never as a public issue. See SECURITY.md for scope and
+      what to expect.
+  - name: Documentation
+    url: https://github.com/ruslano69/tdtp-framework/tree/main/docs
+    about: >
+      The specification, user guide, ETL pipeline reference and deployment
+      guide — worth a look before filing.

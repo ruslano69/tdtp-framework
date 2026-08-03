@@ -1,0 +1,67 @@
+name: Feature request
+description: Something the framework should be able to do and cannot
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What you are trying to do, and where it stops. Describe the situation
+        rather than the feature — the best version of a request often gets
+        solved by something other than what was asked for.
+      placeholder: |
+        We export to a broker with a hard 1 MB message limit. packet_kb gets
+        us close but we cannot tell in advance whether a part will fit.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today
+      description: >
+        The current workaround, if there is one, and what it costs. "Nothing,
+        we gave up on it" is a useful answer too.
+    validations:
+      required: false
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: >
+        Optional. A flag, a config key, an API — as concrete as you can make
+        it. Say if you have thought about how it interacts with compression,
+        splitting into parts, or the packet format.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - tdtpcli
+        - orchestrator
+        - tdtpserve
+        - tdtp-xray
+        - xZMercury / CA / licensing
+        - Python SDK / libtdtp
+        - Go library (pkg/...)
+        - a new database adapter
+        - not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before filing
+      options:
+        - label: >
+            I checked ROADMAP.md and TODO_NEXT.md — this is not already
+            planned or already done
+          required: false
+        - label: I would be willing to work on this
+          required: false
