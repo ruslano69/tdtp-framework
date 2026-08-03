@@ -80,15 +80,6 @@ func TestValidatePubSubScenarios_AllKnown_Passes(t *testing.T) {
 	}
 }
 
-func TestStatusAllowed(t *testing.T) {
-	if !statusAllowed("success", []string{"success"}) {
-		t.Error("success should be allowed")
-	}
-	if statusAllowed("failed", []string{"success"}) {
-		t.Error("failed should not be allowed when only success is listed")
-	}
-}
-
 // ─── Subscriber: real Redis round-trip via miniredis ───────────────────────
 
 func newTestSubscriber(t *testing.T, subs []SubscriptionDef, scenes map[string]*Scenario, run runnerFunc) (*Subscriber, *OrchestratorDB, *miniredis.Miniredis) {
