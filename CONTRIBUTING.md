@@ -163,3 +163,8 @@ sits next to it. Internal Go comments explaining a decision are the exception
 Do not open a public issue for a vulnerability. See
 [`SECURITY.md`](SECURITY.md) for the private reporting channel, the scope, and
 what to expect.
+
+## Conduct
+
+Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md)
+(Contributor Covenant 2.1).
