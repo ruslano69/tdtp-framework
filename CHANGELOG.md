@@ -2,6 +2,71 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased] — refactor/orchestrator-route-groups
+
+### Changed — the orchestrator database opens in WAL mode
+
+Two things an operator should know before this lands, because both are visible
+outside the process:
+
+**There are now `orchestrator.db-wal` and `orchestrator.db-shm` files beside the
+database.** Anything that copies the database file on its own — a backup script,
+a volume snapshot taken while the process runs — must take all three, or copy
+nothing while the orchestrator is stopped. The bundled deployment is unaffected:
+the prod compose mounts `/data` as a directory, so they land in the same volume.
+
+**Durability on power loss is now `synchronous=NORMAL`, not `FULL`.** Under WAL
+that can cost the last transactions after an unclean shutdown — a job record or
+two — and never the integrity of the file. A lost job row means a run that
+happened is not recorded; it does not mean a corrupt database or a lost
+schedule.
+
+What it buys, beyond speed: `/healthz` calls `CountActiveJobs` on every request,
+and in rollback-journal mode those readers block behind the executor's writes.
+WAL lets them run concurrently.
+
+A pragma that fails is logged and execution continues — WAL is unavailable on
+some network filesystems, and an orchestrator that runs slower is better than
+one that refuses to start.
+
+### Changed — opening the orchestrator database no longer costs 1.66 s
+
+`sql.Open` was plain, with no pragmas, so SQLite ran in rollback-journal mode at
+`synchronous=FULL` and each of the ~21 DDL statements at open was its own
+durable commit. Measured: 1.14 s for the schema, 0.52 s across the eight
+`ALTER`s, about 80 ms per statement — fsync and nothing else.
+
+Schema and migrations now run in one transaction. SQLite DDL is transactional,
+so this changes the number of commits, not what the statements do; the
+idempotent-migration path is unaffected, since SQLite rejects a duplicate column
+at prepare time and the statement never runs.
+
+Every start paid the 1.66 s, and so did every test that opened its own database:
+the `cmd/orchestrator` package took **555 s, now 31.5 s**. The floor was per
+test rather than in any one slow test — tests that open no database ran in
+0.00 s, while one that only opens the database and reads a single row took
+1.99 s and now takes 0.36 s.
+
+### Changed — internal: `newRouter` split into per-group registration
+
+No API change: same routes, same middleware, same registration order, same
+handler bodies.
+
+`newRouter` had reached 308 lines, up from the 255 measured in the funcfinder
+audit two weeks earlier — every endpoint added since (`GET /jobs?limit`,
+job stop/cancel) landed in the same body, which is what handler closures make
+easy to do without noticing. It was the package's only VERY_HIGH complexity
+outlier; everything else tops out at HIGH=8.
+
+The section comments already in the body were the seams, so each became its own
+`registerXxxRoutes` function — public, scenarios, jobs, results, schedules,
+tokens, requests — and `newRouter` is now 22 lines. Adding an endpoint means
+picking a group.
+
+Three hand-rolled loops in the same package went to the standard library at the
+same time (`slices.Contains` in `AllowsScenario` and the pub/sub status filter,
+`min` in the `?limit=` clamp). No behaviour change.
+
 ## [1.24.0] — 2026-07-29
 
 ### Added — job log retention in the orchestrator
