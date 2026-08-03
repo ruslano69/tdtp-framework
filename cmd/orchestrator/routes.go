@@ -33,20 +33,40 @@ type routerDeps struct {
 
 // newRouter builds the full HTTP API: public health/metrics endpoints, then
 // every authenticated route behind deps.authMiddleware.
+//
+// The route groups live in one registerXxxRoutes function each. They are
+// deliberately not merged back: this function grew past 300 lines because
+// every new endpoint landed in the same body, and handler closures make that
+// growth invisible until the whole file reads as one function. Adding an
+// endpoint now means picking a group, not appending to a wall.
 func newRouter(deps routerDeps) chi.Router {
-	db := deps.db
-	scenes := deps.scenes
-	executor := deps.executor
-	scheduler := deps.scheduler
-	gate := deps.gate
-	auth := deps.auth
-
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(prometheusMiddleware)
 
-	// Public endpoints — no auth, no timeout wrapper.
+	registerPublicRoutes(r, deps)
+
+	// All other routes require authentication.
+	r.Group(func(r chi.Router) {
+		r.Use(deps.authMiddleware)
+
+		registerScenarioRoutes(r, deps)
+		registerJobRoutes(r, deps)
+		registerResultRoutes(r, deps)
+		registerScheduleRoutes(r, deps)
+		registerTokenRoutes(r, deps)
+		registerRequestRoutes(r, deps)
+	}) // end authenticated group
+
+	return r
+}
+
+// registerPublicRoutes wires the two endpoints that carry no auth: liveness
+// and the Prometheus scrape. Both are read-only and expose no scenario data.
+func registerPublicRoutes(r chi.Router, deps routerDeps) {
+	db, gate := deps.db, deps.gate
+
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		active, _ := db.CountActiveJobs()
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -58,287 +78,305 @@ func newRouter(deps routerDeps) chi.Router {
 		})
 	})
 	r.Get("/metrics", MetricsHandler().ServeHTTP)
+}
 
-	// All other routes require authentication.
-	r.Group(func(r chi.Router) {
-		r.Use(deps.authMiddleware)
+// registerScenarioRoutes wires scenario discovery, manual activation, and the
+// admin approval endpoints that activation is gated on.
+func registerScenarioRoutes(r chi.Router, deps routerDeps) {
+	db, scenes, executor, gate := deps.db, deps.scenes, deps.executor, deps.gate
 
-		// ── Scenarios ──────────────────────────────────────────────────────────────
-		r.Get("/scenarios", RequireRole(RoleConsumer, func(w http.ResponseWriter, _ *http.Request) {
-			type item struct {
-				Name        string     `json:"name"`
-				Description string     `json:"description"`
-				Params      []ParamDef `json:"params,omitempty"`
-				Permissions []string   `json:"permissions,omitempty"`
-				Runner      string     `json:"runner"`
-			}
-			out := make([]item, 0, len(scenes))
-			for _, s := range scenes {
-				out = append(out, item{
-					Name:        s.Orchestrator.Name,
-					Description: s.Orchestrator.Description,
-					Params:      s.Orchestrator.Params,
-					Permissions: s.Orchestrator.Permissions,
-					Runner:      resolveRunnerName(s, defaultRunnerName),
-				})
-			}
-			writeJSON(w, http.StatusOK, out)
-		}))
-
-		r.Get("/scenarios/{name}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-			name := chi.URLParam(r, "name")
-			s, ok := scenes[name]
-			if !ok {
-				writeError(w, http.StatusNotFound, "scenario not found")
-				return
-			}
-			writeJSON(w, http.StatusOK, s.Orchestrator)
-		}))
-
-		r.Post("/scenarios/{name}/run", RequireRole(RoleActivator, func(w http.ResponseWriter, r *http.Request) {
-			name := chi.URLParam(r, "name")
-			s, ok := scenes[name]
-			if !ok {
-				writeError(w, http.StatusNotFound, "scenario not found")
-				return
-			}
-
-			// Per-token scenario allowlist: an activator may be scoped to specific scenarios.
-			principal := PrincipalFrom(r.Context())
-			if principal != nil && !principal.AllowsScenario(name) {
-				writeError(w, http.StatusForbidden, "token not authorized for scenario "+name)
-				return
-			}
-
-			// Parse params from request body.
-			var body struct {
-				Params map[string]string `json:"params"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
-				return
-			}
-
-			params, err := s.ValidateParams(body.Params)
-			if err != nil {
-				writeError(w, http.StatusUnprocessableEntity, err.Error())
-				return
-			}
-
-			// Content-integrity gate: refuse unless this scenario's current content
-			// matches an admin-approved checksum (see scenario_approval.go).
-			if err := VerifyScenarioChecksum(db, s); err != nil {
-				writeError(w, http.StatusForbidden, err.Error())
-				return
-			}
-
-			// Trust gate: scenario permissions must be covered by license + Mercury env.
-			if err := gate.GateScenario(s); err != nil {
-				writeError(w, http.StatusForbidden, err.Error())
-				return
-			}
-			// Pipeline limit: refuse if too many jobs are already active.
-			if active, err := db.CountActiveJobs(); err == nil {
-				if err := gate.CheckPipelineLimit(active); err != nil {
-					writeError(w, http.StatusTooManyRequests, err.Error())
-					return
-				}
-			}
-
-			job, err := executor.Submit(s, params, "" /* manual run */, principalID(principal))
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusAccepted, map[string]string{"job_id": job.ID})
-		}))
-
-		// ── Scenario approvals (admin) ───────────────────────────────────────────────
-		sah := &scenarioApprovalHandlers{db: db, scenes: scenes}
-		r.Post("/scenarios/{name}/approve", RequireRole(RoleAdmin, sah.Approve))
-		r.Get("/scenarios/{name}/approval", RequireRole(RoleAdmin, sah.Get))
-		r.Delete("/scenarios/{name}/approval", RequireRole(RoleAdmin, sah.Revoke))
-
-		// ── Jobs ───────────────────────────────────────────────────────────────────
-		r.Get("/jobs", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-			// Every job carries tdtpcli's full output, so the default hundred
-			// is a few hundred kilobytes. Anything that polls this — a
-			// dashboard, a health check — wants the last handful and had no
-			// way to ask for it.
-			jobs, err := db.ListJobs(queryLimit(r, 100, 500))
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, jobs)
-		}))
-
-		r.Get("/jobs/{id}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-			job, err := db.GetJob(chi.URLParam(r, "id"))
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			if job == nil {
-				writeError(w, http.StatusNotFound, "job not found")
-				return
-			}
-			writeJSON(w, http.StatusOK, job)
-		}))
-
-		r.Get("/jobs/{id}/artifact", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-			job, err := db.GetJob(chi.URLParam(r, "id"))
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			if job == nil {
-				writeError(w, http.StatusNotFound, "job not found")
-				return
-			}
-			if job.ArtifactPath == "" {
-				writeError(w, http.StatusNotFound, "job has no artifact")
-				return
-			}
-			w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(job.ArtifactPath)+`"`)
-			w.Header().Set("Content-Type", "application/octet-stream")
-			http.ServeFile(w, r, job.ArtifactPath)
-		}))
-
-		// Cancel: only for a job that hasn't started running yet (409 otherwise).
-		r.Post("/jobs/{id}/cancel", RequireRole(RoleActivator, jobActionHandler(db, executor.Cancel)))
-		// Stop: graceful termination of a currently running job (409 otherwise).
-		r.Post("/jobs/{id}/stop", RequireRole(RoleActivator, jobActionHandler(db, executor.Stop)))
-
-		// ── Results (consumer view) ─────────────────────────────────────────────────
-		// Recent jobs for a scenario, scoped by the token's scenario allowlist.
-		r.Get("/results/{scenario}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
-			scenario := chi.URLParam(r, "scenario")
-			if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(scenario) {
-				writeError(w, http.StatusForbidden, "token not authorized for scenario "+scenario)
-				return
-			}
-			jobs, err := db.ListJobsByScenario(scenario, 50)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, jobs)
-		}))
-
-		// ── Schedules (admin) ───────────────────────────────────────────────────────
-		r.Get("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			schedules, err := db.ListSchedules()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, schedules)
-		}))
-
-		r.Post("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			var rec ScheduleRecord
-			if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
-				return
-			}
-			if rec.ID == "" || rec.Scenario == "" || rec.CronExpr == "" {
-				writeError(w, http.StatusBadRequest, "id, scenario and cron_expr required")
-				return
-			}
-			rec.Enabled = true
-			if err := scheduler.Add(&rec); err != nil {
-				writeError(w, http.StatusUnprocessableEntity, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusCreated, rec)
-		}))
-
-		r.Patch("/schedules/{id}/enable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			if err := scheduler.Enable(chi.URLParam(r, "id")); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-		}))
-
-		r.Patch("/schedules/{id}/disable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			if err := scheduler.Disable(chi.URLParam(r, "id")); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-		}))
-
-		r.Delete("/schedules/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			if err := scheduler.Delete(chi.URLParam(r, "id")); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-		}))
-
-		// ── Tokens (admin) ──────────────────────────────────────────────────────────
-		r.Get("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			tokens, err := db.ListTokens()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, tokens)
-		}))
-
-		r.Post("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			if auth == nil {
-				writeError(w, http.StatusNotImplemented, "token management not available in ldap auth mode")
-				return
-			}
-			var body struct {
-				Name      string   `json:"name"`
-				Role      string   `json:"role"`
-				Scenarios []string `json:"scenarios"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
-				return
-			}
-			role := Role(body.Role)
-			if _, ok := roleRank[role]; !ok || body.Name == "" {
-				writeError(w, http.StatusBadRequest, "name and valid role (admin|activator|consumer) required")
-				return
-			}
-			raw, err := auth.CreateToken(body.Name, role, body.Scenarios)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			// Raw token shown ONCE.
-			writeJSON(w, http.StatusCreated, map[string]any{
-				"token": raw, "name": body.Name, "role": body.Role,
-				"note": "store this token now — it is not retrievable later",
+	r.Get("/scenarios", RequireRole(RoleConsumer, func(w http.ResponseWriter, _ *http.Request) {
+		type item struct {
+			Name        string     `json:"name"`
+			Description string     `json:"description"`
+			Params      []ParamDef `json:"params,omitempty"`
+			Permissions []string   `json:"permissions,omitempty"`
+			Runner      string     `json:"runner"`
+		}
+		out := make([]item, 0, len(scenes))
+		for _, s := range scenes {
+			out = append(out, item{
+				Name:        s.Orchestrator.Name,
+				Description: s.Orchestrator.Description,
+				Params:      s.Orchestrator.Params,
+				Permissions: s.Orchestrator.Permissions,
+				Runner:      resolveRunnerName(s, defaultRunnerName),
 			})
-		}))
+		}
+		writeJSON(w, http.StatusOK, out)
+	}))
 
-		r.Delete("/tokens/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
-			if err := db.DeleteToken(chi.URLParam(r, "id")); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
+	r.Get("/scenarios/{name}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+		name := chi.URLParam(r, "name")
+		s, ok := scenes[name]
+		if !ok {
+			writeError(w, http.StatusNotFound, "scenario not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, s.Orchestrator)
+	}))
+
+	r.Post("/scenarios/{name}/run", RequireRole(RoleActivator, func(w http.ResponseWriter, r *http.Request) {
+		name := chi.URLParam(r, "name")
+		s, ok := scenes[name]
+		if !ok {
+			writeError(w, http.StatusNotFound, "scenario not found")
+			return
+		}
+
+		// Per-token scenario allowlist: an activator may be scoped to specific scenarios.
+		principal := PrincipalFrom(r.Context())
+		if principal != nil && !principal.AllowsScenario(name) {
+			writeError(w, http.StatusForbidden, "token not authorized for scenario "+name)
+			return
+		}
+
+		// Parse params from request body.
+		var body struct {
+			Params map[string]string `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+			return
+		}
+
+		params, err := s.ValidateParams(body.Params)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+
+		// Content-integrity gate: refuse unless this scenario's current content
+		// matches an admin-approved checksum (see scenario_approval.go).
+		if err := VerifyScenarioChecksum(db, s); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+
+		// Trust gate: scenario permissions must be covered by license + Mercury env.
+		if err := gate.GateScenario(s); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		// Pipeline limit: refuse if too many jobs are already active.
+		if active, err := db.CountActiveJobs(); err == nil {
+			if err := gate.CheckPipelineLimit(active); err != nil {
+				writeError(w, http.StatusTooManyRequests, err.Error())
 				return
 			}
-			w.WriteHeader(http.StatusNoContent)
-		}))
+		}
 
-		// ── Project requests (submit / review / approve workflow) ───────────────────
-		// Clients propose runs; admins test, approve (→ execute), or reject.
-		rh := &requestHandlers{db: db, scenes: scenes, executor: executor, gate: gate}
-		r.Post("/requests", RequireRole(RoleConsumer, rh.Submit))            // propose
-		r.Get("/requests", RequireRole(RoleConsumer, rh.List))               // own (admin: all)
-		r.Get("/requests/{id}", RequireRole(RoleConsumer, rh.Get))           // own (admin: any)
-		r.Post("/requests/{id}/test", RequireRole(RoleAdmin, rh.Test))       // dry-run
-		r.Post("/requests/{id}/approve", RequireRole(RoleAdmin, rh.Approve)) // execute
-		r.Post("/requests/{id}/reject", RequireRole(RoleAdmin, rh.Reject))   // reject
-	}) // end authenticated group
+		job, err := executor.Submit(s, params, "" /* manual run */, principalID(principal))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"job_id": job.ID})
+	}))
 
-	return r
+	// ── Scenario approvals (admin) ───────────────────────────────────────────────
+	sah := &scenarioApprovalHandlers{db: db, scenes: scenes}
+	r.Post("/scenarios/{name}/approve", RequireRole(RoleAdmin, sah.Approve))
+	r.Get("/scenarios/{name}/approval", RequireRole(RoleAdmin, sah.Get))
+	r.Delete("/scenarios/{name}/approval", RequireRole(RoleAdmin, sah.Revoke))
+}
+
+// registerJobRoutes wires job inspection (list, detail, artifact download)
+// and the two lifecycle actions, cancel and stop.
+func registerJobRoutes(r chi.Router, deps routerDeps) {
+	db, executor := deps.db, deps.executor
+
+	r.Get("/jobs", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+		// Every job carries tdtpcli's full output, so the default hundred
+		// is a few hundred kilobytes. Anything that polls this — a
+		// dashboard, a health check — wants the last handful and had no
+		// way to ask for it.
+		jobs, err := db.ListJobs(queryLimit(r, 100, 500))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, jobs)
+	}))
+
+	r.Get("/jobs/{id}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+		job, err := db.GetJob(chi.URLParam(r, "id"))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if job == nil {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
+	}))
+
+	r.Get("/jobs/{id}/artifact", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+		job, err := db.GetJob(chi.URLParam(r, "id"))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if job == nil {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		if job.ArtifactPath == "" {
+			writeError(w, http.StatusNotFound, "job has no artifact")
+			return
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(job.ArtifactPath)+`"`)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		http.ServeFile(w, r, job.ArtifactPath)
+	}))
+
+	// Cancel: only for a job that hasn't started running yet (409 otherwise).
+	r.Post("/jobs/{id}/cancel", RequireRole(RoleActivator, jobActionHandler(db, executor.Cancel)))
+	// Stop: graceful termination of a currently running job (409 otherwise).
+	r.Post("/jobs/{id}/stop", RequireRole(RoleActivator, jobActionHandler(db, executor.Stop)))
+}
+
+// registerResultRoutes wires the consumer view: recent jobs for a scenario,
+// scoped by the token's scenario allowlist.
+func registerResultRoutes(r chi.Router, deps routerDeps) {
+	db := deps.db
+
+	r.Get("/results/{scenario}", RequireRole(RoleConsumer, func(w http.ResponseWriter, r *http.Request) {
+		scenario := chi.URLParam(r, "scenario")
+		if p := PrincipalFrom(r.Context()); p != nil && !p.AllowsScenario(scenario) {
+			writeError(w, http.StatusForbidden, "token not authorized for scenario "+scenario)
+			return
+		}
+		jobs, err := db.ListJobsByScenario(scenario, 50)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, jobs)
+	}))
+}
+
+// registerScheduleRoutes wires cron schedule management (admin only).
+func registerScheduleRoutes(r chi.Router, deps routerDeps) {
+	db, scheduler := deps.db, deps.scheduler
+
+	r.Get("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		schedules, err := db.ListSchedules()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, schedules)
+	}))
+
+	r.Post("/schedules", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		var rec ScheduleRecord
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+			return
+		}
+		if rec.ID == "" || rec.Scenario == "" || rec.CronExpr == "" {
+			writeError(w, http.StatusBadRequest, "id, scenario and cron_expr required")
+			return
+		}
+		rec.Enabled = true
+		if err := scheduler.Add(&rec); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, rec)
+	}))
+
+	r.Patch("/schedules/{id}/enable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if err := scheduler.Enable(chi.URLParam(r, "id")); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r.Patch("/schedules/{id}/disable", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if err := scheduler.Disable(chi.URLParam(r, "id")); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r.Delete("/schedules/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if err := scheduler.Delete(chi.URLParam(r, "id")); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+}
+
+// registerTokenRoutes wires API token management (admin only). Every handler
+// here is a no-op in ldap auth mode, where deps.auth is nil.
+func registerTokenRoutes(r chi.Router, deps routerDeps) {
+	db, auth := deps.db, deps.auth
+
+	r.Get("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		tokens, err := db.ListTokens()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, tokens)
+	}))
+
+	r.Post("/tokens", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if auth == nil {
+			writeError(w, http.StatusNotImplemented, "token management not available in ldap auth mode")
+			return
+		}
+		var body struct {
+			Name      string   `json:"name"`
+			Role      string   `json:"role"`
+			Scenarios []string `json:"scenarios"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+			return
+		}
+		role := Role(body.Role)
+		if _, ok := roleRank[role]; !ok || body.Name == "" {
+			writeError(w, http.StatusBadRequest, "name and valid role (admin|activator|consumer) required")
+			return
+		}
+		raw, err := auth.CreateToken(body.Name, role, body.Scenarios)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Raw token shown ONCE.
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"token": raw, "name": body.Name, "role": body.Role,
+			"note": "store this token now — it is not retrievable later",
+		})
+	}))
+
+	r.Delete("/tokens/{id}", RequireRole(RoleAdmin, func(w http.ResponseWriter, r *http.Request) {
+		if err := db.DeleteToken(chi.URLParam(r, "id")); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+}
+
+// registerRequestRoutes wires the project-request workflow: clients propose
+// runs; admins test, approve (→ execute), or reject.
+func registerRequestRoutes(r chi.Router, deps routerDeps) {
+	rh := &requestHandlers{db: deps.db, scenes: deps.scenes, executor: deps.executor, gate: deps.gate}
+	r.Post("/requests", RequireRole(RoleConsumer, rh.Submit))            // propose
+	r.Get("/requests", RequireRole(RoleConsumer, rh.List))               // own (admin: all)
+	r.Get("/requests/{id}", RequireRole(RoleConsumer, rh.Get))           // own (admin: any)
+	r.Post("/requests/{id}/test", RequireRole(RoleAdmin, rh.Test))       // dry-run
+	r.Post("/requests/{id}/approve", RequireRole(RoleAdmin, rh.Approve)) // execute
+	r.Post("/requests/{id}/reject", RequireRole(RoleAdmin, rh.Reject))   // reject
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -374,9 +412,9 @@ func pubsubStatus(s *Subscriber) string {
 // queryLimit reads a ?limit= query parameter, falling back to def when it is
 // absent, unparseable or out of range. Silently clamping rather than
 // 400-ing keeps a listing endpoint forgiving — a caller asking for more rows
-// than exist wants the rows, not an argument — while max stops one request
+// than exist wants the rows, not an argument — while maxRows stops one request
 // from serving the entire table.
-func queryLimit(r *http.Request, def, max int) int {
+func queryLimit(r *http.Request, def, maxRows int) int {
 	raw := r.URL.Query().Get("limit")
 	if raw == "" {
 		return def
@@ -385,8 +423,5 @@ func queryLimit(r *http.Request, def, max int) int {
 	if err != nil || n < 1 {
 		return def
 	}
-	if n > max {
-		return max
-	}
-	return n
+	return min(n, maxRows)
 }
