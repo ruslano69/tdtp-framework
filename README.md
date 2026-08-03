@@ -49,14 +49,22 @@ Against the standard taxonomy — four integration styles from Hohpe & Woolf's
 *Enterprise Integration Patterns*, and the six classes of integration product
 they are usually built into.
 
-**By style, TDTP does two of the four, and deliberately does not do the other two:**
+**By style, TDTP does two of the four fully, a third partially, and deliberately
+does not do the fourth:**
 
 | Style | TDTP |
 |---|---|
 | **File transfer** | **Yes, primary.** A `.tdtp.xml` packet is self-describing — the Schema is copied into every part — so a consumer needs no access to the source system. Filesystem or S3 (`pkg/storage`). |
 | **Asynchronous messaging** | **Yes, equal footing.** `broker://` over Kafka, RabbitMQ or MSMQ (`pkg/brokers`), with `--map --listen` as a daemon and `--drain` as a bounded unit of work. |
 | Shared database | No, by design. The point of the format is that systems do *not* share a data structure. |
-| Remote procedure call | No. There is no synchronous request/response API; this is the honest gap when comparing against an ESB. |
+| **Remote procedure call** | **Partial, read-only — `tdtpserve`.** `GET /api/data/<name>` serves a configured source or SQL view as JSON, with `where` / `order_by` / `limit` / `offset`; `GET /api/lookup/<name>?key=…` runs a parameterized query live against its own connection at request time. Enough to answer "give me this slice of data, now", over HTTP, synchronously. |
+
+Two limits on that last row, worth stating before someone plans around it.
+`tdtpserve` is **read-only** — there is no write path at all — and its sources
+are a **snapshot**: they load at startup and change only on `POST /api/refresh`.
+Lookups are the exception and are genuinely live per request. So it covers
+synchronous *reads* of data slices, not the synchronous, two-way,
+call-a-remote-operation integration an ESB is bought for.
 
 **By product class, TDTP is ETL** — literally the definition: both the source
 and the destination are databases. Extract is the adapters, Transform is
@@ -69,7 +77,7 @@ What it is *not*, so an evaluator does not have to guess:
 | MOM | Uses brokers, does not implement one. |
 | ESB | No content-based routing or mediation between applications on business rules. |
 | iPaaS | No multi-tenant cloud platform, no connector marketplace. |
-| API Management | No Web API gateway, traffic quotas or monetization. |
+| API Management | `tdtpserve` has its own auth and rate limiting, but it serves data — it is not a gateway that publishes, meters or monetizes somebody else's Web APIs. |
 | BPM | The orchestrator runs a DAG of jobs with approvals — closer to a workflow engine than to business-process modelling. |
 
 **One place the taxonomy does not fit.** It assumes ETL means batch between
