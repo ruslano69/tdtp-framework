@@ -899,6 +899,10 @@ For everything already shipped, see [CHANGELOG.md](CHANGELOG.md).
 The project is under active development. Welcome: bug reports, feature suggestions,
 pull requests.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build and test it, what CI
+enforces, and the one directory that is not open source. Vulnerabilities go
+through [SECURITY.md](SECURITY.md), never a public issue.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Exception: `pkg/license/` (commercial license
