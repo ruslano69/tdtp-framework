@@ -1,0 +1,103 @@
+name: Bug report
+description: Something behaves differently from what it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems do not go here.** Report them privately through
+        [Security → Advisories](https://github.com/ruslano69/tdtp-framework/security/advisories/new)
+        — see [SECURITY.md](https://github.com/ruslano69/tdtp-framework/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+      placeholder: |
+        Expected: the export writes 4 parts.
+        Got: it writes 1 part and exits 0.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >
+        The exact command, and the smallest input that still shows it.
+        Attach the pipeline YAML or the .tdtp.xml packet rather than
+        describing it — a file is worth a paragraph. Redact credentials.
+      render: shell
+      placeholder: |
+        tdtpcli --config cfg.yaml --export users --output out.tdtp.xml --compress
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The error, the log, or the relevant part of a large one.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`tdtpcli --version`, or the commit if built from source."
+      placeholder: "1.24.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - tdtpcli
+        - orchestrator
+        - tdtpserve
+        - tdtp-xray
+        - xZMercury / CA / licensing
+        - Python SDK / libtdtp
+        - Go library (pkg/...)
+        - not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      description: Where the data came from or went, if a database was involved.
+      options:
+        - none / not applicable
+        - SQLite
+        - PostgreSQL
+        - MS SQL Server
+        - MySQL
+        - MS Access
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Windows 10 22H2 / Ubuntu 24.04 / macOS 15"
+    validations:
+      required: true
+
+  - type: input
+    id: build-tags
+    attributes:
+      label: Build tags
+      description: >
+        Only if you built it yourself with any — `nokafka`, `nosqlite`.
+        Leave empty for an official binary.
+      placeholder: "nokafka"
+    validations:
+      required: false
