@@ -43,6 +43,45 @@ and query context travel together in one self-contained file.
 | Protection | Zero Trust encryption + integrity notary | `--enc` / `--integrity` + xZMercury |
 | Governance | Offline, Ed25519-signed capability licensing | `tdtp.lic` + `pkg/license` |
 
+### Where TDTP sits in the integration landscape
+
+Against the standard taxonomy — four integration styles from Hohpe & Woolf's
+*Enterprise Integration Patterns*, and the six classes of integration product
+they are usually built into.
+
+**By style, TDTP does two of the four, and deliberately does not do the other two:**
+
+| Style | TDTP |
+|---|---|
+| **File transfer** | **Yes, primary.** A `.tdtp.xml` packet is self-describing — the Schema is copied into every part — so a consumer needs no access to the source system. Filesystem or S3 (`pkg/storage`). |
+| **Asynchronous messaging** | **Yes, equal footing.** `broker://` over Kafka, RabbitMQ or MSMQ (`pkg/brokers`), with `--map --listen` as a daemon and `--drain` as a bounded unit of work. |
+| Shared database | No, by design. The point of the format is that systems do *not* share a data structure. |
+| Remote procedure call | No. There is no synchronous request/response API; this is the honest gap when comparing against an ESB. |
+
+**By product class, TDTP is ETL** — literally the definition: both the source
+and the destination are databases. Extract is the adapters, Transform is
+mapping YAML and TDTQL, Load is the import strategies.
+
+What it is *not*, so an evaluator does not have to guess:
+
+| Class | Why not |
+|---|---|
+| MOM | Uses brokers, does not implement one. |
+| ESB | No content-based routing or mediation between applications on business rules. |
+| iPaaS | No multi-tenant cloud platform, no connector marketplace. |
+| API Management | No Web API gateway, traffic quotas or monetization. |
+| BPM | The orchestrator runs a DAG of jobs with approvals — closer to a workflow engine than to business-process modelling. |
+
+**One place the taxonomy does not fit.** It assumes ETL means batch between
+databases and that message transport belongs to MOM. Here messaging is a
+first-class output alongside files, and every packet carries its own integrity
+hash and optional per-section encryption. TDTP is ETL by purpose while being
+file transfer *and* asynchronous messaging by style — there is no single box
+for that.
+
+Taxonomy per [*Что такое интеграция и зачем она нужна?*](https://wearecommunity.io/communities/integration/articles/314),
+Stanislav Deviatov (EPAM), April 2020.
+
 ---
 
 ## The TDTP Ecosystem
