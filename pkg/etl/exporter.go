@@ -257,16 +257,6 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		return err
 	}
 
-	// Compact-формат (до сплита)
-	if e.config.TDTP.Compact {
-		fixedNames := packet.ResolveFixedFields(dataPacket.Schema, e.config.TDTP.FixedFields)
-		if len(fixedNames) > 0 {
-			if err := packet.ApplyCompact(dataPacket, fixedNames, e.config.TDTP.CompactTail); err != nil {
-				return fmt.Errorf("failed to apply compact format: %w", err)
-			}
-		}
-	}
-
 	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
 	generator := e.newGenerator()
 	rows := dataPacket.GetRows()
@@ -291,6 +281,28 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		// Resolved before the integrity step, not after: when registration
 		// fails this is where the error packet has to land.
 		partDest := tdtpPartDestination(destination, part.Header.PartNumber, part.Header.TotalParts)
+
+		// Compact-формат применяем к каждой части отдельно, ПОСЛЕ сплита.
+		// Раньше это делалось один раз над dataPacket ДО GenerateReference:
+		// ApplyCompact корректно проставлял carry-forward пропуски и
+		// Data.Compact=true на dataPacket, но GenerateReference берёт
+		// dataPacket.GetRows() (уже с пропусками) и кладёт их в part.rawRows
+		// напрямую (fast-path, без RowsToData) — так что part.Data.Compact
+		// оставался false. Получался пакет с пустыми значениями в fixed-полях
+		// БЕЗ пометки compact="true", и ExpandCompactRows на стороне читателя
+		// (--to-csv/--to-xlsx/--to-tdtp/--import) видел Compact=false и
+		// молча пропускал разворачивание — пропуски так и оставались пустыми.
+		// Применяя ApplyCompact к каждому part после сплита (аналогично
+		// сжатию ниже), Data.Compact и carry-forward кодируются в одном и
+		// том же объекте, который реально сериализуется в XML.
+		if e.config.TDTP.Compact {
+			fixedNames := packet.ResolveFixedFields(part.Schema, e.config.TDTP.FixedFields)
+			if len(fixedNames) > 0 {
+				if err := packet.ApplyCompact(part, fixedNames, e.config.TDTP.CompactTail); err != nil {
+					return fmt.Errorf("failed to apply compact format for part %d: %w", part.Header.PartNumber, err)
+				}
+			}
+		}
 
 		// v1.4 integrity is mandatory ahead of v1.5 encryption, not
 		// opt-in — see pkg/pipeline/produce.go's doc comment: without
