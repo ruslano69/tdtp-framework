@@ -2,6 +2,46 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.24.1] — 2026-08-10
+
+### Fixed — pipeline TDTP output silently dropped compact-format fixed-field values
+
+**Important fix.** Any ETL pipeline writing `output.tdtp` with `compact: true`
+and `fixed_fields` produced a file where every row but the first in each group
+had the fixed field's value replaced with an empty string — permanently, with
+no error and no warning. `--to-csv`, `--to-xlsx`, `--to-tdtp`, and even
+`--import` all read the corrupted file without complaint, because the packet's
+own `compact="true"` marker — the thing that tells a reader "these blanks are
+carry-forward, expand them" — was missing from what actually got written to
+disk.
+
+The CLI path (`--export --compact --fixed-fields`, `--to-compact`) was never
+affected; only pipelines configured through `output.tdtp.compact` in YAML hit
+this.
+
+Root cause: `exportToTDTP` called `ApplyCompact` once on the whole packet
+*before* handing it to `GenerateReference` for splitting into parts.
+`ApplyCompact` correctly encodes carry-forward blanks and sets
+`Data.Compact = true` — but `GenerateReference` reads the row values back out
+via `GetRows()` (already blanked) and stores them straight into each part's
+`rawRows` fast path, which never calls `RowsToCompactData` and never sets
+`Data.Compact` on the part that is actually serialized to XML. The result: a
+packet with real data already stripped down to compact-style gaps, but with
+no marker telling any reader to fill them back in.
+
+Fixed by moving `ApplyCompact` to run per part, after the split — the same
+place per-part compression already runs — so the packet that gets the
+carry-forward encoding is the same one whose `Data.Compact` flag is read back
+out of the file.
+
+If you have any file produced by a pipeline using `output.tdtp.compact` on a
+1.24.0 or earlier build, treat its fixed fields as unreliable and regenerate
+it with 1.24.1.
+
+Added `TestExporter_TDTP_CompactRoundTrip` (`pkg/etl/exporter_test.go`), which
+writes a pipeline-style TDTP file end-to-end and fails if `Data.Compact` isn't
+set or if any carried-forward value doesn't round-trip.
+
 ## [Unreleased] — refactor/orchestrator-route-groups
 
 ### Changed — the orchestrator database opens in WAL mode

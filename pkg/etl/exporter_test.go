@@ -1,10 +1,94 @@
 package etl
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
+
+// TestExporter_TDTP_CompactRoundTrip is a regression test for a bug where
+// exportToTDTP applied ApplyCompact once to the whole dataPacket BEFORE
+// splitting it into parts via GenerateReference. GenerateReference reads
+// dataPacket.GetRows() — already carry-forward blanked by ApplyCompact — and
+// stores those values straight into part.rawRows via its fast path (no
+// RowsToCompactData call), so part.Data.Compact stayed false even though the
+// row values were already stripped down to compact-style blanks. Any reader
+// (--to-csv, --to-xlsx, --to-tdtp, --import) checks Data.Compact before
+// expanding and silently skipped it, permanently losing the fixed field's
+// value for every row but the first in each group.
+//
+// The fix applies ApplyCompact per part, after the split, mirroring how
+// compression is already applied per part. This test writes a TDTP file
+// through the real Export() path and verifies both that the written packet
+// is marked compact="true" and that expanding it recovers every original
+// value.
+func TestExporter_TDTP_CompactRoundTrip(t *testing.T) {
+	schema := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "id", Type: "TEXT"},
+			{Name: "group", Type: "TEXT"},
+			{Name: "value", Type: "TEXT"},
+		},
+	}
+	want := [][]string{
+		{"1", "A", "x"},
+		{"2", "A", "y"},
+		{"3", "A", "z"},
+		{"4", "B", "w"},
+	}
+
+	dataPacket := packet.NewDataPacket(packet.TypeReference, "t")
+	dataPacket.Schema = schema
+	dataPacket.Data = packet.RowsToData(want)
+
+	dest := filepath.Join(t.TempDir(), "out.tdtp.xml")
+	exporter := NewExporter(OutputConfig{
+		Type: "tdtp",
+		TDTP: &TDTPOutputConfig{
+			Destination: dest,
+			Compact:     true,
+			FixedFields: []string{"group"},
+		},
+	})
+
+	if _, err := exporter.Export(context.Background(), dataPacket); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	written, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+
+	pkt, err := packet.NewParser().ParseBytes(written)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+
+	if !pkt.Data.Compact {
+		t.Fatalf("written packet has Data.Compact=false; carry-forward blanks were " +
+			"written without the marker that tells readers to expand them")
+	}
+
+	if err := packet.ExpandCompactRows(pkt); err != nil {
+		t.Fatalf("ExpandCompactRows: %v", err)
+	}
+
+	got := pkt.GetRows()
+	if len(got) != len(want) {
+		t.Fatalf("row count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		for j := range want[i] {
+			if got[i][j] != want[i][j] {
+				t.Errorf("row %d field %d = %q, want %q (fixed field value lost)", i, j, got[i][j], want[i][j])
+			}
+		}
+	}
+}
 
 func TestExporter_getDestination(t *testing.T) {
 	tests := []struct {
