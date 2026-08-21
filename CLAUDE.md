@@ -355,9 +355,20 @@ allocation per cell, and cost three things:
 
 Everything now scans into `any`. If the value comes back as a `time.Time`,
 `DBValueToString` already produced the canonical string and the
-`ParseValue → FormatValue` round trip in `ConvertValueToTDTP` is skipped —
-which is where the real saving was: **1.05 s → 0.93 s on 100k rows with three
-date columns.**
+`ParseValue → FormatValue` round trip in `ConvertValueToTDTP` is skipped.
+
+**This is not a speedup — do not quote one.** An interleaved A/B of ten pairs
+(old binary and new, alternating, both orders) on 100k rows with three date
+columns puts both at ~0.97–0.98 s median, inside a 0.93–1.04 s run-to-run
+spread. An earlier note here claimed 1.05 s → 0.93 s; that came from comparing
+runs taken minutes apart rather than interleaved, and the "before" figure was
+simply the first, cold-cache run. Skipping the round trip does save work, but
+`formatTimeForField` adds a `NormalizeType` call per date cell and the two
+cancel. **These changes are correctness fixes; treat the cost as unchanged.**
+
+The measurement lesson generalizes: on this VM a single wall-clock run carries
+±7%, so any A/B smaller than that has to be interleaved before it means
+anything.
 
 ### The round trip, both directions
 
