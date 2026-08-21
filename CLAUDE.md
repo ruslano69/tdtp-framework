@@ -331,6 +331,64 @@ round-trip integrity.
 
 ---
 
+## SQLite dates: do not "skip parseTime" by scanning into a string (IMPORTANT)
+
+`modernc.org/sqlite` decides whether to parse a cell into `time.Time` from the
+column's **declared type** — `DATE`, `DATETIME`, `TIMESTAMP`. Those are exactly
+the types worth special-casing, which is what makes the trap so easy to walk
+into.
+
+There used to be a fast path in `ScanSQLRows` that bound such columns to
+`*string`, on the stated theory that it skipped `modernc.parseTime` and saved
+about 450 ms per 100k rows. **It saved nothing.** The driver parses first
+regardless; `database/sql`'s `convertAssign` then formats the `time.Time` back
+into the string with `RFC3339Nano`. The path bought an extra format and an
+allocation per cell, and cost three things:
+
+1. **The export died on the first NULL date** — `converting NULL to string is
+   unsupported`. A whole table refused to export because one cell was empty.
+2. `normalizeSQLiteDateTime` became dead code. It looked for the space
+   separator in `"YYYY-MM-DD HH:MM:SS"`, and its input always arrived as
+   RFC3339 already. Its unit test passed the whole time — it called the
+   function directly and never checked that anything reached it.
+3. The driver's own zone rode into a packet whose Schema declares UTC.
+
+Everything now scans into `any`. If the value comes back as a `time.Time`,
+`DBValueToString` already produced the canonical string and the
+`ParseValue → FormatValue` round trip in `ConvertValueToTDTP` is skipped —
+which is where the real saving was: **1.05 s → 0.93 s on 100k rows with three
+date columns.**
+
+### The round trip, both directions
+
+`DATE` is a date. `formatTimeForField` writes `2026-08-21`, not
+`2026-08-21T00:00:00Z`, and `TypedValueToSQL` writes it back as `2026-08-21`
+rather than `2026-08-21 00:00:00`. Before, export produced midnight and import
+kept it, so a DATE column drifted into a timestamp on every hop.
+
+`TypedValueToSQL` keeps sub-second precision **for SQLite only**, via the
+`"2006-01-02 15:04:05.999999999"` layout — it trims trailing zeros and drops
+the dot entirely when there is no fraction, so whole seconds are written with
+the same bytes as before. Export was taught to carry `.fff` long ago; import
+was still cutting it off.
+
+**MySQL and MSSQL deliberately still get whole seconds.** MySQL `DATETIME`
+without explicit precision is `DATETIME(0)` and **rounds** the fraction
+(`14:38:11.527 → 14:38:12`) — it shifts the value instead of truncating it.
+Changing that needs the column's actual precision checked against a live
+database first.
+
+Measured on a 100k-row round trip: zero semantic loss. The only textual
+difference is `RFC3339Nano` trimming trailing zeros (`.110 → .11`), which is
+`FormatTimestamp`'s documented behaviour and not new.
+
+Regression tests: `pkg/adapters/sqlite/datetime_roundtrip_test.go` (needs the
+live driver — none of this is visible to a unit test) and the
+`TypedValueToSQL`/`formatTimeForField` cases in
+`pkg/adapters/base/timestamp_precision_test.go`.
+
+---
+
 ## SeaweedFS S3 (local testing)
 
 ### The binary

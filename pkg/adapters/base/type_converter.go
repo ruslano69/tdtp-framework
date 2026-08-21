@@ -33,6 +33,20 @@ func formatTimestamp(t time.Time) string {
 	return schema.FormatTimestamp(t)
 }
 
+// formatTimeForField форматирует time.Time с оглядкой на объявленный тип поля.
+//
+// DATE отдаётся датой без времени. Раньше поле DATE тоже уходило в
+// formatTimestamp, давая "2026-08-21T00:00:00Z", и в канонический вид его
+// приводил уже round-trip ParseValue→FormatValue внутри ConvertValueToTDTP.
+// Формат от этого не менялся, но каждая ячейка платила за разбор и повторную
+// сборку строки. Теперь канонический вид получается сразу.
+func formatTimeForField(t time.Time, field packet.Field) string {
+	if schema.NormalizeType(schema.DataType(field.Type)) == schema.TypeDate {
+		return t.UTC().Format("2006-01-02")
+	}
+	return formatTimestamp(t)
+}
+
 // UniversalTypeConverter - универсальный конвертер типов для всех адаптеров
 // Устраняет дублирование кода конвертации между адаптерами
 type UniversalTypeConverter struct {
@@ -226,7 +240,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		}
 		// Timestamp в RFC3339 формате (TDTP стандарт)
 		// Нормализуем в UTC для consistency
-		return formatTimestamp(v)
+		return formatTimeForField(v, field)
 
 	case pgtype.Time:
 		// PostgreSQL TIME (время суток, например 08:00:00)
@@ -410,7 +424,7 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 		}
 		// DATETIME, DATETIME2, DATETIMEOFFSET - конвертируем в RFC3339 для TDTP
 		// ВАЖНО: нормализуем в UTC для консистентности
-		return formatTimestamp(v)
+		return formatTimeForField(v, field)
 
 	default:
 		return fmt.Sprintf("%v", v)
@@ -478,7 +492,7 @@ func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Fiel
 			return packet.SpecNoDateMarker
 		}
 		// Конвертируем в RFC3339 для TDTP (консистентность с MSSQL и PostgreSQL)
-		return formatTimestamp(v)
+		return formatTimeForField(v, field)
 
 	default:
 		return fmt.Sprintf("%v", v)
@@ -565,11 +579,40 @@ func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType st
 			return *tv.BoolValue
 		}
 
-	case schema.TypeDate, schema.TypeDatetime, schema.TypeTimestamp:
+	case schema.TypeDate:
 		if tv.TimeValue != nil {
-			// Для SQLite, MySQL, MSSQL используем строковый формат
+			// DATE — только дата. Раньше этот случай шёл вместе с DATETIME и
+			// колонка получала "2026-03-01 00:00:00": дата, притворяющаяся
+			// меткой времени. Экспорт при этом отдаёт "2026-03-01"
+			// (schema.FormatValue, ветка TypeDate), так что round-trip
+			// расходился на ровном месте.
 			if dbType == "sqlite" || dbType == "mysql" || dbType == "mssql" {
-				return tv.TimeValue.Format("2006-01-02 15:04:05")
+				return tv.TimeValue.Format("2006-01-02")
+			}
+			return *tv.TimeValue
+		}
+
+	case schema.TypeDatetime, schema.TypeTimestamp:
+		if tv.TimeValue != nil {
+			// SQLite хранит дату строкой, и дробная часть в неё помещается.
+			// Layout с ".999999999" срезает хвостовые нули и убирает точку
+			// целиком, когда доли нет, — значение без миллисекунд пишется
+			// ровно теми же байтами, что и раньше.
+			//
+			// UTC здесь обязателен: parseTimestamp нормализует зону сам, а
+			// parseDatetime — нет, и без приведения значение с "+03:00"
+			// записывалось бы своим локальным временем стенных часов в
+			// колонку, которая по схеме UTC (сдвиг на 3 часа).
+			if dbType == "sqlite" {
+				return tv.TimeValue.UTC().Format("2006-01-02 15:04:05.999999999")
+			}
+			// MySQL/MSSQL: дробная часть намеренно НЕ передаётся. MySQL
+			// DATETIME без явной точности — это DATETIME(0), и он округляет
+			// доли до секунды (14:38:11.527 → 14:38:12), то есть сдвигает
+			// значение вместо того, чтобы его усечь. Менять это нужно вместе
+			// с проверкой фактической точности колонки на живой БД.
+			if dbType == "mysql" || dbType == "mssql" {
+				return tv.TimeValue.UTC().Format("2006-01-02 15:04:05")
 			}
 			// Для PostgreSQL можем передавать time.Time напрямую
 			return *tv.TimeValue
