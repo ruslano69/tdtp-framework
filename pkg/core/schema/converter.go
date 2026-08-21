@@ -20,8 +20,10 @@ func NewConverter() *Converter {
 // ParseValue парсит строковое значение согласно типу поля
 func (c *Converter) ParseValue(rawValue string, field FieldDef) (*TypedValue, error) {
 	tv := &TypedValue{
-		Type:     field.Type,
-		RawValue: rawValue,
+		Type:      field.Type,
+		Subtype:   field.Subtype,
+		Precision: field.Precision,
+		RawValue:  rawValue,
 	}
 
 	normalized := NormalizeType(field.Type)
@@ -221,10 +223,11 @@ func (c *Converter) parseDate(tv *TypedValue, field FieldDef) (*TypedValue, erro
 // RFC3339 is canonical; the rest handle output from SQLite workspaces and
 // other sources that omit the 'T' separator or timezone suffix.
 var datetimeFormats = []string{
-	time.RFC3339,          // "2006-01-02T15:04:05Z07:00"  — canonical TDTP
-	"2006-01-02T15:04:05", // ISO-8601 without timezone
-	"2006-01-02 15:04:05", // SQLite/MySQL workspace format
-	"2006-01-02",          // date-only fallback
+	time.RFC3339,                // "2006-01-02T15:04:05Z07:00"  — canonical TDTP
+	"2006-01-02 15:04:05Z07:00", // SQLite text storage that carries its own offset
+	"2006-01-02T15:04:05",       // ISO-8601 without timezone
+	"2006-01-02 15:04:05",       // SQLite/MySQL workspace format
+	"2006-01-02",                // date-only fallback
 }
 
 // parseDatetime парсит DATETIME (с таймзоной)
@@ -338,10 +341,28 @@ func FormatTimestamp(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// FormatTimeOfDay renders a TIME value (PostgreSQL `time`, subtype "time") as
+// plain time of day. Trailing zeros in the fraction are trimmed and the dot
+// disappears entirely when there is none, so a whole-second value formats as
+// "14:38:11" — the same bytes the previous %02d:%02d:%02d formatting produced,
+// while microseconds now survive instead of being cut off.
+func FormatTimeOfDay(t time.Time) string {
+	return t.Format("15:04:05.999999999")
+}
+
 // FormatValue форматирует типизированное значение обратно в строку
 func (c *Converter) FormatValue(tv *TypedValue) string {
 	if tv.IsNull {
 		return ""
+	}
+
+	// TIME (PostgreSQL) приезжает как TIMESTAMP с subtype "time" — это время
+	// суток, а не момент. Печатать его через FormatTimestamp значит выдумать
+	// дату: parseTime собирает time.Time с нулевым годом, и получается
+	// "0000-01-01T14:38:11Z". Такую строку PostgreSQL обратно в колонку time
+	// не примет, так что круг обрывался на импорте.
+	if tv.Subtype == "time" && tv.TimeValue != nil {
+		return FormatTimeOfDay(*tv.TimeValue)
 	}
 
 	normalized := NormalizeType(tv.Type)

@@ -94,6 +94,35 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 	return packet.Schema{Fields: fields}, nil
 }
 
+// selectExprForField возвращает выражение для колонки в SELECT.
+//
+// Колонки дат берутся через CAST(... AS TEXT), и это самая крупная экономия на
+// чтении из всех, что здесь есть. modernc.org/sqlite решает, разбирать ли
+// ячейку в time.Time, по ОБЪЯВЛЕННОМУ типу колонки — DATE, DATETIME,
+// TIMESTAMP. У выражения объявленного типа нет, поэтому разбор не запускается
+// вовсе. Измерено на 50k строк с тремя колонками дат: 351 мс → 103 мс, 45
+// аллокаций на строку → 11. Разбор внутри драйвера стоит около 1.65 мкс и 11
+// аллокаций на ячейку — на порядок больше всего, что делает конверсионный слой
+// на нашей стороне.
+//
+// Значение при этом не портится. Текстовое хранение возвращается байт в байт
+// как записано (для этой формы и писался normalizeSQLiteDateTime), INTEGER
+// даёт те же цифры, что и strconv сегодня, а REAL — своё точное хранимое
+// представление вместо сегодняшнего "2.46090911e+06".
+//
+// Приём применим только там, где SELECT строим мы сами. Для произвольного
+// запроса (ReadRowsWithSQL, TDTQL, вьюхи) переписывать проекцию нельзя, и там
+// всё остаётся по-старому.
+func selectExprForField(field packet.Field) string {
+	quoted := fmt.Sprintf("\"%s\"", field.Name) //nolint:gocritic // SQL identifier quoting, not Go string quoting
+	if !packet.IsDateFieldType(field.Type) {
+		return quoted
+	}
+	// Псевдоним сохраняет имя колонки в результате — на случай, если до него
+	// кто-то доберётся через rows.Columns().
+	return fmt.Sprintf("CAST(%s AS TEXT) AS %s", quoted, quoted)
+}
+
 // ReadAllRows читает все строки из таблицы
 // Реализует base.DataReader интерфейс
 func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema packet.Schema) ([][]string, error) {
@@ -101,7 +130,7 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, schema pack
 	// Формируем список полей для SELECT — квотируем каждое имя на случай пробелов
 	fieldNames := make([]string, len(schema.Fields))
 	for i, field := range schema.Fields {
-		fieldNames[i] = fmt.Sprintf("\"%s\"", field.Name) //nolint:gocritic // SQL identifier quoting, not Go string quoting
+		fieldNames[i] = selectExprForField(field)
 	}
 
 	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting

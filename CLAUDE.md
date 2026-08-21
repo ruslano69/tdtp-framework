@@ -73,6 +73,25 @@ pg_ctlcluster 16 main start
 pg_isready
 ```
 
+### Connection strings for the integration tests
+
+Every adapter's integration tests default to a local server and **skip** when
+they cannot reach one, so a machine without databases still gets a green
+`go test ./...`. On CI point them somewhere else with:
+
+| Variable | Package | Default |
+|---|---|---|
+| `POSTGRES_TEST_DSN` | `pkg/adapters/postgres` | `postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test` |
+| `MYSQL_TEST_DSN` | `pkg/adapters/mysql` | `tdtp_user:tdtp_dev_pass_2025@tcp(127.0.0.1:3306)/tdtp_test?parseTime=true` |
+| `MSSQL_TEST_DSN_DEV` | `pkg/adapters/mssql` | `server=localhost,1433;...;database=DevDB` |
+| `MSSQL_TEST_DSN_PROD` | `pkg/adapters/mssql` | `server=localhost,1434;...;database=ProdSimDB` |
+
+SQLite needs nothing — its tests use `t.TempDir()`.
+
+**Keep `parseTime=true` in the MySQL DSN.** Without it the driver hands back
+`[]byte` instead of `time.Time` for DATE/DATETIME/TIMESTAMP, and the tests
+would be exercising a code path the CLI never takes.
+
 ---
 
 ## Compression (zstd and kanzi)
@@ -328,6 +347,325 @@ section (and the bomb is in Data).
 Rejection on the kanzi path is **not verified at full scale** — compressing
 256 MB through kanzi takes tens of seconds. The test there only covers
 round-trip integrity.
+
+---
+
+## SQLite dates: do not "skip parseTime" by scanning into a string (IMPORTANT)
+
+`modernc.org/sqlite` decides whether to parse a cell into `time.Time` from the
+column's **declared type** — `DATE`, `DATETIME`, `TIMESTAMP`. Those are exactly
+the types worth special-casing, which is what makes the trap so easy to walk
+into.
+
+There used to be a fast path in `ScanSQLRows` that bound such columns to
+`*string`, on the stated theory that it skipped `modernc.parseTime` and saved
+about 450 ms per 100k rows.
+
+**The cost it named is real — the remedy was not.** Measured below: the parse
+runs to about 1.65 µs and 11 allocations per date cell, which on 100k rows with
+three date columns is roughly 250 ms of a 350 ms read. But binding the scan to
+`*string` does not avoid any of it. The driver decides whether to parse from the
+column's *declared type*, not from what you scan into, so it parses anyway, and
+`database/sql`'s `convertAssign` then formats the `time.Time` back into the
+string with `RFC3339Nano`. The path bought an extra format and an allocation per
+cell, and cost three things:
+
+1. **The export died on the first NULL date** — `converting NULL to string is
+   unsupported`. A whole table refused to export because one cell was empty.
+2. `normalizeSQLiteDateTime` became dead code. It looked for the space
+   separator in `"YYYY-MM-DD HH:MM:SS"`, and its input always arrived as
+   RFC3339 already. Its unit test passed the whole time — it called the
+   function directly and never checked that anything reached it.
+3. The driver's own zone rode into a packet whose Schema declares UTC.
+
+### Where the read time actually goes
+
+`pkg/adapters/sqlite/driver_cost_bench_test.go`, 50k rows, six columns, three
+of them dates (Xeon 2.80GHz):
+
+| Query | Time | Allocations per row |
+|---|---|---|
+| `SELECT id` | 19 ms | 1 |
+| `id, name, amount` | 50 ms | 5 |
+| all six, dates via `CAST(... AS TEXT)` | 103 ms | 11 |
+| all six, dates as the driver returns them | **351 ms** | **45** |
+
+So the three date columns cost about 250 ms more as `time.Time` than as text —
+about **1.65 µs and 11 allocations per date cell**. For scale, the formatter on
+our side of the boundary costs 120 ns and one allocation. The driver's parse is
+an order of magnitude past anything the conversion layer does.
+
+**Going around `database/sql` does not help.** The same query driven through
+`driver.Rows` directly measures the same 351 ms with the same 45 allocations —
+`convertAssign` hits a plain assignment when the scan target is `*any`, and
+`database/sql` adds nothing else worth naming per row. `driver.Rows` also does
+not expose wire bytes: `go-mssqldb`'s `Rows.Next` copies out of an
+already-decoded `[]interface{}`, and modernc does the same. Do not go looking
+for raw TDS or SQLite bytes at that layer — they are gone before it.
+
+**The lever that does work is the SQL, not the API**, and `ReadAllRows` now
+pulls it. `selectExprForField` wraps every date column in
+`CAST(col AS TEXT) AS col`, which changes the declared type the driver sees so
+the parse never runs: 351 ms → 103 ms on the read.
+
+End to end on the CLI, interleaved A/B over five pairs, 100k rows with three
+date columns: **0.97 s → 0.83 s median, and every single pair faster** — unlike
+the earlier scanner change, this one is outside the ±7% this VM carries. All
+100 000 rows come out byte-identical; the only difference between the two
+packets is the per-export `MessageID`.
+
+Storage classes check out, and one of them improves: a TEXT-stored date comes
+back byte-for-byte as stored, an INTEGER one as the same digits `strconv`
+produced before, and a REAL one as its exact stored text (`2460909.11`) instead
+of the old `2.46090911e+06`. `TestDateStorageClasses` pins all four cases.
+
+`datetimeFormats` gained `"2006-01-02 15:04:05Z07:00"` for this: SQLite text
+storage can carry its own offset, and that spelling previously failed every
+layout and fell through to the packet raw. It parses now, and
+`parseTimestamp` normalizes it to UTC exactly as the driver's value was.
+
+**Only `ReadAllRows` does this** — it is the one place we build the SELECT
+ourselves. `ReadRowsWithSQL` (TDTQL, `--where`, views) takes a caller-supplied
+query whose projection cannot be rewritten safely, so it keeps the old path.
+
+### And then the conversion side, which CAST made the new bottleneck
+
+Raw SQLite text does not match the first layout in `datetimeFormats`, so
+`ParseValue` burns three failed `time.Parse` calls — each allocating an error —
+before the space-separated layout hits. Measured on the shapes SQLite actually
+stores: **1630 ns and 14 allocations per cell.**
+
+`fastSQLiteDateTime` (`scanner.go`) does it with one string splice: **111 ns,
+1 allocation — 14.7×.** This is the job the old `normalizeSQLiteDateTime` was
+written for, finally on a live code path, because CAST is what puts the space
+separator back in front of it.
+
+**It declines rather than guess.** `ok=false` sends the value down the ordinary
+path, and that is the only reason the bytes still match. It declines on: an
+explicit offset (needs converting to UTC, not keeping), trailing zeros in the
+fraction (`RFC3339Nano` trims them), a fraction longer than nine digits,
+anything `time.Parse` would reject — including a day past the length of its
+month, checked with the leap-year rule — and, the easiest one to miss, **a
+shape that does not match the declared type**: a bare date in a TIMESTAMP
+column expands to midnight on the slow path, and a full timestamp in a DATE
+column is not parsed at all. `TestFastSQLiteDateTime_AgreesWithSlowPath` and a
+250k-case random test hold both halves together.
+
+### What the two changes did together
+
+100k rows, three date columns, interleaved A/B against a binary built from the
+preceding commit:
+
+| Step | Export | Против исходного |
+|---|---|---|
+| before both | 0.97 s | — |
+| `CAST(... AS TEXT)` | 0.83 s | 1.17× |
+| `+ fastSQLiteDateTime` | **0.46 s** | **2.1×** |
+
+All 100 000 rows byte-identical at every step; the packets differ only in the
+per-export `MessageID`.
+
+Everything now scans into `any`. If the value comes back as a `time.Time`,
+`DBValueToString` already produced the canonical string and the
+`ParseValue → FormatValue` round trip in `ConvertValueToTDTP` is skipped.
+
+**This is not a speedup — do not quote one.** An interleaved A/B of ten pairs
+(old binary and new, alternating, both orders) on 100k rows with three date
+columns puts both at ~0.97–0.98 s median, inside a 0.93–1.04 s run-to-run
+spread. An earlier note here claimed 1.05 s → 0.93 s; that came from comparing
+runs taken minutes apart rather than interleaved, and the "before" figure was
+simply the first, cold-cache run. Skipping the round trip does save work, but
+`formatTimeForField` adds a `NormalizeType` call per date cell and the two
+cancel. **These changes are correctness fixes; treat the cost as unchanged.**
+
+The measurement lesson generalizes: on this VM a single wall-clock run carries
+±7%, so any A/B smaller than that has to be interleaved before it means
+anything.
+
+### The round trip, both directions
+
+`DATE` is a date. `formatTimeForField` writes `2026-08-21`, not
+`2026-08-21T00:00:00Z`, and `TypedValueToSQL` writes it back as `2026-08-21`
+rather than `2026-08-21 00:00:00`. Before, export produced midnight and import
+kept it, so a DATE column drifted into a timestamp on every hop.
+
+`TypedValueToSQL` keeps sub-second precision **for SQLite only**, via the
+`"2006-01-02 15:04:05.999999999"` layout — it trims trailing zeros and drops
+the dot entirely when there is no fraction, so whole seconds are written with
+the same bytes as before. Export was taught to carry `.fff` long ago; import
+was still cutting it off.
+
+**MySQL and MSSQL deliberately still get whole seconds.** MySQL `DATETIME`
+without explicit precision is `DATETIME(0)` and **rounds** the fraction
+(`14:38:11.527 → 14:38:12`) — it shifts the value instead of truncating it.
+Changing that needs the column's actual precision checked against a live
+database first.
+
+Measured on a 100k-row round trip: zero semantic loss. The only textual
+difference is `RFC3339Nano` trimming trailing zeros (`.110 → .11`), which is
+`FormatTimestamp`'s documented behaviour and not new.
+
+Regression tests: `pkg/adapters/sqlite/datetime_roundtrip_test.go` (needs the
+live driver — none of this is visible to a unit test) and the
+`TypedValueToSQL`/`formatTimeForField` cases in
+`pkg/adapters/base/timestamp_precision_test.go`.
+
+---
+
+## PostgreSQL dates: what pgx actually hands over (IMPORTANT)
+
+Scanned into `any` (which is what the adapters do), pgx v5 returns:
+
+| column | Go type it comes back as |
+|---|---|
+| `date`, `timestamp`, `timestamptz` | `time.Time` |
+| the same columns holding `infinity` | **`pgtype.InfinityModifier`** |
+| `time` | `pgtype.Time` |
+| NULL | `nil` |
+
+So the `case pgtype.Date:` / `case pgtype.Timestamp:` / `case pgtype.Timestamptz:`
+branches in `pgValueToString` **never fire** — the same shape of dead code the
+SQLite date fast path had. They are harmless (the `time.Time` branch does the
+right thing), but do not reason about behaviour from them.
+
+Two real defects came out of that list:
+
+### `time` columns broke the round trip outright
+
+`pgtype.Time` was formatted with `"%02d:%02d:%02d"`, which threw away the
+microseconds PostgreSQL stores. Worse, the field arrives as `TIMESTAMP` with
+`Subtype: "time"`, and `FormatValue` ignored the subtype — so `parseTime`'s
+zero-year `time.Time` was printed through `FormatTimestamp` as
+`0000-01-01T14:38:11Z`. PostgreSQL will not accept that back into a `time`
+column: `invalid input syntax for type time`. **A table with a TIME column
+could not round-trip at all.**
+
+`TypedValue` now carries `Subtype`, and `FormatValue`/`TypedValueToSQL` render
+it through `schema.FormatTimeOfDay` — `15:04:05.999999999`, so whole seconds
+still format to the same bytes as the old `%02d:%02d:%02d`.
+
+### `infinity` never became a marker
+
+Falling through to `fmt.Sprintf("%v", v)` produced **lowercase** `infinity`, and
+`rawInfinityForms` only lists the capitalized spellings. `DetectAndApply`
+therefore left `SpecialValues.Infinity` unset, `ConvertValueToTDTP` logged a
+parse failure for every affected cell, and the packet carried a raw PostgreSQL
+literal.
+
+Postgres→Postgres appeared to work — `infinity` happens to be valid input on
+the way back in. **Postgres→SQLite did not**: with no marker declared, the
+importer tried to parse `infinity` as a date and failed. The marker path
+(`INF` → `"infinity"` for pg, NULL elsewhere) exists precisely for this and was
+simply never reached.
+
+Also note `postgres.convertValue` is the adapter's **own** copy of the marker
+decoding — it is not `base.ConvertRowToSQLValues` — and it handled only `Null`
+and `NoDate`. Anything added to the base version has to be added there too.
+
+### What round-trips cleanly now
+
+Verified against a live PostgreSQL 16 on `DATE`, `TIMESTAMP`, `TIMESTAMPTZ` and
+`TIME`: microseconds, NULL, `infinity`/`-infinity`, year 0001, pre-1900 dates,
+`+03:00` offsets (normalized to UTC, as the schema declares) — **zero
+differences**, and the second pass is a fixed point. A packet with `infinity`
+imported into SQLite lands as NULL, which is the designed behaviour for a
+database that cannot store it.
+
+Regression tests: `pkg/adapters/postgres/datetime_roundtrip_test.go` (needs a
+live database; skips without one, override the DSN with `POSTGRES_TEST_DSN`).
+Start it with `pg_ctlcluster 16 main start`.
+
+---
+
+## MySQL dates: precision is not optional (IMPORTANT)
+
+### Starting MySQL here
+
+Docker Hub is blocked by the egress policy (`production.cloudfront.docker.com`
+answers 403 to CONNECT), so `docker pull mysql` does not work. Install the
+Ubuntu package instead — it is real MySQL 8.0, not MariaDB:
+
+```bash
+apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q mysql-server
+(mysqld_safe > /tmp/mysqld.log 2>&1 &) && sleep 12 && mysqladmin status
+mysql -e "CREATE USER IF NOT EXISTS 'tdtp_user'@'%' IDENTIFIED BY 'tdtp_dev_pass_2025';
+          CREATE DATABASE IF NOT EXISTS tdtp_test;
+          GRANT ALL PRIVILEGES ON *.* TO 'tdtp_user'@'%' WITH GRANT OPTION;"
+```
+
+To exercise the zero-date path, drop `NO_ZERO_DATE`/`NO_ZERO_IN_DATE` from
+`sql_mode` — the default in 8.x forbids `0000-00-00`.
+
+### `DATETIME` without a precision ROUNDS (measured)
+
+MySQL 8.0.46, `DATETIME` (i.e. `DATETIME(0)`):
+
+```
+'2026-08-21 14:38:11.527'  →  2026-08-21 14:38:12
+'2026-08-21 23:59:59.999'  →  2026-08-22 00:00:00   ← another day
+```
+
+It rounds, it does not truncate. So the import **cannot** simply hand MySQL a
+fractional value the way it does for SQLite: on a whole-second column that
+shifts the data, sometimes across a date boundary.
+
+The import therefore writes **exactly as many fractional digits as the column
+declares**. `Precision` comes from `information_schema.columns.datetime_precision`
+— note that `data_type` for `datetime(6)` is just `"datetime"`, with no
+parameters, so `BuildFieldFromColumn` cannot see it from the type name alone.
+Go's `Format` truncates the fraction, so nothing rounds on either side.
+`Precision` 0 produces the same bytes as before this change.
+
+`CreateTable` writes the precision back out (`DATETIME(6)`, `TIMESTAMP(6)`,
+`TIME(6)`), otherwise a freshly created target table would silently be
+`DATETIME(0)` and lose the microseconds on the very first import.
+
+**MSSQL still gets whole seconds**, deliberately: `datetime` rounds to 1/300 s
+while `datetime2` keeps 100 ns, and there was no live MSSQL here to measure it
+on. Do the same exercise before changing that branch.
+
+### MySQL `TIME` is a duration, not a time of day
+
+Range `-838:59:59 .. 838:59:59`. It is not a clock reading, and neither
+`time.Time` nor PostgreSQL `time` can hold the ends of that range.
+
+It used to be rejected outright — `unsupported MySQL type: TIME` straight out of
+`GetTableSchema`, so a table with a TIME column could not even be *described*,
+let alone exported. It now maps to **`TEXT` with `Subtype: "time"`**: the value
+travels verbatim, `Subtype` remembers what it was, and `MapTDTPTypeToMySQL`
+turns it back into `TIME(n)`. `-12:30:15.250000` and `838:59:59` round-trip
+exactly.
+
+Do not "improve" this into `TIMESTAMP` + subtype `"time"` the way PostgreSQL
+`time` is handled — that path goes through `parseTime`, which cannot represent
+either a negative value or an hour past 23.
+
+### The driver: `parseTime=true` matters, and TIME is exempt
+
+The DSN the CLI builds (`cmd/tdtpcli/config.go`) carries `parseTime=true`, so
+`DATE`/`DATETIME`/`TIMESTAMP` arrive as `time.Time`. **`TIME` does not** — it
+arrives as `[]byte` regardless, which is why it lands in the `[]byte` branch of
+`genericValueToString` and passes through as a plain string.
+
+A MySQL zero date (`0000-00-00`) arrives as `time.Time{}`, which is
+`0001-01-01`, so `v.IsZero()` catches it and it becomes the `NoDate` marker.
+
+### What round-trips, and the one thing that does not
+
+Verified on live MySQL 8.0.46 over `DATE`, `DATETIME`, `DATETIME(6)`,
+`TIMESTAMP`, `TIMESTAMP(6)`, `TIME` and `TIME(6)`: microseconds, NULL,
+pre-1900, leap day, negative and over-24h TIME — **zero differences**.
+
+The exception is by design: `0000-00-00` comes back as **NULL**. The `NoDate`
+marker maps to NULL for every database (`import_helper.go`), because most of
+them cannot store a zero date. MySQL can, so the distinction between "no date"
+and NULL is lost on the way back in. Changing that would mean a MySQL-specific
+branch on the import side — worth doing only if someone actually depends on it.
+
+Regression tests: `pkg/adapters/mysql/datetime_roundtrip_test.go` (needs a live
+server; skips without one, override the DSN with `MYSQL_TEST_DSN`). One of them,
+`TestMySQLRoundsSubSecond`, exists purely to keep the rounding rationale honest
+— if a future server truncates instead, it fails and tells you to revisit.
 
 ---
 
