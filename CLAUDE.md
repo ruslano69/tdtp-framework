@@ -73,6 +73,25 @@ pg_ctlcluster 16 main start
 pg_isready
 ```
 
+### Connection strings for the integration tests
+
+Every adapter's integration tests default to a local server and **skip** when
+they cannot reach one, so a machine without databases still gets a green
+`go test ./...`. On CI point them somewhere else with:
+
+| Variable | Package | Default |
+|---|---|---|
+| `POSTGRES_TEST_DSN` | `pkg/adapters/postgres` | `postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test` |
+| `MYSQL_TEST_DSN` | `pkg/adapters/mysql` | `tdtp_user:tdtp_dev_pass_2025@tcp(127.0.0.1:3306)/tdtp_test?parseTime=true` |
+| `MSSQL_TEST_DSN_DEV` | `pkg/adapters/mssql` | `server=localhost,1433;...;database=DevDB` |
+| `MSSQL_TEST_DSN_PROD` | `pkg/adapters/mssql` | `server=localhost,1434;...;database=ProdSimDB` |
+
+SQLite needs nothing — its tests use `t.TempDir()`.
+
+**Keep `parseTime=true` in the MySQL DSN.** Without it the driver hands back
+`[]byte` instead of `time.Time` for DATE/DATETIME/TIMESTAMP, and the tests
+would be exercising a code path the CLI never takes.
+
 ---
 
 ## Compression (zstd and kanzi)
@@ -460,7 +479,8 @@ imported into SQLite lands as NULL, which is the designed behaviour for a
 database that cannot store it.
 
 Regression tests: `pkg/adapters/postgres/datetime_roundtrip_test.go` (needs a
-live database; skips without one). Start it with `pg_ctlcluster 16 main start`.
+live database; skips without one, override the DSN with `POSTGRES_TEST_DSN`).
+Start it with `pg_ctlcluster 16 main start`.
 
 ---
 
@@ -550,7 +570,7 @@ and NULL is lost on the way back in. Changing that would mean a MySQL-specific
 branch on the import side — worth doing only if someone actually depends on it.
 
 Regression tests: `pkg/adapters/mysql/datetime_roundtrip_test.go` (needs a live
-server; skips without one, override the DSN with `TDTP_MYSQL_DSN`). One of them,
+server; skips without one, override the DSN with `MYSQL_TEST_DSN`). One of them,
 `TestMySQLRoundsSubSecond`, exists purely to keep the rounding rationale honest
 — if a future server truncates instead, it fails and tells you to revisit.
 

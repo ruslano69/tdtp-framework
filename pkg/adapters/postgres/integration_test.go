@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -10,7 +11,22 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
-const testConnString = "postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test"
+// testConnString — строка подключения для всех тестов пакета.
+// По умолчанию локальный сервер с учётными данными из
+// scripts/create_postgres_test_db.py; на CI переопределяется через
+// POSTGRES_TEST_DSN. Имя переменной в одном ряду с MSSQL_TEST_DSN_DEV и
+// MYSQL_TEST_DSN.
+var testConnString = getEnvOrDefault(
+	"POSTGRES_TEST_DSN",
+	"postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test",
+)
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 // TestIntegration_BasicConnection проверяет базовое подключение
 func TestIntegration_BasicConnection(t *testing.T) {

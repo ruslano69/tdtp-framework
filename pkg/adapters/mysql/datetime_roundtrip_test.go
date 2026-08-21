@@ -11,9 +11,10 @@ import (
 
 // testDSN — та же строка, что строит cmd/tdtpcli/config.go, включая
 // parseTime=true: без него драйвер отдаёт даты []byte'ами и проверяется
-// совсем не тот путь. Переопределяется через TDTP_MYSQL_DSN.
+// совсем не тот путь. На CI переопределяется через MYSQL_TEST_DSN — имя в
+// одном ряду с POSTGRES_TEST_DSN и MSSQL_TEST_DSN_DEV.
 func testDSN() string {
-	if v := os.Getenv("TDTP_MYSQL_DSN"); v != "" {
+	if v := os.Getenv("MYSQL_TEST_DSN"); v != "" {
 		return v
 	}
 	return "tdtp_user:tdtp_dev_pass_2025@tcp(127.0.0.1:3306)/tdtp_test?parseTime=true"
