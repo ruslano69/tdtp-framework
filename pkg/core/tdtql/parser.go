@@ -216,7 +216,7 @@ func (p *Parser) parseExpression(precedence int) (Expression, error) {
 // parseCondition парсит одно условие (field op value)
 func (p *Parser) parseCondition() (Expression, error) {
 	if p.curToken.Type != TokenIdent {
-		return nil, fmt.Errorf("expected field name, got %v", p.curToken.Type)
+		return nil, fmt.Errorf("expected field name, got %v %q (use [Field Name] or \"Field Name\" for names with spaces)", p.curToken.Type, p.curToken.Literal)
 	}
 
 	field := p.curToken.Literal
@@ -282,7 +282,7 @@ func (p *Parser) parseCondition() (Expression, error) {
 			return nil, fmt.Errorf("expected LIKE after NOT")
 		}
 	default:
-		return nil, fmt.Errorf("expected operator, got %v", p.curToken.Type)
+		return nil, fmt.Errorf("expected operator (=, !=, <, <=, >, >=, LIKE, IN, BETWEEN, IS NULL), got %v %q", p.curToken.Type, p.curToken.Literal)
 	}
 
 	p.nextToken()

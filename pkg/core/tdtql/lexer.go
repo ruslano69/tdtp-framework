@@ -330,6 +330,77 @@ func lookupKeyword(ident string) TokenType {
 	return TokenIdent
 }
 
+// String returns a human-readable name for a TokenType.
+// This makes %v and %s format verbs produce readable error messages.
+func (t TokenType) String() string {
+	switch t {
+	case TokenEOF:
+		return "EOF"
+	case TokenIllegal:
+		return "illegal character"
+	case TokenIdent:
+		return "identifier"
+	case TokenString:
+		return "string literal"
+	case TokenNumber:
+		return "number"
+	case TokenSelect:
+		return "SELECT"
+	case TokenFrom:
+		return "FROM"
+	case TokenWhere:
+		return "WHERE"
+	case TokenAnd:
+		return "AND"
+	case TokenOr:
+		return "OR"
+	case TokenNot:
+		return "NOT"
+	case TokenIn:
+		return "IN"
+	case TokenBetween:
+		return "BETWEEN"
+	case TokenLike:
+		return "LIKE"
+	case TokenIs:
+		return "IS"
+	case TokenNull:
+		return "NULL"
+	case TokenOrderBy:
+		return "ORDER/BY"
+	case TokenAsc:
+		return "ASC"
+	case TokenDesc:
+		return "DESC"
+	case TokenLimit:
+		return "LIMIT"
+	case TokenOffset:
+		return "OFFSET"
+	case TokenEq:
+		return "="
+	case TokenNotEq:
+		return "!="
+	case TokenLt:
+		return "<"
+	case TokenLte:
+		return "<="
+	case TokenGt:
+		return ">"
+	case TokenGte:
+		return ">="
+	case TokenLParen:
+		return "("
+	case TokenRParen:
+		return ")"
+	case TokenComma:
+		return ","
+	case TokenStar:
+		return "*"
+	default:
+		return fmt.Sprintf("token(%d)", int(t))
+	}
+}
+
 // String возвращает строковое представление токена
 func (t Token) String() string {
 	return fmt.Sprintf("Token{Type:%v, Literal:%q, Pos:%d}", t.Type, t.Literal, t.Pos)
