@@ -2,6 +2,100 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased]
+
+### Fixed — SQLite export aborted on the first NULL date
+
+**Important fix.** A SQLite table with a nullable `DATE`, `DATETIME` or
+`TIMESTAMP` column could not be exported at all if any of those cells was
+empty: the whole run failed with `sql: Scan error ... converting NULL to string
+is unsupported`. A NULL in a `TEXT` column was fine — only the date types hit
+it.
+
+Root cause: `ScanSQLRows` bound those columns to `*string`, and a `string`
+cannot hold NULL. The binding was there on the theory that it skipped
+`modernc.parseTime`. It did not — the driver decides whether to parse from the
+column's *declared type*, not from the scan target, so it parsed anyway and
+`database/sql` then formatted the `time.Time` back into the string. That also
+left `normalizeSQLiteDateTime` dead code: it looked for a space separator its
+input never had.
+
+Every column now scans into `any`.
+
+### Fixed — sub-second precision and DATE type lost on import
+
+Export was taught to carry `.fff` through some time ago; import threw it away
+again, formatting with `"2006-01-02 15:04:05"`. A `DATETIME(6)` column came
+back as `.000000` on MySQL, and SQLite lost milliseconds the same way.
+
+`DATE` was handled as a datetime on both sides: exported as
+`2026-08-21T00:00:00Z` and written back as `2026-08-21 00:00:00`, so a date
+column drifted into a timestamp on every hop.
+
+For MySQL the import now writes exactly as many fractional digits as the column
+declares, read from `information_schema.columns.datetime_precision`. This is
+not optional: a `DATETIME(0)` column **rounds** what it cannot store, and
+`2026-08-21 23:59:59.999` becomes `2026-08-22 00:00:00` — a day later. MSSQL
+still gets whole seconds deliberately, pending a measurement on a live server.
+
+### Fixed — PostgreSQL `TIME` columns could not round-trip
+
+Import failed outright with `invalid input syntax for type time`. `pgtype.Time`
+was formatted with `"%02d:%02d:%02d"`, dropping the microseconds PostgreSQL
+stores, and the value then travelled as a `TIMESTAMP` whose subtype nothing
+honoured, so it was rendered as `0000-01-01T14:38:11Z`. `TypedValue` now
+carries `Subtype`, and a `"time"` subtype renders through
+`schema.FormatTimeOfDay`.
+
+### Fixed — PostgreSQL `infinity` never became a marker
+
+Scanned into `any`, pgx returns an infinite date as `pgtype.InfinityModifier`,
+which nothing handled; the value fell through to `fmt.Sprintf("%v")` and came
+out lowercase, a spelling `DetectAndApply` does not recognise. The packet
+carried a raw PostgreSQL literal with no `SpecialValues` declared, and a parse
+failure was logged per cell. Postgres → Postgres happened to work; Postgres →
+SQLite failed. Both directions now use the marker path.
+
+### Fixed — MySQL `TIME` columns were rejected outright
+
+`GetTableSchema` returned `unsupported MySQL type: TIME`, so a table carrying
+one could not even be described. MySQL `TIME` is a signed duration
+(`-838:59:59`..`838:59:59`), not a time of day, so it maps to `TEXT` with
+`Subtype: "time"` and travels verbatim; `CreateTable` writes it back as
+`TIME(n)`.
+
+### Changed — SQLite reads date columns as text
+
+`ReadAllRows` now selects date columns through `CAST(col AS TEXT)`, and raw
+SQLite date text is converted with a string splice instead of a parse/format
+round trip. Both are pure speed: **a 100k-row export with three date columns
+goes from 0.97 s to 0.46 s**, and every one of the 100 000 rows comes out
+byte-identical.
+
+`modernc.org/sqlite` decides whether to parse a cell into `time.Time` from the
+column's declared type; an expression has none, so the parse — 1.65 µs and 11
+allocations per cell — never runs. The conversion that replaced it then became
+the bottleneck at 1630 ns per cell, because raw text misses the first three
+layouts in `datetimeFormats` and each miss allocates an error; the splice does
+it in 111 ns. It declines and falls back to the ordinary path wherever the two
+would not agree byte for byte.
+
+Only `ReadAllRows` is affected. Caller-supplied queries (`--where`, TDTQL,
+views) keep the previous path.
+
+One output changes: a `REAL`-stored date now exports as its exact stored text
+(`2460909.11`) rather than the float64 round trip's `2.46090911e+06`.
+
+### Added — `packet.AppendMSSQLDatetime` and friends
+
+Hand-rolled ISO-8601 formatters for MSSQL `DATETIME`/`DATETIME2` wire bytes and
+for `time.Time`, with benchmarks against the current serialization. Not wired
+into any adapter: `database/sql` never exposes the wire bytes, and on the input
+the framework does have the win is 1.2–1.3×, not the 3–7× the byte-level form
+reaches. Kept for the measurement and for whenever a driver-level reader exists.
+
+---
+
 ## [1.24.1] — 2026-08-10
 
 ### Fixed — pipeline TDTP output silently dropped compact-format fixed-field values
