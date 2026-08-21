@@ -30,7 +30,12 @@ const (
 
 // TypedValue представляет типизированное значение
 type TypedValue struct {
-	Type        DataType
+	Type DataType
+	// Subtype повторяет FieldDef.Subtype ("time", "jsonb", "uuid", ...).
+	// Нужен FormatValue и TypedValueToSQL: без него TIME из PostgreSQL
+	// неотличим от TIMESTAMP и печатается как "0000-01-01T14:38:11Z" —
+	// значение, которое PostgreSQL обратно в колонку time уже не примет.
+	Subtype     string
 	RawValue    string
 	IsNull      bool
 	IntValue    *int64

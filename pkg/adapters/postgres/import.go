@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -509,6 +510,30 @@ func (a *Adapter) convertValue(value string, field packet.Field) any {
 		}
 		if sv.NoDate != nil && value == sv.NoDate.Marker {
 			return nil
+		}
+		// Бесконечности. PostgreSQL — единственная БД здесь, которая умеет
+		// хранить их в DATE/TIMESTAMP, и pgx принимает для этого строковые
+		// литералы. Без этой ветки маркер "INF" уходил в колонку как есть и
+		// импорт падал: invalid input syntax for type date: "INF".
+		// base.ConvertRowToSQLValues делает то же самое, но postgres-адаптер
+		// туда не заходит — у него собственный convertValue.
+		if packet.IsDateFieldType(field.Type) {
+			if sv.Infinity != nil && value == sv.Infinity.Marker {
+				return "infinity"
+			}
+			if sv.NegInfinity != nil && value == sv.NegInfinity.Marker {
+				return "-infinity"
+			}
+		} else {
+			// Числовые специальные значения: pgx принимает IEEE 754 напрямую.
+			switch {
+			case sv.Infinity != nil && value == sv.Infinity.Marker:
+				return math.Inf(1)
+			case sv.NegInfinity != nil && value == sv.NegInfinity.Marker:
+				return math.Inf(-1)
+			case sv.NaN != nil && value == sv.NaN.Marker:
+				return math.NaN()
+			}
 		}
 	}
 

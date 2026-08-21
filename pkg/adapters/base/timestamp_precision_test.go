@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
@@ -157,4 +158,67 @@ func mustParse(t *testing.T, raw string, field packet.Field) *schema.TypedValue 
 		t.Fatalf("ParseValue(%q): %v", raw, err)
 	}
 	return tv
+}
+
+// TestPgTimeKeepsSubSecond: pgtype.Time форматировался как "%02d:%02d:%02d" и
+// терял дробную часть ещё до того, как значение попадало в пакет.
+func TestPgTimeKeepsSubSecond(t *testing.T) {
+	c := NewUniversalTypeConverter()
+	field := packet.Field{Name: "t", Type: "TIMESTAMP", Subtype: "time"}
+
+	tests := []struct {
+		us   int64
+		want string
+	}{
+		{52691000000, "14:38:11"},        // ровные секунды — байты те же, что были
+		{52691527000, "14:38:11.527"},    // миллисекунды
+		{86399123456, "23:59:59.123456"}, // микросекунды
+		{36000500000, "10:00:00.5"},      // хвостовой ноль срезается
+		{0, "00:00:00"},
+	}
+	for _, tt := range tests {
+		got := c.DBValueToString(pgtype.Time{Microseconds: tt.us, Valid: true}, field, "postgres")
+		if got != tt.want {
+			t.Errorf("pgtype.Time{%d}: got %q, want %q", tt.us, got, tt.want)
+		}
+	}
+}
+
+// TestPgInfinityModifier: pgx при скане в any отдаёт бесконечную дату именно
+// как pgtype.InfinityModifier. Без своей ветки значение уходило в
+// fmt.Sprintf("%v") и получалось "infinity" со строчной буквы — форма, которой
+// packet.DetectAndApply не знает, так что маркер не проставлялся.
+func TestPgInfinityModifier(t *testing.T) {
+	c := NewUniversalTypeConverter()
+	field := packet.Field{Name: "d", Type: "DATE"}
+
+	if got, want := c.DBValueToString(pgtype.Infinity, field, "postgres"), "Infinity"; got != want {
+		t.Errorf("Infinity: got %q, want %q", got, want)
+	}
+	if got, want := c.DBValueToString(pgtype.NegativeInfinity, field, "postgres"), "-Infinity"; got != want {
+		t.Errorf("NegativeInfinity: got %q, want %q", got, want)
+	}
+	// Обе формы обязаны опознаваться детектором — иначе маркер не появится.
+	for _, v := range []string{"Infinity", "-Infinity"} {
+		if !packet.IsRawSpecialForm("DATE", v) {
+			t.Errorf("packet.IsRawSpecialForm(DATE, %q) = false, want true", v)
+		}
+	}
+}
+
+// TestConvertValueToTDTP_LeavesRawSpecialsAlone: сырая форма спец-значения
+// проходит без round-trip, который всё равно вернул бы её как есть, зато
+// сначала записал бы ошибку разбора в лог на каждую ячейку.
+func TestConvertValueToTDTP_LeavesRawSpecialsAlone(t *testing.T) {
+	c := NewUniversalTypeConverter()
+	for _, tc := range []struct{ typ, val string }{
+		{"DATE", "Infinity"},
+		{"TIMESTAMP", "-Infinity"},
+		{"REAL", "NaN"},
+		{"DOUBLE", "+Inf"},
+	} {
+		if got := c.ConvertValueToTDTP(packet.Field{Name: "v", Type: tc.typ}, tc.val); got != tc.val {
+			t.Errorf("%s %q: got %q, want it unchanged", tc.typ, tc.val, got)
+		}
+	}
 }

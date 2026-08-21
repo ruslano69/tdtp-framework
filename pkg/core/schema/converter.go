@@ -21,6 +21,7 @@ func NewConverter() *Converter {
 func (c *Converter) ParseValue(rawValue string, field FieldDef) (*TypedValue, error) {
 	tv := &TypedValue{
 		Type:     field.Type,
+		Subtype:  field.Subtype,
 		RawValue: rawValue,
 	}
 
@@ -338,10 +339,28 @@ func FormatTimestamp(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// FormatTimeOfDay renders a TIME value (PostgreSQL `time`, subtype "time") as
+// plain time of day. Trailing zeros in the fraction are trimmed and the dot
+// disappears entirely when there is none, so a whole-second value formats as
+// "14:38:11" — the same bytes the previous %02d:%02d:%02d formatting produced,
+// while microseconds now survive instead of being cut off.
+func FormatTimeOfDay(t time.Time) string {
+	return t.Format("15:04:05.999999999")
+}
+
 // FormatValue форматирует типизированное значение обратно в строку
 func (c *Converter) FormatValue(tv *TypedValue) string {
 	if tv.IsNull {
 		return ""
+	}
+
+	// TIME (PostgreSQL) приезжает как TIMESTAMP с subtype "time" — это время
+	// суток, а не момент. Печатать его через FormatTimestamp значит выдумать
+	// дату: parseTime собирает time.Time с нулевым годом, и получается
+	// "0000-01-01T14:38:11Z". Такую строку PostgreSQL обратно в колонку time
+	// не примет, так что круг обрывался на импорте.
+	if tv.Subtype == "time" && tv.TimeValue != nil {
+		return FormatTimeOfDay(*tv.TimeValue)
 	}
 
 	normalized := NormalizeType(tv.Type)

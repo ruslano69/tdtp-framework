@@ -90,6 +90,18 @@ func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value st
 		return value
 	}
 
+	// Сырые формы специальных значений ("Infinity", "-Inf", "NaN") оставляем
+	// как есть: канонический маркер им проставит DetectAndApply в генераторе.
+	// Round-trip ниже всё равно вернул бы их без изменений, но сначала записал
+	// бы в лог ошибку разбора на каждую такую ячейку.
+	//
+	// Проверка стоит ПОСЛЕ fast path: она приводит тип к верхнему регистру, то
+	// есть аллоцирует, а спец-значения бывают только у DATE и числовых полей —
+	// ни одно из них в fast path не попадает.
+	if packet.IsRawSpecialForm(field.Type, value) {
+		return value
+	}
+
 	// Создаем FieldDef для использования converter
 	fieldDef := schema.FieldDef{
 		Name:      field.Name,
@@ -248,12 +260,28 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		if !v.Valid {
 			return NullSentinel
 		}
-		// v.Microseconds — int64 микросекунд от полуночи
-		seconds := v.Microseconds / 1000000
-		hours := seconds / 3600
-		minutes := (seconds % 3600) / 60
-		secs := seconds % 60
-		return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, secs)
+		// v.Microseconds — int64 микросекунд от полуночи.
+		// Дробную часть обязательно сохраняем: формат "%02d:%02d:%02d"
+		// отбрасывал её, и 14:38:11.527 приезжало в пакет как 14:38:11.
+		return schema.FormatTimeOfDay(
+			time.Unix(v.Microseconds/1e6, (v.Microseconds%1e6)*1000).UTC())
+
+	case pgtype.InfinityModifier:
+		// pgx v5 при скане в any отдаёт бесконечную дату/метку именно так —
+		// не как pgtype.Date/pgtype.Timestamp с InfinityModifier внутри.
+		// Без этой ветки значение уходило в fmt.Sprintf("%v") и получалось
+		// "infinity" со строчной буквы: rawInfinityForms такую форму не знает,
+		// DetectAndApply не выставлял SpecialValues.Infinity, а
+		// ConvertValueToTDTP писал в лог ошибку разбора на каждую ячейку.
+		// В пакете без маркера значение остаётся сырым литералом PostgreSQL,
+		// и импорт такого пакета в SQLite/MSSQL падает на разборе даты.
+		switch v {
+		case pgtype.Infinity:
+			return "Infinity"
+		case pgtype.NegativeInfinity:
+			return "-Infinity"
+		}
+		return NullSentinel
 
 	case pgtype.Date:
 		if !v.Valid {
@@ -540,6 +568,13 @@ func bytesToHexWithoutLeadingZeros(b []byte) string {
 func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType string) any {
 	if tv.IsNull {
 		return nil
+	}
+
+	// TIME (subtype "time") — время суток. Для PostgreSQL ветка ниже вернула бы
+	// time.Time с нулевым годом, и pgx отправил бы его в колонку time как
+	// метку времени; для остальных БД получилась бы дата с выдуманным годом.
+	if tv.Subtype == "time" && tv.TimeValue != nil {
+		return schema.FormatTimeOfDay(*tv.TimeValue)
 	}
 
 	switch tv.Type {

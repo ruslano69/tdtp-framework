@@ -39,11 +39,40 @@ func isFloatField(fieldType string) bool {
 
 // isDateField reports whether a field type can carry NoDate or date-Infinity.
 func isDateField(fieldType string) bool {
+	return IsDateFieldType(fieldType)
+}
+
+// IsDateFieldType reports whether a TDTP field type is a date/time type.
+// Exported because adapters need the same list when they decode SpecialValues
+// markers, and three private copies of it had already started to drift.
+func IsDateFieldType(fieldType string) bool {
 	switch strings.ToUpper(fieldType) {
 	case "DATE", "DATETIME", "TIMESTAMP", "DATETIME2", "DATETIMEOFFSET", "SMALLDATETIME":
 		return true
 	}
 	return false
+}
+
+// IsRawSpecialForm reports whether value is one of the raw driver spellings of a
+// special value ("Infinity", "-Inf", "NaN") that DetectAndApply will later turn
+// into a canonical marker.
+//
+// Adapters use it to leave such a value alone on the way into the packet.
+// Without the check the ParseValue→FormatValue round trip in
+// ConvertValueToTDTP tries to read "Infinity" as a date, fails, and writes a
+// line to the log for every affected cell — while returning the value
+// unchanged anyway.
+func IsRawSpecialForm(fieldType, value string) bool {
+	// Дешёвый отсев раньше всего: функция стоит на пути каждой ячейки, а
+	// самая длинная из этих форм — "-Infinity", девять байт. Без отсечки по
+	// длине хешировалось бы любое текстовое значение целиком.
+	if len(value) < 3 || len(value) > 9 {
+		return false
+	}
+	if !rawInfinityForms[value] && !rawNegInfinityForms[value] && value != "NaN" {
+		return false
+	}
+	return isDateField(fieldType) || isFloatField(fieldType)
 }
 
 // DetectAndApply scans all rows, detects which SpecialValues actually appear per

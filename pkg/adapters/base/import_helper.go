@@ -3,7 +3,6 @@ package base
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -14,11 +13,7 @@ import (
 // isDateFieldType reports whether a TDTP field type can carry NoDate or date-Infinity.
 // Mirrors packet.isDateField — redeclared here to avoid a circular import.
 func isDateFieldType(t string) bool {
-	switch strings.ToUpper(t) {
-	case "DATE", "DATETIME", "TIMESTAMP", "DATETIME2", "DATETIMEOFFSET", "SMALLDATETIME":
-		return true
-	}
-	return false
+	return packet.IsDateFieldType(t)
 }
 
 // TableManager предоставляет методы для управления таблицами

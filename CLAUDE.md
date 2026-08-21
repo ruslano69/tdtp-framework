@@ -389,6 +389,70 @@ live driver — none of this is visible to a unit test) and the
 
 ---
 
+## PostgreSQL dates: what pgx actually hands over (IMPORTANT)
+
+Scanned into `any` (which is what the adapters do), pgx v5 returns:
+
+| column | Go type it comes back as |
+|---|---|
+| `date`, `timestamp`, `timestamptz` | `time.Time` |
+| the same columns holding `infinity` | **`pgtype.InfinityModifier`** |
+| `time` | `pgtype.Time` |
+| NULL | `nil` |
+
+So the `case pgtype.Date:` / `case pgtype.Timestamp:` / `case pgtype.Timestamptz:`
+branches in `pgValueToString` **never fire** — the same shape of dead code the
+SQLite date fast path had. They are harmless (the `time.Time` branch does the
+right thing), but do not reason about behaviour from them.
+
+Two real defects came out of that list:
+
+### `time` columns broke the round trip outright
+
+`pgtype.Time` was formatted with `"%02d:%02d:%02d"`, which threw away the
+microseconds PostgreSQL stores. Worse, the field arrives as `TIMESTAMP` with
+`Subtype: "time"`, and `FormatValue` ignored the subtype — so `parseTime`'s
+zero-year `time.Time` was printed through `FormatTimestamp` as
+`0000-01-01T14:38:11Z`. PostgreSQL will not accept that back into a `time`
+column: `invalid input syntax for type time`. **A table with a TIME column
+could not round-trip at all.**
+
+`TypedValue` now carries `Subtype`, and `FormatValue`/`TypedValueToSQL` render
+it through `schema.FormatTimeOfDay` — `15:04:05.999999999`, so whole seconds
+still format to the same bytes as the old `%02d:%02d:%02d`.
+
+### `infinity` never became a marker
+
+Falling through to `fmt.Sprintf("%v", v)` produced **lowercase** `infinity`, and
+`rawInfinityForms` only lists the capitalized spellings. `DetectAndApply`
+therefore left `SpecialValues.Infinity` unset, `ConvertValueToTDTP` logged a
+parse failure for every affected cell, and the packet carried a raw PostgreSQL
+literal.
+
+Postgres→Postgres appeared to work — `infinity` happens to be valid input on
+the way back in. **Postgres→SQLite did not**: with no marker declared, the
+importer tried to parse `infinity` as a date and failed. The marker path
+(`INF` → `"infinity"` for pg, NULL elsewhere) exists precisely for this and was
+simply never reached.
+
+Also note `postgres.convertValue` is the adapter's **own** copy of the marker
+decoding — it is not `base.ConvertRowToSQLValues` — and it handled only `Null`
+and `NoDate`. Anything added to the base version has to be added there too.
+
+### What round-trips cleanly now
+
+Verified against a live PostgreSQL 16 on `DATE`, `TIMESTAMP`, `TIMESTAMPTZ` and
+`TIME`: microseconds, NULL, `infinity`/`-infinity`, year 0001, pre-1900 dates,
+`+03:00` offsets (normalized to UTC, as the schema declares) — **zero
+differences**, and the second pass is a fixed point. A packet with `infinity`
+imported into SQLite lands as NULL, which is the designed behaviour for a
+database that cannot store it.
+
+Regression tests: `pkg/adapters/postgres/datetime_roundtrip_test.go` (needs a
+live database; skips without one). Start it with `pg_ctlcluster 16 main start`.
+
+---
+
 ## SeaweedFS S3 (local testing)
 
 ### The binary
