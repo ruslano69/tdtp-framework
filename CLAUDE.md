@@ -403,15 +403,30 @@ not expose wire bytes: `go-mssqldb`'s `Rows.Next` copies out of an
 already-decoded `[]interface{}`, and modernc does the same. Do not go looking
 for raw TDS or SQLite bytes at that layer — they are gone before it.
 
-**The lever that does work is the SQL, not the API.** `CAST(col AS TEXT)`
-changes the declared type the driver sees, so the parse never runs: 351 ms →
-103 ms. Storage classes check out — a TEXT-stored date comes back byte-for-byte
-as stored, an INTEGER one as the same digits `strconv` produces today, and a
-REAL one as its exact stored text instead of today's `2.46090911e+06`. It would
-also put `normalizeSQLiteDateTime` back on a live code path, which is the form
-its input was written for in the first place. Not done yet: it changes the SQL
-the adapter emits, and it only applies cleanly where we build the SELECT
-ourselves (`ReadAllRows`), not to caller-supplied queries.
+**The lever that does work is the SQL, not the API**, and `ReadAllRows` now
+pulls it. `selectExprForField` wraps every date column in
+`CAST(col AS TEXT) AS col`, which changes the declared type the driver sees so
+the parse never runs: 351 ms → 103 ms on the read.
+
+End to end on the CLI, interleaved A/B over five pairs, 100k rows with three
+date columns: **0.97 s → 0.83 s median, and every single pair faster** — unlike
+the earlier scanner change, this one is outside the ±7% this VM carries. All
+100 000 rows come out byte-identical; the only difference between the two
+packets is the per-export `MessageID`.
+
+Storage classes check out, and one of them improves: a TEXT-stored date comes
+back byte-for-byte as stored, an INTEGER one as the same digits `strconv`
+produced before, and a REAL one as its exact stored text (`2460909.11`) instead
+of the old `2.46090911e+06`. `TestDateStorageClasses` pins all four cases.
+
+`datetimeFormats` gained `"2006-01-02 15:04:05Z07:00"` for this: SQLite text
+storage can carry its own offset, and that spelling previously failed every
+layout and fell through to the packet raw. It parses now, and
+`parseTimestamp` normalizes it to UTC exactly as the driver's value was.
+
+**Only `ReadAllRows` does this** — it is the one place we build the SELECT
+ourselves. `ReadRowsWithSQL` (TDTQL, `--where`, views) takes a caller-supplied
+query whose projection cannot be rewritten safely, so it keeps the old path.
 
 Everything now scans into `any`. If the value comes back as a `time.Time`,
 `DBValueToString` already produced the canonical string and the

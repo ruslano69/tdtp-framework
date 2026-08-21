@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
 // Круговой прогон дат через SQLite: таблица → пакет → другая таблица.
@@ -252,6 +253,99 @@ func TestDatetimeRoundTrip_IsFixedPoint(t *testing.T) {
 						i, j, k, a[j][k], b[j][k])
 				}
 			}
+		}
+	}
+}
+
+// TestSelectExprForField пришпиливает, какие колонки уходят в SELECT через
+// CAST. Без CAST драйвер разбирает ячейку по объявленному типу колонки, и
+// чтение дорожает втрое — см. driver_cost_bench_test.go.
+func TestSelectExprForField(t *testing.T) {
+	for _, tc := range []struct {
+		typ  string
+		want string
+	}{
+		{"DATE", `CAST("v" AS TEXT) AS "v"`},
+		{"DATETIME", `CAST("v" AS TEXT) AS "v"`},
+		{"TIMESTAMP", `CAST("v" AS TEXT) AS "v"`},
+		{"TEXT", `"v"`},
+		{"INTEGER", `"v"`},
+		{"REAL", `"v"`},
+		{"BLOB", `"v"`},
+	} {
+		got := selectExprForField(packet.Field{Name: "v", Type: tc.typ})
+		if got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.typ, got, tc.want)
+		}
+	}
+}
+
+// TestDateStorageClasses: SQLite типизирован динамически, и колонка DATETIME
+// может хранить текст, целое или вещественное. CAST(... AS TEXT) должен
+// оставлять значение таким, каким оно записано.
+//
+// Для текста и целого это ровно те же байты, что выдавал прежний путь. Для
+// вещественного — лучше: раньше значение проходило через float64 и печаталось
+// как "2.46090911e+06", теперь отдаётся точное хранимое представление.
+func TestDateStorageClasses(t *testing.T) {
+	if !isSQLiteDriverAvailable() {
+		t.Skip("SQLite driver not available")
+	}
+
+	ctx := context.Background()
+	dbFile := filepath.Join(t.TempDir(), "storage.db")
+
+	db, err := sql.Open("sqlite", dbFile)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, dt DATETIME)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, v := range []struct {
+		id  int
+		val any
+	}{
+		{1, "2026-08-21 14:38:11.527"}, // TEXT
+		{2, int64(1787322491)},         // INTEGER (unix)
+		{3, 2460909.11},                // REAL (julian)
+		{4, nil},                       // NULL
+	} {
+		if _, err := db.Exec("INSERT INTO t VALUES (?,?)", v.id, v.val); err != nil {
+			t.Fatalf("insert %d: %v", v.id, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	adapter, err := NewAdapter(dbFile)
+	if err != nil {
+		t.Fatalf("adapter: %v", err)
+	}
+	defer func() { _ = adapter.Close(ctx) }()
+
+	pkts, err := adapter.ExportTable(ctx, "t")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+
+	got := map[string]string{}
+	for _, p := range pkts {
+		for _, r := range p.GetRows() {
+			got[r[0]] = r[1]
+		}
+	}
+
+	want := map[string]string{
+		"1": "2026-08-21T14:38:11.527Z", // текст разобран и приведён к канону
+		"2": "1787322491",               // целое проходит как есть, как и раньше
+		"3": "2460909.11",               // раньше было "2.46090911e+06"
+		"4": packet.SpecNullMarker,
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("row %s: got %q, want %q", id, got[id], w)
 		}
 	}
 }
