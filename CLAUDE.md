@@ -359,10 +359,16 @@ into.
 
 There used to be a fast path in `ScanSQLRows` that bound such columns to
 `*string`, on the stated theory that it skipped `modernc.parseTime` and saved
-about 450 ms per 100k rows. **It saved nothing.** The driver parses first
-regardless; `database/sql`'s `convertAssign` then formats the `time.Time` back
-into the string with `RFC3339Nano`. The path bought an extra format and an
-allocation per cell, and cost three things:
+about 450 ms per 100k rows.
+
+**The cost it named is real — the remedy was not.** Measured below: the parse
+runs to about 1.65 µs and 11 allocations per date cell, which on 100k rows with
+three date columns is roughly 250 ms of a 350 ms read. But binding the scan to
+`*string` does not avoid any of it. The driver decides whether to parse from the
+column's *declared type*, not from what you scan into, so it parses anyway, and
+`database/sql`'s `convertAssign` then formats the `time.Time` back into the
+string with `RFC3339Nano`. The path bought an extra format and an allocation per
+cell, and cost three things:
 
 1. **The export died on the first NULL date** — `converting NULL to string is
    unsupported`. A whole table refused to export because one cell was empty.
@@ -371,6 +377,41 @@ allocation per cell, and cost three things:
    RFC3339 already. Its unit test passed the whole time — it called the
    function directly and never checked that anything reached it.
 3. The driver's own zone rode into a packet whose Schema declares UTC.
+
+### Where the read time actually goes
+
+`pkg/adapters/sqlite/driver_cost_bench_test.go`, 50k rows, six columns, three
+of them dates (Xeon 2.80GHz):
+
+| Query | Time | Allocations per row |
+|---|---|---|
+| `SELECT id` | 19 ms | 1 |
+| `id, name, amount` | 50 ms | 5 |
+| all six, dates via `CAST(... AS TEXT)` | 103 ms | 11 |
+| all six, dates as the driver returns them | **351 ms** | **45** |
+
+So the three date columns cost about 250 ms more as `time.Time` than as text —
+about **1.65 µs and 11 allocations per date cell**. For scale, the formatter on
+our side of the boundary costs 120 ns and one allocation. The driver's parse is
+an order of magnitude past anything the conversion layer does.
+
+**Going around `database/sql` does not help.** The same query driven through
+`driver.Rows` directly measures the same 351 ms with the same 45 allocations —
+`convertAssign` hits a plain assignment when the scan target is `*any`, and
+`database/sql` adds nothing else worth naming per row. `driver.Rows` also does
+not expose wire bytes: `go-mssqldb`'s `Rows.Next` copies out of an
+already-decoded `[]interface{}`, and modernc does the same. Do not go looking
+for raw TDS or SQLite bytes at that layer — they are gone before it.
+
+**The lever that does work is the SQL, not the API.** `CAST(col AS TEXT)`
+changes the declared type the driver sees, so the parse never runs: 351 ms →
+103 ms. Storage classes check out — a TEXT-stored date comes back byte-for-byte
+as stored, an INTEGER one as the same digits `strconv` produces today, and a
+REAL one as its exact stored text instead of today's `2.46090911e+06`. It would
+also put `normalizeSQLiteDateTime` back on a live code path, which is the form
+its input was written for in the first place. Not done yet: it changes the SQL
+the adapter emits, and it only applies cleanly where we build the SELECT
+ourselves (`ReadAllRows`), not to caller-supplied queries.
 
 Everything now scans into `any`. If the value comes back as a `time.Time`,
 `DBValueToString` already produced the canonical string and the
