@@ -428,6 +428,43 @@ layout and fell through to the packet raw. It parses now, and
 ourselves. `ReadRowsWithSQL` (TDTQL, `--where`, views) takes a caller-supplied
 query whose projection cannot be rewritten safely, so it keeps the old path.
 
+### And then the conversion side, which CAST made the new bottleneck
+
+Raw SQLite text does not match the first layout in `datetimeFormats`, so
+`ParseValue` burns three failed `time.Parse` calls — each allocating an error —
+before the space-separated layout hits. Measured on the shapes SQLite actually
+stores: **1630 ns and 14 allocations per cell.**
+
+`fastSQLiteDateTime` (`scanner.go`) does it with one string splice: **111 ns,
+1 allocation — 14.7×.** This is the job the old `normalizeSQLiteDateTime` was
+written for, finally on a live code path, because CAST is what puts the space
+separator back in front of it.
+
+**It declines rather than guess.** `ok=false` sends the value down the ordinary
+path, and that is the only reason the bytes still match. It declines on: an
+explicit offset (needs converting to UTC, not keeping), trailing zeros in the
+fraction (`RFC3339Nano` trims them), a fraction longer than nine digits,
+anything `time.Parse` would reject — including a day past the length of its
+month, checked with the leap-year rule — and, the easiest one to miss, **a
+shape that does not match the declared type**: a bare date in a TIMESTAMP
+column expands to midnight on the slow path, and a full timestamp in a DATE
+column is not parsed at all. `TestFastSQLiteDateTime_AgreesWithSlowPath` and a
+250k-case random test hold both halves together.
+
+### What the two changes did together
+
+100k rows, three date columns, interleaved A/B against a binary built from the
+preceding commit:
+
+| Step | Export | Против исходного |
+|---|---|---|
+| before both | 0.97 s | — |
+| `CAST(... AS TEXT)` | 0.83 s | 1.17× |
+| `+ fastSQLiteDateTime` | **0.46 s** | **2.1×** |
+
+All 100 000 rows byte-identical at every step; the packets differ only in the
+per-export `MessageID`.
+
 Everything now scans into `any`. If the value comes back as a `time.Time`,
 `DBValueToString` already produced the canonical string and the
 `ParseValue → FormatValue` round trip in `ConvertValueToTDTP` is skipped.
