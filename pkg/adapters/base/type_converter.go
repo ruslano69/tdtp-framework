@@ -33,6 +33,20 @@ func formatTimestamp(t time.Time) string {
 	return schema.FormatTimestamp(t)
 }
 
+// mysqlDatetimeLayout собирает layout с фиксированным числом знаков дробной
+// части. Нули, а не девятки: ширина должна быть ровно той, что объявлена у
+// колонки, без срезания хвостовых нулей.
+func mysqlDatetimeLayout(precision int) string {
+	const base = "2006-01-02 15:04:05"
+	if precision <= 0 {
+		return base
+	}
+	if precision > 6 {
+		precision = 6 // предел MySQL
+	}
+	return base + "." + strings.Repeat("0", precision)
+}
+
 // formatTimeForField форматирует time.Time с оглядкой на объявленный тип поля.
 //
 // DATE отдаётся датой без времени. Раньше поле DATE тоже уходило в
@@ -641,12 +655,25 @@ func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType st
 			if dbType == "sqlite" {
 				return tv.TimeValue.UTC().Format("2006-01-02 15:04:05.999999999")
 			}
-			// MySQL/MSSQL: дробная часть намеренно НЕ передаётся. MySQL
-			// DATETIME без явной точности — это DATETIME(0), и он округляет
-			// доли до секунды (14:38:11.527 → 14:38:12), то есть сдвигает
-			// значение вместо того, чтобы его усечь. Менять это нужно вместе
-			// с проверкой фактической точности колонки на живой БД.
-			if dbType == "mysql" || dbType == "mssql" {
+			// MySQL: отдаём ровно столько знаков дробной части, сколько
+			// объявлено у колонки, и ни одним больше.
+			//
+			// Проверено на живой MySQL 8.0: DATETIME без явной точности —
+			// это DATETIME(0), и лишние знаки он ОКРУГЛЯЕТ, а не усекает.
+			// "2026-08-21 23:59:59.999" превращается в "2026-08-22 00:00:00" —
+			// значение уезжает на сутки вперёд. Поэтому слать дробь вслепую
+			// нельзя; Precision приходит из объявления колонки
+			// (mysql.BuildFieldFromColumn), а Format в Go дробь усекает, так
+			// что округлять нечего ни на одной стороне. Precision 0 даёт
+			// ровно те же байты, что и раньше.
+			if dbType == "mysql" {
+				return tv.TimeValue.UTC().Format(mysqlDatetimeLayout(tv.Precision))
+			}
+			// MSSQL: дробная часть по-прежнему не передаётся. Типы там ведут
+			// себя по-разному (datetime округляет до 1/300 секунды, datetime2
+			// держит до 100 нс), и менять это нужно, померив на живой БД —
+			// здесь её не было.
+			if dbType == "mssql" {
 				return tv.TimeValue.UTC().Format("2006-01-02 15:04:05")
 			}
 			// Для PostgreSQL можем передавать time.Time напрямую

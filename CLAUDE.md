@@ -464,6 +464,98 @@ live database; skips without one). Start it with `pg_ctlcluster 16 main start`.
 
 ---
 
+## MySQL dates: precision is not optional (IMPORTANT)
+
+### Starting MySQL here
+
+Docker Hub is blocked by the egress policy (`production.cloudfront.docker.com`
+answers 403 to CONNECT), so `docker pull mysql` does not work. Install the
+Ubuntu package instead — it is real MySQL 8.0, not MariaDB:
+
+```bash
+apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q mysql-server
+(mysqld_safe > /tmp/mysqld.log 2>&1 &) && sleep 12 && mysqladmin status
+mysql -e "CREATE USER IF NOT EXISTS 'tdtp_user'@'%' IDENTIFIED BY 'tdtp_dev_pass_2025';
+          CREATE DATABASE IF NOT EXISTS tdtp_test;
+          GRANT ALL PRIVILEGES ON *.* TO 'tdtp_user'@'%' WITH GRANT OPTION;"
+```
+
+To exercise the zero-date path, drop `NO_ZERO_DATE`/`NO_ZERO_IN_DATE` from
+`sql_mode` — the default in 8.x forbids `0000-00-00`.
+
+### `DATETIME` without a precision ROUNDS (measured)
+
+MySQL 8.0.46, `DATETIME` (i.e. `DATETIME(0)`):
+
+```
+'2026-08-21 14:38:11.527'  →  2026-08-21 14:38:12
+'2026-08-21 23:59:59.999'  →  2026-08-22 00:00:00   ← another day
+```
+
+It rounds, it does not truncate. So the import **cannot** simply hand MySQL a
+fractional value the way it does for SQLite: on a whole-second column that
+shifts the data, sometimes across a date boundary.
+
+The import therefore writes **exactly as many fractional digits as the column
+declares**. `Precision` comes from `information_schema.columns.datetime_precision`
+— note that `data_type` for `datetime(6)` is just `"datetime"`, with no
+parameters, so `BuildFieldFromColumn` cannot see it from the type name alone.
+Go's `Format` truncates the fraction, so nothing rounds on either side.
+`Precision` 0 produces the same bytes as before this change.
+
+`CreateTable` writes the precision back out (`DATETIME(6)`, `TIMESTAMP(6)`,
+`TIME(6)`), otherwise a freshly created target table would silently be
+`DATETIME(0)` and lose the microseconds on the very first import.
+
+**MSSQL still gets whole seconds**, deliberately: `datetime` rounds to 1/300 s
+while `datetime2` keeps 100 ns, and there was no live MSSQL here to measure it
+on. Do the same exercise before changing that branch.
+
+### MySQL `TIME` is a duration, not a time of day
+
+Range `-838:59:59 .. 838:59:59`. It is not a clock reading, and neither
+`time.Time` nor PostgreSQL `time` can hold the ends of that range.
+
+It used to be rejected outright — `unsupported MySQL type: TIME` straight out of
+`GetTableSchema`, so a table with a TIME column could not even be *described*,
+let alone exported. It now maps to **`TEXT` with `Subtype: "time"`**: the value
+travels verbatim, `Subtype` remembers what it was, and `MapTDTPTypeToMySQL`
+turns it back into `TIME(n)`. `-12:30:15.250000` and `838:59:59` round-trip
+exactly.
+
+Do not "improve" this into `TIMESTAMP` + subtype `"time"` the way PostgreSQL
+`time` is handled — that path goes through `parseTime`, which cannot represent
+either a negative value or an hour past 23.
+
+### The driver: `parseTime=true` matters, and TIME is exempt
+
+The DSN the CLI builds (`cmd/tdtpcli/config.go`) carries `parseTime=true`, so
+`DATE`/`DATETIME`/`TIMESTAMP` arrive as `time.Time`. **`TIME` does not** — it
+arrives as `[]byte` regardless, which is why it lands in the `[]byte` branch of
+`genericValueToString` and passes through as a plain string.
+
+A MySQL zero date (`0000-00-00`) arrives as `time.Time{}`, which is
+`0001-01-01`, so `v.IsZero()` catches it and it becomes the `NoDate` marker.
+
+### What round-trips, and the one thing that does not
+
+Verified on live MySQL 8.0.46 over `DATE`, `DATETIME`, `DATETIME(6)`,
+`TIMESTAMP`, `TIMESTAMP(6)`, `TIME` and `TIME(6)`: microseconds, NULL,
+pre-1900, leap day, negative and over-24h TIME — **zero differences**.
+
+The exception is by design: `0000-00-00` comes back as **NULL**. The `NoDate`
+marker maps to NULL for every database (`import_helper.go`), because most of
+them cannot store a zero date. MySQL can, so the distinction between "no date"
+and NULL is lost on the way back in. Changing that would mean a MySQL-specific
+branch on the import side — worth doing only if someone actually depends on it.
+
+Regression tests: `pkg/adapters/mysql/datetime_roundtrip_test.go` (needs a live
+server; skips without one, override the DSN with `TDTP_MYSQL_DSN`). One of them,
+`TestMySQLRoundsSubSecond`, exists purely to keep the rounding rationale honest
+— if a future server truncates instead, it fails and tells you to revisit.
+
+---
+
 ## SeaweedFS S3 (local testing)
 
 ### The binary

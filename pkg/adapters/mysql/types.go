@@ -40,6 +40,11 @@ func TDTPToMySQL(field packet.Field) string {
 
 	// Текстовые типы
 	case "TEXT":
+		// TIME приезжает текстом с Subtype "time" — возвращаем его в
+		// родную колонку, иначе длительности осели бы в VARCHAR.
+		if field.Subtype == "time" {
+			return withFractionalPrecision("TIME", field.Precision)
+		}
 		if field.Length > 0 && field.Length <= 65535 {
 			return fmt.Sprintf("VARCHAR(%d)", field.Length)
 		}
@@ -74,10 +79,10 @@ func TDTPToMySQL(field packet.Field) string {
 		return "DATE"
 
 	case "DATETIME":
-		return "DATETIME"
+		return withFractionalPrecision("DATETIME", field.Precision)
 
 	case "TIMESTAMP":
-		return "TIMESTAMP"
+		return withFractionalPrecision("TIMESTAMP", field.Precision)
 
 	// Бинарные типы
 	case "BLOB":
@@ -86,6 +91,53 @@ func TDTPToMySQL(field packet.Field) string {
 	default:
 		return "TEXT"
 	}
+}
+
+// MaxFractionalPrecision — предел MySQL на дробную часть DATETIME/TIMESTAMP/TIME.
+const MaxFractionalPrecision = 6
+
+// fractionalPrecision вытаскивает точность дробной части из параметров типа
+// ("datetime(6)" → 6). Значение вне 0..6 отбрасывается: packet.Field.Precision
+// у других адаптеров может нести совсем другой смысл (разрядность DECIMAL), и
+// доверять ему вслепую нельзя.
+func fractionalPrecision(params []string) int {
+	if len(params) == 0 {
+		return 0
+	}
+	v, err := strconv.Atoi(params[0])
+	if err != nil || v < 0 || v > MaxFractionalPrecision {
+		return 0
+	}
+	return v
+}
+
+// isFractionalSecondsType сообщает, что у поля есть дробная часть секунд —
+// то есть datetime_precision из information_schema про него, а не про DECIMAL.
+func isFractionalSecondsType(field packet.Field) bool {
+	switch field.Type {
+	case "DATETIME", "TIMESTAMP":
+		return true
+	}
+	return field.Subtype == "time"
+}
+
+// clampFractionalPrecision приводит значение к допустимому для MySQL 0..6.
+func clampFractionalPrecision(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > MaxFractionalPrecision {
+		return MaxFractionalPrecision
+	}
+	return v
+}
+
+// withFractionalPrecision собирает "DATETIME(6)" и подобные.
+func withFractionalPrecision(base string, precision int) string {
+	if precision <= 0 || precision > MaxFractionalPrecision {
+		return base
+	}
+	return fmt.Sprintf("%s(%d)", base, precision)
 }
 
 // BuildFieldFromColumn создает packet.Field из информации о колонке MySQL
@@ -175,10 +227,22 @@ func BuildFieldFromColumn(columnName, dataType string, isPrimaryKey bool) (packe
 
 	case "DATETIME":
 		field.Type = "DATETIME"
+		field.Precision = fractionalPrecision(params)
 
 	case "TIMESTAMP":
 		field.Type = "TIMESTAMP"
 		field.Timezone = "UTC" // MySQL TIMESTAMP всегда хранится в UTC
+		field.Precision = fractionalPrecision(params)
+
+	case "TIME":
+		// MySQL TIME — это НЕ время суток, а длительность со знаком в
+		// диапазоне -838:59:59..838:59:59. Ни time.Time, ни PostgreSQL time
+		// такое не вмещают, поэтому значение едет текстом как есть, а
+		// Subtype "time" помнит, чем оно было. Round-trip получается точным,
+		// включая отрицательные значения и часы больше суток.
+		field.Type = "TEXT"
+		field.Subtype = "time"
+		field.Precision = fractionalPrecision(params)
 
 	case "BLOB", "TINYBLOB", "MEDIUMBLOB", "LONGBLOB", "BINARY", "VARBINARY":
 		field.Type = "BLOB"

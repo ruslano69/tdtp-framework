@@ -20,9 +20,10 @@ func NewConverter() *Converter {
 // ParseValue парсит строковое значение согласно типу поля
 func (c *Converter) ParseValue(rawValue string, field FieldDef) (*TypedValue, error) {
 	tv := &TypedValue{
-		Type:     field.Type,
-		Subtype:  field.Subtype,
-		RawValue: rawValue,
+		Type:      field.Type,
+		Subtype:   field.Subtype,
+		Precision: field.Precision,
+		RawValue:  rawValue,
 	}
 
 	normalized := NormalizeType(field.Type)

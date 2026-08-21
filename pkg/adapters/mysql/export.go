@@ -51,6 +51,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 			character_maximum_length,
 			numeric_precision,
 			numeric_scale,
+			datetime_precision,
 			is_nullable,
 			column_key
 		FROM information_schema.columns
@@ -72,11 +73,12 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 			charLength sql.NullInt64
 			numPrec    sql.NullInt64
 			numScale   sql.NullInt64
+			dtPrec     sql.NullInt64
 			isNullable string
 			columnKey  string
 		)
 
-		if err := rows.Scan(&columnName, &dataType, &charLength, &numPrec, &numScale, &isNullable, &columnKey); err != nil {
+		if err := rows.Scan(&columnName, &dataType, &charLength, &numPrec, &numScale, &dtPrec, &isNullable, &columnKey); err != nil {
 			return packet.Schema{}, err
 		}
 
@@ -85,6 +87,14 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		field, err := BuildFieldFromColumn(columnName, dataType, isPrimaryKey)
 		if err != nil {
 			return packet.Schema{}, err
+		}
+
+		// Разрядность дробной части хранится отдельной колонкой:
+		// data_type для datetime(6) — это просто "datetime", без параметров,
+		// так что BuildFieldFromColumn её увидеть не может. Без неё импорт
+		// отдал бы в колонку целые секунды и микросекунды бы пропали.
+		if dtPrec.Valid && isFractionalSecondsType(field) {
+			field.Precision = clampFractionalPrecision(int(dtPrec.Int64))
 		}
 
 		fields = append(fields, field)
