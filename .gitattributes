@@ -1,0 +1,5 @@
+# TDTP packets are byte-exact artefacts. docs/REGISTRATION_DOSSIER.md cites their
+# bytes as the BOF/EOF signatures submitted to PRONOM, so git must never
+# translate line endings on them — a CRLF checkout would hand a reviewer a file
+# the implementation does not produce.
+*.tdtp -text
