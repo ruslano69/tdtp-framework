@@ -4,6 +4,41 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — a large PostgreSQL `NUMERIC` exported in scientific notation
+
+A `NUMERIC(12,2)` holding `9999999999.99` left the exporter as
+`"9.99999999999e+09"`, and wrote a line to the log for every such cell.
+
+Three things had to line up. `pgValueToString` printed floats with `'g'`, which
+switches to an exponent on large values. `parseDecimal` then checks scale by
+splitting the string on `"."` — on `"9.99999999999e+09"` it reads the mantissa as
+the fractional part, finds fifteen digits against the two the column declares,
+and returns a validation error. And `ConvertValueToTDTP` answers a parse error by
+returning **the value as it came in** — so the exponent form went into the packet
+untouched.
+
+Floats and `pgtype.Numeric` now print with `'f'`, which is what `FormatValue`
+produces at the end of the round trip anyway. For values that never reached an
+exponent the bytes are unchanged; they change only where they were wrong.
+
+PostgreSQL only. The same three-part failure is present in the SQLite, MySQL,
+Access and MSSQL paths through `genericValueToString`/`mssqlValueToString`, which
+still print with `'g'` — see `TODO_NEXT.md`.
+
+### Changed — PostgreSQL export skips the round-trip for numbers too
+
+With numbers printed as `'f'`, `ParseValue`→`FormatValue` returns the same string
+it was given, so it is skipped for `float32`, `float64` and `pgtype.Numeric` —
+the same fast path `time.Time` already takes.
+
+**A 100k×16 export goes from 412 ms to 335 ms**, from 212 MB to 160 MB, and from
+6 097 194 allocations to 4 899 277. Together with the date change below, from the
+505 ms this started at — **a third off**.
+
+The skip is decided by the type of the value, not the type of the field: a
+`NUMERIC` that arrives as a string still takes the ordinary path, whatever the
+column declares.
+
 ### Changed — PostgreSQL export no longer round-trips dates through a string
 
 `readRowsWithSQL` passed an **empty** `packet.Field` into `DBValueToString`, so

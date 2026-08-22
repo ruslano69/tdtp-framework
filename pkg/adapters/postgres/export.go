@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
@@ -187,10 +188,23 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 // Это тот же приём, которым живёт base.ScanSQLRows у остальных адаптеров;
 // PostgreSQL мимо него проходил, потому что читает через pgx, а не database/sql.
 //
-// Пропуск разрешён ТОЛЬКО для time.Time. Остальным веткам pgValueToString
-// второй проход всё ещё нужен: TIME приезжает как pgtype.Time, бесконечная дата
-// как pgtype.InfinityModifier, NUMERIC как pgtype.Numeric, и канонический вид им
+// Пропуск разрешён по типу ЗНАЧЕНИЯ, а не по типу поля: решение принимается о
+// той строке, которую эта функция только что получила от pgValueToString, и
+// только для форм, каждая из которых уже канонична.
+//
+//   - time.Time      — formatTimeForField даёт RFC3339Nano либо "YYYY-MM-DD"
+//   - float32/64     — strconv.FormatFloat(v, 'f', -1, N), ровно то же, что
+//     печатает FormatValue в конце round-trip
+//   - pgtype.Numeric — то же 'f' плюс NullSentinel, "NaN" и "±Infinity",
+//     которые ConvertValueToTDTP и так возвращает нетронутыми
+//
+// Остальному второй проход по-прежнему нужен: TIME приезжает как pgtype.Time, а
+// бесконечная дата как pgtype.InfinityModifier, и канонический вид им
 // проставляет именно ConvertValueToTDTP.
+//
+// Проверка идёт по значению, а не по field.Type, потому что тип поля не
+// обещает, какую форму отдаст драйвер: NUMERIC, приехавший строкой, обязан
+// пройти обычным путём, даже если колонка объявлена DECIMAL.
 //
 // Единственная ветка pgValueToString, которая ещё смотрит на поле помимо дат, —
 // "[]byte длиной 16 при field.Type == \"uuid\"". Она была мертва и остаётся
@@ -198,7 +212,8 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 // так что field.Type для такой колонки — "TEXT", а не "uuid".
 func (a *Adapter) pgCellToTDTP(field packet.Field, val any) string {
 	raw := a.converter.DBValueToString(val, field, "postgres")
-	if _, isTime := val.(time.Time); isTime {
+	switch val.(type) {
+	case time.Time, float32, float64, pgtype.Numeric:
 		return raw
 	}
 	return a.convertValueToTDTP(field, raw)

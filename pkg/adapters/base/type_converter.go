@@ -163,6 +163,18 @@ func (c *UniversalTypeConverter) DBValueToString(value any, field packet.Field, 
 
 // pgValueToString конвертирует pgx значение в сырую строку для последующей обработки
 // PostgreSQL-специфичные типы: UUID, JSONB, INET, ARRAY, NUMERIC
+//
+// Числа печатаются через 'f', а не 'g', и это не косметика. 'g' уходит в
+// экспоненту на больших значениях, а дальше по пути стоит проверка scale в
+// parseDecimal, которая режет строку по точке и принимает мантиссу за дробную
+// часть: "9.99999999999e+09" из обычной NUMERIC(12,2) давало ей "дробь" в 15
+// знаков против разрешённых двух. ParseValue возвращал ошибку, а
+// ConvertValueToTDTP на ошибке отдаёт значение КАК ЕСТЬ — так экспонента и
+// уезжала в пакет, вместе со строкой в логе на каждую такую ячейку.
+//
+// FormatValue в конце round-trip всё равно печатает через 'f', так что для
+// значений без экспоненты вывод не меняется вовсе; меняется он ровно там, где
+// раньше был испорчен.
 func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) string {
 	if val == nil {
 		return NullSentinel
@@ -249,9 +261,9 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		return strconv.FormatUint(v, 10)
 
 	case float32:
-		return strconv.FormatFloat(float64(v), 'g', -1, 32)
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
 	case float64:
-		return strconv.FormatFloat(v, 'g', -1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64)
 
 	case bool:
 		if v {
@@ -350,7 +362,7 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		// Конвертируем в float64 для получения числового значения
 		f64, err := v.Float64Value()
 		if err == nil && f64.Valid {
-			return strconv.FormatFloat(f64.Float64, 'g', -1, 64)
+			return strconv.FormatFloat(f64.Float64, 'f', -1, 64)
 		}
 		// Fallback - используем строковое представление Int и Exp
 		return v.Int.String()
