@@ -2,6 +2,69 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [1.25.1] — 2026-08-22
+
+Version handling put in order. Three defects, each of which quietly switched an
+integrity check off rather than failing loudly.
+
+### Fixed — protocol versions were compared as strings
+
+`NeedsRowCountCheck` decided whether a packet predates v1.4 with
+`version <= "1.3.1"`. On every version the protocol has shipped that gives the
+right answer, but by coincidence: `'0'`, `'2'` and `'3'` sort before `'4'`. The
+coincidence ends at a two-digit component — `"1.10"` sorts below `"1.3.1"`
+because `'1' < '3'`, so a 1.10 packet would be treated as pre-1.4 and stop
+requiring a registered xxh3 hash, silently, while still importing.
+
+The predicate gates three things: whether `RecordsInPart` is verified, whether
+the Mercury pre-flight runs, and whether a hash is registered at all. Components
+are now compared as numbers, with missing components read as zero, so `1.4`
+equals `1.4.0` and `1.3` is below `1.3.1`. Answers for every shipped version are
+unchanged, pinned against the previous implementation.
+
+xzMercury carried the same comparison and would have refused hash registration
+for a 1.10 packet with "requires packet_version >= 1.4". Fixed identically; the
+two implementations are pinned to each other by one table repeated in both test
+files, because they must not disagree about which packet needs a registered hash.
+
+### Fixed — the version attribute was never validated
+
+Anything non-empty passed. A packet declaring `abc` parsed and imported without
+a word, and the garbage then counted as newer than any known version — moving
+the packet onto the integrity-required path without saying so.
+
+A value that is not a version is now refused: `abc`, `1..2`, `v1.4`, `1.`,
+`-1.0`. A well-formed but unknown version — `1.6`, `2.0` — is still accepted,
+because that is what the compatibility rules require: a reader degrades on the
+features it does not understand rather than refusing on the number.
+
+### Changed — a packet whose features outrun its version is read, with a warning
+
+Compression arrived in v1.2 but never raised the version: compact format writes
+`1.3.1`, integrity `1.4`, encryption `1.5`, and compression leaves `1.0` while
+announcing itself on `<Data compression="…">`. Years of archives carry
+compressed packets declaring `1.0`. They are correct and readable, and they stay
+that way — the reader warns, naming the feature and the version that introduced
+it, and carries on.
+
+### Fixed — a v1.4+ packet with no hashes was reported as integrity-verified
+
+Relabel a plain packet `1.5` and import it, and the gate printed
+`✓ Local integrity: OK`. Nothing had been checked: the verification step ran only
+when hashes were present, and an unstamped packet skipped it, leaving a silent
+result the caller read as success.
+
+Such a packet is now refused. It is not the compressed-1.0 case: v1.4 has no
+feature other than those hashes, so the version and the contents contradict each
+other. It also brings two paths to the same answer — with a Mercury registry
+configured this already failed, so the outcome had been depending on whether a
+registry happened to be reachable.
+
+Whether a `1.3.1` packet carries fixed fields is not checked in either
+direction: the compact format is optional at that version.
+
+---
+
 ## [1.25.0] — 2026-08-22
 
 ### Fixed — a large PostgreSQL `NUMERIC` exported in scientific notation

@@ -18,7 +18,7 @@ good it is.
 
 ---
 
-## Current state — v1.25.0 (2026-08-22)
+## Current state — v1.25.1 (2026-08-22)
 
 ### Closed sprints
 
