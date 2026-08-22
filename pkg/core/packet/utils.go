@@ -51,8 +51,33 @@ func NewErrorPacket(code, message, table, inReplyTo, serverMode string) *DataPac
 // it with HASH_NOT_REGISTERED — found live via a v1.5 packet that skipped
 // this. See pkg/pipeline/produce.go's ComputeAndRegisterIntegrity, which
 // every v1.5 encryption call site now calls for exactly this reason.
+//
+// Сравнение версий — числовое, а не строковое (см. ParseProtocolVersion).
+// Раньше здесь стояло `version <= "1.3.1"`, и на нынешнем наборе версий это
+// давало верный ответ по совпадению порядка символов. На двузначном компоненте
+// совпадение кончается: "1.10" строкой меньше "1.3.1", то есть версия 1.10
+// перестала бы требовать зарегистрированный хеш — и молча, потому что пакет
+// при этом продолжает импортироваться.
+//
+// Неразбираемая версия считается НОВЕЕ любой известной: предикат отвечает
+// false, пакет обязан нести целостность. Так закрыт обход через мусор в поле
+// версии; ровно так же вело себя и строковое сравнение ("abc" > "1.3.1"), но
+// там это выходило случайно.
+//
+// Пустая строка — единственное исключение, она считается легаси. Это тоже
+// повторяет прежнее поведение ("" < "1.3.1"), и на практике сюда не доходит:
+// parser.go отвергает пакет без версии раньше, а NewDataPacket проставляет
+// "1.0".
 func NeedsRowCountCheck(version string) bool {
-	return version <= "1.3.1"
+	if version == "" {
+		return true
+	}
+	v, ok := ParseProtocolVersion(version)
+	if !ok {
+		return false
+	}
+	legacyMax, _ := ParseProtocolVersion(versionLegacyMax)
+	return v.Compare(legacyMax) <= 0
 }
 
 // ExtractKeyFields извлекает ключевые поля из схемы

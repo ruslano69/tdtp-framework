@@ -109,6 +109,29 @@ ones pass.
 shares `genericValueToString` and so takes the fix, but nothing has confirmed
 what its driver returns for a `DECIMAL`.
 
+### The `version` attribute, three steps still open
+
+Comparing versions numerically instead of by string is **done** — see
+`pkg/core/packet/version.go` and the mirror in `xzmercury/internal/api`. What
+that fix uncovered is not.
+
+**Nothing validates the version on read.** A packet declaring `9.9`, or `abc`,
+parses and imports without complaint; the only check is that the attribute is
+non-empty (`parser.go`). For a format being registered with IANA, where
+`version` is an optional media-type parameter, that wants a known-set check and
+a clear error on anything else.
+
+**A declared version is not backed by its contents.** Take a plain packet, edit
+the attribute to `1.5`, and it imports reporting `Local integrity: OK` — it has
+no `xxh3` fields at all, so the local check passes vacuously. `utils.go` states
+the intended rule plainly: a producer of a version ≥ 1.4 packet must have called
+`ComputeIntegrity` and `RegisterHash`. Nothing enforces it on the consumer side
+when no registry is configured. A packet claiming a version it does not
+implement should be refused, not waved through.
+
+Both are patches — they refuse malformed input, they do not change what a
+conforming packet looks like on the wire.
+
 ### Tests for paths that have never run
 
 `pkg/adapters/mssql/integration_test.go` skipped for its entire life. Its first
@@ -202,6 +225,27 @@ high-risk items, the two round-trip traps, the config selectors with their
 existing precedent, and the driver decision that has to be made before starting
 — was written out in this file before the freeze. Recover it with
 `git log -p TODO_NEXT.md` rather than re-deriving it.
+
+### The `version` attribute as the maximum of the features in use
+
+Every feature stamps the version except compression: compact format writes
+`1.3.1`, integrity `1.4`, encryption `1.5`, and compression leaves `1.0` while
+announcing itself on `<Data compression="…">`. Compression arrived in 1.2,
+before the stamping convention existed, and was never brought into it.
+
+The consequence is small but real: a compressed packet tells a strict 1.0-only
+reader that it can be read, and that reader finds Base64 where rows should be
+instead of refusing cleanly.
+
+The rule to adopt is **version = max(features)**, not "compression means 1.2" —
+compression is orthogonal to the ladder, so forcing 1.2 would *lower* a
+compressed 1.4 packet and lose the fact that it carries integrity hashes.
+Measured beforehand: a packet declaring `1.2` behaves today exactly as one
+declaring `1.0`, on both the parse and the import path, so the change is inert
+inside this implementation and carries risk only for external consumers that
+match on the version string. `--to-tdtp` would also need `1.2` added to its
+target list and a `--compress` option, and its integrity must be computed
+**before** compression, as the export path already does.
 
 ### 2.1 Parallel daemon — `--map --listen --workers N`
 
