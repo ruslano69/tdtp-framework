@@ -209,10 +209,21 @@ func validatePacket(pkt *packet.DataPacket, label string) (int, error) {
 		}
 	}
 
-	// Dry decompression — просто проверяем что блоб не битый, не парсим содержимое.
-	// RecordsInPart в заголовке — авторитетный счётчик строк; содержимое <Data> непрозрачно.
+	// Распаковываем и СЧИТАЕМ строки, а не просто проверяем блоб на целость.
+	//
+	// Раньше здесь стоял DryDecompress, а счётчиком объявлялся сам заголовок:
+	// "RecordsInPart в заголовке — авторитетный счётчик строк; содержимое <Data>
+	// непрозрачно". Для сжатого пакета это означало, что --test заявленное число
+	// не проверял, а повторял: пакет с RecordsInPart=999 и пятью строками внутри
+	// проходил проверку и отчитывался о 999 строках. Ровно ту проверку, которую
+	// --test обещает в справке ("count rows vs header"), сжатые пакеты и не
+	// получали.
+	//
+	// Дороже это почти не стало: DryDecompress и так распаковывал блоб целиком и
+	// выбрасывал результат — теперь результат используется. Объём распакованного
+	// по-прежнему ограничен MaxDecompressedBytes.
 	decompStart := time.Now()
-	err := processors.DryDecompress(compressedValue, pkt.Data.Compression)
+	rows, err := processors.DecompressDataForTdtpAlgo(compressedValue, pkt.Data.Compression)
 	decompTime := time.Since(decompStart)
 	if err != nil {
 		fmt.Printf("  ✗ %s: decompress failed (%s): %v\n",
@@ -220,10 +231,15 @@ func validatePacket(pkt *packet.DataPacket, label string) (int, error) {
 		return 0, err
 	}
 
-	actual := pkt.Header.RecordsInPart
+	actual := len(rows)
 	checksumMark := ""
 	if pkt.Data.Checksum != "" {
 		checksumMark = ", checksum OK"
+	}
+	if pkt.Header.RecordsInPart > 0 && actual != pkt.Header.RecordsInPart {
+		fmt.Printf("  ✗ %s: algo=%s, RecordsInPart=%d but the decompressed data has %d rows\n",
+			label, pkt.Data.Compression, pkt.Header.RecordsInPart, actual)
+		return actual, fmt.Errorf("row count mismatch")
 	}
 	fmt.Printf("  ✓ %s: algo=%s, %d rows, decompressed %s%s\n",
 		label, pkt.Data.Compression, actual, decompTime.Round(time.Millisecond), checksumMark)
