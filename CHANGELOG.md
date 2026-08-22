@@ -2,6 +2,36 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased]
+
+### Changed — PostgreSQL export no longer round-trips dates through a string
+
+`readRowsWithSQL` passed an **empty** `packet.Field` into `DBValueToString`, so
+the converter could not tell a `DATE` from a `TIMESTAMP` and emitted RFC3339 for
+both; trimming it back to `YYYY-MM-DD` was left to a second pass, which parsed
+the string that had just been built from a `time.Time`. The field is now passed
+for real, the first pass produces the canonical form directly, and for a
+`time.Time` the second pass is skipped as the no-op it is.
+
+**A 100k-row export with three date columns goes from 505 ms to 412 ms**, from
+281 MB to 212 MB, and from 7 497 229 allocations to 6 097 194 — about 14 per
+row. Every one of the 1 600 000 cells comes out byte-identical.
+
+This is the fast path `base.ScanSQLRows` already gives every other adapter.
+PostgreSQL missed it because it reads through pgx rather than `database/sql` and
+keeps its own scan loop.
+
+The skip is allowed for `time.Time` only. `TIME` arrives as `pgtype.Time`, an
+infinite date as `pgtype.InfinityModifier` and `NUMERIC` as `pgtype.Numeric`,
+and those still need the second pass to reach canonical form.
+
+Not the same trick as the SQLite one above, and deliberately so: pgx sends
+`timestamp` and `date` in binary, so there is no raw text to splice and nothing
+for a `::text` cast to save. Measured, casting all sixteen columns to text made
+the read *slower* — 166 ms against 130 ms — and a literal port of the splice
+came out only 1.6% ahead of this change while requiring the session time zone
+pinned to UTC and `SELECT *` expanded into an explicit column list.
+
 ## [1.25.0] — 2026-08-22
 
 ### Fixed — SQLite export aborted on the first NULL date

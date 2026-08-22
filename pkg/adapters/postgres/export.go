@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -165,9 +166,7 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 
 		rowData := make([]string, len(values))
 		for i, val := range values {
-			// Сначала в сырую строку, потом через schema.Converter для правильного форматирования
-			rawValue := a.pgValueToRawString(val)
-			rowData[i] = a.convertValueToTDTP(schema.Fields[i], rawValue)
+			rowData[i] = a.pgCellToTDTP(schema.Fields[i], val)
 		}
 
 		dataRows = append(dataRows, rowData)
@@ -176,10 +175,33 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, sql string, schema packet
 	return dataRows, rows.Err()
 }
 
-// pgValueToRawString конвертирует pgx значение в сырую строку для последующей обработки
-func (a *Adapter) pgValueToRawString(val any) string {
-	emptyField := packet.Field{}
-	return a.converter.DBValueToString(val, emptyField, "postgres")
+// pgCellToTDTP приводит значение, отданное pgx, к каноническому виду TDTP.
+//
+// Поле уходит в DBValueToString настоящим, а не пустым, как было раньше.
+// С пустым полем конвертер не мог отличить DATE от TIMESTAMP и выдавал RFC3339
+// на любую дату, а обрезать его до "YYYY-MM-DD" приходилось вторым проходом
+// ConvertValueToTDTP — то есть разбирать во время строку, только что из времени
+// и собранную. Зная тип, первый проход сразу даёт нужный вид, и второй для
+// time.Time становится холостым ходом.
+//
+// Это тот же приём, которым живёт base.ScanSQLRows у остальных адаптеров;
+// PostgreSQL мимо него проходил, потому что читает через pgx, а не database/sql.
+//
+// Пропуск разрешён ТОЛЬКО для time.Time. Остальным веткам pgValueToString
+// второй проход всё ещё нужен: TIME приезжает как pgtype.Time, бесконечная дата
+// как pgtype.InfinityModifier, NUMERIC как pgtype.Numeric, и канонический вид им
+// проставляет именно ConvertValueToTDTP.
+//
+// Единственная ветка pgValueToString, которая ещё смотрит на поле помимо дат, —
+// "[]byte длиной 16 при field.Type == \"uuid\"". Она была мертва и остаётся
+// мертва: BuildFieldFromPGColumn отображает uuid в TypeText с подтипом "uuid",
+// так что field.Type для такой колонки — "TEXT", а не "uuid".
+func (a *Adapter) pgCellToTDTP(field packet.Field, val any) string {
+	raw := a.converter.DBValueToString(val, field, "postgres")
+	if _, isTime := val.(time.Time); isTime {
+		return raw
+	}
+	return a.convertValueToTDTP(field, raw)
 }
 
 // convertValueToTDTP конвертирует значение из БД в TDTP формат
@@ -278,8 +300,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, tableName string, 
 		// Конвертируем значения в строки TDTP формата
 		rowData := make([]string, len(values))
 		for i, val := range values {
-			rawValue := a.pgValueToRawString(val)
-			rowData[i] = a.convertValueToTDTP(pkgSchema.Fields[i], rawValue)
+			rowData[i] = a.pgCellToTDTP(pkgSchema.Fields[i], val)
 
 			// Сохраняем последнее значение tracking поля
 			if i == trackingFieldIndex {
