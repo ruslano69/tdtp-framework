@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"strings"
 	"errors"
 	"testing"
 
@@ -216,5 +217,53 @@ func TestVerify_NilVerifier_NoMercuryCheck(t *testing.T) {
 	// With a stamped packet and nil verifier → should pass (local integrity OK).
 	if err != nil {
 		t.Errorf("nil verifier (local only): expected pass, got %v", err)
+	}
+}
+
+// Пакет, объявляющий v1.4+, но без единого xxh3, обязан быть отвергнут.
+//
+// Раньше он проходил и печатался как "✓ Local integrity: OK": шаг проверки
+// пропускался, потому что проверять было нечего, а вызывающий трактовал
+// молчание как успех. Достаточно было взять обычный пакет и поменять строку
+// версии, чтобы получить ложное подтверждение целостности.
+//
+// Отказ, а не пометка: v1.4 не имеет других возможностей кроме этих хешей, так
+// что версия и содержимое противоречат друг другу. Это отличается от сжатого
+// пакета с version="1.0" — тот настоящий и корректный, протокол просто никогда
+// не поднимал ему версию.
+func TestVerify_V14WithoutHashes_Blocked(t *testing.T) {
+	for _, version := range []string{"1.4", "1.5", "2.0"} {
+		t.Run(version, func(t *testing.T) {
+			pkt := makeV131Packet(t)
+			pkt.Version = version // объявляем версию, хеши не проставляем
+
+			_, err := pipeline.VerifyAndPrepare(context.Background(), pkt, nil, pipeline.FallbackDegrade)
+			if err == nil {
+				t.Fatal("a packet declaring v1.4+ without xxh3 must be refused, not reported OK")
+			}
+			if !strings.Contains(err.Error(), "no xxh3") {
+				t.Errorf("error does not name the problem: %v", err)
+			}
+		})
+	}
+}
+
+// Обратная сторона: настоящий v1.4 с хешами проходит, и отказ выше не задел
+// нормальный путь.
+func TestVerify_V14WithHashes_StillPasses(t *testing.T) {
+	pkt := makeV14Packet(t)
+	if _, err := pipeline.VerifyAndPrepare(context.Background(), pkt, nil, pipeline.FallbackDegrade); err != nil {
+		t.Errorf("a properly stamped v1.4 packet must pass: %v", err)
+	}
+}
+
+// Пакеты до v1.4 гейт не касается вовсе — у них хешей и не должно быть.
+func TestVerify_PreV14WithoutHashes_Unaffected(t *testing.T) {
+	for _, version := range []string{"1.0", "1.2", "1.3", "1.3.1"} {
+		pkt := makeV131Packet(t)
+		pkt.Version = version
+		if _, err := pipeline.VerifyAndPrepare(context.Background(), pkt, nil, pipeline.FallbackDegrade); err != nil {
+			t.Errorf("version %s must pass through untouched: %v", version, err)
+		}
 	}
 }

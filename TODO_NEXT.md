@@ -109,12 +109,11 @@ ones pass.
 shares `genericValueToString` and so takes the fix, but nothing has confirmed
 what its driver returns for a `DECIMAL`.
 
-### The `version` attribute — one step left
+### The `version` attribute — done in 1.x
 
-Two of the three are done. Comparing versions numerically instead of by string:
-see `pkg/core/packet/version.go` and the mirror in `xzmercury/internal/api`.
-Validating the attribute on read: see below. What remains is the consistency
-between what a packet declares and what it actually carries.
+All three are done: numeric comparison (`pkg/core/packet/version.go` and the
+mirror in `xzmercury/internal/api`), validation on read, and consistency between
+what a packet declares and what it carries.
 
 **~~Nothing validates the version on read~~ — done.** `validatePacket` now
 refuses a value that is not a version (`abc`, `1..2`, `v1.4`), accepts a
@@ -123,19 +122,24 @@ and warns without refusing when a packet's features are newer than its declared
 version — the common case being a compressed packet declaring `1.0`, of which
 years of archives exist.
 
-**A declared version is still not backed by its contents.** Take a plain packet,
-edit the attribute to `1.5`, and it imports reporting `Local integrity: OK` — it
-has no `xxh3` fields at all, so the local check passes vacuously. `utils.go`
-states the intended rule plainly: a producer of a version ≥ 1.4 packet must have
-called `ComputeIntegrity` and `RegisterHash`. Nothing enforces it on the consumer
-side when no registry is configured.
+**~~A declared version is not backed by its contents~~ — done.** A packet
+declaring 1.4 or later without `xxh3` is now refused by `VerifyAndPrepare`. It
+used to pass and print `✓ Local integrity: OK`, because the verification step
+was skipped when there was nothing to verify and the caller read silence as
+success — so relabelling a plain packet `1.5` produced a false assurance.
 
-The warning added above deliberately checks one direction only — features newer
-than the version. The reverse is harder than it looks: a decrypted v1.5 packet
-keeps `Version = "1.5"` after `DecryptSections` has removed the `encryption`
-attributes, so a naive "1.5 must carry encryption" check would fire on a packet
-that is perfectly correct. Establish where in the pipeline the check can see the
-packet in its as-received shape before writing it.
+Refusing rather than flagging was the right call for a reason worth keeping:
+with a Mercury registry configured the same packet **already** failed, as
+`runMercuryCheck` turns an empty hash into `ErrHashNotRegistered`. The outcome
+had been depending on whether a registry happened to be reachable. Now both
+paths agree.
+
+The 1.3.1 direction is deliberately not checked: the compact format is optional
+at that version, so neither its presence nor its absence says anything.
+
+All three steps under this heading are closed. What remains about the version
+attribute is the 2.0 item — making the version the maximum of the features in
+use — which is behind the freeze.
 
 ### Tests for paths that have never run
 

@@ -133,11 +133,34 @@ func VerifyAndPrepare(
 	}
 
 	// ── Step 2: Local xxh3 integrity ─────────────────────────────────────────
-	// Only meaningful if the packet was stamped with ComputeIntegrity.
-	if packet.HasIntegrity(pkt) {
-		if err := packet.VerifyIntegrity(pkt); err != nil {
-			return nil, fmt.Errorf("local integrity check failed: %w", err)
-		}
+	//
+	// A packet that reaches this point declares v1.4 or later, and integrity
+	// hashes are what that version IS. If it carries none, there is nothing to
+	// verify — and saying nothing would be the dangerous answer: the caller
+	// prints "✓ Local integrity: OK" for a silent result, so an unstamped
+	// packet used to come out looking verified. It was not; nothing was checked.
+	//
+	// With Mercury configured this case already blocks — runMercuryCheck turns
+	// an empty XXH3 into ErrHashNotRegistered. The hole was the degraded path,
+	// where no verifier is present and Step 2 simply had nothing to do.
+	//
+	// Refused, not merely flagged. A v1.4 packet without hashes is not an old
+	// packet being generous to — v1.4 has no other feature, so the version and
+	// the contents contradict each other outright. This differs from a
+	// compressed packet declaring 1.0, which is a real and correct file the
+	// protocol simply never re-stamped.
+	//
+	// It also brings the two paths to the same answer. With Mercury configured
+	// this already fails, and the difference in outcome depended on nothing but
+	// whether a registry happened to be reachable.
+	if !packet.HasIntegrity(pkt) {
+		return nil, fmt.Errorf(
+			"packet declares version %s but carries no xxh3 integrity hashes: "+
+				"v1.4 and later are defined by those hashes, so the version and the "+
+				"contents contradict each other", pkt.Version)
+	}
+	if err := packet.VerifyIntegrity(pkt); err != nil {
+		return nil, fmt.Errorf("local integrity check failed: %w", err)
 	}
 
 	// ── Step 3: Dictionary expansion ─────────────────────────────────────────

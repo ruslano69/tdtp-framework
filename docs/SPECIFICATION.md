@@ -208,6 +208,13 @@ implementation follows all three:
   warning. Archives of compressed packets declaring `1.0` are correct and
   perfectly readable; refusing them would punish the user for an omission in the
   protocol.
+- A packet declaring **1.4 or later without `xxh3` hashes** is **refused**. This
+  is not the same situation: v1.4 has no feature other than those hashes, so the
+  version and the contents contradict each other outright. A consumer with a
+  Mercury registry configured already refused such a packet; without one it used
+  to pass and be reported as integrity-verified, which was a false assurance —
+  nothing had been checked. Whether `1.3.1` carries fixed fields is not checked
+  in either direction: the compact format is optional at that version.
 
 **Identify on `protocol`, not on `version`.** The `version` attribute records
 which features the packet uses, not which release wrote it: compression leaves
