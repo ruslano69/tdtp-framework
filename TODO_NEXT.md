@@ -109,28 +109,33 @@ ones pass.
 shares `genericValueToString` and so takes the fix, but nothing has confirmed
 what its driver returns for a `DECIMAL`.
 
-### The `version` attribute, three steps still open
+### The `version` attribute — one step left
 
-Comparing versions numerically instead of by string is **done** — see
-`pkg/core/packet/version.go` and the mirror in `xzmercury/internal/api`. What
-that fix uncovered is not.
+Two of the three are done. Comparing versions numerically instead of by string:
+see `pkg/core/packet/version.go` and the mirror in `xzmercury/internal/api`.
+Validating the attribute on read: see below. What remains is the consistency
+between what a packet declares and what it actually carries.
 
-**Nothing validates the version on read.** A packet declaring `9.9`, or `abc`,
-parses and imports without complaint; the only check is that the attribute is
-non-empty (`parser.go`). For a format being registered with IANA, where
-`version` is an optional media-type parameter, that wants a known-set check and
-a clear error on anything else.
+**~~Nothing validates the version on read~~ — done.** `validatePacket` now
+refuses a value that is not a version (`abc`, `1..2`, `v1.4`), accepts a
+well-formed but unknown one (`1.6`, `2.0`) as the compatibility rules require,
+and warns without refusing when a packet's features are newer than its declared
+version — the common case being a compressed packet declaring `1.0`, of which
+years of archives exist.
 
-**A declared version is not backed by its contents.** Take a plain packet, edit
-the attribute to `1.5`, and it imports reporting `Local integrity: OK` — it has
-no `xxh3` fields at all, so the local check passes vacuously. `utils.go` states
-the intended rule plainly: a producer of a version ≥ 1.4 packet must have called
-`ComputeIntegrity` and `RegisterHash`. Nothing enforces it on the consumer side
-when no registry is configured. A packet claiming a version it does not
-implement should be refused, not waved through.
+**A declared version is still not backed by its contents.** Take a plain packet,
+edit the attribute to `1.5`, and it imports reporting `Local integrity: OK` — it
+has no `xxh3` fields at all, so the local check passes vacuously. `utils.go`
+states the intended rule plainly: a producer of a version ≥ 1.4 packet must have
+called `ComputeIntegrity` and `RegisterHash`. Nothing enforces it on the consumer
+side when no registry is configured.
 
-Both are patches — they refuse malformed input, they do not change what a
-conforming packet looks like on the wire.
+The warning added above deliberately checks one direction only — features newer
+than the version. The reverse is harder than it looks: a decrypted v1.5 packet
+keeps `Version = "1.5"` after `DecryptSections` has removed the `encryption`
+attributes, so a naive "1.5 must carry encryption" check would fire on a packet
+that is perfectly correct. Establish where in the pipeline the check can see the
+packet in its as-received shape before writing it.
 
 ### Tests for paths that have never run
 

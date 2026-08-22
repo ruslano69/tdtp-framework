@@ -191,6 +191,24 @@ A TDTP packet is recognisable from its opening bytes without parsing:
 
 The file ends with `</DataPacket>`.
 
+**How a reader must treat the version.** Three rules, and the reference
+implementation follows all three:
+
+- A value that is not a version at all — `abc`, `1..2`, `v1.4`, `1.` — is
+  **rejected**. It is not a version, and letting it through silently changes
+  behaviour elsewhere: an unparseable value is treated as newer than anything
+  known, so it moves the packet onto the integrity-required path without saying
+  so.
+- A well-formed but **unknown** version — `1.6`, `2.0` — is **accepted**. That
+  is what the compatibility rules in [Versioning](#versioning) require: a reader
+  degrades on the features it does not understand, rather than refusing on the
+  number.
+- A packet whose **features are newer than its declared version** — the common
+  case being compression, which never raised the version — is read, with a
+  warning. Archives of compressed packets declaring `1.0` are correct and
+  perfectly readable; refusing them would punish the user for an omission in the
+  protocol.
+
 **Identify on `protocol`, not on `version`.** The `version` attribute records
 which features the packet uses, not which release wrote it: compression leaves
 it at `1.0` and is announced by `<Data compression="…">`, the compact format

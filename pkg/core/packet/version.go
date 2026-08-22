@@ -1,6 +1,9 @@
 package packet
 
-import "strconv"
+import (
+	"log"
+	"strconv"
+)
 
 // ProtocolVersion — разобранная версия протокола TDTP ("1.0", "1.3.1", "1.4").
 //
@@ -90,3 +93,53 @@ func CompareProtocolVersions(a, b string) (int, bool) {
 
 // versionLegacyMax — последняя версия, живущая на счёте строк вместо хешей.
 const versionLegacyMax = "1.3.1"
+
+// versionIntroduced — версия, в которой возможность появилась. Пакет,
+// пользующийся возможностью, но объявляющий версию ниже, сам себя описывает
+// неверно.
+var versionIntroduced = []struct {
+	feature string
+	since   string
+	present func(*DataPacket) bool
+}{
+	{"compression", "1.2", func(p *DataPacket) bool { return p.Data.Compression != "" }},
+	{"compact format", "1.3.1", func(p *DataPacket) bool { return p.Data.Compact }},
+	{"xxh3 integrity", "1.4", func(p *DataPacket) bool {
+		return p.XXH3 != "" || p.Schema.XXH3 != "" || p.Data.XXH3 != ""
+	}},
+	{"section encryption", "1.5", func(p *DataPacket) bool {
+		return p.Schema.Encryption != "" || p.Data.Encryption != ""
+	}},
+}
+
+// warnVersionBelowFeatures предупреждает, если объявленная версия ниже той, в
+// которой появилась использованная возможность.
+//
+// Предупреждение, а НЕ отказ, и это осознанно. Сжатие появилось в 1.2, но
+// версию пакета никогда не поднимало: компактный формат ставит 1.3.1,
+// целостность 1.4, шифрование 1.5, а сжатие оставляет 1.0. За годы накопились
+// архивы сжатых пакетов с version="1.0" — они корректны, читаются и ничем не
+// испорчены. Отвергать их значит наказывать пользователя за упущение
+// протокола.
+//
+// Проверяется только одно направление: возможность новее объявленной версии.
+// Обратное — пакет объявляет 1.5, а внутри ни одного xxh3 — тоже стоит ловить,
+// но там легко получить ложное срабатывание на уже расшифрованном пакете, у
+// которого атрибуты encryption сняты, а версия осталась. См. TODO_NEXT.md.
+func warnVersionBelowFeatures(p *DataPacket) {
+	declared, ok := ParseProtocolVersion(p.Version)
+	if !ok {
+		return // формат версии проверяется отдельно, до этого места
+	}
+	for _, f := range versionIntroduced {
+		if !f.present(p) {
+			continue
+		}
+		since, _ := ParseProtocolVersion(f.since)
+		if declared.Compare(since) < 0 {
+			log.Printf("WARNING: packet declares version %s but uses %s, introduced in %s — "+
+				"reading it anyway; the packet predates the convention that a feature raises the version",
+				p.Version, f.feature, f.since)
+		}
+	}
+}
