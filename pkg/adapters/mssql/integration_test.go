@@ -3,7 +3,6 @@ package mssql
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -105,7 +104,7 @@ func TestIntegration_ExportImport(t *testing.T) {
 	if err != nil {
 		t.Skipf("MS SQL Server not available: %v", err)
 	}
-	defer adapter.Close(ctx)
+	t.Cleanup(func() { _ = adapter.Close(ctx) })
 
 	tableName := "test_export_import"
 
@@ -139,10 +138,15 @@ func TestIntegration_ExportImport(t *testing.T) {
 		t.Errorf("Expected 6 fields, got %d", len(pkt.Schema.Fields))
 	}
 
-	// Проверяем данные
+	// Проверяем данные.
+	//
+	// Считать надо по RecordsInPart, а не по len(Data.Rows): GenerateReference
+	// оставляет строки в rawRows и в Data.Rows их не переносит, так что прямое
+	// обращение к полю вернуло бы ноль. Строки достаёт GetRows(), который обе
+	// формы прячет.
 	totalRows := 0
 	for _, p := range packets {
-		totalRows += len(p.Data.Rows)
+		totalRows += p.Header.RecordsInPart
 	}
 
 	if totalRows != 3 {
@@ -183,7 +187,7 @@ func TestIntegration_MergeUpsert(t *testing.T) {
 	if err != nil {
 		t.Skipf("MS SQL Server not available: %v", err)
 	}
-	defer adapter.Close(ctx)
+	t.Cleanup(func() { _ = adapter.Close(ctx) })
 
 	tableName := "test_merge_upsert"
 
@@ -208,17 +212,25 @@ func TestIntegration_MergeUpsert(t *testing.T) {
 		t.Fatal("No packets exported")
 	}
 
-	// Модифицируем данные в пакете (обновляем balance для id=1)
-	for i, row := range packets[0].Data.Rows {
-		// Разбираем значения
-		values := strings.Split(row.Value, "|")
-		if len(values) > 0 && values[0] == "1" { // id = 1
-			if len(values) > 4 {
-				values[4] = "9999.99" // balance = 9999.99
-				packets[0].Data.Rows[i].Value = strings.Join(values, "|")
-			}
+	// Модифицируем данные в пакете (обновляем balance для id=1).
+	//
+	// Только через GetRows/SetRows. Раньше здесь шёл цикл по Data.Rows со
+	// склейкой значений через "|", и он молча не делал ничего: после
+	// GenerateReference строки лежат в rawRows, а Data.Rows пуст. Тест на этом
+	// импортировал исходные данные и сообщал, что MERGE не сработал, хотя не
+	// срабатывала правка.
+	rows := packets[0].GetRows()
+	updated := false
+	for i := range rows {
+		if len(rows[i]) > 4 && rows[i][0] == "1" { // id = 1
+			rows[i][4] = "9999.99" // balance = 9999.99
+			updated = true
 		}
 	}
+	if !updated {
+		t.Fatal("Row with id=1 not found in exported packet")
+	}
+	packets[0].SetRows(rows)
 
 	// Import с UPSERT (StrategyReplace)
 	t.Log("Importing with MERGE (UPSERT)...")
@@ -328,7 +340,7 @@ func TestIntegration_GetTableSchema(t *testing.T) {
 	if err != nil {
 		t.Skipf("MS SQL Server not available: %v", err)
 	}
-	defer adapter.Close(ctx)
+	t.Cleanup(func() { _ = adapter.Close(ctx) })
 
 	tableName := "test_get_schema"
 
@@ -392,7 +404,7 @@ func TestIntegration_TableExists(t *testing.T) {
 	if err != nil {
 		t.Skipf("MS SQL Server not available: %v", err)
 	}
-	defer adapter.Close(ctx)
+	t.Cleanup(func() { _ = adapter.Close(ctx) })
 
 	tableName := "test_table_exists"
 
@@ -438,7 +450,7 @@ func TestIntegration_SpecialTypes(t *testing.T) {
 	if err != nil {
 		t.Skipf("MS SQL Server not available: %v", err)
 	}
-	defer adapter.Close(ctx)
+	t.Cleanup(func() { _ = adapter.Close(ctx) })
 
 	tableName := "test_special_types"
 	t.Cleanup(func() {
@@ -536,6 +548,13 @@ func insertTestData(t *testing.T, ctx context.Context, adapter adapters.Adapter,
 	}
 }
 
+// dropTableIfExists убирает таблицу после теста.
+//
+// Тест, который её вызывает через t.Cleanup, обязан закрывать адаптер тоже
+// через t.Cleanup, зарегистрированный РАНЬШЕ: уборки идут в обратном порядке
+// регистрации, а defer отрабатывает ещё до них. С "defer adapter.Close(ctx)"
+// соединение закрывалось первым, каждый DROP падал с "sql: database is closed",
+// и тестовые таблицы копились в базе.
 func dropTableIfExists(t *testing.T, ctx context.Context, adapter adapters.Adapter, tableName string) {
 	mssqlAdapter, ok := adapter.(*Adapter)
 	if !ok {
