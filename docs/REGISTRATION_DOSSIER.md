@@ -290,14 +290,30 @@ than because implementations use it.
 
 ### 2.3 Sample files to accompany the submission
 
-PRONOM asks for representative files. Three cover the format's variation:
+Generated with `tdtpcli` from a SQLite source and checked with `tdtpcli --test`;
+they are in [`samples/`](samples/).
 
-1. **v1.0 baseline** — plain XML, no compression, no integrity fields.
-2. **v1.2 compressed** — zstd payload, Base64 inside `<Data>`.
-3. **v1.5 encrypted** — section-level AES-256-GCM, with `<Header>` in the clear.
+| File | Declares | Distinguishing markup |
+|---|---|---|
+| `employees-plain.tdtp` | `version="1.0"` | none — the baseline shape |
+| `employees-zstd.tdtp` | `version="1.0"` | `<Data compression="zstd" checksum="…">` |
+| `timesheet-compact.tdtp` | `version="1.3.1"` | `<Data compact="true">` |
+| `employees-integrity.tdtp` | `version="1.4"` | `xxh3` on `<DataPacket>`, `<Schema>` and `<Data>` |
 
-All three match the same BOF and EOF signatures, which is the point of leaving
-the header and the root element unencrypted.
+**The `version` attribute records the features in use, not the release the
+packet was written by.** Compression does not raise it — a zstd packet still
+declares `1.0` and announces the compression on `<Data>` instead. The compact
+format raises it to `1.3.1`, integrity hashes to `1.4`, section encryption to
+`1.5`. An identification tool must therefore key on `protocol="TDTP"` and treat
+`version` as informational, which is what the signatures in 2.1 do.
+
+A fifth sample, section-encrypted v1.5, is not included here: `--enc` is gated
+behind a licensed feature, so producing one requires a `tdtp.lic` signed with
+the vendor key. It matches the same BOF and EOF signatures as the other four —
+that is the point of leaving `<Header>` and the root element unencrypted — and
+should be added to the submission when a licensed build is used.
+
+All four files match the BOF and EOF signatures in 2.1, verified byte for byte.
 
 ---
 

@@ -191,6 +191,12 @@ A TDTP packet is recognisable from its opening bytes without parsing:
 
 The file ends with `</DataPacket>`.
 
+**Identify on `protocol`, not on `version`.** The `version` attribute records
+which features the packet uses, not which release wrote it: compression leaves
+it at `1.0` and is announced by `<Data compression="…">`, the compact format
+raises it to `1.3.1`, integrity hashes to `1.4`, and section encryption to
+`1.5`. `protocol="TDTP"` is the invariant.
+
 This holds for every variant of the format, including compressed and encrypted
 packets: compression touches only the contents of `<Data>`, and v1.5 section
 encryption deliberately leaves `<Header>` and the root element in the clear so
