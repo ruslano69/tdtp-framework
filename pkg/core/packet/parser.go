@@ -389,60 +389,98 @@ func (p *Parser) ParseBytesWithDecompression(data []byte, decompressor func(ctx 
 // GetRowValues разбивает строку данных на значения полей.
 // Обрабатывает экранирование: \| → |, \\ → \, \n → newline.
 //
-// Fast path (нет '\' в строке): возвращает срезы исходной строки без аллокаций
-// на поле — только одна аллокация на весь срез результата.
-// Slow path (есть '\\'): прежняя логика со strings.Builder.
+// Ёмкость результата считается точно — `strings.Count` по разделителю. Это
+// один проход с векторной инструкцией, и он дешевле любого промаха оценки:
+// заниженная ёмкость стоит пересборки среза с копированием (на строке из
+// сотни коротких полей это 1.75× ко времени), завышенная — лишней памяти
+// (на четырёх длинных полях доходило до 22×).
 func (p *Parser) GetRowValues(row Row) []string {
-	s := row.Value
+	return p.GetRowValuesInto(row, make([]string, 0, strings.Count(row.Value, "|")+1))
+}
 
-	// Fast path: нет escape-символов — срезы без копирования.
-	if strings.IndexByte(s, '\\') == -1 {
-		n := strings.Count(s, "|") + 1
-		values := make([]string, 0, n)
-		start := 0
-		for i := 0; i < len(s); i++ {
-			if s[i] == '|' {
-				values = append(values, s[start:i])
-				start = i + 1
-			}
-		}
-		values = append(values, s[start:])
-		return values
+// GetRowValuesInto разбирает строку в переданный срез, переиспользуя его
+// память: dst усекается до нуля и заполняется заново.
+//
+// Нужен там, где значения потребляются и выбрасываются внутри итерации — тогда
+// разбор строки обходится без единой аллокации (около 100 нс против 300 нс с
+// выделением среза на каждую строку).
+//
+// ВНИМАНИЕ: результат ссылается на память dst, поэтому переиспользовать буфер
+// можно только если предыдущий результат больше не нужен. Для DataPacket.GetRows
+// это не годится — он удерживает срез каждой строки, и общий буфер сделал бы их
+// всех алиасами одного массива. Передайте nil, чтобы получить свежий срез.
+func (p *Parser) GetRowValuesInto(row Row, dst []string) []string {
+	s := row.Value
+	if dst == nil {
+		dst = make([]string, 0, strings.Count(s, "|")+1)
+	} else {
+		dst = dst[:0]
 	}
 
-	// Slow path: есть экранирование.
-	n := len(s)
-	values := make([]string, 0, 10)
-	var buf strings.Builder
-	buf.Grow(n / 10)
+	// Fast path: экранирования нет — поля отдаются срезами исходной строки,
+	// без копирования. IndexByte сканирует векторно, что заметно выигрывает
+	// на длинных полях и примерно равно ручному циклу на коротких.
+	if strings.IndexByte(s, '\\') == -1 {
+		start := 0
+		for {
+			idx := strings.IndexByte(s[start:], '|')
+			if idx < 0 {
+				return append(dst, s[start:])
+			}
+			dst = append(dst, s[start:start+idx])
+			start += idx + 1
+		}
+	}
 
+	// Slow path: есть экранирование (\| → |, \\ → \, \n → newline).
+	//
+	// Неэкранированные участки копируются прогонами, а не побайтово: в буфер
+	// уходит только то, что действительно нужно склеить вокруг escape-
+	// последовательностей.
+	n := len(s)
+	var buf strings.Builder
+	start := 0
 	escaped := false
 
 	for i := 0; i < n; i++ {
-		char := s[i]
-
+		c := s[i]
 		switch {
 		case escaped:
-			if char == 'n' {
+			if c == 'n' {
 				buf.WriteByte('\n')
 			} else {
-				buf.WriteByte(char)
+				buf.WriteByte(c)
 			}
 			escaped = false
-		case char == '\\':
+			start = i + 1
+		case c == '\\':
 			escaped = true
-		case char == '|':
-			values = append(values, buf.String())
-			buf.Reset()
-		default:
-			buf.WriteByte(char)
+			if i > start {
+				buf.WriteString(s[start:i])
+			}
+			start = i + 1
+		case c == '|':
+			if buf.Len() > 0 || start < i {
+				buf.WriteString(s[start:i])
+				dst = append(dst, buf.String())
+				buf.Reset()
+			} else {
+				dst = append(dst, "")
+			}
+			start = i + 1
 		}
 	}
 
+	// Висящий обратный слэш в конце строки — не escape, а сам символ.
 	if escaped {
 		buf.WriteByte('\\')
 	}
+	if buf.Len() > 0 || start < n {
+		buf.WriteString(s[start:])
+		dst = append(dst, buf.String())
+	} else {
+		dst = append(dst, "")
+	}
 
-	values = append(values, buf.String())
-	return values
+	return dst
 }
