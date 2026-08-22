@@ -15,19 +15,24 @@ integrity xxh3_128 hashes + xzMercury, v1.5 section-level encryption)
 
 1. [Introduction](#introduction)
 2. [Architecture](#architecture)
-3. [Packet format](#packet-format)
+3. [Format identity](#format-identity)
+   - [File extension](#file-extension)
+   - [Media type](#media-type)
+   - [Identifying a packet](#identifying-a-packet)
+   - [Registration status](#registration-status)
+4. [Packet format](#packet-format)
    - [Header](#header)
    - [Schema](#schema)
    - [Data](#data)
    - [Integrity](#integrity)
    - [Query (TDTQL)](#query-tdtql)
    - [QueryContext](#querycontext)
-4. [Data types](#data-types)
-5. [TDTQL query language](#tdtql-query-language)
-6. [Compact format v1.3.1](#compact-format-v131)
-7. [Examples](#examples)
-8. [Adapter-specific behaviour of SpecialValues](#adapter-specific-behaviour-of-specialvalues)
-9. [Versioning](#versioning)
+5. [Data types](#data-types)
+6. [TDTQL query language](#tdtql-query-language)
+7. [Compact format v1.3.1](#compact-format-v131)
+8. [Examples](#examples)
+9. [Adapter-specific behaviour of SpecialValues](#adapter-specific-behaviour-of-specialvalues)
+10. [Versioning](#versioning)
 
 ---
 
@@ -114,6 +119,96 @@ DataPacket
 > `error` is an ordinary `DataPacket` with Schema and Data, written into a
 > `tdtp_errors` table, and any downstream consumer can read it. It is produced
 > automatically when xZMercury degrades.
+
+---
+
+## Format identity
+
+This section defines what a TDTP packet is called on disk, how it is labelled in
+transit, and how software that has never heard of TDTP can recognise one.
+
+### File extension
+
+`.tdtp` is the extension of a TDTP packet.
+
+`.tdtp.xml` is equally valid and is what the reference implementation writes
+today; a reader MUST accept both. The compound form is the older convention and
+carries a practical benefit — editors, `xmllint` and generic XML tooling
+recognise the file without configuration — while `.tdtp` names the format
+itself, which matters because the family already contains a member that is not
+XML at all: `.tdtp.enc`, the whole-packet binary envelope of the legacy v1.3
+encryption.
+
+Which of the two is written by default is an implementation choice, not a
+requirement of this specification.
+
+### Media type
+
+```
+application/vnd.tdtp+xml
+```
+
+A vendor-tree name under RFC 6838, carrying the `+xml` structured syntax suffix
+defined in RFC 7303. The name is claimed by this specification and not yet
+assigned by IANA — see [Registration status](#registration-status) below.
+
+The suffix is not decoration: it is what allows a generic XML processor to
+handle a TDTP packet correctly without knowing anything about TDTP, in the same
+way `image/svg+xml` and `application/atom+xml` work.
+
+**Parameters.** `version` (optional) carries the specification version so that a
+transport can route without parsing the body; the authoritative value is always
+the `version` attribute of `<DataPacket>`. `charset` is permitted as for
+`application/xml`, but is redundant — the container is UTF-8 and declares it in
+the prolog.
+
+**Compression is not part of the media type.** A compressed packet is still
+`application/vnd.tdtp+xml`; the compression is declared separately:
+
+```
+Content-Type:     application/vnd.tdtp+xml
+Content-Encoding: zstd
+```
+
+The `+suffix` convention in RFC 6838 denotes a *structured syntax* — `+xml`,
+`+json`, `+cbor` — and not a content coding, so a type of the form
+`application/xml+zstd` is not a valid construction and MUST NOT be used.
+
+> **Known deviation.** The Kafka and RabbitMQ transports in this repository
+> currently send `application/xml`, and Kafka sends `application/xml+zstd` for
+> compressed payloads (`pkg/brokers/kafka.go`). Both predate this section and do
+> not conform to it. Consumers should continue to accept them until the
+> transports are updated.
+
+### Identifying a packet
+
+A TDTP packet is recognisable from its opening bytes without parsing:
+
+1. the XML prolog, `<?xml version="1.0" encoding="UTF-8"?>`;
+2. within roughly 100 bytes, the root element `<DataPacket`;
+3. carrying the attribute `protocol="TDTP"`, which is the first attribute of the
+   root element in every packet the reference implementation writes.
+
+The file ends with `</DataPacket>`.
+
+This holds for every variant of the format, including compressed and encrypted
+packets: compression touches only the contents of `<Data>`, and v1.5 section
+encryption deliberately leaves `<Header>` and the root element in the clear so
+that routing, reassembly and identification work without a key.
+
+Byte-level signatures for DROID and PRONOM, with the hexadecimal sequences and
+offsets, are in
+[`REGISTRATION_DOSSIER.md`](REGISTRATION_DOSSIER.md).
+
+### Registration status
+
+The media type and the PRONOM format entry are **prepared but not yet
+registered**. The complete submission — the RFC 6838 template, the PRONOM
+metadata and signatures, and a `shared-mime-info` manifest for Linux desktops —
+is in [`REGISTRATION_DOSSIER.md`](REGISTRATION_DOSSIER.md).
+
+Until registration completes, `application/vnd.tdtp+xml` should be treated as
+the intended type rather than an assigned one.
 
 ---
 
@@ -1440,4 +1535,4 @@ Copyright (c) 2025 TDTP Framework
 
 ---
 
-*Last updated: 2026-07-22*
+*Last updated: 2026-08-22*

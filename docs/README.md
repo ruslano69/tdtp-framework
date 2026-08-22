@@ -15,6 +15,7 @@ before. This page is the map of everything else.
 | Use the CLI | [USER_GUIDE.md](./USER_GUIDE.md) |
 | Write an ETL pipeline | [ETL_PIPELINE.md](./ETL_PIPELINE.md) |
 | Understand the wire format | [SPECIFICATION.md](./SPECIFICATION.md) |
+| Register the format, or identify a file as TDTP | [REGISTRATION_DOSSIER.md](./REGISTRATION_DOSSIER.md) |
 | Encrypt what leaves the system | [SPECIFICATION.md](./SPECIFICATION.md) · [ETL_PIPELINE.md](./ETL_PIPELINE.md) |
 | Schedule work and govern it | [ORCHESTRATOR_SCENARIOS.md](./ORCHESTRATOR_SCENARIOS.md) |
 | Decide what a scenario is allowed to do | [SCENARIO_TRUST.md](./SCENARIO_TRUST.md) |
@@ -76,6 +77,8 @@ above depends on.
 ## Protocol and format
 
 - **[SPECIFICATION.md](./SPECIFICATION.md)** — TDTP and TDTQL
+- **[REGISTRATION_DOSSIER.md](./REGISTRATION_DOSSIER.md)** — the `.tdtp` extension, the
+  `application/vnd.tdtp+xml` media type, and the byte signatures that identify a packet
 - **[tdtp-protocol-schema.md](./tdtp-protocol-schema.md)** — schema reference
 - **[tdtp-v14-protocol-schema.md](./tdtp-v14-protocol-schema.md)** — v1.4 integrity additions
 - **[dictionary-as-dependency-manifest.md](./dictionary-as-dependency-manifest.md)** — the dictionary as a dependency manifest
