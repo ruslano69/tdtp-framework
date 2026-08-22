@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -444,7 +445,11 @@ func (w *Workspace) formatValue(val any) string {
 	case int64:
 		return fmt.Sprintf("%d", v)
 	case float64:
-		return fmt.Sprintf("%g", v)
+		// 'f', а не %g: %g уходит в экспоненту на больших значениях, а проверка
+		// scale в parseDecimal режет строку по точке и принимает мантиссу за
+		// дробную часть — DECIMAL(12,2) со значением 9999999999.99 доезжал до
+		// пакета как "9.99999999999e+09".
+		return strconv.FormatFloat(v, 'f', -1, 64)
 	case bool:
 		if v {
 			return "true"

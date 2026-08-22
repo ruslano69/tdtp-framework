@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,4 +166,142 @@ func TestPgCellToTDTP_MatchesRoundTripOnLiveRows(t *testing.T) {
 		t.Fatal("no cells checked — fixture table is empty")
 	}
 	t.Logf("%d cells agree with the round-trip", checked)
+}
+
+// Числа минуют round-trip по тому же принципу, что и time.Time: pgValueToString
+// печатает их через 'f', ровно как FormatValue в конце round-trip, так что
+// второй проход возвращает ту же строку. Тест это и проверяет — на формах, где
+// 'f' и 'g' расходятся сильнее всего.
+func TestPgCellToTDTP_FloatSkipMatchesRoundTrip(t *testing.T) {
+	a := &Adapter{converter: base.NewUniversalTypeConverter()}
+
+	columns := []struct {
+		name   string
+		pgType string
+	}{
+		{"d", "double precision"},
+		{"r", "real"},
+		{"n", "numeric(20,4)"},
+	}
+
+	f64 := []struct {
+		name string
+		v    float64
+	}{
+		{"zero", 0},
+		{"negative zero", math.Copysign(0, -1)},
+		{"one", 1},
+		{"simple fraction", 1500.5},
+		{"trailing zero in source", 1500.50},
+		{"exponent territory", 486789500},
+		{"decimal at NUMERIC(12,2) limit", 9999999999.99},
+		{"beyond float64 exact integers", 1234567890123456.7891},
+		{"negative large", -9999999999.99},
+		{"tiny", 0.000000123},
+		{"max float64", math.MaxFloat64},
+		{"smallest nonzero", math.SmallestNonzeroFloat64},
+		{"NaN", math.NaN()},
+		{"positive infinity", math.Inf(1)},
+		{"negative infinity", math.Inf(-1)},
+	}
+
+	for _, col := range columns {
+		field := pgFieldFor(t, col.name, col.pgType)
+		for _, tc := range f64 {
+			t.Run(fmt.Sprintf("float64/%s/%s", col.pgType, tc.name), func(t *testing.T) {
+				got := a.pgCellToTDTP(field, tc.v)
+				want := roundTripCell(a.converter, field, tc.v)
+				if got != want {
+					t.Errorf("fast path diverged: fast = %q, round = %q", got, want)
+				}
+			})
+		}
+		for _, tc := range []struct {
+			name string
+			v    float32
+		}{
+			{"zero", 0},
+			{"simple fraction", 1500.5},
+			{"max float32", math.MaxFloat32},
+			{"smallest nonzero", math.SmallestNonzeroFloat32},
+			{"exponent territory", 4867895},
+			{"NaN", float32(math.NaN())},
+			{"infinity", float32(math.Inf(1))},
+		} {
+			t.Run(fmt.Sprintf("float32/%s/%s", col.pgType, tc.name), func(t *testing.T) {
+				got := a.pgCellToTDTP(field, tc.v)
+				want := roundTripCell(a.converter, field, tc.v)
+				if got != want {
+					t.Errorf("fast path diverged: fast = %q, round = %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+// Регрессия на конкретный баг, который вскрылся при переводе чисел на 'f'.
+//
+// NUMERIC(12,2) со значением у верхней границы уезжала в пакет как
+// "9.99999999999e+09": 'g' печатал экспоненту, проверка scale в parseDecimal
+// принимала мантиссу за дробную часть, ParseValue возвращал ошибку, а
+// ConvertValueToTDTP на ошибке отдаёт значение как есть. Плюс строка в логе на
+// каждую такую ячейку.
+func TestPgCellToTDTP_LargeDecimalIsNotScientific(t *testing.T) {
+	ctx := context.Background()
+	a, err := NewAdapter(testConnString)
+	if err != nil {
+		t.Skipf("PostgreSQL not available: %v", err)
+	}
+	defer a.Close(ctx)
+
+	const tbl = "tdtp_decimal_scientific"
+	ddl := `
+DROP TABLE IF EXISTS ` + tbl + `;
+CREATE TABLE ` + tbl + ` (
+  id  INT PRIMARY KEY,
+  bal NUMERIC(12,2),
+  big NUMERIC(20,4),
+  d   DOUBLE PRECISION,
+  r   REAL
+);
+INSERT INTO ` + tbl + ` VALUES
+ (1,  9999999999.99,  1234567890123456.7891,  486789500,  4867895),
+ (2, -9999999999.99, -1234567890123456.7891, -486789500, -4867895),
+ (3,       486789500,           486789500.0,       1e20,     1e20),
+ (4,            0.00,                0.0000,          0,        0),
+ (5,            NULL,                  NULL,       NULL,     NULL);
+`
+	if err := a.Exec(ctx, ddl); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Exec(context.Background(), "DROP TABLE IF EXISTS "+tbl) })
+
+	pkgSchema, err := a.GetTableSchema(ctx, tbl)
+	if err != nil {
+		t.Fatalf("get schema: %v", err)
+	}
+	rows, err := a.ReadAllRows(ctx, tbl, pkgSchema)
+	if err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	if len(rows) != 5 {
+		t.Fatalf("got %d rows", len(rows))
+	}
+
+	for r, row := range rows {
+		for c, cell := range row {
+			if strings.ContainsAny(cell, "eE") {
+				t.Errorf("row %d, column %s: value left in scientific notation: %q",
+					r+1, pkgSchema.Fields[c].Name, cell)
+			}
+		}
+	}
+
+	// Точное значение у верхней границы NUMERIC(12,2) обязано доехать целиком.
+	if got, want := rows[0][1], "9999999999.99"; got != want {
+		t.Errorf("NUMERIC(12,2) at its limit: got %q, want %q", got, want)
+	}
+	if got, want := rows[1][1], "-9999999999.99"; got != want {
+		t.Errorf("negative NUMERIC(12,2) at its limit: got %q, want %q", got, want)
+	}
 }

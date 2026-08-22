@@ -69,23 +69,45 @@ belongs in a plan any more.
 Both came out of profiling the PostgreSQL export on 2026-08-22, and both sit
 squarely inside the freeze: no new capability, no format change.
 
-**`rows.Values()` on the PostgreSQL read path — 1.75 s out of 9.27 s of
-samples.** pgx allocates a fresh `[]any` per row and boxes every value into it.
-Scanning into pre-allocated typed destinations would take most of that back.
-It is now the largest single item in a 100k×16 export, the string round-trip
-having been removed. Not a two-line edit — the loop in `readRowsWithSQL` has to
-be rebuilt around typed destinations — so it wants its own before/after
-measurement.
+**`rows.Values()` on the PostgreSQL read path — measured, and smaller than it
+looks.** pgx allocates a fresh `[]any` per row and boxes every value into it, and
+the line carries 21% of CPU samples. But the achievable saving is bounded by the
+wire: reading the same 100k×16 costs 103.9 ms as raw bytes, 125.8 ms scanning
+into reusable typed destinations, and 150.3 ms through `Values()`. **The whole
+prize is 24.5 ms** — about 6% of the export — plus some share of the GC relief
+from 2.7M fewer allocations.
 
-**`DECIMAL` and `REAL` still round-trip through `ParseValue`.**
-`UniversalTypeConverter.ConvertValueToTDTP` has a fast path for
-`TEXT`/`INTEGER`/`BOOLEAN`, and the read loops have one for `time.Time`; numeric
-types have neither, so every such cell is formatted, parsed and formatted again.
-On the 16-column benchmark table that is 3 columns out of 16. Whether the
-round-trip is genuinely a no-op for them has to be **established first**, the
-way the `time.Time` case was — see
-`pkg/adapters/postgres/export_timefastpath_test.go` for the shape of that proof.
-Do not skip the pass on the assumption that it is idempotent.
+Against that, the loop in `readRowsWithSQL` has to be rebuilt around typed
+destinations with a schema→destination mapping and a formatter per type, and a
+schema/column mismatch stops being a soft conversion and becomes a hard scan
+error. Worth doing only after the cheaper items above are gone.
+
+**~~`DECIMAL` and `REAL` still round-trip through `ParseValue`~~ — done for
+PostgreSQL.** 412 ms → 335 ms, 1.2M fewer allocations. Establishing that the
+round-trip was a no-op turned out to be the whole job: it was **not** one, and
+the reason was a real bug (see below). Left open for the other four adapters,
+which still print floats with `'g'` and so cannot take the same shortcut until
+they are fixed.
+
+### The scientific-notation decimal bug — done, with one adapter unverified
+
+Fixed in PostgreSQL and SQLite, where a `DECIMAL` column really does hand the
+converter a `float64`. MySQL and MSSQL turned out **not** to be affected: their
+drivers return `DECIMAL` as text, so it never reaches the float branch. The
+formatting is `'f'` everywhere now anyway, so the hazard cannot come back
+through a change of driver or type mapping.
+
+An earlier version of this entry claimed all four adapters were affected. That
+was wrong, and worth remembering why: it came from calling `DBValueToString`
+directly with a `float64` for each `dbType`, which proves what the converter
+does but not what the driver hands it. Reachability has to be checked against a
+live driver, and the cheap way to check it is to run the new test against the
+pre-fix code — the PostgreSQL and SQLite ones fail there, the MySQL and MSSQL
+ones pass.
+
+**Access is the one left unverified**, for want of a live Jet/ACE source. It
+shares `genericValueToString` and so takes the fix, but nothing has confirmed
+what its driver returns for a `DECIMAL`.
 
 ### Tests for paths that have never run
 

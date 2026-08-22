@@ -4,6 +4,56 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — a large PostgreSQL `NUMERIC` exported in scientific notation
+
+A `NUMERIC(12,2)` holding `9999999999.99` left the exporter as
+`"9.99999999999e+09"`, and wrote a line to the log for every such cell.
+
+Three things had to line up. `pgValueToString` printed floats with `'g'`, which
+switches to an exponent on large values. `parseDecimal` then checks scale by
+splitting the string on `"."` — on `"9.99999999999e+09"` it reads the mantissa as
+the fractional part, finds fifteen digits against the two the column declares,
+and returns a validation error. And `ConvertValueToTDTP` answers a parse error by
+returning **the value as it came in** — so the exponent form went into the packet
+untouched.
+
+Floats and `pgtype.Numeric` now print with `'f'`, which is what `FormatValue`
+produces at the end of the round trip anyway. For values that never reached an
+exponent the bytes are unchanged; they change only where they were wrong.
+
+The same failure was reachable in SQLite, where a `DECIMAL` column backed by
+`REAL` storage also hands the converter a `float64`. Fixed in the same way.
+
+**MySQL and MSSQL turned out not to be affected.** Their drivers return `DECIMAL`
+as `[]uint8` — text — so it never reaches the `float64` branch where the `'g'`
+happened; `DOUBLE`/`FLOAT`/`REAL` do arrive as numbers but map to TDTP `REAL`,
+which carries no scale check. An earlier note in this file claimed all four
+adapters were affected; that came from calling the converter directly with a
+`float64`, which is not what those drivers deliver. `genericValueToString` and
+`mssqlValueToString` print with `'f'` now regardless, so the hazard cannot
+return through a change of driver or type mapping.
+
+`pkg/etl/workspace.go` printed with `%g` on the same kind of path and now prints
+with `'f'` as well.
+
+Access is unverified: it needs a live Jet/ACE data source, which is not
+available here. It shares `genericValueToString`, so it takes the fix with
+SQLite and MySQL.
+
+### Changed — PostgreSQL export skips the round-trip for numbers too
+
+With numbers printed as `'f'`, `ParseValue`→`FormatValue` returns the same string
+it was given, so it is skipped for `float32`, `float64` and `pgtype.Numeric` —
+the same fast path `time.Time` already takes.
+
+**A 100k×16 export goes from 412 ms to 335 ms**, from 212 MB to 160 MB, and from
+6 097 194 allocations to 4 899 277. Together with the date change below, from the
+505 ms this started at — **a third off**.
+
+The skip is decided by the type of the value, not the type of the field: a
+`NUMERIC` that arrives as a string still takes the ordinary path, whatever the
+column declares.
+
 ### Changed — PostgreSQL export no longer round-trips dates through a string
 
 `readRowsWithSQL` passed an **empty** `packet.Field` into `DBValueToString`, so
