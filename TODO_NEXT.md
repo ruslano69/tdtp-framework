@@ -89,18 +89,25 @@ the reason was a real bug (see below). Left open for the other four adapters,
 which still print floats with `'g'` and so cannot take the same shortcut until
 they are fixed.
 
-### The scientific-notation decimal bug, in the four adapters still carrying it
+### The scientific-notation decimal bug — done, with one adapter unverified
 
-Found and fixed in PostgreSQL (see `CHANGELOG.md`, Unreleased); **confirmed by
-direct measurement to be present in `sqlite`, `mysql`, `access` and `mssql`**,
-which print floats with `'g'` through `genericValueToString` and
-`mssqlValueToString`. A `DECIMAL(12,2)` holding `9999999999.99` comes out of all
-four as `"9.99999999999e+09"`, with a log line per cell.
+Fixed in PostgreSQL and SQLite, where a `DECIMAL` column really does hand the
+converter a `float64`. MySQL and MSSQL turned out **not** to be affected: their
+drivers return `DECIMAL` as text, so it never reaches the float branch. The
+formatting is `'f'` everywhere now anyway, so the hazard cannot come back
+through a change of driver or type mapping.
 
-The fix is the same one-character change, `'g'` → `'f'`. The work is not the fix
-but the proof: each adapter needs its own live round-trip check that the bytes
-change only where they were wrong. SQLite and MSSQL can be stood up locally;
-MySQL needs a container.
+An earlier version of this entry claimed all four adapters were affected. That
+was wrong, and worth remembering why: it came from calling `DBValueToString`
+directly with a `float64` for each `dbType`, which proves what the converter
+does but not what the driver hands it. Reachability has to be checked against a
+live driver, and the cheap way to check it is to run the new test against the
+pre-fix code — the PostgreSQL and SQLite ones fail there, the MySQL and MSSQL
+ones pass.
+
+**Access is the one left unverified**, for want of a live Jet/ACE source. It
+shares `genericValueToString` and so takes the fix, but nothing has confirmed
+what its driver returns for a `DECIMAL`.
 
 ### Tests for paths that have never run
 

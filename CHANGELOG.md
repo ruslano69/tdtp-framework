@@ -21,9 +21,24 @@ Floats and `pgtype.Numeric` now print with `'f'`, which is what `FormatValue`
 produces at the end of the round trip anyway. For values that never reached an
 exponent the bytes are unchanged; they change only where they were wrong.
 
-PostgreSQL only. The same three-part failure is present in the SQLite, MySQL,
-Access and MSSQL paths through `genericValueToString`/`mssqlValueToString`, which
-still print with `'g'` — see `TODO_NEXT.md`.
+The same failure was reachable in SQLite, where a `DECIMAL` column backed by
+`REAL` storage also hands the converter a `float64`. Fixed in the same way.
+
+**MySQL and MSSQL turned out not to be affected.** Their drivers return `DECIMAL`
+as `[]uint8` — text — so it never reaches the `float64` branch where the `'g'`
+happened; `DOUBLE`/`FLOAT`/`REAL` do arrive as numbers but map to TDTP `REAL`,
+which carries no scale check. An earlier note in this file claimed all four
+adapters were affected; that came from calling the converter directly with a
+`float64`, which is not what those drivers deliver. `genericValueToString` and
+`mssqlValueToString` print with `'f'` now regardless, so the hazard cannot
+return through a change of driver or type mapping.
+
+`pkg/etl/workspace.go` printed with `%g` on the same kind of path and now prints
+with `'f'` as well.
+
+Access is unverified: it needs a live Jet/ACE data source, which is not
+available here. It shares `genericValueToString`, so it takes the fix with
+SQLite and MySQL.
 
 ### Changed — PostgreSQL export skips the round-trip for numbers too
 

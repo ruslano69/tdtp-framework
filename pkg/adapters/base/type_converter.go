@@ -380,6 +380,9 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 
 // mssqlValueToString конвертирует MS SQL значение в строку
 // MS SQL-специфичные типы: UNIQUEIDENTIFIER, TIMESTAMP/ROWVERSION, NVARCHAR
+//
+// Числа печатаются через 'f' — см. pgValueToString о том, почему 'g' портил
+// большие DECIMAL.
 func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field) string {
 	if val == nil {
 		return NullSentinel
@@ -460,9 +463,9 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 		return strconv.FormatUint(v, 10)
 
 	case float32:
-		return strconv.FormatFloat(float64(v), 'g', -1, 32)
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
 	case float64:
-		return strconv.FormatFloat(v, 'g', -1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64)
 
 	case bool:
 		if v {
@@ -487,6 +490,11 @@ func (c *UniversalTypeConverter) mssqlValueToString(val any, field packet.Field)
 
 // genericValueToString конвертирует общее значение БД в строку
 // Для SQLite, MySQL и других простых типов
+//
+// Числа печатаются через 'f'. Причина та же, что и в pgValueToString: 'g'
+// уходит в экспоненту на больших значениях, а parseDecimal проверяет scale,
+// разрезая строку по точке, и принимает мантиссу за дробную часть — так
+// DECIMAL(12,2) со значением 9999999999.99 уезжал в пакет экспонентой.
 func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Field) string {
 	if val == nil {
 		return NullSentinel
@@ -530,9 +538,9 @@ func (c *UniversalTypeConverter) genericValueToString(val any, field packet.Fiel
 		return strconv.FormatUint(v, 10)
 
 	case float32:
-		return strconv.FormatFloat(float64(v), 'g', -1, 32)
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
 	case float64:
-		return strconv.FormatFloat(v, 'g', -1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64)
 
 	case bool:
 		if v {
