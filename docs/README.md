@@ -1,6 +1,6 @@
 # TDTP Framework documentation
 
-Protocol v1.5 · `tdtpcli` v1.24.1
+Protocol v1.5 · `tdtpcli` v1.25.0
 
 Start at the [project README](../README.md) if you have not used the framework
 before. This page is the map of everything else.
