@@ -1,607 +1,225 @@
-# TODO NEXT — Sprint план
+# TODO NEXT
 
-## Поточний стан (v1.17.0, 2026-06-15)
+## Status: 1.x is frozen (2026-08-22)
 
-### Закриті спринти
+**Patches and optimization only.** Anything that adds capability waits for 2.0.
 
-| Sprint | Версія | Що закрили |
-|--------|--------|------------|
-| 1 | v1.11.0 | Повний ланцюг довіри: CA/TPM → xZMercury → tdtp.lic → Orchestrator TrustGate |
+| Allowed in 1.x | Not allowed in 1.x |
+|---|---|
+| Bug fixes | New adapters |
+| Performance work with a measurement behind it | New flags, commands or subsystems |
+| Tests, especially for paths never exercised | Changes to the packet wire format |
+| Documentation and translation | Anything that changes the meaning of an existing flag |
+| Security and dependency updates | |
+
+Read that table before adding anything below. An item that does not fit the
+left column belongs under [Behind the freeze](#behind-the-freeze--20), however
+good it is.
+
+---
+
+## Current state — v1.25.0 (2026-08-22)
+
+### Closed sprints
+
+| Sprint | Version | What shipped |
+|--------|---------|--------------|
+| 1 | v1.11.0 | Full chain of trust: CA/TPM → xZMercury → tdtp.lic → Orchestrator TrustGate |
 | 2 | v1.12.0 | Air-gap offline cert, seat policy, mock-clock renewal test, `issue-unsafe-cert` |
 | 3 | v1.12.0 | Structured audit log (JSON/syslog), per-job artifact, LDAP auth, Prometheus, Docker stack |
 | 4 | v1.13.0 | `--map --input file.tdtp.xml` (P8: mapping YAML, executor, enum remap, loop guard layers 2+4) |
-|   | v1.13.0 | Schema passthrough (`applySchemaPassthrough`) — type-drift bug у SQLite workspace (8 тестів) |
-|   | v1.13.0 | `cmd/tdtp-xray` aligned with framework core (~600 рядків видалено) |
-| 5 | v1.14.0 | `--map --input s3://bucket/key` — S3-sourced packets в mapping flow |
-| 6 | v1.15.0 | `--map --input broker://queue` — RabbitMQ-sourced packets, yaml tags на brokers.Config |
-|   | v1.15.0 | consumer.py: `tdtp.sync.branch.customers` → `--map broker://` (staging + merge_proc більше не потрібні) |
-| 7 | v1.15.0 | consumer.py: всі 7 entity мігровані на `--map broker://`; staging tables і merge procs видалені |
-|   | v1.15.0 | 7 нових mapping YAML: `sync_flights`, `sync_reservations`, `sync_countries`, `sync_guides`, `sync_tours`, `sync_schedule`, `sync_branch_sales` |
+|   | v1.13.0 | Schema passthrough (`applySchemaPassthrough`) — type-drift bug in the SQLite workspace (8 tests) |
+|   | v1.13.0 | `cmd/tdtp-xray` aligned with the framework core (~600 lines removed) |
+| 5 | v1.14.0 | `--map --input s3://bucket/key` — S3-sourced packets in the mapping flow |
+| 6 | v1.15.0 | `--map --input broker://queue` — RabbitMQ-sourced packets, yaml tags on `brokers.Config` |
+|   | v1.15.0 | consumer.py: `tdtp.sync.branch.customers` → `--map broker://` (staging + merge_proc no longer needed) |
+| 7 | v1.15.0 | consumer.py: all 7 entities migrated to `--map broker://`; staging tables and merge procs removed |
+|   | v1.15.0 | 7 new mapping YAMLs: `sync_flights`, `sync_reservations`, `sync_countries`, `sync_guides`, `sync_tours`, `sync_schedule`, `sync_branch_sales` |
 | 8 | v1.16.0 | `--map --input broker://queue --listen` — daemon mode; NACK+requeue on error; graceful SIGTERM/SIGINT |
 |   | v1.16.1 | RabbitMQ resilience: deliveryChan reset, QoS prefetch=1, heartbeat 10s, exponential reconnect backoff |
-| 9 | v1.17.0 | P10 `--steps workflow.yaml` — DAG orchestration, parallel waves, on_error: stop/skip/retry(N) |
+| 9 | v1.17.0 | P10 `--steps workflow.yaml` — DAG orchestration, parallel waves, `on_error: stop/skip/retry(N)` |
+
+### Since v1.17.0 — no longer sprint-shaped, one theme per release
+
+| Version | Theme |
+|---------|-------|
+| v1.18.0 | **TDTP v1.5 section-level encryption** — the redesign this file used to track as "next" |
+| v1.18.1–1.18.3 | Go security advisories; audit SQL sink; libtdtp v1.5 fixes |
+| v1.19.x | `--to-tdtp` (re-filter/re-version without a DB round-trip); fast-parser conformance |
+| v1.20.x | `--sync-incremental --to-broker`; orchestrator `GET /jobs?limit=`; sub-second timestamps on export |
+| v1.21.0 | `--quiet` |
+| v1.22.x | XLSX written and read in-house, excelize dropped; byte-level `<sheetData>` scanner |
+| v1.23.0 | `security.mercury_url` in the tdtpcli config |
+| v1.24.x | Orchestrator job-log retention, `--drain`, WAL mode, parallel-safe audit |
+| v1.25.0 | Datetime round-trip across SQLite/MySQL/PostgreSQL; cheaper escaped-row splitting; MSSQL datetime formatters |
+
+**The v1.5 encryption redesign is done** — shipped in v1.18.0, 2026-07-22. Its
+~290-line design writeup lived on in this file for a month after the fact, which
+is the exact failure mode `CLAUDE.md` warns about. The spec reference is
+[`docs/tdtp-protocol-schema.md`](docs/tdtp-protocol-schema.md) → "v1.5"; the
+release notes are in [`CHANGELOG.md`](CHANGELOG.md) → 1.18.0. Nothing about it
+belongs in a plan any more.
 
 ---
 
-## Encryption format redesign — XML-preserving sections (target: v1.5)
+## Open in 1.x
 
-Origin: designing `examples/travel-agency/TRAVEL-AGENCY_NEXT.md` (orchestrator-
-governed, encrypted showcase) surfaced a real spec inconsistency between how
-compression and encryption protect packet content.
+### Optimization — measured, not yet done
 
-Full protocol-level flow diagrams (producer/consumer sequence, dual-format
-detection, fallback policy, attack/defense table) — same depth as the
-existing v1.4 writeup — now live in
-[`docs/tdtp-protocol-schema.md`](docs/tdtp-protocol-schema.md) → "v1.5
-(planned)". This section stays the implementation-task-tracking summary;
-that doc is the spec reference.
+Both came out of profiling the PostgreSQL export on 2026-08-22, and both sit
+squarely inside the freeze: no new capability, no format change.
 
-### The inconsistency
+**`rows.Values()` on the PostgreSQL read path — 1.75 s out of 9.27 s of
+samples.** pgx allocates a fresh `[]any` per row and boxes every value into it.
+Scanning into pre-allocated typed destinations would take most of that back.
+It is now the largest single item in a 100k×16 export, the string round-trip
+having been removed. Not a two-line edit — the loop in `readRowsWithSQL` has to
+be rebuilt around typed destinations — so it wants its own before/after
+measurement.
 
-`pkg/core/packet/generator.go`'s compression path never breaks XML validity:
-`<Header>`/`<Schema>` stay plain, only `<Data>`'s rows collapse into one
-opaque value with a `Compression="zstd"` attribute marking it. A parser can
-always read Header/Schema without decompressing anything.
+**`DECIMAL` and `REAL` still round-trip through `ParseValue`.**
+`UniversalTypeConverter.ConvertValueToTDTP` has a fast path for
+`TEXT`/`INTEGER`/`BOOLEAN`, and the read loops have one for `time.Time`; numeric
+types have neither, so every such cell is formatted, parsed and formatted again.
+On the 16-column benchmark table that is 3 columns out of 16. Whether the
+round-trip is genuinely a no-op for them has to be **established first**, the
+way the `time.Time` case was — see
+`pkg/adapters/postgres/export_timefastpath_test.go` for the shape of that proof.
+Do not skip the pass on the assumption that it is idempotent.
 
-Encryption (introduced v1.3, `cmd/tdtpcli/commands/encrypt.go`) does the
-opposite: serializes the *whole packet*, wraps it in a proprietary binary
-envelope (`[2B ver][1B algo][16B uuid][12B nonce][ciphertext]`) that isn't
-XML at all — no `<DataPacket>`, nothing readable without the key, including
-routing metadata that downstream infrastructure needs.
+### Tests for paths that have never run
 
-Concretely this breaks `--export-broker`/`--import-broker`
-(`cmd/tdtpcli/commands/broker.go`): confirmed by direct grep, that command
-pair has **zero** encryption support and **zero** `result_log` support —
-both exist only on the `--pipeline` path. The broker's import side always
-does `parser.ParseBytesWithDecompression(xmlData, ...)`, which can't handle
-a non-XML blob, and nobody wired a "try decrypt first" branch there the way
-`import.go` has (`data, decErr = DecryptEncBlob(...)`).
+`pkg/adapters/mssql/integration_test.go` skipped for its entire life. Its first
+live run (2026-08-22, SQL Server 2022) failed two tests and exposed a third
+defect hiding behind them — none of the three in the adapter, all three in the
+tests. Fixed. The lesson generalizes: **a suite that skips is not a suite that
+passes.**
 
-### Agreed design (selective section encryption, mirrors compression)
+Worth doing the same wherever else a suite self-skips:
 
-```xml
-<DataPacket protocol="TDTP" version="1.5">
-  <Header>...</Header>                                              <!-- stays plain: routing/dedup/part-reassembly need no key -->
-  <QueryContext encryption="aes-256-gcm">BASE64_CIPHERTEXT</QueryContext>  <!-- was: filter conditions, business logic -->
-  <Schema encryption="aes-256-gcm">BASE64_CIPHERTEXT</Schema>              <!-- was: field names/types -->
-  <Data compression="zstd" encryption="aes-256-gcm">
-    <R>BASE64_CIPHERTEXT</R>                                         <!-- same opaque-row shape compression already uses -->
-  </Data>
-</DataPacket>
-```
+- `pkg/adapters/mysql` — has round-trip tests, needs a live MySQL to prove them
+- `pkg/brokers` — Kafka tests and benchmarks skip without a broker
+- `pkg/adapters/postgres` — now covered, but only against PostgreSQL 16
 
-`Header` stays in the clear deliberately — transport needs *something* to
-route/reassemble on without a key (same as a queue name or `result_name`
-already isn't secret). `QueryContext` and `Schema` are the two places that
-leak real information without ever touching row data: which filter
-conditions were interesting (business logic — e.g. `balance >= 1000`) and
-which fields/types exist (structure). Both get the same treatment as
-`Data`, not left exposed as an oversight.
+Standing the servers up is cheap. The value is not the green tick; it is that
+these runs keep finding real defects.
 
-### This is NOT touching dead code — check before implementing
+### Documentation — translation, Tier 2 onward
 
-`--map --input broker://queue` (`cmd/tdtpcli/commands/map.go`, sprints 6-8,
-v1.15-1.16, the mechanism `examples/travel-agency/consumer.py` actually
-uses today) **already decrypts the current whole-blob format**:
-`IsEncryptedBlob(data)` → `DecryptEncBlob(ctx, data, opts.MercuryURL)`
-(`map.go:163-164`, also `map.go:338`). This is a real, working, in-repo
-consumer of the v1.3 format — not an orphaned feature nobody adopted.
-Full blast radius of the detection primitives (`encrypt.go:40,48`):
+Tier 1 is **done**, against the 36 K of Cyrillic the old plan recorded across
+those four files:
 
-- `cmd/tdtpcli/commands/import.go:127` (`--import`)
-- `cmd/tdtpcli/commands/map.go:163,338` (`--map`, both one-shot and `--listen` daemon paths)
+| File | Cyrillic left |
+|------|--------------:|
+| `docs/SPECIFICATION.md` | 0 |
+| `docs/README.md` | 0 |
+| `docs/USER_GUIDE.md` | 63 |
+| `docs/ETL_PIPELINE.md` | 80 |
 
-Changing the wire format must not silently break either. **Plan: additive,
-not a replacement** — `IsEncryptedBlob`/`DecryptEncBlob` gain a second
-detection branch (old binary-header blob vs. new `encryption="..."`
-XML attribute) and dispatch accordingly; old packets already in flight or
-archived keep decrypting exactly as they do today.
+The Russian originals live in `docs/ru-archive/` — that directory is an archive,
+not a debt, and must not be counted as outstanding work.
 
-### Versioning question — resolved: bump to v1.5, don't revise v1.4 in place
+What remains, largest first, excluding the archive:
 
-Considered folding this into v1.4 instead of minting v1.5 (rationale
-floated: v1.4 shipped only 2026-05-26, ~2 months ago, and this whole
-framework has no confirmed external production consumers yet outside this
-repo's own examples — so is a version bump even meaningful pre-adoption?).
+| File | Cyrillic |
+|------|---------:|
+| `pkg/python/libtdtp/README.md` | 4 758 |
+| `cmd/tdtpserve/README.md` | 4 501 |
+| `bindings/python/DEVELOPER_GUIDE.md` | 3 852 |
+| `cmd/tdtp-xray/README.md` | 3 558 |
+| `cmd/tdtpserve/AUTH_PLAN.md` | 3 348 |
+| `examples/README.md` | 2 990 |
+| `pkg/adapters/base/MIGRATION_EXAMPLE.md` | 2 014 |
 
-**Rejected that, for a concrete reason found above, not just "many releases
-already, don't want more churn":** `--map`'s decrypt path is a real,
-already-working consumer of the *current* format. Revising "1.4" in place
-would mean the string `"1.4"` stops meaning one fixed wire shape — exactly
-the kind of silent redefinition that breaks the "read the version, know the
-shape" contract the version field exists for, even with zero external
-users. Since backward-compatible dual-format detection is required anyway
-(see above), there's no actual cost saved by not incrementing the version
-— may as well let the version string carry the truth.
+Counted over the `U+0400–U+04FF` block only. A naive `[а-яА-Я]` character class
+also matches `—` and `→` in some locales and roughly doubles every figure —
+which is how the first pass of this table came out twice too large.
 
-- [x] `pkg/core/packet/encryption.go` (new) — `EncryptSections`/
-      `DecryptSections`: fixed hash→compress→encrypt order, one key per
-      packet with a unique nonce per section. New packets get
-      `Version = "1.5"` set by `EncryptSections` itself.
-      **Critical bug found and fixed during implementation**: the function
-      MUST call `pkt.MaterializeRows()` itself, unconditionally, as its
-      first step — an earlier version left this to callers, and a caller
-      that skips compression (or calls through `pkg/etl`'s exporter, which
-      only materializes as a side effect of `compressDataPacket`) left
-      `rawRows` populated, so `writePacketTo`'s fast path silently wrote
-      the ORIGINAL PLAINTEXT rows into `<Data>` right next to a truthful
-      `encryption="aes-256-gcm"` attribute — a packet that looks encrypted
-      but leaks every row in the clear. Caught by
-      `pkg/etl/exporter_v15_test.go`'s `TestExporter_ExportToTDTP_V15Default`
-      before it shipped. Guarantee now lives at the lowest common layer, not
-      duplicated per call site.
-- [x] `pkg/core/packet/types.go` `Schema` struct, `query.go` `QueryContext`
-      struct — added `Encrypted string \`xml:",chardata"\`` +
-      `Encryption string \`xml:"encryption,attr,omitempty"\`` to both.
-      `Data` needed no struct change (`Rows []Row` chardata already fit) —
-      only a new `encryption` attribute in the hand-written `xmlwriter.go`
-      writer.
-- [x] `pkg/core/packet/parser.go`'s `validatePacket` — found and fixed a
-      second real bug while wire-round-trip-testing: two existing checks
-      ("schema required when data present", `RecordsInPart` count match)
-      unconditionally assumed plaintext `Schema.Fields`/`Data.Rows` and
-      would reject every valid v1.5 encrypted packet. Both now skip when
-      `Schema.Encryption`/`Data.Encryption` is set.
-- [x] Encode order (fixed, not configurable): `ComputeIntegrity` →
-      compress `Data` → encrypt `QueryContext`/`Schema`/`Data` content.
-      Decode order: decrypt → decompress → verify xxh3. Enforced by
-      `EncryptSections` running after both steps in every call site
-      (`cmd/tdtpcli/commands/export.go`'s `writePacket`,
-      `pkg/etl/exporter.go`'s `exportToTDTP`).
-- [x] `cmd/tdtpcli/commands/encrypt.go` — `EncryptPacketV15`/
-      `DecryptPacketV15`/`IsEncryptedPacket` (CLI-level, `--export`/
-      `--import` path). `bindAndVerifyKey` factored out for reuse.
-      Verified against a live `xzmercury.exe --dev` instance (real HTTP,
-      real HMAC, real burn-on-read), not only a mock — see live smoke test
-      run during this session (not committed, was scratch verification).
-- [x] `pkg/processors/encryption.go` — `FileEncryptor.bindAndDecodeKey`
-      factored out of `Encrypt` (shared with `--enc13`) +
-      `EncryptSectionsV15` new method, so `pkg/etl`'s Exporter gets the
-      same `MercuryBinder`-override support (dev-mode / tests) v1.3 already
-      had, not a parallel implementation.
-- [x] `pkg/etl/exporter.go` — `exportToTDTP`'s per-part loop branches on
-      `TDTPOutputConfig.EncryptionV13` (new field): `true` → unchanged
-      legacy call; `false`/unset → new `exportEncryptedV15`, keyed by
-      `part.Header.MessageID` (see Multi-part note above — no special
-      per-message coordination needed, confirmed by test).
-- [x] `cmd/tdtpcli/flags.go` — `--enc` (name unchanged) now defaults to
-      v1.5; new `--enc13` flag maps to the legacy `EncryptPacket` call
-      unchanged. Both gated under the same `GateFeature("enc")` license
-      check. Wired through `ExportOptions.EncryptLegacy` /
-      `PipelineOptions.EncryptLegacy` / `TDTPOutputConfig.EncryptionV13`.
-      `--enc-dev` unaffected (orthogonal: key source, not wire format).
-      Full rationale in
-      [`docs/tdtp-protocol-schema.md`](docs/tdtp-protocol-schema.md) →
-      "v1.5" → "CLI flag naming".
-- [x] `cmd/tdtpcli/commands/export.go`'s `writePacket` — all four
-      destination×format combinations wired (file/S3 × v1.5/legacy); v1.5
-      output can go to stdout (still valid XML), legacy `--enc13` still
-      cannot (binary blob).
-- [x] Multi-part: corrected after checking `GenerateReference` directly —
-      each part already gets its own distinct `Header.MessageID`
-      (`{base}-P{n}`, not shared), so `BindKey` just happens once per part
-      at the same per-part call site `--enc13` already uses
-      (`pkg/etl/exporter.go`'s `exportToTDTP` loop) — no special multi-part
-      handling needed. See `docs/tdtp-protocol-schema.md` → "v1.5" →
-      "Multi-part packets" (also flags a pre-existing `--enc13` race this
-      uncovered, out of scope for v1.5 itself).
-- [x] Audited every `v1.4` reference in `pkg/core/packet/` (`grep -rn
-      "v1\.4" pkg/core/packet/`). Two needed action:
-      `dictionary.go`'s `Downgrade` — checked, no change needed: it only
-      ever runs after decryption (VerifyAndPrepare's FallbackDowngrade,
-      consumer-side, post-`DecryptPacketV15`), so it always sees plaintext
-      Schema/Data regardless of v1.5. `utils.go`'s `NeedsRowCountCheck` —
-      doc comment expanded: this predicate is the *same* one gating
-      `pipeline.VerifyAndPrepare`'s Mercury pre-flight (inverted), which is
-      exactly the assumption that caused the mandatory-integrity bug above
-      — now documented explicitly so the next person touching it doesn't
-      rediscover it live. Everything else (`generator.go`, `integrity.go`,
-      `types.go`'s struct comments) was already accurate as v1.4-specific
-      text; no v1.5 counterpart needed since v1.5's own struct fields
-      already carry their own doc comments.
-- [x] `docs/SPECIFICATION.md` "Версионирование" section — new `v1.5` entry
-      added following the existing changelog format, plus updated
-      "Текущая версия"/header version line and "Последнее обновление"
-      date. Cross-references `docs/tdtp-protocol-schema.md` → "v1.5" for
-      full diagrams/design rationale rather than duplicating them here.
-- [x] `cmd/tdtpcli/commands/broker.go` — `--export-broker` gained
-      `--enc`(v1.5)/`--enc13`(legacy) support (previously zero encryption
-      support at all, confirmed by grep before starting). `--import-broker`
-      gained the same dual-format decrypt dispatch as `--map`/`--import`,
-      factored into a shared `parseAndDecryptBrokerMessage` helper (used by
-      both the atomic and `--keep` streaming import paths, which
-      previously duplicated the same parse logic). Verified against real
-      infrastructure, not only mocks: full v1.5 encrypt→send→receive→decrypt
-      round-trip through a live RabbitMQ (Docker) + live `xzmercury --dev`
-      instance, including the decrypt-then-decompress ordering with
-      compression also enabled (scratch verification, not committed —
-      same pattern as the earlier live xZMercury-only smoke test).
-      **Still open, separate from v1.5 and not done here:** `result_log`
-      publish (mirror `pipeline.go:144-153`) — orchestrator pub/sub
-      integration for the broker path, unrelated to the encryption format.
-- [x] `cmd/tdtpcli/commands/map.go` — `loadPacket` (file/S3/broker input)
-      and `runMapListen` (daemon mode) both gained v1.5 detection, via two
-      new shared helpers factored out of `broker.go`'s
-      `parseAndDecryptBrokerMessage`: `decryptLegacyBlobIfNeeded` (raw
-      bytes, pre-parse) and `decryptV15PacketIfNeeded` (parsed packet,
-      post-parse) — same two atomic steps, reused by both files instead of
-      three separate copies of the same detection logic.
-- [x] `cmd/tdtpcli/commands/import.go:127` (`--import`) — added the same
-      `IsEncryptedPacket` → `DecryptPacketV15` dispatch after `p.ParseBytes`,
-      with the same error-packet-on-failure handling the legacy blob path
-      already had (`WriteErrorPacket` + `KeyBurnedError` mode extraction).
-      A v1.5 file now works with a bare `--import --mercury-url`, same as
-      `--enc13` output does today.
-- [x] **Bug found and fixed via live end-to-end testing, not part of the
-      original plan:** `integrityProc.ProcessPacket` (`export.go`) computed
-      `Schema.XXH3` (`ComputeIntegrity`) *before* embedding the `@MRC`
-      Dictionary entry (Mercury base URL, added whenever
-      `--integrity`/v1.5 + `--mercury-url` are combined) — the stamped
-      hash covered a Schema that was about to change, so every consumer's
-      `VerifyIntegrity` on import failed with a schema hash mismatch.
-      100% reproducible, not a corner case — affects **any** use of
-      `--integrity --mercury-url` together, not just v1.5; nothing
-      exercised that combination end-to-end before (no prior test
-      existed). Fixed by reordering: embed `@MRC` first, then
-      `ComputeIntegrity`. Regression test:
-      `cmd/tdtpcli/commands/export_integrity_test.go`. Confirmed via a
-      full live `--export --enc` → `--import` round trip against real
-      xZMercury + real SQLite (scratch verification).
+Then a long tail of per-example READMEs at 1–3 K each. These block integration
+work rather than evaluation, which is why they are Tier 2 and not Tier 1.
 
-### v1.4 integrity made mandatory for v1.5, not optional (deliberate scope addition)
+Go comments (~153 K) are deliberately **not** on this list; the reasoning is
+kept in `docs/ru-archive/` unchanged.
 
-Found live, not planned up front: `pipeline.VerifyAndPrepare`'s consumer-side
-pre-flight runs for *any* packet with `Version >= "1.4"` and treats an empty
-`pkt.XXH3` as a hard block (`ErrHashNotRegistered`), not "integrity wasn't
-requested." A v1.5-encrypted packet that skipped `ComputeIntegrity` would
-therefore be unimportable the instant a consumer sets `--mercury-url` —
-which v1.5 decryption itself always requires. Reproduced live before fixing.
+### Housekeeping
 
-Decision (explicit user call, not a default assumption): rather than
-loosening `runMercuryCheck`'s existing block-on-empty-XXH3 behavior (which
-would be a real security-relevant change to v1.4's own gate, shared by
-`--map`/`--import`/`--import-broker`), make `ComputeIntegrity` +
-`RegisterHash` **mandatory** ahead of every v1.5 encryption call, so no
-v1.5 packet is ever missing what the existing gate already requires — zero
-regression to the pre-v1.5 security posture, and the gate itself needed no
-changes.
-
-New shared helper: `pkg/pipeline/produce.go`'s
-`ComputeAndRegisterIntegrity` (+ `HashRegistrar` interface, mirroring
-`processors.MercuryBinder`'s dev/test-substitution shape for `BindKey`).
-Wired into all three v1.5 encryption call sites:
-- `cmd/tdtpcli/commands/export.go`'s `ExportTable` — `integrityProc` now
-  added to the chain whenever `opts.Encrypt && !opts.EncryptLegacy`, not
-  only when `--integrity` was passed explicitly.
-- `cmd/tdtpcli/commands/broker.go`'s `ExportToBroker` — per-packet call
-  before compression, same condition.
-- `pkg/etl/exporter.go`'s `exportToTDTP` — same, per part; this path had
-  **zero** v1.4 integrity wiring at all before (`--pipeline` output could
-  never stamp/register a hash, encrypted or not).
-
-Tests: `pkg/pipeline/produce_test.go` (including
-`TestV15EncryptionEnablesVerifyAndPrepare`, which fails on the *old*
-unregistered-hash behavior and passes once `ComputeAndRegisterIntegrity`
-runs — proves the fix, not just the happy path), plus assertions folded
-into the existing `pkg/etl` and `cmd/tdtpcli/commands` v1.5 test suites.
-Confirmed end-to-end against real xZMercury + real SQLite.
-
-### xZMercury pairing — verified: zero server-side changes needed
-
-Checked directly against source, not assumed (full trace in
-[`docs/tdtp-protocol-schema.md`](docs/tdtp-protocol-schema.md) → "v1.5" →
-"xZMercury pairing"): `xzmercury/internal/keystore/store.go`'s
-`Bind`/`BurnOnRead` and `xzmercury/internal/api/keys.go`'s HTTP handlers
-treat the AES key as opaque bytes keyed only by `packageUUID` — no
-assumption anywhere about how many times or in what shape the key gets
-used to encrypt something downstream. `pkg/mercury/client.go`'s
-`BindKey`/`RetrieveKey` need no signature change either. v1.5 is a
-**client-side-only** change: one `BindKey` call still returns one key;
-that key just seals three sections (QueryContext/Schema/Data) instead of
-one whole-packet blob, each with its own nonce. Don't scope an xZMercury
-API-side task for this — there isn't one.
-
-### Corrected understanding of travel-agency's current state (for TRAVEL-AGENCY_NEXT.md)
-
-`TRAVEL-AGENCY_NEXT.md` was drafted assuming `consumer.py` still used
-`--import-broker` → staging tables → SQL merge. **That's stale** — per this
-file's own Sprint 6-7 entries, `consumer.py` was already migrated to
-`--map --input broker://queue` (no staging, no merge procs) before this
-plan was written. Only `coordinator.py` (export side, `--export-broker`)
-still needs the Phase 1.5 work; the import side needs only the dual-format
-decrypt update once the wire format changes, not new plumbing. Fix the
-plan doc to match before starting Phase 1.5 implementation.
+- `CHANGELOG.md` carries a stray `## [Unreleased] — refactor/orchestrator-route-groups`
+  section stranded between 1.24.1 and 1.24.0. It describes work that shipped —
+  fold it under a version heading or drop it.
+- The working tree accumulates untracked scratch: `PR_DESCRIPTION.md`,
+  `docs/SESSION_SUMMARY.md`, `docs/analysis/`, four `cmd/bench_*` directories,
+  a pile of `examples/travel-agency/*.yaml` and `*.py`. Decide per item — commit,
+  `.gitignore`, or delete. Leaving it makes `git status` useless as a signal.
+- `benchmarks/bench_duckdb` does not build with `CGO_ENABLED=0`, because
+  go-duckdb needs cgo. Gate it behind a build tag or document the requirement.
 
 ---
 
-## Open Items (v1.x)
+## Behind the freeze — 2.0
 
-### 1. Grace period для tdtp.lic
+Everything here is a capability change. **None of it goes into 1.x**, however
+ready it looks. Kept because the analysis is worth having when 2.0 opens, not
+because it is scheduled.
 
-Зараз: expired = fatal. Для integrators під час активного проекту — проблема.
-Варіант: `--grace-period 30d` flag, read-only mode після expiry. Не критично зараз.
+### Oracle adapter — not started
 
----
+Raised while comparing the framework against Soft Review's integration services
+(their stack is Oracle PL/SQL + J2EE). Oracle is the one mainstream DBMS
+`pkg/adapters` does not cover, and in the banking and enterprise segment that
+gap decides whether the framework is evaluated at all.
 
-## Oracle adapter — estimate (2026-08-03, not started)
+**No architectural obstacle.** `adapters.Adapter` (17 methods) and the `base`
+helpers apply to Oracle unchanged; nothing in the shared layer needs
+redesigning. The reference point is the MySQL adapter — written last, entirely
+on the finished `base` layer, so it measures what a new adapter costs today:
+**~1000 non-test lines** (adapter 249 / import 188 / inspect 213 / types 219 /
+export 133).
 
-Raised while comparing the framework against Soft Review's integration
-services (their stack is Oracle PL/SQL + J2EE): Oracle is the one mainstream
-DBMS `pkg/adapters` does not cover, and in the banking/enterprise segment
-that is the gap that decides whether the framework is evaluated at all.
+**Estimate: 14–20 man-days, plan for 15–16.** The full breakdown — the two
+high-risk items, the two round-trip traps, the config selectors with their
+existing precedent, and the driver decision that has to be made before starting
+— was written out in this file before the freeze. Recover it with
+`git log -p TODO_NEXT.md` rather than re-deriving it.
 
-**No architectural obstacle.** `adapters.Adapter` (17 methods) and the
-`base` helpers apply to Oracle unchanged; nothing in the shared layer needs
-redesigning. The reference point is the MySQL adapter — written last, "с нуля
-с использованием base helpers" (`pkg/adapters/mysql/adapter.go:22`), so it is
-a direct measurement of what a new adapter costs on the finished layer:
-**~1000 non-test lines** (adapter 249 / import 188 / inspect 213 /
-types 219 / export 133).
+### 2.1 Parallel daemon — `--map --listen --workers N`
 
-### Estimate: 14–20 man-days, plan for 15–16
+- N independent goroutine workers, each with its own AMQP connection
+- Each worker ACKs independently; no shared state between workers
+- Graceful shutdown waits for the in-flight message in every worker
+- RabbitMQ: N separate connections (multiple consumers on one channel is an anti-pattern)
+- Kafka: consumer group, N partitions → N workers, the native model
 
-| Work | Days | Risk |
-|---|---:|---|
-| Driver, DSN, pool, TNS/wallet, `Connect`/`Ping`/`Close` | 1–2 | med |
-| `types.go` — TDTP ↔ NUMBER/VARCHAR2/DATE/TIMESTAMP/CLOB/BLOB | 1.5–2 | low |
-| `SQLAdapter` — pagination + identifier quoting | 2–3 | **high** |
-| `inspect.go` — `ALL_TAB_COLUMNS`/`ALL_CONSTRAINTS`/`ALL_VIEWS` | 1–1.5 | low |
-| `import.go` — `MERGE INTO`, bulk insert, GTT | 2–3 | **high** |
-| Wiring: factory + `pkg/etl/config.go`, `cmd/tdtpcli` (4 files), `cmd/tdtpserve` (2), `cmd/tdtp-xray` (2) | 0.5 | low |
-| Tests (unit + integration, modelled on `pkg/adapters/mssql/integration_test.go`) | 3–4 | med |
-| Docs, CHANGELOG, help | 0.5 | low |
-| Shakeout against a real customer database | 2–3 | med |
+### 2.2 Streaming CLI — `--export-stream` / `--import-stream`
 
-### The two high-risk items
+**The code already exists and is not wired up.**
+`pkg/core/packet/streaming.go` holds `StreamingGenerator` with a channel-based
+API, 7 methods, and no CLI caller. Cheapest of the three by a wide margin — but
+still new surface, so it waits.
 
-**Pagination.** `base.MSSQLAdapter.AdaptSQL` is 170 lines for three
-strategies (`TOP N` / `OFFSET-FETCH` / tail mode) precisely because SQL
-Server had no `OFFSET` before 2012. Oracle repeats the situation:
-`OFFSET .. FETCH NEXT` is 12c+, 11g needs `ROW_NUMBER()` in a subquery. If
-the target installations are 11g — normal in banking — budget the upper end.
+- `--export-stream` writes rows as they are read from the DB, without buffering the full set
+- `--import-stream` reads from stdin or a broker row by row, upserting without accumulation
+- Together they allow tables larger than RAM
 
-**`MERGE` + temporary tables.** `base.ImportHelper` takes
-`useTemporaryTables bool` and creates temp tables on the fly. Oracle global
-temporary tables are DDL objects, not per-session ones, so they cannot be
-created per import. Needs either a third mode in `ImportHelper` or an
-Oracle-specific `TableManager` — a boolean flag does not cover it.
+### 2.3 Schema migration — `ALTER TABLE`
 
-### Two round-trip traps
+Add and drop columns, change types, on schema drift between the packet and the
+target table. Prerequisite for `--import-stream`, which needs schema negotiation.
 
-- **`'' IS NULL`.** Oracle does not distinguish empty string from NULL, so a
-  packet value that is empty comes back as NULL after import→export. Not an
-  adapter bug — DBMS semantics. Needs a format-level decision (sentinel) and
-  an explicit round-trip test.
-- **Identifier case.** Unquoted names fold to upper case, quoted ones do not;
-  `Users` and `USERS` are different objects. Pick one policy and carry it
-  through `QuoteIdentifier` and `inspect`.
+### Grace period for `tdtp.lic`
 
-### Config selectors (precedent already exists)
-
-MSSQL already carries `CompatibilityMode`, `StrictCompatibility`,
-`WarnOnIncompatible` in `adapters.Config` (`adapter.go:42`). Oracle fits the
-same shape: `CompatibilityMode: "11g"|"12c"|"auto"` selecting the pagination
-strategy, plus `EmptyStringMode` and `IdentifierCase` for the two traps
-above. `NoDateSentinels` and `Charset` already exist and only need Oracle
-values. Note the split: the selectors are configuration, but GTT handling and
-the empty-string policy are code behind them — those are the 4–6 days of
-high-risk work, not a settings change.
-
-### Driver decision — make it before starting
-
-- `go-ora` — pure Go, no Instant Client, keeps the single-static-binary
-  property the rest of the project relies on. **Recommended.**
-- `godror` — cgo + Oracle Instant Client on every machine and in CI; fuller
-  type coverage and faster bulk. If bulk import turns out to be the
-  bottleneck, add it as a second adapter behind a build tag, the way
-  `nokafka`/`nosqlite` already work.
-
-Oracle XE is free and enough for integration tests — no licensing obstacle
-to CI.
+Today expired = fatal, which hurts integrators mid-project. Proposal:
+`--grace-period 30d` with read-only mode after expiry. Nothing is implemented —
+no `GracePeriod` identifier exists anywhere in the tree.
 
 ---
 
-## v2.0 Roadmap — Масштабування, паралелізм, стрімінг
+## Keeping this file honest
 
-Великий перехід: від single-threaded ETL до паралельної та потокової обробки.
-Всі пункти залежать один від одного — вводяться разом як breaking architecture change.
+`CLAUDE.md` asks that this file be checked for staleness **before** starting
+work, and that a completed plan be deleted rather than left standing. The v1.5
+encryption section outlived its release by a month and had grown to half the
+file; the sprint table sat eight minor versions behind. Both are corrected
+above.
 
-### 2.1 Parallel daemon (`--map --listen --workers N`)
-
-- `--workers N` — N незалежних goroutine-воркерів, кожен зі своїм AMQP connection
-- ACK кожного воркера незалежно (жодного shared state між воркерами)
-- graceful shutdown: дочекатись завершення поточного повідомлення в кожному воркері
-- RabbitMQ: N окремих connections (multiple consumers на одному channel — anti-pattern)
-- Kafka: consumer group, N partitions → N workers (нативна модель)
-
-### 2.2 Streaming CLI (`--export-stream` / `--import-stream`)
-
-Код вже готовий: `pkg/core/packet/streaming.go` — `StreamingGenerator` з channel-based API.
-Не підключено до CLI.
-
-- `--export-stream` → пише рядки в output по мірі читання з DB (без буферизації всього набору)
-- `--import-stream` → читає з stdin/broker рядок за рядком, upsert без accumulation
-- Дозволяє обробляти таблиці розміром більше RAM
-
-### 2.3 Schema migration (`ALTER TABLE`)
-
-Add/drop columns, type changes при schema drift між версіями пакета і target таблицею.
-Потрібно як основа для `--import-stream` (streaming import потребує schema negotiation).
-
----
-
-## Package hygiene — funcfinder audit (2026-07-29, post-1.24.0)
-
-Standing practice after each sprint: map the touched package and look for
-hand-rolled stdlib. Run on `cmd/orchestrator`.
-
-### Reinvented stdlib (3 sites, mechanical) — DONE 2026-08-03
-
-The package already imported `slices` in `preflight.go` and used it correctly,
-so these were copies that predated it rather than a deliberate choice:
-
-- [x] `auth.go` `AllowsScenario` — manual loop → `slices.Contains(p.Scenarios, name)`.
-      The empty-allowlist early return stays: "no list = everything allowed" is
-      its own rule, not part of the search.
-- [x] `pubsub.go` `statusAllowed` — function deleted, inlined as
-      `slices.Contains(def.OnStatus, result.Status)`. `TestStatusAllowed` went
-      with it (it would now be testing stdlib); the behaviour it covered is
-      already exercised end-to-end by `TestSubscriber_IgnoresDisallowedStatus`
-      through a real miniredis.
-- [x] `routes.go` `queryLimit` — `min(n, maxRows)`. The parameter was renamed off
-      `max`, which had been shadowing the builtin — that shadowing was itself the
-      reason `min`/`max` could not be used there.
-
-None of these was a defect: the code worked and was covered. They were on the
-list so they stopped being copied.
-
-### `newRouter` — the one complexity outlier — DONE 2026-08-03
-
-Was `routes.go:36`, depth 5, complexity 16, VERY_HIGH — and **308 lines by the
-time it was split, up from the 255 measured on 2026-07-29**: every endpoint
-added in the meantime (`/jobs?limit`, stop/cancel) landed in the same body.
-Everything else in the package tops out at HIGH=8, ordinary for Go with error
-handling.
-
-Split along its own seams — the section comments already in the body became one
-`registerXxxRoutes` function each (public, scenarios, jobs, results, schedules,
-tokens, requests), `newRouter` down to 22 lines. Each takes `routerDeps` and
-binds only the fields it uses. Pure rearrangement: middleware, registration
-order and handler bodies untouched.
-
-**Why it kept growing, recorded so the split holds:** handler closures make
-length invisible — nothing in a diff that appends one more `r.Get(...)` looks
-like it is adding forty lines to a function. Adding an endpoint now means
-picking a group.
-
----
-
-## Internationalization — what actually needs translating
-
-Goal: the package is usable by someone who does not read Russian.
-
-Measured 2026-07-29 across the repo (Cyrillic character counts, so a
-proportional measure of work, not of value).
-
-### Tier 0 — already done, no work
-
-**The binary is already fully English.** Zero Russian in any user-visible
-string: every `fmt.Errorf`, `Printf`, log line and help text. This was checked
-rather than assumed, and it is the part that would have been most expensive to
-fix, because a foreign user hits it at runtime with no way around it.
-
-25 documents are already English, including the ones a newcomer meets first:
-`README.md` (35 KB), `cmd/orchestrator/README.md`, `xzmercury/README.md` and
-its `docs/`, `pkg/audit/README.md`, `docs/DEPLOYMENT.md`,
-`docs/ORCHESTRATOR_SCENARIOS.md`, `ROADMAP.md`, and the whole travel-agency
-example.
-
-### Tier 1 — blocks adoption (~36 K)
-
-Without these an integrator cannot evaluate or use the product at all:
-
-| File | Cyrillic | Why it blocks |
-|------|---------:|---------------|
-| `docs/USER_GUIDE.md` | 16 477 | The reference for every flag |
-| `docs/SPECIFICATION.md` | 12 958 | The protocol itself — nobody can write a compatible reader without it |
-| `docs/ETL_PIPELINE.md` | 4 971 | Pipeline YAML reference |
-| `docs/README.md` | 1 784 | Index of `docs/` — a broken front door to everything else |
-
-### Tier 2 — blocks integration work (~45 K)
-
-Needed once they start building, not to decide whether to:
-
-- `pkg/python/libtdtp/README.md` (4 758) and `bindings/python/DEVELOPER_GUIDE.md` (3 852) —
-  likely first contact for a shop whose current tooling is Excel and CSV
-- `cmd/tdtpserve/README.md` (4 501)
-- `docs/SCENARIO_TRUST.md` (5 839), `docs/S3_AS_SYNC_BROKER.md` (2 694),
-  `docs/tdtp-v14-protocol-schema.md` (1 279), `docs/ACCESS_ADAPTER.md` (1 083)
-- Adapter READMEs — sqlite 2 880, access 2 572, mssql 2 422, base 2 149,
-  mysql 1 971, postgres 1 222
-- `pkg/processors/README.md` (2 959), `pkg/sync` (754), `pkg/retry` (415), `pkg/xlsx` (130)
-
-### Tier 3 — examples (~14 K)
-
-`examples/README.md` (2 990) plus fifteen per-example READMEs. Lower urgency
-only because the flagship example, travel-agency, is already English — and an
-example is the thing people actually copy, so this tier is worth more than its
-size suggests.
-
-### Tier 4 — contributor-facing (~20 K)
-
-`docs/DEVELOPER_GUIDE.md` (8 284), `pkg/adapters/base/MIGRATION_EXAMPLE.md`,
-the `cmd/tdtp-xray/*` docs, `libcs/BUILD.md`, `docker/sprint4/README.md`,
-`scripts/*`. Needed to accept outside contributions, not to be used.
-
-### Tier 5 — do NOT translate; decide whether to ship them at all (~1.5 K left)
-
-The cheapest translation is the one that is not done. These are internal working
-artifacts that happen to sit in the repository:
-
-`cmd/tdtp-xray/CAST_IN_WHERE_ORDER_BY.md` (1 463).
-
-Decision needed: move them under an internal path excluded from the published
-package, or leave them and accept that a reader meets Russian working notes
-scattered among the documentation. Translating them is the worst of the three.
-
-**`docs/xZMercury-TDTP-TZ-v1.2.md` was resolved on 2026-07-30, not left
-pending.** Checked against the code rather than translated, and the check
-found it did not merely need a translation — it needed retiring. §15 frames
-Ed25519 signing, a certificate authority and tiered licensing as a
-speculative, unbuilt, separately-sold future product ("chiptdtp"). All three
-exist today, shipped inside the same product the document calls free:
-`pkg/license` (three real tiers), `xzmercury/internal/ca` (challenge-response
-enrollment), and the orchestrator's trust gate that intersects them
-(`cmd/orchestrator/preflight.go`). Translating it would have produced a
-fluent, confident, wrong account of the licensing model — worse than a stale
-one nobody reads by mistake. It is archived at
-`docs/ru-archive/docs/xZMercury-TDTP-TZ-v1.2.md` as the historical record of
-what was planned, and replaced by `docs/XZMERCURY_SERVICE.md`, written from
-the code, which also names the real gaps found along the way (no admin check
-on hash revocation, no audit trail for hash operations, no quota on hash
-registration — distinct from the key-bind quota, which does exist) and a
-suggested order for closing them.
-
-**`CLAUDE.md` (7 589) and `AGENTS.md` (3 679) are explicitly not in this tier**
-(decided 2026-07-29). They stay where they are, and they are product surface
-rather than working notes: a package meant to be operated by an agent should
-show that on arrival, and `AGENTS.md` is becoming a convention tools read on
-their own. That promotes them into the translation work rather than out of it —
-they are the two documents whose whole purpose is to be understood immediately,
-and 43% of `CLAUDE.md` is currently Cyrillic. Treat them as Tier 1.
-
-Three were deleted outright on 2026-07-29 rather than filed here, having no
-inbound references and describing a state that no longer exists:
-`docs/SESSION_SUMMARY.md` (a Feb 20 report on a branch long since merged),
-`docs/analysis/MAP_SUMMARY.md` (an auto-generated funcfinder map with stale
-figures — regenerable in seconds), and `cmd/tdtp-xray/GO_PROXY_FIX.md` (a proxy
-workaround pointing at a drive letter the repository no longer lives on).
-
-Two candidates were kept after checking, and the reasons are worth recording so
-they are not re-proposed: `cmd/tdtpserve/AUTH_PLAN.md` is cited by `auth.go:4`
-as the design rationale for code that exists, and `TRAVEL-AGENCY_NEXT.md` is
-half-delivered — its encryption and orchestrator phases shipped in 1.23/1.24,
-but Phase 0 (real `tdtp-ca` and xZMercury in compose) has not, so deleting it
-would discard the only written form of the part still outstanding.
-
-### Go comments — 153 K, and mostly not worth translating
-
-Split by audience rather than by volume:
-
-- **Doc comments on exported symbols in `pkg/`: 39 K.** These are published API
-  documentation — they appear on pkg.go.dev for anyone importing the framework.
-  Same audience as Tier 1 and 2, so they belong at that priority. Heaviest:
-  `pkg/core/packet` 7 022, `pkg/processors` 4 878, `pkg/etl` 4 061,
-  `pkg/brokers` 3 279, `pkg/adapters/base` 2 749.
-- **Internal comments: 64 K in `pkg/`, more elsewhere.** These explain why a
-  branch exists to whoever changes it next. Leave them. Machine translation
-  would flatten exactly the reasoning that makes them worth having, and the
-  continuity model for this codebase does not depend on a human reading them
-  cold.
-
-Recommended order overall: Tier 1 → exported doc comments in the packages a
-consumer imports first (`pkg/core/packet`, `pkg/adapters`, `pkg/etl`) → Tier 2 →
-Tier 3. Tier 5 is a decision, not a task, and should be made before any of it.
-
-New sections in this file are written in English from here on, for the same
-reason the rest of this list exists.
+The check is mechanical: read the plan, grep for the artefacts it proposes
+writing, and if they are all there and it compiles, the plan is done.
