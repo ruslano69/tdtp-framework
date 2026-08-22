@@ -2,7 +2,7 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
-## [Unreleased]
+## [1.25.0] — 2026-08-22
 
 ### Fixed — SQLite export aborted on the first NULL date
 
@@ -85,6 +85,28 @@ views) keep the previous path.
 
 One output changes: a `REAL`-stored date now exports as its exact stored text
 (`2460909.11`) rather than the float64 round trip's `2.46090911e+06`.
+
+### Changed — cheaper row splitting when values are escaped
+
+`GetRowValues` copies unescaped runs into the builder instead of writing byte by
+byte. Reading 100k rows that each carry one escaped field goes from 124 ms to
+95 ms, and from 2 001 335 allocations to 1 202 135. On data with no escaping the
+cost is unchanged — 100k rows read in 45 ms before and after.
+
+Output is identical in every case. The old byte-at-a-time parse is kept in the
+test file as a reference implementation and agreed against on 300k random
+strings drawn from separators, backslashes and ready-made escape sequences.
+
+### Added — `Parser.GetRowValuesInto`
+
+Splits a row into a caller-supplied slice, reusing its memory. 100k rows cost
+10.5 ms and zero allocations this way, against 27.7 ms and 100 070 through
+`GetRows`.
+
+The result aliases the buffer, so it suits callers that consume the values and
+drop them within the iteration. It deliberately cannot serve
+`DataPacket.GetRows`, which retains every row's slice — a shared buffer would
+alias them all. Pass nil for a fresh slice.
 
 ### Added — `packet.AppendMSSQLDatetime` and friends
 
