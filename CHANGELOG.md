@@ -2,6 +2,121 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased] — bench/sqlite-date-columns
+
+### Security — a configured field_masker exported unmasked data
+
+A pipeline with `field_masker` in `processors.pre_export` wrote the original
+values to the output file. `field_normalizer` and `field_validator` were
+discarded the same way. The processors ran, produced correct output, and the
+output was thrown away.
+
+**Anyone relying on `pre_export` masking to keep PII out of an export should
+treat past exports as unmasked.** The configuration looked right, the run
+reported success, and nothing anywhere named the omission.
+
+`GenerateReference` leaves rows in an internal fast-path field that the XML
+writer prefers over `Data.Rows`. `applyPreExport` wrote its result to
+`Data.Rows` and left the fast path populated, so the writer emitted the
+originals. `SetRows` had the same hole, which affected every one of its callers
+rather than the pipeline alone, so that is where it is fixed: setting the rows
+now means the packet's rows are those rows.
+
+The same trap is documented at length on `EncryptSections`, which defends
+against it by materializing unconditionally — a packet that looks encrypted
+while leaking every row in the clear — and `cmd/tdtpcli/processors.go` had
+already patched its own copy. Two places knew; the pipeline path did not.
+
+### Fixed — RecordsInPart lied after a filtering processor
+
+`field_validator` in filter mode removes rows, and the header kept declaring the
+count from before the filter. Fixed by the same change: `SetRows` updates
+`RecordsInPart`, so a reader is no longer told to expect rows that were
+deliberately dropped.
+
+### Added — `--columnar`, a column-major Data layout
+
+`Data layout="columns"` puts a whole column in each `<R>` instead of a row. In
+the row layout the values of one column sit about 154 bytes apart with the other
+fields between them, so a compressor never sees them as a series; gathered
+together they compress considerably better.
+
+On 100k rows of ten columns, zstd 3 goes from 6 207 344 to 5 288 453 bytes,
+**14.8% smaller at unchanged time**. zstd 19 gains 11.1%. **kanzi gains only
+3.2%** — BWT already groups like values regardless of stream order — so the
+layout is worth pairing with zstd and generally not with kanzi.
+
+**Off by default, and it has to stay a deliberate choice.** The attribute
+changes what `<R>` means: a reader that does not know it slices columns as rows
+and reports success. Enable it only where the consumer is known to understand
+it.
+
+Readers in this version do understand it. Expansion happens during parsing and
+during decompression, so `--to-tdtp`, `--to-csv`, `--test` and import all see
+ordinary rows; `--to-tdtp` doubles as the normaliser, taking a columnar packet
+in and writing a row-major one out. Malformed shapes are refused rather than
+guessed at: columns of unequal height would slide values into neighbouring rows,
+and a column count disagreeing with Schema means the packet and its schema
+describe different tables.
+
+Integrity is unaffected. The v1.4 hashes still cover plain-text rows before
+compression, and the transposition happens after hashing, so `--integrity`
+verifies identically with and without the flag.
+
+### Added — `CompressChunksForTdtpAlgo`, compression without the join copy
+
+`CompressDataForTdtpAlgo` takes `[]string` and calls `strings.Join`, which
+copies the entire payload — 15 MB allocated and filled solely to be handed to
+the codec and dropped. The new entry point takes `[][]byte` and streams the
+pieces into the encoder. On the same data: 119 → 77 ms, 100.9 → 41.1 MB
+allocated, same output size.
+
+zstd runs as a streaming frame there rather than `EncodeAll`. Packets written
+either way stay readable by the other; a test pins that rather than assuming it.
+
+### Fixed — the CLI test suites were verifying an eleven-month-old binary
+
+All eight suites under `tests/cli` default to `/tmp/tdtpcli` and did no more
+than print its `--version` banner. One had been running a build eleven minor
+versions behind for months — green or red for reasons unrelated to the working
+tree, at one point reporting a NULL-date crash fixed long before.
+
+`tdtp_binary.check_binary` now refuses a binary that is not the current tree's
+code, on two counts. Version against `pkg/core/version/version.go` catches the
+old build. Build time against the newest tracked `.go` file catches the case a
+version comparison cannot see: a binary of the right version, built before the
+feature under test, passing the tests that assert it by not implementing it.
+That second check earned its place immediately — Git Bash `/tmp` and Python
+`/tmp` resolve to different directories on Windows, so a rebuild can land beside
+the binary the suite actually runs.
+
+### Changed — `scripts/create_benchmark_db.py`
+
+Loading 100k rows took about two and a half minutes: a commit every 1000 rows,
+six indexes maintained during the insert, and a progress bar redrawn on every
+batch. Now 4.2 s — one transaction, indexes built afterwards, journal and fsync
+off for what is a disposable fixture.
+
+It also stopped swallowing `IntegrityError`, which discarded the whole 1000-row
+batch along with the exception and silently produced a database smaller than
+requested — for a reference corpus the worst kind of failure, because nothing
+says it happened.
+
+`--seed` fixes both the generator and the date epoch, so a seeded run reproduces
+the file byte for byte. `--out`, `--rows` and `--no-dates` make the old
+seven-column set reproducible for comparison; by default the fixture now carries
+`DATE`, `DATETIME` (10% NULL) and `TIMESTAMP` columns, because the SQLite
+adapter reads a column's type from its declaration and the previous `TEXT` date
+column exercised none of that code.
+
+### Tests
+
+`test_sqlite.py` gains T12, nineteen checks over the CLI: date column types in
+Schema, sub-second precision, the `[NULL]` sentinel, export/import round trip,
+values containing a pipe or a newline, columnar normalisation and both malformed
+columnar shapes, `RecordsInPart` after filtering, and a pipeline whose
+`field_masker` output is checked to actually reach the file.
+
 ## [1.25.1] — 2026-08-22
 
 Version handling put in order. Three defects, each of which quietly switched an
