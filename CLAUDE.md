@@ -265,6 +265,39 @@ format, which is knowable for `DATE`/`DATETIME`/`TIMESTAMP` and not for `TEXT`.
 Any implementation needs the round-trip assertion the experiment used; without
 it the corruption is invisible.
 
+### The columnar read prototype: where the win actually is
+
+`base.ScanSQLColumns` and `sqlite.ReadAllColumns` read a table straight into
+per-column slices. Nothing in the working path calls them — `ExportTable` still
+goes through `ReadAllRows`. Cells go through the same `cellToTDTP` as the row
+scanner, and `TestReadAllColumns_MatchesReadAllRows` compares all 100k×10 cells,
+because two readers that disagree would produce two different integrity hashes
+from one table.
+
+Measured on `benchmark_100k_dates.db`, i7-7700:
+
+| Stage | row path | columnar | Δ |
+|---|---|---|---|
+| read | 359 ms, 84.8 MB, 2 915 495 allocs | 362 ms, 71.9 MB, 2 815 645 allocs | −15% memory, **same time** |
+| serialize + compress (zstd 3) | 174 ms, 6 172 104 B, 100 080 allocs | 152 ms, 5 008 288 B, **94 allocs** | −13% time, −18.9% size |
+
+**The read gets no faster, and that is the finding.** Dropping the per-row
+`[]string` removes exactly the ~100k allocations you would expect and 13 MB of
+memory, but the remaining 2.8M allocations are the per-cell strings from
+`cellToTDTP`, and they dominate. Reading columnar is a memory win, not a speed
+one. Going further means a per-column byte arena with offsets instead of
+`[]string` — untried.
+
+**The serialization step is where the idea pays off: 100 080 allocations become
+94.** That is the pipe-join, one `strings.Join` per row, building text that on
+the compressed path nothing ever reads — it goes to the codec and is thrown
+away. Handing the codec the columns directly skips it entirely and lands the
+same −18.9% the layout experiment predicted.
+
+So the two halves of the idea are not equal. Skipping serialization on the
+compressed path is cheap and clearly worth it; columnar reading is worth it for
+memory, and only becomes a speed story if the per-cell string goes too.
+
 On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
 reaches 10–12× against the original — BWT gets to do its work properly. On short
 synthetic strings it manages 6–7×, which is still **30–50% denser than zstd**.

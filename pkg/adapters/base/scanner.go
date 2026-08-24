@@ -39,27 +39,36 @@ func ScanSQLRows(rows *sql.Rows, schema packet.Schema, converter *UniversalTypeC
 		}
 		row := make([]string, columnCount)
 		for i, field := range schema.Fields {
-			raw := converter.DBValueToString(values[i], field, dbType)
-			if dbType == "sqlite" {
-				if norm, ok := fastSQLiteDateTime(raw, field.Type); ok {
-					row[i] = norm
-					continue
-				}
-			}
-			if _, isTime := values[i].(time.Time); isTime {
-				// Драйвер отдал time.Time — DBValueToString уже собрал
-				// канонический вид (RFC3339Nano для DATETIME/TIMESTAMP,
-				// YYYY-MM-DD для DATE, маркер для no-date). Round-trip
-				// ParseValue→FormatValue вернул бы ту же строку, а для
-				// маркера ещё и записал бы ошибку разбора в лог.
-				row[i] = raw
-				continue
-			}
-			row[i] = converter.ConvertValueToTDTP(field, raw)
+			row[i] = cellToTDTP(values[i], field, converter, dbType)
 		}
 		result = append(result, row)
 	}
 	return result, rows.Err()
+}
+
+// cellToTDTP переводит одно сканированное значение в текст TDTP.
+//
+// Вынесено из ScanSQLRows, чтобы колоночный сканер (ScanSQLColumns) не
+// заводил вторую копию этой логики. Копия разошлась бы: здесь три ветки, и
+// каждая появилась по конкретной причине, описанной у ScanSQLRows и
+// fastSQLiteDateTime. Расхождение между строчным и колоночным чтением дало бы
+// разные байты из одной таблицы — то есть разные хеши целостности.
+func cellToTDTP(v any, field packet.Field, converter *UniversalTypeConverter, dbType string) string {
+	raw := converter.DBValueToString(v, field, dbType)
+	if dbType == "sqlite" {
+		if norm, ok := fastSQLiteDateTime(raw, field.Type); ok {
+			return norm
+		}
+	}
+	if _, isTime := v.(time.Time); isTime {
+		// Драйвер отдал time.Time — DBValueToString уже собрал
+		// канонический вид (RFC3339Nano для DATETIME/TIMESTAMP,
+		// YYYY-MM-DD для DATE, маркер для no-date). Round-trip
+		// ParseValue→FormatValue вернул бы ту же строку, а для
+		// маркера ещё и записал бы ошибку разбора в лог.
+		return raw
+	}
+	return converter.ConvertValueToTDTP(field, raw)
 }
 
 // fastSQLiteDateTime переводит сырую дату из SQLite в канонический вид TDTP
