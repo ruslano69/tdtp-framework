@@ -115,3 +115,27 @@ def check_binary(binary: str, quiet: bool = False) -> str:
         sys.exit(1)
 
     return binary_ver
+
+
+def license_env(base: dict = None) -> dict:
+    """Env with TDTP_LICENSE pointing at the repo's tdtp.lic, if there is one.
+
+    tdtpcli resolves its licence from TDTP_LICENSE, else ./tdtp.lic relative to
+    the working directory. The suites run from tests/cli, so ./tdtp.lic is not
+    found and the binary falls back to the community tier — where --enc is
+    refused outright with `feature "enc" is not licensed`.
+
+    That is worth naming precisely, because the failure it produces looks like
+    something else entirely: the encrypted file is written correctly and
+    decrypts, and only the exit code says no. In test_encryption.py it read as
+    a Mercury or HMAC problem for as long as nobody checked stderr.
+
+    Suites that exercise no licensed feature are unaffected, which is why this
+    surfaced only in the encryption suite.
+    """
+    env = dict(base if base is not None else os.environ)
+    if "TDTP_LICENSE" not in env:
+        lic = REPO_ROOT / "tdtp.lic"
+        if lic.is_file():
+            env["TDTP_LICENSE"] = str(lic)
+    return env

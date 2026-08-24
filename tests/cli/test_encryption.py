@@ -40,7 +40,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tdtp_binary import check_binary
+from tdtp_binary import check_binary, license_env
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -95,6 +95,41 @@ MERCURY_URL  = f"http://{MERCURY_ADDR}"
 # already uses for its own mock Mercury server.
 MERCURY_SECRET = "dev-mode"
 
+# ─── Running against a real xZMercury instead of the mock ─────────────────────
+#
+# The mock is stale in a way that matters: its Bind handler signs
+# HMAC(secret, uuid) with no ":mode" suffix, which pkg/mercury.VerifyHMAC
+# stopped accepting. The suite works around that with the "dev-mode" sentinel
+# above — a bypass, which means the one thing it cannot exercise is the HMAC
+# verification itself.
+#
+# Set TDTP_MERCURY_EXTERNAL=1 to point the suite at an instance you started:
+#
+#   cd xzmercury
+#   MERCURY_SERVER_SECRET=dev-secret go run ./cmd/xzmercury/ --dev #       --config configs/xzmercury.dev.yaml --addr :3000
+#
+#   TDTP_MERCURY_EXTERNAL=1 TDTP_MERCURY_ADDR=127.0.0.1:3000 #   MERCURY_SERVER_SECRET=dev-secret-change-in-production-32ch #       python tests/cli/test_encryption.py
+#
+# The secret must then be the real one — the server's, from its config — and
+# the suite refuses to start without it rather than falling back to the bypass
+# and reporting a pass for a check it never ran.
+#
+# This is an opt-in and not a relaxation of start_mercury_mock's refusal to
+# adopt whatever answers the port. That guard exists because a mock surviving
+# an interrupted run once made the suite exercise a stale binary silently. The
+# variable makes adoption deliberate and states which server is in use, which
+# is the part that was missing — not the checking.
+MERCURY_EXTERNAL = os.environ.get("TDTP_MERCURY_EXTERNAL", "") not in ("", "0")
+if MERCURY_EXTERNAL:
+    MERCURY_SECRET = os.environ.get("MERCURY_SERVER_SECRET", "")
+    if not MERCURY_SECRET:
+        print("TDTP_MERCURY_EXTERNAL is set but MERCURY_SERVER_SECRET is empty.",
+              file=sys.stderr)
+        print("Pass the running instance's secret — with the dev-mode bypass the "
+              "HMAC check would be skipped and the run would prove nothing.",
+              file=sys.stderr)
+        sys.exit(2)
+
 # ─── ANSI colors ──────────────────────────────────────────────────────────────
 GREEN  = "\033[32m"
 RED    = "\033[31m"
@@ -115,7 +150,7 @@ def _tdtpcli_env() -> dict:
     verification (EncryptPacket/DecryptEncBlob both require it — there is
     no silent bypass except the literal string "dev-mode", which is not
     what this mock signs with, so this must be the real matching secret)."""
-    env = dict(os.environ)
+    env = license_env()
     env["MERCURY_SERVER_SECRET"] = MERCURY_SECRET
     return env
 
@@ -332,6 +367,16 @@ def start_mercury_mock() -> bool:
     unlikely; these checks make one impossible to mistake for success.
     """
     global _mock_proc, _mock_log_path
+
+    if MERCURY_EXTERNAL:
+        if not mercury_healthy():
+            print(f"{RED}  TDTP_MERCURY_EXTERNAL is set but {MERCURY_URL} "
+                  f"does not answer /healthz{RESET}")
+            return False
+        print(f"  {GREEN}using external xZMercury at {MERCURY_URL} "
+              f"(real HMAC, no dev-mode bypass){RESET}")
+        return True
+
     if not go_available():
         return False
 
@@ -388,6 +433,8 @@ def _report_mock_failure(reason: str):
 
 def stop_mercury_mock():
     global _mock_proc
+    if MERCURY_EXTERNAL:
+        return  # не наш процесс — не нам его и останавливать
     if _mock_proc is None:
         return
     try:
