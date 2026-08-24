@@ -22,6 +22,9 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tdtp_binary import check_binary
+
 # Force UTF-8 output so → and other Unicode chars work on Windows cp1251 terminals
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1456,88 +1459,9 @@ GROUPS = [
 ]
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-VERSION_GO = REPO_ROOT / "pkg" / "core" / "version" / "version.go"
-
-
-def repo_version() -> str:
-    """Version constant declared in pkg/core/version/version.go, or '' if unreadable."""
-    try:
-        text = VERSION_GO.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    m = re.search(r'Version\s*=\s*"([^"]+)"', text)
-    return m.group(1) if m else ""
-
-
-def newest_source_mtime() -> tuple:
-    """(mtime, path) of the most recently modified .go file under cmd/ and pkg/."""
-    newest, where = 0.0, ""
-    for sub in ("cmd", "pkg"):
-        for path in (REPO_ROOT / sub).rglob("*.go"):
-            try:
-                mt = path.stat().st_mtime
-            except OSError:
-                continue
-            if mt > newest:
-                newest, where = mt, str(path.relative_to(REPO_ROOT))
-    return newest, where
-
-
-def build_hint() -> str:
-    return (f"  GOPROXY=https://goproxy.io GONOSUMDB='*' "
-            f"go build -tags nokafka -o {TDTPCLI} ./cmd/tdtpcli/")
-
-
 def preflight():
-    """Refuse to run against a binary that is not this working tree's code.
-
-    Both checks exist because both failures happened. The suite once ran for
-    months against a binary eleven minor versions behind, reporting a NULL-date
-    crash that had long been fixed — the version check catches that. Then a
-    binary of the *right* version, built an hour before the feature under test,
-    passed tests by not implementing the thing they were asserting — only the
-    timestamp catches that one. A green run against the wrong binary is worse
-    than a red one: it is a false statement about the code.
-    """
-    if not os.path.exists(TDTPCLI):
-        print(f"{RED}ERROR: tdtpcli binary not found at {TDTPCLI}{RESET}")
-        print("Build first:")
-        print(build_hint())
-        sys.exit(1)
-
-    proc = subprocess.run([TDTPCLI, "--version"], capture_output=True, text=True)
-    binary_ver = ""
-    m = re.search(r"version\s+(\S+)", proc.stdout)
-    if m:
-        binary_ver = m.group(1)
-    print(f"tdtpcli: {binary_ver or proc.stdout.strip()}  ({TDTPCLI})")
-
-    expected = repo_version()
-    if expected and binary_ver and binary_ver != expected:
-        print(f"{RED}ERROR: binary is version {binary_ver}, this tree declares "
-              f"{expected}{RESET}")
-        print(f"  {VERSION_GO.relative_to(REPO_ROOT)} is the source of truth.")
-        print("Rebuild:")
-        print(build_hint())
-        print(f"  or point the suite elsewhere: TDTPCLI_BIN=/path/to/tdtpcli")
-        sys.exit(1)
-
-    # Same version, older build: the case a version check cannot see.
-    src_mtime, src_path = newest_source_mtime()
-    try:
-        bin_mtime = os.path.getmtime(TDTPCLI)
-    except OSError:
-        bin_mtime = 0.0
-    if src_mtime and bin_mtime and src_mtime > bin_mtime:
-        age = (src_mtime - bin_mtime) / 60.0
-        print(f"{RED}ERROR: binary is older than the source it should contain{RESET}")
-        print(f"  binary: {time.strftime('%Y-%m-%d %H:%M', time.localtime(bin_mtime))}")
-        print(f"  source: {time.strftime('%Y-%m-%d %H:%M', time.localtime(src_mtime))} "
-              f"({src_path}, {age:.0f} min newer)")
-        print("Rebuild:")
-        print(build_hint())
-        sys.exit(1)
+    """Refuse to run against a binary that is not this working tree's code."""
+    check_binary(TDTPCLI)
 
 
 def main():
