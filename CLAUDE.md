@@ -232,6 +232,39 @@ This is a property of the layout, not of this corpus — unlike the sorting
 result. Nothing is implemented; the measurement exists to say the idea is worth
 the design work, not that the format is decided.
 
+### Delta coding on top of that: −28% for zstd, nothing for kanzi
+
+Encoding the numeric and date columns as differences from the previous value,
+still as text, on the same 100k×10 set. **Sorting is deliberately absent** — it
+lost in every combination, delta included, and it is an expensive operation
+besides.
+
+| Strategy | raw | zstd 3 | kanzi 6 | ms zstd / kanzi |
+|---|---|---|---|---|
+| row order (today) | 14.78 MB | 6 177 644 B | 3 394 260 B | 160 / 1056 |
+| column order | 14.78 MB | 5 011 048 B | 2 958 236 B | 128 / 1022 |
+| column order + delta | **11.62 MB** | **4 442 564 B** | 2 945 952 B | **104 / 781** |
+
+Three things to carry forward:
+
+**`ID` is where delta earns its keep: 63 436 B → 56 B.** A sequential key deltas
+to a run of ones, which compresses to nothing. Date columns give a milder 17–29%,
+mostly because a delta prints shorter than a 13-digit epoch, not because of
+redundancy.
+
+**Delta is nearly worthless for kanzi — 2 958 236 → 2 945 952, under half a
+percent.** BWT already recovers what delta would hand it, and on some columns
+delta is actively worse (`BirthDate` 245 252 → 266 744) because variable-length
+decimals break the fixed-width column alignment BWT was exploiting. **If the
+format goes columnar, delta is a zstd optimisation and should be optional.**
+
+**A `TEXT` column holding dates cannot be delta-coded safely.** `RegisteredAt`
+round-tripped as `2022-10-11T17:36:54Z` against an original of
+`2022-10-11 17:36:54` — a silent rewrite. Delta needs the column's exact output
+format, which is knowable for `DATE`/`DATETIME`/`TIMESTAMP` and not for `TEXT`.
+Any implementation needs the round-trip assertion the experiment used; without
+it the corruption is invisible.
+
 On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
 reaches 10–12× against the original — BWT gets to do its work properly. On short
 synthetic strings it manages 6–7×, which is still **30–50% denser than zstd**.
