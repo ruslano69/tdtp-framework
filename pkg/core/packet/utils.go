@@ -35,11 +35,21 @@ func NewErrorPacket(code, message, table, inReplyTo, serverMode string) *DataPac
 	return pkt
 }
 
-// NeedsRowCountCheck reports whether a packet with the given version string
-// requires RecordsInPart to be validated against the actual row count.
+// NeedsRowCountCheck reports whether a packet of the given version predates the
+// integrity hashes, and therefore must have its RecordsInPart registered with
+// Mercury rather than verified by an xxh3 stamp.
 //
-// Starting with v1.4, packets carry XXH3-128 hashes that guarantee integrity
-// end-to-end, making the RecordsInPart counter redundant as a safety check.
+// The name is historical and was, for a while, taken literally: this predicate
+// used to gate the RecordsInPart-vs-row-count comparison, on the reasoning that
+// "from v1.4 packets carry XXH3-128 hashes that guarantee integrity end to end,
+// making the counter redundant". That reasoning does not survive reading
+// computeHashes: the hashes cover the Schema and the row values, and the header
+// is in neither. The result was that from v1.4 up, no one checked the counter —
+// a packet declaring 999 rows while carrying 3 parsed cleanly and verified.
+//
+// The row count is now checked by VerifyRowCount, at every version, wherever
+// the rows are actually readable. This predicate keeps only its second job,
+// described below, which was always the real one.
 //
 // This same predicate also gates pkg/pipeline's VerifyAndPrepare pre-flight
 // (via the inverse: !NeedsRowCountCheck(version) → run the Mercury pre-flight)

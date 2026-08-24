@@ -312,8 +312,10 @@ func (p *DataPacket) MaterializeRows() {
 		p.Data = RowsToData(p.rawRows)
 		p.rawRows = nil
 	}
-	// Строки уже построчные — намерение исполнять поздно и незачем.
-	p.wantColumnar = false
+	// wantColumnar НЕ сбрасывается. Материализация делает строки построчными,
+	// но раскладку применяет писатель, и он идёт после: ComputeIntegrity зовёт
+	// эту функцию первым делом, так что сброс здесь означал бы, что
+	// --columnar --integrity молча пишет обычный построчный пакет. Так и было.
 }
 
 // SchemaEquals reports whether two schemas are structurally identical:

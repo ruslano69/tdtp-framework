@@ -310,19 +310,11 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 		}
 	}
 
-	// RecordsInPart должен точно совпадать с числом <R> строк.
-	// Для сжатых пакетов строки упакованы в blob — проверка невозможна без декомпрессии.
-	// Начиная с v1.4 целостность гарантируется XXH3 — проверка счётчика избыточна.
-	// v1.5: зашифрованные строки тоже упакованы в один opaque <R> — тот же случай.
-	// Колоночная раскладка: <R> это колонка, а не строка, так что сравнивать
-	// их число с RecordsInPart бессмысленно — счёт строк даёт ExpandColumnarRows,
-	// и он же ловит колонки разной высоты.
-	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" && packet.Data.Encryption == "" &&
-		packet.Data.Layout == "" && NeedsRowCountCheck(packet.Version) {
-		if actual := len(packet.Data.Rows); actual != packet.Header.RecordsInPart {
-			return fmt.Errorf("RecordsInPart mismatch: header declares %d rows, <Data> contains %d",
-				packet.Header.RecordsInPart, actual)
-		}
+	// RecordsInPart сверяется с числом <R>. Условия пропуска — сжатие,
+	// шифрование, колоночная раскладка — живут в VerifyRowCount; версия среди
+	// них больше не значится, см. комментарий там.
+	if err := VerifyRowCount(packet); err != nil {
+		return err
 	}
 
 	return nil
@@ -381,7 +373,14 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 	// Колоночная раскладка разворачивается здесь, а не у вызывающего. Это
 	// точка схождения сжатого и несжатого путей, и единственное место, где
 	// разворот гарантированно случится ровно один раз.
-	return ExpandColumnarRows(packet)
+	if err := ExpandColumnarRows(packet); err != nil {
+		return err
+	}
+
+	// И здесь же — счёт строк. До распаковки он был невозможен, после неё
+	// обязателен: заголовок не покрыт ни одним хешем, так что если его не
+	// сверить тут, его не сверит никто.
+	return VerifyRowCount(packet)
 }
 
 // ParseWithDecompression парсит пакет и автоматически распаковывает сжатые данные

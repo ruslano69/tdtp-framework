@@ -313,6 +313,7 @@ func (g *Generator) GenerateResponse(
 
 		mask := buildEscapeMask(schema)
 		packet.Data = rowsToDataMasked(partition, mask)
+		packet.wantColumnar = g.columnar
 		packets = append(packets, packet)
 	}
 
@@ -392,19 +393,20 @@ func (g *Generator) ToXML(packet *DataPacket, _ bool) ([]byte, error) {
 // разворот по колонкам). В остальных случаях rawRows остаются, и писатель
 // идёт быстрым путём.
 func (g *Generator) materializeForWrite(packet *DataPacket) {
+	// Раскладка проверяется до отсечки по rawRows: GenerateResponse (путь с
+	// TDTQL-запросом) строит Data сразу и rawRows не заполняет, так что раньше
+	// --columnar на нём молча не применялся вовсе.
+	if packet.wantColumnar || g.columnar {
+		EnsureColumnar(packet)
+		return
+	}
 	if len(packet.rawRows) == 0 || len(packet.Data.Rows) > 0 {
 		return
 	}
-	mask := buildEscapeMask(packet.Schema)
-	switch {
-	case packet.wantColumnar || g.columnar:
-		packet.Data = RowsToColumnarData(packet.rawRows, len(packet.Schema.Fields), mask)
-	case g.compression.Enabled:
-		packet.Data = rowsToDataMasked(packet.rawRows, mask)
-	default:
-		return
+	if g.compression.Enabled {
+		packet.Data = rowsToDataMasked(packet.rawRows, buildEscapeMask(packet.Schema))
+		packet.rawRows = nil
 	}
-	packet.rawRows = nil
 }
 
 // WriteToFile записывает пакет прямо в файл без промежуточного []byte.

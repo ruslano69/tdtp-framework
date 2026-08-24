@@ -227,6 +227,34 @@ func EncryptPacketV15(ctx context.Context, pkt *packet.DataPacket, mercuryURL, p
 	return xmlData, packageUUID, nil
 }
 
+// EncryptSectionsInPlace — v1.5 шифрование БЕЗ сериализации: берёт ключ у
+// xZMercury и шифрует секции пакета, оставляя его обычным *DataPacket.
+//
+// Отделено от EncryptPacketV15 затем, чтобы шифрование стало шагом цепочки, а
+// не поведением писателя. Пока оно жило в writePacket, оно было единственным
+// преобразованием вне общего порядка — то есть тем местом, где ограничения из
+// pkg/transform не проверялись вовсе.
+//
+// Возвращает UUID пакета: он же ключ в Mercury, и вызывающий печатает его
+// пользователю для последующей расшифровки.
+func EncryptSectionsInPlace(ctx context.Context, pkt *packet.DataPacket, mercuryURL, pipelineName string) (string, error) {
+	if mercuryURL == "" {
+		return "", fmt.Errorf("--enc requires --mercury-url pointing at a running xZMercury instance")
+	}
+	packageUUID := pkt.Header.MessageID
+	if packageUUID == "" {
+		return "", fmt.Errorf("encrypt v1.5: packet Header.MessageID is empty — cannot bind a key without it")
+	}
+	key, err := bindAndVerifyKey(ctx, mercuryURL, packageUUID, pipelineName)
+	if err != nil {
+		return "", err
+	}
+	if err := packet.EncryptSections(pkt, key); err != nil {
+		return "", fmt.Errorf("encrypt sections: %w", err)
+	}
+	return packageUUID, nil
+}
+
 // bindAndVerifyKey calls xZMercury BindKey and verifies the HMAC exactly
 // like processors.FileEncryptor.Encrypt does for the legacy path — shared
 // here so v1.5 gets the identical ACL/quota/HMAC guarantees without

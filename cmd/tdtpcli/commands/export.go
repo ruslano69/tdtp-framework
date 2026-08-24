@@ -18,6 +18,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
+	"github.com/ruslano69/tdtp-framework/pkg/transform"
 )
 
 // ExportOptions holds options for export operations
@@ -109,6 +110,31 @@ type integrityProc struct {
 	mercuryClient *mercury.Client // nil = local integrity only (no Mercury registration)
 	mercuryURL    string          // embedded in Dictionary as @MRC for consumer pre-flight
 	caller        string
+}
+
+// encryptProc — v1.5 посекционное шифрование как шаг цепочки.
+//
+// Только v1.5. Legacy --enc13 шагом быть не может: он подменяет сериализацию
+// целиком, отдавая двоичный блоб вместо XML, то есть это формат контейнера, а
+// не преобразование пакета. Он и остаётся в writePacket, и в реестре
+// pkg/transform его нет — объявить там то, что не встраивается в цепочку,
+// значило бы соврать о нём проверке совместимости.
+type encryptProc struct {
+	mercuryURL string
+	uuids      *[]string // куда сложить UUID пакетов — их печатают пользователю
+}
+
+func (p *encryptProc) Name() string { return "encrypt" }
+
+func (p *encryptProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error {
+	uuid, err := EncryptSectionsInPlace(ctx, pkt, p.mercuryURL, pkt.Header.TableName)
+	if err != nil {
+		return err
+	}
+	if p.uuids != nil {
+		*p.uuids = append(*p.uuids, uuid)
+	}
+	return nil
 }
 
 func (p *integrityProc) Name() string { return "integrity" }
@@ -265,12 +291,17 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 	recordOpMetrics(ctx, opts.TableName, int64(totalRows))
 
-	// Build packet processing chain.
-	// Порядок: mask/normalize/validate → compact → compress → (encrypt) → (hash)
-	chain := processors.NewPacketChain()
+	// Порядок шагов берётся из pkg/transform, а не из очереди вызовов ниже.
+	//
+	// Раньше он держался на том, что каждый добавляющий шаг прочитал все
+	// комментарии вида "MUST run before ComputeIntegrity". За месяц так
+	// набралось три бага, и все — про стык между шагами, а не про сами
+	// преобразования. Теперь ограничения объявлены у шага один раз, план
+	// строится из них, а этот код лишь раскладывает готовые шаги по плану.
+	steps := map[string]processors.PacketProcessor{}
 
 	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
-		chain.Add(opts.ProcessorMgr)
+		steps[transform.StageRowProcessors] = opts.ProcessorMgr
 	}
 
 	if opts.Compact {
@@ -279,7 +310,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			fmt.Println("⚠ compact requested but no fixed fields found (use --fixed-fields or add _ prefix to view columns)")
 		} else {
 			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
-			chain.Add(&compactProc{fixedNames: fixedNames, writeTail: opts.CompactTail})
+			steps[transform.StageCompact] = &compactProc{fixedNames: fixedNames, writeTail: opts.CompactTail}
 		}
 	}
 
@@ -309,13 +340,35 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		} else {
 			fmt.Printf("v1.4 integrity (local hashes only, no Mercury registration)...\n")
 		}
-		chain.Add(&integrityProc{mercuryClient: mclient, mercuryURL: opts.MercuryURL, caller: caller})
+		steps[transform.StageIntegrity] = &integrityProc{mercuryClient: mclient, mercuryURL: opts.MercuryURL, caller: caller}
 	}
 
 	if opts.Compress {
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
-		chain.Add(&compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
-			checksum: opts.EnableChecksum, columnar: opts.Columnar})
+		steps[transform.StageCompress] = &compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
+			checksum: opts.EnableChecksum, columnar: opts.Columnar}
+	}
+
+	// v1.5 шифрование — шаг цепочки; порядок относительно сжатия и целостности
+	// задан реестром, а не тем, что writePacket вызывается последним.
+	var encUUIDs []string
+	if opts.Encrypt && !opts.EncryptLegacy {
+		steps[transform.StageEncrypt] = &encryptProc{mercuryURL: opts.MercuryURL, uuids: &encUUIDs}
+	}
+
+	// Раскладка по плану. Несовместимый набор отвергается ЗДЕСЬ, до первого
+	// записанного байта, а не проявляется у получателя.
+	enabled := make([]string, 0, len(steps))
+	for name := range steps {
+		enabled = append(enabled, name)
+	}
+	plan, planErr := transform.Plan(enabled)
+	if planErr != nil {
+		return fmt.Errorf("incompatible transform options: %w", planErr)
+	}
+	chain := processors.NewPacketChain()
+	for _, name := range plan {
+		chain.Add(steps[name])
 	}
 
 	// Open object storage once outside the loop (if needed).
@@ -465,10 +518,15 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 		if total > 1 {
 			key = generatePacketFilename(opts.StorageKey, n, total)
 		}
-		xmlData, uuid, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+		// Шифрование уже выполнено шагом цепочки (encryptProc): здесь пакет
+		// сериализуется как любой другой. Раньше writePacket шифровал сам, и
+		// это было единственное преобразование вне общего порядка.
+		gen := packet.NewGenerator()
+		xmlData, err := gen.ToXML(pkt, true)
 		if err != nil {
-			return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+			return fmt.Errorf("marshal encrypted packet %d/%d: %w", n, total, err)
 		}
+		uuid := pkt.Header.MessageID
 		if err := uploadXMLBytesToStorage(ctx, store, xmlData, key, pkt); err != nil {
 			return err
 		}
@@ -495,14 +553,6 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 	case opts.OutputFile == "" || opts.OutputFile == "-":
 		if opts.Encrypt && opts.EncryptLegacy {
 			return fmt.Errorf("--enc13 cannot be used with stdout output; specify --output file.tdtp.enc")
-		}
-		if opts.Encrypt {
-			xmlData, _, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
-			if err != nil {
-				return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
-			}
-			fmt.Println(string(xmlData))
-			return nil
 		}
 		generator := packet.NewGenerator()
 		xml, err := generator.ToXML(pkt, true)
@@ -533,10 +583,13 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 			}
 
 		case opts.Encrypt:
-			xmlData, uuid, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+			// Зашифровано шагом цепочки; здесь только сериализация.
+			gen := packet.NewGenerator()
+			xmlData, err := gen.ToXML(pkt, true)
 			if err != nil {
-				return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+				return fmt.Errorf("marshal encrypted packet %d/%d: %w", n, total, err)
 			}
+			uuid := pkt.Header.MessageID
 			if err := writeEncryptedBlobToFile(xmlData, filename); err != nil {
 				return err
 			}
@@ -744,10 +797,10 @@ func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableCh
 	//
 	// Раскладка не идёт через materializeForWrite, потому что после сжатия
 	// Data.Rows — это один блоб, и перекладывать там уже нечего.
+	// EnsureColumnar идемпотентна: на пути с TDTQL-запросом раскладку мог уже
+	// применить писатель, и второе транспонирование приняло бы колонки за строки.
 	if columnar {
-		rows := pkt.GetRows()
-		pkt.Data = packet.RowsToColumnarData(rows, len(pkt.Schema.Fields),
-			packet.BuildEscapeMask(pkt.Schema))
+		packet.EnsureColumnar(pkt)
 	}
 
 	if algo == "" {
@@ -821,11 +874,21 @@ func decompressPacketData(pkt *packet.DataPacket) error {
 		pkt.Data.Rows[i] = packet.Row{Value: row}
 	}
 
-	// Integrity: RecordsInPart must match actual decompressed row count.
-	// v1.4+ packets carry XXH3 — that is the authoritative integrity check.
-	if declared := pkt.Header.RecordsInPart; declared > 0 && packet.NeedsRowCountCheck(pkt.Version) && declared != len(rows) {
-		return fmt.Errorf("RecordsInPart mismatch after decompression: header declares %d rows, got %d (data may be truncated or corrupt)",
-			declared, len(rows))
+	// Колоночная раскладка разворачивается ЗДЕСЬ, и до счёта строк.
+	//
+	// Это третья копия связки «распаковать и сверить счётчик» — две другие в
+	// packet.DecompressData и etl/loader.go. Копию пропустили, когда разворот
+	// вносили в первые две, и --to-csv/--to-html/--to-tdtp начали отвергать
+	// сжатый колоночный пакет: распаковка даёт по строке на КОЛОНКУ, и восемь
+	// колонок сравнивались с десятью строками заголовка.
+	if err := packet.ExpandColumnarRows(pkt); err != nil {
+		return err
+	}
+
+	// Счёт строк — общей функцией, без версионного гейта: заголовок не покрыт
+	// ни одним хешем, так что «начиная с v1.4 за него отвечает XXH3» неверно.
+	if err := packet.VerifyRowCount(pkt); err != nil {
+		return fmt.Errorf("%w after decompression (data may be truncated or corrupt)", err)
 	}
 
 	return nil

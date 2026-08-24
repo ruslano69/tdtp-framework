@@ -1439,6 +1439,193 @@ def test_T12_dates_columnar_processors():
            city_ok, time.monotonic() - t,
            f"City={masked[0][3]!r}" if masked else "no rows")
 
+    # --- Compressed columnar: every conversion must read it -------------------
+    #
+    # T12.9-T12.14 above transpose in Python and so only ever produce an
+    # UNCOMPRESSED columnar packet. The compressed one takes a different route
+    # on both sides: the layout is applied between hashing and the codec, and
+    # the reader has to expand after decompressing. That gap let a real defect
+    # through — decompression yields one string per COLUMN, and a copy of the
+    # row-count check compared eight columns against ten rows, so --to-csv,
+    # --to-html and --to-tdtp all refused a packet they had written themselves.
+    t = time.monotonic()
+    colz = out("t12_users_colz.xml")
+    p = run("--export", "users", "--columnar", "--compress", "--output", colz)
+    attrs = ""
+    if os.path.exists(colz):
+        d = ET.parse(colz).getroot().find("Data")
+        attrs = "%s/%s" % (d.get("compression"), d.get("layout"))
+    record("T12.20 export compressed + columnar in one packet",
+           p.returncode == 0 and attrs == "zstd/columns", time.monotonic() - t,
+           f"rc={p.returncode} Data={attrs!r} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    ref = out("t12_users_rowz.xml")
+    run("--export", "users", "--compress", "--output", ref)
+    ref_csv, col_csv = out("t12_rowz.csv"), out("t12_colz.csv")
+    p1 = run_no_cfg("--to-csv", ref, "--output", ref_csv)
+    p2 = run_no_cfg("--to-csv", colz, "--output", col_csv)
+    same = False
+    if p1.returncode == 0 and p2.returncode == 0 and os.path.exists(ref_csv) and os.path.exists(col_csv):
+        with open(ref_csv, encoding="utf-8") as fh:
+            a = fh.read()
+        with open(col_csv, encoding="utf-8") as fh:
+            b = fh.read()
+        same = a == b
+    record("T12.21 --to-csv gives identical output for row and columnar packets",
+           p2.returncode == 0 and same, time.monotonic() - t,
+           f"rc={p2.returncode} identical={same} err={p2.stderr[-160:]}")
+
+    t = time.monotonic()
+    p = run_no_cfg("--to-html", colz, "--output", out("t12_colz.html"))
+    record("T12.22 --to-html reads a compressed columnar packet",
+           p.returncode == 0, time.monotonic() - t,
+           f"rc={p.returncode} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    p = run_no_cfg("--to-tdtp", colz, "--output", out("t12_colz_norm.xml"), "--v14")
+    rows_back = read_rows(out("t12_colz_norm.xml"))
+    record("T12.23 --to-tdtp normalizes a compressed columnar packet to 10 rows",
+           p.returncode == 0 and len(rows_back) == 10, time.monotonic() - t,
+           f"rc={p.returncode} rows={len(rows_back)} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    imp_db = out("t12_colz_import.db")
+    if os.path.exists(imp_db):
+        os.remove(imp_db)
+    shutil.copy(TEST_DB, imp_db)
+    conn = sqlite3.connect(imp_db)
+    conn.execute("DELETE FROM users")
+    conn.commit()
+    conn.close()
+    imp_cfg = out("t12_colz_import.yaml")
+    write_cfg(imp_cfg, db=imp_db)
+    p = run("--import", colz, "--table", "users", "--strategy", "replace", cfg=imp_cfg)
+    n = sqlite_query(imp_db, "SELECT COUNT(*) FROM users")[0][0]
+    record("T12.24 --import restores 10 rows from a compressed columnar packet",
+           p.returncode == 0 and n == 10, time.monotonic() - t,
+           f"rc={p.returncode} rows={n} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    p = run("--test", colz)
+    record("T12.25 --test counts rows, not columns, on a compressed columnar packet",
+           p.returncode == 0 and "10 rows" in p.stdout, time.monotonic() - t,
+           f"rc={p.returncode} out={p.stdout[-160:]}")
+
+    # --- Columnar on the TDTQL query path ------------------------------------
+    #
+    # A filtered export goes through GenerateResponse, which builds Data eagerly
+    # instead of leaving rows in the writer's fast path. --columnar reached only
+    # the latter, so a query export silently produced a row-major packet: the
+    # flag was accepted, reported nothing, and did nothing.
+    #
+    # The compressed variant is the one that can corrupt rather than merely
+    # ignore. The layout is applied by the writer AND by the compression step,
+    # so a second transposition would read the columns as rows.
+    for label, args in [("--limit", ["--limit", "5"]),
+                        ("--where", ["--where", "City = 'Moscow'"])]:
+        for suffix, extra in [("", []), (" +compress", ["--compress"])]:
+            t = time.monotonic()
+            colf = out(f"t12_q{label.strip('-')}{'z' if extra else ''}.xml")
+            p = run("--export", "users", "--columnar", *args, *extra, "--output", colf)
+            layout, nrec = "", -1
+            if os.path.exists(colf):
+                root = ET.parse(colf).getroot()
+                layout = root.find("Data").get("layout") or ""
+                rip = root.find("Header").find("RecordsInPart")
+                nrec = int(rip.text) if rip is not None and rip.text else -1
+            record(f"T12.26{label}{suffix}: --columnar applies on the query path",
+                   p.returncode == 0 and layout == "columns" and nrec == 5,
+                   time.monotonic() - t,
+                   f"rc={p.returncode} layout={layout!r} RecordsInPart={nrec}")
+
+            # And the rows must survive: a double transposition would not fail,
+            # it would hand back other records' values.
+            t = time.monotonic()
+            reff = out(f"t12_qref{label.strip('-')}{'z' if extra else ''}.xml")
+            run("--export", "users", *args, *extra, "--output", reff)
+            a_csv, b_csv = out("t12_qa.csv"), out("t12_qb.csv")
+            r1 = run_no_cfg("--to-csv", reff, "--output", a_csv)
+            r2 = run_no_cfg("--to-csv", colf, "--output", b_csv)
+            same = False
+            if r1.returncode == 0 and r2.returncode == 0:
+                with open(a_csv, encoding="utf-8") as fh:
+                    a = fh.read()
+                with open(b_csv, encoding="utf-8") as fh:
+                    b = fh.read()
+                same = a == b and a.count("\n") >= 5
+            record(f"T12.27{label}{suffix}: filtered rows are identical either layout",
+                   same, time.monotonic() - t,
+                   f"rc={r2.returncode} identical={same}")
+
+    # --- The combination matrix ----------------------------------------------
+    #
+    # Every transformation was tested on its own, and each pair that anyone
+    # happened to think of. The full stack was not, and it was broken: with
+    # --columnar --compact --integrity --compress the packet came back with an
+    # empty stored hash and was refused on read.
+    #
+    # Two separate causes, both invisible in isolation. Laying out the columns
+    # replaced the whole <Data> element and dropped the xxh3 that integrity had
+    # already stamped. And materializing rows cleared the columnar intent, so
+    # --columnar --integrity silently wrote a row-major packet — the flag
+    # accepted, nothing said, nothing done.
+    #
+    # Hence a matrix rather than more pairs: these bugs live in the ordering
+    # between steps, so the only thing that finds them is running the steps
+    # together. Each case asserts three things, because each failure mode shows
+    # up in a different one: the attribute is present (the flag was not
+    # ignored), the hash survives (a later step did not clobber an earlier
+    # one), and the data reads back identical (nothing was transposed twice).
+    base = out("t12_matrix_base.xml")
+    base_csv = out("t12_matrix_base.csv")
+    run("--export", "users", "--output", base)
+    run_no_cfg("--to-csv", base, "--output", base_csv)
+    with open(base_csv, encoding="utf-8") as fh:
+        want_csv = fh.read()
+
+    matrix = [
+        ["--columnar"],
+        ["--columnar", "--integrity"],
+        ["--columnar", "--compress"],
+        ["--columnar", "--compact"],
+        ["--columnar", "--compact", "--compress"],
+        ["--columnar", "--integrity", "--compress"],
+        ["--columnar", "--compact", "--integrity", "--compress"],
+    ]
+    for i, args in enumerate(matrix, start=1):
+        t = time.monotonic()
+        label = " ".join(a.lstrip("-") for a in args)
+        f = out(f"t12_matrix_{i}.xml")
+        c = out(f"t12_matrix_{i}.csv")
+        p = run("--export", "users", *args, "--output", f)
+
+        layout, xxh3 = "", ""
+        if os.path.exists(f):
+            d = ET.parse(f).getroot().find("Data")
+            layout = d.get("layout") or ""
+            xxh3 = d.get("xxh3") or ""
+
+        r = run_no_cfg("--to-csv", f, "--output", c)
+        got_csv = ""
+        if r.returncode == 0 and os.path.exists(c):
+            with open(c, encoding="utf-8") as fh:
+                got_csv = fh.read()
+
+        want_hash = "--integrity" in args
+        ok = (p.returncode == 0
+              and layout == "columns"                 # флаг не проигнорирован
+              and bool(xxh3) == want_hash             # хеш не затёрт поздним шагом
+              and r.returncode == 0
+              and got_csv == want_csv)                # ничего не переложено дважды
+        record(f"T12.28.{i} {label}",
+               ok, time.monotonic() - t,
+               f"export={p.returncode} layout={layout!r} xxh3={'да' if xxh3 else 'нет'} "
+               f"read={r.returncode} data={'ok' if got_csv == want_csv else 'РАСХОЖДЕНИЕ'}")
+
+
+
+
 
 
 # ─── Runner ───────────────────────────────────────────────────────────────────

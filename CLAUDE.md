@@ -476,6 +476,92 @@ broker's limit rather than aligning the two formulas with each other.
 
 ---
 
+## Adding a format or a transformation (IMPORTANT)
+
+**Declare it in `pkg/transform`. Do not order it by hand at the call site.**
+
+That package holds no implementations — only the step names, the order between
+them and the incompatibilities. `Plan(enabled)` returns the order to run;
+`ExportTable` builds its chain from that, so the sequence can no longer be
+changed by moving a line.
+
+### Why it exists
+
+The order used to live in the call order of `chain.Add` plus comments saying
+`MUST run before ComputeIntegrity`. That holds only while everyone adding a
+step has read every comment. Three bugs in one month, all in the seam between
+steps rather than in any step:
+
+- laying out columns after `ComputeIntegrity` but assigning `Data` wholesale
+  threw away the `xxh3` already stamped — the packet was refused on read with
+  an empty stored hash;
+- laying them out *before* hashing would have had the writer hash columns while
+  the reader hashes rows — a mismatch on every packet;
+- `MaterializeRows` cleared the columnar intent because the rows were already
+  row-major by then, so `--columnar --integrity` silently wrote an ordinary
+  packet. Flag accepted, nothing said, nothing done.
+
+None is visible on a single flag, and none on a pair.
+
+### The rule
+
+1. **Add a `Stage` to the registry** with `After` where order matters and
+   `Conflicts` where a combination is meaningless or dangerous.
+2. **Write `Reason` as an answer to the user**, not a note to yourself — it
+   becomes the refusal text.
+3. **No constraint "just in case."** Every one in the registry is there because
+   breaking it corrupted data, and the comment says how. A constraint without
+   that history forbids a working combination.
+4. **A step must be idempotent, or applied from exactly one place.** The
+   columnar layout was applied from two — the writer and the compression step —
+   and the second pass read the columns as rows, returning other records'
+   values. Silently: such a packet converts without complaint.
+
+### The read order is not the write order reversed
+
+`transform.ReadOrder()` lists the reading steps, each with the reason for its
+place. It describes rather than executes — the steps live in `ParseBytes`,
+`DecompressData`, `VerifyIntegrity` and the CLI commands — and it exists
+because three of the four ordering bugs this month happened on the reading
+side, where a write-side dispatcher offers no protection at all.
+
+```
+parse → decrypt → decompress → expand-columnar → expand-compact
+      → verify-rowcount → verify-integrity → expand-dictionary
+```
+
+The write order answers "what wraps what". The read order answers a different
+question — "what is safe to touch yet" — and the two differ:
+
+- **Integrity is stamped before compression and verified after decompression.**
+  Reversing the write order would give "verify, then decompress", which cannot
+  work: the hash covers the plain rows.
+- **`verify-rowcount` has no write-side counterpart.** `RecordsInPart` is
+  written, but on the writing side there is nothing to compare it against.
+- **`expand-columnar` must precede both the row count and the integrity check.**
+  Decompression yields one string per *column*, so eight columns were compared
+  against a header counting ten rows — that broke `--to-csv`, `--to-html`,
+  `--to-tdtp` and `--import` identically.
+- **The decompression bomb detonates at `decompress`,** before any signature has
+  had a chance to speak. `MaxDecompressedBytes` is the only thing between a
+  25 KB packet and 200 MB of memory; no hash helps, because hashes are verified
+  further down this list.
+
+### Do not hand-write a compatibility matrix
+
+N flags means 2^N subsets, N² pairwise. A hand-written table falls behind on
+the first new transformation, and falls behind *quietly* — the tests keep
+passing, they just stop covering the new step. `stages_test.go` generates the
+subsets from the registry instead, so declaring a stage is the whole job.
+
+The generator guards its own limit: past twelve stages it fails and says to
+switch to pairwise plus the full set, rather than quietly taking minutes.
+
+`ExamplePlan` doubles as the readable statement of the current order:
+`compact → integrity → columnar → compress`.
+
+---
+
 ## The parser: a hybrid parse (IMPORTANT)
 
 The writer took reflection off the hot path long ago (`xmlwriter.go`): Header and
