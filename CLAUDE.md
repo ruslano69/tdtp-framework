@@ -517,6 +517,36 @@ None is visible on a single flag, and none on a pair.
    and the second pass read the columns as rows, returning other records'
    values. Silently: such a packet converts without complaint.
 
+### The read order is not the write order reversed
+
+`transform.ReadOrder()` lists the reading steps, each with the reason for its
+place. It describes rather than executes — the steps live in `ParseBytes`,
+`DecompressData`, `VerifyIntegrity` and the CLI commands — and it exists
+because three of the four ordering bugs this month happened on the reading
+side, where a write-side dispatcher offers no protection at all.
+
+```
+parse → decrypt → decompress → expand-columnar → expand-compact
+      → verify-rowcount → verify-integrity → expand-dictionary
+```
+
+The write order answers "what wraps what". The read order answers a different
+question — "what is safe to touch yet" — and the two differ:
+
+- **Integrity is stamped before compression and verified after decompression.**
+  Reversing the write order would give "verify, then decompress", which cannot
+  work: the hash covers the plain rows.
+- **`verify-rowcount` has no write-side counterpart.** `RecordsInPart` is
+  written, but on the writing side there is nothing to compare it against.
+- **`expand-columnar` must precede both the row count and the integrity check.**
+  Decompression yields one string per *column*, so eight columns were compared
+  against a header counting ten rows — that broke `--to-csv`, `--to-html`,
+  `--to-tdtp` and `--import` identically.
+- **The decompression bomb detonates at `decompress`,** before any signature has
+  had a chance to speak. `MaxDecompressedBytes` is the only thing between a
+  25 KB packet and 200 MB of memory; no hash helps, because hashes are verified
+  further down this list.
+
 ### Do not hand-write a compatibility matrix
 
 N flags means 2^N subsets, N² pairwise. A hand-written table falls behind on

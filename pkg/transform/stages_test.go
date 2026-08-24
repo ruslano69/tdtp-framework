@@ -186,3 +186,91 @@ func ExamplePlan() {
 	fmt.Println(strings.Join(plan, " → "))
 	// Output: compact → integrity → columnar → compress
 }
+
+// ── Порядок на чтении ───────────────────────────────────────────────────────
+
+// Ограничения чтения, каждое из которых уже ломалось. Список описательный —
+// исполняют его packet и команды CLI, — но описание обязано совпадать с тем,
+// что там происходит, иначе оно хуже отсутствия: выглядит проверенным.
+func TestReadOrder_PinsWhatBrokeOnReading(t *testing.T) {
+	cases := []struct{ before, after, why string }{
+		{"decrypt", "decompress",
+			"пока секции зашифрованы, распаковывать нечего"},
+		{"decompress", "expand-columnar",
+			"колонки лежат в блобе; разворот до распаковки невозможен"},
+		{"expand-columnar", "verify-rowcount",
+			"распакованное — по строке на КОЛОНКУ; восемь колонок против десяти " +
+				"строк заголовка ломали --to-csv, --to-html, --to-tdtp и --import"},
+		{"expand-columnar", "verify-integrity",
+			"хеш писателя считан по построчным значениям; по колонкам он не сойдётся"},
+		{"expand-compact", "verify-integrity",
+			"хеш накрывает окончательные значения, а compact их восстанавливает"},
+		{"verify-integrity", "expand-dictionary",
+			"подстановка словаря меняет значения; после проверки — намеренно"},
+	}
+	for _, c := range cases {
+		t.Run(c.before+"→"+c.after, func(t *testing.T) {
+			if !ReadMustPrecede(c.before, c.after) {
+				t.Errorf("порядок чтения потерян: %s обязан идти раньше %s — %s",
+					c.before, c.after, c.why)
+			}
+		})
+	}
+}
+
+// Порядок чтения — НЕ обращение порядка записи. Проверяется явно, потому что
+// «просто разверни запись наоборот» — первая мысль, и она неверна.
+func TestReadOrder_IsNotTheReverseOfWrite(t *testing.T) {
+	// На записи целостность идёт ДО сжатия, на чтении проверка целостности —
+	// ПОСЛЕ распаковки. Обращение дало бы «проверить, потом распаковать».
+	if !MustRunBefore(StageIntegrity, StageCompress) {
+		t.Fatal("на записи integrity обязан быть до compress")
+	}
+	if !ReadMustPrecede("decompress", "verify-integrity") {
+		t.Fatal("на чтении распаковка обязана быть до проверки целостности")
+	}
+
+	// А вот счёта строк на записи нет вовсе: RecordsInPart проставляется, но
+	// сверять его там не с чем. Шаг существует только на чтении.
+	if ReadStepIndex("verify-rowcount") < 0 {
+		t.Error("verify-rowcount отсутствует в порядке чтения")
+	}
+	for _, name := range All() {
+		if name == "verify-rowcount" {
+			t.Error("verify-rowcount не должен быть шагом записи")
+		}
+	}
+}
+
+// Каждый шаг чтения обязан объяснять своё место: список без причин снова
+// превращается в порядок, который живёт в чьей-то голове.
+func TestReadOrder_EveryStepStatesItsReason(t *testing.T) {
+	seen := map[string]bool{}
+	for _, s := range ReadOrder() {
+		if strings.TrimSpace(s.Note) == "" {
+			t.Errorf("шаг чтения %q без объяснения", s.Name)
+		}
+		if seen[s.Name] {
+			t.Errorf("шаг чтения %q объявлен дважды", s.Name)
+		}
+		seen[s.Name] = true
+	}
+	if len(seen) == 0 {
+		t.Fatal("порядок чтения пуст")
+	}
+}
+
+func ExampleReadOrder() {
+	for _, s := range ReadOrder() {
+		fmt.Println(s.Name)
+	}
+	// Output:
+	// parse
+	// decrypt
+	// decompress
+	// expand-columnar
+	// expand-compact
+	// verify-rowcount
+	// verify-integrity
+	// expand-dictionary
+}

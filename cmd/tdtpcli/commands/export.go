@@ -112,6 +112,31 @@ type integrityProc struct {
 	caller        string
 }
 
+// encryptProc — v1.5 посекционное шифрование как шаг цепочки.
+//
+// Только v1.5. Legacy --enc13 шагом быть не может: он подменяет сериализацию
+// целиком, отдавая двоичный блоб вместо XML, то есть это формат контейнера, а
+// не преобразование пакета. Он и остаётся в writePacket, и в реестре
+// pkg/transform его нет — объявить там то, что не встраивается в цепочку,
+// значило бы соврать о нём проверке совместимости.
+type encryptProc struct {
+	mercuryURL string
+	uuids      *[]string // куда сложить UUID пакетов — их печатают пользователю
+}
+
+func (p *encryptProc) Name() string { return "encrypt" }
+
+func (p *encryptProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error {
+	uuid, err := EncryptSectionsInPlace(ctx, pkt, p.mercuryURL, pkt.Header.TableName)
+	if err != nil {
+		return err
+	}
+	if p.uuids != nil {
+		*p.uuids = append(*p.uuids, uuid)
+	}
+	return nil
+}
+
 func (p *integrityProc) Name() string { return "integrity" }
 
 func (p *integrityProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error {
@@ -324,6 +349,13 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			checksum: opts.EnableChecksum, columnar: opts.Columnar}
 	}
 
+	// v1.5 шифрование — шаг цепочки; порядок относительно сжатия и целостности
+	// задан реестром, а не тем, что writePacket вызывается последним.
+	var encUUIDs []string
+	if opts.Encrypt && !opts.EncryptLegacy {
+		steps[transform.StageEncrypt] = &encryptProc{mercuryURL: opts.MercuryURL, uuids: &encUUIDs}
+	}
+
 	// Раскладка по плану. Несовместимый набор отвергается ЗДЕСЬ, до первого
 	// записанного байта, а не проявляется у получателя.
 	enabled := make([]string, 0, len(steps))
@@ -486,10 +518,15 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 		if total > 1 {
 			key = generatePacketFilename(opts.StorageKey, n, total)
 		}
-		xmlData, uuid, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+		// Шифрование уже выполнено шагом цепочки (encryptProc): здесь пакет
+		// сериализуется как любой другой. Раньше writePacket шифровал сам, и
+		// это было единственное преобразование вне общего порядка.
+		gen := packet.NewGenerator()
+		xmlData, err := gen.ToXML(pkt, true)
 		if err != nil {
-			return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+			return fmt.Errorf("marshal encrypted packet %d/%d: %w", n, total, err)
 		}
+		uuid := pkt.Header.MessageID
 		if err := uploadXMLBytesToStorage(ctx, store, xmlData, key, pkt); err != nil {
 			return err
 		}
@@ -516,14 +553,6 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 	case opts.OutputFile == "" || opts.OutputFile == "-":
 		if opts.Encrypt && opts.EncryptLegacy {
 			return fmt.Errorf("--enc13 cannot be used with stdout output; specify --output file.tdtp.enc")
-		}
-		if opts.Encrypt {
-			xmlData, _, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
-			if err != nil {
-				return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
-			}
-			fmt.Println(string(xmlData))
-			return nil
 		}
 		generator := packet.NewGenerator()
 		xml, err := generator.ToXML(pkt, true)
@@ -554,10 +583,13 @@ func writePacket(ctx context.Context, pkt *packet.DataPacket, n, total int, opts
 			}
 
 		case opts.Encrypt:
-			xmlData, uuid, err := EncryptPacketV15(ctx, pkt, opts.MercuryURL, pkt.Header.TableName)
+			// Зашифровано шагом цепочки; здесь только сериализация.
+			gen := packet.NewGenerator()
+			xmlData, err := gen.ToXML(pkt, true)
 			if err != nil {
-				return fmt.Errorf("encrypt packet %d/%d: %w", n, total, err)
+				return fmt.Errorf("marshal encrypted packet %d/%d: %w", n, total, err)
 			}
+			uuid := pkt.Header.MessageID
 			if err := writeEncryptedBlobToFile(xmlData, filename); err != nil {
 				return err
 			}
