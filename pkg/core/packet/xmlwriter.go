@@ -95,6 +95,9 @@ func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
 	if packet.Data.Encryption != "" {
 		writeXMLAttr(w, "encryption", packet.Data.Encryption)
 	}
+	if packet.Data.Layout != "" {
+		writeXMLAttr(w, "layout", packet.Data.Layout)
+	}
 	w.WriteByte('>')
 
 	if len(packet.rawRows) > 0 {

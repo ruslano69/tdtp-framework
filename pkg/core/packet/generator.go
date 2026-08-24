@@ -143,6 +143,7 @@ type Generator struct {
 	maxMessageSize    int                // в байтах
 	compression       CompressionOptions // настройки сжатия
 	skipSpecialValues bool               // --fast: пропустить DetectAndApply (без контроля NULL/NaN/Inf)
+	columnar          bool               // Data.Layout="columns" (см. SetColumnarLayout)
 }
 
 // NewGenerator создает новый генератор
@@ -176,6 +177,16 @@ func (g *Generator) DisableCompression() {
 // SetSkipSpecialValues отключает DetectAndApply для максимальной скорости экспорта.
 // Используется с флагом --fast: NULL/NaN/Inf не получат canonical markers в схеме.
 // Применять только когда источник гарантированно не содержит спецзначений.
+// SetColumnarLayout включает колоночную раскладку Data.
+//
+// По умолчанию выключена, и это осознанно: атрибут layout меняет смысл <R>,
+// поэтому читатель, ничего о нём не знающий, разберёт такой пакет неверно и
+// молча. Включать только там, где известно, что принимающая сторона умеет
+// разворачивать (см. ExpandColumnarRows).
+func (g *Generator) SetColumnarLayout(on bool) {
+	g.columnar = on
+}
+
 func (g *Generator) SetSkipSpecialValues(skip bool) {
 	g.skipSpecialValues = skip
 }
@@ -367,15 +378,32 @@ func (g *Generator) GenerateAlarm(
 func (g *Generator) ToXML(packet *DataPacket, _ bool) ([]byte, error) {
 	// Broker/компрессия-путь: если сжатие включено, нужны Data.Rows (compressed string).
 	// В этом случае rawRows ещё не прошли через rowsToDataWithCompression.
-	if g.compression.Enabled && len(packet.rawRows) > 0 && len(packet.Data.Rows) == 0 {
-		packet.Data = rowsToDataMasked(packet.rawRows, buildEscapeMask(packet.Schema))
-		packet.rawRows = nil
-	}
+	g.materializeForWrite(packet)
 	data, err := packetToBytes(packet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write XML: %w", err)
 	}
 	return data, nil
+}
+
+// materializeForWrite переводит rawRows в Data.Rows там, где писать напрямую
+// нельзя: при сжатии (нужен один блоб) и при колоночной раскладке (нужен
+// разворот по колонкам). В остальных случаях rawRows остаются, и писатель
+// идёт быстрым путём.
+func (g *Generator) materializeForWrite(packet *DataPacket) {
+	if len(packet.rawRows) == 0 || len(packet.Data.Rows) > 0 {
+		return
+	}
+	mask := buildEscapeMask(packet.Schema)
+	switch {
+	case g.columnar:
+		packet.Data = RowsToColumnarData(packet.rawRows, len(packet.Schema.Fields), mask)
+	case g.compression.Enabled:
+		packet.Data = rowsToDataMasked(packet.rawRows, mask)
+	default:
+		return
+	}
+	packet.rawRows = nil
 }
 
 // WriteToFile записывает пакет прямо в файл без промежуточного []byte.
@@ -385,6 +413,7 @@ func (g *Generator) WriteToFile(packet *DataPacket, filename string) error {
 
 // WriteToWriter записывает пакет в writer.
 func (g *Generator) WriteToWriter(packet *DataPacket, w io.Writer) error {
+	g.materializeForWrite(packet)
 	return writePacketTo(newPacketWriter(w), packet)
 }
 

@@ -154,6 +154,10 @@ func (p *Parser) parseAndExpand(data []byte) (*DataPacket, error) {
 		return nil, err
 	}
 
+	if err := ExpandColumnarRows(packet); err != nil {
+		return nil, err
+	}
+
 	return p.expandCompact(packet)
 }
 
@@ -297,7 +301,11 @@ func (p *Parser) validatePacket(packet *DataPacket) error {
 	// Для сжатых пакетов строки упакованы в blob — проверка невозможна без декомпрессии.
 	// Начиная с v1.4 целостность гарантируется XXH3 — проверка счётчика избыточна.
 	// v1.5: зашифрованные строки тоже упакованы в один opaque <R> — тот же случай.
-	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" && packet.Data.Encryption == "" && NeedsRowCountCheck(packet.Version) {
+	// Колоночная раскладка: <R> это колонка, а не строка, так что сравнивать
+	// их число с RecordsInPart бессмысленно — счёт строк даёт ExpandColumnarRows,
+	// и он же ловит колонки разной высоты.
+	if packet.Header.RecordsInPart > 0 && packet.Data.Compression == "" && packet.Data.Encryption == "" &&
+		packet.Data.Layout == "" && NeedsRowCountCheck(packet.Version) {
 		if actual := len(packet.Data.Rows); actual != packet.Header.RecordsInPart {
 			return fmt.Errorf("RecordsInPart mismatch: header declares %d rows, <Data> contains %d",
 				packet.Header.RecordsInPart, actual)
