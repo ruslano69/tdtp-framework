@@ -46,20 +46,21 @@ func TestColumnar_RoundTrip(t *testing.T) {
 		t.Errorf("<R> элементов %d, ожидалось %d (по колонкам)", n, len(schema.Fields))
 	}
 
-	// ParseBytes намеренно не разворачивает — как и с compact.
+	// ParseBytes разворачивает колонки — в отличие от compact. Асимметрия
+	// намеренна: неразвёрнутый compact вызывающий видит по флагу и по
+	// осмысленным значениям, а неразвёрнутые колонки выглядят обычными
+	// строками, только составленными из чужих значений.
 	raw, err := NewParser().ParseBytes(xml)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if raw.Data.Layout != LayoutColumns {
-		t.Errorf("ParseBytes снял layout, а не должен был")
+	if raw.Data.Layout != "" {
+		t.Errorf("ParseBytes не развернул колонки: layout=%q", raw.Data.Layout)
 	}
 
+	// Повторный вызов обязан быть безобидным.
 	if err := ExpandColumnarRows(raw); err != nil {
-		t.Fatalf("expand: %v", err)
-	}
-	if raw.Data.Layout != "" {
-		t.Errorf("после разворота layout остался %q", raw.Data.Layout)
+		t.Fatalf("повторный expand: %v", err)
 	}
 
 	got := raw.GetRows()
@@ -151,13 +152,21 @@ func TestColumnar_RejectsColumnCountMismatch(t *testing.T) {
 	}
 }
 
-// Разворачивать сжатый пакет нельзя — строки ещё в блобе.
-func TestColumnar_RefusesCompressed(t *testing.T) {
+// На сжатом пакете разворот — no-op, а не ошибка: строки ещё в блобе, и
+// DecompressData позовёт эту же функцию сразу после распаковки. Ошибка сделала
+// бы её непригодной как автоматический шаг разбора.
+func TestColumnar_NoOpWhileCompressed(t *testing.T) {
 	pkt := NewDataPacket(TypeReference, "T")
 	pkt.Schema = columnarSchema()
 	pkt.Data = Data{Layout: LayoutColumns, Compression: "zstd", Rows: []Row{{Value: "blob"}}}
-	if err := ExpandColumnarRows(pkt); err == nil {
-		t.Fatal("ожидался отказ разворачивать сжатый пакет")
+	if err := ExpandColumnarRows(pkt); err != nil {
+		t.Fatalf("ожидался no-op, получена ошибка: %v", err)
+	}
+	if pkt.Data.Layout != LayoutColumns {
+		t.Errorf("layout снят раньше распаковки: %q", pkt.Data.Layout)
+	}
+	if len(pkt.Data.Rows) != 1 || pkt.Data.Rows[0].Value != "blob" {
+		t.Errorf("блоб тронут: %v", pkt.Data.Rows)
 	}
 }
 

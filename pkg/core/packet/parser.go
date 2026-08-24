@@ -194,6 +194,9 @@ func (p *Parser) ParseBytes(data []byte) (*DataPacket, error) {
 		if err := p.validatePacket(packet); err != nil {
 			return nil, fmt.Errorf("validation failed: %w", err)
 		}
+		if err := ExpandColumnarRows(packet); err != nil {
+			return nil, err
+		}
 		return packet, nil
 	}
 
@@ -204,6 +207,16 @@ func (p *Parser) ParseBytes(data []byte) (*DataPacket, error) {
 
 	if err := p.validatePacket(&packet); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	// Колоночная раскладка разворачивается на разборе, в отличие от compact.
+	// Асимметрия намеренна и держится на разной цене промаха: неразвёрнутый
+	// compact виден вызывающему — флаг стоит, строк столько же, значения
+	// осмысленны; неразвёрнутые колонки выглядят как обычные строки, только
+	// чужие. То есть compact можно оставить на усмотрение вызывающего, а
+	// колонки нельзя.
+	if err := ExpandColumnarRows(&packet); err != nil {
+		return nil, err
 	}
 
 	return &packet, nil
@@ -365,7 +378,10 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 		packet.Data.Rows[i] = Row{Value: rowStr}
 	}
 
-	return nil
+	// Колоночная раскладка разворачивается здесь, а не у вызывающего. Это
+	// точка схождения сжатого и несжатого путей, и единственное место, где
+	// разворот гарантированно случится ровно один раз.
+	return ExpandColumnarRows(packet)
 }
 
 // ParseWithDecompression парсит пакет и автоматически распаковывает сжатые данные

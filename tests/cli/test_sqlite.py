@@ -252,6 +252,23 @@ def setup_db():
         (6, 2, "2025-03-10", "Credit memo",       -150.00),
     ])
 
+    # Table for T12: real date decltypes, sub-second precision, NULL dates and
+    # a value carrying a newline. Kept separate so the row counts every other
+    # group asserts on stay untouched.
+    c.execute("""CREATE TABLE datetypes (
+        ID INTEGER PRIMARY KEY,
+        Label TEXT,
+        BirthDate DATE,
+        LastLoginAt DATETIME,
+        UpdatedAt TIMESTAMP)""")
+    c.executemany("INSERT INTO datetypes VALUES (?,?,?,?,?)", [
+        (1, "plain",        "1990-04-13", "2025-10-12 16:35:38", "2025-12-26 01:02:57.399"),
+        (2, "null-login",   "1985-01-16", None,                  "2025-10-05 18:51:28.698"),
+        (3, "millis-trim",  "2001-12-31", "2025-01-01 00:00:01", "2025-07-11 06:35:26.140"),
+        (4, "pipe|inside",  "1975-06-30", "2024-02-29 23:59:59", "2026-02-01 12:00:00.001"),
+        (5, "line\nbreak",  "2000-01-01", "2025-05-05 05:05:05", "2025-05-05 05:05:05.500"),
+    ])
+
     conn.commit()
     conn.close()
 
@@ -1154,6 +1171,273 @@ def test_T10_merge():
            time.monotonic() - t, f"rc={p.returncode}")
 
 
+# --- T12 Date types, columnar layout, pre-export processors ------------------
+#
+# Three subjects in one group because they arrived together:
+#   * DATE/DATETIME/TIMESTAMP columns. The adapter takes a column's type from
+#     its declaration, so a TEXT column holding a date never reaches that code
+#     and never tested it.
+#   * Data layout="columns", where each <R> holds a whole column. There is no
+#     CLI flag to WRITE it (it is a generator option in the library), so the
+#     packets below are transposed in Python and the tests check that the
+#     reader normalises them and refuses the malformed ones.
+#   * the pre-export processor chain. A field_masker used to run, produce
+#     correct output, and have that output silently thrown away.
+
+def transpose_packet(src: str, dst: str):
+    """Rewrite a row-major TDTP file as layout="columns"."""
+    with open(src, encoding="utf-8") as fh:
+        content = fh.read()
+
+    rows = re.findall(r"<R>([^<]*)</R>", content)
+    cols = list(zip(*[r.split("|") for r in rows]))
+    body = "".join("<R>" + "|".join(c) + "</R>" for c in cols)
+
+    # The pattern must not match <DataPacket ...>: after "<Data" it demands
+    # either ">" straight away or whitespace, which "Packet" is not.
+    new = re.sub(r"<Data(\s[^>]*)?>.*</Data>",
+                 lambda m: "<Data" + (m.group(1) or "") + ' layout="columns">' + body + "</Data>",
+                 content, flags=re.S)
+    with open(dst, "w", encoding="utf-8") as fh:
+        fh.write(new)
+    return len(rows), len(cols)
+
+
+def write_masker_pipeline(path: str, dest: str):
+    """Pipeline exporting users through a field_masker."""
+    yaml = (
+        'name: "T12 masker"\n'
+        'sources:\n'
+        '  - name: users\n'
+        '    type: sqlite\n'
+        '    dsn: ' + TEST_DB + '\n'
+        '    query: "SELECT ID, Name, Email, City FROM users ORDER BY ID"\n'
+        '\n'
+        'workspace:\n'
+        '  type: sqlite\n'
+        '  mode: ":memory:"\n'
+        '\n'
+        'transform:\n'
+        '  result_table: "users"\n'
+        '  sql: "SELECT * FROM users"\n'
+        '\n'
+        'processors:\n'
+        '  pre_export:\n'
+        '    - type: field_masker\n'
+        '      params:\n'
+        '        fields:\n'
+        '          Email: partial\n'
+        '          Name: first2_last2\n'
+        '\n'
+        'output:\n'
+        '  type: tdtp\n'
+        '  tdtp:\n'
+        '    format: xml\n'
+        '    destination: ' + dest + '\n'
+    )
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(yaml)
+
+
+def read_rows(path: str) -> list:
+    """Return the <R> rows of a TDTP file, split on '|'."""
+    if not os.path.exists(path):
+        return []
+    d = ET.parse(path).getroot().find("Data")
+    if d is None:
+        return []
+    return [(r.text or "").split("|") for r in d.findall("R")]
+
+
+def test_T12_dates_columnar_processors():
+    print(f"\n{BOLD}T12: Date types, columnar layout, pre-export processors{RESET}")
+
+    # --- Date column types ---------------------------------------------------
+    t = time.monotonic()
+    f = out("t12_dates.xml")
+    p = run("--export", "datetypes", "--output", f)
+    n = count_rows_xml(f)
+    record("T12.1 export a table with DATE/DATETIME/TIMESTAMP columns",
+           p.returncode == 0 and n == 5, time.monotonic() - t,
+           f"rc={p.returncode} rows={n} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    types = {}
+    if os.path.exists(f):
+        sch = ET.parse(f).getroot().find("Schema")
+        if sch is not None:
+            types = {fd.get("name"): (fd.get("type"), fd.get("timezone"))
+                     for fd in sch.findall("Field")}
+    record("T12.2 Schema: DATE for a DATE column, TIMESTAMP+UTC for DATETIME",
+           types.get("BirthDate", (None, None))[0] == "DATE"
+           and types.get("LastLoginAt", (None, None)) == ("TIMESTAMP", "UTC")
+           and types.get("UpdatedAt", (None, None)) == ("TIMESTAMP", "UTC"),
+           time.monotonic() - t, str(types))
+
+    rows = {r[0]: r for r in read_rows(f)}
+
+    t = time.monotonic()
+    birth = rows.get("1", [""] * 5)[2]
+    record("T12.3 a DATE value carries no time part",
+           birth == "1990-04-13", time.monotonic() - t, f"BirthDate={birth!r}")
+
+    t = time.monotonic()
+    ms = rows.get("1", [""] * 5)[4]
+    record("T12.4 TIMESTAMP keeps sub-second precision",
+           ms == "2025-12-26T01:02:57.399Z", time.monotonic() - t, f"UpdatedAt={ms!r}")
+
+    t = time.monotonic()
+    nulled = rows.get("2", [""] * 5)[3]
+    record("T12.5 a NULL date exports as [NULL], not an empty field",
+           nulled == "[NULL]", time.monotonic() - t, f"LastLoginAt={nulled!r}")
+
+    # --- Round trip through import -------------------------------------------
+    t = time.monotonic()
+    rt_db = out("t12_roundtrip.db")
+    if os.path.exists(rt_db):
+        os.remove(rt_db)
+    shutil.copy(TEST_DB, rt_db)
+    conn = sqlite3.connect(rt_db)
+    conn.execute("DELETE FROM datetypes")
+    conn.commit()
+    conn.close()
+    rt_cfg = out("t12_rt.yaml")
+    write_cfg(rt_cfg, db=rt_db)
+    p = run("--import", f, "--table", "datetypes", "--strategy", "replace", cfg=rt_cfg)
+    back = sqlite_query(rt_db,
+                        "SELECT ID, BirthDate, LastLoginAt, UpdatedAt, Label FROM datetypes ORDER BY ID")
+    got = {r[0]: r for r in back}
+    ok = (p.returncode == 0 and len(back) == 5
+          and str(got.get(1, (0, "", "", "", ""))[1]).startswith("1990-04-13")
+          and got.get(2, (0, "", "x", "", ""))[2] in (None, "")
+          and "399" in str(got.get(1, (0, "", "", "", ""))[3]))
+    record("T12.6 date values survive the export/import round trip",
+           ok, time.monotonic() - t,
+           f"rc={p.returncode} rows={len(back)} sample={back[:1]} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    before = sqlite_query(TEST_DB, "SELECT Label FROM datetypes WHERE ID = 5")[0][0]
+    after_rows = sqlite_query(rt_db, "SELECT Label FROM datetypes WHERE ID = 5")
+    after = after_rows[0][0] if after_rows else ""
+    record("T12.7 a value containing a newline survives the round trip",
+           before == after and chr(10) in str(before), time.monotonic() - t,
+           f"before={before!r} after={after!r}")
+
+    t = time.monotonic()
+    pipe_rows = sqlite_query(rt_db, "SELECT Label FROM datetypes WHERE ID = 4")
+    pipe_val = pipe_rows[0][0] if pipe_rows else ""
+    record("T12.8 a value containing a pipe survives the round trip",
+           pipe_val == "pipe|inside", time.monotonic() - t, f"Label={pipe_val!r}")
+
+    # --- Columnar layout ------------------------------------------------------
+    t = time.monotonic()
+    src = out("t12_users.xml")
+    run("--export", "users", "--output", src)
+    colf = out("t12_users_columns.xml")
+    nrows, ncols = transpose_packet(src, colf)
+    record("T12.9 build a layout=columns packet (10 rows becomes 8 columns)",
+           nrows == 10 and ncols == 8, time.monotonic() - t, f"rows={nrows} cols={ncols}")
+
+    t = time.monotonic()
+    normf = out("t12_users_normalized.xml")
+    p = run_no_cfg("--to-tdtp", colf, "--output", normf, "--v14")
+    same = read_rows(src) == read_rows(normf)
+    record("T12.10 --to-tdtp expands columns back to rows, values identical",
+           p.returncode == 0 and same, time.monotonic() - t,
+           f"rc={p.returncode} identical={same} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    layout = ""
+    if os.path.exists(normf):
+        d = ET.parse(normf).getroot().find("Data")
+        layout = d.get("layout") or ""
+    record("T12.11 the normalized output carries no layout attribute",
+           layout == "", time.monotonic() - t, f"layout={layout!r}")
+
+    t = time.monotonic()
+    ragged = out("t12_ragged.xml")
+    with open(colf, encoding="utf-8") as fh:
+        c = fh.read()
+    # Drop one value from the first column. Columns of unequal height would
+    # slide values into neighbouring rows, so this has to be refused.
+    c = re.sub(r"<R>([^<]*)</R>",
+               lambda m: "<R>" + "|".join(m.group(1).split("|")[:-1]) + "</R>", c, count=1)
+    with open(ragged, "w", encoding="utf-8") as fh:
+        fh.write(c)
+    p = run_no_cfg("--to-tdtp", ragged, "--output", out("t12_ragged_out.xml"), "--v14")
+    record("T12.12 ragged columns are refused, not silently misaligned",
+           p.returncode != 0, time.monotonic() - t, f"rc={p.returncode}")
+
+    t = time.monotonic()
+    short = out("t12_shortcols.xml")
+    with open(colf, encoding="utf-8") as fh:
+        c = fh.read()
+    body = re.search(r"<Data(?:\s[^>]*)?>(.*)</Data>", c, re.S).group(1)
+    cols = re.findall(r"<R>[^<]*</R>", body)
+    c = c.replace(body, "".join(cols[:-1]))  # one column fewer than Schema declares
+    with open(short, "w", encoding="utf-8") as fh:
+        fh.write(c)
+    p = run_no_cfg("--to-tdtp", short, "--output", out("t12_shortcols_out.xml"), "--v14")
+    record("T12.13 the column count must match Schema, otherwise refused",
+           p.returncode != 0, time.monotonic() - t, f"rc={p.returncode}")
+
+    t = time.monotonic()
+    csvf = out("t12_columns.csv")
+    p = run_no_cfg("--to-csv", colf, "--output", csvf)
+    lines = []
+    if os.path.exists(csvf):
+        with open(csvf, encoding="utf-8") as fh:
+            lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+    record("T12.14 --to-csv reads a columnar packet as 10 rows plus a header",
+           p.returncode == 0 and len(lines) == 11, time.monotonic() - t,
+           f"rc={p.returncode} lines={len(lines)}")
+
+    # --- RecordsInPart after filtering ----------------------------------------
+    t = time.monotonic()
+    filt = out("t12_filtered.xml")
+    p = run_no_cfg("--to-tdtp", src, "--where", "City = 'Moscow'", "--output", filt, "--v14")
+    hdr_n, actual_n = -1, -2
+    if os.path.exists(filt):
+        root = ET.parse(filt).getroot()
+        rip = root.find("Header").find("RecordsInPart")
+        hdr_n = int(rip.text) if rip is not None and rip.text else -1
+        actual_n = len(root.find("Data").findall("R"))
+    record("T12.15 RecordsInPart matches the row count after filtering",
+           p.returncode == 0 and hdr_n == actual_n and hdr_n > 0,
+           time.monotonic() - t, f"header={hdr_n} actual={actual_n}")
+
+    # --- pre-export processor chain -------------------------------------------
+    t = time.monotonic()
+    maskf = out("t12_masked.xml")
+    pipef = out("t12_masker_pipeline.yaml")
+    write_masker_pipeline(pipef, maskf)
+    p = run_no_cfg("--pipeline", pipef, timeout=60)
+    masked = read_rows(maskf)
+    record("T12.16 a pipeline with a field_masker produces an output file",
+           p.returncode == 0 and len(masked) == 10, time.monotonic() - t,
+           f"rc={p.returncode} rows={len(masked)} err={p.stderr[-200:]}")
+
+    t = time.monotonic()
+    leaked = any("john@example.com" in "|".join(r) for r in masked)
+    record("T12.17 the masked Email does NOT reach the output file",
+           bool(masked) and not leaked, time.monotonic() - t,
+           f"first={masked[0] if masked else None}")
+
+    t = time.monotonic()
+    email_ok = bool(masked) and "*" in masked[0][2]
+    name_ok = bool(masked) and masked[0][1] != "John Doe"
+    record("T12.18 both masked fields are actually rewritten",
+           email_ok and name_ok, time.monotonic() - t,
+           f"name={masked[0][1]!r} email={masked[0][2]!r}" if masked else "no rows")
+
+    t = time.monotonic()
+    city_ok = bool(masked) and masked[0][3] == "Moscow"
+    record("T12.19 columns outside the mask list are left untouched",
+           city_ok, time.monotonic() - t,
+           f"City={masked[0][3]!r}" if masked else "no rows")
+
+
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
 
 GROUPS = [
@@ -1168,6 +1452,7 @@ GROUPS = [
     ("T9", test_T9_diff),
     ("T10", test_T10_merge),
     ("T11", test_T11_msmq),
+    ("T12", test_T12_dates_columnar_processors),
 ]
 
 

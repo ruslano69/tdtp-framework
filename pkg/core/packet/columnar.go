@@ -59,8 +59,13 @@ func ExpandColumnarRows(pkt *DataPacket) error {
 	if pkt.Data.Layout != LayoutColumns {
 		return nil
 	}
+	// Сжатый пакет разворачивать нечем — строки ещё в блобе. Не ошибка, а
+	// «рано»: DecompressData позовёт эту же функцию сразу после распаковки.
+	// Ошибка тут сделала бы функцию непригодной как автоматический шаг, а
+	// именно автоматизм и нужен: разворот руками — это десять мест вызова, и
+	// одиннадцатое забытое даёт молча неверные строки, без всякого признака.
 	if pkt.Data.Compression != "" {
-		return fmt.Errorf("columnar layout: decompress before expanding")
+		return nil
 	}
 
 	nFields := len(pkt.Schema.Fields)
