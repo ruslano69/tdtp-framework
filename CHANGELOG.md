@@ -74,12 +74,13 @@ allocated, same output size.
 zstd runs as a streaming frame there rather than `EncodeAll`. Packets written
 either way stay readable by the other; a test pins that rather than assuming it.
 
-### Fixed — the CLI test suites were verifying an eleven-month-old binary
+### Fixed — the CLI test suites were verifying a binary eleven versions behind
 
 All eight suites under `tests/cli` default to `/tmp/tdtpcli` and did no more
 than print its `--version` banner. One had been running a build eleven minor
-versions behind for months — green or red for reasons unrelated to the working
-tree, at one point reporting a NULL-date crash fixed long before.
+versions behind — 1.8.2 against 1.25.1, and close to four months old. Runs
+against it were green or red for reasons unrelated to the working tree, at one
+point reporting a NULL-date crash fixed long before.
 
 `tdtp_binary.check_binary` now refuses a binary that is not the current tree's
 code, on two counts. Version against `pkg/core/version/version.go` catches the
