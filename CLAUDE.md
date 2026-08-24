@@ -333,13 +333,35 @@ text cell before our code sees it. `Balance` adds 100k more by falling back —
 `REAL` is not in the identity set, so appending it directly would not be
 provably the same bytes, and it goes the long way on purpose.
 
-Two things this prototype does not do. The benchmark copies each arena with
-`string(col.Buf)` to fit the `[]string` signature of
-`CompressDataForTdtpAlgo` — a real path would hand it `[][]byte` and save
-another 14.8 MB of copying, so 126 ms is still pessimistic. And the arena marks
-value boundaries only in `Offsets`: a value containing its own `\n` is
-unambiguous there but not in `Buf` alone, so a columnar format has to either
-escape on write or ship the offsets alongside.
+### `CompressChunksForTdtpAlgo`: the copy was half the cost
+
+`CompressDataForTdtpAlgo` takes `[]string` and calls `strings.Join`, which is a
+full copy of the payload — 15 MB allocated and filled only to be handed to the
+codec and dropped. `CompressChunksForTdtpAlgo` takes `[][]byte` and writes the
+chunks into the encoder one at a time. Same separator placement (between, not
+after), so the stream is identical.
+
+| Compressing the same arenas | time | memory | size |
+|---|---|---|---|
+| via `[]string` (copy + join) | 119 ms | 100.9 MB | 5 004 228 B |
+| via `[][]byte` (no copy) | **77 ms** | **41.1 MB** | 5 004 224 B |
+
+Against the row-major baseline of 166 ms that is **−53%**, and end to end the
+export path goes 540 → 397 ms, **−26%**.
+
+zstd here is a streaming frame rather than `EncodeAll`, because `EncodeAll`
+wants the single `[]byte` we are avoiding. The frame is 4 bytes smaller on 85 KB
+and the existing decoder reads it unchanged — `TestCompressChunks_InteropWithStringPath`
+pins that, so packets written either way stay compatible. kanzi already wrote
+through a writer, so it only needed the total length up front.
+
+The allocation *count* goes up (94 → 456) while allocated bytes fall by 60 MB:
+the streaming encoder takes small internal buffers per write instead of one
+enormous one. Count is the misleading number here.
+
+**Still open.** The arena marks value boundaries only in `Offsets`: a value
+containing its own `\n` is unambiguous there but not in `Buf` alone, so a
+columnar format has to either escape on write or ship the offsets alongside.
 
 On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
 reaches 10–12× against the original — BWT gets to do its work properly. On short

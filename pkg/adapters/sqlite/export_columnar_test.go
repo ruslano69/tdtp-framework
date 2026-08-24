@@ -202,9 +202,35 @@ func BenchmarkReadAllArenas_Dates(b *testing.B) {
 	}
 }
 
-// Сжатие прямо из арен: Buf каждой колонки уже готовый поток, склеивать
-// нечего вовсе.
+// Сжатие прямо из арен: Buf каждой колонки уже готовый поток, и
+// CompressChunksForTdtpAlgo берёт его как есть — ни склейки, ни копии.
 func BenchmarkCompressArena_Dates(b *testing.B) {
+	a, ctx := openBench(b, datesDB)
+	schema, _ := a.GetTableSchema(ctx, "Users")
+	block, err := a.ReadAllArenas(ctx, "Users", schema)
+	if err != nil {
+		b.Fatal(err)
+	}
+	bufs := make([][]byte, len(block.Columns))
+	for c, col := range block.Columns {
+		bufs[c] = col.Buf
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	var n int
+	for i := 0; i < b.N; i++ {
+		blob, _, err := processors.CompressChunksForTdtpAlgo(bufs, "zstd", 3)
+		if err != nil {
+			b.Fatal(err)
+		}
+		n = len(blob)
+	}
+	b.ReportMetric(float64(n), "bytes")
+}
+
+// Для сравнения — та же арена, но через строковый API: видно, во что обходятся
+// копия каждой колонки и последующий strings.Join.
+func BenchmarkCompressArenaViaStrings_Dates(b *testing.B) {
 	a, ctx := openBench(b, datesDB)
 	schema, _ := a.GetTableSchema(ctx, "Users")
 	block, err := a.ReadAllArenas(ctx, "Users", schema)
