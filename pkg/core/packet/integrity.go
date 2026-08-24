@@ -63,6 +63,15 @@ func VerifyIntegrity(pkt *DataPacket) error {
 
 	pkt.MaterializeRows()
 
+	// RecordsInPart is not covered by any of the three hashes — they cover the
+	// Schema and the row values, and the header is outside both. Skipping this
+	// was justified for years by "v1.4 carries XXH3, the counter is redundant",
+	// which simply is not what the hashes hash. Verified before fixing: a v1.4
+	// packet declaring 999 rows while carrying 3 parsed cleanly and passed here.
+	if err := VerifyRowCount(pkt); err != nil {
+		return err
+	}
+
 	// Save the stored hashes before computeHashes clears Schema.XXH3 in its copy
 	storedSchema := pkt.Schema.XXH3
 	storedData := pkt.Data.XXH3
