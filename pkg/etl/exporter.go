@@ -341,6 +341,8 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		}
 
 		// Сжатие применяем к каждой части отдельно
+		// SetDefaults уже свёл Compress в Compression; || оставлен для конфигов,
+		// собранных в коде в обход загрузчика.
 		if e.config.TDTP.Compression || e.config.TDTP.Compress {
 			if err := e.compressDataPacket(part, e.config.TDTP.CompressAlgo, e.config.TDTP.CompressLevel); err != nil {
 				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)

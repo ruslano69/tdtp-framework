@@ -144,7 +144,11 @@ type XLSXOutputConfig struct {
 type TDTPOutputConfig struct {
 	Format        string            `yaml:"format"`         // Формат: xml, json (в будущем)
 	Compression   bool              `yaml:"compression"`    // Использовать сжатие
-	Compress      bool              `yaml:"compress"`       // Алиас для compression (совместимость с CLI)
+	// Compress — второй YAML-ключ для того же факта, ради совместимости с CLI.
+	// SetDefaults складывает его в Compression и обнуляет, так что дальше по
+	// коду читать нужно ТОЛЬКО Compression. Читать это поле напрямую — значит
+	// видеть false у конфига, где сжатие включено.
+	Compress bool `yaml:"compress"`
 	CompressAlgo  string            `yaml:"compress_algo"`  // Алгоритм: zstd (по умолчанию) или kanzi
 	CompressLevel int               `yaml:"compress_level"` // Уровень: 1-19 (zstd), 6-7 (kanzi)
 	Destination   string            `yaml:"destination"`    // Путь к файлу или s3://bucket/key
@@ -497,6 +501,23 @@ func (c *PipelineConfig) SetDefaults() {
 		if c.Sources[i].Timeout == 0 {
 			c.Sources[i].Timeout = 60 // 60 секунд по умолчанию
 		}
+	}
+
+	// `compress:` и `compression:` — два YAML-ключа для одного факта, и хранились
+	// они в двух полях. Потребители расходились: exporter читал оба через ||, а
+	// tdtp-xray только Compression — так что открыть в нём пайплайн с
+	// `compress: true` и сохранить означало молча потерять сжатие.
+	//
+	// Оба ключа остаются принимаемыми, но дальше по коду существует одно
+	// значение: Compression. Пока полей было два, «прочитать не то» оставалось
+	// возможным в каждом новом месте.
+	if c.Output.TDTP != nil && c.Output.TDTP.Compress {
+		c.Output.TDTP.Compression = true
+		c.Output.TDTP.Compress = false
+	}
+	if c.Output.Fallback != nil && c.Output.Fallback.TDTP != nil && c.Output.Fallback.TDTP.Compress {
+		c.Output.Fallback.TDTP.Compression = true
+		c.Output.Fallback.TDTP.Compress = false
 	}
 
 	// Defaults для workspace mode
