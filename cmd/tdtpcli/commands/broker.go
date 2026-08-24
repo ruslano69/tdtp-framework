@@ -807,7 +807,9 @@ func sendPacketsToBroker(ctx context.Context, broker brokers.MessageBroker, pack
 			}
 
 			if opts.Compress {
-				if err := compressPacketData(pkt, opts.CompressLevel, opts.CompressAlgo, true); err != nil { // checksum always enabled with compression
+				// columnar=false: брокерный путь раскладку не предлагает, и включать её
+				// молча нельзя — принимающая сторона может не знать атрибута layout.
+				if err := compressPacketData(pkt, opts.CompressLevel, opts.CompressAlgo, true, false); err != nil { // checksum always enabled with compression
 					errs[i] = fmt.Errorf("packet %d compress: %w", i+1, err)
 					return
 				}

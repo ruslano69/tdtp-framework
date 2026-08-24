@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 TDTP CLI Integration Tests — MS SQL Server (Windows Auth) + MSMQ
 
 Primary scenario: Axapta 2009 / Dynamics NAV stack on ZTR-Live.
@@ -14,7 +14,8 @@ Prerequisites (Windows, domain zt-2075):
     - pyodbc + ODBC Driver 17 for SQL Server installed
     - MSMQ service running  (Get-Service MSMQ → Running)
     - Queue MSMQ_QUEUE exists (.\private$\tdtp_test)
-    - tdtpcli binary built: go build -o /tmp/tdtpcli.exe ./cmd/tdtpcli/
+    - tdtpcli binary built: go build -tags nokafka -o /tmp/tdtpcli ./cmd/tdtpcli/
+      (the suite verifies its version and build time — see tdtp_binary.py)
 
 Usage:
     python tests/cli/test_mssql_msmq.py          # all groups
@@ -35,6 +36,9 @@ import time
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tdtp_binary import check_binary
 
 # Force UTF-8 output on Windows cp1251 terminals
 if hasattr(sys.stdout, "reconfigure"):
@@ -657,6 +661,7 @@ GROUPS = [
 
 
 def preflight():
+    check_binary(TDTPCLI)
     if not os.path.exists(TDTPCLI):
         print(f"{RED}ERROR: tdtpcli binary not found at {TDTPCLI}{RESET}")
         print("Build: GOPROXY=https://goproxy.io GONOSUMDB='*' "

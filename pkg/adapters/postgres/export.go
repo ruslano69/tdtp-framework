@@ -137,6 +137,11 @@ func (a *Adapter) SetMaxFallbackRows(n int64) {
 	a.exportHelper.SetMaxFallbackRows(n)
 }
 
+// SetColumnarLayout включает колоночную раскладку Data (--columnar).
+func (a *Adapter) SetColumnarLayout(on bool) {
+	a.exportHelper.SetColumnarLayout(on)
+}
+
 // ExportTable экспортирует таблицу в TDTP reference пакеты
 // Делегирует в base.ExportHelper для устранения дублирования кода
 func (a *Adapter) ExportTable(ctx context.Context, tableName string) ([]*packet.DataPacket, error) {

@@ -39,6 +39,9 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tdtp_binary import check_binary
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -621,6 +624,7 @@ GROUPS = [
 
 
 def preflight():
+    check_binary(TDTPCLI)
     if not os.path.exists(TDTPCLI):
         print(f"{RED}ERROR: tdtpcli binary not found at {TDTPCLI}{RESET}")
         print(f"Build first:")

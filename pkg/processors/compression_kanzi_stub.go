@@ -14,3 +14,8 @@ func CompressKanzi(_ []byte, _ int) ([]byte, error) {
 func DecompressKanzi(_ []byte) ([]byte, error) {
 	return nil, fmt.Errorf("kanzi decompression is not supported on this platform (use zstd)")
 }
+
+// compressChunksKanzi — заглушка для платформ без поддержки kanzi.
+func compressChunksKanzi(_ [][]byte, _, _ int) ([]byte, error) {
+	return nil, fmt.Errorf("kanzi compression is not supported on this platform (use zstd)")
+}

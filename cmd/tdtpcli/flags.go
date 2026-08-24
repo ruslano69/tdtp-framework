@@ -102,6 +102,7 @@ type Flags struct {
 	Compress         *bool
 	CompressLevel    *int
 	CompressAlgo     *string // Алгоритм сжатия: "zstd" (по умолчанию) или "kanzi"
+	Columnar         *bool   // Колоночная раскладка Data (layout="columns")
 	Hash             *bool   // Add XXH3 checksum for data integrity verification
 	PacketSize       *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
 	Fast             *bool   // Skip SpecialValues detection (no NULL/NaN/Inf markers) for maximum export speed
@@ -245,6 +246,7 @@ func ParseFlags() *Flags {
 	f.Compress = flag.Bool("compress", false, "Enable compression for exported data")
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1-19 (zstd) or 6-7 (kanzi)")
 	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
+	f.Columnar = flag.Bool("columnar", false, "Write Data column-major (layout=\"columns\"); ~19% smaller compressed, readers must understand the attribute")
 	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
 	f.Hash = flag.Bool("hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	f.Fast = flag.Bool("fast", false, "Skip SpecialValues detection for maximum export speed (no NULL/NaN/Inf schema markers)")

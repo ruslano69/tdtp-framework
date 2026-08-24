@@ -118,7 +118,7 @@ func TestParseAndDecryptBrokerMessage_V15WithCompression(t *testing.T) {
 
 	ctx := context.Background()
 	pkt := makeBrokerTestPacket(t)
-	if err := compressPacketData(pkt, 3, "zstd", true); err != nil {
+	if err := compressPacketData(pkt, 3, "zstd", true, false); err != nil {
 		t.Fatalf("compressPacketData: %v", err)
 	}
 	if _, err := packet.ComputeIntegrity(pkt); err != nil {

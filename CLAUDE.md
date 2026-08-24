@@ -47,7 +47,17 @@ redirect — it **always works**.
 - `scripts/create_postgres_test_db.py` — PostgreSQL (users, orders, products, activity_logs; 100/200/50 rows)
 - `scripts/create_test_db.py` — SQLite
 - `scripts/generate_test_db.py` — SQLite benchmark
-- `scripts/create_benchmark_db.py` — SQLite benchmark, large
+- `scripts/create_benchmark_db.py` — SQLite benchmark, large. `--out FILE`,
+  `--rows N`, `--no-dates`, `--seed N`. 100k rows load in about 4 s: one
+  transaction, indexes built after the insert, journal and fsync off. `--seed`
+  fixes both the RNG and the date epoch, so a seeded run reproduces the file
+  byte for byte — a benchmark corpus whose numbers get written down has to be
+  regenerable. By default it now emits `BirthDate DATE`,
+  `LastLoginAt DATETIME` (10% NULL) and `UpdatedAt TIMESTAMP` alongside the
+  original `RegisteredAt TEXT`; `--no-dates` reproduces the old seven-column
+  set. The date columns are the point: the SQLite adapter reads the type from
+  the column declaration (`pkg/adapters/sqlite/types.go`), so a `TEXT` column
+  never touches the date path, and the old set exercised none of it
 - `tests/compact_v131/setup_db.py` — SQLite for the compact-format tests
 
 **Do not write new ones — use these.**
@@ -96,20 +106,300 @@ would be exercising a code path the CLI never takes.
 
 ## Compression (zstd and kanzi)
 
-Benchmarked on 100k SQLite rows (`benchmark_100k.db`, synthetic Users data):
+Re-measured 2026-08-24 on tdtpcli 1.25.1 (Go 1.26.5), Intel Core i7-7700
+@ 3.60 GHz (4C/8T), Windows 10 Pro, idle machine. Export of 100k rows to file,
+wall time of the whole CLI process, best of three runs.
 
-| Mode | Time | Size | Ratio |
-|------|------|------|-------|
-| No compression | 673 ms | 9.9 MB | — |
-| zstd level 3 | 751 ms | 2.9 MB | 3.4× |
-| zstd level 19 | 2363 ms | 2.4 MB | 4.1× |
-| kanzi level 6 | 1279 ms | 1.5 MB | 6.6× |
-| kanzi level 7 | 1449 ms | 1.4 MB | 7.1× |
+**Two data sets, and the difference between them matters.** `benchmark_100k.db`
+has seven columns and no real date types; `benchmark_100k_dates.db` adds
+`BirthDate DATE`, `LastLoginAt DATETIME` (10% NULL) and `UpdatedAt TIMESTAMP`.
+Both are reproducible byte for byte:
+
+```bash
+python scripts/create_benchmark_db.py --out benchmark_100k.db --rows 100000 --no-dates --seed 20260824
+python scripts/create_benchmark_db.py --out benchmark_100k_dates.db --rows 100000 --seed 20260824
+```
+
+| Mode | 7 cols | 10 cols, with dates | Size 7 / 10 | Ratio 7 / 10 |
+|------|--------|---------------------|-------------|--------------|
+| No compression | 554 ms | 705 ms | 9.84 / 15.39 MB | — |
+| zstd level 3 | 586 ms | 824 ms | 3.54 / 6.21 MB | 2.8× / 2.5× |
+| zstd level 19 | 739 ms | 1112 ms | 3.01 / 5.40 MB | 3.3× / 2.8× |
+| kanzi level 6 | 697 ms | 1007 ms | 1.87 / 3.43 MB | 5.3× / 4.5× |
+| kanzi level 7 | 794 ms | 1187 ms | 1.78 / 3.30 MB | 5.5× / 4.7× |
+| zstd 3 + `--integrity` | 588 ms | 837 ms | 3.54 / 6.21 MB | 2.8× / 2.5× |
 
 **What to pick:**
-- `zstd level 3` — the default for real-time streams: nearly free, 3× saving
-- `kanzi level 6` — the optimum for archives and backups: **twice as dense as zstd3**, and faster than zstd19
-- `kanzi level 7` — maximum density, +170 ms over level 6, only worth it on a slow link
+- `zstd level 3` — the default for real-time streams: nearly free, 2.8× saving
+- `kanzi level 6` — the optimum for archives and backups: **nearly twice as dense as zstd3**
+- `kanzi level 7` — maximum density, +97 ms over level 6, only worth it on a slow link
+- `--integrity` costs nothing measurable — 586 against 588 ms, inside the spread
+  between repeats
+
+**Compare times with the old table, but not ratios.** The corpus is not the one
+the previous numbers came from. The old generator called `datetime.now()` per
+row over a two-and-a-half-minute run, so all 100k timestamps landed in about 150
+distinct seconds; the current one spreads them across the whole day, which is
+both more realistic and less compressible. That alone accounts for kanzi 6
+reading 5.3× here against the 6.6× recorded before — the data got harder, not
+the codec worse.
+
+**The old numbers said kanzi 6 wins on speed. That is no longer the argument.**
+Against the previous table (673 / 751 / 2363 / 1279 / 1449 ms) everything got
+faster, but not evenly: `zstd 19` fell 3.2× and `kanzi 6` only 1.8×, so the gap
+between them shrank from 1.8× to about 6%. Compression stopped dominating the
+export — pick `kanzi 6` for its density, not its speed.
+
+**Dates cost bytes, not time.** With dates the export takes 27–50% longer, and
+none of that is date conversion: the set is 56% larger (+56 B per row, exactly
+the length of three ISO-8601 fields plus separators) and splits into 9 parts
+instead of 6. Per byte the date path is slightly *faster* — 17.8 → 21.8 MB/s
+uncompressed. What genuinely suffers is density: ISO-8601 stamps barely repeat,
+so kanzi 6 drops from 5.3× to 4.5×. **When sizing an archive of date-heavy
+data, the seven-column ratios overstate the win by about 1.2×.**
+
+### Sorting the export does not help compression — measured, do not retry
+
+Sorting rows by a date column before export looks like it should pay off:
+adjacent timestamps share a long prefix, so the stream ought to get more
+redundant. **It does the opposite.** On the 10-column set, `--order-by`:
+
+| Order | kanzi 6 size | vs unsorted | Time |
+|---|---|---|---|
+| none (ID order) | 3 426 553 B | — | 1043 ms |
+| `ID ASC` | 3 427 451 B | +0.03% | 1406 ms |
+| `Email ASC` | 3 503 254 B | +2.2% | 1589 ms |
+| `UpdatedAt ASC` | 3 547 721 B | **+3.5%** | 1560 ms |
+| `BirthDate ASC` | 3 526 894 B | +2.9% | 1549 ms |
+| `City ASC` | 3 548 343 B | +3.6% | 1471 ms |
+
+`ORDER BY ID` is the control: it asks for the order the rows are already in, and
+returns a byte-identical result — so the whole +360 ms is the cost of the sort
+itself, and every size change above belongs to the reordering alone.
+
+**Why the intuition fails: TDTP is a row store.** Sorted timestamps do share a
+prefix, but consecutive copies of that prefix sit about 154 bytes apart, with
+nine unrelated fields between them. There is no long run for the codec to
+collapse. Meanwhile the natural ID order carries real locality — `generate_email`
+embeds the row index, so neighbouring rows read `...ivanov.41@`, `...ivanov.42@`
+— and any reordering destroys it. `Email ASC` losing 2.2% is the same effect
+seen on its own: lexicographic order is not the numeric order the data had.
+
+zstd 3 is nearly indifferent (+0.16% on `UpdatedAt`); the one order that helps it
+is `City ASC` (−1.4%), where 15 cities become runs of about 6700 identical
+strings. kanzi loses even there, because BWT already gathers those contexts
+without being handed them sorted.
+
+**So: `--order-by` is for consumers that need ordered rows. It is not a
+compression tactic — it costs about 360 ms and gives back nothing.**
+
+**But the intuition behind it was not wrong, only mislocated.** Transposing the
+same 100k rows into column order and compressing that instead shows what was
+really going on:
+
+| Column | in ID order | sorted by `UpdatedAt` |
+|---|---|---|
+| `ID` | 63 436 B (9.3×) | 372 596 B (1.6×) |
+| `Email` | 830 580 B (3.7×) | 966 128 B (3.2×) |
+| `UpdatedAt` | 1 027 264 B (2.4×) | **836 748 B (3.0×)** |
+| all ten | 4 977 472 B | 5 230 732 B |
+
+Sorting by date *does* compress the date column — 19% off `UpdatedAt`, exactly as
+expected. It loses overall because it costs 309 KB on `ID` and 136 KB on `Email`,
+and those two are only that compressible because this corpus exports a dense
+sequential surrogate key. **On data without one, sorting by date would come out
+ahead** — subtract `ID` and `Email` from the table above and the sorted layout
+wins by 4.7%. Do not generalise the "sorting never helps" line past this corpus.
+
+### Column order beats row order by 13–19%, at no cost in time
+
+Measured on the same 100k×10 set, compressing the identical bytes in row order
+against column order:
+
+| Codec | row order | column order | Δ | Time row → column |
+|---|---|---|---|---|
+| zstd 3 | 6 177 644 B | 5 011 048 B | **−18.9%** | 155 → 138 ms |
+| zstd 19 | 5 272 432 B | 4 491 948 B | −14.8% | 971 → 731 ms |
+| kanzi 6 | 3 394 260 B | 2 958 236 B | −12.8% | 1016 → 1007 ms |
+
+The reason is the same one that defeats sorting: in a row store the values of one
+column sit about 154 bytes apart, with nine unrelated fields between them, so a
+codec never sees them as a series. Transposed, each column becomes a contiguous
+run of like-typed, like-shaped values. Compression also gets *faster*, because
+the codec finds its matches sooner.
+
+This is a property of the layout, not of this corpus — unlike the sorting
+result. Nothing is implemented; the measurement exists to say the idea is worth
+the design work, not that the format is decided.
+
+### Delta coding on top of that: −28% for zstd, nothing for kanzi
+
+Encoding the numeric and date columns as differences from the previous value,
+still as text, on the same 100k×10 set. **Sorting is deliberately absent** — it
+lost in every combination, delta included, and it is an expensive operation
+besides.
+
+| Strategy | raw | zstd 3 | kanzi 6 | ms zstd / kanzi |
+|---|---|---|---|---|
+| row order (today) | 14.78 MB | 6 177 644 B | 3 394 260 B | 160 / 1056 |
+| column order | 14.78 MB | 5 011 048 B | 2 958 236 B | 128 / 1022 |
+| column order + delta | **11.62 MB** | **4 442 564 B** | 2 945 952 B | **104 / 781** |
+
+Three things to carry forward:
+
+**`ID` is where delta earns its keep: 63 436 B → 56 B.** A sequential key deltas
+to a run of ones, which compresses to nothing. Date columns give a milder 17–29%,
+mostly because a delta prints shorter than a 13-digit epoch, not because of
+redundancy.
+
+**Delta is nearly worthless for kanzi — 2 958 236 → 2 945 952, under half a
+percent.** BWT already recovers what delta would hand it, and on some columns
+delta is actively worse (`BirthDate` 245 252 → 266 744) because variable-length
+decimals break the fixed-width column alignment BWT was exploiting. **If the
+format goes columnar, delta is a zstd optimisation and should be optional.**
+
+**A `TEXT` column holding dates cannot be delta-coded safely.** `RegisteredAt`
+round-tripped as `2022-10-11T17:36:54Z` against an original of
+`2022-10-11 17:36:54` — a silent rewrite. Delta needs the column's exact output
+format, which is knowable for `DATE`/`DATETIME`/`TIMESTAMP` and not for `TEXT`.
+Any implementation needs the round-trip assertion the experiment used; without
+it the corruption is invisible.
+
+### The columnar read prototype: where the win actually is
+
+`base.ScanSQLColumns` and `sqlite.ReadAllColumns` read a table straight into
+per-column slices. Nothing in the working path calls them — `ExportTable` still
+goes through `ReadAllRows`. Cells go through the same `cellToTDTP` as the row
+scanner, and `TestReadAllColumns_MatchesReadAllRows` compares all 100k×10 cells,
+because two readers that disagree would produce two different integrity hashes
+from one table.
+
+Measured on `benchmark_100k_dates.db`, i7-7700:
+
+| Stage | row path | columnar | Δ |
+|---|---|---|---|
+| read | 359 ms, 84.8 MB, 2 915 495 allocs | 362 ms, 71.9 MB, 2 815 645 allocs | −15% memory, **same time** |
+| serialize + compress (zstd 3) | 174 ms, 6 172 104 B, 100 080 allocs | 152 ms, 5 008 288 B, **94 allocs** | −13% time, −18.9% size |
+
+**The read gets no faster, and that is the finding.** Dropping the per-row
+`[]string` removes exactly the ~100k allocations you would expect and 13 MB of
+memory, but the remaining 2.8M allocations are the per-cell strings from
+`cellToTDTP`, and they dominate. Reading columnar is a memory win, not a speed
+one. Going further means a per-column byte arena with offsets instead of
+`[]string` — untried.
+
+**The serialization step is where the idea pays off: 100 080 allocations become
+94.** That is the pipe-join, one `strings.Join` per row, building text that on
+the compressed path nothing ever reads — it goes to the codec and is thrown
+away. Handing the codec the columns directly skips it entirely and lands the
+same −18.9% the layout experiment predicted.
+
+So the two halves of the idea are not equal. Skipping serialization on the
+compressed path is cheap and clearly worth it; columnar reading is worth it for
+memory, and only becomes a speed story if the per-cell string goes too.
+
+### Taking the per-cell string out: the arena
+
+`base.ScanSQLArena` / `sqlite.ReadAllArenas` hold each column as one `[]byte`
+with an `[]int32` of offsets, and append values into it straight from what the
+driver returned — no `string` per cell. All three paths measured in one run:
+
+| Read | time | memory | allocs |
+|---|---|---|---|
+| `ReadAllRows` | 364 ms | 96.5 MB | 3 475 317 |
+| `ReadAllColumns` | 363 ms | 83.6 MB | 3 375 467 |
+| `ReadAllArenas` | **333 ms** | 88.9 MB | **2 535 856** |
+
+| Compress (zstd 3) | time | size | allocs |
+|---|---|---|---|
+| row-major | 179 ms | 6 172 104 B | 100 080 |
+| columnar | 147 ms | 5 008 288 B | 95 |
+| arena | **126 ms** | **5 004 228 B** | **94** |
+
+End to end 543 → 459 ms, −15.5%, with the blob 18.9% smaller.
+
+`appendCellTDTP` earns this by not going through `DBValueToString` +
+`ConvertValueToTDTP` at all on the common types. Both shortcuts rest on
+properties the row path already proves: `ConvertValueToTDTP` is the identity for
+TEXT, INTEGER and BOOLEAN (its own fast path returns the argument), and
+`fastSQLiteDateTime` is now a wrapper over `appendFastSQLiteDateTime` — one
+implementation, so the two readers cannot drift on the awkward cases (fractional
+seconds, a shape that disagrees with the declared type).
+`TestReadAllArenas_MatchesReadAllRows` checks all 100k×10 cells anyway.
+
+**What is left is not ours to remove.** 2.5M allocations remain for 1M cells,
+and the bulk is the driver: modernc hands us a freshly allocated `string` per
+text cell before our code sees it. `Balance` adds 100k more by falling back —
+`REAL` is not in the identity set, so appending it directly would not be
+provably the same bytes, and it goes the long way on purpose.
+
+### `CompressChunksForTdtpAlgo`: the copy was half the cost
+
+`CompressDataForTdtpAlgo` takes `[]string` and calls `strings.Join`, which is a
+full copy of the payload — 15 MB allocated and filled only to be handed to the
+codec and dropped. `CompressChunksForTdtpAlgo` takes `[][]byte` and writes the
+chunks into the encoder one at a time. Same separator placement (between, not
+after), so the stream is identical.
+
+| Compressing the same arenas | time | memory | size |
+|---|---|---|---|
+| via `[]string` (copy + join) | 119 ms | 100.9 MB | 5 004 228 B |
+| via `[][]byte` (no copy) | **77 ms** | **41.1 MB** | 5 004 224 B |
+
+Against the row-major baseline of 166 ms that is **−53%**, and end to end the
+export path goes 540 → 397 ms, **−26%**.
+
+zstd here is a streaming frame rather than `EncodeAll`, because `EncodeAll`
+wants the single `[]byte` we are avoiding. The frame is 4 bytes smaller on 85 KB
+and the existing decoder reads it unchanged — `TestCompressChunks_InteropWithStringPath`
+pins that, so packets written either way stay compatible. kanzi already wrote
+through a writer, so it only needed the total length up front.
+
+The allocation *count* goes up (94 → 456) while allocated bytes fall by 60 MB:
+the streaming encoder takes small internal buffers per write instead of one
+enormous one. Count is the misleading number here.
+
+### `--columnar` end to end: 14.8% off zstd 3
+
+The layout is now reachable from the CLI. Measured on `benchmark_100k_dates.db`,
+i7-7700, best of three:
+
+| Codec | rows | `--columnar` | Δ |
+|---|---|---|---|
+| none | 15 392 603 B | 14 793 296 B | −3.9% |
+| zstd 3 | 6 207 344 B | 5 288 453 B | **−14.8%** |
+| zstd 19 | 5 404 180 B | 4 803 741 B | −11.1% |
+| kanzi 6 | 3 426 544 B | 3 318 214 B | −3.2% |
+
+Time is unchanged in every row — within noise of the row-major path.
+
+**kanzi gains almost nothing (−3.2%) where zstd gains 14.8%.** Same reason delta
+coding did nothing for it: BWT already gathers like values regardless of how the
+stream is ordered, so handing them over pre-grouped tells it what it had worked
+out. **Pair `--columnar` with zstd; with kanzi it is not worth the
+compatibility cost.**
+
+**Where the transposition happens is load-bearing.** On the compressed path it
+runs inside `compressPacketData`, after `ComputeIntegrity` and before the codec.
+Not a free choice: the v1.4 hash covers plain-text rows before compression, and
+a reader expands columns back to rows before verifying. Transpose earlier and
+the writer hashes columns while the reader hashes rows — a mismatch on every
+packet. That is the same shape as the `@MRC`-after-`ComputeIntegrity` bug the
+comment in `export.go` records as 100% reproducible.
+
+**Three call sites had to learn the attribute, and each was silent until it
+did.** `WriteToFileFast` (the third of the generator's three write paths) wrote
+plain rows while `--columnar` was set; `compressPacketData` compressed
+row-major because `MaterializeRows` had already flattened the intent; and
+`--test` counted 10 "rows" in a 12 004-row part because it counts decompressed
+entries and those were columns. The intent now travels on the packet as an
+unexported `wantColumnar`, set by `GenerateReference`, because the export
+command builds a **fresh generator at each of three write sites** and none of
+them sees the first one's settings.
+
+**Still open.** The arena marks value boundaries only in `Offsets`: a value
+containing its own `\n` is unambiguous there but not in `Buf` alone, so a
+columnar format has to either escape on write or ship the offsets alongside.
 
 On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
 reaches 10–12× against the original — BWT gets to do its work properly. On short

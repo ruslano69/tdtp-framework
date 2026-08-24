@@ -95,6 +95,9 @@ func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
 	if packet.Data.Encryption != "" {
 		writeXMLAttr(w, "encryption", packet.Data.Encryption)
 	}
+	if packet.Data.Layout != "" {
+		writeXMLAttr(w, "layout", packet.Data.Layout)
+	}
 	w.WriteByte('>')
 
 	if len(packet.rawRows) > 0 {
@@ -273,6 +276,12 @@ func packetToBytes(packet *DataPacket) ([]byte, error) {
 // WriteToFileFast записывает пакет прямо в файл без промежуточного []byte.
 // Используется вместо WriteToFile для экспорта в файлы.
 func (g *Generator) WriteToFileFast(packet *DataPacket, filename string) error {
+	// Обязательно, а не для симметрии: у генератора три точки записи (ToXML,
+	// WriteToWriter, эта), и раскладка со сжатием живут в rawRows, пока их
+	// отсюда не переложат. Пропусти его — и --columnar молча запишет обычный
+	// построчный пакет, что и случилось при первом прогоне.
+	g.materializeForWrite(packet)
+
 	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err

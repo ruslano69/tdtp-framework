@@ -59,6 +59,7 @@ type ExportHelper struct {
 	maxMessageSize    int   // 0 = use generator default
 	skipSpecialValues bool  // --fast: skip DetectAndApply
 	maxFallbackRows   int64 // 0 = unlimited; > 0 = abort fallback path if table has more rows
+	columnar          bool  // --columnar: Data.Layout="columns"
 }
 
 // NewExportHelper создает новый ExportHelper
@@ -89,6 +90,15 @@ func (h *ExportHelper) SetSkipSpecialValues(skip bool) {
 	h.skipSpecialValues = skip
 }
 
+// SetColumnarLayout включает колоночную раскладку Data (--columnar).
+//
+// Выключено по умолчанию: атрибут layout меняет смысл <R>, и читатель, ничего
+// о нём не знающий, разберёт пакет неверно и молча. Включать только когда
+// известно, что принимающая сторона умеет разворачивать.
+func (h *ExportHelper) SetColumnarLayout(on bool) {
+	h.columnar = on
+}
+
 // SetMaxFallbackRows задаёт лимит строк для in-memory fallback при провале SQL pushdown.
 // При 0 — без лимита (текущее поведение). При > 0 — если таблица больше лимита,
 // возвращается ошибка вместо чтения всей таблицы в RAM. Защищает прод-БД от 17 GB сканов.
@@ -104,6 +114,9 @@ func (h *ExportHelper) newGenerator() *packet.Generator {
 	}
 	if h.skipSpecialValues {
 		g.SetSkipSpecialValues(true)
+	}
+	if h.columnar {
+		g.SetColumnarLayout(true)
 	}
 	return g
 }

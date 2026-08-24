@@ -59,6 +59,20 @@ type DataPacket struct {
 	// (без RowsToData, без strings.Join, без промежуточных аллокаций).
 	// Если nil — используется Data.Rows (broker-путь, компрессия, etc.).
 	rawRows [][]string
+
+	// wantColumnar помечает пакет как предназначенный к записи колонками.
+	//
+	// Живёт на пакете, а не на генераторе, потому что строит пакет один
+	// генератор, а пишет — другой: команда экспорта заводит свежий
+	// packet.NewGenerator() в трёх разных местах записи, и ни одно из них не
+	// видит настроек первого. Намерение обязано ехать вместе с пакетом,
+	// иначе --columnar молча пишет обычные строки — что и происходило.
+	//
+	// Неэкспортируемое и не Data.Layout: пока строки лежат в rawRows,
+	// выставленный Layout описывал бы пустую Data.Rows как колоночную, и
+	// любой, кто заглянет туда раньше записи, увидит колоночный пакет без
+	// колонок. Настоящий Layout ставится в момент перекладки.
+	wantColumnar bool
 }
 
 // Header содержит метаданные сообщения
@@ -163,8 +177,26 @@ type Data struct {
 	// produced — one compressed row, or the plain N rows joined). Always
 	// check Encryption before treating Rows as plaintext row values.
 	Encryption string `xml:"encryption,attr,omitempty"`
-	Rows       []Row  `xml:"R"`
+
+	// Layout (опционально): "columns" означает, что каждый <R> хранит не строку
+	// таблицы, а КОЛОНКУ целиком — все её значения, разделённые '|'. Пусто —
+	// обычная построчная раскладка.
+	//
+	// Смысл в сжатии: в построчной раскладке значения одной колонки лежат
+	// друг от друга на длину записи, и кодек не видит их рядом. Собранные
+	// подряд, они дают около 19% на zstd 3.
+	//
+	// Атрибут обязателен именно потому, что меняет смысл <R>: читатель без
+	// него разрежет колонки как строки и получит мусор, не заметив этого.
+	// Поэтому раскладка включается только явным флагом генератора, а
+	// умолчание — построчная.
+	Layout string `xml:"layout,attr,omitempty"`
+
+	Rows []Row `xml:"R"`
 }
+
+// LayoutColumns — значение Data.Layout для колоночной раскладки.
+const LayoutColumns = "columns"
 
 // Row представляет одну строку данных
 type Row struct {
@@ -260,8 +292,16 @@ func (p *DataPacket) GetRows() [][]string {
 
 // SetRows устанавливает данные в пакет из [][]string
 // Правильно экранирует специальные символы
+//
+// Сбрасывает rawRows, и это не деталь реализации. GenerateReference оставляет
+// строки в неэкспортируемом rawRows, а writePacketTo предпочитает именно их —
+// так что без сброса "установить строки" не устанавливало бы ничего: пакет
+// уехал бы с прежними значениями, а вызывающий считал бы, что заменил их.
+// Ровно так терялась цепочка pre-export: маскировщик отрабатывал, результат
+// ложился в Data.Rows, а в XML уходили незамаскированные rawRows.
 func (p *DataPacket) SetRows(rows [][]string) {
 	p.Data = RowsToData(rows)
+	p.rawRows = nil
 	p.Header.RecordsInPart = len(rows)
 }
 
@@ -272,6 +312,8 @@ func (p *DataPacket) MaterializeRows() {
 		p.Data = RowsToData(p.rawRows)
 		p.rawRows = nil
 	}
+	// Строки уже построчные — намерение исполнять поздно и незачем.
+	p.wantColumnar = false
 }
 
 // SchemaEquals reports whether two schemas are structurally identical:

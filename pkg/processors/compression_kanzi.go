@@ -88,3 +88,29 @@ func (nopWriteCloser) Close() error { return nil }
 type nopReadCloser struct{ io.Reader }
 
 func (nopReadCloser) Close() error { return nil }
+
+// compressChunksKanzi пишет куски в kanzi-writer по одному.
+//
+// Писателю нужен полный исходный размер заранее — его считает вызывающий, суммой
+// длин кусков вместе с разделителями.
+func compressChunksKanzi(chunks [][]byte, level, total int) ([]byte, error) {
+	preset, ok := kanziPresets[level]
+	if !ok {
+		preset = kanziPresets[kanziDefaultLevel]
+	}
+	transform, entropy := preset[0], preset[1]
+
+	var buf bytes.Buffer
+	w, err := kio.NewWriter(&nopWriteCloser{&buf}, transform, entropy, 1024*1024, 1, 0, int64(total), false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kanzi writer: %w", err)
+	}
+	if err := writeChunks(w, chunks); err != nil {
+		_ = w.Close()
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, fmt.Errorf("kanzi compress close failed: %w", err)
+	}
+	return buf.Bytes(), nil
+}

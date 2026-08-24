@@ -132,7 +132,10 @@ func (e *Exporter) applyPreExport(ctx context.Context, pkt *packet.DataPacket) e
 	if err != nil {
 		return fmt.Errorf("pre-export processor failed: %w", err)
 	}
-	pkt.Data = packet.RowsToData(processed)
+	// SetRows, а не присваивание Data: оно сбрасывает rawRows, без чего писатель
+	// вывел бы исходные строки мимо всей цепочки, и поправляет RecordsInPart —
+	// валидатор в режиме filter удаляет строки, и заголовок иначе врёт.
+	pkt.SetRows(processed)
 	return nil
 }
 
