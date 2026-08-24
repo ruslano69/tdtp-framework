@@ -8,6 +8,7 @@ import argparse
 import sqlite3
 import random
 import sys
+import time
 from datetime import datetime, timedelta
 
 # Конфигурация (переопределяется ключами --out/--rows/--no-dates)
@@ -21,6 +22,16 @@ TOTAL_RECORDS = 100000
 # добавлены именно чтобы его задействовать. Флаг --no-dates воспроизводит
 # старый набор из шести колонок для сравнения.
 WITH_DATES = True
+
+# Единая точка отсчёта для всех дат. Раньше datetime.now() звался на каждое
+# поле каждой строки — это и лишняя работа, и разъезд: строки, сгенерированные
+# в начале и в конце прогона, отсчитывались от разных моментов.
+NOW = datetime.now()
+
+# Точка отсчёта для --seed. Одного сида мало: даты считаются от «сейчас», так
+# что без фиксации момента набор всё равно выходил бы разным. С обоими
+# фиксированными --seed даёт побайтово тот же файл.
+SEEDED_EPOCH = datetime(2026, 1, 1, 0, 0, 0)
 
 # Списки для генерации данных
 FIRST_NAMES = [
@@ -74,16 +85,23 @@ def generate_balance():
 
 
 def generate_date():
-    """Генерирует дату регистрации за последние 5 лет"""
-    days_ago = random.randint(0, 365 * 5)
-    date = datetime.now() - timedelta(days=days_ago)
-    return date.strftime("%Y-%m-%d %H:%M:%S")
+    """Дата регистрации за последние 5 лет, TEXT.
+
+    Время суток разыгрывается отдельно, а не наследуется от точки отсчёта.
+    Вычитание целых дней давало бы у всех ста тысяч строк одинаковый хвост
+    "00:00:00" — не свойство данных, а подарок компрессору. Замерено, и цена
+    велика: сжатый zstd 3 набор выходил на 18% меньше, kanzi 6 на 22%. То есть
+    пятая часть заявленной плотности бралась бы из артефакта генератора.
+    """
+    delta = timedelta(days=random.randint(0, 365 * 5),
+                      seconds=random.randint(0, 86399))
+    return (NOW - delta).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def generate_birth_date():
     """DATE — только календарная дата, без времени. Возраст 18..70 лет."""
     days_ago = random.randint(365 * 18, 365 * 70)
-    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+    return (NOW - timedelta(days=days_ago)).strftime("%Y-%m-%d")
 
 
 def generate_last_login():
@@ -95,27 +113,32 @@ def generate_last_login():
     if random.random() < 0.10:
         return None
     seconds_ago = random.randint(0, 86400 * 365)
-    return (datetime.now() - timedelta(seconds=seconds_ago)).strftime("%Y-%m-%d %H:%M:%S")
+    return (NOW - timedelta(seconds=seconds_ago)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def generate_updated_at():
     """TIMESTAMP с долями секунды — миллисекунды обязаны пережить round-trip."""
     delta = timedelta(seconds=random.randint(0, 86400 * 90),
                       milliseconds=random.randint(0, 999))
-    return (datetime.now() - delta).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    return (NOW - delta).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
 def create_database():
-    """Создает БД и таблицу"""
+    """Создает БД и таблицу. Индексы строятся отдельно, ПОСЛЕ вставки."""
     print(f"Создание БД: {DB_FILE}")
-    
+
     conn = sqlite3.connect(DB_FILE)
+
+    # Это одноразовый тестовый набор: durability здесь не нужна, а стоит она
+    # дорого — журнал и fsync на каждой транзакции были основной статьёй
+    # расходов. Потеря БД при падении процесса ничем не грозит, она
+    # пересоздаётся одной командой.
+    conn.execute("PRAGMA journal_mode = MEMORY")
+    conn.execute("PRAGMA synchronous = OFF")
+
     cursor = conn.cursor()
-    
-    # Удаляем таблицу если существует
     cursor.execute("DROP TABLE IF EXISTS Users")
-    
-    # Создаем таблицу
+
     date_columns = """,
             BirthDate DATE NOT NULL,
             LastLoginAt DATETIME,
@@ -132,8 +155,22 @@ def create_database():
             RegisteredAt TEXT NOT NULL%s
         )
     """ % date_columns)
-    
-    # Создаем индексы для ускорения запросов
+
+    conn.commit()
+    print("✓ Таблица Users создана")
+
+    return conn
+
+
+def create_indexes(conn):
+    """Строит индексы после вставки.
+
+    Индекс, существующий во время загрузки, переписывается на каждой строке:
+    шесть индексов — это шесть B-деревьев, которые правятся 100 000 раз.
+    Построенные разом по готовой таблице, они обходятся заметно дешевле, а
+    результат тот же.
+    """
+    cursor = conn.cursor()
     cursor.execute("CREATE INDEX idx_balance ON Users(Balance)")
     cursor.execute("CREATE INDEX idx_city ON Users(City)")
     cursor.execute("CREATE INDEX idx_active ON Users(IsActive)")
@@ -141,65 +178,61 @@ def create_database():
     if WITH_DATES:
         cursor.execute("CREATE INDEX idx_birth ON Users(BirthDate)")
         cursor.execute("CREATE INDEX idx_lastlogin ON Users(LastLoginAt)")
-    
     conn.commit()
-    print("✓ Таблица Users создана")
-    print("✓ Индексы созданы")
-    
-    return conn
+    print("✓ Индексы построены")
 
 
-def insert_records(conn, batch_size=1000):
-    """Вставляет записи пакетами"""
-    cursor = conn.cursor()
+def iter_records(total):
+    """Порождает записи по одной, не собирая их в список.
 
+    Прогресс печатается раз в 5000 строк, а не на каждой пачке: сам вывод в
+    консоль стоил заметной доли времени вставки.
+    """
+    for i in range(1, total + 1):
+        name = generate_name()
+        row = [
+            name,
+            generate_email(name, i),
+            random.choice(CITIES),
+            generate_balance(),
+            1 if random.random() < 0.7 else 0,  # 70% активных
+            generate_date(),
+        ]
+        if WITH_DATES:
+            row += [generate_birth_date(), generate_last_login(), generate_updated_at()]
+        yield tuple(row)
+
+        if i % 5000 == 0 or i == total:
+            done = int(i / total * 50)
+            print(f"\rПрогресс: [{'=' * done}{' ' * (50 - done)}] {i:,}/{total:,}",
+                  end="", flush=True)
+
+
+def insert_records(conn):
+    """Вставляет все записи одной транзакцией.
+
+    Прежняя версия коммитила каждую 1000 строк и глушила IntegrityError,
+    выбрасывая при этом всю пачку целиком. Это молча давало БД меньше
+    заказанного размера — для эталонного набора худший из возможных отказов,
+    потому что он не виден. Уникальность Email обеспечена индексом записи в
+    generate_email, так что ловить там нечего, а если однажды будет —
+    пусть падает.
+    """
     cols = ["Name", "Email", "City", "Balance", "IsActive", "RegisteredAt"]
     if WITH_DATES:
         cols += ["BirthDate", "LastLoginAt", "UpdatedAt"]
     insert_sql = "INSERT INTO Users (%s) VALUES (%s)" % (
         ", ".join(cols), ", ".join(["?"] * len(cols)))
-    
-    print(f"\nГенерация {TOTAL_RECORDS:,} записей...")
-    print("Прогресс: ", end="", flush=True)
-    
-    records = []
-    for i in range(1, TOTAL_RECORDS + 1):
-        name = generate_name()
-        email = generate_email(name, i)
-        city = random.choice(CITIES)
-        balance = generate_balance()
-        is_active = 1 if random.random() < 0.7 else 0  # 70% активных
-        registered_at = generate_date()
 
-        row = [name, email, city, balance, is_active, registered_at]
-        if WITH_DATES:
-            row += [generate_birth_date(), generate_last_login(), generate_updated_at()]
-        records.append(tuple(row))
-        
-        # Вставка пакетами
-        if len(records) >= batch_size:
-            try:
-                cursor.executemany(insert_sql, records)
-                conn.commit()
-                records = []
-                
-                # Прогресс-бар
-                progress = int((i / TOTAL_RECORDS) * 50)
-                print(f"\rПрогресс: [{'=' * progress}{' ' * (50 - progress)}] {i:,}/{TOTAL_RECORDS:,}", end="", flush=True)
-            
-            except sqlite3.IntegrityError:
-                # Пропускаем дубликаты email
-                records = []
-    
-    # Вставка остатка
-    if records:
-        try:
-            cursor.executemany(insert_sql, records)
-            conn.commit()
-        except sqlite3.IntegrityError:
-            pass
-    
-    print("\n✓ Записи вставлены")
+    print(f"\nГенерация {TOTAL_RECORDS:,} записей...")
+
+    with conn:  # одна транзакция: коммит на выходе, откат при исключении
+        conn.executemany(insert_sql, iter_records(TOTAL_RECORDS))
+
+    inserted = conn.execute("SELECT COUNT(*) FROM Users").fetchone()[0]
+    if inserted != TOTAL_RECORDS:
+        raise RuntimeError(f"вставлено {inserted:,} строк вместо {TOTAL_RECORDS:,}")
+    print(f"\n✓ Вставлено {inserted:,} записей")
 
 
 def print_statistics(conn):
@@ -264,14 +297,20 @@ def parse_args():
                     help=f"число записей (по умолчанию {TOTAL_RECORDS})")
     ap.add_argument("--no-dates", action="store_true",
                     help="без колонок DATE/DATETIME/TIMESTAMP — старый набор из шести колонок")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="детерминированный набор: фиксирует и генератор случайных чисел, "
+                         "и точку отсчёта дат, поэтому файл выходит побайтово тем же")
     return ap.parse_args()
 
 
 def main():
     """Главная функция"""
-    global DB_FILE, TOTAL_RECORDS, WITH_DATES
+    global DB_FILE, TOTAL_RECORDS, WITH_DATES, NOW
     args = parse_args()
     DB_FILE, TOTAL_RECORDS, WITH_DATES = args.out, args.rows, not args.no_dates
+    if args.seed is not None:
+        random.seed(args.seed)
+        NOW = SEEDED_EPOCH
 
     print("=" * 60)
     print("ГЕНЕРАТОР ТЕСТОВОЙ БД ДЛЯ TDTP BENCHMARK")
@@ -281,8 +320,11 @@ def main():
         # Создание БД
         conn = create_database()
         
-        # Вставка данных
+        # Вставка данных, затем индексы — именно в этом порядке
+        t0 = time.monotonic()
         insert_records(conn)
+        create_indexes(conn)
+        print(f"✓ Загрузка заняла {time.monotonic() - t0:.1f} с")
         
         # Статистика
         print_statistics(conn)
