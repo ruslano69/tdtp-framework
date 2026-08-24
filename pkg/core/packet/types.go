@@ -260,8 +260,16 @@ func (p *DataPacket) GetRows() [][]string {
 
 // SetRows устанавливает данные в пакет из [][]string
 // Правильно экранирует специальные символы
+//
+// Сбрасывает rawRows, и это не деталь реализации. GenerateReference оставляет
+// строки в неэкспортируемом rawRows, а writePacketTo предпочитает именно их —
+// так что без сброса "установить строки" не устанавливало бы ничего: пакет
+// уехал бы с прежними значениями, а вызывающий считал бы, что заменил их.
+// Ровно так терялась цепочка pre-export: маскировщик отрабатывал, результат
+// ложился в Data.Rows, а в XML уходили незамаскированные rawRows.
 func (p *DataPacket) SetRows(rows [][]string) {
 	p.Data = RowsToData(rows)
+	p.rawRows = nil
 	p.Header.RecordsInPart = len(rows)
 }
 
