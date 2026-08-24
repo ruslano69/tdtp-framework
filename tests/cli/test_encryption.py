@@ -144,6 +144,29 @@ _mock_log_path: str = ""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+# --enc-dev never talks to xZMercury: DevClient generates the key locally and
+# returns a placeholder HMAC. The bypass that lets that through is keyed on the
+# SECRET being literally "dev-mode" (processors/encryption.go), not on which
+# client was chosen — so "we are in dev mode" is expressed twice, by the flag
+# and by the secret, and setting one without the other fails.
+#
+# That matters here because TDTP_MERCURY_EXTERNAL sets the real secret for
+# every invocation, which is right for E1-E4 and wrong for E5: with a real
+# secret the placeholder HMAC is verified for real, fails, and the pipeline
+# degrades to an error packet. E5 therefore pins the sentinel regardless of
+# mode. It is not a workaround for a broken --enc-dev — that path works, and
+# passes here — it is passing the flag the mode actually requires.
+DEV_SENTINEL_SECRET = "dev-mode"
+
+
+def run_enc_dev(*args, timeout=30) -> subprocess.CompletedProcess:
+    """tdtpcli for --enc-dev: forces the dev sentinel as MERCURY_SERVER_SECRET."""
+    env = _tdtpcli_env()
+    env["MERCURY_SERVER_SECRET"] = DEV_SENTINEL_SECRET
+    return subprocess.run([TDTPCLI] + list(args), capture_output=True, text=True,
+                          timeout=timeout, env=env)
+
+
 def _tdtpcli_env() -> dict:
     """Env for every tdtpcli invocation: MERCURY_SERVER_SECRET must match
     what xzmercury-mock was started with, or every --enc call fails HMAC
@@ -619,7 +642,7 @@ def test_E5_enc_dev():
     #   (NOT decryptable afterward by design — key is session-scoped, never
     #   persisted; see flags_dev.go's own warning comment)
     t = time.monotonic()
-    p = run_no_cfg("--pipeline", pipeline_yaml, "--enc-dev")
+    p = run_enc_dev("--pipeline", pipeline_yaml, "--enc-dev")
     enc_ok, detail = is_encrypted_output(dest)
     record("E5.1 --pipeline --enc-dev → exit 0, encrypted output (no Mercury needed)",
            p.returncode == 0 and enc_ok,
