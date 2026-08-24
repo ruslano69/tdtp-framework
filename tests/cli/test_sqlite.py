@@ -1558,6 +1558,72 @@ def test_T12_dates_columnar_processors():
                    same, time.monotonic() - t,
                    f"rc={r2.returncode} identical={same}")
 
+    # --- The combination matrix ----------------------------------------------
+    #
+    # Every transformation was tested on its own, and each pair that anyone
+    # happened to think of. The full stack was not, and it was broken: with
+    # --columnar --compact --integrity --compress the packet came back with an
+    # empty stored hash and was refused on read.
+    #
+    # Two separate causes, both invisible in isolation. Laying out the columns
+    # replaced the whole <Data> element and dropped the xxh3 that integrity had
+    # already stamped. And materializing rows cleared the columnar intent, so
+    # --columnar --integrity silently wrote a row-major packet — the flag
+    # accepted, nothing said, nothing done.
+    #
+    # Hence a matrix rather than more pairs: these bugs live in the ordering
+    # between steps, so the only thing that finds them is running the steps
+    # together. Each case asserts three things, because each failure mode shows
+    # up in a different one: the attribute is present (the flag was not
+    # ignored), the hash survives (a later step did not clobber an earlier
+    # one), and the data reads back identical (nothing was transposed twice).
+    base = out("t12_matrix_base.xml")
+    base_csv = out("t12_matrix_base.csv")
+    run("--export", "users", "--output", base)
+    run_no_cfg("--to-csv", base, "--output", base_csv)
+    with open(base_csv, encoding="utf-8") as fh:
+        want_csv = fh.read()
+
+    matrix = [
+        ["--columnar"],
+        ["--columnar", "--integrity"],
+        ["--columnar", "--compress"],
+        ["--columnar", "--compact"],
+        ["--columnar", "--compact", "--compress"],
+        ["--columnar", "--integrity", "--compress"],
+        ["--columnar", "--compact", "--integrity", "--compress"],
+    ]
+    for i, args in enumerate(matrix, start=1):
+        t = time.monotonic()
+        label = " ".join(a.lstrip("-") for a in args)
+        f = out(f"t12_matrix_{i}.xml")
+        c = out(f"t12_matrix_{i}.csv")
+        p = run("--export", "users", *args, "--output", f)
+
+        layout, xxh3 = "", ""
+        if os.path.exists(f):
+            d = ET.parse(f).getroot().find("Data")
+            layout = d.get("layout") or ""
+            xxh3 = d.get("xxh3") or ""
+
+        r = run_no_cfg("--to-csv", f, "--output", c)
+        got_csv = ""
+        if r.returncode == 0 and os.path.exists(c):
+            with open(c, encoding="utf-8") as fh:
+                got_csv = fh.read()
+
+        want_hash = "--integrity" in args
+        ok = (p.returncode == 0
+              and layout == "columns"                 # флаг не проигнорирован
+              and bool(xxh3) == want_hash             # хеш не затёрт поздним шагом
+              and r.returncode == 0
+              and got_csv == want_csv)                # ничего не переложено дважды
+        record(f"T12.28.{i} {label}",
+               ok, time.monotonic() - t,
+               f"export={p.returncode} layout={layout!r} xxh3={'да' if xxh3 else 'нет'} "
+               f"read={r.returncode} data={'ok' if got_csv == want_csv else 'РАСХОЖДЕНИЕ'}")
+
+
 
 
 

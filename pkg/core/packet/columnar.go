@@ -67,7 +67,15 @@ func EnsureColumnar(pkt *DataPacket) {
 		return
 	}
 	rows := pkt.GetRows() // работает и от rawRows, и от Data.Rows
-	pkt.Data = RowsToColumnarData(rows, len(pkt.Schema.Fields), buildEscapeMask(pkt.Schema))
+	laid := RowsToColumnarData(rows, len(pkt.Schema.Fields), buildEscapeMask(pkt.Schema))
+
+	// Заменяются только строки и раскладка. Присвоить Data целиком нельзя: там
+	// уже могут стоять xxh3 от ComputeIntegrity, checksum и признаки compact —
+	// всё это описывает те же данные и остаётся верным. Полное присваивание
+	// роняло xxh3, и пакет, собранный с --columnar --compact --integrity
+	// --compress, отвергался на чтении с пустым stored-хешем.
+	pkt.Data.Rows = laid.Rows
+	pkt.Data.Layout = laid.Layout
 	pkt.rawRows = nil
 	pkt.wantColumnar = false
 }
