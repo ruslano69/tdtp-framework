@@ -18,6 +18,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
+	"github.com/ruslano69/tdtp-framework/pkg/transform"
 )
 
 // ExportOptions holds options for export operations
@@ -265,12 +266,17 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 	recordOpMetrics(ctx, opts.TableName, int64(totalRows))
 
-	// Build packet processing chain.
-	// Порядок: mask/normalize/validate → compact → compress → (encrypt) → (hash)
-	chain := processors.NewPacketChain()
+	// Порядок шагов берётся из pkg/transform, а не из очереди вызовов ниже.
+	//
+	// Раньше он держался на том, что каждый добавляющий шаг прочитал все
+	// комментарии вида "MUST run before ComputeIntegrity". За месяц так
+	// набралось три бага, и все — про стык между шагами, а не про сами
+	// преобразования. Теперь ограничения объявлены у шага один раз, план
+	// строится из них, а этот код лишь раскладывает готовые шаги по плану.
+	steps := map[string]processors.PacketProcessor{}
 
 	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
-		chain.Add(opts.ProcessorMgr)
+		steps[transform.StageRowProcessors] = opts.ProcessorMgr
 	}
 
 	if opts.Compact {
@@ -279,7 +285,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 			fmt.Println("⚠ compact requested but no fixed fields found (use --fixed-fields or add _ prefix to view columns)")
 		} else {
 			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
-			chain.Add(&compactProc{fixedNames: fixedNames, writeTail: opts.CompactTail})
+			steps[transform.StageCompact] = &compactProc{fixedNames: fixedNames, writeTail: opts.CompactTail}
 		}
 	}
 
@@ -309,13 +315,28 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		} else {
 			fmt.Printf("v1.4 integrity (local hashes only, no Mercury registration)...\n")
 		}
-		chain.Add(&integrityProc{mercuryClient: mclient, mercuryURL: opts.MercuryURL, caller: caller})
+		steps[transform.StageIntegrity] = &integrityProc{mercuryClient: mclient, mercuryURL: opts.MercuryURL, caller: caller}
 	}
 
 	if opts.Compress {
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
-		chain.Add(&compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
-			checksum: opts.EnableChecksum, columnar: opts.Columnar})
+		steps[transform.StageCompress] = &compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
+			checksum: opts.EnableChecksum, columnar: opts.Columnar}
+	}
+
+	// Раскладка по плану. Несовместимый набор отвергается ЗДЕСЬ, до первого
+	// записанного байта, а не проявляется у получателя.
+	enabled := make([]string, 0, len(steps))
+	for name := range steps {
+		enabled = append(enabled, name)
+	}
+	plan, planErr := transform.Plan(enabled)
+	if planErr != nil {
+		return fmt.Errorf("incompatible transform options: %w", planErr)
+	}
+	chain := processors.NewPacketChain()
+	for _, name := range plan {
+		chain.Add(steps[name])
 	}
 
 	// Open object storage once outside the loop (if needed).
