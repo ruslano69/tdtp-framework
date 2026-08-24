@@ -298,6 +298,49 @@ So the two halves of the idea are not equal. Skipping serialization on the
 compressed path is cheap and clearly worth it; columnar reading is worth it for
 memory, and only becomes a speed story if the per-cell string goes too.
 
+### Taking the per-cell string out: the arena
+
+`base.ScanSQLArena` / `sqlite.ReadAllArenas` hold each column as one `[]byte`
+with an `[]int32` of offsets, and append values into it straight from what the
+driver returned — no `string` per cell. All three paths measured in one run:
+
+| Read | time | memory | allocs |
+|---|---|---|---|
+| `ReadAllRows` | 364 ms | 96.5 MB | 3 475 317 |
+| `ReadAllColumns` | 363 ms | 83.6 MB | 3 375 467 |
+| `ReadAllArenas` | **333 ms** | 88.9 MB | **2 535 856** |
+
+| Compress (zstd 3) | time | size | allocs |
+|---|---|---|---|
+| row-major | 179 ms | 6 172 104 B | 100 080 |
+| columnar | 147 ms | 5 008 288 B | 95 |
+| arena | **126 ms** | **5 004 228 B** | **94** |
+
+End to end 543 → 459 ms, −15.5%, with the blob 18.9% smaller.
+
+`appendCellTDTP` earns this by not going through `DBValueToString` +
+`ConvertValueToTDTP` at all on the common types. Both shortcuts rest on
+properties the row path already proves: `ConvertValueToTDTP` is the identity for
+TEXT, INTEGER and BOOLEAN (its own fast path returns the argument), and
+`fastSQLiteDateTime` is now a wrapper over `appendFastSQLiteDateTime` — one
+implementation, so the two readers cannot drift on the awkward cases (fractional
+seconds, a shape that disagrees with the declared type).
+`TestReadAllArenas_MatchesReadAllRows` checks all 100k×10 cells anyway.
+
+**What is left is not ours to remove.** 2.5M allocations remain for 1M cells,
+and the bulk is the driver: modernc hands us a freshly allocated `string` per
+text cell before our code sees it. `Balance` adds 100k more by falling back —
+`REAL` is not in the identity set, so appending it directly would not be
+provably the same bytes, and it goes the long way on purpose.
+
+Two things this prototype does not do. The benchmark copies each arena with
+`string(col.Buf)` to fit the `[]string` signature of
+`CompressDataForTdtpAlgo` — a real path would hand it `[][]byte` and save
+another 14.8 MB of copying, so 126 ms is still pessimistic. And the arena marks
+value boundaries only in `Offsets`: a value containing its own `\n` is
+unambiguous there but not in `Buf` alone, so a columnar format has to either
+escape on write or ship the offsets alongside.
+
 On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
 reaches 10–12× against the original — BWT gets to do its work properly. On short
 synthetic strings it manages 6–7×, which is still **30–50% denser than zstd**.

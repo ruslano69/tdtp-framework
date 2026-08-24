@@ -151,3 +151,79 @@ func BenchmarkCompressColumnar_Dates(b *testing.B) {
 	}
 	b.ReportMetric(float64(n), "bytes")
 }
+
+// Арена обязана давать те же байты, что строчное чтение. Быстрые ветки
+// appendCellTDTP обходят DBValueToString и ConvertValueToTDTP, опираясь на
+// доказанные свойства обычного пути; тест проверяет, что рассуждение верно на
+// всех ста тысячах строк, включая NULL и дробные секунды.
+func TestReadAllArenas_MatchesReadAllRows(t *testing.T) {
+	a, ctx := openBench(t, datesDB)
+
+	schema, err := a.GetTableSchema(ctx, "Users")
+	if err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	rows, err := a.ReadAllRows(ctx, "Users", schema)
+	if err != nil {
+		t.Fatalf("ReadAllRows: %v", err)
+	}
+	block, err := a.ReadAllArenas(ctx, "Users", schema)
+	if err != nil {
+		t.Fatalf("ReadAllArenas: %v", err)
+	}
+
+	if block.Rows != len(rows) {
+		t.Fatalf("строк: арена %d, строчно %d", block.Rows, len(rows))
+	}
+	for c, col := range block.Columns {
+		if col.Len() != len(rows) {
+			t.Fatalf("колонка %s: высота %d, ожидалось %d", block.Names[c], col.Len(), len(rows))
+		}
+	}
+	for r := range rows {
+		for c := range rows[r] {
+			if got := block.Columns[c].String(r); got != rows[r][c] {
+				t.Fatalf("строка %d колонка %s: арена %q, строчно %q",
+					r, block.Names[c], got, rows[r][c])
+			}
+		}
+	}
+}
+
+func BenchmarkReadAllArenas_Dates(b *testing.B) {
+	a, ctx := openBench(b, datesDB)
+	schema, _ := a.GetTableSchema(ctx, "Users")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := a.ReadAllArenas(ctx, "Users", schema); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Сжатие прямо из арен: Buf каждой колонки уже готовый поток, склеивать
+// нечего вовсе.
+func BenchmarkCompressArena_Dates(b *testing.B) {
+	a, ctx := openBench(b, datesDB)
+	schema, _ := a.GetTableSchema(ctx, "Users")
+	block, err := a.ReadAllArenas(ctx, "Users", schema)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	var n int
+	for i := 0; i < b.N; i++ {
+		cols := make([]string, len(block.Columns))
+		for c, col := range block.Columns {
+			cols[c] = string(col.Buf)
+		}
+		blob, _, err := processors.CompressDataForTdtpAlgo(cols, "zstd", 3)
+		if err != nil {
+			b.Fatal(err)
+		}
+		n = len(blob)
+	}
+	b.ReportMetric(float64(n), "bytes")
+}

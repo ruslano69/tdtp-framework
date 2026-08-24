@@ -97,8 +97,23 @@ func cellToTDTP(v any, field packet.Field, converter *UniversalTypeConverter, db
 // без неё "2026-02-31 00:00:00" прошло бы склейкой, тогда как time.Parse его
 // отвергает, и битое значение поехало бы в пакет как валидная метка времени.
 func fastSQLiteDateTime(s, fieldType string) (string, bool) {
-	if !packet.IsDateFieldType(fieldType) {
+	out, ok := appendFastSQLiteDateTime(nil, s, fieldType)
+	if !ok {
 		return "", false
+	}
+	return string(out), true
+}
+
+// appendFastSQLiteDateTime — та же нормализация, дописывающая результат в dst
+// вместо того чтобы возводить строку.
+//
+// Здесь единственная реализация, а fastSQLiteDateTime поверх неё обёртка.
+// Держать две копии этих проверок нельзя: строчный и колоночный путь тогда
+// разошлись бы ровно на тех значениях, где условия сложнее всего, — на границах
+// дробной части и на форме, не совпавшей с объявленным типом.
+func appendFastSQLiteDateTime(dst []byte, s, fieldType string) ([]byte, bool) {
+	if !packet.IsDateFieldType(fieldType) {
+		return dst, false
 	}
 
 	// Форма обязана соответствовать объявленному типу, иначе обычный путь
@@ -110,15 +125,15 @@ func fastSQLiteDateTime(s, fieldType string) (string, bool) {
 	// "YYYY-MM-DD" — уже канонический вид для DATE.
 	if len(s) == 10 {
 		if !isDateOnly || !validCivilDate(s) {
-			return "", false
+			return dst, false
 		}
-		return s, true
+		return append(dst, s...), true
 	}
 
 	// "YYYY-MM-DD HH:MM:SS" плюс необязательная дробная часть.
 	if isDateOnly || len(s) < 19 || s[10] != ' ' ||
 		!validCivilDate(s[:10]) || !validClockTime(s[11:19]) {
-		return "", false
+		return dst, false
 	}
 
 	frac := s[19:]
@@ -127,21 +142,20 @@ func fastSQLiteDateTime(s, fieldType string) (string, bool) {
 		// RFC3339Nano хвостовые нули срезает, так что ".500" пришлось бы
 		// укорачивать, а это уже не склейка.
 		if len(frac) < 2 || len(frac) > 10 || frac[0] != '.' || frac[len(frac)-1] == '0' {
-			return "", false
+			return dst, false
 		}
 		for i := 1; i < len(frac); i++ {
 			if frac[i] < '0' || frac[i] > '9' {
-				return "", false
+				return dst, false
 			}
 		}
 	}
 
-	out := make([]byte, 0, len(s)+1)
-	out = append(out, s[:10]...)
-	out = append(out, 'T')
-	out = append(out, s[11:]...)
-	out = append(out, 'Z')
-	return string(out), true
+	dst = append(dst, s[:10]...)
+	dst = append(dst, 'T')
+	dst = append(dst, s[11:]...)
+	dst = append(dst, 'Z')
+	return dst, true
 }
 
 // validCivilDate проверяет "YYYY-MM-DD" по символам и по календарю.

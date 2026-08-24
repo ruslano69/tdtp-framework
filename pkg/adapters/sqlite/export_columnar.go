@@ -42,3 +42,29 @@ func (a *Adapter) ReadAllColumns(ctx context.Context, tableName string, schema p
 
 	return base.ScanSQLColumns(rows, schema, a.converter, "sqlite", hint)
 }
+
+// ReadAllArenas читает таблицу в поколоночные арены — тот же путь, что
+// ReadAllColumns, но без строки на ячейку.
+func (a *Adapter) ReadAllArenas(ctx context.Context, tableName string, schema packet.Schema) (*base.ArenaBlock, error) {
+	tableName = tdtql.StripBrackets(tableName)
+	fieldNames := make([]string, len(schema.Fields))
+	for i, field := range schema.Fields {
+		fieldNames[i] = selectExprForField(field)
+	}
+
+	quotedTable := fmt.Sprintf("\"%s\"", tableName) //nolint:gocritic // SQL identifier quoting, not Go string quoting
+	query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(fieldNames, ", "), quotedTable)
+
+	hint := 0
+	if n, err := a.GetRowCount(ctx, tableName); err == nil {
+		hint = int(n)
+	}
+
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query table: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return base.ScanSQLArena(rows, schema, a.converter, "sqlite", hint)
+}
