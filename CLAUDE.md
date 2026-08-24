@@ -193,6 +193,45 @@ without being handed them sorted.
 **So: `--order-by` is for consumers that need ordered rows. It is not a
 compression tactic — it costs about 360 ms and gives back nothing.**
 
+**But the intuition behind it was not wrong, only mislocated.** Transposing the
+same 100k rows into column order and compressing that instead shows what was
+really going on:
+
+| Column | in ID order | sorted by `UpdatedAt` |
+|---|---|---|
+| `ID` | 63 436 B (9.3×) | 372 596 B (1.6×) |
+| `Email` | 830 580 B (3.7×) | 966 128 B (3.2×) |
+| `UpdatedAt` | 1 027 264 B (2.4×) | **836 748 B (3.0×)** |
+| all ten | 4 977 472 B | 5 230 732 B |
+
+Sorting by date *does* compress the date column — 19% off `UpdatedAt`, exactly as
+expected. It loses overall because it costs 309 KB on `ID` and 136 KB on `Email`,
+and those two are only that compressible because this corpus exports a dense
+sequential surrogate key. **On data without one, sorting by date would come out
+ahead** — subtract `ID` and `Email` from the table above and the sorted layout
+wins by 4.7%. Do not generalise the "sorting never helps" line past this corpus.
+
+### Column order beats row order by 13–19%, at no cost in time
+
+Measured on the same 100k×10 set, compressing the identical bytes in row order
+against column order:
+
+| Codec | row order | column order | Δ | Time row → column |
+|---|---|---|---|---|
+| zstd 3 | 6 177 644 B | 5 011 048 B | **−18.9%** | 155 → 138 ms |
+| zstd 19 | 5 272 432 B | 4 491 948 B | −14.8% | 971 → 731 ms |
+| kanzi 6 | 3 394 260 B | 2 958 236 B | −12.8% | 1016 → 1007 ms |
+
+The reason is the same one that defeats sorting: in a row store the values of one
+column sit about 154 bytes apart, with nine unrelated fields between them, so a
+codec never sees them as a series. Transposed, each column becomes a contiguous
+run of like-typed, like-shaped values. Compression also gets *faster*, because
+the codec finds its matches sooner.
+
+This is a property of the layout, not of this corpus — unlike the sorting
+result. Nothing is implemented; the measurement exists to say the idea is worth
+the design work, not that the format is decided.
+
 On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
 reaches 10–12× against the original — BWT gets to do its work properly. On short
 synthetic strings it manages 6–7×, which is still **30–50% denser than zstd**.
