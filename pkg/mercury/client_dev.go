@@ -67,6 +67,19 @@ func (d *DevClient) RegisterHash(_ context.Context, _ string, _ int, xxh3, _, _,
 	return nil
 }
 
+// HMACVerificationExempt сообщает, что привязки этого клиента верифицировать
+// нечем: ключ сгенерирован здесь же, и подписи от сервера не существует.
+//
+// Именно этим dev-режим и включается теперь — выбором клиента, а не строкой
+// "dev-mode" в MERCURY_SERVER_SECRET. Прежняя связка требовала двух действий
+// вместо одного и отказывала тихо, если сделано было только одно: на боевом
+// сервере секрет выставлен всегда, так что --enc-dev в одиночку не работал
+// ровно там, где нужен, — при аварийном откате.
+//
+// Файл собирается только без -tags production, поэтому в продакшен-сборке
+// освобождения не существует вовсе.
+func (d *DevClient) HMACVerificationExempt() bool { return true }
+
 // VerifyHMACDev всегда возвращает true в dev-режиме.
 func VerifyHMACDev(_, _, _ string) bool {
 	return true
