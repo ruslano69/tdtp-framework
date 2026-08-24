@@ -48,6 +48,30 @@ func RowsToColumnarData(rows [][]string, nFields int, mask []bool) Data {
 	return data
 }
 
+// EnsureColumnar приводит Data к колоночной раскладке, если она ещё не такая.
+//
+// Идемпотентна намеренно. Раскладку выставляют из трёх мест — три точки записи
+// генератора и шаг сжатия в команде экспорта, — и какие из них отработают,
+// зависит от пути: GenerateReference оставляет строки в rawRows и раскладку
+// делает писатель, GenerateResponse строит Data сразу, а сжатие перекладывает
+// само между хешем и кодеком. Без защиты от повторного вызова путь с запросом
+// и сжатием транспонировал бы дважды, приняв колонки за строки.
+//
+// Отказывается работать, когда строки непрозрачны: у сжатого или
+// зашифрованного пакета перекладывать нечего.
+func EnsureColumnar(pkt *DataPacket) {
+	if pkt.Data.Layout == LayoutColumns {
+		return // уже разложено
+	}
+	if pkt.Data.Compression != "" || pkt.Data.Encryption != "" {
+		return
+	}
+	rows := pkt.GetRows() // работает и от rawRows, и от Data.Rows
+	pkt.Data = RowsToColumnarData(rows, len(pkt.Schema.Fields), buildEscapeMask(pkt.Schema))
+	pkt.rawRows = nil
+	pkt.wantColumnar = false
+}
+
 // ExpandColumnarRows разворачивает колоночную раскладку обратно в построчную.
 //
 // Устроен как ExpandCompactRows: правит Data.Rows на месте и снимает свой

@@ -1512,6 +1512,53 @@ def test_T12_dates_columnar_processors():
            p.returncode == 0 and "10 rows" in p.stdout, time.monotonic() - t,
            f"rc={p.returncode} out={p.stdout[-160:]}")
 
+    # --- Columnar on the TDTQL query path ------------------------------------
+    #
+    # A filtered export goes through GenerateResponse, which builds Data eagerly
+    # instead of leaving rows in the writer's fast path. --columnar reached only
+    # the latter, so a query export silently produced a row-major packet: the
+    # flag was accepted, reported nothing, and did nothing.
+    #
+    # The compressed variant is the one that can corrupt rather than merely
+    # ignore. The layout is applied by the writer AND by the compression step,
+    # so a second transposition would read the columns as rows.
+    for label, args in [("--limit", ["--limit", "5"]),
+                        ("--where", ["--where", "City = 'Moscow'"])]:
+        for suffix, extra in [("", []), (" +compress", ["--compress"])]:
+            t = time.monotonic()
+            colf = out(f"t12_q{label.strip('-')}{'z' if extra else ''}.xml")
+            p = run("--export", "users", "--columnar", *args, *extra, "--output", colf)
+            layout, nrec = "", -1
+            if os.path.exists(colf):
+                root = ET.parse(colf).getroot()
+                layout = root.find("Data").get("layout") or ""
+                rip = root.find("Header").find("RecordsInPart")
+                nrec = int(rip.text) if rip is not None and rip.text else -1
+            record(f"T12.26{label}{suffix}: --columnar applies on the query path",
+                   p.returncode == 0 and layout == "columns" and nrec == 5,
+                   time.monotonic() - t,
+                   f"rc={p.returncode} layout={layout!r} RecordsInPart={nrec}")
+
+            # And the rows must survive: a double transposition would not fail,
+            # it would hand back other records' values.
+            t = time.monotonic()
+            reff = out(f"t12_qref{label.strip('-')}{'z' if extra else ''}.xml")
+            run("--export", "users", *args, *extra, "--output", reff)
+            a_csv, b_csv = out("t12_qa.csv"), out("t12_qb.csv")
+            r1 = run_no_cfg("--to-csv", reff, "--output", a_csv)
+            r2 = run_no_cfg("--to-csv", colf, "--output", b_csv)
+            same = False
+            if r1.returncode == 0 and r2.returncode == 0:
+                with open(a_csv, encoding="utf-8") as fh:
+                    a = fh.read()
+                with open(b_csv, encoding="utf-8") as fh:
+                    b = fh.read()
+                same = a == b and a.count("\n") >= 5
+            record(f"T12.27{label}{suffix}: filtered rows are identical either layout",
+                   same, time.monotonic() - t,
+                   f"rc={r2.returncode} identical={same}")
+
+
 
 
 

@@ -744,10 +744,10 @@ func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableCh
 	//
 	// Раскладка не идёт через materializeForWrite, потому что после сжатия
 	// Data.Rows — это один блоб, и перекладывать там уже нечего.
+	// EnsureColumnar идемпотентна: на пути с TDTQL-запросом раскладку мог уже
+	// применить писатель, и второе транспонирование приняло бы колонки за строки.
 	if columnar {
-		rows := pkt.GetRows()
-		pkt.Data = packet.RowsToColumnarData(rows, len(pkt.Schema.Fields),
-			packet.BuildEscapeMask(pkt.Schema))
+		packet.EnsureColumnar(pkt)
 	}
 
 	if algo == "" {
