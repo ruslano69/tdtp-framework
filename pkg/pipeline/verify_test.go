@@ -2,8 +2,8 @@ package pipeline_test
 
 import (
 	"context"
-	"strings"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
