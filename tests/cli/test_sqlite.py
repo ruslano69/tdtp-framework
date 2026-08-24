@@ -1439,6 +1439,80 @@ def test_T12_dates_columnar_processors():
            city_ok, time.monotonic() - t,
            f"City={masked[0][3]!r}" if masked else "no rows")
 
+    # --- Compressed columnar: every conversion must read it -------------------
+    #
+    # T12.9-T12.14 above transpose in Python and so only ever produce an
+    # UNCOMPRESSED columnar packet. The compressed one takes a different route
+    # on both sides: the layout is applied between hashing and the codec, and
+    # the reader has to expand after decompressing. That gap let a real defect
+    # through — decompression yields one string per COLUMN, and a copy of the
+    # row-count check compared eight columns against ten rows, so --to-csv,
+    # --to-html and --to-tdtp all refused a packet they had written themselves.
+    t = time.monotonic()
+    colz = out("t12_users_colz.xml")
+    p = run("--export", "users", "--columnar", "--compress", "--output", colz)
+    attrs = ""
+    if os.path.exists(colz):
+        d = ET.parse(colz).getroot().find("Data")
+        attrs = "%s/%s" % (d.get("compression"), d.get("layout"))
+    record("T12.20 export compressed + columnar in one packet",
+           p.returncode == 0 and attrs == "zstd/columns", time.monotonic() - t,
+           f"rc={p.returncode} Data={attrs!r} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    ref = out("t12_users_rowz.xml")
+    run("--export", "users", "--compress", "--output", ref)
+    ref_csv, col_csv = out("t12_rowz.csv"), out("t12_colz.csv")
+    p1 = run_no_cfg("--to-csv", ref, "--output", ref_csv)
+    p2 = run_no_cfg("--to-csv", colz, "--output", col_csv)
+    same = False
+    if p1.returncode == 0 and p2.returncode == 0 and os.path.exists(ref_csv) and os.path.exists(col_csv):
+        with open(ref_csv, encoding="utf-8") as fh:
+            a = fh.read()
+        with open(col_csv, encoding="utf-8") as fh:
+            b = fh.read()
+        same = a == b
+    record("T12.21 --to-csv gives identical output for row and columnar packets",
+           p2.returncode == 0 and same, time.monotonic() - t,
+           f"rc={p2.returncode} identical={same} err={p2.stderr[-160:]}")
+
+    t = time.monotonic()
+    p = run_no_cfg("--to-html", colz, "--output", out("t12_colz.html"))
+    record("T12.22 --to-html reads a compressed columnar packet",
+           p.returncode == 0, time.monotonic() - t,
+           f"rc={p.returncode} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    p = run_no_cfg("--to-tdtp", colz, "--output", out("t12_colz_norm.xml"), "--v14")
+    rows_back = read_rows(out("t12_colz_norm.xml"))
+    record("T12.23 --to-tdtp normalizes a compressed columnar packet to 10 rows",
+           p.returncode == 0 and len(rows_back) == 10, time.monotonic() - t,
+           f"rc={p.returncode} rows={len(rows_back)} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    imp_db = out("t12_colz_import.db")
+    if os.path.exists(imp_db):
+        os.remove(imp_db)
+    shutil.copy(TEST_DB, imp_db)
+    conn = sqlite3.connect(imp_db)
+    conn.execute("DELETE FROM users")
+    conn.commit()
+    conn.close()
+    imp_cfg = out("t12_colz_import.yaml")
+    write_cfg(imp_cfg, db=imp_db)
+    p = run("--import", colz, "--table", "users", "--strategy", "replace", cfg=imp_cfg)
+    n = sqlite_query(imp_db, "SELECT COUNT(*) FROM users")[0][0]
+    record("T12.24 --import restores 10 rows from a compressed columnar packet",
+           p.returncode == 0 and n == 10, time.monotonic() - t,
+           f"rc={p.returncode} rows={n} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    p = run("--test", colz)
+    record("T12.25 --test counts rows, not columns, on a compressed columnar packet",
+           p.returncode == 0 and "10 rows" in p.stdout, time.monotonic() - t,
+           f"rc={p.returncode} out={p.stdout[-160:]}")
+
+
 
 
 # ─── Runner ───────────────────────────────────────────────────────────────────

@@ -821,11 +821,21 @@ func decompressPacketData(pkt *packet.DataPacket) error {
 		pkt.Data.Rows[i] = packet.Row{Value: row}
 	}
 
-	// Integrity: RecordsInPart must match actual decompressed row count.
-	// v1.4+ packets carry XXH3 — that is the authoritative integrity check.
-	if declared := pkt.Header.RecordsInPart; declared > 0 && packet.NeedsRowCountCheck(pkt.Version) && declared != len(rows) {
-		return fmt.Errorf("RecordsInPart mismatch after decompression: header declares %d rows, got %d (data may be truncated or corrupt)",
-			declared, len(rows))
+	// Колоночная раскладка разворачивается ЗДЕСЬ, и до счёта строк.
+	//
+	// Это третья копия связки «распаковать и сверить счётчик» — две другие в
+	// packet.DecompressData и etl/loader.go. Копию пропустили, когда разворот
+	// вносили в первые две, и --to-csv/--to-html/--to-tdtp начали отвергать
+	// сжатый колоночный пакет: распаковка даёт по строке на КОЛОНКУ, и восемь
+	// колонок сравнивались с десятью строками заголовка.
+	if err := packet.ExpandColumnarRows(pkt); err != nil {
+		return err
+	}
+
+	// Счёт строк — общей функцией, без версионного гейта: заголовок не покрыт
+	// ни одним хешем, так что «начиная с v1.4 за него отвечает XXH3» неверно.
+	if err := packet.VerifyRowCount(pkt); err != nil {
+		return fmt.Errorf("%w after decompression (data may be truncated or corrupt)", err)
 	}
 
 	return nil
