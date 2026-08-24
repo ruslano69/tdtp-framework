@@ -144,6 +144,16 @@ _mock_log_path: str = ""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+# --enc-dev never talks to xZMercury: DevClient generates the key locally and
+# returns a placeholder HMAC. It is exempt from HMAC verification because the
+# CLIENT declares itself exempt (mercury.DevClient.HMACVerificationExempt), not
+# because MERCURY_SERVER_SECRET happens to hold a sentinel.
+#
+# E5 therefore runs with whatever secret the mode supplies — the real one under
+# TDTP_MERCURY_EXTERNAL. That is the point of the test: pinning the sentinel
+# here would pass no matter what, and would hide a regression of exactly the
+# coupling this fixed. Before it, --enc-dev with a real secret degraded to an
+# error packet, which is what a production server would always have set.
 def _tdtpcli_env() -> dict:
     """Env for every tdtpcli invocation: MERCURY_SERVER_SECRET must match
     what xzmercury-mock was started with, or every --enc call fails HMAC

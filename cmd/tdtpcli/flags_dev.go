@@ -13,5 +13,5 @@ func init() {
 	//
 	// ПРЕДУПРЕЖДЕНИЕ: результат можно расшифровать только в рамках одной сессии.
 	// Ключ нигде не сохраняется. Только для отладки шифрования.
-	flag.Bool("enc-dev", false, "[DEV ONLY] Encrypt output using locally generated key (no xZMercury required). Key is session-scoped and not stored.")
+	flag.Bool("enc-dev", false, "[DEV ONLY] Encrypt output using locally generated key (no xZMercury required, no MERCURY_SERVER_SECRET needed). Key is session-scoped and not stored.")
 }

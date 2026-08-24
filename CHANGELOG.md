@@ -27,6 +27,63 @@ against it by materializing unconditionally — a packet that looks encrypted
 while leaking every row in the clear — and `cmd/tdtpcli/processors.go` had
 already patched its own copy. Two places knew; the pipeline path did not.
 
+### Security — a v1.4 packet could lie about how many rows it carried
+
+A packet declaring 999 rows while carrying 3 parsed cleanly and passed
+`VerifyIntegrity`. From v1.4 up, nothing checked the counter at all.
+
+The comparison was gated on the packet predating v1.4, on the reasoning that
+"packets carry XXH3-128 hashes that guarantee integrity end-to-end, making the
+RecordsInPart counter redundant". The hashes cover the Schema and the row
+values; the header is in neither. Not the parser, not the hashes and not
+`VerifyIntegrity` were looking at it.
+
+It is not a decorative field. The pipeline sums it into its loaded-rows total
+and the library's inspect call returns it as the row count, both without
+touching the rows — so a wrong counter is a wrong number handed to whoever
+asked.
+
+Now checked at every version, wherever the rows are readable: parsing an
+uncompressed packet, right after decompression, and inside `VerifyIntegrity`.
+**A v1.4+ packet whose header disagrees with its rows is now refused where it
+used to import** — which is the point, though anything this tool produced
+before the masking fix above, with a filtering processor in the chain, carries
+exactly that inconsistency.
+
+### Fixed — `--enc-dev` failed in the situation it exists for
+
+`--enc-dev` lets an integration server keep exporting when production Redis is
+down — controlled degradation rather than a blocked server. It did not work
+there.
+
+The flag swaps the key source for a local generator, whose binding carries a
+placeholder signature instead of one from xZMercury. Letting that placeholder
+through was a *separate* switch: it required `MERCURY_SERVER_SECRET` to hold
+the literal `dev-mode`. A production server has the real secret set, because
+that is its normal state, so `--enc-dev` alone verified the placeholder for
+real, failed, and degraded to an error packet with exit 0. The flag's help
+said "no xZMercury required" and never mentioned the second step.
+
+The exemption now travels with the flag, so `--enc-dev` is sufficient on its
+own — with a production secret set, or none at all. The `dev-mode` sentinel
+still works.
+
+The decision is made by the locally chosen key source and never by the
+server's answer: a bypass the far end could request would not be a bypass but
+the absence of a check. Anything that does not declare itself exempt is
+verified, so nothing changes for any other configuration.
+
+### Fixed — `compress: true` was dropped when a pipeline was saved from tdtp-xray
+
+`compress` and `compression` are two YAML spellings of one setting, and they
+were two independent fields. The exporter read both; tdtp-xray read only
+`compression`, on load and on save. Opening a pipeline written with
+`compress: true` in the GUI and saving it therefore lost the setting.
+
+Both spellings keep working. What stops existing is the second field, which
+the loader now folds into one value — so the next reader cannot pick the wrong
+one.
+
 ### Fixed — RecordsInPart lied after a filtering processor
 
 `field_validator` in filter mode removes rows, and the header kept declaring the
@@ -63,6 +120,16 @@ Integrity is unaffected. The v1.4 hashes still cover plain-text rows before
 compression, and the transposition happens after hashing, so `--integrity`
 verifies identically with and without the flag.
 
+It composes with the other options — `--compress`, `--compact`, `--integrity`,
+`--enc`, and a `--where`/`--limit` query — in any combination, and the same
+rows come back out. That is asserted rather than assumed: the suite runs the
+combinations and checks three things each time, because each way of getting it
+wrong shows in a different one. The attribute is present, so the flag was not
+ignored. The integrity hash survives, so no later step overwrote an earlier
+one. And the rows read back byte-identical to a row-major export, because a
+layout applied twice does not fail — it returns other records' values without
+complaint.
+
 ### Added — `CompressChunksForTdtpAlgo`, compression without the join copy
 
 `CompressDataForTdtpAlgo` takes `[]string` and calls `strings.Join`, which
@@ -73,6 +140,35 @@ allocated, same output size.
 
 zstd runs as a streaming frame there rather than `EncodeAll`. Packets written
 either way stay readable by the other; a test pins that rather than assuming it.
+
+### Added — `pkg/transform`: the order of packet transformations is declared, not implied
+
+Which step runs before which used to live in the order of the calls that built
+the chain, plus comments reading `MUST run before ComputeIntegrity`. That holds
+only while everyone adding a step has read every comment.
+
+`pkg/transform` holds no implementations — only the step names, the order
+between them and the incompatibilities. The export chain is built from
+`Plan(enabled)`, so the sequence can no longer be changed by moving a line, and
+an incompatible set is refused before the first byte is written rather than
+surfacing at the receiver.
+
+v1.5 encryption moved into that chain with it. It was the last transformation
+applied outside the shared order — it lived in the writer, which meant the
+constraints were not checked for it and it could only ever run last. Legacy
+`--enc13` stays out: it replaces serialization wholesale with a binary blob, so
+it is a container format rather than a transformation of the packet.
+
+The reading side is written down too, in `ReadOrder()`, because it is **not the
+write order reversed** and a write-side plan does nothing for it. Integrity is
+stamped before compression but verified after decompression; the row-count
+check has no write-side counterpart at all; and the decompression bomb goes off
+before any signature has had a chance to speak.
+
+For anyone adding a format or a transformation, the rule is in `CLAUDE.md`. The
+part that is easiest to skip: a step must be idempotent or applied from exactly
+one place. A layout applied from two places transposed twice and returned other
+records' values, silently — such a packet converts without complaint.
 
 ### Fixed — the CLI test suites were verifying a binary eleven versions behind
 

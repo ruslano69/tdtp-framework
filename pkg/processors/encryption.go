@@ -38,6 +38,30 @@ type MercuryBinder interface {
 	BindKey(ctx context.Context, packageUUID, pipelineName string) (*mercury.KeyBinding, error)
 }
 
+// hmacExempt — необязательный интерфейс, которым биндер объявляет, что его
+// привязки не подлежат HMAC-верификации: он выдал ключ сам и подписывать
+// нечем.
+//
+// Необязательный намеренно. Не реализовал — значит проверка обязательна; это
+// поведение по умолчанию для всех, включая будущие реализации, и ошибиться в
+// безопасную сторону здесь дешевле, чем в любую другую.
+//
+// Решение принимает ЛОКАЛЬНО выбранный клиент, а не ответ сервера. Поле
+// "mode" в ответе на эту роль не годится ни при каких оговорках: обход
+// верификации, которым управляет та сторона провода, — это не обход, а
+// отсутствие проверки.
+//
+// Появился затем, чтобы «мы в dev-режиме» перестало выражаться дважды. Раньше
+// --enc-dev подменял клиента, а обход проверки включался отдельно, строкой
+// "dev-mode" в MERCURY_SERVER_SECRET. Установи одно без другого — и отказ
+// тихий: фиктивный HMAC от DevClient не проходит настоящую проверку, экспорт
+// деградирует в error-пакет с кодом 0. Срабатывало это ровно там, где режим и
+// нужен: на интеграционном сервере при аварии Redis секрет выставлен
+// настоящий, потому что это его штатное состояние.
+type hmacExempt interface {
+	HMACVerificationExempt() bool
+}
+
 // NewFileEncryptor создаёт FileEncryptor для продакшен-режима.
 // serverSecret — значение переменной MERCURY_SERVER_SECRET для верификации HMAC.
 func NewFileEncryptor(client MercuryBinder, serverSecret, packageUUID, pipelineName string) *FileEncryptor {
@@ -61,6 +85,18 @@ func (f *FileEncryptor) bindAndDecodeKey(ctx context.Context) ([]byte, string, e
 	}
 
 	// 2. Верифицируем HMAC.
+	//
+	// Сначала — освобождён ли биндер от проверки. Раньше здесь стояла проверка
+	// пустого секрета, и dev-режим спотыкался об неё: ключ сгенерирован
+	// локально, подписывать нечем, а требование секрета остаётся.
+	if ex, ok := f.client.(hmacExempt); ok && ex.HMACVerificationExempt() {
+		key, err := mercury.DecodeKey(binding.KeyB64)
+		if err != nil {
+			return nil, mercury.ErrCodeMercuryError, fmt.Errorf("decode key: %w", err)
+		}
+		return key, "", nil
+	}
+
 	// serverSecret пустой — ошибка конфигурации: молчаливый bypass недопустим в проде.
 	// Для dev-режима нужно явно передать "dev-mode" (DevClient / тестовый сервер).
 	if f.serverSecret == "" {
