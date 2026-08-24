@@ -4,14 +4,23 @@
 Создает SQLite БД с 100k записей для тестирования производительности
 """
 
+import argparse
 import sqlite3
 import random
 import sys
 from datetime import datetime, timedelta
 
-# Конфигурация
+# Конфигурация (переопределяется ключами --out/--rows/--no-dates)
 DB_FILE = "benchmark_100k.db"
 TOTAL_RECORDS = 100000
+
+# Колонки с настоящими датовыми decltype. Адаптер SQLite разбирает тип из
+# объявления колонки (pkg/adapters/sqlite/types.go): DATE -> TypeDate,
+# DATETIME/TIMESTAMP -> TypeTimestamp, всё прочее -> TypeText. Поэтому
+# RegisteredAt TEXT датовый путь не задействует вовсе, и колонки ниже
+# добавлены именно чтобы его задействовать. Флаг --no-dates воспроизводит
+# старый набор из шести колонок для сравнения.
+WITH_DATES = True
 
 # Списки для генерации данных
 FIRST_NAMES = [
@@ -71,6 +80,31 @@ def generate_date():
     return date.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def generate_birth_date():
+    """DATE — только календарная дата, без времени. Возраст 18..70 лет."""
+    days_ago = random.randint(365 * 18, 365 * 70)
+    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+
+
+def generate_last_login():
+    """DATETIME, 10% NULL — не каждый пользователь входил хоть раз.
+
+    NULL здесь не для красоты: пустая датовая ячейка идёт по другой ветке,
+    чем заполненная, и без неё бенчмарк её не меряет.
+    """
+    if random.random() < 0.10:
+        return None
+    seconds_ago = random.randint(0, 86400 * 365)
+    return (datetime.now() - timedelta(seconds=seconds_ago)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def generate_updated_at():
+    """TIMESTAMP с долями секунды — миллисекунды обязаны пережить round-trip."""
+    delta = timedelta(seconds=random.randint(0, 86400 * 90),
+                      milliseconds=random.randint(0, 999))
+    return (datetime.now() - delta).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
 def create_database():
     """Создает БД и таблицу"""
     print(f"Создание БД: {DB_FILE}")
@@ -82,6 +116,11 @@ def create_database():
     cursor.execute("DROP TABLE IF EXISTS Users")
     
     # Создаем таблицу
+    date_columns = """,
+            BirthDate DATE NOT NULL,
+            LastLoginAt DATETIME,
+            UpdatedAt TIMESTAMP NOT NULL""" if WITH_DATES else ""
+
     cursor.execute("""
         CREATE TABLE Users (
             ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,15 +129,18 @@ def create_database():
             City TEXT NOT NULL,
             Balance REAL NOT NULL,
             IsActive INTEGER NOT NULL,
-            RegisteredAt TEXT NOT NULL
+            RegisteredAt TEXT NOT NULL%s
         )
-    """)
+    """ % date_columns)
     
     # Создаем индексы для ускорения запросов
     cursor.execute("CREATE INDEX idx_balance ON Users(Balance)")
     cursor.execute("CREATE INDEX idx_city ON Users(City)")
     cursor.execute("CREATE INDEX idx_active ON Users(IsActive)")
     cursor.execute("CREATE INDEX idx_registered ON Users(RegisteredAt)")
+    if WITH_DATES:
+        cursor.execute("CREATE INDEX idx_birth ON Users(BirthDate)")
+        cursor.execute("CREATE INDEX idx_lastlogin ON Users(LastLoginAt)")
     
     conn.commit()
     print("✓ Таблица Users создана")
@@ -110,6 +152,12 @@ def create_database():
 def insert_records(conn, batch_size=1000):
     """Вставляет записи пакетами"""
     cursor = conn.cursor()
+
+    cols = ["Name", "Email", "City", "Balance", "IsActive", "RegisteredAt"]
+    if WITH_DATES:
+        cols += ["BirthDate", "LastLoginAt", "UpdatedAt"]
+    insert_sql = "INSERT INTO Users (%s) VALUES (%s)" % (
+        ", ".join(cols), ", ".join(["?"] * len(cols)))
     
     print(f"\nГенерация {TOTAL_RECORDS:,} записей...")
     print("Прогресс: ", end="", flush=True)
@@ -122,16 +170,16 @@ def insert_records(conn, batch_size=1000):
         balance = generate_balance()
         is_active = 1 if random.random() < 0.7 else 0  # 70% активных
         registered_at = generate_date()
-        
-        records.append((name, email, city, balance, is_active, registered_at))
+
+        row = [name, email, city, balance, is_active, registered_at]
+        if WITH_DATES:
+            row += [generate_birth_date(), generate_last_login(), generate_updated_at()]
+        records.append(tuple(row))
         
         # Вставка пакетами
         if len(records) >= batch_size:
             try:
-                cursor.executemany(
-                    "INSERT INTO Users (Name, Email, City, Balance, IsActive, RegisteredAt) VALUES (?, ?, ?, ?, ?, ?)",
-                    records
-                )
+                cursor.executemany(insert_sql, records)
                 conn.commit()
                 records = []
                 
@@ -146,10 +194,7 @@ def insert_records(conn, batch_size=1000):
     # Вставка остатка
     if records:
         try:
-            cursor.executemany(
-                "INSERT INTO Users (Name, Email, City, Balance, IsActive, RegisteredAt) VALUES (?, ?, ?, ?, ?, ?)",
-                records
-            )
+            cursor.executemany(insert_sql, records)
             conn.commit()
         except sqlite3.IntegrityError:
             pass
@@ -190,6 +235,19 @@ def print_statistics(conn):
     for city, count in cursor.fetchall():
         print(f"  {city}: {count:,}")
     
+    # Датовые колонки
+    if WITH_DATES:
+        cursor.execute("SELECT MIN(BirthDate), MAX(BirthDate) FROM Users")
+        bmin, bmax = cursor.fetchone()
+        cursor.execute("SELECT COUNT(*) FROM Users WHERE LastLoginAt IS NULL")
+        nulls = cursor.fetchone()[0]
+        cursor.execute("SELECT UpdatedAt FROM Users LIMIT 1")
+        sample = cursor.fetchone()[0]
+        print(f"\nДаты:")
+        print(f"  BirthDate   (DATE):      {bmin} .. {bmax}")
+        print(f"  LastLoginAt (DATETIME):  NULL у {nulls:,} ({nulls/total*100:.1f}%)")
+        print(f"  UpdatedAt   (TIMESTAMP): {sample}")
+
     # Размер файла
     cursor.execute("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()")
     size_bytes = cursor.fetchone()[0]
@@ -199,8 +257,22 @@ def print_statistics(conn):
     print("=" * 60)
 
 
+def parse_args():
+    ap = argparse.ArgumentParser(description="Генератор тестовой БД для TDTP benchmark")
+    ap.add_argument("--out", default=DB_FILE, help=f"файл БД (по умолчанию {DB_FILE})")
+    ap.add_argument("--rows", type=int, default=TOTAL_RECORDS,
+                    help=f"число записей (по умолчанию {TOTAL_RECORDS})")
+    ap.add_argument("--no-dates", action="store_true",
+                    help="без колонок DATE/DATETIME/TIMESTAMP — старый набор из шести колонок")
+    return ap.parse_args()
+
+
 def main():
     """Главная функция"""
+    global DB_FILE, TOTAL_RECORDS, WITH_DATES
+    args = parse_args()
+    DB_FILE, TOTAL_RECORDS, WITH_DATES = args.out, args.rows, not args.no_dates
+
     print("=" * 60)
     print("ГЕНЕРАТОР ТЕСТОВОЙ БД ДЛЯ TDTP BENCHMARK")
     print("=" * 60)
@@ -228,6 +300,7 @@ def main():
         print(f"✓ ГОТОВО! БД сохранена в: {DB_FILE}")
         print(f"{'=' * 60}")
         
+        print("\nКолонки: 7 базовых" + (" + BirthDate/LastLoginAt/UpdatedAt" if WITH_DATES else " (без дат)"))
         print("\nДля использования в бенчмарках:")
         print(f"  adapter, _ := sqlite.NewAdapter(\"{DB_FILE}\")")
         

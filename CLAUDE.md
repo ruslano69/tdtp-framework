@@ -47,7 +47,13 @@ redirect — it **always works**.
 - `scripts/create_postgres_test_db.py` — PostgreSQL (users, orders, products, activity_logs; 100/200/50 rows)
 - `scripts/create_test_db.py` — SQLite
 - `scripts/generate_test_db.py` — SQLite benchmark
-- `scripts/create_benchmark_db.py` — SQLite benchmark, large
+- `scripts/create_benchmark_db.py` — SQLite benchmark, large. `--out FILE`,
+  `--rows N`, `--no-dates`. By default it now emits `BirthDate DATE`,
+  `LastLoginAt DATETIME` (10% NULL) and `UpdatedAt TIMESTAMP` alongside the
+  original `RegisteredAt TEXT`; `--no-dates` reproduces the old seven-column
+  set. The date columns are the point: the SQLite adapter reads the type from
+  the column declaration (`pkg/adapters/sqlite/types.go`), so a `TEXT` column
+  never touches the date path, and the old set exercised none of it
 - `tests/compact_v131/setup_db.py` — SQLite for the compact-format tests
 
 **Do not write new ones — use these.**
@@ -96,20 +102,44 @@ would be exercising a code path the CLI never takes.
 
 ## Compression (zstd and kanzi)
 
-Benchmarked on 100k SQLite rows (`benchmark_100k.db`, synthetic Users data):
+Re-measured 2026-08-24 on tdtpcli 1.25.1 (Go 1.26.5), Intel Core i7-7700
+@ 3.60 GHz (4C/8T), Windows 10 Pro, idle machine. Export of 100k rows to file,
+wall time of the whole CLI process, best of three runs.
 
-| Mode | Time | Size | Ratio |
-|------|------|------|-------|
-| No compression | 673 ms | 9.9 MB | — |
-| zstd level 3 | 751 ms | 2.9 MB | 3.4× |
-| zstd level 19 | 2363 ms | 2.4 MB | 4.1× |
-| kanzi level 6 | 1279 ms | 1.5 MB | 6.6× |
-| kanzi level 7 | 1449 ms | 1.4 MB | 7.1× |
+**Two data sets, and the difference between them matters.** `benchmark_100k.db`
+has seven columns and no real date types; `benchmark_100k_dates.db` adds
+`BirthDate DATE`, `LastLoginAt DATETIME` (10% NULL) and `UpdatedAt TIMESTAMP`.
+Both come from `scripts/create_benchmark_db.py` (`--out`, `--rows`,
+`--no-dates`).
+
+| Mode | 7 cols | 10 cols, with dates | Size 7 / 10 | Ratio 7 / 10 |
+|------|--------|---------------------|-------------|--------------|
+| No compression | 531 ms | 708 ms | 9.84 / 15.40 MB | — |
+| zstd level 3 | 575 ms | 817 ms | 3.03 / 5.79 MB | 3.2× / 2.7× |
+| zstd level 19 | 712 ms | 1063 ms | 2.50 / 5.03 MB | 3.9× / 3.1× |
+| kanzi level 6 | 674 ms | 1005 ms | 1.54 / 3.12 MB | 6.4× / 4.9× |
+| kanzi level 7 | 761 ms | 1162 ms | 1.47 / 3.01 MB | 6.7× / 5.1× |
+| zstd 3 + `--integrity` | 574 ms | 819 ms | 3.03 / 5.80 MB | 3.2× / 2.7× |
 
 **What to pick:**
 - `zstd level 3` — the default for real-time streams: nearly free, 3× saving
-- `kanzi level 6` — the optimum for archives and backups: **twice as dense as zstd3**, and faster than zstd19
-- `kanzi level 7` — maximum density, +170 ms over level 6, only worth it on a slow link
+- `kanzi level 6` — the optimum for archives and backups: **twice as dense as zstd3**
+- `kanzi level 7` — maximum density, +90 ms over level 6, only worth it on a slow link
+- `--integrity` is free — it lands inside the measurement noise of `zstd 3`
+
+**The old numbers said kanzi 6 wins on speed. That is no longer the argument.**
+Against the previous table (673 / 751 / 2363 / 1279 / 1449 ms) everything got
+faster, but not evenly: `zstd 19` fell 3.3× and `kanzi 6` only 1.9×, so the gap
+between them shrank from 1.8× to about 5%. Compression stopped dominating the
+export — pick `kanzi 6` for its density, not its speed.
+
+**Dates cost bytes, not time.** With dates the export takes 29–55% longer, and
+none of that is date conversion: the set is 56% larger (+56 B per row, exactly
+the length of three ISO-8601 fields plus separators) and splits into 9 parts
+instead of 6. Per byte the date path is slightly *faster* — 18.2 → 22.1 MB/s
+uncompressed. What genuinely suffers is density: ISO-8601 stamps barely repeat,
+so kanzi 6 drops from 6.4× to 4.9×. **When sizing an archive of date-heavy
+data, the seven-column ratios overstate the win by about 1.3×.**
 
 On real data with heterogeneous text (HR orders, narrative descriptions) kanzi
 reaches 10–12× against the original — BWT gets to do its work properly. On short
