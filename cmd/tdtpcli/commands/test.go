@@ -231,7 +231,24 @@ func validatePacket(pkt *packet.DataPacket, label string) (int, error) {
 		return 0, err
 	}
 
+	// Колоночная раскладка: распакованное — это колонки, а не строки, и считать
+	// их против RecordsInPart бессмысленно. Разворачиваем тем же кодом, что и
+	// обычный разбор, чтобы счёт шёл по строкам.
 	actual := len(rows)
+	if pkt.Data.Layout == packet.LayoutColumns {
+		tmp := *pkt
+		tmp.Data.Compression = ""
+		tmp.Data.Rows = make([]packet.Row, len(rows))
+		for i, v := range rows {
+			tmp.Data.Rows[i] = packet.Row{Value: v}
+		}
+		if err := packet.ExpandColumnarRows(&tmp); err != nil {
+			fmt.Printf("  ✗ %s: columnar expansion failed: %v\n", label, err)
+			return 0, err
+		}
+		actual = len(tmp.Data.Rows)
+	}
+
 	checksumMark := ""
 	if pkt.Data.Checksum != "" {
 		checksumMark = ", checksum OK"

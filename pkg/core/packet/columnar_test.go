@@ -1,6 +1,8 @@
 package packet
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -193,4 +195,62 @@ func TestColumnar_EmptyTable(t *testing.T) {
 	if n := len(pkt.GetRows()); n != 0 {
 		t.Errorf("строк %d, ожидалось 0", n)
 	}
+}
+
+// У генератора три точки записи, и каждая обязана уважать раскладку.
+// Пропущенная WriteToFileFast уже давала --columnar, молча пишущий строки.
+func TestColumnar_EveryWritePathHonoursTheFlag(t *testing.T) {
+	schema, rows := columnarSchema(), columnarRows()
+	dir := t.TempDir()
+
+	newPkt := func() *DataPacket {
+		g := NewGenerator()
+		g.SetColumnarLayout(true)
+		p, err := g.GenerateReference("T", schema, rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p[0]
+	}
+
+	check := func(name string, produce func(g *Generator, pkt *DataPacket) []byte) {
+		g := NewGenerator()
+		g.SetColumnarLayout(true)
+		got := produce(g, newPkt())
+		if !strings.Contains(string(got), `layout="columns"`) {
+			t.Errorf("%s: раскладка не применилась:\n%s", name, got)
+			return
+		}
+		if n := strings.Count(string(got), "<R>"); n != len(schema.Fields) {
+			t.Errorf("%s: <R> элементов %d, ожидалось %d", name, n, len(schema.Fields))
+		}
+	}
+
+	check("ToXML", func(g *Generator, pkt *DataPacket) []byte {
+		b, err := g.ToXML(pkt, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	})
+
+	check("WriteToWriter", func(g *Generator, pkt *DataPacket) []byte {
+		var buf strings.Builder
+		if err := g.WriteToWriter(pkt, &buf); err != nil {
+			t.Fatal(err)
+		}
+		return []byte(buf.String())
+	})
+
+	check("WriteToFile", func(g *Generator, pkt *DataPacket) []byte {
+		fn := filepath.Join(dir, "c.xml")
+		if err := g.WriteToFile(pkt, fn); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(fn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	})
 }

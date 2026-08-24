@@ -248,6 +248,7 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 		// без pipe-join и промежуточных аллокаций (RowsToData не вызывается).
 		// Broker-путь (ToXML → компрессия) вызовет RowsToData сам если нужно.
 		packet.rawRows = partition
+		packet.wantColumnar = g.columnar
 
 		packets = append(packets, packet)
 	}
@@ -396,7 +397,7 @@ func (g *Generator) materializeForWrite(packet *DataPacket) {
 	}
 	mask := buildEscapeMask(packet.Schema)
 	switch {
-	case g.columnar:
+	case packet.wantColumnar || g.columnar:
 		packet.Data = RowsToColumnarData(packet.rawRows, len(packet.Schema.Fields), mask)
 	case g.compression.Enabled:
 		packet.Data = rowsToDataMasked(packet.rawRows, mask)

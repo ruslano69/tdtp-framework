@@ -33,6 +33,7 @@ type ExportOptions struct {
 	EnableChecksum   bool   // Add XXH3 checksum for data integrity verification
 	ReadOnlyFields   bool   // Include read-only fields (timestamp, computed, identity)
 	Fast             bool   // Skip SpecialValues detection for maximum export speed
+	Columnar         bool   // Write Data column-major (layout="columns")
 	FallbackRowLimit int64  // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
 	// v1.3.1 compact format
@@ -90,11 +91,12 @@ type compressProc struct {
 	algo     string
 	level    int
 	checksum bool
+	columnar bool
 }
 
 func (p *compressProc) Name() string { return "compress" }
 func (p *compressProc) ProcessPacket(_ context.Context, pkt *packet.DataPacket) error {
-	return compressPacketData(pkt, p.level, p.algo, p.checksum)
+	return compressPacketData(pkt, p.level, p.algo, p.checksum, p.columnar)
 }
 
 // integrityProc computes TDTP v1.4 xxh3_128 integrity hashes and optionally
@@ -207,6 +209,16 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		}
 	}
 
+	// --columnar: колоночная раскладка Data. Ставится тем же приёмом, что --fast,
+	// потому что адаптеры не имеют общего интерфейса настроек экспорта: у кого
+	// метод есть — тому и достаётся.
+	if opts.Columnar {
+		type columnarSetter interface{ SetColumnarLayout(bool) }
+		if cs, ok := adapter.(columnarSetter); ok {
+			cs.SetColumnarLayout(true)
+		}
+	}
+
 	// --fallback-row-limit: safety-net против обвала на in-memory сканах
 	if opts.FallbackRowLimit > 0 {
 		type fallbackLimiter interface{ SetMaxFallbackRows(int64) }
@@ -302,7 +314,8 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 
 	if opts.Compress {
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
-		chain.Add(&compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel, checksum: opts.EnableChecksum})
+		chain.Add(&compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
+			checksum: opts.EnableChecksum, columnar: opts.Columnar})
 	}
 
 	// Open object storage once outside the loop (if needed).
@@ -712,12 +725,29 @@ func generatePacketFilename(baseFile string, n, total int) string {
 
 // compressPacketData compresses the Data section of a packet using the specified algorithm.
 // and optionally generates XXH3 checksum for data integrity verification
-func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableChecksum bool) error {
+func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableChecksum, columnar bool) error {
 	// Materialize rawRows (GenerateReference fast-path) before compression.
 	// MaterializeRows() очищает rawRows — иначе writePacketTo пишет fast-path вместо сжатых данных.
 	pkt.MaterializeRows()
 	if len(pkt.Data.Rows) == 0 {
 		return nil
+	}
+
+	// --columnar на сжатом пути перекладывается ЗДЕСЬ, между хешем и сжатием.
+	//
+	// Порядок не произволен. ComputeIntegrity уже отработал выше и накрыл
+	// построчные значения — так и задумано: «Hash covers plain-text rows BEFORE
+	// compression». Транспонируй раньше — хеш накрыл бы колонки, а читатель,
+	// развернувший их обратно в строки, посчитал бы хеш по строкам и получил
+	// расхождение на каждом пакете. Ровно тем же способом ломался
+	// --integrity --mercury-url, когда @MRC добавляли после ComputeIntegrity.
+	//
+	// Раскладка не идёт через materializeForWrite, потому что после сжатия
+	// Data.Rows — это один блоб, и перекладывать там уже нечего.
+	if columnar {
+		rows := pkt.GetRows()
+		pkt.Data = packet.RowsToColumnarData(rows, len(pkt.Schema.Fields),
+			packet.BuildEscapeMask(pkt.Schema))
 	}
 
 	if algo == "" {

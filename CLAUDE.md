@@ -359,6 +359,44 @@ The allocation *count* goes up (94 → 456) while allocated bytes fall by 60 MB:
 the streaming encoder takes small internal buffers per write instead of one
 enormous one. Count is the misleading number here.
 
+### `--columnar` end to end: 14.8% off zstd 3
+
+The layout is now reachable from the CLI. Measured on `benchmark_100k_dates.db`,
+i7-7700, best of three:
+
+| Codec | rows | `--columnar` | Δ |
+|---|---|---|---|
+| none | 15 392 603 B | 14 793 296 B | −3.9% |
+| zstd 3 | 6 207 344 B | 5 288 453 B | **−14.8%** |
+| zstd 19 | 5 404 180 B | 4 803 741 B | −11.1% |
+| kanzi 6 | 3 426 544 B | 3 318 214 B | −3.2% |
+
+Time is unchanged in every row — within noise of the row-major path.
+
+**kanzi gains almost nothing (−3.2%) where zstd gains 14.8%.** Same reason delta
+coding did nothing for it: BWT already gathers like values regardless of how the
+stream is ordered, so handing them over pre-grouped tells it what it had worked
+out. **Pair `--columnar` with zstd; with kanzi it is not worth the
+compatibility cost.**
+
+**Where the transposition happens is load-bearing.** On the compressed path it
+runs inside `compressPacketData`, after `ComputeIntegrity` and before the codec.
+Not a free choice: the v1.4 hash covers plain-text rows before compression, and
+a reader expands columns back to rows before verifying. Transpose earlier and
+the writer hashes columns while the reader hashes rows — a mismatch on every
+packet. That is the same shape as the `@MRC`-after-`ComputeIntegrity` bug the
+comment in `export.go` records as 100% reproducible.
+
+**Three call sites had to learn the attribute, and each was silent until it
+did.** `WriteToFileFast` (the third of the generator's three write paths) wrote
+plain rows while `--columnar` was set; `compressPacketData` compressed
+row-major because `MaterializeRows` had already flattened the intent; and
+`--test` counted 10 "rows" in a 12 004-row part because it counts decompressed
+entries and those were columns. The intent now travels on the packet as an
+unexported `wantColumnar`, set by `GenerateReference`, because the export
+command builds a **fresh generator at each of three write sites** and none of
+them sees the first one's settings.
+
 **Still open.** The arena marks value boundaries only in `Offsets`: a value
 containing its own `\n` is unambiguous there but not in `Buf` alone, so a
 columnar format has to either escape on write or ship the offsets alongside.

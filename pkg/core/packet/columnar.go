@@ -126,3 +126,10 @@ func ExpandColumnarRows(pkt *DataPacket) error {
 	pkt.Data.Layout = ""
 	return nil
 }
+
+// BuildEscapeMask отдаёт маску экранирования по схеме: false для типов,
+// которые экранировать не нужно. Экспортируется для тех, кто раскладывает
+// данные по колонкам вне пакета (например, сжатый путь экспорта).
+func BuildEscapeMask(schema Schema) []bool {
+	return buildEscapeMask(schema)
+}
