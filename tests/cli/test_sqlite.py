@@ -1628,6 +1628,135 @@ def test_T12_dates_columnar_processors():
 
 
 
+# --- T13 --packet-size ------------------------------------------------------
+#
+# The flag was accepted everywhere and honoured almost nowhere. It reached only
+# ExportToBroker, and there only through a type assertion that just one adapter
+# satisfied, so `--export t --packet-size 8 --output f.xml` produced the default
+# ~1.9 MB parts and said nothing about it. The help text meanwhile recommended
+# exactly that command for kanzi archives.
+#
+# The group needs its own database because the shared fixture is ten rows and
+# the flag is measured in megabytes: nothing splits until there are megabytes to
+# split. It is built once here rather than in setup_test_db so the row counts
+# every other group asserts on stay untouched.
+#
+# What each check is actually for:
+#   * that the flag reaches the file path at all (it did not),
+#   * that N means N MB of XML and not 2N — the budget is counted in units twice
+#     the size of a UTF-8 byte, so the conversion has a factor of 2 in it and
+#     getting it wrong is invisible except in the part size,
+#   * that the streaming path applies the same number, since it partitions with
+#     its own counter (StreamingGenerator.partSizeBytes) that the adapter's
+#     setter does not reach.
+
+PS_DB = None   # заполняется в build_packet_size_db()
+PS_CFG = None
+PS_ROWS = 60000
+
+
+def build_packet_size_db():
+    """A table with megabytes in it, in its own file."""
+    global PS_DB, PS_CFG
+    PS_DB = out("t13_big.db")
+    PS_CFG = out("t13_big.yaml")
+    if os.path.exists(PS_DB):
+        os.remove(PS_DB)
+    conn = sqlite3.connect(PS_DB)
+    c = conn.cursor()
+    c.execute("PRAGMA journal_mode = OFF")
+    c.execute("PRAGMA synchronous = OFF")
+    c.execute("""CREATE TABLE bulk (
+        ID INTEGER PRIMARY KEY,
+        Name TEXT,
+        Payload TEXT,
+        Amount REAL)""")
+    pad = "x" * 120
+    c.executemany("INSERT INTO bulk VALUES (?,?,?,?)",
+                  ((i, f"row-{i}", f"{pad}{i}", i * 1.5) for i in range(1, PS_ROWS + 1)))
+    conn.commit()
+    conn.close()
+    write_cfg(PS_CFG, db=PS_DB)
+
+
+def ps_parts(prefix: str) -> list:
+    """Part files of an export, in part order."""
+    files = list(OUTDIR.glob(f"{prefix}_part_*.xml"))
+    if not files:
+        single = OUTDIR / f"{prefix}.xml"
+        return [single] if single.exists() else []
+    return sorted(files, key=lambda p: int(p.name.split("_part_")[1].split("_")[0]))
+
+
+def ps_export(prefix: str, *extra) -> int:
+    """Export the bulk table with extra flags; return the part count."""
+    for f in ps_parts(prefix):
+        os.remove(str(f))
+    run("--export", "bulk", *extra, "--output", out(f"{prefix}.xml"),
+        cfg=PS_CFG, timeout=180)
+    return len(ps_parts(prefix))
+
+
+def ps_rows(prefix: str) -> list:
+    rows = []
+    for f in ps_parts(prefix):
+        d = ET.parse(str(f)).getroot().find("Data")
+        rows.extend((r.text or "") for r in d.findall("R"))
+    return rows
+
+
+def test_T13_packet_size():
+    print(f"\n{BOLD}T13: --packet-size{RESET}")
+
+    t = time.monotonic()
+    build_packet_size_db()
+    n_default = ps_export("t13_default")
+    sizes = [os.path.getsize(str(f)) for f in ps_parts("t13_default")]
+    biggest = max(sizes) if sizes else 0
+    record("T13.1 the table is big enough to split at the default part size",
+           n_default > 2 and biggest < 3 * 1024 * 1024, time.monotonic() - t,
+           f"parts={n_default} biggest={biggest}")
+
+    # The bug: this used to return the same part count as the default.
+    t = time.monotonic()
+    n_8 = ps_export("t13_ps8", "--packet-size", "8")
+    record("T13.2 --packet-size 8 reaches the file export (fewer, bigger parts)",
+           0 < n_8 < n_default, time.monotonic() - t,
+           f"parts={n_8} default={n_default}")
+
+    # N means N megabytes of XML. The budget is counted in units twice the size
+    # of a UTF-8 byte, so the conversion carries a factor of 2; drop it and the
+    # parts come out half the size, double it twice and they come out at 16 MB.
+    # Nothing but the part size shows the difference.
+    t = time.monotonic()
+    sizes8 = [os.path.getsize(str(f)) for f in ps_parts("t13_ps8")]
+    big8 = max(sizes8) if sizes8 else 0
+    record("T13.3 a part is close to 8 MB, not 4 and not 16",
+           4 * 1024 * 1024 < big8 <= 8 * 1024 * 1024, time.monotonic() - t,
+           f"biggest={big8}")
+
+    t = time.monotonic()
+    n_1 = ps_export("t13_ps1", "--packet-size", "1")
+    record("T13.4 --packet-size 1 splits into more parts, not fewer",
+           n_1 > n_default, time.monotonic() - t, f"parts={n_1} default={n_default}")
+
+    # The streaming path partitions with its own counter, so the setter that
+    # serves the buffered path does not reach it: this is a separate wire.
+    t = time.monotonic()
+    n_s8 = ps_export("t13_stream8", "--stream", "--packet-size", "8")
+    record("T13.5 --stream --packet-size 8 splits the same way as the buffered path",
+           n_s8 == n_8 and n_s8 > 0, time.monotonic() - t,
+           f"stream={n_s8} buffered={n_8}")
+
+    # A part-size change must move the boundaries and nothing else.
+    t = time.monotonic()
+    base, eight, streamed = ps_rows("t13_default"), ps_rows("t13_ps8"), ps_rows("t13_stream8")
+    ok = (len(base) == PS_ROWS and base == eight and base == streamed)
+    record("T13.6 every layout carries the same 60 000 rows in the same order",
+           ok, time.monotonic() - t,
+           f"default={len(base)} ps8={len(eight)} stream={len(streamed)}")
+
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
 
 GROUPS = [
@@ -1643,6 +1772,7 @@ GROUPS = [
     ("T10", test_T10_merge),
     ("T11", test_T11_msmq),
     ("T12", test_T12_dates_columnar_processors),
+    ("T13", test_T13_packet_size),
 ]
 
 

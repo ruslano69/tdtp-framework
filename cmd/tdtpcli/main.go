@@ -203,6 +203,7 @@ func routeCommand(
 				Fast:             *flags.Fast,
 				Columnar:         *flags.Columnar,
 				Stream:           *flags.Stream,
+				PacketSizeMB:     *flags.PacketSize,
 				FallbackRowLimit: *flags.FallbackRowLimit,
 				Compact:          *flags.Compact,
 				FixedFields:      splitCommaSeparated(*flags.FixedFields),

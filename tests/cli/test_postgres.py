@@ -1268,6 +1268,15 @@ def test_T9_columnar_stream_processors():
     # so it writes TotalParts=0 and rewrites every part in a finalize pass; the
     # boundaries themselves must still land where the buffered path puts them,
     # or one table would produce two different sets of files.
+    #
+    # THE FIXTURE HAS NO NULLs, AND THAT IS LOAD-BEARING. The two paths measure
+    # rows at different moments: the buffered one applies DetectAndApply to the
+    # whole set before partitioning, so estimateRowSize sees `[NULL]`, while the
+    # streaming one applies markers per part, after the row has been counted at
+    # its raw one-byte size. On NULL-bearing data the streamed parts therefore
+    # hold about 0.3% more rows and run slightly over the requested size — the
+    # content still matches, but the boundaries do not. Add a NULL to
+    # stream_big and this check fails for that reason and not a regression.
     t = time.monotonic()
     pg_query("DROP TABLE IF EXISTS stream_big;")
     pg_query("CREATE TABLE stream_big AS "

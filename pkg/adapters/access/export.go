@@ -13,6 +13,17 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
+// SetMaxMessageSize задаёт максимальный размер одного TDTP пакета (в байтах).
+// Вызывается из CLI при указании --packet-size.
+//
+// Единственный setter экспорта у этого адаптера: --fast и --columnar он не
+// поддерживает. Метод есть, чтобы --packet-size вёл себя одинаково у всех
+// пяти адаптеров — иначе Access остался бы единственным, где флаг молча
+// ничего не делает.
+func (a *Adapter) SetMaxMessageSize(size int) {
+	a.exportHelper.SetMaxMessageSize(size)
+}
+
 // GetTableSchema reads column metadata.
 // Column ORDER comes from ODBC (SELECT * — table definition order).
 // Column TYPES come from ADOX via VBScript (exact Access catalog types).

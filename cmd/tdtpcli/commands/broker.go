@@ -74,7 +74,7 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	type packetSizeSetter interface{ SetMaxMessageSize(int) }
 	if packetSizeMB > 0 {
 		if sizer, ok := adapter.(packetSizeSetter); ok {
-			sizer.SetMaxMessageSize(packetSizeMB * 2 * 1024 * 1024)
+			sizer.SetMaxMessageSize(packetSizeBudget(packetSizeMB))
 			if !quiet {
 				fmt.Printf("Packet size set to %dMB (internal estimate: %dMB)\n", packetSizeMB, packetSizeMB*2)
 			}

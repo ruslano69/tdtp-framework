@@ -105,7 +105,7 @@ type Flags struct {
 	Columnar         *bool   // Колоночная раскладка Data (layout="columns")
 	Stream           *bool   // Потоковый экспорт: не держать таблицу в памяти
 	Hash             *bool   // Add XXH3 checksum for data integrity verification
-	PacketSize       *int    // Broker packet size in MB (default 0 = use built-in default ~1.9MB)
+	PacketSize       *int    // Packet size in MB for --export and --to-broker (0 = built-in default ~1.9MB)
 	Fast             *bool   // Skip SpecialValues detection (no NULL/NaN/Inf markers) for maximum export speed
 	FallbackRowLimit *int64  // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
@@ -249,7 +249,7 @@ func ParseFlags() *Flags {
 	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
 	f.Columnar = flag.Bool("columnar", false, "Write Data column-major (layout=\"columns\"); ~19% smaller compressed, readers must understand the attribute")
 	f.Stream = flag.Bool("stream", false, "[BETA] Stream the export: read, pack and write part by part instead of loading the whole table (SQLite, MSSQL, MySQL, PostgreSQL; requires --output, no S3)")
-	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
+	f.PacketSize = flag.Int("packet-size", 0, "Max packet size in MB for --export and --to-broker (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
 	f.Hash = flag.Bool("hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	f.Fast = flag.Bool("fast", false, "Skip SpecialValues detection for maximum export speed (no NULL/NaN/Inf schema markers)")
 	f.FallbackRowLimit = flag.Int64("fallback-row-limit", 1_000_000, "Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited). Protects prod DBs from full-table scans on broken queries")

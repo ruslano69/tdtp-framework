@@ -4,6 +4,67 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### `--packet-size` was accepted everywhere and honoured almost nowhere
+
+`--export t --packet-size 8 --output archive.xml` wrote the default ~1.9 MB
+parts and said nothing. The flag reached only `ExportToBroker`, and there only
+through a type assertion that a single adapter satisfied, so on a file export it
+did nothing at all — while the flag's own help text recommended exactly that
+command for kanzi archives.
+
+The failure had two independent halves, and each hid the other:
+
+**The file path never applied it.** `ExportTable` sets `--fast`, `--columnar`
+and `--fallback-row-limit` through optional interfaces but had no case for the
+part size, so the value went from `main.go` into `ExportOptions` and stopped.
+
+**Only MSSQL implemented the setter.** `broker.go` asks for
+`interface{ SetMaxMessageSize(int) }`; SQLite, MySQL, PostgreSQL and Access did
+not have the method, so the assertion failed and the branch was skipped in
+silence. `--packet-size` worked in exactly one combination — MSSQL to a broker.
+
+Now: the four missing adapters delegate to `ExportHelper` as MSSQL already did,
+`ExportTable` applies the size, and `--stream` sets it on the streaming
+generator, which partitions with its own counter that the adapter setter does
+not reach. An adapter that does not support it is **refused** rather than
+skipped — the same lesson as `--columnar` on the query path: a flag accepted and
+silently ignored is worse than one that says no.
+
+Measured on 60 000 rows, buffered and streamed alike: 6 parts by default,
+2 at `--packet-size 8`, 16 at `--packet-size 1`, with identical rows in
+identical order every time.
+
+**The budget is the uncompressed payload.** `--packet-size 8` means about 8 MB
+of rows per part; compression happens after, so a kanzi archive of that part is
+whatever those 8 MB compress to. That is what makes 8 a sensible number for a
+broker, where the limit applies to what goes on the wire.
+
+The megabytes-to-budget conversion now lives in one function,
+`packetSizeBudget`, instead of an inline `* 2 * 1024 * 1024` in `broker.go`.
+The factor of 2 is not slack for the envelope: `estimateRowSize` counts
+`len(value) * 2`, so the budget is denominated in units twice the size of a
+UTF-8 byte. It is deliberately **not** shared with `packet_kb` in a pipeline
+YAML, which has no such factor for a reason recorded in `CLAUDE.md`.
+
+Regression tests: `tests/cli/test_sqlite.py` T13 — six checks, two of which fail
+against the previous build.
+
+### Known: the two partitioners disagree on NULL-bearing data
+
+Found while verifying the above, not caused by it. A streamed export fits about
+0.3% more rows per part than the buffered one when the table contains NULLs, and
+its parts run correspondingly over the requested size. On a NULL-free table the
+two agree exactly, boundary for boundary.
+
+The cause is when the markers are applied. The buffered path runs
+`DetectAndApply` over the whole set before partitioning, so `estimateRowSize`
+measures `[NULL]` — six characters. The streaming path applies markers per part,
+by which time the row has already been counted at its raw one-byte size.
+
+No data is affected: both paths emit the same rows in the same order, and every
+check that compares content passes. What is not guaranteed is that one table
+exported both ways yields byte-identical files.
+
 ### Security — a configured field_masker exported unmasked data
 
 A pipeline with `field_masker` in `processors.pre_export` wrote the original

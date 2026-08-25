@@ -209,6 +209,35 @@ work rather than evaluation, which is why they are Tier 2 and not Tier 1.
 Go comments (~153 K) are deliberately **not** on this list; the reasoning is
 kept in `docs/ru-archive/` unchanged.
 
+### The two partitioners disagree on NULL-bearing data
+
+A streamed export fits about 0.3% more rows per part than the buffered one when
+the table holds NULLs, and its parts run correspondingly over the size asked
+for. On a NULL-free table the two agree exactly, boundary for boundary —
+measured both ways on the same 100k-row table, with and without a nullable
+column.
+
+The cause is *when* the markers go on. The buffered path runs `DetectAndApply`
+over the whole set before partitioning, so `estimateRowSize` measures `[NULL]`
+— six characters. The streaming path applies markers per part, by which time
+the row has already been counted at its raw one-byte size.
+
+**No data is affected** and no check that compares content fails: both paths
+emit the same rows in the same order. What is not true, and was quietly assumed,
+is that one table exported both ways yields byte-identical files.
+
+The obvious fix is not obviously right. Applying markers per row on arrival
+would make the streaming estimate match, but `DetectAndApply` decides what to
+declare in the *schema* from the whole set, so per-row is not the same
+operation. Worth a measurement before a design: the error is 0.3%, and a part
+that overshoots its budget by 0.3% matters only where the budget is a hard
+external limit — which is the broker case, and the broker path is buffered.
+
+Noticed while wiring `--packet-size` into the file export, not caused by it.
+`tests/cli/test_postgres.py` T9.18 asserts the boundaries match and passes
+because its fixture has no NULLs; the comment there says so, so that a NULL
+added to the fixture reads as a fixture change and not a regression.
+
 ### `cmd/tdtp-xray` writes a lossy pipeline config
 
 `app.go:1671` declares its own `TDTPOutputConfig` with three fields —
