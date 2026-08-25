@@ -308,7 +308,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		if schemaErr != nil {
 			return fmt.Errorf("failed to read schema: %w", schemaErr)
 		}
-		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified on SQLite, MSSQL and MySQL; other adapters are refused\n")
+		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified on SQLite, MSSQL, MySQL and PostgreSQL\n")
 		fmt.Printf("Streaming export of '%s'...\n", opts.TableName)
 		return streamExportTable(ctx, streamer, schema, opts.TableName, opts)
 	}

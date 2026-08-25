@@ -10,6 +10,7 @@
 - NUMERIC с precision/scale
 """
 
+import os
 import psycopg2
 from psycopg2 import sql
 import random
@@ -20,13 +21,18 @@ import uuid
 # Fixed seed for reproducible test data
 random.seed(42)
 
-# Параметры подключения (из docker-compose.yml)
+# Параметры подключения (из docker-compose.yml), переопределяются окружением.
+#
+# Переменные те же, что читает tests/cli/test_postgres.py, чтобы скрипт и набор
+# указывали на одну базу. Пригодилось, когда контейнер оказался на 5434: без
+# этого пришлось бы либо править файл, либо заводить второй скрипт — а второй
+# скрипт разойдётся с первым.
 DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'user': 'tdtp_user',
-    'password': 'tdtp_dev_pass_2025',
-    'database': 'tdtp_test'
+    'host': os.environ.get('PG_HOST', 'localhost'),
+    'port': int(os.environ.get('PG_PORT', '5432')),
+    'user': os.environ.get('PG_USER', 'tdtp_user'),
+    'password': os.environ.get('PG_PASS', 'tdtp_dev_pass_2025'),
+    'database': os.environ.get('PG_DB', 'tdtp_test'),
 }
 
 def create_connection():
