@@ -151,6 +151,30 @@ def create_test_tables(conn):
             (6, 2, '2025-03-10', 'Credit memo',       -150.00);
     """)
 
+    # Датовые типы PostgreSQL, каждый из которых уже ломался (см. CHANGELOG 1.25.0):
+    # TIME не переживал round-trip, infinity не становился маркером, а NUMERIC
+    # уезжал в экспоненту. Остальные фикстуры этого не покрывают: там только
+    # date и timestamptz.
+    cursor.execute("""
+        DROP TABLE IF EXISTS datetypes CASCADE;
+        CREATE TABLE datetypes (
+            id            SERIAL PRIMARY KEY,
+            label         TEXT NOT NULL,
+            d_date        DATE,
+            d_time        TIME,
+            d_timestamp   TIMESTAMP,
+            d_timestamptz TIMESTAMPTZ,
+            d_numeric     NUMERIC(20,4)
+        );
+        INSERT INTO datetypes (label, d_date, d_time, d_timestamp, d_timestamptz, d_numeric) VALUES
+            ('plain',      '1990-04-13', '16:35:38',     '2025-10-12 16:35:38',       '2025-10-12 16:35:38+03', 1234.5678),
+            ('millis',     '2001-12-31', '00:00:01.250', '2025-07-11 06:35:26.14',    '2025-07-11 06:35:26.14+00', 0.0001),
+            ('nulls',      NULL,          NULL,           NULL,                        NULL,                     NULL),
+            ('infinity',   'infinity',   '23:59:59',     'infinity',                  'infinity',               99999999999999.9999),
+            ('-infinity',  '-infinity',  '00:00:00',     '-infinity',                 '-infinity',              -99999999999999.9999),
+            ('epoch',      '1970-01-01', '12:00:00',     '1970-01-01 00:00:00',       '1970-01-01 00:00:00+00', 0);
+    """)
+
     conn.commit()
     cursor.close()
     print("✅ Tables created successfully")

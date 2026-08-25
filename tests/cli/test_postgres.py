@@ -727,6 +727,151 @@ def test_T7_compact():
 
 # ─── Runner ───────────────────────────────────────────────────────────────────
 
+# ─── T8 PostgreSQL date and numeric types ─────────────────────────────────────
+#
+# The types here are the ones that actually broke, all in 1.25.0: TIME could not
+# round-trip, infinity never became a marker, and a large NUMERIC came out in
+# scientific notation. The other fixtures carry only date and timestamptz, so
+# none of it was covered.
+#
+# The NUMERIC checks are a regression test rather than a precaution. Values went
+# through float64, which holds 15-17 significant digits against NUMERIC(30,6)'s
+# thirty: 999999999999999.999999 exported as 1000000000000000, turning a balance
+# a millionth below a quadrillion into exactly a quadrillion.
+
+def dt_rows(path: str) -> dict:
+    """Rows of the datetypes export, keyed by label."""
+    if not os.path.exists(path):
+        return {}
+    root = ET.parse(path).getroot()
+    data = root.find("Data")
+    if data is None:
+        return {}
+    out_ = {}
+    for r in data.findall("R"):
+        v = (r.text or "").split("|")
+        if len(v) > 1:
+            out_[v[1]] = v
+    return out_
+
+
+def dt_fields(path: str) -> dict:
+    """Schema fields keyed by name -> (type, subtype, timezone, precision, scale)."""
+    if not os.path.exists(path):
+        return {}
+    sch = ET.parse(path).getroot().find("Schema")
+    if sch is None:
+        return {}
+    return {f.get("name"): (f.get("type"), f.get("subtype"), f.get("timezone"),
+                            f.get("precision"), f.get("scale"))
+            for f in sch.findall("Field")}
+
+
+def test_T8_datetypes():
+    print(f"\n{BOLD}=== T8 Date and numeric types ==={RESET}")
+
+    t = time.monotonic()
+    f = out("t8_datetypes.xml")
+    p = run("--export", "datetypes", "--output", f)
+    n = count_rows_xml(f)
+    record("T8.1 export datetypes (DATE/TIME/TIMESTAMP/TIMESTAMPTZ/NUMERIC)",
+           p.returncode == 0 and n == 6, time.monotonic() - t,
+           f"rc={p.returncode} rows={n} err={p.stderr[-160:]}")
+
+    flds = dt_fields(f)
+    rows = dt_rows(f)
+
+    t = time.monotonic()
+    record("T8.2 TIME keeps its own subtype, not plain TIMESTAMP",
+           flds.get("d_time", (None, None))[1] == "time", time.monotonic() - t,
+           f"d_time={flds.get('d_time')}")
+
+    t = time.monotonic()
+    tz = flds.get("d_timestamptz", (None, None, None))
+    record("T8.3 TIMESTAMPTZ declares UTC and subtype timestamptz",
+           tz[2] == "UTC" and tz[1] == "timestamptz", time.monotonic() - t, f"{tz}")
+
+    t = time.monotonic()
+    dec = flds.get("d_numeric", (None, None, None, None, None))
+    record("T8.4 NUMERIC(20,4) keeps precision and scale in the schema",
+           dec[0] == "DECIMAL" and dec[3] == "20" and dec[4] == "4",
+           time.monotonic() - t, f"{dec}")
+
+    # 16:35:38+03 must arrive as 13:35:38Z — the offset is applied, not dropped.
+    t = time.monotonic()
+    plain = rows.get("plain", [])
+    record("T8.5 TIMESTAMPTZ is converted to UTC, not just relabelled",
+           len(plain) > 5 and plain[5] == "2025-10-12T13:35:38Z", time.monotonic() - t,
+           f"got={plain[5] if len(plain) > 5 else None}")
+
+    t = time.monotonic()
+    record("T8.6 TIME value survives as a time, sub-second included",
+           len(plain) > 3 and plain[3] == "16:35:38"
+           and rows.get("millis", [""] * 4)[3] == "00:00:01.25",
+           time.monotonic() - t,
+           f"plain={plain[3] if len(plain) > 3 else None} "
+           f"millis={rows.get('millis', [''] * 4)[3]}")
+
+    t = time.monotonic()
+    nulls = rows.get("nulls", [])
+    # Колонки 2..6 — date, time, timestamp, timestamptz, numeric.
+    all_null = len(nulls) == 7 and all(x == "[NULL]" for x in nulls[2:7])
+    record("T8.7 every nullable column exports as [NULL]",
+           all_null, time.monotonic() - t, f"got={nulls[2:7] if len(nulls) == 7 else nulls}")
+
+    t = time.monotonic()
+    inf, ninf = rows.get("infinity", []), rows.get("-infinity", [])
+    # date, timestamp и timestamptz — все три должны стать маркером.
+    record("T8.8 infinity and -infinity become INF / -INF markers",
+           len(inf) > 5 and inf[2] == "INF" and inf[4] == "INF" and inf[5] == "INF"
+           and len(ninf) > 5 and ninf[2] == "-INF" and ninf[4] == "-INF" and ninf[5] == "-INF",
+           time.monotonic() - t,
+           f"inf={inf[2:6] if len(inf) > 5 else inf} neg={ninf[2:6] if len(ninf) > 5 else ninf}")
+
+    # ── NUMERIC precision: the regression ─────────────────────────────────────
+    t = time.monotonic()
+    probe = out("t8_numprobe.xml")
+    pg_query("""
+        DROP TABLE IF EXISTS numprobe;
+        CREATE TABLE numprobe (id int primary key, v numeric(30,6));
+        INSERT INTO numprobe VALUES
+            (1, 123456789012.345678),
+            (2, 999999999999999.999999),
+            (3, 0.000001),
+            (4, 1234.560000),
+            (5, 123456789012345678.901000);
+    """)
+    p = run("--export", "numprobe", "--output", probe)
+    got = {}
+    if os.path.exists(probe):
+        d = ET.parse(probe).getroot().find("Data")
+        for r in (d.findall("R") if d is not None else []):
+            v = (r.text or "").split("|")
+            if len(v) > 1:
+                got[v[0]] = v[1]
+    want = {
+        "1": "123456789012.345678",
+        "2": "999999999999999.999999",   # was 1000000000000000 through float64
+        "3": "0.000001",
+        "4": "1234.560000",              # declared scale, trailing zeros kept
+        "5": "123456789012345678.901000",
+    }
+    bad = {k: (got.get(k), w) for k, w in want.items() if got.get(k) != w}
+    record("T8.9 NUMERIC(30,6) exports every digit, no float64 rounding",
+           p.returncode == 0 and not bad, time.monotonic() - t,
+           f"rc={p.returncode} mismatches={bad}")
+
+    # ── Round trip ────────────────────────────────────────────────────────────
+    t = time.monotonic()
+    pg_query("DROP TABLE IF EXISTS datetypes_copy;")
+    p = run("--import", f, "--table", "datetypes_copy", "--strategy", "replace")
+    back = pg_query("SELECT count(*) FROM datetypes_copy;") if p.returncode == 0 else []
+    cnt = int(back[0]) if back else -1
+    record("T8.10 datetypes round-trips back into PostgreSQL",
+           p.returncode == 0 and cnt == 6, time.monotonic() - t,
+           f"rc={p.returncode} rows={cnt} err={p.stderr[-160:]}")
+
+
 GROUPS = [
     ("T1", test_T1_basic_export),
     ("T2", test_T2_filters),
@@ -735,6 +880,7 @@ GROUPS = [
     ("T5", test_T5_integrity),
     ("T6", test_T6_edge_cases),
     ("T7", test_T7_compact),
+    ("T8", test_T8_datetypes),
 ]
 
 
