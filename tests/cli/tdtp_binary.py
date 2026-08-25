@@ -99,6 +99,22 @@ def check_binary(binary: str, quiet: bool = False) -> str:
         print(f"  or point the suite elsewhere: TDTPCLI_BIN=/path/to/tdtpcli")
         sys.exit(1)
 
+    # Лицензия — здесь же, потому что сюда заходит каждый набор.
+    #
+    # tdtpcli ищет её в TDTP_LICENSE, иначе в ./tdtp.lic относительно рабочего
+    # каталога. Наборы запускаются из tests/cli, файла там нет, и community-тариф
+    # разрешает только sqlite: экспорт из mysql, postgres и mssql отказывает с
+    # rc=1. Выглядит это как что угодно, только не как лицензия — данные в
+    # сообщении об ошибке верные, а стандартный вывод пуст.
+    #
+    # Правится через os.environ, а не возвратом словаря: у каждого набора свой
+    # run(), и переписывать восемь штук ради одной переменной значило бы забыть
+    # девятый.
+    if "TDTP_LICENSE" not in os.environ:
+        lic = REPO_ROOT / "tdtp.lic"
+        if lic.is_file():
+            os.environ["TDTP_LICENSE"] = str(lic)
+
     src_mtime, src_path = newest_source_mtime()
     try:
         bin_mtime = os.path.getmtime(binary)

@@ -114,6 +114,26 @@ type integrityProc struct {
 	caller        string
 }
 
+// columnarProc — колоночная раскладка как шаг цепочки.
+//
+// Раньше её не было: раскладка применялась писателем (materializeForWrite) и
+// полем внутри compressProc. Обычный экспорт проходил через писателя и потому
+// работал, а потоковый пишет части сам, минуя генератор с флагом, — и
+// --stream --columnar без сжатия молча не делал ничего. Со сжатием делал,
+// потому что до него дотягивался compressProc.
+//
+// Теперь это шаг, и порядок ему задаёт реестр pkg/transform: после integrity,
+// до compress. EnsureColumnar идемпотентна, так что повторный вызов из
+// compressProc безвреден.
+type columnarProc struct{}
+
+func (p *columnarProc) Name() string { return "columnar" }
+
+func (p *columnarProc) ProcessPacket(_ context.Context, pkt *packet.DataPacket) error {
+	packet.EnsureColumnar(pkt)
+	return nil
+}
+
 // encryptProc — v1.5 посекционное шифрование как шаг цепочки.
 //
 // Только v1.5. Legacy --enc13 шагом быть не может: он подменяет сериализацию
@@ -288,7 +308,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		if schemaErr != nil {
 			return fmt.Errorf("failed to read schema: %w", schemaErr)
 		}
-		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified on SQLite; MSSQL is wired but untested against a server\n")
+		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified on SQLite, MSSQL and MySQL; other adapters are refused\n")
 		fmt.Printf("Streaming export of '%s'...\n", opts.TableName)
 		return streamExportTable(ctx, streamer, schema, opts.TableName, opts)
 	}
@@ -920,6 +940,10 @@ func buildExportChain(schema packet.Schema, opts ExportOptions) (*processors.Pac
 		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
 		steps[transform.StageCompress] = &compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
 			checksum: opts.EnableChecksum, columnar: opts.Columnar}
+	}
+
+	if opts.Columnar {
+		steps[transform.StageColumnar] = &columnarProc{}
 	}
 
 	// v1.5 шифрование — шаг цепочки; порядок относительно сжатия и целостности
