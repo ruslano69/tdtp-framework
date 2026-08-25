@@ -136,6 +136,12 @@ OPTIONS:
     --fallback-row-limit <n>   Max rows loaded into memory when SQL pushdown fails (default: 1000000)
                                Protects production DBs from accidental full-table scans; 0 = unlimited
 
+  Memory and layout:
+    --stream                   Export part by part instead of loading the whole table (1M rows:
+                               1044 MB -> 68 MB). SQLite only, needs --output, no S3/--where/--limit.
+    --columnar                 Write Data column-major (layout="columns"): ~15% smaller with zstd 3,
+                               ~3% with kanzi. Off by default — old readers misread the attribute.
+
   v1.4 Integrity:
     --integrity                Stamp packet with TDTP v1.4 xxh3_128 hashes: Schema + Data + Packet
                                fingerprint. Hash covers plain-text rows BEFORE compression.
@@ -296,6 +302,9 @@ EXAMPLES:
 
   # Export with kanzi (30% denser than zstd, large text tables)
   tdtpcli --export operations_log --compress --compress-algo kanzi --compress-level 6 --output ops.tdtp.xml
+
+  # Export a table too large to fit in memory
+  tdtpcli --export big_table --stream --compress --output big.tdtp.xml
 
   # Export with compression (XXH3 checksum added automatically)
   tdtpcli --export orders --compress --output orders.tdtp.xml
