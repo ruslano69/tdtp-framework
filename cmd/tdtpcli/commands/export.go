@@ -292,6 +292,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		if chainErr != nil {
 			return chainErr
 		}
+		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified against SQLite only\n")
 		fmt.Printf("Streaming export of '%s'...\n", opts.TableName)
 		return streamExportTable(ctx, streamer, schema, opts.TableName, chain, opts)
 	}
