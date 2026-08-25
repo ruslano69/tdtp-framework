@@ -158,6 +158,20 @@ Worth doing the same wherever else a suite self-skips:
 Standing the servers up is cheap. The value is not the green tick; it is that
 these runs keep finding real defects.
 
+The CLI suites under `tests/cli/` are uneven in the same way, and the gap is
+which adapter a feature was written against rather than which feature matters:
+
+| Suite | Checks | Missing against sqlite |
+|---|---:|---|
+| `test_sqlite.py` | 96 | — |
+| `test_postgres.py` | 87 | `diff`, `merge`, S3, MSMQ |
+| `test_mysql.py` | 58 | columnar, `--stream`, processors, dates |
+
+MySQL is the one to take next: `--columnar`, `--stream` and the pre-export
+processor chain are all unexercised there, and its `ReadAllRowsStream` is the
+one that shares `base.StreamSQLRows` — so a divergence would show up in the
+shared code, not in the adapter.
+
 ### Documentation — translation, Tier 2 onward
 
 Tier 1 is **done**, against the 36 K of Cyrillic the old plan recorded across
@@ -195,15 +209,84 @@ work rather than evaluation, which is why they are Tier 2 and not Tier 1.
 Go comments (~153 K) are deliberately **not** on this list; the reasoning is
 kept in `docs/ru-archive/` unchanged.
 
+### `cmd/tdtp-xray` writes a lossy pipeline config
+
+`app.go:1671` declares its own `TDTPOutputConfig` with three fields —
+`destination`, `format`, `compression`. The real one, `pkg/etl/config.go:144`,
+has thirteen. Saving a pipeline from the GUI therefore drops ten of them,
+**`encryption` among them**, along with `compact`, `fixed_fields`,
+`compress_algo`, `compress_level`, `s3` and `fast`. Silently: the YAML is
+written, it parses, and the settings are simply not in it.
+
+The reason it was copied rather than imported is worth knowing before choosing a
+fix. Wails serializes the struct to the frontend as JSON, and the `pkg/etl`
+version carries `yaml` tags only. So it is either json tags on
+`pkg/etl.TDTPOutputConfig` and a type alias in xray — one declaration, the
+duplication gone — or a field-by-field sync that will drift again on the next
+field added.
+
+Diagnosed, not fixed. The choice is a contract decision, and the GUI cannot be
+exercised from here.
+
+### Complexity outliers — funcfinder, 2026-08-25
+
+Over the whole tree: 560 files, 4719 functions; 3688 of them scored, average
+cognitive complexity 9.4, 109 VERY_HIGH and 40 CRITICAL. Only the part worth
+acting on is below — **a high score is a question, not a defect**, and two of
+these four resolve to "leave it alone".
+
+| cx | lines | where |
+|---:|------:|-------|
+| 128 | 107 | `pkg/xlsx/ooxml_read.go:221` `parseSheetXML` |
+| 64 | 89 / 98 | `pkg/core/packet/streaming.go` `GeneratePartsStream`, `…WithSender` |
+| 64 | 105–134 | `InspectTable` — five of them: postgres, mssql, mysql, sqlite, access |
+| 16 | **599** | `cmd/tdtpcli/main.go:29` `routeCommand` |
+
+**`routeCommand` is the clear one, and its number is the low one.** cx=16 is not
+complexity; 599 lines is length. It is the same shape as `newRouter`, which
+reached 308 lines because every endpoint added since had landed in the same
+body, and became seven `registerXxxRoutes` in 1.24.x. Splitting it on that
+precedent fits the freeze: same commands, same dispatch order, same bodies.
+
+**The two `GeneratePartsStream` functions are new code**, arrived with
+`--stream`, and are BETA. Nesting depth 7 in a function that also owns the
+finalize pass is worth reading before the flag loses its BETA label rather than
+after.
+
+**The five `InspectTable` are not five copies of one fact** and must not be
+filed as duplication. Their queries differ in substance —
+`information_schema` against `PRAGMA` against `sys.columns`. What repeats is the
+frame: query, scan, assemble the report, the same non-fatal fallbacks. Folding
+it means every adapter supplying a query plus a row→column mapper and sharing
+the assembly, which is real work and larger than the table suggests. Not
+scheduled.
+
+**`parseSheetXML` carries the worst number in the tree and is probably
+legitimate.** It is a nested state machine over a nested format, written on
+purpose in 1.22 when excelize was dropped. Measure a replacement before
+believing it would be simpler.
+
+Regenerating: the binaries live in `H:\Ruslan\Code\Go\funcfinder\*.exe`, the
+outputs in `.codemap/` and `docs/analysis/`, both gitignored.
+`.funcfinder.config` still points `FUNCFINDER_BIN` at `/tmp/funcfinder/funcfinder`,
+which no longer exists — so the commit hook it configures is silently a no-op,
+and the path needs deciding rather than pointing at `/tmp` again.
+
 ### Housekeeping
 
-- `CHANGELOG.md` carries a stray `## [Unreleased] — refactor/orchestrator-route-groups`
-  section stranded between 1.24.1 and 1.24.0. It describes work that shipped —
-  fold it under a version heading or drop it.
-- The working tree accumulates untracked scratch: `PR_DESCRIPTION.md`,
-  `docs/SESSION_SUMMARY.md`, `docs/analysis/`, four `cmd/bench_*` directories,
-  a pile of `examples/travel-agency/*.yaml` and `*.py`. Decide per item — commit,
-  `.gitignore`, or delete. Leaving it makes `git status` useless as a signal.
+- `CHANGELOG.md` carries **two** stranded `## [Unreleased]` sections, not the one
+  this bullet used to name: `refactor/orchestrator-route-groups` (line 514,
+  between 1.24.1 and 1.24.0) and `feature/sprint4-map` (line 1845). Both
+  describe work that shipped — fold each under a version heading or drop it.
+  The third, at line 5, is the current branch and belongs there.
+- ~~The working tree accumulates untracked scratch~~ — **cleared.** `git status
+  --untracked-files=all` reports zero untracked files. The funcfinder outputs
+  that would otherwise land there (`.codemap/`, `docs/analysis/`) are
+  gitignored.
+- `TestCompressDataForTdtp` (`pkg/processors/compression_test.go:133`) asserts
+  `stats.Time != 0` after compressing three short rows. On Windows the clock is
+  coarser than the work, so the assertion flakes. It is testing the timer, not
+  the compressor — assert on the output instead.
 - `benchmarks/bench_duckdb` does not build with `CGO_ENABLED=0`, because
   go-duckdb needs cgo. Gate it behind a build tag or document the requirement.
 
@@ -264,16 +347,29 @@ target list and a `--compress` option, and its integrity must be computed
 - RabbitMQ: N separate connections (multiple consumers on one channel is an anti-pattern)
 - Kafka: consumer group, N partitions → N workers, the native model
 
-### 2.2 Streaming CLI — `--export-stream` / `--import-stream`
+### 2.2 Streaming CLI — the export half shipped, the import half did not
 
-**The code already exists and is not wired up.**
-`pkg/core/packet/streaming.go` holds `StreamingGenerator` with a channel-based
-API, 7 methods, and no CLI caller. Cheapest of the three by a wide margin — but
-still new surface, so it waits.
+**The export half is done and this entry is what is left of the plan.**
+`--stream` (BETA) is on `bench/sqlite-date-columns`, not yet merged: a
+`ReadAllRowsStream` in each of SQLite, MSSQL, MySQL and PostgreSQL, driven from
+`cmd/tdtpcli/commands/export_stream.go` through `GeneratePartsStream`. It went
+in against a production case rather than a wish — a 24 M-row table wanted about
+17 GB and could not be exported at all; streamed it holds 63 MB flat and writes
+1408 parts in 213 s.
 
-- `--export-stream` writes rows as they are read from the DB, without buffering the full set
+It reached 1.x on the freeze's own terms: no new capability, an existing export
+that stops buffering. `--stream` is nonetheless BETA and stays that way until
+each adapter has been exercised on a real table, because "the driver streams"
+is a claim about the driver, not the API. The tell is a flat peak as the data
+grows — MySQL holds 62 MB at both 524 288 and 4 194 304 rows, where the
+buffered path goes 388 MB → 2 823 MB. A peak that grows linearly means the
+driver materialized the result and the streaming is decorative.
+
+What remains is genuinely new surface and stays behind the freeze:
+
 - `--import-stream` reads from stdin or a broker row by row, upserting without accumulation
-- Together they allow tables larger than RAM
+- together with the above it allows tables larger than RAM in both directions
+- it needs 2.3 (schema negotiation) first
 
 ### 2.3 Schema migration — `ALTER TABLE`
 
