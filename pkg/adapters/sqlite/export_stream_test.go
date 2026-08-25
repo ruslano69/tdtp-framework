@@ -21,7 +21,7 @@ func TestReadAllRowsStream_MatchesReadAllRows(t *testing.T) {
 		t.Fatalf("ReadAllRows: %v", err)
 	}
 
-	rowsChan, errChan, err := a.ReadAllRowsStream(ctx, "Users", schema)
+	_, rowsChan, errChan, err := a.ReadAllRowsStream(ctx, "Users", schema)
 	if err != nil {
 		t.Fatalf("ReadAllRowsStream: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestReadAllRowsStream_StopsOnCancel(t *testing.T) {
 	}
 
 	cctx, cancel := context.WithCancel(ctx)
-	rowsChan, errChan, err := a.ReadAllRowsStream(cctx, "Users", schema)
+	_, rowsChan, errChan, err := a.ReadAllRowsStream(cctx, "Users", schema)
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}
@@ -85,7 +85,7 @@ func BenchmarkReadAllRowsStream_Dates(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		rowsChan, errChan, err := a.ReadAllRowsStream(ctx, "Users", schema)
+		_, rowsChan, errChan, err := a.ReadAllRowsStream(ctx, "Users", schema)
 		if err != nil {
 			b.Fatal(err)
 		}

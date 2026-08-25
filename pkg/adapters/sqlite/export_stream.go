@@ -20,7 +20,7 @@ import (
 //
 // Курсор закрывается горутиной, которая его и открыла: вернуть его наружу
 // значило бы обязать вызывающего закрыть, а он видит только каналы.
-func (a *Adapter) ReadAllRowsStream(ctx context.Context, tableName string, schema packet.Schema) (<-chan []string, <-chan error, error) {
+func (a *Adapter) ReadAllRowsStream(ctx context.Context, tableName string, schema packet.Schema) (packet.Schema, <-chan []string, <-chan error, error) {
 	tableName = tdtql.StripBrackets(tableName)
 	fieldNames := make([]string, len(schema.Fields))
 	for i, field := range schema.Fields {
@@ -43,17 +43,17 @@ func (a *Adapter) ReadAllRowsStream(ctx context.Context, tableName string, schem
 	// возможно, испортить кеш импорту. Conn берёт одно и держит до закрытия.
 	conn, err := a.db.Conn(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to take a connection: %w", err)
+		return schema, nil, nil, fmt.Errorf("failed to take a connection: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, "PRAGMA cache_size = -2000"); err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("failed to size the page cache: %w", err)
+		return schema, nil, nil, fmt.Errorf("failed to size the page cache: %w", err)
 	}
 
 	rows, err := conn.QueryContext(ctx, query)
 	if err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("failed to query table: %w", err)
+		return schema, nil, nil, fmt.Errorf("failed to query table: %w", err)
 	}
 
 	// Буфер на канале сглаживает разницу темпов чтения и упаковки. Он же —
@@ -74,5 +74,6 @@ func (a *Adapter) ReadAllRowsStream(ctx context.Context, tableName string, schem
 		}
 	}()
 
-	return out, errc, nil
+	// SQLite ничего из схемы не выкидывает — отдаём как получили.
+	return schema, out, errc, nil
 }

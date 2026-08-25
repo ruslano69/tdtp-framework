@@ -138,8 +138,8 @@ OPTIONS:
 
   Memory and layout:
     --stream                   [BETA] Export part by part instead of loading the whole table (1M
-                               rows: 1044 MB -> 68 MB). Tested on SQLite only; other adapters are
-                               refused. Needs --output, no S3/--where/--limit.
+                               rows: 1044 MB -> 68 MB). Verified on SQLite; MSSQL wired but not
+                               yet run against a server. Needs --output, no S3/--where/--limit.
     --columnar                 Write Data column-major (layout="columns"): ~15% smaller with zstd 3,
                                ~3% with kanzi. Off by default — old readers misread the attribute.
 

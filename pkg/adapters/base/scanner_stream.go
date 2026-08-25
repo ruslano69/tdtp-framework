@@ -19,8 +19,15 @@ import (
 // Канал строк закрывается по исчерпании данных. Ошибки приходят в отдельный
 // канал: читать его нужно ПОСЛЕ того, как канал строк закрыт, иначе ошибку,
 // случившуюся в середине чтения, легко принять за нормальный конец.
+//
+// Возвращает схему, которую РЕАЛЬНО будет отдавать, а не ту, что получил.
+// Они расходятся: MSSQL выкидывает read-only колонки (identity, computed,
+// rowversion), и обычный путь делает это хуком PostProcessRows уже после
+// чтения. Потоку постфактум фильтровать нечего — строки уже ушли
+// потребителю, — поэтому схема согласовывается заранее, и вызывающий обязан
+// строить пакеты по возвращённой, а не по переданной.
 type StreamingDataReader interface {
-	ReadAllRowsStream(ctx context.Context, tableName string, schema packet.Schema) (<-chan []string, <-chan error, error)
+	ReadAllRowsStream(ctx context.Context, tableName string, schema packet.Schema) (packet.Schema, <-chan []string, <-chan error, error)
 }
 
 // StreamSQLRows перекладывает sql.Rows в канал, преобразуя ячейки тем же

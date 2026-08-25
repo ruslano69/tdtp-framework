@@ -9,7 +9,6 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
 // streamExportTable экспортирует таблицу, не собирая её в памяти.
@@ -35,7 +34,6 @@ func streamExportTable(
 	reader base.StreamingDataReader,
 	schema packet.Schema,
 	tableName string,
-	chain *processors.PacketChain,
 	opts ExportOptions,
 ) error {
 	if opts.OutputFile == "" || opts.OutputFile == "-" {
@@ -45,9 +43,22 @@ func streamExportTable(
 		return fmt.Errorf("--stream does not support object storage yet: use --output <file>")
 	}
 
-	rowsChan, errChan, err := reader.ReadAllRowsStream(ctx, tableName, schema)
+	// Схему берём ТУ, ЧТО ВЕРНУЛ читатель: она может отличаться от переданной.
+	// MSSQL выкидывает read-only колонки, и обычный путь делает это хуком после
+	// чтения; потоку фильтровать постфактум нечего, поэтому он согласовывает
+	// схему заранее. Построй пакеты по исходной — и заголовок обещал бы колонки,
+	// которых в строках нет.
+	schema, rowsChan, errChan, err := reader.ReadAllRowsStream(ctx, tableName, schema)
 	if err != nil {
 		return fmt.Errorf("failed to start streaming read: %w", err)
+	}
+
+	// Цепочка строится ПОСЛЕ, по согласованной схеме. Compact берёт из неё
+	// имена fixed-полей, и на схеме до фильтрации он ссылался бы на колонки,
+	// которых в строках уже нет.
+	chain, chainErr := buildExportChain(schema, opts)
+	if chainErr != nil {
+		return chainErr
 	}
 
 	// Размер части — умолчание генератора: --packet-size до файлового экспорта

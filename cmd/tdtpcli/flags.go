@@ -248,7 +248,7 @@ func ParseFlags() *Flags {
 	f.CompressLevel = flag.Int("compress-level", 3, "Compression level: 1-19 (zstd) or 6-7 (kanzi)")
 	f.CompressAlgo = flag.String("compress-algo", "zstd", "Compression algorithm: zstd (default) or kanzi")
 	f.Columnar = flag.Bool("columnar", false, "Write Data column-major (layout=\"columns\"); ~19% smaller compressed, readers must understand the attribute")
-	f.Stream = flag.Bool("stream", false, "[BETA] Stream the export: read, pack and write part by part instead of loading the whole table (SQLite only; requires --output, no S3)")
+	f.Stream = flag.Bool("stream", false, "[BETA] Stream the export: read, pack and write part by part instead of loading the whole table (SQLite, MSSQL; requires --output, no S3)")
 	f.PacketSize = flag.Int("packet-size", 0, "Max broker packet size in MB (default 0 = ~1.9MB; use 8 for large kanzi-compressed packets)")
 	f.Hash = flag.Bool("hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	f.Fast = flag.Bool("fast", false, "Skip SpecialValues detection for maximum export speed (no NULL/NaN/Inf schema markers)")

@@ -288,13 +288,9 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		if schemaErr != nil {
 			return fmt.Errorf("failed to read schema: %w", schemaErr)
 		}
-		chain, chainErr := buildExportChain(schema, opts)
-		if chainErr != nil {
-			return chainErr
-		}
-		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified against SQLite only\n")
+		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified on SQLite; MSSQL is wired but untested against a server\n")
 		fmt.Printf("Streaming export of '%s'...\n", opts.TableName)
-		return streamExportTable(ctx, streamer, schema, opts.TableName, chain, opts)
+		return streamExportTable(ctx, streamer, schema, opts.TableName, opts)
 	}
 
 	// Export with or without query
