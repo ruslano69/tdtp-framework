@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
@@ -35,6 +36,7 @@ type ExportOptions struct {
 	ReadOnlyFields   bool   // Include read-only fields (timestamp, computed, identity)
 	Fast             bool   // Skip SpecialValues detection for maximum export speed
 	Columnar         bool   // Write Data column-major (layout="columns")
+	Stream           bool   // Потоковый экспорт (см. streamExportTable)
 	FallbackRowLimit int64  // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
 	// v1.3.1 compact format
@@ -110,6 +112,26 @@ type integrityProc struct {
 	mercuryClient *mercury.Client // nil = local integrity only (no Mercury registration)
 	mercuryURL    string          // embedded in Dictionary as @MRC for consumer pre-flight
 	caller        string
+}
+
+// columnarProc — колоночная раскладка как шаг цепочки.
+//
+// Раньше её не было: раскладка применялась писателем (materializeForWrite) и
+// полем внутри compressProc. Обычный экспорт проходил через писателя и потому
+// работал, а потоковый пишет части сам, минуя генератор с флагом, — и
+// --stream --columnar без сжатия молча не делал ничего. Со сжатием делал,
+// потому что до него дотягивался compressProc.
+//
+// Теперь это шаг, и порядок ему задаёт реестр pkg/transform: после integrity,
+// до compress. EnsureColumnar идемпотентна, так что повторный вызов из
+// compressProc безвреден.
+type columnarProc struct{}
+
+func (p *columnarProc) Name() string { return "columnar" }
+
+func (p *columnarProc) ProcessPacket(_ context.Context, pkt *packet.DataPacket) error {
+	packet.EnsureColumnar(pkt)
+	return nil
 }
 
 // encryptProc — v1.5 посекционное шифрование как шаг цепочки.
@@ -262,6 +284,35 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		opts.Query.Fields = opts.Fields
 	}
 
+	// --stream: читаем, пакуем и пишем по частям, не держа таблицу в памяти.
+	//
+	// Отдельная ветка, а не режим общего кода, потому что различие
+	// структурное: обычный путь получает все пакеты и только потом строит
+	// цепочку, потоковый строит цепочку заранее и обрабатывает часть сразу.
+	// Второго прохода по таблице у него нет.
+	if opts.Stream {
+		streamer, ok := adapter.(base.StreamingDataReader)
+		if !ok {
+			return fmt.Errorf("--stream is not supported by this adapter yet (SQLite only for now)")
+		}
+		if opts.Query != nil {
+			return fmt.Errorf("--stream does not support filters yet: run without --where/--limit/--fields")
+		}
+		schemaReader, ok := adapter.(interface {
+			GetTableSchema(context.Context, string) (packet.Schema, error)
+		})
+		if !ok {
+			return fmt.Errorf("--stream: adapter cannot report a table schema")
+		}
+		schema, schemaErr := schemaReader.GetTableSchema(ctx, opts.TableName)
+		if schemaErr != nil {
+			return fmt.Errorf("failed to read schema: %w", schemaErr)
+		}
+		fmt.Fprintf(os.Stderr, "⚠ --stream is BETA: verified on SQLite, MSSQL, MySQL and PostgreSQL\n")
+		fmt.Printf("Streaming export of '%s'...\n", opts.TableName)
+		return streamExportTable(ctx, streamer, schema, opts.TableName, opts)
+	}
+
 	// Export with or without query
 	var packets []*packet.DataPacket
 	if opts.Query != nil {
@@ -291,84 +342,9 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 	fmt.Printf("✓ Total rows: %d\n", totalRows)
 	recordOpMetrics(ctx, opts.TableName, int64(totalRows))
 
-	// Порядок шагов берётся из pkg/transform, а не из очереди вызовов ниже.
-	//
-	// Раньше он держался на том, что каждый добавляющий шаг прочитал все
-	// комментарии вида "MUST run before ComputeIntegrity". За месяц так
-	// набралось три бага, и все — про стык между шагами, а не про сами
-	// преобразования. Теперь ограничения объявлены у шага один раз, план
-	// строится из них, а этот код лишь раскладывает готовые шаги по плану.
-	steps := map[string]processors.PacketProcessor{}
-
-	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
-		steps[transform.StageRowProcessors] = opts.ProcessorMgr
-	}
-
-	if opts.Compact {
-		fixedNames := BuildFixedFieldsForExport(packets[0].Schema, opts.FixedFields)
-		if len(fixedNames) == 0 {
-			fmt.Println("⚠ compact requested but no fixed fields found (use --fixed-fields or add _ prefix to view columns)")
-		} else {
-			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
-			steps[transform.StageCompact] = &compactProc{fixedNames: fixedNames, writeTail: opts.CompactTail}
-		}
-	}
-
-	// v1.4 integrity: runs BEFORE compression so hashes cover plain-text rows.
-	//
-	// Mandatory (not opt-in) whenever v1.5 encryption is active, even if
-	// --integrity wasn't passed explicitly: VerifyAndPrepare's consumer-side
-	// pre-flight runs for any packet with Version >= "1.4" and treats an
-	// empty XXH3 as a hard block (ErrHashNotRegistered), not "wasn't
-	// requested". A v1.5-encrypted packet that skipped this would be
-	// unimportable the moment --mercury-url is set — which v1.5 decryption
-	// itself always requires. See pkg/pipeline/produce.go's doc comment for
-	// the full explanation; this is not a v1.5-specific security feature,
-	// it's v1.4's existing gate being satisfied unconditionally so v1.5
-	// doesn't regress it.
-	needsIntegrity := opts.IntegrityV14 || (opts.Encrypt && !opts.EncryptLegacy)
-	if needsIntegrity {
-		caller := opts.MercuryCaller
-		if caller == "" {
-			caller = "tdtpcli"
-		}
-		var mclient *mercury.Client
-		if opts.MercuryURL != "" {
-			mclient = mercury.NewClient(opts.MercuryURL, 5000)
-			fmt.Printf("v1.4 integrity + Mercury registration (%s, caller=%s)...\n",
-				opts.MercuryURL, caller)
-		} else {
-			fmt.Printf("v1.4 integrity (local hashes only, no Mercury registration)...\n")
-		}
-		steps[transform.StageIntegrity] = &integrityProc{mercuryClient: mclient, mercuryURL: opts.MercuryURL, caller: caller}
-	}
-
-	if opts.Compress {
-		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
-		steps[transform.StageCompress] = &compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
-			checksum: opts.EnableChecksum, columnar: opts.Columnar}
-	}
-
-	// v1.5 шифрование — шаг цепочки; порядок относительно сжатия и целостности
-	// задан реестром, а не тем, что writePacket вызывается последним.
-	var encUUIDs []string
-	if opts.Encrypt && !opts.EncryptLegacy {
-		steps[transform.StageEncrypt] = &encryptProc{mercuryURL: opts.MercuryURL, uuids: &encUUIDs}
-	}
-
-	// Раскладка по плану. Несовместимый набор отвергается ЗДЕСЬ, до первого
-	// записанного байта, а не проявляется у получателя.
-	enabled := make([]string, 0, len(steps))
-	for name := range steps {
-		enabled = append(enabled, name)
-	}
-	plan, planErr := transform.Plan(enabled)
-	if planErr != nil {
-		return fmt.Errorf("incompatible transform options: %w", planErr)
-	}
-	chain := processors.NewPacketChain()
-	for _, name := range plan {
-		chain.Add(steps[name])
+	chain, chainErr := buildExportChain(packets[0].Schema, opts)
+	if chainErr != nil {
+		return chainErr
 	}
 
 	// Open object storage once outside the loop (if needed).
@@ -898,4 +874,98 @@ func decompressPacketData(pkt *packet.DataPacket) error {
 func IsCompressedFile(filename string) bool {
 	return strings.HasSuffix(strings.ToLower(filename), ".zst") ||
 		strings.HasSuffix(strings.ToLower(filename), ".zstd")
+}
+
+// buildExportChain собирает цепочку преобразований по опциям экспорта.
+//
+// Вынесена из ExportTable, потому что потоковому пути цепочка нужна ДО чтения
+// данных: он обрабатывает часть сразу, как она собрана, и второго прохода по
+// таблице у него нет. Обычный путь строил её после получения пакетов и брал
+// схему из packets[0]; здесь схема передаётся явно, и оба пути получают
+// одинаковый план.
+func buildExportChain(schema packet.Schema, opts ExportOptions) (*processors.PacketChain, error) {
+	// Порядок шагов берётся из pkg/transform, а не из очереди вызовов ниже.
+	//
+	// Раньше он держался на том, что каждый добавляющий шаг прочитал все
+	// комментарии вида "MUST run before ComputeIntegrity". За месяц так
+	// набралось три бага, и все — про стык между шагами, а не про сами
+	// преобразования. Теперь ограничения объявлены у шага один раз, план
+	// строится из них, а этот код лишь раскладывает готовые шаги по плану.
+	steps := map[string]processors.PacketProcessor{}
+
+	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
+		steps[transform.StageRowProcessors] = opts.ProcessorMgr
+	}
+
+	if opts.Compact {
+		fixedNames := BuildFixedFieldsForExport(schema, opts.FixedFields)
+		if len(fixedNames) == 0 {
+			fmt.Println("⚠ compact requested but no fixed fields found (use --fixed-fields or add _ prefix to view columns)")
+		} else {
+			fmt.Printf("Applying compact format (fixed: %s)...\n", strings.Join(fixedNames, ", "))
+			steps[transform.StageCompact] = &compactProc{fixedNames: fixedNames, writeTail: opts.CompactTail}
+		}
+	}
+
+	// v1.4 integrity: runs BEFORE compression so hashes cover plain-text rows.
+	//
+	// Mandatory (not opt-in) whenever v1.5 encryption is active, even if
+	// --integrity wasn't passed explicitly: VerifyAndPrepare's consumer-side
+	// pre-flight runs for any packet with Version >= "1.4" and treats an
+	// empty XXH3 as a hard block (ErrHashNotRegistered), not "wasn't
+	// requested". A v1.5-encrypted packet that skipped this would be
+	// unimportable the moment --mercury-url is set — which v1.5 decryption
+	// itself always requires. See pkg/pipeline/produce.go's doc comment for
+	// the full explanation; this is not a v1.5-specific security feature,
+	// it's v1.4's existing gate being satisfied unconditionally so v1.5
+	// doesn't regress it.
+	needsIntegrity := opts.IntegrityV14 || (opts.Encrypt && !opts.EncryptLegacy)
+	if needsIntegrity {
+		caller := opts.MercuryCaller
+		if caller == "" {
+			caller = "tdtpcli"
+		}
+		var mclient *mercury.Client
+		if opts.MercuryURL != "" {
+			mclient = mercury.NewClient(opts.MercuryURL, 5000)
+			fmt.Printf("v1.4 integrity + Mercury registration (%s, caller=%s)...\n",
+				opts.MercuryURL, caller)
+		} else {
+			fmt.Printf("v1.4 integrity (local hashes only, no Mercury registration)...\n")
+		}
+		steps[transform.StageIntegrity] = &integrityProc{mercuryClient: mclient, mercuryURL: opts.MercuryURL, caller: caller}
+	}
+
+	if opts.Compress {
+		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
+		steps[transform.StageCompress] = &compressProc{algo: opts.CompressAlgo, level: opts.CompressLevel,
+			checksum: opts.EnableChecksum, columnar: opts.Columnar}
+	}
+
+	if opts.Columnar {
+		steps[transform.StageColumnar] = &columnarProc{}
+	}
+
+	// v1.5 шифрование — шаг цепочки; порядок относительно сжатия и целостности
+	// задан реестром, а не тем, что writePacket вызывается последним.
+	var encUUIDs []string
+	if opts.Encrypt && !opts.EncryptLegacy {
+		steps[transform.StageEncrypt] = &encryptProc{mercuryURL: opts.MercuryURL, uuids: &encUUIDs}
+	}
+
+	// Раскладка по плану. Несовместимый набор отвергается ЗДЕСЬ, до первого
+	// записанного байта, а не проявляется у получателя.
+	enabled := make([]string, 0, len(steps))
+	for name := range steps {
+		enabled = append(enabled, name)
+	}
+	plan, planErr := transform.Plan(enabled)
+	if planErr != nil {
+		return nil, fmt.Errorf("incompatible transform options: %w", planErr)
+	}
+	chain := processors.NewPacketChain()
+	for _, name := range plan {
+		chain.Add(steps[name])
+	}
+	return chain, nil
 }

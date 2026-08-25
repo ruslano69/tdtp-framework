@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -359,13 +360,18 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 			}
 			return "-Infinity"
 		}
-		// Конвертируем в float64 для получения числового значения
-		f64, err := v.Float64Value()
-		if err == nil && f64.Valid {
-			return strconv.FormatFloat(f64.Float64, 'f', -1, 64)
-		}
-		// Fallback - используем строковое представление Int и Exp
-		return v.Int.String()
+		// Печатаем ТОЧНО, из Int и Exp, а не через float64.
+		//
+		// Через float64 значение теряло цифры, и это не край: NUMERIC(30,6) со
+		// значением 999999999999999.999999 выходил как 1000000000000000 —
+		// остаток на миллионную меньше квадриллиона становился ровно
+		// квадриллионом. 123456789012.345678 терял последнюю цифру,
+		// 123456789012345678.901 искажался в хвосте. float64 держит около
+		// 15-17 значащих цифр, а NUMERIC(30,6) их тридцать.
+		//
+		// Тип выбирают именно затем, чтобы не округляло — деньги, остатки,
+		// проводки. Округление здесь не потеря точности, а другая сумма.
+		return formatExactNumeric(v)
 
 	default:
 		// Попытка конвертировать в строку через Stringer interface
@@ -705,4 +711,42 @@ func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType st
 	}
 
 	return tv.RawValue
+}
+
+// formatExactNumeric печатает pgtype.Numeric без потери цифр.
+//
+// pgtype.Numeric хранит значение как Int (big.Int) и Exp (десятичный порядок),
+// то есть точно. Достаточно поставить запятую в нужное место: при Exp >= 0
+// дописать нули справа, при Exp < 0 — отделить -Exp цифр с конца, добавив
+// ведущие нули, если цифр не хватает.
+//
+// Незначащие нули справа не срезаются: NUMERIC(18,2) со значением 1234.50
+// печатается как "1234.50", потому что масштаб — часть объявленного типа, а не
+// оформление. Обратный round-trip через ParseValue/FormatValue это сохраняет.
+func formatExactNumeric(v pgtype.Numeric) string {
+	if v.Int == nil {
+		return "0"
+	}
+	neg := v.Int.Sign() < 0
+	digits := new(big.Int).Abs(v.Int).String()
+
+	var body string
+	switch {
+	case v.Exp == 0:
+		body = digits
+	case v.Exp > 0:
+		body = digits + strings.Repeat("0", int(v.Exp))
+	default:
+		frac := int(-v.Exp)
+		if len(digits) <= frac {
+			body = "0." + strings.Repeat("0", frac-len(digits)) + digits
+		} else {
+			cut := len(digits) - frac
+			body = digits[:cut] + "." + digits[cut:]
+		}
+	}
+	if neg {
+		return "-" + body
+	}
+	return body
 }

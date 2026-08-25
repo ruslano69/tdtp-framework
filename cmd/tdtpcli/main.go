@@ -202,6 +202,7 @@ func routeCommand(
 				ReadOnlyFields:   *flags.ReadOnlyFields,
 				Fast:             *flags.Fast,
 				Columnar:         *flags.Columnar,
+				Stream:           *flags.Stream,
 				FallbackRowLimit: *flags.FallbackRowLimit,
 				Compact:          *flags.Compact,
 				FixedFields:      splitCommaSeparated(*flags.FixedFields),
