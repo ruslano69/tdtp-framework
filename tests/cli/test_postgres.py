@@ -344,6 +344,35 @@ def test_T2_filters():
            p.returncode == 0 and rows == 5,
            time.monotonic() - t, f"rows={rows}")
 
+    # Имена колонок с пробелами и спецсимволами. Для PostgreSQL это не
+    # формальность: $ там маркер параметра ($1), % — шаблон LIKE, а кавычка
+    # вокруг идентификатора ещё и делает его регистрозависимым. Ошибка в
+    # квотировании даёт либо синтаксическую ошибку, либо, что хуже, другой
+    # набор строк.
+    for n, where, want in [
+        (8,  "[Order ID] > 3",       2),   # строки 4, 5
+        (9,  "[Is Active?] = true",  3),   # 1, 2, 4
+        (10, "[Total Cost $] > 100", 3),   # 150, 200, 320
+        (11, "[Discount %] > 0",     3),   # 0.10, 0.20, 0.05
+    ]:
+        t = time.monotonic()
+        f = out(f"t2_{n}.xml")
+        p = run("--export", "[complex_fields]", "--where", where, "--output", f)
+        rows = count_rows_xml(f)
+        record(f"T2.{n} quoted WHERE {where} → {want} rows",
+               p.returncode == 0 and rows == want,
+               time.monotonic() - t, f"rc={p.returncode} rows={rows} err={p.stderr[-140:]}")
+
+    # Булев столбец принимает и 1, и true — писать WHERE через число не должно
+    # зависеть от того, как СУБД хранит булево.
+    t = time.monotonic()
+    f = out("t2_12.xml")
+    p = run("--export", "[complex_fields]", "--where", "[Is Active?] = 1", "--output", f)
+    rows = count_rows_xml(f)
+    record("T2.12 boolean column accepts = 1 as well as = true",
+           p.returncode == 0 and rows == 3, time.monotonic() - t,
+           f"rc={p.returncode} rows={rows}")
+
 
 # ─── T3 Compression ───────────────────────────────────────────────────────────
 
