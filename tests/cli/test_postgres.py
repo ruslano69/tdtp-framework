@@ -16,6 +16,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import time
 import shutil
@@ -754,8 +755,6 @@ def test_T7_compact():
     pg_query("DROP TABLE IF EXISTS rt_users_compact CASCADE")
 
 
-# ─── Runner ───────────────────────────────────────────────────────────────────
-
 # ─── T8 PostgreSQL date and numeric types ─────────────────────────────────────
 #
 # The types here are the ones that actually broke, all in 1.25.0: TIME could not
@@ -901,6 +900,456 @@ def test_T8_datetypes():
            f"rc={p.returncode} rows={cnt} err={p.stderr[-160:]}")
 
 
+# ─── T9 Columnar layout, streaming export, pre-export processors ──────────────
+#
+# The PostgreSQL half of the sqlite suite's T12. Its date checks are not
+# repeated here — T8 above covers PostgreSQL's own date types, which are a
+# different set from SQLite's — so what is left is the three subjects that are
+# about the writer and the reader rather than about the source:
+#
+#   * Data layout="columns". A hand-written columnar packet can only be made by
+#     transposing a row-major one, so the group builds those in Python and
+#     checks that the reader normalises the valid ones and refuses the
+#     malformed ones. The CLI-written variant goes through --columnar.
+#   * --stream, which on PostgreSQL is a SECOND reader: ReadAllRowsStream is
+#     hand-written against pgx rather than sharing base.StreamSQLRows the way
+#     MySQL does. Two readers of one table is exactly the shape that drifts, so
+#     the checks below compare them value by value instead of counting rows.
+#   * the pre-export processor chain. A field_masker used to run, produce
+#     correct output, and have that output silently discarded.
+
+
+def read_rows(path: str) -> list:
+    """Return the <R> rows of a TDTP file, split on '|'."""
+    if not os.path.exists(path):
+        return []
+    d = ET.parse(path).getroot().find("Data")
+    if d is None:
+        return []
+    return [(r.text or "").split("|") for r in d.findall("R")]
+
+
+def part_files(prefix: str) -> list:
+    """Part files of a multi-part export, in part order."""
+    files = list(OUTDIR.glob(f"{prefix}_part_*.xml"))
+    return sorted(files, key=lambda p: int(p.name.split("_part_")[1].split("_")[0]))
+
+
+def part_shape(prefix: str) -> list:
+    """(PartNumber, TotalParts, row count) per part."""
+    shape = []
+    for f in part_files(prefix):
+        root = ET.parse(str(f)).getroot()
+        hdr = root.find("Header")
+        tp = hdr.find("TotalParts")
+        pn = hdr.find("PartNumber")
+        shape.append((pn.text if pn is not None else None,
+                      tp.text if tp is not None else None,
+                      len(root.find("Data").findall("R"))))
+    return shape
+
+
+def transpose_packet(src: str, dst: str):
+    """Rewrite a row-major TDTP file as layout="columns"."""
+    with open(src, encoding="utf-8") as fh:
+        content = fh.read()
+
+    rows = re.findall(r"<R>([^<]*)</R>", content)
+    cols = list(zip(*[r.split("|") for r in rows]))
+    body = "".join("<R>" + "|".join(c) + "</R>" for c in cols)
+
+    # The pattern must not match <DataPacket ...>: after "<Data" it demands
+    # either ">" straight away or whitespace, which "Packet" is not.
+    new = re.sub(r"<Data(\s[^>]*)?>.*</Data>",
+                 lambda m: "<Data" + (m.group(1) or "") + ' layout="columns">' + body + "</Data>",
+                 content, flags=re.S)
+    with open(dst, "w", encoding="utf-8") as fh:
+        fh.write(new)
+    return len(rows), len(cols)
+
+
+def write_masker_pipeline(path: str, dest: str):
+    """Pipeline exporting users from PostgreSQL through a field_masker."""
+    dsn = (f"postgres://{PG_USER}:{PG_PASS}@{PG_HOST}:{PG_PORT}/{PG_DB}"
+           f"?sslmode=disable")
+    yaml = (
+        'name: "T9 masker"\n'
+        'sources:\n'
+        '  - name: users\n'
+        '    type: postgres\n'
+        '    dsn: "' + dsn + '"\n'
+        '    query: "SELECT username, email, age FROM users ORDER BY username LIMIT 10"\n'
+        '\n'
+        'workspace:\n'
+        '  type: sqlite\n'
+        '  mode: ":memory:"\n'
+        '\n'
+        'transform:\n'
+        '  result_table: "users"\n'
+        '  sql: "SELECT * FROM users"\n'
+        '\n'
+        'processors:\n'
+        '  pre_export:\n'
+        '    - type: field_masker\n'
+        '      params:\n'
+        '        fields:\n'
+        '          email: partial\n'
+        '          username: first2_last2\n'
+        '\n'
+        'output:\n'
+        '  type: tdtp\n'
+        '  tdtp:\n'
+        '    format: xml\n'
+        '    destination: ' + dest + '\n'
+    )
+    with open(path, "w") as f:
+        f.write(yaml)
+
+
+def test_T9_columnar_stream_processors():
+    print(f"\n{BOLD}=== T9 Columnar layout, streaming, processors ==={RESET}")
+
+    plain = out("t9_users.xml")
+    run("--export", "users", "--output", plain)
+    plain_csv = out("t9_users.csv")
+    run_no_cfg("--to-csv", plain, "--output", plain_csv)
+    want_csv = ""
+    if os.path.exists(plain_csv):
+        with open(plain_csv, encoding="utf-8") as fh:
+            want_csv = fh.read()
+
+    # ── Columnar packets built by hand ────────────────────────────────────────
+    t = time.monotonic()
+    colf = out("t9_users_columns.xml")
+    nrows, ncols = transpose_packet(plain, colf)
+    record("T9.1 transpose a 100-row export into 9 columns",
+           nrows == USERS_COUNT and ncols == 9, time.monotonic() - t,
+           f"rows={nrows} cols={ncols}")
+
+    t = time.monotonic()
+    normf = out("t9_users_normalized.xml")
+    p = run_no_cfg("--to-tdtp", colf, "--output", normf, "--v14")
+    same = read_rows(plain) == read_rows(normf)
+    record("T9.2 --to-tdtp expands columns back to rows, values identical",
+           p.returncode == 0 and same, time.monotonic() - t,
+           f"rc={p.returncode} identical={same} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    layout = ""
+    if os.path.exists(normf):
+        layout = ET.parse(normf).getroot().find("Data").get("layout") or ""
+    record("T9.3 the normalized output carries no layout attribute",
+           layout == "", time.monotonic() - t, f"layout={layout!r}")
+
+    # Columns of unequal height would slide values into neighbouring rows.
+    t = time.monotonic()
+    with open(colf, encoding="utf-8") as fh:
+        c = fh.read()
+    ragged = out("t9_ragged.xml")
+    with open(ragged, "w", encoding="utf-8") as fh:
+        fh.write(re.sub(r"<R>([^<]*)</R>",
+                        lambda m: "<R>" + "|".join(m.group(1).split("|")[:-1]) + "</R>",
+                        c, count=1))
+    p = run_no_cfg("--to-tdtp", ragged, "--output", out("t9_ragged_out.xml"), "--v14")
+    record("T9.4 ragged columns are refused, not silently misaligned",
+           p.returncode != 0, time.monotonic() - t, f"rc={p.returncode}")
+
+    t = time.monotonic()
+    body = re.search(r"<Data(?:\s[^>]*)?>(.*)</Data>", c, re.S).group(1)
+    cols = re.findall(r"<R>[^<]*</R>", body)
+    short = out("t9_shortcols.xml")
+    with open(short, "w", encoding="utf-8") as fh:
+        fh.write(c.replace(body, "".join(cols[:-1])))
+    p = run_no_cfg("--to-tdtp", short, "--output", out("t9_shortcols_out.xml"), "--v14")
+    record("T9.5 a column count that disagrees with Schema is refused",
+           p.returncode != 0, time.monotonic() - t, f"rc={p.returncode}")
+
+    t = time.monotonic()
+    csvf = out("t9_columns.csv")
+    p = run_no_cfg("--to-csv", colf, "--output", csvf)
+    lines = []
+    if os.path.exists(csvf):
+        with open(csvf, encoding="utf-8") as fh:
+            lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+    record("T9.6 --to-csv reads a columnar packet as 100 rows plus a header",
+           p.returncode == 0 and len(lines) == USERS_COUNT + 1, time.monotonic() - t,
+           f"rc={p.returncode} lines={len(lines)}")
+
+    # ── Compressed columnar, written by the CLI ───────────────────────────────
+    #
+    # A different route on both sides: the layout is applied between hashing and
+    # the codec, and the reader has to expand after decompressing. That gap let
+    # a real defect through — decompression yields one string per COLUMN, and a
+    # copy of the row-count check compared columns against rows, so --to-csv,
+    # --to-html and --to-tdtp all refused a packet the tool had just written.
+    t = time.monotonic()
+    colz = out("t9_users_colz.xml")
+    p = run("--export", "users", "--columnar", "--compress", "--output", colz)
+    attrs = ""
+    if os.path.exists(colz):
+        d = ET.parse(colz).getroot().find("Data")
+        attrs = "%s/%s" % (d.get("compression"), d.get("layout"))
+    record("T9.7 export compressed + columnar in one packet",
+           p.returncode == 0 and attrs == "zstd/columns", time.monotonic() - t,
+           f"rc={p.returncode} Data={attrs!r} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    col_csv = out("t9_colz.csv")
+    p = run_no_cfg("--to-csv", colz, "--output", col_csv)
+    got = ""
+    if os.path.exists(col_csv):
+        with open(col_csv, encoding="utf-8") as fh:
+            got = fh.read()
+    record("T9.8 --to-csv gives identical output for row and columnar packets",
+           p.returncode == 0 and bool(want_csv) and got == want_csv,
+           time.monotonic() - t,
+           f"rc={p.returncode} identical={got == want_csv}")
+
+    t = time.monotonic()
+    p = run_no_cfg("--to-html", colz, "--output", out("t9_colz.html"))
+    record("T9.9 --to-html reads a compressed columnar packet",
+           p.returncode == 0, time.monotonic() - t,
+           f"rc={p.returncode} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    normz = out("t9_colz_norm.xml")
+    p = run_no_cfg("--to-tdtp", colz, "--output", normz, "--v14")
+    back = read_rows(normz)
+    record("T9.10 --to-tdtp normalizes a compressed columnar packet to 100 rows",
+           p.returncode == 0 and len(back) == USERS_COUNT, time.monotonic() - t,
+           f"rc={p.returncode} rows={len(back)} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    pg_query("DROP TABLE IF EXISTS users_colz CASCADE;")
+    p = run("--import", colz, "--table", "users_colz", "--strategy", "replace")
+    rows_sql = pg_query("SELECT COUNT(*) FROM users_colz")
+    cnt = int(rows_sql[0]) if p.returncode == 0 and rows_sql else -1
+    record("T9.11 --import restores 100 rows from a compressed columnar packet",
+           p.returncode == 0 and cnt == USERS_COUNT, time.monotonic() - t,
+           f"rc={p.returncode} rows={cnt} err={p.stderr[-160:]}")
+    pg_query("DROP TABLE IF EXISTS users_colz CASCADE;")
+
+    t = time.monotonic()
+    p = run("--test", colz)
+    record("T9.12 --test counts rows, not columns, on a compressed columnar packet",
+           p.returncode == 0 and f"{USERS_COUNT} rows" in p.stdout, time.monotonic() - t,
+           f"rc={p.returncode} out={p.stdout[-160:]}")
+
+    # ── Columnar on the TDTQL query path ──────────────────────────────────────
+    #
+    # A filtered export goes through GenerateResponse, which builds Data eagerly
+    # instead of leaving rows in the writer's fast path. --columnar reached only
+    # the latter, so a query export silently produced a row-major packet.
+    #
+    # The compressed variant is the one that can corrupt rather than merely
+    # ignore: the layout is applied by the writer AND by the compression step,
+    # and a second transposition reads the columns as rows.
+    n_old = pg_query("SELECT COUNT(*) FROM users WHERE age > 60")
+    n_old = int(n_old[0]) if n_old else -1
+    for label, args, want_n in [("--limit", ["--limit", "5"], 5),
+                                ("--where", ["--where", "age > 60"], n_old)]:
+        for suffix, extra in [("", []), (" +compress", ["--compress"])]:
+            tag = label.strip("-") + ("z" if extra else "")
+            t = time.monotonic()
+            qf = out(f"t9_q_{tag}.xml")
+            p = run("--export", "users", "--columnar", *args, *extra, "--output", qf)
+            layout, nrec = "", -1
+            if os.path.exists(qf):
+                root = ET.parse(qf).getroot()
+                layout = root.find("Data").get("layout") or ""
+                rip = root.find("Header").find("RecordsInPart")
+                nrec = int(rip.text) if rip is not None and rip.text else -1
+            record(f"T9.13{label}{suffix}: --columnar applies on the query path",
+                   p.returncode == 0 and layout == "columns" and nrec == want_n,
+                   time.monotonic() - t,
+                   f"rc={p.returncode} layout={layout!r} RecordsInPart={nrec} want={want_n}")
+
+            # And the values must survive: a double transposition does not fail,
+            # it hands back other records' values.
+            t = time.monotonic()
+            reff = out(f"t9_qref_{tag}.xml")
+            run("--export", "users", *args, *extra, "--output", reff)
+            a_csv, b_csv = out("t9_qa.csv"), out("t9_qb.csv")
+            r1 = run_no_cfg("--to-csv", reff, "--output", a_csv)
+            r2 = run_no_cfg("--to-csv", qf, "--output", b_csv)
+            same = False
+            if r1.returncode == 0 and r2.returncode == 0:
+                with open(a_csv, encoding="utf-8") as fh:
+                    a = fh.read()
+                with open(b_csv, encoding="utf-8") as fh:
+                    b = fh.read()
+                same = a == b and a.count(chr(10)) >= 5
+            record(f"T9.14{label}{suffix}: filtered rows are identical either layout",
+                   same, time.monotonic() - t, f"rc={r2.returncode} identical={same}")
+
+    # ── The combination matrix ────────────────────────────────────────────────
+    #
+    # Every transformation was tested on its own, and each pair anyone happened
+    # to think of. The full stack was not, and it was broken: with --columnar
+    # --compact --integrity --compress the packet came back with an empty stored
+    # hash and was refused on read. Two causes, neither visible in isolation —
+    # laying out the columns replaced the whole <Data> element and dropped the
+    # xxh3 integrity had already stamped, and materializing rows cleared the
+    # columnar intent, so --columnar --integrity wrote a row-major packet.
+    #
+    # Each case asserts three things, because each failure mode shows up in a
+    # different one: the attribute is present (the flag was not ignored), the
+    # hash survives (a later step did not clobber an earlier one), and the data
+    # reads back identical (nothing was transposed twice).
+    matrix = [
+        ["--columnar"],
+        ["--columnar", "--integrity"],
+        ["--columnar", "--compress"],
+        ["--columnar", "--compact"],
+        ["--columnar", "--compact", "--compress"],
+        ["--columnar", "--integrity", "--compress"],
+        ["--columnar", "--compact", "--integrity", "--compress"],
+    ]
+    for i, args in enumerate(matrix, start=1):
+        t = time.monotonic()
+        label = " ".join(a.lstrip("-") for a in args)
+        f = out(f"t9_matrix_{i}.xml")
+        c = out(f"t9_matrix_{i}.csv")
+        p = run("--export", "users", *args, "--output", f)
+
+        layout, xxh3 = "", ""
+        if os.path.exists(f):
+            d = ET.parse(f).getroot().find("Data")
+            layout = d.get("layout") or ""
+            xxh3 = d.get("xxh3") or ""
+
+        r = run_no_cfg("--to-csv", f, "--output", c)
+        got_csv = ""
+        if r.returncode == 0 and os.path.exists(c):
+            with open(c, encoding="utf-8") as fh:
+                got_csv = fh.read()
+
+        want_hash = "--integrity" in args
+        ok = (p.returncode == 0
+              and layout == "columns"
+              and bool(xxh3) == want_hash
+              and r.returncode == 0
+              and got_csv == want_csv)
+        record(f"T9.15.{i} {label}", ok, time.monotonic() - t,
+               f"export={p.returncode} layout={layout!r} xxh3={'yes' if xxh3 else 'no'} "
+               f"read={r.returncode} data={'ok' if got_csv == want_csv else 'MISMATCH'}")
+
+    # ── Streaming export ──────────────────────────────────────────────────────
+    #
+    # ReadAllRowsStream is a separate implementation for this adapter: pgx has
+    # no *sql.Rows, so it cannot share base.StreamSQLRows the way MySQL does.
+    # What keeps the two readers agreeing is that both go through pgCellToTDTP —
+    # a property nothing would notice losing, hence these comparisons.
+    t = time.monotonic()
+    streamed = out("t9_stream_users.xml")
+    p = run("--export", "users", "--stream", "--output", streamed)
+    same = read_rows(plain) == read_rows(streamed)
+    record("T9.16 --stream returns the same rows as the buffered path",
+           p.returncode == 0 and same, time.monotonic() - t,
+           f"rc={p.returncode} identical={same} err={p.stderr[-160:]}")
+
+    # The values that broke in 1.25.0 are exactly the ones a second reader is
+    # likely to get wrong, so the streamed datetypes table is compared cell by
+    # cell — infinity markers, [NULL], the time subtype and exact NUMERIC.
+    t = time.monotonic()
+    dt_plain, dt_str = out("t9_dt.xml"), out("t9_dt_stream.xml")
+    run("--export", "datetypes", "--output", dt_plain)
+    p = run("--export", "datetypes", "--stream", "--output", dt_str)
+    rows_a, rows_b = read_rows(dt_plain), read_rows(dt_str)
+    sch_a, sch_b = get_schema_fields(dt_plain), get_schema_fields(dt_str)
+    diff = [(x, y) for x, y in zip(rows_a, rows_b) if x != y]
+    record("T9.17 --stream agrees on dates, infinity, NULL and NUMERIC",
+           p.returncode == 0 and rows_a == rows_b and len(rows_a) == 6 and sch_a == sch_b,
+           time.monotonic() - t,
+           f"rc={p.returncode} rows={len(rows_b)} schema_same={sch_a == sch_b} "
+           f"diff={diff[:1]}")
+
+    # A table large enough to split. Streaming does not know the total up front,
+    # so it writes TotalParts=0 and rewrites every part in a finalize pass; the
+    # boundaries themselves must still land where the buffered path puts them,
+    # or one table would produce two different sets of files.
+    t = time.monotonic()
+    pg_query("DROP TABLE IF EXISTS stream_big;")
+    pg_query("CREATE TABLE stream_big AS "
+             "SELECT g AS id, 'row-' || g AS name, "
+             "repeat('x', 120) || g AS payload, (g % 7 = 0) AS flag "
+             "FROM generate_series(1, 20000) g;")
+    for f in part_files("t9_big_buf") + part_files("t9_big_str"):
+        os.remove(str(f))
+    run("--export", "stream_big", "--output", out("t9_big_buf.xml"), timeout=180)
+    p = run("--export", "stream_big", "--stream", "--output", out("t9_big_str.xml"),
+            timeout=180)
+    buf_shape, str_shape = part_shape("t9_big_buf"), part_shape("t9_big_str")
+    total = sum(n for _, _, n in str_shape)
+    record("T9.18 --stream splits into the same parts as the buffered path",
+           p.returncode == 0 and len(str_shape) > 1 and total == 20000
+           and buf_shape == str_shape, time.monotonic() - t,
+           f"rc={p.returncode} buffered={buf_shape} streamed={str_shape}")
+
+    t = time.monotonic()
+    n_parts = len(str_shape)
+    finalized = bool(str_shape) and all(tp == str(n_parts) for _, tp, _ in str_shape)
+    record("T9.19 every streamed part declares TotalParts (the finalize pass ran)",
+           finalized, time.monotonic() - t, f"parts={[tp for _, tp, _ in str_shape]}")
+    pg_query("DROP TABLE IF EXISTS stream_big;")
+
+    t = time.monotonic()
+    sc, sc_csv = out("t9_stream_colz.xml"), out("t9_stream_colz.csv")
+    p = run("--export", "users", "--stream", "--columnar", "--compress", "--output", sc)
+    attrs = ""
+    if os.path.exists(sc):
+        d = ET.parse(sc).getroot().find("Data")
+        attrs = "%s/%s" % (d.get("compression"), d.get("layout"))
+    r = run_no_cfg("--to-csv", sc, "--output", sc_csv)
+    got = ""
+    if os.path.exists(sc_csv):
+        with open(sc_csv, encoding="utf-8") as fh:
+            got = fh.read()
+    record("T9.20 --stream --columnar --compress reads back identical to a plain export",
+           p.returncode == 0 and attrs == "zstd/columns" and r.returncode == 0
+           and got == want_csv, time.monotonic() - t,
+           f"rc={p.returncode} Data={attrs!r} read={r.returncode} "
+           f"identical={got == want_csv}")
+
+    # ── The pre-export processor chain ────────────────────────────────────────
+    #
+    # The masker used to write its result into a slice the packet no longer
+    # read, so the pipeline reported success and exported the unmasked values.
+    # The checks are order-independent on purpose: the workspace does not
+    # promise to hand rows back in the source's order.
+    t = time.monotonic()
+    maskf, pipef = out("t9_masked.xml"), out("t9_masker.yaml")
+    write_masker_pipeline(pipef, maskf)
+    p = run_no_cfg("--pipeline", pipef, timeout=60)
+    masked = read_rows(maskf)
+    record("T9.21 a pipeline with a field_masker produces an output file",
+           p.returncode == 0 and len(masked) == 10, time.monotonic() - t,
+           f"rc={p.returncode} rows={len(masked)} err={p.stderr[-200:]}")
+
+    t = time.monotonic()
+    real_mail = set(pg_query("SELECT email FROM users ORDER BY username LIMIT 10"))
+    blob = "|".join("|".join(r) for r in masked)
+    leaked = sorted(m for m in real_mail if m in blob)
+    record("T9.22 no real address reaches the output file",
+           bool(masked) and bool(real_mail) and not leaked, time.monotonic() - t,
+           f"leaked={leaked[:3]}")
+
+    t = time.monotonic()
+    both = bool(masked) and all("*" in r[0] and "*" in r[1] for r in masked)
+    record("T9.23 both masked fields are actually rewritten",
+           both, time.monotonic() - t,
+           f"first={masked[0][:2] if masked else None}")
+
+    t = time.monotonic()
+    real_age = sorted(pg_query("SELECT age FROM users ORDER BY username LIMIT 10"))
+    got_age = sorted(r[2] for r in masked)
+    record("T9.24 a column outside the mask list is left untouched",
+           bool(masked) and got_age == real_age, time.monotonic() - t,
+           f"got={got_age[:4]} want={real_age[:4]}")
+
+
+# ─── Runner ───────────────────────────────────────────────────────────────────
+
 GROUPS = [
     ("T1", test_T1_basic_export),
     ("T2", test_T2_filters),
@@ -910,6 +1359,7 @@ GROUPS = [
     ("T6", test_T6_edge_cases),
     ("T7", test_T7_compact),
     ("T8", test_T8_datetypes),
+    ("T9", test_T9_columnar_stream_processors),
 ]
 
 
