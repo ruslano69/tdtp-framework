@@ -4,6 +4,82 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### A NULL date in a pipeline result killed the whole query
+
+`Workspace.ExecuteSQL` bound `DATE`, `DATETIME` and `TIMESTAMP` columns to
+`*string`, with the comment "otherwise modernc parses into time.Time". Any NULL
+in such a column then failed the entire read:
+
+```
+sql: Scan error on column index 1, name "When": converting NULL to string is unsupported
+```
+
+**A pipeline whose transform produced an empty date did not lose a value — it
+stopped.** Both readers were affected: `ExecuteSQL` and `ExecuteSQLStream`
+carried the same loop.
+
+Reproduced end to end against live PostgreSQL, on the commonest ETL shape there
+is — a `LEFT JOIN` with unmatched rows:
+
+```
+Error: pipeline execution failed: failed to execute transformation:
+       failed to scan row: sql: Scan error on column index 2, name "d_date":
+       converting NULL to string is unsupported
+```
+
+The trigger is narrower than it looks, which is why this survived: the column
+must keep its **declared type** through to the result. A plain reference to a
+real table's column (`d.d_date`) does; an expression — `NULLIF(...)`,
+`COALESCE(...)` — does not, because a computed column reports an empty
+`DatabaseTypeName`, the date branch never claims it, and the NULL passes
+through unharmed. Two straightforward attempts to reproduce it that way came
+back green.
+
+The binding never did what it claimed. modernc decides whether to parse a cell
+from the column's **declared type**, not from the type of the scan target, so
+the parse ran anyway and `database/sql` then formatted the `time.Time` back into
+a string — an extra conversion on top of a hard failure. `CLAUDE.md` documents
+exactly this trap for the SQLite adapter, where it was fixed; the workspace kept
+its own copy.
+
+Everything now scans into `any`, and `formatCell` renders by column kind. Bytes
+for non-empty dates are unchanged — `2006-01-02` for DATE, `2006-01-02 15:04:05`
+for the rest — and a NULL becomes the empty string, which is the same
+representation `convertValue` reads back as NULL on load. `normalizeDateString`
+stays as the fallback for a driver that returns a string.
+
+Regression tests cover NULL in all three spellings, a row mixing filled and
+empty dates (a misalignment would put values in the wrong columns rather than
+fail), the streaming reader, and a guard that the formats did not move. Three of
+the four fail against the previous build with the error above.
+
+### Workspace load: multi-row INSERT, and why the batch is small
+
+`LoadData` ran one `Exec` per row. It now fills a multi-row `INSERT`, which on
+100 000 rows measures:
+
+| | before | after |
+|---|---|---|
+| 6 columns | 265 ms | **193 ms** (−27%) |
+| 20 columns | 606 ms | 593 ms (−2%) |
+| allocations, 6 columns | 1.70 M | **0.82 M** |
+
+End to end, interleaved, three pairs, every pair faster: a 100k-row pipeline
+goes **941 ms → 849 ms median**.
+
+**The batch size is measured, not chosen round, and bigger is worse.** At 150
+rows per statement — 900 placeholders — the same load took 406 ms, well behind
+the per-row loop it was meant to beat: SQLite spends more on that VDBE program
+than is saved on `Exec` calls. The optimum sits near **60 parameters per
+statement** and holds across shapes: 10 rows at 6 columns, 3 rows at 20 columns,
+both the same ~60 placeholders. `insertBatchRows` therefore divides by the column
+count rather than returning a row count, and degenerates to one row per
+statement — the old behaviour — on a table wider than the target.
+
+The gain is honest about where it applies: a quarter off a narrow table, nothing
+measurable on a wide one, because the per-call overhead being removed is a
+smaller share there.
+
 ### A flag that no command reads now says so
 
 Four bugs in one month shared a shape rather than a subject: a flag was
