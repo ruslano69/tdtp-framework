@@ -183,6 +183,39 @@ func (h *ExportHelper) ExportTableWithQuery(
 	// Нормализация имён полей к каноническим из схемы (критично для PostgreSQL quoted identifiers)
 	executor.NormalizeQueryFields(query, fullSchema)
 
+	// 3a. Tail-режим без ORDER BY: --limit -N обещает «последние N, как tail -n».
+	//
+	// SQL-генератор умеет это только когда порядок задан: при пустом ORDER BY он
+	// сваливался в обычный LIMIT N с комментарием «order is undefined; still
+	// honor the row count» — и возвращал ПЕРВЫЕ N. Количество строк совпадало с
+	// запрошенным, поэтому ошибка не была видна ни в выводе, ни в тестах,
+	// которые считали строки, а не смотрели какие.
+	//
+	// В памяти тот же ключ отрабатывает правильно (executor берёт хвост среза),
+	// так что один и тот же флаг означал разное в зависимости от того, читаем мы
+	// таблицу или файл.
+	//
+	// Ключ подставляется здесь, а не в генераторе, по двум причинам: только тут
+	// есть схема, и подстановка чинит сразу все адаптеры. У SQLite, Access и
+	// PostgreSQL с public-схемой SQLAdapter вообще nil, поэтому починка в
+	// AdaptSQL (как сделано у MSSQL) до них бы не дошла.
+	//
+	// Ключ обязан быть в проекции: наружный запрос сортирует уже подзапрос
+	// (AS _tail), у которого есть только выбранные колонки.
+	if query.Limit < 0 && query.OrderBy == nil {
+		key := ""
+		if len(query.Fields) > 0 {
+			key = query.Fields[0]
+		} else {
+			key = firstWritableFieldName(fullSchema)
+		}
+		if key != "" {
+			query.OrderBy = &packet.OrderBy{Field: key, Direction: "ASC"}
+			log.Printf("NOTICE: --limit %d (tail) has no --order-by; ordering by %q to define \"last\". "+
+				"Specify --order-by to choose the key yourself", query.Limit, key)
+		}
+	}
+
 	// 4. Пробуем транслировать TDTQL → SQL для оптимизации (pushdown filtering)
 	sqlGenerator := tdtql.NewSQLGenerator()
 	if sqlGenerator.CanTranslateToSQL(query) {

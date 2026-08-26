@@ -119,6 +119,7 @@ func routeCommand(
 				OutputFile:  outputCompact,
 				FixedFields: splitCommaSeparated(*flags.FixedFields),
 				Tail:        *flags.CompactTail,
+				Query:       query,
 			})
 		})
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // ConvertCompactOptions holds options for the --to-compact conversion command.
@@ -14,6 +15,7 @@ type ConvertCompactOptions struct {
 	OutputFile  string
 	FixedFields []string // explicit list; nil = auto-detect
 	Tail        bool     // write tail row with all fixed fields explicit (stream validation / carry handoff)
+	Query       *packet.Query
 }
 
 // ConvertToCompact reads a TDTP v1.x file and rewrites it in v1.3.1 compact format.
@@ -54,6 +56,34 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	}
 
 	fmt.Printf("  %d row(s), %d field(s)\n", len(pkt.Data.Rows), len(pkt.Schema.Fields))
+
+	// TDTQL (--where, --order-by, --limit, --offset) и проекция (--fields).
+	//
+	// Применяется ДО поиска fixed-полей, и порядок здесь содержательный: fixed
+	// определяется по данным («колонка, где все значения одинаковы»), поэтому
+	// анализировать надо те строки, которые действительно попадут в пакет.
+	// После отбора константных колонок может стать больше — и это правильно:
+	// пакет описывает то, что несёт.
+	//
+	// Раньше запрос сюда не доходил вовсе: --to-compact --where "ID > 7" писал
+	// все десять строк и сообщал «10 row(s)». Три соседние команды того же
+	// семейства — --to-tdtp, --to-csv, --to-html — запрос применяют.
+	if opts.Query != nil {
+		executor := tdtql.NewExecutor()
+		execResult, err := executor.Execute(opts.Query, pkt.GetRows(), pkt.Schema)
+		if err != nil {
+			return fmt.Errorf("failed to apply query filters: %w", err)
+		}
+		pkt.SetRows(execResult.FilteredRows)
+		fmt.Printf("  Filtered: %d row(s) matched\n", len(execResult.FilteredRows))
+
+		if len(opts.Query.Fields) > 0 {
+			if err := projectPacketFields(pkt, opts.Query.Fields); err != nil {
+				return err
+			}
+			fmt.Printf("  Projection: %d column(s) selected\n", len(pkt.Schema.Fields))
+		}
+	}
 
 	// Determine fixed fields
 	fixedNames := resolveFixedFields(pkt, opts.FixedFields)

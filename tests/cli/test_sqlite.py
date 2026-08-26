@@ -370,13 +370,22 @@ def test_T2_filters():
            time.monotonic() - t, f"rows={rows}")
 
     # T2.7 — negative LIMIT (tail mode): last 3 rows
+    #
+    # The IDs are the assertion, not the count. This check used to read
+    # `rows == 3` and passed for months while the export returned rows 1-3:
+    # the SQL generator could not express "last N" without an ORDER BY and
+    # quietly emitted LIMIT 3. Three rows were requested and three arrived.
+    # See T14 for the full matrix across both code paths.
     t = time.monotonic()
     p = run("--export", "users", "--limit", "-3",
             "--output", out("t2_7.xml"))
-    rows = count_rows_xml(out("t2_7.xml"))
-    record("T2.7 LIMIT -3 (last 3 rows, tail mode)",
-           p.returncode == 0 and rows == 3,
-           time.monotonic() - t, f"rows={rows}")
+    ids = []
+    if os.path.exists(out("t2_7.xml")):
+        d = ET.parse(out("t2_7.xml")).getroot().find("Data")
+        ids = [(r.text or "").split("|")[0] for r in d.findall("R")]
+    record("T2.7 LIMIT -3 returns rows 8,9,10 (tail), not 1,2,3",
+           p.returncode == 0 and ids == ["8", "9", "10"],
+           time.monotonic() - t, f"ids={ids}")
 
     # T2.8 — bracket-quoted field name (MSSQL/Access style): [Order ID] > 3 → rows 4,5
     t = time.monotonic()
@@ -1757,6 +1766,152 @@ def test_T13_packet_size():
            f"default={len(base)} ps8={len(eight)} stream={len(streamed)}")
 
 
+# --- T14 --limit and --offset ------------------------------------------------
+#
+# Every check here asserts WHICH rows came back, never how many. That is the
+# whole point of the group: `--export --limit -3` used to return the FIRST three
+# rows instead of the last three, and T2.7 passed the entire time because it
+# counted them. Three rows were asked for and three rows arrived.
+#
+# The flag has two independent implementations — tdtql.SQLGenerator for a
+# database source and tdtql.Executor for a packet already on disk — so the group
+# runs the same six combinations through both and requires them to agree. A
+# divergence between the two is invisible to any single-path test.
+
+LIMIT_CASES = [
+    (["--limit", "3"],                    ["1", "2", "3"],        "first three"),
+    (["--offset", "4"],                   list("56789") + ["10"], "skip four"),
+    (["--limit", "3", "--offset", "4"],   ["5", "6", "7"],        "window"),
+    (["--limit", "-3"],                   ["8", "9", "10"],       "tail"),
+    (["--limit", "-3", "--offset", "4"],  ["8", "9", "10"],       "tail after skip"),
+    (["--limit", "3", "--offset", "8"],   ["9", "10"],            "window past the end"),
+    (["--limit", "3", "--offset", "20"],  [],                     "offset past the end"),
+]
+
+
+def row_ids(path: str) -> list:
+    """First column of every row, in file order."""
+    if not os.path.exists(path):
+        return ["<missing>"]
+    d = ET.parse(path).getroot().find("Data")
+    if d is None:
+        return ["<no-data>"]
+    return [(r.text or "").split("|")[0] for r in d.findall("R")]
+
+
+def test_T14_limit_offset():
+    print(f"\n{BOLD}T14: --limit and --offset{RESET}")
+
+    src = out("t14_users.xml")
+    run("--export", "users", "--output", src)
+
+    # --- The matrix, on both paths ------------------------------------------
+    for i, (args, want, label) in enumerate(LIMIT_CASES, start=1):
+        t = time.monotonic()
+        ef = out(f"t14_e{i}.xml")
+        tf = out(f"t14_t{i}.xml")
+        p = run("--export", "users", *args, "--output", ef)
+        run_no_cfg("--to-tdtp", src, *args, "--output", tf, "--v14")
+        got_db, got_file = row_ids(ef), row_ids(tf)
+        record(f"T14.1.{i} {' '.join(args)} — {label}",
+               p.returncode == 0 and got_db == want and got_file == want,
+               time.monotonic() - t,
+               f"db={got_db} file={got_file} want={want}")
+
+    # --- Tail mode is the case that was silently wrong -----------------------
+    #
+    # Without --order-by the SQL generator could not express "last N" and fell
+    # back to LIMIT N — the first N — while the in-memory executor took the
+    # genuine tail. Same flag, same documented meaning, opposite answers
+    # depending on whether the source was a table or a file.
+    t = time.monotonic()
+    a, b = row_ids(out("t14_e4.xml")), row_ids(out("t14_t4.xml"))
+    record("T14.2 --limit -3 is the LAST three on both paths, not the first three",
+           a == b == ["8", "9", "10"], time.monotonic() - t,
+           f"db={a} file={b}")
+
+    # The key is a default, not a decision: an explicit --order-by must win, and
+    # the answer must actually differ, or the check would pass on a stale one.
+    t = time.monotonic()
+    bf = out("t14_bal.xml")
+    p = run("--export", "users", "--limit", "-3", "--order-by", "Balance",
+            "--output", bf)
+    got = row_ids(bf)
+    record("T14.3 --order-by overrides the default tail key",
+           p.returncode == 0 and got == ["10", "4", "6"], time.monotonic() - t,
+           f"got={got} want=['10','4','6'] (three largest balances)")
+
+    # --- Cross-command agreement --------------------------------------------
+    #
+    # --to-csv renders through a third code path. It must land on the same rows
+    # as the export it is supposed to represent.
+    t = time.monotonic()
+    csvf = out("t14_window.csv")
+    r = run_no_cfg("--to-csv", src, "--limit", "3", "--offset", "4", "--output", csvf)
+    csv_ids = []
+    if os.path.exists(csvf):
+        with open(csvf, encoding="utf-8") as fh:
+            lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+        csv_ids = [ln.split(",")[0].strip('"') for ln in lines[1:]]
+    record("T14.4 --to-csv --limit 3 --offset 4 selects the same window",
+           r.returncode == 0 and csv_ids == ["5", "6", "7"], time.monotonic() - t,
+           f"got={csv_ids}")
+
+    # --- --to-compact ignored the query entirely -----------------------------
+    #
+    # It read ten rows, wrote ten and reported "10 row(s)", while its three
+    # siblings in the same family — --to-tdtp, --to-csv, --to-html — all applied
+    # the query. The filter runs before fixed-field detection on purpose: after
+    # narrowing to one city, City becomes constant and therefore compactable,
+    # which is exactly the behaviour wanted — the packet describes what it
+    # carries.
+    t = time.monotonic()
+    cf = out("t14_compact.xml")
+    p = run_no_cfg("--to-compact", src, "--where", "City = 'Moscow'", "--output", cf)
+    got = row_ids(cf)
+    compact_attr = ""
+    if os.path.exists(cf):
+        compact_attr = ET.parse(cf).getroot().find("Data").get("compact") or ""
+    record("T14.5 --to-compact applies --where instead of writing every row",
+           p.returncode == 0 and got == ["1", "3", "6", "7", "10"],
+           time.monotonic() - t,
+           f"rc={p.returncode} ids={got} compact={compact_attr!r} err={p.stderr[-160:]}")
+
+    t = time.monotonic()
+    cf2 = out("t14_compact_window.xml")
+    p = run_no_cfg("--to-compact", src, "--where", "City = 'Moscow'",
+                   "--limit", "2", "--offset", "1", "--output", cf2)
+    got = row_ids(cf2)
+    record("T14.6 --to-compact honours --limit and --offset too",
+           p.returncode == 0 and got == ["3", "6"], time.monotonic() - t,
+           f"rc={p.returncode} ids={got} err={p.stderr[-160:]}")
+
+    # --- Commands that deliberately do NOT take a row window -----------------
+    #
+    # --import writes whatever the packet holds and --map transforms it; neither
+    # accepts a row window, and the flag being global means it is accepted on
+    # the command line and does nothing. Pinned so the behaviour is a decision
+    # on the record rather than an oversight someone later "fixes" by halves.
+    t = time.monotonic()
+    imp_db = out("t14_import.db")
+    if os.path.exists(imp_db):
+        os.remove(imp_db)
+    conn = sqlite3.connect(imp_db)
+    conn.execute("CREATE TABLE users (ID INTEGER PRIMARY KEY, Name TEXT, Email TEXT, "
+                 "Balance NUMERIC(18,2), IsActive INTEGER, City TEXT, "
+                 "CreatedAt DATETIME, LastLoginAt DATETIME)")
+    conn.commit()
+    conn.close()
+    imp_cfg = out("t14_import.yaml")
+    write_cfg(imp_cfg, db=imp_db)
+    p = run("--import", src, "--table", "users", "--strategy", "replace",
+            "--limit", "3", cfg=imp_cfg)
+    n = sqlite_query(imp_db, "SELECT COUNT(*) FROM users")[0][0]
+    record("T14.7 --import ignores --limit by design: all 10 rows land",
+           p.returncode == 0 and n == 10, time.monotonic() - t,
+           f"rc={p.returncode} rows={n} err={p.stderr[-160:]}")
+
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
 
 GROUPS = [
@@ -1773,6 +1928,7 @@ GROUPS = [
     ("T11", test_T11_msmq),
     ("T12", test_T12_dates_columnar_processors),
     ("T13", test_T13_packet_size),
+    ("T14", test_T14_limit_offset),
 ]
 
 

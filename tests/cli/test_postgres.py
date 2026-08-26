@@ -337,13 +337,24 @@ def test_T2_filters():
            time.monotonic() - t, f"rows={rows}")
 
     # T2.7 — tail mode: last 5 rows
+    #
+    # Which rows, not how many. The count alone passed for months while the
+    # export returned the FIRST five: without an ORDER BY the SQL generator
+    # could not express "last N" and emitted a plain LIMIT 5. The expected set
+    # comes from the database rather than a literal, so the check keeps working
+    # if the fixture is regenerated.
     t = time.monotonic()
     p = run("--export", "orders", "--limit", "-5",
             "--output", out("t2_tail.xml"))
-    rows = count_rows_xml(out("t2_tail.xml"))
-    record("T2.7 LIMIT -5 (last 5 rows, tail mode)",
-           p.returncode == 0 and rows == 5,
-           time.monotonic() - t, f"rows={rows}")
+    ids = []
+    if os.path.exists(out("t2_tail.xml")):
+        d = ET.parse(out("t2_tail.xml")).getroot().find("Data")
+        ids = [(r.text or "").split("|")[0] for r in d.findall("R")]
+    want = pg_query("SELECT order_id FROM orders ORDER BY order_id DESC LIMIT 5")
+    want = sorted(want, key=int)
+    record("T2.7 LIMIT -5 returns the five highest order_id (tail), not the first five",
+           p.returncode == 0 and ids == want and len(want) == 5,
+           time.monotonic() - t, f"ids={ids} want={want}")
 
     # Имена колонок с пробелами и спецсимволами. Для PostgreSQL это не
     # формальность: $ там маркер параметра ($1), % — шаблон LIKE, а кавычка

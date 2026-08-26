@@ -4,6 +4,71 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### `--limit -N` returned the first N rows from a database, not the last N
+
+The flag is documented as "negative = last N rows (like tail -n)", and on a
+packet already on disk that is what it did. On a database source it returned
+rows 1..N instead.
+
+```
+--export  --limit -3   ->  1, 2, 3      (wrong)
+--to-tdtp --limit -3   ->  8, 9, 10     (right)
+```
+
+**The row count was always correct, which is why nothing caught it.** Three rows
+were asked for and three rows arrived; the tests counted them and passed. The
+existing tail checks in the SQLite and PostgreSQL suites had been green for
+months over the wrong rows.
+
+The cause is that "last N" has no meaning in SQL without an ORDER BY, and the
+generator degraded rather than said so: `// No ORDER BY: order is undefined;
+still honor the row count`. Meanwhile the in-memory executor, which has the rows
+in hand, took the genuine tail — so one flag meant two things depending on
+whether the source was a table or a file.
+
+`ExportTableWithQuery` now supplies a sort key when tail mode has none: the
+first projected column with `--fields`, otherwise the first writable field of
+the schema, and it prints a NOTICE naming the key, because that choice decides
+which rows come back. An explicit `--order-by` still wins.
+
+The key is set there rather than in the SQL generator for two reasons: only the
+helper has the schema, and it is the one place all five adapters pass through.
+MSSQL already solved this inside its own `AdaptSQL` — but SQLite, Access and
+public-schema PostgreSQL have no `SQLAdapter` at all (it is `nil`), so a fix
+shaped like the MSSQL one would have reached almost nobody.
+
+`--limit` and `--offset` now agree row-for-row between a database source and a
+packet on disk across the whole matrix, including tail-after-offset and an
+offset past the end of the table.
+
+### `--to-compact` ignored `--where`, `--limit` and `--offset` entirely
+
+`--to-compact users.tdtp.xml --where "City = 'Moscow'"` read ten rows, wrote ten
+and reported `10 row(s)`. Its three siblings in the same family — `--to-tdtp`,
+`--to-csv`, `--to-html` — all apply the query; this one never received it.
+
+The filter runs before fixed-field detection, and the order is deliberate:
+"fixed" is decided by looking at the data, so it has to look at the rows that
+will actually be written. Narrowing to one city makes `City` constant and
+therefore compactable — the packet describes what it carries. On the fixture
+used by the tests the old build could not even produce output for that command,
+because across all ten rows no column was constant.
+
+### `--import` and `--map` take no row window, and now say so
+
+Both accept `--limit` on the command line — Go's flags are global — and neither
+has ever applied it. That is the intended behaviour: they write the packet
+through as it stands. It is now stated in `--help` alongside the list of
+commands that do honour the window, and pinned by a test so it reads as a
+decision rather than an oversight. `--sync-incremental` likewise sizes its
+batches with `--batch-size`.
+
+Regression tests: `tests/cli/test_sqlite.py` T14 — thirteen checks, every one
+asserting *which* rows came back rather than how many, run through both the
+database path and the file path. The tail cases and both `--to-compact` cases
+fail against the previous build. The old count-only tail checks in the SQLite
+and PostgreSQL suites were rewritten the same way.
+
 ### `--packet-size` was accepted everywhere and honoured almost nowhere
 
 `--export t --packet-size 8 --output archive.xml` wrote the default ~1.9 MB

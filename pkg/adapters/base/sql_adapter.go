@@ -250,9 +250,21 @@ func (a *MSSQLAdapter) QuoteIdentifier(identifier string) string {
 // PostProcessRows and cannot be reliably ordered in a subquery context.
 // Returns "" when schema has no writable fields.
 func firstWritableColumn(schema packet.Schema) string {
+	if name := firstWritableFieldName(schema); name != "" {
+		return fmt.Sprintf("[%s]", name)
+	}
+	return ""
+}
+
+// firstWritableFieldName возвращает имя первого не-read-only поля, без квотирования.
+//
+// Отдельно от firstWritableColumn, потому что у вызывающих разные диалекты:
+// MSSQL нужны скобки, а ExportTableWithQuery подставляет имя в packet.OrderBy,
+// где квотированием занимается генератор.
+func firstWritableFieldName(schema packet.Schema) string {
 	for _, f := range schema.Fields {
 		if !f.ReadOnly {
-			return fmt.Sprintf("[%s]", f.Name)
+			return f.Name
 		}
 	}
 	return ""
