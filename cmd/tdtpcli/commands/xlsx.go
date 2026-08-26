@@ -125,6 +125,16 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 		}
 		pkt.SetRows(execResult.FilteredRows)
 		fmt.Printf("✓ Filtered: %d row(s) matched\n", len(execResult.FilteredRows))
+		// Проекция (--fields), после фильтрации — --where может ссылаться на
+		// колонку вне проекции. --export-xlsx проекцию делал всегда (её
+		// выполняет БД), а --to-xlsx над готовым пакетом — нет: один формат,
+		// два поведения в зависимости от источника.
+		if len(opts.Query.Fields) > 0 {
+			if err := projectPacketFields(pkt, opts.Query.Fields); err != nil {
+				return err
+			}
+			fmt.Printf("  Projection: %d column(s) selected\n", len(pkt.Schema.Fields))
+		}
 	}
 
 	// Determine local output path (temp file when uploading to S3)

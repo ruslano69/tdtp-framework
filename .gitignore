@@ -63,6 +63,8 @@ deployments/docker-compose.yml
 docs/analysis/codebase_map.json
 docs/analysis/dependencies.json
 docs/analysis/.last_update
+.codemap/
+docs/analysis/complexity.json
 
 # Claude Code local files
 .claude/
@@ -121,3 +123,13 @@ examples/travel-agency/logs/
 
 # Credentials for the S3 dev tests — never commit
 tests/cli/s3_dev_credentials.yaml
+
+# Windows icon build -- draft, kept local until it is settled.
+# Working as of 1.24.0: ./scripts/build_windows.ps1 produces tdtpcli.exe with
+# the icon and version metadata. Drop these lines to start tracking it.
+*.syso
+cmd/tdtpcli/tdtpcli.ico
+cmd/tdtpcli/versioninfo.json
+scripts/build_windows.ps1
+scripts/python/png_to_ico.py
+docs/BUILD_WINDOWS_ICON.md

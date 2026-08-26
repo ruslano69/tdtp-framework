@@ -1,6 +1,7 @@
 package tdtql
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -530,5 +531,55 @@ func TestSQLGenerator_BracketTableName(t *testing.T) {
 				t.Errorf("GenerateSQL(%q)\n  got:  %s\n  want: %s", tc.tableName, result, tc.want)
 			}
 		})
+	}
+}
+
+// OFFSET без LIMIT — валидный TDTQL, но не валидный SQL в SQLite и MySQL:
+// "SELECT ... OFFSET 5" у обоих синтаксическая ошибка (PostgreSQL принимает).
+// Генератор отдавал именно эту форму, pushdown падал, и export_helper молча
+// уходил на полное чтение таблицы в память — а на таблице больше
+// --fallback-row-limit экспорт обрывался с советом «fix the query», хотя
+// чинить в запросе нечего.
+func TestSQLGenerator_OffsetWithoutLimit(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{Offset: 5}
+	result, err := generator.GenerateSQL("Users", query)
+	if err != nil {
+		t.Fatalf("SQL generation failed: %v", err)
+	}
+
+	if !strings.Contains(result, "OFFSET 5") {
+		t.Errorf("OFFSET lost: %s", result)
+	}
+	// LIMIT обязан стоять перед OFFSET, иначе SQLite и MySQL не разберут.
+	limitIdx := strings.Index(result, "LIMIT")
+	offsetIdx := strings.Index(result, "OFFSET")
+	if limitIdx < 0 {
+		t.Fatalf("no LIMIT emitted before OFFSET; SQLite and MySQL reject that: %s", result)
+	}
+	if limitIdx > offsetIdx {
+		t.Errorf("LIMIT must precede OFFSET: %s", result)
+	}
+	if !strings.Contains(result, fmt.Sprintf("LIMIT %d", OffsetOnlyLimit)) {
+		t.Errorf("expected the OffsetOnlyLimit sentinel so adapters can recognise it: %s", result)
+	}
+}
+
+// Явный LIMIT ничего не меняет: подстановка только для случая «только OFFSET».
+func TestSQLGenerator_OffsetWithExplicitLimitUnchanged(t *testing.T) {
+	generator := NewSQLGenerator()
+
+	query := &packet.Query{Limit: 10, Offset: 5}
+	result, err := generator.GenerateSQL("Users", query)
+	if err != nil {
+		t.Fatalf("SQL generation failed: %v", err)
+	}
+
+	if !strings.HasSuffix(result, "LIMIT 10 OFFSET 5") {
+		t.Errorf("explicit LIMIT must survive untouched: %s", result)
+	}
+	if strings.Contains(result, fmt.Sprintf("%d", OffsetOnlyLimit)) {
+		t.Errorf("sentinel must not appear when LIMIT is explicit: %s", result)
 	}
 }

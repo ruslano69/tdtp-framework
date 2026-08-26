@@ -476,6 +476,59 @@ broker's limit rather than aligning the two formulas with each other.
 
 ---
 
+## Adding a CLI flag (IMPORTANT)
+
+**Declare it in `cmd/tdtpcli/flagscope.go`, on every command that reads it.**
+`TestFlagScope_EveryFlagIsClaimed` fails until you do, and that failure is the
+whole point of the file.
+
+### Why it exists
+
+Go's flags are global: any flag can be passed to any command, and a command
+that does not read one does nothing about it — no error, no warning, no trace
+in the output. Four separate bugs in one month, none visible in the result:
+
+- `--columnar` on the query path — the packet was written row-major, flag accepted;
+- `--packet-size` on a file export — parts came out at the default size;
+- `--limit` on `--to-compact` — every row written, `10 row(s)` reported;
+- `--fields` on `--to-html` and `--to-xlsx` — all columns rendered.
+
+What they share is not a subject but a shape: the command exited zero having
+done something other than what was asked. Each was found by hand, one at a
+time. `warnUnusedFlags` exists so the fifth is found by the tool.
+
+### The rule
+
+1. **A new flag goes into `commandFlags` for each command that reads it**, or
+   into `globalFlags` if it is read outside the dispatch chain (`--config`,
+   `--quiet`, `--license`).
+2. **A new command in `routeCommand` gets a `warnUnusedFlags("name")` call**
+   right after its `metadata` assignment — before the work, not after: that
+   `--limit` did nothing is worth knowing before 24 M rows are exported, not
+   after.
+3. **The command's own flag belongs in its own list.** `--export` without
+   `"export"` would make running the command complain about itself.
+
+### What the tests do and do not guarantee
+
+They check that every declared flag is claimed by somebody, that no name in the
+table is a phantom (typo, renamed flag), that each command claims its own flag,
+and that every dispatched command appears in the table.
+
+**They do not check that the command actually reads the flag** — Go cannot see
+that. Writing a flag into a command's list is still a human claim; the tests
+only make sure the claim was made and spelled right. A flag listed for a
+command that ignores it is exactly the original bug with a table entry on top.
+
+### Warning, not refusal
+
+An extra flag is usually harmless — habit, a copy-pasted invocation, a script
+with one argument set for several commands. Refusing would break working calls
+for the sake of typos. The goal was to remove the silence, not to forbid the
+combination.
+
+---
+
 ## Adding a format or a transformation (IMPORTANT)
 
 **Declare it in `pkg/transform`. Do not order it by hand at the call site.**

@@ -94,6 +94,11 @@ func NewMSSQLAdapter(schemaName string) *MSSQLAdapter {
 // 4. Квалифицирует имена таблиц: [schema].[table]  (поддержка "schema.table" формата)
 // 5. Квалифицирует имена полей: [field]
 func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Schema, query *packet.Query) string {
+	// OFFSET без LIMIT: генератор подставляет LIMIT maxint, чтобы SQL был
+	// валиден в SQLite и MySQL. MSSQL выражает это через OFFSET ... ROWS, и
+	// оставленный LIMIT сломал бы запрос — убираем до основного разбора.
+	standardSQL = strings.Replace(standardSQL,
+		fmt.Sprintf(" LIMIT %d", tdtql.OffsetOnlyLimit), "", 1)
 	// Поддержка формата "schema.table" в tableName (например, "dbo.Users")
 	tableName = tdtql.StripBrackets(tableName)
 	schemaName := a.schemaName
@@ -150,34 +155,27 @@ func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Sch
 			sql = strings.Replace(sql, "SELECT ", fmt.Sprintf("SELECT TOP %d ", query.Limit), 1)
 		}
 	case query != nil && (query.Limit > 0 || query.Offset > 0):
-		// OFFSET/FETCH: SQL Server 2012+ only (compat level 110+)
-		limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
-		offsetPattern := fmt.Sprintf(" OFFSET %d", query.Offset)
-		sql = strings.Replace(sql, limitPattern, "", 1)
-		sql = strings.Replace(sql, offsetPattern, "", 1)
-
-		// ORDER BY is mandatory for OFFSET/FETCH.
-		// Use the first *projected* column (from the SQL itself) so that the ORDER BY
-		// key is always in the SELECT list — schema.Fields[0] may not be projected
-		// when --fields restricts the column list.
-		// For "SELECT *" (no --fields), fall back to the first non-read-only schema field
-		// so we never ORDER BY timestamp/rowversion (which is cut by PostProcessRows).
-		if !strings.Contains(sql, "ORDER BY") {
-			if col := firstProjectedColumn(sql); col != "" {
-				sql += " ORDER BY " + col
-			} else if col := firstWritableColumn(schema); col != "" {
-				sql += " ORDER BY " + col
-			}
-		}
-
-		if query.Offset > 0 {
-			sql += fmt.Sprintf(" OFFSET %d ROWS", query.Offset)
-		} else {
-			sql += " OFFSET 0 ROWS"
-		}
-		if query.Limit > 0 {
-			sql += fmt.Sprintf(" FETCH NEXT %d ROWS ONLY", query.Limit)
-		}
+		// Пагинация с OFFSET.
+		//
+		// Раньше здесь строился OFFSET ... ROWS / FETCH NEXT ... ROWS ONLY —
+		// синтаксис SQL Server 2012 (уровень совместимости 110+). На сервере с
+		// уровнем 80 он не разбирается вовсе:
+		//
+		//   --offset 3             -> Incorrect syntax near 'OFFSET'
+		//   --limit 3 --offset 3   -> Invalid usage of the option NEXT in the FETCH statement
+		//
+		// Отказ не был виден: pushdown падал, и ExportTableWithQuery молча
+		// уходил на чтение всей таблицы в память. На таблице больше
+		// --fallback-row-limit экспорт обрывался советом «fix the query», хотя
+		// чинить в запросе нечего.
+		//
+		// ROW_NUMBER() работает и при уровне 80 — проверено на живом
+		// SQL Server 2008 R2 (10.50, compat 80), где OFFSET/FETCH отвергается, а
+		// оконная функция возвращает нужные строки. Классическая замена
+		// «TOP N ... WHERE key NOT IN (SELECT TOP m key ...)» отброшена: на
+		// колонке с повторами она отбрасывает и совпадающие строки, то есть
+		// молча врёт.
+		sql = pageWithRowNumber(sql, schema, query)
 	case query != nil && query.Limit < 0:
 		// Tail mode: --limit -N means "last N rows" (like tail -n).
 		// sql_generator emits LIMIT N (where N = abs(query.Limit)).
@@ -244,15 +242,148 @@ func (a *MSSQLAdapter) QuoteIdentifier(identifier string) string {
 	return fmt.Sprintf("[%s]", identifier)
 }
 
+// pageWithRowNumber переписывает LIMIT/OFFSET в подзапрос с ROW_NUMBER().
+//
+// Результат:
+//
+//	SELECT <колонки> FROM (
+//	    SELECT <колонки>, ROW_NUMBER() OVER (ORDER BY <ключ>) AS _tdtp_rn
+//	    FROM <таблица> WHERE ...
+//	) AS _tdtp_page
+//	WHERE _tdtp_rn > <offset> AND _tdtp_rn <= <offset+limit>
+//	ORDER BY _tdtp_rn
+//
+// Внешний SELECT перечисляет колонки ЯВНО, а не звёздочкой, и это не стиль:
+// со звёздочкой наружу вышел бы и служебный _tdtp_rn, строка стала бы на одну
+// колонку шире схемы, и пакет разъехался бы молча — схема сопоставляется с
+// колонками по позиции.
+//
+// Если список колонок построить не из чего (нет ни явной проекции в SQL, ни
+// схемы), запрос возвращается КАК ЕСТЬ. Это оставляет прежнее поведение —
+// падение pushdown и откат в память, — но лучше медленно и верно, чем быстро
+// и не теми колонками.
+func pageWithRowNumber(sql string, schema packet.Schema, query *packet.Query) string {
+	limitPattern := fmt.Sprintf(" LIMIT %d", query.Limit)
+	offsetPattern := fmt.Sprintf(" OFFSET %d", query.Offset)
+	inner := strings.Replace(sql, limitPattern, "", 1)
+	inner = strings.Replace(inner, offsetPattern, "", 1)
+	inner = strings.TrimRight(inner, " ")
+
+	cols := projectedColumns(inner)
+	if len(cols) == 0 {
+		cols = schemaColumns(schema)
+	}
+	if len(cols) == 0 {
+		return sql
+	}
+
+	// Ключ сортировки: тот, что просил пользователь, иначе первая колонка
+	// проекции. ROW_NUMBER() без ORDER BY не бывает.
+	orderKey := ""
+	if idx := strings.Index(inner, " ORDER BY "); idx >= 0 {
+		orderKey = strings.TrimSpace(inner[idx+len(" ORDER BY "):])
+		inner = strings.TrimRight(inner[:idx], " ")
+	}
+	if orderKey == "" {
+		orderKey = cols[0]
+	}
+
+	projection := strings.Join(cols, ", ")
+	rn := fmt.Sprintf("ROW_NUMBER() OVER (ORDER BY %s) AS _tdtp_rn", orderKey)
+
+	// ROW_NUMBER дописывается в конец списка выборки внутреннего запроса.
+	fromIdx := strings.Index(strings.ToUpper(inner), " FROM ")
+	if fromIdx < 0 {
+		return sql
+	}
+	inner = inner[:fromIdx] + ", " + rn + inner[fromIdx:]
+
+	where := fmt.Sprintf("_tdtp_rn > %d", query.Offset)
+	if query.Limit > 0 {
+		where += fmt.Sprintf(" AND _tdtp_rn <= %d", query.Offset+query.Limit)
+	}
+
+	return fmt.Sprintf("SELECT %s FROM (%s) AS _tdtp_page WHERE %s ORDER BY _tdtp_rn",
+		projection, inner, where)
+}
+
+// projectedColumns возвращает список колонок из SELECT-списка, или nil для
+// "SELECT *" и для всего, что не разбирается уверенно.
+//
+// Разбор нарочно робкий: скобки в именах ([Calendar Date]) допускаются, а вот
+// выражение со скобкой-функцией — нет, потому что запятая внутри вызова
+// разрезала бы список не там. Неуверенность здесь возвращает nil, и вызывающий
+// берёт колонки из схемы.
+func projectedColumns(sql string) []string {
+	upper := strings.ToUpper(sql)
+	selIdx := strings.Index(upper, "SELECT ")
+	fromIdx := strings.Index(upper, " FROM ")
+	if selIdx < 0 || fromIdx <= selIdx+7 {
+		return nil
+	}
+	projection := strings.TrimSpace(sql[selIdx+7 : fromIdx])
+	if strings.HasPrefix(strings.ToUpper(projection), "DISTINCT ") {
+		projection = strings.TrimSpace(projection[len("DISTINCT "):])
+	}
+	if strings.HasPrefix(strings.ToUpper(projection), "TOP ") {
+		parts := strings.SplitN(projection, " ", 3)
+		if len(parts) < 3 {
+			return nil
+		}
+		projection = strings.TrimSpace(parts[2])
+	}
+	if projection == "" || projection == "*" || strings.Contains(projection, "(") {
+		return nil
+	}
+
+	cols := strings.Split(projection, ",")
+	out := make([]string, 0, len(cols))
+	for _, c := range cols {
+		c = strings.TrimSpace(c)
+		if c == "" || c == "*" {
+			return nil
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// schemaColumns — имена полей схемы в скобках, в порядке схемы.
+//
+// Порядок важен: адаптеры сопоставляют схему с колонками по позиции, так что
+// перечисление полей схемы обязано совпасть с тем, что дал бы "SELECT *".
+func schemaColumns(schema packet.Schema) []string {
+	if len(schema.Fields) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(schema.Fields))
+	for _, f := range schema.Fields {
+		out = append(out, fmt.Sprintf("[%s]", f.Name))
+	}
+	return out
+}
+
 // firstWritableColumn returns the first non-read-only field from schema, bracket-quoted.
 // Used as ORDER BY fallback for "SELECT *" queries (no --fields projection) so that
 // we never ORDER BY timestamp/rowversion or computed columns — those are cut by
 // PostProcessRows and cannot be reliably ordered in a subquery context.
 // Returns "" when schema has no writable fields.
 func firstWritableColumn(schema packet.Schema) string {
+	if name := firstWritableFieldName(schema); name != "" {
+		return fmt.Sprintf("[%s]", name)
+	}
+	return ""
+}
+
+// firstWritableFieldName возвращает имя первого не-read-only поля, без квотирования.
+//
+// Отдельно от firstWritableColumn, потому что у вызывающих разные диалекты:
+// MSSQL нужны скобки, а ExportTableWithQuery подставляет имя в packet.OrderBy,
+// где квотированием занимается генератор.
+func firstWritableFieldName(schema packet.Schema) string {
 	for _, f := range schema.Fields {
 		if !f.ReadOnly {
-			return fmt.Sprintf("[%s]", f.Name)
+			return f.Name
 		}
 	}
 	return ""

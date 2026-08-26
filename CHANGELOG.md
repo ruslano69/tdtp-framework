@@ -4,6 +4,369 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### `--offset` did not work on SQL Server below compatibility level 110
+
+The MSSQL adapter translated `--limit`/`--offset` into `OFFSET n ROWS FETCH NEXT
+m ROWS ONLY`, which is SQL Server 2012 syntax. On an older compatibility level
+the server does not parse it at all:
+
+```
+--offset 3            ->  Incorrect syntax near 'OFFSET'
+--limit 3 --offset 3  ->  Invalid usage of the option NEXT in the FETCH statement
+```
+
+Neither surfaced as a refusal. The pushdown failed, `ExportTableWithQuery` fell
+back to reading the whole table into memory, and the right rows came back — from
+a full scan. Past `--fallback-row-limit` the export stopped instead, advising the
+user to "fix the query" when there was nothing wrong with it.
+
+Paging now goes through `ROW_NUMBER()`, which the same server accepts:
+
+```sql
+SELECT [ID], [Name] FROM (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY [ID]) AS _tdtp_rn FROM [dbo].[Users]
+) AS _tdtp_page
+WHERE _tdtp_rn > 5 AND _tdtp_rn <= 15 ORDER BY _tdtp_rn
+```
+
+**The outer `SELECT` names its columns rather than using `*`, and that is
+load-bearing.** With a star the helper column would come back too, every row
+would be one column wider than the Schema declares, and since schema and columns
+are matched *by position* the packet would be silently wrong rather than
+refused. The column list comes from the SQL's own projection when `--fields`
+gave one, otherwise from the schema; if neither yields a list, the statement is
+returned untouched — the old behaviour, which is slow but correct.
+
+The 2000-era alternative, `TOP n ... WHERE key NOT IN (SELECT TOP m key ...)`,
+was tried and rejected: on a column with repeats it drops the duplicates as
+well, so it answers a different question without saying so.
+
+Verified against a live SQL Server 2008 R2 (10.50, compatibility level 80) on a
+backup database, with `--fallback-row-limit 1` so that any return to the
+in-memory path would have been fatal rather than invisible: `--limit`,
+`--offset`, and the two together all push down, `--offset 11019` on an
+11 022-row table returns exactly 3, and consecutive pages are disjoint.
+
+### `--offset` without `--order-by` now says the order is undefined
+
+With an explicit `--order-by`, page 1 and page 2 compose exactly — checked on
+the same server. Without one they need not: "rows 101 to 200" has no meaning
+until something fixes the order, and the two pages may overlap or skip rows.
+The export prints a NOTICE, in the same spirit as the one for `--limit -N`, and
+`--help` says to pair the two.
+
+### A NULL date in a pipeline result killed the whole query
+
+`Workspace.ExecuteSQL` bound `DATE`, `DATETIME` and `TIMESTAMP` columns to
+`*string`, with the comment "otherwise modernc parses into time.Time". Any NULL
+in such a column then failed the entire read:
+
+```
+sql: Scan error on column index 1, name "When": converting NULL to string is unsupported
+```
+
+**A pipeline whose transform produced an empty date did not lose a value — it
+stopped.** Both readers were affected: `ExecuteSQL` and `ExecuteSQLStream`
+carried the same loop.
+
+Reproduced end to end against live PostgreSQL, on the commonest ETL shape there
+is — a `LEFT JOIN` with unmatched rows:
+
+```
+Error: pipeline execution failed: failed to execute transformation:
+       failed to scan row: sql: Scan error on column index 2, name "d_date":
+       converting NULL to string is unsupported
+```
+
+The trigger is narrower than it looks, which is why this survived: the column
+must keep its **declared type** through to the result. A plain reference to a
+real table's column (`d.d_date`) does; an expression — `NULLIF(...)`,
+`COALESCE(...)` — does not, because a computed column reports an empty
+`DatabaseTypeName`, the date branch never claims it, and the NULL passes
+through unharmed. Two straightforward attempts to reproduce it that way came
+back green.
+
+The binding never did what it claimed. modernc decides whether to parse a cell
+from the column's **declared type**, not from the type of the scan target, so
+the parse ran anyway and `database/sql` then formatted the `time.Time` back into
+a string — an extra conversion on top of a hard failure. `CLAUDE.md` documents
+exactly this trap for the SQLite adapter, where it was fixed; the workspace kept
+its own copy.
+
+Everything now scans into `any`, and `formatCell` renders by column kind. Bytes
+for non-empty dates are unchanged — `2006-01-02` for DATE, `2006-01-02 15:04:05`
+for the rest — and a NULL becomes the empty string, which is the same
+representation `convertValue` reads back as NULL on load. `normalizeDateString`
+stays as the fallback for a driver that returns a string.
+
+Regression tests cover NULL in all three spellings, a row mixing filled and
+empty dates (a misalignment would put values in the wrong columns rather than
+fail), the streaming reader, and a guard that the formats did not move. Three of
+the four fail against the previous build with the error above.
+
+### Workspace load: multi-row INSERT, and why the batch is small
+
+`LoadData` ran one `Exec` per row. It now fills a multi-row `INSERT`, which on
+100 000 rows measures:
+
+| | before | after |
+|---|---|---|
+| 6 columns | 265 ms | **193 ms** (−27%) |
+| 20 columns | 606 ms | 593 ms (−2%) |
+| allocations, 6 columns | 1.70 M | **0.82 M** |
+
+End to end, interleaved, three pairs, every pair faster: a 100k-row pipeline
+goes **941 ms → 849 ms median**.
+
+**The batch size is measured, not chosen round, and bigger is worse.** At 150
+rows per statement — 900 placeholders — the same load took 406 ms, well behind
+the per-row loop it was meant to beat: SQLite spends more on that VDBE program
+than is saved on `Exec` calls. The optimum sits near **60 parameters per
+statement** and holds across shapes: 10 rows at 6 columns, 3 rows at 20 columns,
+both the same ~60 placeholders. `insertBatchRows` therefore divides by the column
+count rather than returning a row count, and degenerates to one row per
+statement — the old behaviour — on a table wider than the target.
+
+The gain is honest about where it applies: a quarter off a narrow table, nothing
+measurable on a wide one, because the per-call overhead being removed is a
+smaller share there.
+
+### A flag that no command reads now says so
+
+Four bugs in one month shared a shape rather than a subject: a flag was
+accepted, nothing read it, the command exited zero having done something other
+than what was asked.
+
+```
+--columnar   on the query path      packet written row-major
+--packet-size on a file export      parts at the default size
+--limit      on --to-compact        every row written, "10 row(s)" reported
+--fields     on --to-html/--to-xlsx all columns rendered
+```
+
+Each was found by hand. Nothing in the tool could find them, because Go's flags
+are global: a command that ignores one is indistinguishable from a command that
+has no use for it.
+
+`warnUnusedFlags` closes that. `flag.Visit` lists exactly the flags the user
+**typed** — as opposed to `VisitAll`, which lists the ones declared — and what
+the command has not declared as readable comes back as a notice:
+
+```
+tdtpcli --import users.tdtp.xml --table users --limit 3
+NOTICE: --import does not read --limit — the flag was accepted, nothing acted on it
+```
+
+**A notice, not a refusal.** An extra flag is usually harmless: habit, a
+copy-pasted invocation, a script sharing one argument set across commands.
+Refusing would break working calls for the sake of typos, and the problem was
+the silence, not the combination.
+
+The declaration lives in `cmd/tdtpcli/flagscope.go` — command → the flags it
+reads — which is precisely the kind of hand-kept list that falls behind the
+code, so four tests hold it in place: every declared flag must be claimed by
+someone, no name in the table may be a phantom (a typo would leave the real
+flag being warned about), each command must claim its own flag, and every
+branch of `routeCommand` must appear. The first test paid for itself
+immediately by finding `--expect-var`, declared through `flag.Func` and missed
+by a static scan of `main.go`; `--import` and `--import-broker` read it.
+
+**What the tests cannot do is verify that a command actually reads a flag** —
+Go does not expose that. Listing a flag is a human claim; the tests only ensure
+the claim exists and is spelled correctly. A flag listed for a command that
+ignores it is the original bug with a table entry on top, and that is written
+down in `CLAUDE.md` next to the rule for adding new flags.
+
+Validated against every CLI suite — 310 invocations across SQLite, PostgreSQL,
+MySQL and the CSV set — with zero notices, so the table matches what the
+commands really consume.
+
+### `--offset` without `--limit` fell back to reading the whole table
+
+`SELECT ... OFFSET 5` is a syntax error in SQLite and in MySQL — both require a
+LIMIT first; PostgreSQL is the one that accepts it. The generator emitted
+exactly that form, the pushdown failed, and `ExportTableWithQuery` quietly
+switched to loading the entire table into memory and filtering there.
+
+The rows came back correct, so on a small table nothing looked wrong. On a large
+one it was not merely slow:
+
+```
+tdtpcli --export users --offset 5
+WARNING: SQL pushdown failed for table "users": SQL logic error: near "5": syntax error
+Error: fallback aborted: table "users" has 100000 rows (limit 1000).
+       SQL pushdown failed — fix the query or raise --fallback-row-limit
+```
+
+The advice is impossible to follow: there is nothing wrong with the query. Past
+`--fallback-row-limit` (default 1 000 000 rows) the export simply stopped.
+
+The generator now emits `LIMIT <maxint64> OFFSET n` when only an offset was
+asked for — the standard idiom for "everything from row N on", and the one form
+SQLite, MySQL and PostgreSQL all accept. A negative LIMIT, SQLite's own
+spelling, is rejected by the other two.
+
+The sentinel is an exported constant, `tdtql.OffsetOnlyLimit`, because the MSSQL
+adapter has to recognise and remove it: SQL Server expresses the same thing as
+`OFFSET n ROWS`, and a stray `LIMIT` would break the statement. That path has no
+live server here, so it is covered by an adapter unit test rather than a run.
+
+Measured after the fix: SQLite, MySQL and PostgreSQL all push the offset down,
+and `--export users --offset 5 --fallback-row-limit 1000` on a 100 000-row table
+now exports 99 995 rows instead of aborting.
+
+### `--to-html` and `--to-xlsx` ignored `--fields`
+
+Projection worked on `--export`, `--export-xlsx`, `--to-tdtp` and `--to-csv`,
+and was dropped on the two rendering commands. The xlsx pair shows it plainest:
+
+```
+--export-xlsx users --fields ID,City   ->  2 columns
+--to-xlsx     users.tdtp.xml --fields ID,City  ->  8 columns
+```
+
+One output format, two behaviours, decided by whether the data came from the
+table or from a packet of that same table.
+
+Both now project through `projectPacketFields`, the same function `--to-tdtp`
+uses, so schema and rows stay consistent. Projection runs **after** filtering,
+deliberately: `--where` may name a column the projection drops, and reversing
+the order would break that combination.
+
+Regression tests: `tests/cli/test_sqlite.py` T14.8-T14.14, plus
+`TestSQLGenerator_OffsetWithoutLimit`,
+`TestSQLGenerator_OffsetWithExplicitLimitUnchanged` and
+`TestMSSQLAdapter_AdaptSQL_StripsOffsetOnlyLimit`. T14.9 pins the offset case by
+running with `--fallback-row-limit 1`, which makes any return to the in-memory
+path fatal regardless of how small the table is.
+
+### `--limit -N` returned the first N rows from a database, not the last N
+
+The flag is documented as "negative = last N rows (like tail -n)", and on a
+packet already on disk that is what it did. On a database source it returned
+rows 1..N instead.
+
+```
+--export  --limit -3   ->  1, 2, 3      (wrong)
+--to-tdtp --limit -3   ->  8, 9, 10     (right)
+```
+
+**The row count was always correct, which is why nothing caught it.** Three rows
+were asked for and three rows arrived; the tests counted them and passed. The
+existing tail checks in the SQLite and PostgreSQL suites had been green for
+months over the wrong rows.
+
+The cause is that "last N" has no meaning in SQL without an ORDER BY, and the
+generator degraded rather than said so: `// No ORDER BY: order is undefined;
+still honor the row count`. Meanwhile the in-memory executor, which has the rows
+in hand, took the genuine tail — so one flag meant two things depending on
+whether the source was a table or a file.
+
+`ExportTableWithQuery` now supplies a sort key when tail mode has none: the
+first projected column with `--fields`, otherwise the first writable field of
+the schema, and it prints a NOTICE naming the key, because that choice decides
+which rows come back. An explicit `--order-by` still wins.
+
+The key is set there rather than in the SQL generator for two reasons: only the
+helper has the schema, and it is the one place all five adapters pass through.
+MSSQL already solved this inside its own `AdaptSQL` — but SQLite, Access and
+public-schema PostgreSQL have no `SQLAdapter` at all (it is `nil`), so a fix
+shaped like the MSSQL one would have reached almost nobody.
+
+`--limit` and `--offset` now agree row-for-row between a database source and a
+packet on disk across the whole matrix, including tail-after-offset and an
+offset past the end of the table.
+
+### `--to-compact` ignored `--where`, `--limit` and `--offset` entirely
+
+`--to-compact users.tdtp.xml --where "City = 'Moscow'"` read ten rows, wrote ten
+and reported `10 row(s)`. Its three siblings in the same family — `--to-tdtp`,
+`--to-csv`, `--to-html` — all apply the query; this one never received it.
+
+The filter runs before fixed-field detection, and the order is deliberate:
+"fixed" is decided by looking at the data, so it has to look at the rows that
+will actually be written. Narrowing to one city makes `City` constant and
+therefore compactable — the packet describes what it carries. On the fixture
+used by the tests the old build could not even produce output for that command,
+because across all ten rows no column was constant.
+
+### `--import` and `--map` take no row window, and now say so
+
+Both accept `--limit` on the command line — Go's flags are global — and neither
+has ever applied it. That is the intended behaviour: they write the packet
+through as it stands. It is now stated in `--help` alongside the list of
+commands that do honour the window, and pinned by a test so it reads as a
+decision rather than an oversight. `--sync-incremental` likewise sizes its
+batches with `--batch-size`.
+
+Regression tests: `tests/cli/test_sqlite.py` T14.1-T14.7 — every check
+asserting *which* rows came back rather than how many, run through both the
+database path and the file path. (The group grew to twenty with the `--offset`
+and `--fields` work above.) The tail cases and both `--to-compact` cases
+fail against the previous build. The old count-only tail checks in the SQLite
+and PostgreSQL suites were rewritten the same way.
+
+### `--packet-size` was accepted everywhere and honoured almost nowhere
+
+`--export t --packet-size 8 --output archive.xml` wrote the default ~1.9 MB
+parts and said nothing. The flag reached only `ExportToBroker`, and there only
+through a type assertion that a single adapter satisfied, so on a file export it
+did nothing at all — while the flag's own help text recommended exactly that
+command for kanzi archives.
+
+The failure had two independent halves, and each hid the other:
+
+**The file path never applied it.** `ExportTable` sets `--fast`, `--columnar`
+and `--fallback-row-limit` through optional interfaces but had no case for the
+part size, so the value went from `main.go` into `ExportOptions` and stopped.
+
+**Only MSSQL implemented the setter.** `broker.go` asks for
+`interface{ SetMaxMessageSize(int) }`; SQLite, MySQL, PostgreSQL and Access did
+not have the method, so the assertion failed and the branch was skipped in
+silence. `--packet-size` worked in exactly one combination — MSSQL to a broker.
+
+Now: the four missing adapters delegate to `ExportHelper` as MSSQL already did,
+`ExportTable` applies the size, and `--stream` sets it on the streaming
+generator, which partitions with its own counter that the adapter setter does
+not reach. An adapter that does not support it is **refused** rather than
+skipped — the same lesson as `--columnar` on the query path: a flag accepted and
+silently ignored is worse than one that says no.
+
+Measured on 60 000 rows, buffered and streamed alike: 6 parts by default,
+2 at `--packet-size 8`, 16 at `--packet-size 1`, with identical rows in
+identical order every time.
+
+**The budget is the uncompressed payload.** `--packet-size 8` means about 8 MB
+of rows per part; compression happens after, so a kanzi archive of that part is
+whatever those 8 MB compress to. That is what makes 8 a sensible number for a
+broker, where the limit applies to what goes on the wire.
+
+The megabytes-to-budget conversion now lives in one function,
+`packetSizeBudget`, instead of an inline `* 2 * 1024 * 1024` in `broker.go`.
+The factor of 2 is not slack for the envelope: `estimateRowSize` counts
+`len(value) * 2`, so the budget is denominated in units twice the size of a
+UTF-8 byte. It is deliberately **not** shared with `packet_kb` in a pipeline
+YAML, which has no such factor for a reason recorded in `CLAUDE.md`.
+
+Regression tests: `tests/cli/test_sqlite.py` T13 — six checks, two of which fail
+against the previous build.
+
+### Known: the two partitioners disagree on NULL-bearing data
+
+Found while verifying the above, not caused by it. A streamed export fits about
+0.3% more rows per part than the buffered one when the table contains NULLs, and
+its parts run correspondingly over the requested size. On a NULL-free table the
+two agree exactly, boundary for boundary.
+
+The cause is when the markers are applied. The buffered path runs
+`DetectAndApply` over the whole set before partitioning, so `estimateRowSize`
+measures `[NULL]` — six characters. The streaming path applies markers per part,
+by which time the row has already been counted at its raw one-byte size.
+
+No data is affected: both paths emit the same rows in the same order, and every
+check that compares content passes. What is not guaranteed is that one table
+exported both ways yields byte-identical files.
+
 ### Security — a configured field_masker exported unmasked data
 
 A pipeline with `field_masker` in `processors.pre_export` wrote the original
@@ -208,11 +571,45 @@ column exercised none of that code.
 
 ### Tests
 
-`test_sqlite.py` gains T12, nineteen checks over the CLI: date column types in
-Schema, sub-second precision, the `[NULL]` sentinel, export/import round trip,
-values containing a pipe or a newline, columnar normalisation and both malformed
-columnar shapes, `RecordsInPart` after filtering, and a pipeline whose
-`field_masker` output is checked to actually reach the file.
+Where the CLI suites stand at the close of the branch: `test_sqlite.py` 122,
+`test_postgres.py` 87, `test_mysql.py` 58, `test_csv.py` 43.
+
+**`test_sqlite.py`** gains three groups:
+
+- **T12** (40 checks) — date column types in Schema, sub-second precision, the
+  `[NULL]` sentinel, the export/import round trip, values carrying a pipe or a
+  newline, columnar normalisation and both malformed columnar shapes,
+  `RecordsInPart` after filtering, a pipeline whose `field_masker` output is
+  checked to actually reach the file, and a seven-case matrix over
+  `--columnar` / `--compact` / `--integrity` / `--compress` asserting three
+  things per case: the attribute is present, the hash survived a later step,
+  and the data reads back identical.
+- **T13** (6 checks) — `--packet-size`, including that 8 means about 8 MB of
+  XML rather than 4 or 16, and that the streaming path splits the same way.
+- **T14** (20 checks) — `--limit` and `--offset` through both code paths, every
+  check asserting *which* rows came back rather than how many. That distinction
+  is the whole group: the tail check it replaces read `rows == 3` and passed for
+  months over the wrong three.
+
+**`test_postgres.py`** gains two, closing most of its gap with sqlite:
+
+- **T8** (10 checks) — PostgreSQL's own date and numeric types: `TIME` with its
+  subtype, `infinity` as a marker, `TIMESTAMPTZ` converted to UTC rather than
+  relabelled, `NUMERIC(30,6)` exported to the last digit.
+- **T9** (36 checks) — the columnar layout, the transformation matrix, the
+  pre-export processors, and `--stream`, which on this adapter is a second,
+  hand-written reader: the checks compare it against the buffered path value by
+  value and require both to split a 20 000-row table into identical parts.
+
+**`pkg/etl`** gains `workspace_dates_test.go` and `workspace_batch_test.go`,
+covering the NULL-date failure — including the `LEFT JOIN` shape that is the
+only one reproducible through a whole pipeline — and the misalignment risk that
+comes with multi-row inserts.
+
+What remains uneven is named rather than hidden: `test_mysql.py` still has no
+group for the columnar layout, `--stream` or the processor chain, and
+`test_postgres.py` none for `diff`, `merge`, S3 or MSMQ. Both gaps are recorded
+in `TODO_NEXT.md`.
 
 ## [1.25.1] — 2026-08-22
 

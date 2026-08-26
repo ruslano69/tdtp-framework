@@ -14,6 +14,12 @@ import (
 
 // ========== Публичные методы (делегируют в ExportHelper) ==========
 
+// SetMaxMessageSize задаёт максимальный размер одного TDTP пакета (в байтах).
+// Вызывается из CLI при указании --packet-size.
+func (a *Adapter) SetMaxMessageSize(size int) {
+	a.exportHelper.SetMaxMessageSize(size)
+}
+
 // SetSkipSpecialValues включает режим --fast: DetectAndApply пропускается.
 func (a *Adapter) SetSkipSpecialValues(skip bool) {
 	a.exportHelper.SetSkipSpecialValues(skip)

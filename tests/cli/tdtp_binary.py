@@ -45,13 +45,20 @@ def repo_version() -> str:
 
 
 def newest_source_mtime() -> tuple:
-    """(mtime, repo-relative path) of the newest .go file under cmd/ and pkg/."""
+    """(mtime, repo-relative path) of the newest .go file under cmd/ and pkg/.
+
+    Test files are skipped: they cannot change the binary, so counting them
+    reports a stale binary after every edit to a _test.go and sends the runner
+    off to rebuild something that would come out byte-identical.
+    """
     newest, where = 0.0, ""
     for sub in ("cmd", "pkg"):
         root = REPO_ROOT / sub
         if not root.is_dir():
             continue
         for path in root.rglob("*.go"):
+            if path.name.endswith("_test.go"):
+                continue
             try:
                 mt = path.stat().st_mtime
             except OSError:

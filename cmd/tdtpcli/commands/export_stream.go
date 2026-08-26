@@ -61,9 +61,14 @@ func streamExportTable(
 		return chainErr
 	}
 
-	// Размер части — умолчание генератора: --packet-size до файлового экспорта
-	// не доходит вовсе, он есть только у брокерного пути.
+	// Размер части. У потока свой счётчик — StreamingGenerator.partSizeBytes, а
+	// не maxMessageSize из ExportHelper, — поэтому setter на адаптере до него не
+	// доходит и --packet-size приходится ставить здесь отдельно. Бюджет считает
+	// та же packetSizeBudget, что и остальные пути.
 	gen := packet.NewStreamingGenerator()
+	if opts.PacketSizeMB > 0 {
+		gen.SetPartSize(packetSizeBudget(opts.PacketSizeMB))
+	}
 	partsChan, summaryChan := gen.GeneratePartsStream(ctx, rowsChan, schema, tableName, packet.TypeReference)
 
 	ext := filepath.Ext(opts.OutputFile)

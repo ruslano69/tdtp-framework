@@ -37,6 +37,7 @@ type ExportOptions struct {
 	Fast             bool   // Skip SpecialValues detection for maximum export speed
 	Columnar         bool   // Write Data column-major (layout="columns")
 	Stream           bool   // Потоковый экспорт (см. streamExportTable)
+	PacketSizeMB     int    // --packet-size: размер одной части в МБ (0 = умолчание ~1.9 МБ)
 	FallbackRowLimit int64  // Max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)
 
 	// v1.3.1 compact format
@@ -235,6 +236,23 @@ func (p *integrityProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacke
 }
 
 // ExportTable exports a table to TDTP XML file
+// packetSizeBudget переводит --packet-size N — мегабайты готового XML — в
+// бюджет генератора.
+//
+// Множитель 2 не запас на конверт: estimateRowSize считает len(value)*2, то
+// есть бюджет измеряется в единицах вдвое крупнее UTF-8 байта, и N мегабайт
+// реального XML стоят 2N бюджета. Соотношение держится на любом алфавите,
+// потому что len() в Go считает байты, а не символы.
+//
+// Формула живёт здесь одна на оба пути. До этого она была только в broker.go —
+// а файловый экспорт, не имея её, флаг молча игнорировал.
+//
+// Не путать с packet_kb в пайплайновом YAML: там множителя нет намеренно, и
+// выравнивать их между собой нельзя (см. CLAUDE.md).
+func packetSizeBudget(mb int) int {
+	return mb * 2 * 1024 * 1024
+}
+
 func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOptions) error {
 	// Create adapter
 	adapter, err := adapters.New(ctx, *config)
@@ -265,6 +283,26 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		if cs, ok := adapter.(columnarSetter); ok {
 			cs.SetColumnarLayout(true)
 		}
+	}
+
+	// --packet-size: размер одной части. Тем же приёмом, что --fast и
+	// --columnar, но с ОТКАЗОМ вместо тихого пропуска, и это не стилистика.
+	//
+	// Раньше флаг применялся только в broker.go, и только там, где приведение
+	// типа удавалось — то есть на одном MSSQL. Файловый экспорт не применял его
+	// никогда. Пользователь просил части по 8 МБ, получал по 1.9 и никакого
+	// сообщения: команда завершалась успехом, флаг был принят, не сделано
+	// ничего. Ровно та же форма отказа, что у --columnar на пути запросов.
+	//
+	// Все пять адаптеров метод имеют, так что провал приведения означает новый
+	// адаптер, который о размере части не знает. Про это лучше сказать.
+	if opts.PacketSizeMB > 0 {
+		type packetSizeSetter interface{ SetMaxMessageSize(int) }
+		sizer, ok := adapter.(packetSizeSetter)
+		if !ok {
+			return fmt.Errorf("--packet-size is not supported by the %s adapter", config.Type)
+		}
+		sizer.SetMaxMessageSize(packetSizeBudget(opts.PacketSizeMB))
 	}
 
 	// --fallback-row-limit: safety-net против обвала на in-memory сканах

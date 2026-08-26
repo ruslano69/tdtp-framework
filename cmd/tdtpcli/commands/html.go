@@ -136,6 +136,24 @@ func renderHTML(inputFile string, pkt *packet.DataPacket, opts HTMLOptions) (str
 		totalRows = len(allRows)
 	}
 
+	// Проекция (--fields). ПОСЛЕ фильтрации: --where может ссылаться на
+	// колонку, которой в проекции нет, и отобрать её раньше значило бы
+	// сломать фильтр по неотображаемому полю.
+	//
+	// Раньше --to-html единственный из семейства проекцию не применял: тот же
+	// пакет через --to-csv и --to-tdtp давал две колонки, а здесь все три.
+	// Заметнее всего это было рядом с --export-xlsx, который проекцию делает
+	// на стороне БД: один и тот же формат вёл себя по-разному в зависимости
+	// от того, откуда пришли данные.
+	if opts.Query != nil && len(opts.Query.Fields) > 0 {
+		pkt.SetRows(allRows)
+		if err := projectPacketFields(pkt, opts.Query.Fields); err != nil {
+			return "", 0, err
+		}
+		allRows = pkt.GetRows()
+		totalRows = len(allRows)
+	}
+
 	// Apply --row range (1-indexed, inclusive)
 	startIdx := 0
 	endIdx := totalRows
