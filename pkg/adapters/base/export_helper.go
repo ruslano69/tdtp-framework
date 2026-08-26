@@ -202,6 +202,16 @@ func (h *ExportHelper) ExportTableWithQuery(
 	//
 	// Ключ обязан быть в проекции: наружный запрос сортирует уже подзапрос
 	// (AS _tail), у которого есть только выбранные колонки.
+	// 3b. Страничный обход без ORDER BY. Не подставляем ключ молча — в отличие
+	// от tail-режима, здесь запрос СИНТАКСИЧЕСКИ полон и вернёт ровно столько
+	// строк, сколько просили. Неверен только их выбор: без явного порядка
+	// «строки с 101-й по 200-ю» не определены, и страницы могут перекрыться
+	// или пропустить записи между вызовами. Про это стоит сказать вслух.
+	if query.Offset > 0 && query.OrderBy == nil {
+		log.Printf("NOTICE: --offset %d without --order-by: the order of rows is not defined, "+
+			"so pages may overlap or skip rows between calls", query.Offset)
+	}
+
 	if query.Limit < 0 && query.OrderBy == nil {
 		key := ""
 		if len(query.Fields) > 0 {

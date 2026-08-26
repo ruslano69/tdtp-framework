@@ -4,6 +4,57 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### `--offset` did not work on SQL Server below compatibility level 110
+
+The MSSQL adapter translated `--limit`/`--offset` into `OFFSET n ROWS FETCH NEXT
+m ROWS ONLY`, which is SQL Server 2012 syntax. On an older compatibility level
+the server does not parse it at all:
+
+```
+--offset 3            ->  Incorrect syntax near 'OFFSET'
+--limit 3 --offset 3  ->  Invalid usage of the option NEXT in the FETCH statement
+```
+
+Neither surfaced as a refusal. The pushdown failed, `ExportTableWithQuery` fell
+back to reading the whole table into memory, and the right rows came back — from
+a full scan. Past `--fallback-row-limit` the export stopped instead, advising the
+user to "fix the query" when there was nothing wrong with it.
+
+Paging now goes through `ROW_NUMBER()`, which the same server accepts:
+
+```sql
+SELECT [ID], [Name] FROM (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY [ID]) AS _tdtp_rn FROM [dbo].[Users]
+) AS _tdtp_page
+WHERE _tdtp_rn > 5 AND _tdtp_rn <= 15 ORDER BY _tdtp_rn
+```
+
+**The outer `SELECT` names its columns rather than using `*`, and that is
+load-bearing.** With a star the helper column would come back too, every row
+would be one column wider than the Schema declares, and since schema and columns
+are matched *by position* the packet would be silently wrong rather than
+refused. The column list comes from the SQL's own projection when `--fields`
+gave one, otherwise from the schema; if neither yields a list, the statement is
+returned untouched — the old behaviour, which is slow but correct.
+
+The 2000-era alternative, `TOP n ... WHERE key NOT IN (SELECT TOP m key ...)`,
+was tried and rejected: on a column with repeats it drops the duplicates as
+well, so it answers a different question without saying so.
+
+Verified against a live SQL Server 2008 R2 (10.50, compatibility level 80) on a
+backup database, with `--fallback-row-limit 1` so that any return to the
+in-memory path would have been fatal rather than invisible: `--limit`,
+`--offset`, and the two together all push down, `--offset 11019` on an
+11 022-row table returns exactly 3, and consecutive pages are disjoint.
+
+### `--offset` without `--order-by` now says the order is undefined
+
+With an explicit `--order-by`, page 1 and page 2 compose exactly — checked on
+the same server. Without one they need not: "rows 101 to 200" has no meaning
+until something fixes the order, and the two pages may overlap or skip rows.
+The export prints a NOTICE, in the same spirit as the one for `--limit -N`, and
+`--help` says to pair the two.
+
 ### A NULL date in a pipeline result killed the whole query
 
 `Workspace.ExecuteSQL` bound `DATE`, `DATETIME` and `TIMESTAMP` columns to

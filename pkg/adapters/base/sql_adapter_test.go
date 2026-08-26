@@ -262,10 +262,75 @@ func TestMSSQLAdapter_AdaptSQL_StripsOffsetOnlyLimit(t *testing.T) {
 	if strings.Contains(got, "LIMIT") {
 		t.Errorf("the sentinel LIMIT must be stripped for MSSQL; got: %s", got)
 	}
-	if !strings.Contains(got, "OFFSET 5 ROWS") {
-		t.Errorf("expected OFFSET 5 ROWS; got: %s", got)
+	// Пагинация идёт через ROW_NUMBER(), а не OFFSET/FETCH: последний не
+	// разбирается при уровне совместимости 80.
+	if strings.Contains(got, "OFFSET") || strings.Contains(got, "FETCH") {
+		t.Errorf("OFFSET/FETCH is not available at compatibility level 80; got: %s", got)
 	}
-	if !strings.Contains(got, "ORDER BY") {
-		t.Errorf("OFFSET/FETCH requires ORDER BY; got: %s", got)
+	if !strings.Contains(got, "ROW_NUMBER() OVER (ORDER BY") {
+		t.Errorf("expected a ROW_NUMBER() window; got: %s", got)
+	}
+	if !strings.Contains(got, "_tdtp_rn > 5") {
+		t.Errorf("expected the offset as a row-number predicate; got: %s", got)
+	}
+}
+
+// Внешний SELECT обязан перечислять колонки явно: со звёздочкой наружу вышел
+// бы служебный _tdtp_rn, строка стала бы на колонку шире схемы, и пакет
+// разъехался бы молча — схема сопоставляется с колонками ПО ПОЗИЦИИ.
+func TestMSSQLAdapter_PagingDoesNotLeakRowNumber(t *testing.T) {
+	adapter := NewMSSQLAdapter("dbo")
+	schema := packet.Schema{Fields: []packet.Field{
+		{Name: "ID"}, {Name: "Calendar Date"}, {Name: "Hours"},
+	}}
+
+	got := adapter.AdaptSQL(`SELECT * FROM "Sheet" LIMIT 10 OFFSET 5`, "Sheet", schema,
+		&packet.Query{Limit: 10, Offset: 5})
+
+	outer := got[:strings.Index(got, " FROM (")]
+	if strings.Contains(outer, "*") {
+		t.Errorf("the outer SELECT must name its columns, not use *; got: %s", got)
+	}
+	if strings.Contains(outer, "_tdtp_rn") {
+		t.Errorf("_tdtp_rn must not reach the caller; got: %s", got)
+	}
+	for _, f := range schema.Fields {
+		if !strings.Contains(outer, "["+f.Name+"]") {
+			t.Errorf("column %q missing from the projection; got: %s", f.Name, got)
+		}
+	}
+	if !strings.Contains(got, "_tdtp_rn > 5 AND _tdtp_rn <= 15") {
+		t.Errorf("expected the window to be rows 6..15; got: %s", got)
+	}
+}
+
+// Запрошенный порядок сохраняется: ROW_NUMBER нумерует по нему, а не по
+// первой попавшейся колонке.
+func TestMSSQLAdapter_PagingKeepsRequestedOrder(t *testing.T) {
+	adapter := NewMSSQLAdapter("dbo")
+	schema := packet.Schema{Fields: []packet.Field{{Name: "ID"}, {Name: "Name"}}}
+
+	got := adapter.AdaptSQL(`SELECT * FROM "Users" ORDER BY [Name] DESC LIMIT 5 OFFSET 10`,
+		"Users", schema, &packet.Query{Limit: 5, Offset: 10})
+
+	if !strings.Contains(got, "ROW_NUMBER() OVER (ORDER BY [Name] DESC)") {
+		t.Errorf("the requested ORDER BY must drive the numbering; got: %s", got)
+	}
+}
+
+// --fields: проекция из самого SQL важнее схемы, иначе наружу вышли бы
+// колонки, которых пользователь не просил.
+func TestMSSQLAdapter_PagingRespectsExplicitProjection(t *testing.T) {
+	adapter := NewMSSQLAdapter("dbo")
+	schema := packet.Schema{Fields: []packet.Field{
+		{Name: "ID"}, {Name: "Name"}, {Name: "Secret"},
+	}}
+
+	got := adapter.AdaptSQL(`SELECT [ID], [Name] FROM "Users" LIMIT 2 OFFSET 1`,
+		"Users", schema, &packet.Query{Limit: 2, Offset: 1})
+
+	outer := got[:strings.Index(got, " FROM (")]
+	if strings.Contains(outer, "Secret") {
+		t.Errorf("a column outside the projection leaked into the result; got: %s", got)
 	}
 }

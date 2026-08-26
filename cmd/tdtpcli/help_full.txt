@@ -186,6 +186,8 @@ OPTIONS:
                                --order-by the first writable column is used and a NOTICE says so
     -l <n>                     Shorthand for --limit
     --offset <n>               OFFSET number of rows to skip; applied before --limit
+                               Pair it with --order-by when paging: without one the row
+                               order is undefined and pages may overlap or skip rows
                                --limit/--offset apply to: --export, --export-xlsx, --to-broker,
                                --to-tdtp, --to-csv, --to-html, --to-xlsx, --to-compact.
                                NOT to --import or --map: those write the packet through as it is.
