@@ -248,9 +248,10 @@ commands that do honour the window, and pinned by a test so it reads as a
 decision rather than an oversight. `--sync-incremental` likewise sizes its
 batches with `--batch-size`.
 
-Regression tests: `tests/cli/test_sqlite.py` T14 — thirteen checks, every one
+Regression tests: `tests/cli/test_sqlite.py` T14.1-T14.7 — every check
 asserting *which* rows came back rather than how many, run through both the
-database path and the file path. The tail cases and both `--to-compact` cases
+database path and the file path. (The group grew to twenty with the `--offset`
+and `--fields` work above.) The tail cases and both `--to-compact` cases
 fail against the previous build. The old count-only tail checks in the SQLite
 and PostgreSQL suites were rewritten the same way.
 
@@ -519,11 +520,45 @@ column exercised none of that code.
 
 ### Tests
 
-`test_sqlite.py` gains T12, nineteen checks over the CLI: date column types in
-Schema, sub-second precision, the `[NULL]` sentinel, export/import round trip,
-values containing a pipe or a newline, columnar normalisation and both malformed
-columnar shapes, `RecordsInPart` after filtering, and a pipeline whose
-`field_masker` output is checked to actually reach the file.
+Where the CLI suites stand at the close of the branch: `test_sqlite.py` 122,
+`test_postgres.py` 87, `test_mysql.py` 58, `test_csv.py` 43.
+
+**`test_sqlite.py`** gains three groups:
+
+- **T12** (40 checks) — date column types in Schema, sub-second precision, the
+  `[NULL]` sentinel, the export/import round trip, values carrying a pipe or a
+  newline, columnar normalisation and both malformed columnar shapes,
+  `RecordsInPart` after filtering, a pipeline whose `field_masker` output is
+  checked to actually reach the file, and a seven-case matrix over
+  `--columnar` / `--compact` / `--integrity` / `--compress` asserting three
+  things per case: the attribute is present, the hash survived a later step,
+  and the data reads back identical.
+- **T13** (6 checks) — `--packet-size`, including that 8 means about 8 MB of
+  XML rather than 4 or 16, and that the streaming path splits the same way.
+- **T14** (20 checks) — `--limit` and `--offset` through both code paths, every
+  check asserting *which* rows came back rather than how many. That distinction
+  is the whole group: the tail check it replaces read `rows == 3` and passed for
+  months over the wrong three.
+
+**`test_postgres.py`** gains two, closing most of its gap with sqlite:
+
+- **T8** (10 checks) — PostgreSQL's own date and numeric types: `TIME` with its
+  subtype, `infinity` as a marker, `TIMESTAMPTZ` converted to UTC rather than
+  relabelled, `NUMERIC(30,6)` exported to the last digit.
+- **T9** (36 checks) — the columnar layout, the transformation matrix, the
+  pre-export processors, and `--stream`, which on this adapter is a second,
+  hand-written reader: the checks compare it against the buffered path value by
+  value and require both to split a 20 000-row table into identical parts.
+
+**`pkg/etl`** gains `workspace_dates_test.go` and `workspace_batch_test.go`,
+covering the NULL-date failure — including the `LEFT JOIN` shape that is the
+only one reproducible through a whole pipeline — and the misalignment risk that
+comes with multi-row inserts.
+
+What remains uneven is named rather than hidden: `test_mysql.py` still has no
+group for the columnar layout, `--stream` or the processor chain, and
+`test_postgres.py` none for `diff`, `merge`, S3 or MSMQ. Both gaps are recorded
+in `TODO_NEXT.md`.
 
 ## [1.25.1] — 2026-08-22
 
