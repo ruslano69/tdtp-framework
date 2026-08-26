@@ -4,6 +4,56 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### A flag that no command reads now says so
+
+Four bugs in one month shared a shape rather than a subject: a flag was
+accepted, nothing read it, the command exited zero having done something other
+than what was asked.
+
+```
+--columnar   on the query path      packet written row-major
+--packet-size on a file export      parts at the default size
+--limit      on --to-compact        every row written, "10 row(s)" reported
+--fields     on --to-html/--to-xlsx all columns rendered
+```
+
+Each was found by hand. Nothing in the tool could find them, because Go's flags
+are global: a command that ignores one is indistinguishable from a command that
+has no use for it.
+
+`warnUnusedFlags` closes that. `flag.Visit` lists exactly the flags the user
+**typed** — as opposed to `VisitAll`, which lists the ones declared — and what
+the command has not declared as readable comes back as a notice:
+
+```
+tdtpcli --import users.tdtp.xml --table users --limit 3
+NOTICE: --import does not read --limit — the flag was accepted, nothing acted on it
+```
+
+**A notice, not a refusal.** An extra flag is usually harmless: habit, a
+copy-pasted invocation, a script sharing one argument set across commands.
+Refusing would break working calls for the sake of typos, and the problem was
+the silence, not the combination.
+
+The declaration lives in `cmd/tdtpcli/flagscope.go` — command → the flags it
+reads — which is precisely the kind of hand-kept list that falls behind the
+code, so four tests hold it in place: every declared flag must be claimed by
+someone, no name in the table may be a phantom (a typo would leave the real
+flag being warned about), each command must claim its own flag, and every
+branch of `routeCommand` must appear. The first test paid for itself
+immediately by finding `--expect-var`, declared through `flag.Func` and missed
+by a static scan of `main.go`; `--import` and `--import-broker` read it.
+
+**What the tests cannot do is verify that a command actually reads a flag** —
+Go does not expose that. Listing a flag is a human claim; the tests only ensure
+the claim exists and is spelled correctly. A flag listed for a command that
+ignores it is the original bug with a table entry on top, and that is written
+down in `CLAUDE.md` next to the rule for adding new flags.
+
+Validated against every CLI suite — 310 invocations across SQLite, PostgreSQL,
+MySQL and the CSV set — with zero notices, so the table matches what the
+commands really consume.
+
 ### `--offset` without `--limit` fell back to reading the whole table
 
 `SELECT ... OFFSET 5` is a syntax error in SQLite and in MySQL — both require a

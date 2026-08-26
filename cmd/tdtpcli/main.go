@@ -60,6 +60,7 @@ func routeCommand(
 	if *flags.Steps != "" {
 		operation = audit.OpTransform
 		metadata = map[string]string{"command": "steps", "workflow": *flags.Steps}
+		warnUnusedFlags("steps")
 
 		err = commands.RunSteps(ctx, *flags.Steps, flags.PipelineVars, *flags.Quiet)
 
@@ -70,6 +71,7 @@ func routeCommand(
 			fatal("--drain: %v", drainErr)
 		}
 		metadata = map[string]string{"command": "map", "mapping": *flags.Map, "input": *flags.MapInput}
+		warnUnusedFlags("map")
 
 		err = commands.RunMap(ctx, commands.MapOptions{
 			MappingFile: *flags.Map,
@@ -87,6 +89,7 @@ func routeCommand(
 	} else if flags.List.IsSet {
 		operation = audit.OpQuery
 		metadata = map[string]string{"command": "list", "pattern": flags.List.Pattern}
+		warnUnusedFlags("list")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-tables", func() error {
 			return commands.ListTables(ctx, adapterConfig, flags.List.Pattern)
@@ -95,6 +98,7 @@ func routeCommand(
 	} else if *flags.ListViews {
 		operation = audit.OpQuery
 		metadata = map[string]string{"command": "list-views"}
+		warnUnusedFlags("list-views")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "list-views", func() error {
 			return commands.ListViews(ctx, adapterConfig)
@@ -112,6 +116,7 @@ func routeCommand(
 			"input":   *flags.ToCompact,
 			"output":  outputCompact,
 		}
+		warnUnusedFlags("to-compact")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "to-compact", func() error {
 			return commands.ConvertToCompact(commands.ConvertCompactOptions{
@@ -142,6 +147,7 @@ func routeCommand(
 			"output":  outputTDTP,
 			"version": version,
 		}
+		warnUnusedFlags("to-tdtp")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-tdtp", func() error {
 			return commands.ConvertTDTPToTDTP(ctx, commands.ToTDTPOptions{
@@ -188,6 +194,7 @@ func routeCommand(
 			"table":   *flags.Export,
 			"output":  determineOutputFile(*flags.Output, *flags.Export, "tdtp.xml"),
 		}
+		warnUnusedFlags("export")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table", func() error {
 			return commands.ExportTable(ctx, adapterConfig, commands.ExportOptions{
@@ -251,6 +258,7 @@ func routeCommand(
 			"file":     *flags.Import,
 			"strategy": *flags.Strategy,
 		}
+		warnUnusedFlags("import")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-file", func() error {
 			return commands.ImportFile(ctx, adapterConfig, commands.ImportOptions{
@@ -277,6 +285,7 @@ func routeCommand(
 			"input":   *flags.ToHTML,
 			"output":  outputHTML,
 		}
+		warnUnusedFlags("to-html")
 
 		// Parse optional --row range (format: "n1-n2", 1-indexed inclusive)
 		rowStart, rowEnd := 0, 0
@@ -314,6 +323,7 @@ func routeCommand(
 			"delimiter": *flags.CSVDelimiter,
 			"cp":        *flags.CSVCP,
 		}
+		warnUnusedFlags("to-csv")
 
 		// Parse delimiter: strip wrapping single quotes (e.g. ';' → ;),
 		// then accept single char or named escapes (\t).
@@ -380,6 +390,7 @@ func routeCommand(
 			"input":   *flags.ToXLSX,
 			"output":  determineOutputFile(*flags.Output, *flags.ToXLSX, "xlsx"),
 		}
+		warnUnusedFlags("to-xlsx")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "tdtp-to-xlsx", func() error {
 			return commands.ConvertTDTPToXLSX(ctx, commands.XLSXOptions{
@@ -400,6 +411,7 @@ func routeCommand(
 			"input":   *flags.FromXLSX,
 			"output":  determineOutputFile(*flags.Output, *flags.FromXLSX, "tdtp.xml"),
 		}
+		warnUnusedFlags("from-xlsx")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "xlsx-to-tdtp", func() error {
 			return commands.ConvertXLSXToTDTP(commands.XLSXOptions{
@@ -431,6 +443,7 @@ func routeCommand(
 			"table":   *flags.ExportXLSX,
 			"output":  determineOutputFile(*flags.Output, *flags.ExportXLSX, "xlsx"),
 		}
+		warnUnusedFlags("export-xlsx")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-table-to-xlsx", func() error {
 			return commands.ExportTableToXLSX(ctx, adapterConfig, commands.XLSXOptions{
@@ -456,6 +469,7 @@ func routeCommand(
 			"file":     *flags.ImportXLSX,
 			"strategy": *flags.Strategy,
 		}
+		warnUnusedFlags("import-xlsx")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-xlsx-to-table", func() error {
 			return commands.ImportXLSXToTable(ctx, adapterConfig, commands.XLSXOptions{
@@ -500,6 +514,7 @@ func routeCommand(
 			"broker":  brokerCfg.Type,
 			"queue":   brokerCfg.Queue,
 		}
+		warnUnusedFlags("export-broker")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "export-to-broker", func() error {
 			return commands.ExportToBroker(ctx, adapterConfig, &brokerCfg, *flags.ExportBroker, query, compress, compressLevel, brokerCompressAlgo, procMgr, *flags.PacketSize, mercuryURL, *flags.Encrypt || *flags.Enc13, *flags.Enc13)
@@ -524,6 +539,7 @@ func routeCommand(
 			"queue":    brokerCfg.Queue,
 			"strategy": *flags.Strategy,
 		}
+		warnUnusedFlags("import-broker")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "import-from-broker", func() error {
 			return commands.ImportFromBroker(ctx, adapterConfig, &brokerCfg, commands.ImportBrokerOptions{
@@ -547,6 +563,7 @@ func routeCommand(
 			"checkpoint_file": *flags.CheckpointFile,
 			"output":          determineOutputFile(*flags.Output, *flags.SyncIncr, "xml"),
 		}
+		warnUnusedFlags("sync-incremental")
 
 		// --to-broker sends the increment to the queue instead of a file. The
 		// checkpoint is kept either way, which is the point: until now tracking
@@ -592,6 +609,7 @@ func routeCommand(
 			"config":  *flags.Pipeline,
 			"mode":    modeLabel,
 		}
+		warnUnusedFlags("pipeline")
 
 		// Читаем --enc-dev флаг через flag.Lookup (флаг зарегистрирован только в !production сборках;
 		// в production Lookup вернёт nil → encDev остаётся false).
@@ -620,6 +638,7 @@ func routeCommand(
 			"command": "process-request",
 			"file":    *flags.ProcessRequest,
 		}
+		warnUnusedFlags("process-request")
 
 		// Директория для поиска конфигов: рядом с файлом запроса, затем текущая директория
 		configsDir := filepath.Dir(*flags.ProcessRequest)
@@ -640,6 +659,7 @@ func routeCommand(
 			"command": "diff",
 			"file_a":  *flags.Diff,
 		}
+		warnUnusedFlags("diff")
 
 		// Get second file from remaining args
 		args := flag.Args()
@@ -669,6 +689,7 @@ func routeCommand(
 			"files":   *flags.Merge,
 			"output":  *flags.Output,
 		}
+		warnUnusedFlags("merge")
 
 		if *flags.Output == "" {
 			return fmt.Errorf("merge requires --output flag")
@@ -692,6 +713,7 @@ func routeCommand(
 
 		// Test command — integrity check, no DB required; supports s3:// URIs
 	} else if *flags.Test != "" {
+		warnUnusedFlags("test")
 		var testStorageCfg *storage.Config
 		if storage.IsRemote(*flags.Test) {
 			var uriBucket string
@@ -707,6 +729,7 @@ func routeCommand(
 
 		// Inspect command — no DB connection required, runs directly
 	} else if *flags.Inspect != "" {
+		warnUnusedFlags("inspect")
 		var inspectStorageCfg *storage.Config
 		if storage.IsRemote(*flags.Inspect) {
 			var uriBucket string
@@ -727,6 +750,7 @@ func routeCommand(
 			"command": "inspect-table",
 			"table":   *flags.InspectTable,
 		}
+		warnUnusedFlags("inspect-table")
 
 		err = prodFeatures.ExecuteWithResilience(ctx, "inspect-table", func() error {
 			return commands.InspectTable(ctx, adapterConfig, *flags.InspectTable)
@@ -748,6 +772,7 @@ func routeCommand(
 			"topic":    brokerCfg.Queue,
 			"strategy": *flags.Strategy,
 		}
+		warnUnusedFlags("listen")
 
 		// Listen runs until SIGTERM — bypass resilience wrapper (it's an infinite loop)
 		err = commands.ListenKafkaStream(ctx, adapterConfig, commands.ListenConfig{
