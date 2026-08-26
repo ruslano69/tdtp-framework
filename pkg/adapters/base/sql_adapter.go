@@ -94,6 +94,11 @@ func NewMSSQLAdapter(schemaName string) *MSSQLAdapter {
 // 4. Квалифицирует имена таблиц: [schema].[table]  (поддержка "schema.table" формата)
 // 5. Квалифицирует имена полей: [field]
 func (a *MSSQLAdapter) AdaptSQL(standardSQL, tableName string, schema packet.Schema, query *packet.Query) string {
+	// OFFSET без LIMIT: генератор подставляет LIMIT maxint, чтобы SQL был
+	// валиден в SQLite и MySQL. MSSQL выражает это через OFFSET ... ROWS, и
+	// оставленный LIMIT сломал бы запрос — убираем до основного разбора.
+	standardSQL = strings.Replace(standardSQL,
+		fmt.Sprintf(" LIMIT %d", tdtql.OffsetOnlyLimit), "", 1)
 	// Поддержка формата "schema.table" в tableName (например, "dbo.Users")
 	tableName = tdtql.StripBrackets(tableName)
 	schemaName := a.schemaName

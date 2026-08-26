@@ -7,6 +7,16 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
+// OffsetOnlyLimit — значение LIMIT, подставляемое когда задан только OFFSET.
+//
+// "Все строки начиная с N" в SQLite и MySQL нельзя записать без LIMIT, а
+// отрицательный LIMIT (идиома SQLite) отвергают и MySQL, и PostgreSQL. maxint64
+// принимают все три.
+//
+// Экспортировано, потому что MSSQL-адаптер должен уметь его распознать и
+// убрать: там та же операция выражается через OFFSET ... ROWS.
+const OffsetOnlyLimit = 9223372036854775807
+
 // SQLGenerator конвертирует TDTQL запросы в SQL
 type SQLGenerator struct{}
 
@@ -87,7 +97,22 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 	}
 
 	// OFFSET clause
+	//
+	// SQLite и MySQL требуют LIMIT перед OFFSET: "SELECT ... OFFSET 5" у них
+	// синтаксическая ошибка (PostgreSQL такое принимает). Раньше генератор
+	// отдавал именно эту форму, запрос падал, и export_helper молча уходил на
+	// полное чтение таблицы в память. Строки возвращались правильные, поэтому
+	// на маленькой таблице проблема не видна вовсе — а на большой экспорт
+	// обрывается: "fallback aborted: table has 100000 rows ... SQL pushdown
+	// failed — fix the query", хотя чинить в запросе нечего.
+	//
+	// LIMIT со значением maxint — стандартная идиома "все строки начиная с N".
+	// Значение вынесено в константу, потому что MSSQL-адаптер его вырезает:
+	// у него OFFSET/FETCH, и лишний LIMIT сломал бы SQL.
 	if query.Offset > 0 {
+		if query.Limit == 0 {
+			parts = append(parts, fmt.Sprintf("LIMIT %d", OffsetOnlyLimit))
+		}
 		parts = append(parts, fmt.Sprintf("OFFSET %d", query.Offset))
 	}
 

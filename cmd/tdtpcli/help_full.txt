@@ -190,11 +190,13 @@ OPTIONS:
                                --to-tdtp, --to-csv, --to-html, --to-xlsx, --to-compact.
                                NOT to --import or --map: those write the packet through as it is.
                                --sync-incremental sizes its batches with --batch-size instead
-    --fields <col1,col2,...>   Column projection: export/import/to-csv only listed columns
-                               (e.g. 'id,email,status')
+    --fields <col1,col2,...>   Column projection: only the listed columns (e.g. 'id,email,status')
+                               Applies to --export, --export-xlsx, --to-broker, --to-tdtp,
+                               --to-csv, --to-html, --to-xlsx, --to-compact and --import
                                For --import: whitelist — only these columns are written to DB
-                               For --to-csv: only listed columns appear in output CSV
                                For --sync-incremental: tracking field is always included automatically
+                               Applied after --where, so a filter may name a column the
+                               projection drops
                                Bracket-quoted names for fields with spaces or commas:
                                  --fields "id,[Birth Date],status"
                                  --fields "[First, Last],[Birth Date]"

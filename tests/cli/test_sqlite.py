@@ -14,6 +14,7 @@ Usage:
 import os
 import re
 import sys
+import zipfile
 import time
 import shutil
 import sqlite3
@@ -1799,6 +1800,61 @@ def row_ids(path: str) -> list:
     return [(r.text or "").split("|")[0] for r in d.findall("R")]
 
 
+def schema_names(path: str) -> list:
+    """Field names declared in a packet's Schema."""
+    if not os.path.exists(path):
+        return ["<missing>"]
+    sch = ET.parse(path).getroot().find("Schema")
+    return [f.get("name") for f in sch.findall("Field")] if sch is not None else []
+
+
+def html_data_headers(path: str) -> list:
+    """Column headers of the DATA table in a rendered HTML report.
+
+    The report opens with a schema table, so the data table is the second one;
+    its first header cell is the row-number column and is dropped.
+    """
+    if not os.path.exists(path):
+        return ["<missing>"]
+    with open(path, encoding="utf-8") as fh:
+        html = fh.read()
+    tables = re.findall(r"<table.*?</table>", html, re.S)
+    if len(tables) < 2:
+        return ["<no-data-table>"]
+    cells = re.findall(r"<th[^>]*>(.*?)</th>", tables[1], re.S)
+    names = []
+    for c in cells[1:]:
+        text = re.sub(r"<[^>]*>", " ", c)
+        parts = text.split()
+        if parts:
+            names.append(parts[0])
+    return names
+
+
+def _xlsx_first_row(path: str) -> list:
+    with zipfile.ZipFile(path) as z:
+        sheet = z.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="replace")
+    row = re.search(r"<row[^>]*>(.*?)</row>", sheet, re.S)
+    if row is None:
+        return []
+    cells = re.findall(r"<c[^>]*>(?:<is><t[^>]*>(.*?)</t></is>|<v>(.*?)</v>)", row.group(1))
+    return [a or b for a, b in cells]
+
+
+def xlsx_header(path: str) -> list:
+    if not os.path.exists(path):
+        return ["<missing>"]
+    return _xlsx_first_row(path)
+
+
+def xlsx_row_count(path: str) -> int:
+    if not os.path.exists(path):
+        return -1
+    with zipfile.ZipFile(path) as z:
+        sheet = z.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="replace")
+    return sheet.count("<row ")
+
+
 def test_T14_limit_offset():
     print(f"\n{BOLD}T14: --limit and --offset{RESET}")
 
@@ -1911,6 +1967,88 @@ def test_T14_limit_offset():
            p.returncode == 0 and n == 10, time.monotonic() - t,
            f"rc={p.returncode} rows={n} err={p.stderr[-160:]}")
 
+    # --- OFFSET without LIMIT ------------------------------------------------
+    #
+    # Valid TDTQL, invalid SQL in SQLite and MySQL: both reject
+    # "SELECT ... OFFSET 5" outright (PostgreSQL accepts it). The generator
+    # emitted exactly that, the pushdown failed, and the export helper fell
+    # back to reading the whole table into memory — silently, and with the
+    # right rows, so nothing looked wrong on a small table.
+    #
+    # On a large one it did not merely get slow: past --fallback-row-limit the
+    # export aborted with "SQL pushdown failed — fix the query", about a query
+    # with nothing to fix. That is what the second check reproduces.
+    t = time.monotonic()
+    off = out("t14_offset_only.xml")
+    p = run("--export", "users", "--offset", "4", "--output", off)
+    ids = row_ids(off)
+    noisy = "pushdown failed" in p.stderr
+    record("T14.8 --offset without --limit pushes down instead of scanning in memory",
+           p.returncode == 0 and ids == ["5", "6", "7", "8", "9", "10"] and not noisy,
+           time.monotonic() - t,
+           f"ids={ids} pushdown_failed={noisy}")
+
+    # --fallback-row-limit 1 makes any in-memory fallback fatal, so this check
+    # fails loudly if the pushdown ever breaks again — regardless of table size.
+    t = time.monotonic()
+    off2 = out("t14_offset_nofallback.xml")
+    p = run("--export", "users", "--offset", "8",
+            "--fallback-row-limit", "1", "--output", off2)
+    ids = row_ids(off2)
+    record("T14.9 --offset survives with the in-memory fallback disabled",
+           p.returncode == 0 and ids == ["9", "10"], time.monotonic() - t,
+           f"rc={p.returncode} ids={ids} err={p.stderr[-160:]}")
+
+    # --- --fields ------------------------------------------------------------
+    #
+    # Projection was applied by --export, --export-xlsx, --to-tdtp and --to-csv,
+    # and ignored by --to-html and --to-xlsx. The xlsx pair is the clearest
+    # symptom: one output format, two behaviours, decided by whether the data
+    # came from a table or from a packet of that same table.
+    t = time.monotonic()
+    proj = out("t14_fields.xml")
+    p = run("--export", "users", "--fields", "ID,City", "--output", proj)
+    got = schema_names(proj)
+    record("T14.10 --export --fields projects to two columns",
+           p.returncode == 0 and got == ["ID", "City"], time.monotonic() - t,
+           f"fields={got}")
+
+    t = time.monotonic()
+    pf = out("t14_fields_tdtp.xml")
+    r = run_no_cfg("--to-tdtp", src, "--fields", "ID,City", "--output", pf, "--v14")
+    got = schema_names(pf)
+    record("T14.11 --to-tdtp --fields projects the packet schema too",
+           r.returncode == 0 and got == ["ID", "City"], time.monotonic() - t,
+           f"fields={got}")
+
+    t = time.monotonic()
+    hf = out("t14_fields.html")
+    r = run("--to-html", src, "--fields", "ID,City", "--output", hf)
+    heads = html_data_headers(hf)
+    record("T14.12 --to-html --fields renders two columns, not all eight",
+           r.returncode == 0 and heads == ["ID", "City"], time.monotonic() - t,
+           f"headers={heads}")
+
+    t = time.monotonic()
+    xf = out("t14_fields.xlsx")
+    r = run("--to-xlsx", src, "--fields", "ID,City", "--output", xf)
+    heads = xlsx_header(xf)
+    record("T14.13 --to-xlsx --fields writes two columns, like --export-xlsx does",
+           r.returncode == 0 and len(heads) == 2
+           and heads[0].startswith("ID") and heads[1].startswith("City"),
+           time.monotonic() - t, f"header={heads}")
+
+    # The filter must still see the columns the projection drops, which is why
+    # projection runs after filtering and not before.
+    t = time.monotonic()
+    xf2 = out("t14_fields_where.xlsx")
+    r = run("--to-xlsx", src, "--fields", "ID,City",
+            "--where", "Name = 'Grace Lee'", "--output", xf2)
+    heads = xlsx_header(xf2)
+    nrows = xlsx_row_count(xf2)
+    record("T14.14 --where on a column outside --fields still filters",
+           r.returncode == 0 and len(heads) == 2 and nrows == 2,
+           time.monotonic() - t, f"header={heads} rows_incl_header={nrows}")
 
 # ─── Runner ───────────────────────────────────────────────────────────────────
 

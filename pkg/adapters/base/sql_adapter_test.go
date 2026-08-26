@@ -1,10 +1,12 @@
 package base
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 func TestMSSQLAdapter_AdaptSQL_ANSIQuotedTableName(t *testing.T) {
@@ -241,5 +243,29 @@ func TestMSSQLAdapter_AdaptSQL_LeavesNonDatetimeStringsAlone(t *testing.T) {
 	}
 	if !strings.Contains(got, "'24626-1'") {
 		t.Errorf("regex damaged code-style value '24626-1': %s", got)
+	}
+}
+
+// OFFSET без LIMIT: генератор подставляет LIMIT maxint, чтобы SQL был валиден
+// в SQLite и MySQL. MSSQL выражает то же самое через OFFSET ... ROWS, поэтому
+// обязан этот LIMIT убрать — иначе в запросе останется синтаксис, которого
+// SQL Server не знает.
+func TestMSSQLAdapter_AdaptSQL_StripsOffsetOnlyLimit(t *testing.T) {
+	adapter := NewMSSQLAdapter("dbo")
+	schema := packet.Schema{Fields: []packet.Field{{Name: "ID"}, {Name: "Name"}}}
+
+	standardSQL := fmt.Sprintf(`SELECT * FROM "Users" LIMIT %d OFFSET 5`, tdtql.OffsetOnlyLimit)
+	query := &packet.Query{Offset: 5}
+
+	got := adapter.AdaptSQL(standardSQL, "Users", schema, query)
+
+	if strings.Contains(got, "LIMIT") {
+		t.Errorf("the sentinel LIMIT must be stripped for MSSQL; got: %s", got)
+	}
+	if !strings.Contains(got, "OFFSET 5 ROWS") {
+		t.Errorf("expected OFFSET 5 ROWS; got: %s", got)
+	}
+	if !strings.Contains(got, "ORDER BY") {
+		t.Errorf("OFFSET/FETCH requires ORDER BY; got: %s", got)
 	}
 }

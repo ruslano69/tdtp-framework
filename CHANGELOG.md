@@ -4,6 +4,65 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### `--offset` without `--limit` fell back to reading the whole table
+
+`SELECT ... OFFSET 5` is a syntax error in SQLite and in MySQL — both require a
+LIMIT first; PostgreSQL is the one that accepts it. The generator emitted
+exactly that form, the pushdown failed, and `ExportTableWithQuery` quietly
+switched to loading the entire table into memory and filtering there.
+
+The rows came back correct, so on a small table nothing looked wrong. On a large
+one it was not merely slow:
+
+```
+tdtpcli --export users --offset 5
+WARNING: SQL pushdown failed for table "users": SQL logic error: near "5": syntax error
+Error: fallback aborted: table "users" has 100000 rows (limit 1000).
+       SQL pushdown failed — fix the query or raise --fallback-row-limit
+```
+
+The advice is impossible to follow: there is nothing wrong with the query. Past
+`--fallback-row-limit` (default 1 000 000 rows) the export simply stopped.
+
+The generator now emits `LIMIT <maxint64> OFFSET n` when only an offset was
+asked for — the standard idiom for "everything from row N on", and the one form
+SQLite, MySQL and PostgreSQL all accept. A negative LIMIT, SQLite's own
+spelling, is rejected by the other two.
+
+The sentinel is an exported constant, `tdtql.OffsetOnlyLimit`, because the MSSQL
+adapter has to recognise and remove it: SQL Server expresses the same thing as
+`OFFSET n ROWS`, and a stray `LIMIT` would break the statement. That path has no
+live server here, so it is covered by an adapter unit test rather than a run.
+
+Measured after the fix: SQLite, MySQL and PostgreSQL all push the offset down,
+and `--export users --offset 5 --fallback-row-limit 1000` on a 100 000-row table
+now exports 99 995 rows instead of aborting.
+
+### `--to-html` and `--to-xlsx` ignored `--fields`
+
+Projection worked on `--export`, `--export-xlsx`, `--to-tdtp` and `--to-csv`,
+and was dropped on the two rendering commands. The xlsx pair shows it plainest:
+
+```
+--export-xlsx users --fields ID,City   ->  2 columns
+--to-xlsx     users.tdtp.xml --fields ID,City  ->  8 columns
+```
+
+One output format, two behaviours, decided by whether the data came from the
+table or from a packet of that same table.
+
+Both now project through `projectPacketFields`, the same function `--to-tdtp`
+uses, so schema and rows stay consistent. Projection runs **after** filtering,
+deliberately: `--where` may name a column the projection drops, and reversing
+the order would break that combination.
+
+Regression tests: `tests/cli/test_sqlite.py` T14.8-T14.14, plus
+`TestSQLGenerator_OffsetWithoutLimit`,
+`TestSQLGenerator_OffsetWithExplicitLimitUnchanged` and
+`TestMSSQLAdapter_AdaptSQL_StripsOffsetOnlyLimit`. T14.9 pins the offset case by
+running with `--fallback-row-limit 1`, which makes any return to the in-memory
+path fatal regardless of how small the table is.
+
 ### `--limit -N` returned the first N rows from a database, not the last N
 
 The flag is documented as "negative = last N rows (like tail -n)", and on a
