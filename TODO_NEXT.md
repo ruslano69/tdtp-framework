@@ -322,8 +322,17 @@ and the path needs deciding rather than pointing at `/tmp` again.
   `stats.Time != 0` after compressing three short rows. On Windows the clock is
   coarser than the work, so the assertion flakes. It is testing the timer, not
   the compressor — assert on the output instead.
-- `benchmarks/bench_duckdb` does not build with `CGO_ENABLED=0`, because
-  go-duckdb needs cgo. Gate it behind a build tag or document the requirement.
+- `benchmarks/bench_duckdb` needs cgo, which on this machine means the mingw64
+  under the user's home rather than the one on PATH — with the right compiler it
+  builds in under a minute. The old wording here said it "does not build", which
+  came from reading `cgo.exe: exit status 2` as "no cgo" instead of "wrong gcc".
+  Still worth a build tag or a line in the README so the requirement is stated
+  rather than discovered.
+- DuckDB as the pipeline workspace was tried and measured — three times slower
+  on load, because every `database/sql` call crosses into cgo and its fast path
+  is the Appender. Written up in `CLAUDE.md` so it is not re-derived; the code
+  was reverted rather than kept, since an engine seam with one implementation
+  buys nothing.
 
 ---
 
