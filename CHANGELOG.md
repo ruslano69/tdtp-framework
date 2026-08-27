@@ -4,6 +4,204 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### The workspace bypasses database/sql on both the write and the read
+
+`LoadData` and `ExecuteSQL` now go straight to the driver — prepared statements
+from `driver.ConnPrepareContext`, arguments as `[]driver.NamedValue`, rows read
+through `driver.Rows` — instead of through `database/sql`. The generic path
+stays as the fallback and is used whenever a driver does not offer those
+interfaces.
+
+What that removes is bookkeeping the profile had already named: `grabConn`,
+`driverArgsConnLocked`, `resultFromStatement`, `newResult`, and on the read side
+a `convertAssign` per cell that turns a driver value into a destination only to
+hand it back as a string.
+
+| | before | after |
+|---|---|---|
+| `LoadData`, 1M rows | 2.35 s | **2.00 s** (−15%) |
+| peak heap during it | 353 MB | **289 MB** (−18%) |
+| `ExecuteSQL`, 500k rows | 972 ms | **715 ms** (−26%) |
+| allocator churn there | 318 MB | **149 MB** (−53%) |
+
+**The read matters more than it looks.** In an aggregating report only 600 rows
+come back and it costs nothing — but most `transform.sql` in this repository is
+`SELECT * FROM table`, where the whole set travels back and the read costs what
+the write costs (196 ms against 193 ms per 100k rows). End to end on a
+2M-row passthrough pipeline: 18.4 → 16.2 s and 15.5 → 15.0 s.
+
+**These are small percentages taken on purpose.** Three of them compound to ten,
+and this project got where it is by accumulating exactly such measurements —
+the arena at −15%, chunked compression at −53%, batched inserts at −27%. An
+earlier draft of this entry argued the 3% was not worth the code; that was the
+wrong standard, and inconsistent with having accepted the batching change on the
+same arithmetic.
+
+Two things worth knowing before touching this code:
+
+**The fallback is only safe before the first write or read.** After that, falling
+back would duplicate rows or re-read a consumed cursor, so `errBulkUnsupported`
+is returned only from the setup phase and everything later propagates as a real
+error.
+
+**`driver.Value` does not accept `int`.** The boolean conversion had to become
+`int64`, because `convertAssign` — the layer being bypassed — used to fix that
+silently. `TestPassthrough_WorkspaceRoundTrip` caught it immediately.
+
+`TestBulkRead_MatchesGenericPath` compares the two readers field by field and
+cell by cell on dates, NULLs, numbers and booleans. Two implementations of one
+read is exactly the shape that drifts, and nothing else would notice.
+
+### Two pipeline sources on one SQLite file could not open it
+
+One database, several tables, several entries under `sources` — an ordinary
+shape, and it failed:
+
+```
+failed to load sources: source 'employees': failed to create adapter:
+failed to connect to sqlite: failed to ping database: database is locked (261)
+```
+
+`LoadAll` starts a goroutine per source, and each called `adapters.New` with its
+own DSN, so one file was opened twice **at the same time**. Every open switches
+the file to WAL, switching the journal takes an exclusive lock, and the second
+connection got 261 — `SQLITE_BUSY_RECOVERY` — on the ping itself.
+
+Worse than a plain refusal, it was a race: a three-source pipeline sometimes
+survived with only a warning, and started failing outright once the file was
+left in WAL mode.
+
+Fixed from both ends, and both are needed.
+
+**Sources that share a type, DSN and settings now share one connection.** The
+key includes the settings and not only the DSN, deliberately: an adapter carries
+mutable export state — `SetSkipSpecialValues` is set per source and never
+cleared — so pooling on the DSN alone would let a source with `fast: true`
+silently change how its neighbour from the same file handles markers. That
+trades a connection for quiet data corruption, which is the wrong direction.
+
+**`busy_timeout` moves into the connection string.** It cannot be set in time as
+a pragma: `applyPragmaOptimizations` runs after `PingContext`, and the conflict
+happens on the ping. The default is zero, so a busy file refuses immediately
+instead of waiting. In the DSN it applies from the open, and it covers what
+pooling cannot — a conflict with a *different process* holding the same file.
+An empty DSN is left alone: SQLite reads it as a private temporary database, and
+appending `?_pragma=…` turns it into a filename that does not exist.
+
+Measured on the repro: every configuration failed before, all pass after.
+
+The regression test does not catch the fault every time — roughly two runs in
+three — and that is inherent: the outcome depends on whose open lands inside
+someone else's journal switch. It also needs the file put into WAL beforehand;
+the first version of the test passed against the broken code because a freshly
+created database never reaches the recovery path. Both limits are written into
+the test rather than papered over.
+
+### `--stream` produced parts larger than `--packet-size` asked for
+
+The streaming partitioner measured each row as it arrived from the adapter,
+where a NULL is one byte, while the packet writes it as `[NULL]` — six. Parts
+therefore held more rows than they were sized for, and the error grew with the
+density of empty cells:
+
+| table | buffered | `--stream` |
+|---|---|---|
+| one nullable column in ten, 10% empty | 1807 KB | 1813 KB (+0.3%) |
+| eight all-empty date columns | 1799 KB | **2576 KB (+43%)** |
+
+```
+--packet-size 2   (2 MB per part requested)
+  buffered:  1.94 MB
+  --stream:  2.78 MB
+```
+
+**What this does and does not threaten, stated carefully**, because the first
+draft of this entry overstated it.
+
+The budget governs the **uncompressed** payload. Once compression is on, the
+size that actually leaves the machine is not controlled by `--packet-size` at
+all — it is whatever the codec achieves, three to five times smaller depending
+on the data. So the tidy story of "a part goes over the broker's limit" does not
+hold for a compressed packet: nobody can size to a hard external limit that way
+in the first place. It holds only for an uncompressed export, where the part is
+written roughly one to one.
+
+Peak memory is likewise a smaller effect than it sounds. `--stream` holds one
+part, and 43% of ~1.9 MB is under a megabyte against a measured peak of 60-odd.
+
+What is simply true is that the estimator measured something other than what
+gets written, so the same table exported two ways produced different files, and
+`--packet-size N` produced parts well over N on NULL-heavy data. That is worth
+fixing on its own terms — a cheap correctness fix in a size estimate — without
+a crisis attached to it.
+
+No data was ever at risk: both paths emit the same rows in the same order.
+
+`estimateRowSize` now measures a value as it will be written. Other markers are
+still measured raw, deliberately: they shrink a value (`Infinity` → `INF`) or
+leave its length alone, so measuring them raw over-estimates, and parts come out
+under budget rather than over.
+
+**The buffered path is untouched by construction** — it applies the markers
+before measuring, so it was already counting `[NULL]`. Checked against a binary
+built from the previous commit: the broker path sends 3 packets either way, a
+buffered file export splits into 9 parts either way, and the streamed one goes
+6 → 9. MSMQ was exercised end to end on the same NULL-heavy data with splitting
+forced: 3 packets out, 3 back, 20 000 rows, every NULL intact.
+
+The regression test compares the two partitioners on the same rows. Its first
+version passed against the broken code — four thousand narrow rows fit in a
+single part, so there were no boundaries to disagree about. It sets a small
+part-size budget now instead of relying on volume, and against the previous
+commit it reports 3 streamed parts against 6 buffered.
+
+### Opening a pipeline in tdtp-xray and saving it dropped ten of its thirteen output settings
+
+`cmd/tdtp-xray` declared its own `TDTPOutputConfig` with three fields —
+`destination`, `format`, `compression`. The real one, `pkg/etl.TDTPOutputConfig`,
+carries thirteen. The loss was doubly silent: `yaml.Unmarshal` ignores keys a
+struct has no field for, and saving wrote back only what survived. The result
+was still valid YAML — just a different pipeline:
+
+```
+compress_algo, compress_level, compact, compact_tail, fixed_fields,
+s3, fast, encryption, encryption_v13
+```
+
+The local copy is now a **type alias** to the real one, so there is a single
+declaration and the next field added to `pkg/etl` cannot go missing here. A copy
+with the ten fields written in would have drifted again on the eleventh, and
+drifted just as quietly.
+
+**The GUI still shows only what it showed before.** Settings it has no control
+for are kept as loaded and written back untouched — `tdtp-xray` is a bench for
+preparing and running pipelines against sample data, and opening a production
+pipeline in it should not cost that pipeline its settings. Whether the GUI
+should *offer* an encryption switch is a separate question, and this change
+deliberately leaves it open rather than answering it by accident.
+
+Two traps came with it, both covered by tests:
+
+**`compress` and `compression` are two YAML keys for one fact.** `pkg/etl` folds
+the first into the second and clears it; xray now does the same on load.
+Without that, a pipeline written with `compress: true` would show "no
+compression" in the GUI and come back with both keys set — one fact turned into
+two that can disagree.
+
+**Kept settings are cleared when another config is loaded.** Encryption leaking
+from one pipeline into another is worse than losing it: losing is visible.
+
+Tests cover the full path — YAML → app state → YAML — because the loss was in
+the transitions, not in the struct. They do not merely fail against the previous
+code, they **do not compile** against it: the fields were not declared.
+
+**Nothing compiles this module by default, and that is why the bug survived.**
+`cmd/tdtp-xray` is a separate module, absent from `go.work`, and it does not
+build standalone without `go mod tidy`. The new tests run only for someone who
+builds it deliberately. Adding `./cmd/tdtp-xray` to `go.work` would put it back
+under `go build ./...` at the cost of pulling the Wails dependency tree into the
+workspace — worth deciding, not worth deciding silently.
+
 ### `--offset` did not work on SQL Server below compatibility level 110
 
 The MSSQL adapter translated `--limit`/`--offset` into `OFFSET n ROWS FETCH NEXT

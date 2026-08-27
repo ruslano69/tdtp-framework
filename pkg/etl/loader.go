@@ -337,6 +337,20 @@ type Loader struct {
 	sources       []SourceConfig
 	errorHandling ErrorHandlingConfig
 	fast          bool // performance.fast global override
+
+	// adapters — по одному соединению на связку (тип, DSN, настройки).
+	//
+	// Раньше каждый источник открывал своё, и два источника на одном
+	// SQLite-файле открывали его ОДНОВРЕМЕННО: LoadAll поднимает горутину на
+	// источник. Каждое открытие переводит файл в WAL, перевод журнала берёт
+	// исключительную блокировку — и второй источник получал "database is locked
+	// (261)" на проверке соединения. Три прогона из трёх; с третьим источником
+	// в середине иногда проходило, что хуже стабильного отказа.
+	//
+	// Одна база, несколько таблиц, несколько записей в sources — обычная
+	// конфигурация, а не экзотика.
+	adaptersMu sync.Mutex
+	adapters   map[string]adapters.Adapter
 }
 
 // NewLoader создает новый загрузчик данных
@@ -359,6 +373,8 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 	if len(l.sources) == 0 {
 		return nil, fmt.Errorf("no sources configured")
 	}
+
+	defer l.closeAdapters(ctx)
 
 	// Канал для результатов
 	results := make(chan SourceData, len(l.sources))
@@ -442,6 +458,8 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 		return nil, fmt.Errorf("source '%s' not found", sourceName)
 	}
 
+	defer l.closeAdapters(ctx)
+
 	// Загружаем данные
 	pkt, err := l.loadFromSource(ctx, *source)
 	if err != nil {
@@ -457,6 +475,68 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 		TableName:  source.Name,
 		Packet:     pkt,
 	}, nil
+}
+
+// adapterKey — ключ пула.
+//
+// В него входит не только DSN, но и НАСТРОЙКИ, потому что адаптер несёт
+// изменяемое состояние экспорта: SetSkipSpecialValues ставится на источник и
+// обратно не сбрасывается. Общий адаптер с общим ключом по одному DSN означал
+// бы, что источник с fast: true молча включает пропуск маркеров соседнему
+// источнику из того же файла — тихая порча данных вместо экономии соединения.
+func adapterKey(source SourceConfig, fast bool) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%t",
+		source.Type, source.DSN, strings.Join(source.NoDateSentinels, ","), fast)
+}
+
+// adapterFor возвращает соединение для источника, открывая его при первом
+// обращении. Закрывает их всех closeAdapters, а не вызывающий: соединение
+// теперь переживает загрузку одного источника.
+func (l *Loader) adapterFor(ctx context.Context, source SourceConfig, fast bool) (adapters.Adapter, error) {
+	key := adapterKey(source, fast)
+
+	l.adaptersMu.Lock()
+	defer l.adaptersMu.Unlock()
+
+	if a, ok := l.adapters[key]; ok {
+		return a, nil
+	}
+
+	a, err := adapters.New(ctx, adapters.Config{
+		Type:            source.Type,
+		DSN:             source.DSN,
+		NoDateSentinels: source.NoDateSentinels,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Настройки ставятся ОДИН раз, при создании: ключ пула их учитывает, так
+	// что каждый адаптер обслуживает источники с одинаковыми настройками.
+	if fast {
+		type specialValueSkipper interface{ SetSkipSpecialValues(bool) }
+		if sv, ok := a.(specialValueSkipper); ok {
+			sv.SetSkipSpecialValues(true)
+		}
+	}
+
+	if l.adapters == nil {
+		l.adapters = make(map[string]adapters.Adapter)
+	}
+	l.adapters[key] = a
+	return a, nil
+}
+
+// closeAdapters закрывает все открытые соединения. Вызывается по завершении
+// загрузки, а не по завершении источника.
+func (l *Loader) closeAdapters(ctx context.Context) {
+	l.adaptersMu.Lock()
+	defer l.adaptersMu.Unlock()
+
+	for key, a := range l.adapters {
+		_ = a.Close(ctx)
+		delete(l.adapters, key)
+	}
 }
 
 // loadFromSource загружает данные из конкретного источника
@@ -488,24 +568,14 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	}
 	_ = timeoutCtx // используется далее
 
-	// Создаем адаптер для источника
-	adapter, err := adapters.New(timeoutCtx, adapters.Config{
-		Type:            source.Type,
-		DSN:             source.DSN,
-		NoDateSentinels: source.NoDateSentinels,
-	})
+	// Соединение из пула: источники с одинаковыми типом, DSN и настройками
+	// делят одно. Закрывает их closeAdapters по завершении загрузки.
+	//
+	// --fast здесь уже не ставится: он входит в ключ пула и применяется при
+	// создании адаптера. Посточниковый флаг важнее глобального.
+	adapter, err := l.adapterFor(timeoutCtx, source, source.Fast || l.fast)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
-	}
-	defer func() { _ = adapter.Close(timeoutCtx) }()
-
-	// --fast: skip SpecialValues detection. Per-source flag takes precedence
-	// over the global performance.fast loader flag.
-	if source.Fast || l.fast {
-		type specialValueSkipper interface{ SetSkipSpecialValues(bool) }
-		if sv, ok := adapter.(specialValueSkipper); ok {
-			sv.SetSkipSpecialValues(true)
-		}
 	}
 
 	// Проверяем соединение

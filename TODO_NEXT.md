@@ -209,53 +209,59 @@ work rather than evaluation, which is why they are Tier 2 and not Tier 1.
 Go comments (~153 K) are deliberately **not** on this list; the reasoning is
 kept in `docs/ru-archive/` unchanged.
 
-### The two partitioners disagree on NULL-bearing data
+### ~~The two partitioners disagree on NULL-bearing data~~ — done
 
-A streamed export fits about 0.3% more rows per part than the buffered one when
-the table holds NULLs, and its parts run correspondingly over the size asked
-for. On a NULL-free table the two agree exactly, boundary for boundary —
-measured both ways on the same 100k-row table, with and without a nullable
-column.
+Both halves of the entry that stood here were wrong, and worth recording as a
+lesson rather than quietly replacing.
 
-The cause is *when* the markers go on. The buffered path runs `DetectAndApply`
-over the whole set before partitioning, so `estimateRowSize` measures `[NULL]`
-— six characters. The streaming path applies markers per part, by which time
-the row has already been counted at its raw one-byte size.
+**The size was the dataset, not the defect.** It said "about 0.3%", which was
+one table with a single nullable column in ten. The undercount scales with NULL
+density: on eight all-empty date columns it reached **43%** — 2.78 MB where
+`--packet-size 2` asked for 2.
 
-**No data is affected** and no check that compares content fails: both paths
-emit the same rows in the same order. What is not true, and was quietly assumed,
-is that one table exported both ways yields byte-identical files.
+Note what the budget actually governs, because it is easy to overstate: the
+**uncompressed** payload. With compression on, what leaves the machine is
+whatever the codec achieves — three to five times smaller, data-dependent — so
+sizing to a hard external limit through this flag was never possible for a
+compressed packet anyway. The overshoot bites on uncompressed exports, and the
+plain fact underneath is simply that the estimator measured something other than
+what gets written.
 
-The obvious fix is not obviously right. Applying markers per row on arrival
-would make the streaming estimate match, but `DetectAndApply` decides what to
-declare in the *schema* from the whole set, so per-row is not the same
-operation. Worth a measurement before a design: the error is 0.3%, and a part
-that overshoots its budget by 0.3% matters only where the budget is a hard
-external limit — which is the broker case, and the broker path is buffered.
+**And the fix was smaller than the entry claimed.** It said the obvious remedy
+was not obviously right, because moving `DetectAndApply` would be a redesign.
+Nothing had to move: `estimateRowSize` measured the raw row while the markers go
+on later, so it was enough to measure a value as it will be written — NUL counts
+as the six characters of `[NULL]`. Other markers shrink a value or leave it
+alone, so measuring them raw over-estimates, and that is the safe direction.
 
-Noticed while wiring `--packet-size` into the file export, not caused by it.
-`tests/cli/test_postgres.py` T9.18 asserts the boundaries match and passes
-because its fixture has no NULLs; the comment there says so, so that a NULL
-added to the fixture reads as a fixture change and not a regression.
+The buffered path is untouched by construction: it applies markers before
+measuring, so it was already counting `[NULL]`. Verified against a binary built
+from the previous commit — broker 3 packets either way, buffered file export 9
+parts either way, streamed 6 → 9.
 
-### `cmd/tdtp-xray` writes a lossy pipeline config
+### ~~`cmd/tdtp-xray` writes a lossy pipeline config~~ — done
 
-`app.go:1671` declares its own `TDTPOutputConfig` with three fields —
-`destination`, `format`, `compression`. The real one, `pkg/etl/config.go:144`,
-has thirteen. Saving a pipeline from the GUI therefore drops ten of them,
-**`encryption` among them**, along with `compact`, `fixed_fields`,
-`compress_algo`, `compress_level`, `s3` and `fast`. Silently: the YAML is
-written, it parses, and the settings are simply not in it.
+The local `TDTPOutputConfig` is a type alias to `pkg/etl.TDTPOutputConfig` now,
+so there is one declaration instead of two, and settings the GUI has no control
+for survive a load-and-save round trip untouched.
 
-The reason it was copied rather than imported is worth knowing before choosing a
-fix. Wails serializes the struct to the frontend as JSON, and the `pkg/etl`
-version carries `yaml` tags only. So it is either json tags on
-`pkg/etl.TDTPOutputConfig` and a type alias in xray — one declaration, the
-duplication gone — or a field-by-field sync that will drift again on the next
-field added.
+**No encryption switch was added to the GUI, deliberately.** The bug was never
+"xray lacks a checkbox" — it was "xray destroyed what it did not understand".
+Those are different problems, and only the second one was ours to fix.
 
-Diagnosed, not fixed. The choice is a contract decision, and the GUI cannot be
-exercised from here.
+**Do not add `./cmd/tdtp-xray` to `go.work`** — asked and answered
+(2026-08-27). It would put the module back under `go build ./...` and drag the
+Wails dependency tree into the workspace, and the value is not there any more:
+
+Practice has moved the tool's role. Agents turn out to write pipeline YAML
+better than the visual builder does, so what remains for xray is **visual
+inspection**, not authoring. That reframes what matters about it: a viewer must
+never corrupt what it opens, which is exactly the property just fixed, and it
+does not need to understand every field to be useful. Coverage of a builder it
+is no longer being used as would be the wrong thing to buy.
+
+The module still does not build standalone without `go mod tidy`. Left as is
+for the same reason.
 
 ### Complexity outliers — funcfinder, 2026-08-25
 
@@ -316,8 +322,17 @@ and the path needs deciding rather than pointing at `/tmp` again.
   `stats.Time != 0` after compressing three short rows. On Windows the clock is
   coarser than the work, so the assertion flakes. It is testing the timer, not
   the compressor — assert on the output instead.
-- `benchmarks/bench_duckdb` does not build with `CGO_ENABLED=0`, because
-  go-duckdb needs cgo. Gate it behind a build tag or document the requirement.
+- `benchmarks/bench_duckdb` needs cgo, which on this machine means the mingw64
+  under the user's home rather than the one on PATH — with the right compiler it
+  builds in under a minute. The old wording here said it "does not build", which
+  came from reading `cgo.exe: exit status 2` as "no cgo" instead of "wrong gcc".
+  Still worth a build tag or a line in the README so the requirement is stated
+  rather than discovered.
+- DuckDB as the pipeline workspace was tried and measured — three times slower
+  on load, because every `database/sql` call crosses into cgo and its fast path
+  is the Appender. Written up in `CLAUDE.md` so it is not re-derived; the code
+  was reverted rather than kept, since an engine seam with one implementation
+  buys nothing.
 
 ---
 

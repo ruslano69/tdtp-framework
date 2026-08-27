@@ -31,6 +31,14 @@ type App struct {
 	transform    *Transform
 	output       *Output
 	settings     Settings
+	// tdtpOutputKept — настройки вывода TDTP, прочитанные из открытого файла и
+	// не представленные в GUI (compress_algo, compact, fixed_fields, s3,
+	// encryption и прочие). Хранятся, чтобы вернуть их при сохранении: ни один
+	// экран их не показывает, но и терять их открытие файла не должно.
+	//
+	// Обнуляется при каждой загрузке конфига — иначе настройки одного пайплайна
+	// перетекли бы в другой, а это хуже потери: потеря хотя бы заметна.
+	tdtpOutputKept *TDTPOutputConfig
 	// Mode: "mock" or "production"
 	mode string
 	// Services
@@ -1175,11 +1183,18 @@ func (a *App) buildOutputConfig() OutputConfig {
 	case "tdtp_file":
 		if a.output.File != nil {
 			config.Type = "tdtp" // Normalize to tdtpcli format
-			config.TDTP = &TDTPOutputConfig{
-				Destination: a.output.File.Destination,
-				Format:      "xml",
-				Compression: a.output.File.Compression,
+
+			// Начинаем с того, что было в открытом файле, и переписываем только
+			// то, чем GUI действительно управляет. Без этого сохранение
+			// стирало бы всё остальное — см. TDTPOutputConfig.
+			tdtp := TDTPOutputConfig{}
+			if a.tdtpOutputKept != nil {
+				tdtp = *a.tdtpOutputKept
 			}
+			tdtp.Destination = a.output.File.Destination
+			tdtp.Format = "xml"
+			tdtp.Compression = a.output.File.Compression
+			config.TDTP = &tdtp
 		}
 	case "rabbitmq":
 		if a.output.Broker != nil {
@@ -1667,12 +1682,21 @@ type XLSXOutputConfig struct {
 	Sheet       string `yaml:"sheet,omitempty" json:"sheet,omitempty"`
 }
 
-// TDTPOutputConfig for TDTP protocol output
-type TDTPOutputConfig struct {
-	Destination string `yaml:"destination" json:"destination"` // File path
-	Format      string `yaml:"format" json:"format"`           // xml, json
-	Compression bool   `yaml:"compression,omitempty" json:"compression,omitempty"`
-}
+// TDTPOutputConfig — ТОТ ЖЕ тип, что читает и пишет tdtpcli.
+//
+// Здесь стояла своя копия на три поля: destination, format, compression.
+// Настоящая, pkg/etl.TDTPOutputConfig, несёт тринадцать, и разница уходила в
+// тишину: yaml.Unmarshal просто пропускает ключи, которых нет в структуре, а
+// сохранение писало обратно то, что осталось. Пайплайн, открытый в xray и
+// сохранённый, терял compress_algo, compress_level, compact, compact_tail,
+// fixed_fields, s3, fast, encryption и encryption_v13.
+//
+// Псевдоним, а не копия с дописанными полями: копия разошлась бы снова на
+// следующем добавленном поле, и разошлась бы так же молча.
+//
+// До фронтенда этот тип не доходит — GUI редактирует собственную модель
+// Output/TDTPFileOutput, — поэтому json-теги оригинала роли не играют.
+type TDTPOutputConfig = etl.TDTPOutputConfig
 
 // RabbitMQOutputConfig for RabbitMQ output
 type RabbitMQOutputConfig struct {
@@ -1812,6 +1836,10 @@ func (a *App) LoadConfigurationFile() ConfigFileResult {
 // loadConfigFromYAML loads a parsed TDTPConfig into App state (sources, transform, output, settings).
 // Does NOT set canvasDesign — callers decide canvas restoration strategy.
 func (a *App) loadConfigFromYAML(config *TDTPConfig) {
+	// Настройки предыдущего конфига не должны пережить загрузку следующего.
+	// loadOutputFromConfig заполнит это заново, если новый конфиг пишет в TDTP.
+	a.tdtpOutputKept = nil
+
 	if config.Sources == nil {
 		config.Sources = make([]SourceConfig, 0)
 	}
@@ -2127,9 +2155,25 @@ func (a *App) loadOutputFromConfig(outputConfig *OutputConfig) *Output {
 	case "tdtp":
 		if outputConfig.TDTP != nil {
 			output.Type = "tdtp_file" // Convert to GUI format
+
+			// Настройки, которых нет в GUI, сохраняются как есть и
+			// возвращаются при записи. xray — стенд для подготовки и прогона
+			// пайплайнов на образцах, и открыть здесь боевой пайплайн не должно
+			// значить лишиться его настроек: чего не понимаем, того не трогаем.
+			kept := *outputConfig.TDTP
+			// compress — второй YAML-ключ для того же факта, что и compression;
+			// pkg/etl складывает его в compression и обнуляет. Повторяем это
+			// здесь, иначе GUI показал бы «сжатия нет» у файла с compress: true,
+			// а сохранение записало бы оба ключа сразу.
+			if kept.Compress {
+				kept.Compression = true
+				kept.Compress = false
+			}
+			a.tdtpOutputKept = &kept
+
 			output.File = &TDTPFileOutput{
 				Destination:   outputConfig.TDTP.Destination,
-				Compression:   outputConfig.TDTP.Compression,
+				Compression:   kept.Compression,
 				CompressLevel: 3,
 			}
 		}
