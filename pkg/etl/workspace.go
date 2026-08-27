@@ -3,6 +3,7 @@ package etl
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -86,8 +87,26 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	fields := dataPacket.Schema.Fields
 	numFields := len(fields)
 
+	// Длина строк проверяется ОДНИМ проходом до вставки, а не по дороге:
+	// быстрый путь получает уже проверенные строки, и короткая строка находится
+	// до того, как половина пачки записана.
+	for i, values := range rows {
+		if len(values) != numFields {
+			return fmt.Errorf("row %d has %d values, expected %d", i, len(values), numFields)
+		}
+	}
+
 	rowTuple := "(" + strings.TrimSuffix(strings.Repeat("?, ", numFields), ", ") + ")"
 	batchRows := insertBatchRows(numFields)
+
+	// Быстрый путь: вставка минуя обвязку database/sql. errBulkUnsupported
+	// означает "драйвер не подошёл, ничего не записано" — только тогда откат на
+	// общий путь ниже безопасен.
+	if err := w.bulkLoadViaDriver(ctx, tableName, fields, rows, batchRows); err == nil {
+		return nil
+	} else if !errors.Is(err, errBulkUnsupported) {
+		return err
+	}
 
 	// Начинаем транзакцию для производительности
 	tx, err := w.db.BeginTx(ctx, nil)
@@ -122,9 +141,6 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 	batchStart := 0
 
 	for i, values := range rows {
-		if len(values) != numFields {
-			return fmt.Errorf("row %d has %d values, expected %d", i, len(values), numFields)
-		}
 		for j, val := range values {
 			args = append(args, w.convertValue(val, fields[j].Type))
 		}
@@ -187,6 +203,22 @@ func insertBatchRows(numFields int) int {
 
 // ExecuteSQL выполняет SQL запрос в workspace и возвращает результат как DataPacket
 func (w *Workspace) ExecuteSQL(ctx context.Context, sqlQuery, resultTableName string) (*packet.DataPacket, error) {
+	// Быстрый путь: чтение минуя обвязку database/sql. errBulkUnsupported
+	// означает "драйвер не подошёл, не прочитано ни строки" — только тогда
+	// откат на общий путь ниже безопасен.
+	if pkt, err := w.bulkReadViaDriver(ctx, sqlQuery, resultTableName); err == nil {
+		return pkt, nil
+	} else if !errors.Is(err, errBulkUnsupported) {
+		return nil, err
+	}
+
+	return w.executeSQLGeneric(ctx, sqlQuery, resultTableName)
+}
+
+// executeSQLGeneric — общий путь чтения через database/sql. Работает у любого
+// драйвера и служит запасным для bulkReadViaDriver; вызывается напрямую только
+// из теста, сверяющего два пути между собой.
+func (w *Workspace) executeSQLGeneric(ctx context.Context, sqlQuery, resultTableName string) (*packet.DataPacket, error) {
 	// Выполняем SELECT запрос
 	rows, err := w.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
@@ -427,10 +459,13 @@ func (w *Workspace) convertValue(value, fieldType string) any {
 		return value
 	case schema.TypeBoolean, schema.TypeBool:
 		// Конвертируем boolean в 0/1
+		// int64, а не int: быстрый путь отдаёт значения драйверу напрямую, а
+		// driver.Value принимает только int64. Раньше это чинил convertAssign
+		// внутри database/sql — тот самый слой, который путь обходит.
 		if value == "true" || value == "1" || value == "TRUE" {
-			return 1
+			return int64(1)
 		}
-		return 0
+		return int64(0)
 	default:
 		return value
 	}

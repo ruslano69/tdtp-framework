@@ -4,6 +4,54 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### The workspace bypasses database/sql on both the write and the read
+
+`LoadData` and `ExecuteSQL` now go straight to the driver — prepared statements
+from `driver.ConnPrepareContext`, arguments as `[]driver.NamedValue`, rows read
+through `driver.Rows` — instead of through `database/sql`. The generic path
+stays as the fallback and is used whenever a driver does not offer those
+interfaces.
+
+What that removes is bookkeeping the profile had already named: `grabConn`,
+`driverArgsConnLocked`, `resultFromStatement`, `newResult`, and on the read side
+a `convertAssign` per cell that turns a driver value into a destination only to
+hand it back as a string.
+
+| | before | after |
+|---|---|---|
+| `LoadData`, 1M rows | 2.35 s | **2.00 s** (−15%) |
+| peak heap during it | 353 MB | **289 MB** (−18%) |
+| `ExecuteSQL`, 500k rows | 972 ms | **715 ms** (−26%) |
+| allocator churn there | 318 MB | **149 MB** (−53%) |
+
+**The read matters more than it looks.** In an aggregating report only 600 rows
+come back and it costs nothing — but most `transform.sql` in this repository is
+`SELECT * FROM table`, where the whole set travels back and the read costs what
+the write costs (196 ms against 193 ms per 100k rows). End to end on a
+2M-row passthrough pipeline: 18.4 → 16.2 s and 15.5 → 15.0 s.
+
+**These are small percentages taken on purpose.** Three of them compound to ten,
+and this project got where it is by accumulating exactly such measurements —
+the arena at −15%, chunked compression at −53%, batched inserts at −27%. An
+earlier draft of this entry argued the 3% was not worth the code; that was the
+wrong standard, and inconsistent with having accepted the batching change on the
+same arithmetic.
+
+Two things worth knowing before touching this code:
+
+**The fallback is only safe before the first write or read.** After that, falling
+back would duplicate rows or re-read a consumed cursor, so `errBulkUnsupported`
+is returned only from the setup phase and everything later propagates as a real
+error.
+
+**`driver.Value` does not accept `int`.** The boolean conversion had to become
+`int64`, because `convertAssign` — the layer being bypassed — used to fix that
+silently. `TestPassthrough_WorkspaceRoundTrip` caught it immediately.
+
+`TestBulkRead_MatchesGenericPath` compares the two readers field by field and
+cell by cell on dates, NULLs, numbers and booleans. Two implementations of one
+read is exactly the shape that drifts, and nothing else would notice.
+
 ### Two pipeline sources on one SQLite file could not open it
 
 One database, several tables, several entries under `sources` — an ordinary
