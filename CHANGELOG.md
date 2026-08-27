@@ -4,6 +4,64 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### `--stream` produced parts larger than `--packet-size` asked for
+
+The streaming partitioner measured each row as it arrived from the adapter,
+where a NULL is one byte, while the packet writes it as `[NULL]` — six. Parts
+therefore held more rows than they were sized for, and the error grew with the
+density of empty cells:
+
+| table | buffered | `--stream` |
+|---|---|---|
+| one nullable column in ten, 10% empty | 1807 KB | 1813 KB (+0.3%) |
+| eight all-empty date columns | 1799 KB | **2576 KB (+43%)** |
+
+```
+--packet-size 2   (2 MB per part requested)
+  buffered:  1.94 MB
+  --stream:  2.78 MB
+```
+
+**What this does and does not threaten, stated carefully**, because the first
+draft of this entry overstated it.
+
+The budget governs the **uncompressed** payload. Once compression is on, the
+size that actually leaves the machine is not controlled by `--packet-size` at
+all — it is whatever the codec achieves, three to five times smaller depending
+on the data. So the tidy story of "a part goes over the broker's limit" does not
+hold for a compressed packet: nobody can size to a hard external limit that way
+in the first place. It holds only for an uncompressed export, where the part is
+written roughly one to one.
+
+Peak memory is likewise a smaller effect than it sounds. `--stream` holds one
+part, and 43% of ~1.9 MB is under a megabyte against a measured peak of 60-odd.
+
+What is simply true is that the estimator measured something other than what
+gets written, so the same table exported two ways produced different files, and
+`--packet-size N` produced parts well over N on NULL-heavy data. That is worth
+fixing on its own terms — a cheap correctness fix in a size estimate — without
+a crisis attached to it.
+
+No data was ever at risk: both paths emit the same rows in the same order.
+
+`estimateRowSize` now measures a value as it will be written. Other markers are
+still measured raw, deliberately: they shrink a value (`Infinity` → `INF`) or
+leave its length alone, so measuring them raw over-estimates, and parts come out
+under budget rather than over.
+
+**The buffered path is untouched by construction** — it applies the markers
+before measuring, so it was already counting `[NULL]`. Checked against a binary
+built from the previous commit: the broker path sends 3 packets either way, a
+buffered file export splits into 9 parts either way, and the streamed one goes
+6 → 9. MSMQ was exercised end to end on the same NULL-heavy data with splitting
+forced: 3 packets out, 3 back, 20 000 rows, every NULL intact.
+
+The regression test compares the two partitioners on the same rows. Its first
+version passed against the broken code — four thousand narrow rows fit in a
+single part, so there were no boundaries to disagree about. It sets a small
+part-size budget now instead of relying on volume, and against the previous
+commit it reports 3 streamed parts against 6 buffered.
+
 ### Opening a pipeline in tdtp-xray and saving it dropped ten of its thirteen output settings
 
 `cmd/tdtp-xray` declared its own `TDTPOutputConfig` with three fields —

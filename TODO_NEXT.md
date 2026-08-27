@@ -209,34 +209,35 @@ work rather than evaluation, which is why they are Tier 2 and not Tier 1.
 Go comments (~153 K) are deliberately **not** on this list; the reasoning is
 kept in `docs/ru-archive/` unchanged.
 
-### The two partitioners disagree on NULL-bearing data
+### ~~The two partitioners disagree on NULL-bearing data~~ — done
 
-A streamed export fits about 0.3% more rows per part than the buffered one when
-the table holds NULLs, and its parts run correspondingly over the size asked
-for. On a NULL-free table the two agree exactly, boundary for boundary —
-measured both ways on the same 100k-row table, with and without a nullable
-column.
+Both halves of the entry that stood here were wrong, and worth recording as a
+lesson rather than quietly replacing.
 
-The cause is *when* the markers go on. The buffered path runs `DetectAndApply`
-over the whole set before partitioning, so `estimateRowSize` measures `[NULL]`
-— six characters. The streaming path applies markers per part, by which time
-the row has already been counted at its raw one-byte size.
+**The size was the dataset, not the defect.** It said "about 0.3%", which was
+one table with a single nullable column in ten. The undercount scales with NULL
+density: on eight all-empty date columns it reached **43%** — 2.78 MB where
+`--packet-size 2` asked for 2.
 
-**No data is affected** and no check that compares content fails: both paths
-emit the same rows in the same order. What is not true, and was quietly assumed,
-is that one table exported both ways yields byte-identical files.
+Note what the budget actually governs, because it is easy to overstate: the
+**uncompressed** payload. With compression on, what leaves the machine is
+whatever the codec achieves — three to five times smaller, data-dependent — so
+sizing to a hard external limit through this flag was never possible for a
+compressed packet anyway. The overshoot bites on uncompressed exports, and the
+plain fact underneath is simply that the estimator measured something other than
+what gets written.
 
-The obvious fix is not obviously right. Applying markers per row on arrival
-would make the streaming estimate match, but `DetectAndApply` decides what to
-declare in the *schema* from the whole set, so per-row is not the same
-operation. Worth a measurement before a design: the error is 0.3%, and a part
-that overshoots its budget by 0.3% matters only where the budget is a hard
-external limit — which is the broker case, and the broker path is buffered.
+**And the fix was smaller than the entry claimed.** It said the obvious remedy
+was not obviously right, because moving `DetectAndApply` would be a redesign.
+Nothing had to move: `estimateRowSize` measured the raw row while the markers go
+on later, so it was enough to measure a value as it will be written — NUL counts
+as the six characters of `[NULL]`. Other markers shrink a value or leave it
+alone, so measuring them raw over-estimates, and that is the safe direction.
 
-Noticed while wiring `--packet-size` into the file export, not caused by it.
-`tests/cli/test_postgres.py` T9.18 asserts the boundaries match and passes
-because its fixture has no NULLs; the comment there says so, so that a NULL
-added to the fixture reads as a fixture change and not a regression.
+The buffered path is untouched by construction: it applies markers before
+measuring, so it was already counting `[NULL]`. Verified against a binary built
+from the previous commit — broker 3 packets either way, buffered file export 9
+parts either way, streamed 6 → 9.
 
 ### ~~`cmd/tdtp-xray` writes a lossy pipeline config~~ — done
 
