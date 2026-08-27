@@ -194,9 +194,10 @@ func newTestWorkspace(t *testing.T, ctx context.Context) *Workspace {
 // дате» отказ не даёт, и баг дожил до сюда.
 //
 // На боевом пайплайне это выглядело так:
-//   Error: pipeline execution failed: failed to execute transformation:
-//   failed to scan row: sql: Scan error on column index 2, name "d_date":
-//   converting NULL to string is unsupported
+//
+//	Error: pipeline execution failed: failed to execute transformation:
+//	failed to scan row: sql: Scan error on column index 2, name "d_date":
+//	converting NULL to string is unsupported
 func TestWorkspace_LeftJoinUnmatchedDate(t *testing.T) {
 	ctx := context.Background()
 	ws := newTestWorkspace(t, ctx)
