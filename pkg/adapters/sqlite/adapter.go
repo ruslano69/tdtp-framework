@@ -36,10 +36,49 @@ type Adapter struct {
 	converter    *base.UniversalTypeConverter
 }
 
+// defaultBusyTimeoutMS — сколько ждать освобождения блокировки, если файл занят.
+const defaultBusyTimeoutMS = 5000
+
+// withBusyTimeout дописывает busy_timeout в строку подключения.
+//
+// Прагмой это поставить вовремя НЕЛЬЗЯ, и в этом всё дело: applyPragmaOptimizations
+// выполняется после PingContext, а конфликт случается на самом ping. По
+// умолчанию busy_timeout равен нулю, то есть занятый файл даёт отказ
+// немедленно, не подождав.
+//
+// Наблюдалось так: два источника пайплайна на одном SQLite-файле грузятся
+// параллельно (LoadAll поднимает горутину на источник), каждый переводит файл в
+// WAL, перевод журнала берёт исключительную блокировку — и второй получает
+// "database is locked (261)", то есть SQLITE_BUSY_RECOVERY, прямо на проверке
+// соединения. Три прогона из трёх.
+//
+// Заданный в DSN, таймаут действует с открытия и покрывает то, чего не достаёт
+// общий адаптер: конфликт с ДРУГИМ процессом, держащим тот же файл.
+//
+// Явное значение вызывающего не трогаем — если busy_timeout уже в строке, он
+// знает лучше.
+func withBusyTimeout(dsn string) string {
+	// Пустой DSN оставляем как есть. SQLite понимает его как приватную
+	// временную базу, а "?_pragma=..." превращает его в имя файла, которого
+	// нет: "unable to open database file: out of memory (14)". Поймано
+	// TestFactory_ConfigValidation/Empty_DSN, и поделом.
+	if dsn == "" {
+		return dsn
+	}
+	if strings.Contains(dsn, "busy_timeout") {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return fmt.Sprintf("%s%s_pragma=busy_timeout(%d)", dsn, sep, defaultBusyTimeoutMS)
+}
+
 // Connect устанавливает подключение к SQLite
 // Реализует интерфейс adapters.Adapter
 func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
-	db, err := sql.Open(driverSqlite, cfg.DSN)
+	db, err := sql.Open(driverSqlite, withBusyTimeout(cfg.DSN))
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

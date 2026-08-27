@@ -4,6 +4,51 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### Two pipeline sources on one SQLite file could not open it
+
+One database, several tables, several entries under `sources` — an ordinary
+shape, and it failed:
+
+```
+failed to load sources: source 'employees': failed to create adapter:
+failed to connect to sqlite: failed to ping database: database is locked (261)
+```
+
+`LoadAll` starts a goroutine per source, and each called `adapters.New` with its
+own DSN, so one file was opened twice **at the same time**. Every open switches
+the file to WAL, switching the journal takes an exclusive lock, and the second
+connection got 261 — `SQLITE_BUSY_RECOVERY` — on the ping itself.
+
+Worse than a plain refusal, it was a race: a three-source pipeline sometimes
+survived with only a warning, and started failing outright once the file was
+left in WAL mode.
+
+Fixed from both ends, and both are needed.
+
+**Sources that share a type, DSN and settings now share one connection.** The
+key includes the settings and not only the DSN, deliberately: an adapter carries
+mutable export state — `SetSkipSpecialValues` is set per source and never
+cleared — so pooling on the DSN alone would let a source with `fast: true`
+silently change how its neighbour from the same file handles markers. That
+trades a connection for quiet data corruption, which is the wrong direction.
+
+**`busy_timeout` moves into the connection string.** It cannot be set in time as
+a pragma: `applyPragmaOptimizations` runs after `PingContext`, and the conflict
+happens on the ping. The default is zero, so a busy file refuses immediately
+instead of waiting. In the DSN it applies from the open, and it covers what
+pooling cannot — a conflict with a *different process* holding the same file.
+An empty DSN is left alone: SQLite reads it as a private temporary database, and
+appending `?_pragma=…` turns it into a filename that does not exist.
+
+Measured on the repro: every configuration failed before, all pass after.
+
+The regression test does not catch the fault every time — roughly two runs in
+three — and that is inherent: the outcome depends on whose open lands inside
+someone else's journal switch. It also needs the file put into WAL beforehand;
+the first version of the test passed against the broken code because a freshly
+created database never reaches the recovery path. Both limits are written into
+the test rather than papered over.
+
 ### `--stream` produced parts larger than `--packet-size` asked for
 
 The streaming partitioner measured each row as it arrived from the adapter,
