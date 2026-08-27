@@ -4,6 +4,53 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### Opening a pipeline in tdtp-xray and saving it dropped ten of its thirteen output settings
+
+`cmd/tdtp-xray` declared its own `TDTPOutputConfig` with three fields —
+`destination`, `format`, `compression`. The real one, `pkg/etl.TDTPOutputConfig`,
+carries thirteen. The loss was doubly silent: `yaml.Unmarshal` ignores keys a
+struct has no field for, and saving wrote back only what survived. The result
+was still valid YAML — just a different pipeline:
+
+```
+compress_algo, compress_level, compact, compact_tail, fixed_fields,
+s3, fast, encryption, encryption_v13
+```
+
+The local copy is now a **type alias** to the real one, so there is a single
+declaration and the next field added to `pkg/etl` cannot go missing here. A copy
+with the ten fields written in would have drifted again on the eleventh, and
+drifted just as quietly.
+
+**The GUI still shows only what it showed before.** Settings it has no control
+for are kept as loaded and written back untouched — `tdtp-xray` is a bench for
+preparing and running pipelines against sample data, and opening a production
+pipeline in it should not cost that pipeline its settings. Whether the GUI
+should *offer* an encryption switch is a separate question, and this change
+deliberately leaves it open rather than answering it by accident.
+
+Two traps came with it, both covered by tests:
+
+**`compress` and `compression` are two YAML keys for one fact.** `pkg/etl` folds
+the first into the second and clears it; xray now does the same on load.
+Without that, a pipeline written with `compress: true` would show "no
+compression" in the GUI and come back with both keys set — one fact turned into
+two that can disagree.
+
+**Kept settings are cleared when another config is loaded.** Encryption leaking
+from one pipeline into another is worse than losing it: losing is visible.
+
+Tests cover the full path — YAML → app state → YAML — because the loss was in
+the transitions, not in the struct. They do not merely fail against the previous
+code, they **do not compile** against it: the fields were not declared.
+
+**Nothing compiles this module by default, and that is why the bug survived.**
+`cmd/tdtp-xray` is a separate module, absent from `go.work`, and it does not
+build standalone without `go mod tidy`. The new tests run only for someone who
+builds it deliberately. Adding `./cmd/tdtp-xray` to `go.work` would put it back
+under `go build ./...` at the cost of pulling the Wails dependency tree into the
+workspace — worth deciding, not worth deciding silently.
+
 ### `--offset` did not work on SQL Server below compatibility level 110
 
 The MSSQL adapter translated `--limit`/`--offset` into `OFFSET n ROWS FETCH NEXT

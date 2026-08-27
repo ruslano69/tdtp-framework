@@ -238,24 +238,21 @@ Noticed while wiring `--packet-size` into the file export, not caused by it.
 because its fixture has no NULLs; the comment there says so, so that a NULL
 added to the fixture reads as a fixture change and not a regression.
 
-### `cmd/tdtp-xray` writes a lossy pipeline config
+### ~~`cmd/tdtp-xray` writes a lossy pipeline config~~ — done
 
-`app.go:1671` declares its own `TDTPOutputConfig` with three fields —
-`destination`, `format`, `compression`. The real one, `pkg/etl/config.go:144`,
-has thirteen. Saving a pipeline from the GUI therefore drops ten of them,
-**`encryption` among them**, along with `compact`, `fixed_fields`,
-`compress_algo`, `compress_level`, `s3` and `fast`. Silently: the YAML is
-written, it parses, and the settings are simply not in it.
+The local `TDTPOutputConfig` is a type alias to `pkg/etl.TDTPOutputConfig` now,
+so there is one declaration instead of two, and settings the GUI has no control
+for survive a load-and-save round trip untouched. Whether the GUI should offer
+an encryption switch is deliberately still open — the fix removes the data loss
+without answering the product question.
 
-The reason it was copied rather than imported is worth knowing before choosing a
-fix. Wails serializes the struct to the frontend as JSON, and the `pkg/etl`
-version carries `yaml` tags only. So it is either json tags on
-`pkg/etl.TDTPOutputConfig` and a type alias in xray — one declaration, the
-duplication gone — or a field-by-field sync that will drift again on the next
-field added.
-
-Diagnosed, not fixed. The choice is a contract decision, and the GUI cannot be
-exercised from here.
+What the fix exposed and did **not** close: `cmd/tdtp-xray` is a separate module,
+absent from `go.work`, that does not build standalone without `go mod tidy`.
+Nothing compiles it in ordinary development, which is why a three-field struct
+sat opposite a thirteen-field one for months. The new round-trip tests run only
+for someone who builds that module on purpose. Adding `./cmd/tdtp-xray` to
+`go.work` would fix that, at the price of the Wails dependency tree entering the
+workspace — a build-system decision, not a patch.
 
 ### Complexity outliers — funcfinder, 2026-08-25
 
