@@ -242,17 +242,25 @@ added to the fixture reads as a fixture change and not a regression.
 
 The local `TDTPOutputConfig` is a type alias to `pkg/etl.TDTPOutputConfig` now,
 so there is one declaration instead of two, and settings the GUI has no control
-for survive a load-and-save round trip untouched. Whether the GUI should offer
-an encryption switch is deliberately still open — the fix removes the data loss
-without answering the product question.
+for survive a load-and-save round trip untouched.
 
-What the fix exposed and did **not** close: `cmd/tdtp-xray` is a separate module,
-absent from `go.work`, that does not build standalone without `go mod tidy`.
-Nothing compiles it in ordinary development, which is why a three-field struct
-sat opposite a thirteen-field one for months. The new round-trip tests run only
-for someone who builds that module on purpose. Adding `./cmd/tdtp-xray` to
-`go.work` would fix that, at the price of the Wails dependency tree entering the
-workspace — a build-system decision, not a patch.
+**No encryption switch was added to the GUI, deliberately.** The bug was never
+"xray lacks a checkbox" — it was "xray destroyed what it did not understand".
+Those are different problems, and only the second one was ours to fix.
+
+**Do not add `./cmd/tdtp-xray` to `go.work`** — asked and answered
+(2026-08-27). It would put the module back under `go build ./...` and drag the
+Wails dependency tree into the workspace, and the value is not there any more:
+
+Practice has moved the tool's role. Agents turn out to write pipeline YAML
+better than the visual builder does, so what remains for xray is **visual
+inspection**, not authoring. That reframes what matters about it: a viewer must
+never corrupt what it opens, which is exactly the property just fixed, and it
+does not need to understand every field to be useful. Coverage of a builder it
+is no longer being used as would be the wrong thing to buy.
+
+The module still does not build standalone without `go mod tidy`. Left as is
+for the same reason.
 
 ### Complexity outliers — funcfinder, 2026-08-25
 
