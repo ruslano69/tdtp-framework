@@ -4,6 +4,39 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased] — bench/sqlite-date-columns
 
+### `LoadData` stops re-boxing a value the slot already holds
+
+`convertValue` returns `any`, and that return is where a string gets boxed into
+an interface — 16 bytes per cell, 53% of every allocation the workspace load
+makes. The box itself can't be avoided (`driver.Value` is `any`); repeating it
+for an unchanged value can. `args` now lives for the whole batch, and each slot
+remembers the raw string it was built from — the same value in the same slot
+skips the rebox.
+
+Measured on 200k rows × 6 columns shaped like a transaction table (a key and an
+amount unique, the rest reference data and dates): 1 580 585 → **1 188 444**
+allocations (−24.8%), 64.0 → **57.75 MB** (−9.8%). Wall time doesn't move — the
+insert still dominates — so this is a GC-pressure fix, not a speedup. On
+all-unique values the saving is exactly zero, as it must be.
+
+### PostgreSQL `ReadAllRows` stops going through `rows.Values()`
+
+`rows.Values()` decodes each cell into its "right" Go type and immediately
+boxes the result into a freshly `make()`-and-`append`-ed `[]any` per row —
+76% of all allocations in a 100k×9 read. `readAllRowsTyped` scans into reused,
+per-column typed `pgtype.*` destinations instead; each is then converted back
+to the exact `any` shape `Values()` already produced for that cell, so
+`pgCellToTDTP` runs unmodified downstream.
+
+Measured end to end, 524 288 rows × 9 columns, three repeats: 1258 → **1044 ms**
+(−17%), 469 → **325 MB** (−31%), 16.26M → **11.54M** allocations (−29%).
+Scoped to `ReadAllRows` only — the one place the adapter builds its own
+`SELECT * FROM table` against a schema it just read itself, so column order and
+type are guaranteed to match by position, the same precedent already set for
+SQLite's `CAST(...AS TEXT)` path. Deliberately excludes `REAL`/`FLOAT`/`DOUBLE`
+(TDTP doesn't distinguish float4 from float8, and widening changes the
+formatted digits) and any `TEXT` field with a non-empty `Subtype`.
+
 ### The workspace bypasses database/sql on both the write and the read
 
 `LoadData` and `ExecuteSQL` now go straight to the driver — prepared statements
