@@ -2,7 +2,7 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
-## [Unreleased] — bench/sqlite-date-columns
+## [1.26.0] — 2026-08-31
 
 ### `LoadData` stops re-boxing a value the slot already holds
 

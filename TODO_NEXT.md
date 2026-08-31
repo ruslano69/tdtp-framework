@@ -16,9 +16,19 @@ Read that table before adding anything below. An item that does not fit the
 left column belongs under [Behind the freeze](#behind-the-freeze--20), however
 good it is.
 
+**Recorded exception: `--columnar` and `--stream` landed after this table.**
+Both are new flags — exactly what the right-hand column forbids — and both
+merged into `bench/sqlite-date-columns` on 2026-08-24/25, two to three days
+after this freeze was declared. They are staying: both are already measured,
+covered by tests, and written up in `CHANGELOG.md` as part of the 1.26.0
+release, and pulling them back out at this point would cost more than the
+freeze buys. Noted here so the discrepancy is a decision, not a thing that
+slipped through. The freeze otherwise holds — read it as "no more of these
+after 1.26.0," not as license to keep adding capability.
+
 ---
 
-## Current state — v1.25.1 (2026-08-22)
+## Current state — v1.26.0 (2026-08-31)
 
 ### Closed sprints
 
@@ -52,6 +62,8 @@ good it is.
 | v1.23.0 | `security.mercury_url` in the tdtpcli config |
 | v1.24.x | Orchestrator job-log retention, `--drain`, WAL mode, parallel-safe audit |
 | v1.25.0 | Datetime round-trip across SQLite/MySQL/PostgreSQL; cheaper escaped-row splitting; MSSQL datetime formatters |
+| v1.25.1 | Protocol-version comparison and validation hardening (three integrity-gate bypasses) |
+| v1.26.0 | `--columnar`/`--stream`, `pkg/transform` step ordering, the `--limit`/`--offset`/`--fields`/`--packet-size` silent-ignore fixes, the unread-flag checker, workspace driver bypass and box-reuse, PostgreSQL typed-scan read path |
 
 **The v1.5 encryption redesign is done** — shipped in v1.18.0, 2026-07-22. Its
 ~290-line design writeup lived on in this file for a month after the fact, which
