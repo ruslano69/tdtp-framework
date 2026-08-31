@@ -16,9 +16,19 @@ Read that table before adding anything below. An item that does not fit the
 left column belongs under [Behind the freeze](#behind-the-freeze--20), however
 good it is.
 
+**Recorded exception: `--columnar` and `--stream` landed after this table.**
+Both are new flags — exactly what the right-hand column forbids — and both
+merged into `bench/sqlite-date-columns` on 2026-08-24/25, two to three days
+after this freeze was declared. They are staying: both are already measured,
+covered by tests, and written up in `CHANGELOG.md` as part of the 1.26.0
+release, and pulling them back out at this point would cost more than the
+freeze buys. Noted here so the discrepancy is a decision, not a thing that
+slipped through. The freeze otherwise holds — read it as "no more of these
+after 1.26.0," not as license to keep adding capability.
+
 ---
 
-## Current state — v1.25.1 (2026-08-22)
+## Current state — v1.26.0 (2026-08-31)
 
 ### Closed sprints
 
@@ -52,6 +62,8 @@ good it is.
 | v1.23.0 | `security.mercury_url` in the tdtpcli config |
 | v1.24.x | Orchestrator job-log retention, `--drain`, WAL mode, parallel-safe audit |
 | v1.25.0 | Datetime round-trip across SQLite/MySQL/PostgreSQL; cheaper escaped-row splitting; MSSQL datetime formatters |
+| v1.25.1 | Protocol-version comparison and validation hardening (three integrity-gate bypasses) |
+| v1.26.0 | `--columnar`/`--stream`, `pkg/transform` step ordering, the `--limit`/`--offset`/`--fields`/`--packet-size` silent-ignore fixes, the unread-flag checker, workspace driver bypass and box-reuse, PostgreSQL typed-scan read path |
 
 **The v1.5 encryption redesign is done** — shipped in v1.18.0, 2026-07-22. Its
 ~290-line design writeup lived on in this file for a month after the fact, which
@@ -66,21 +78,44 @@ belongs in a plan any more.
 
 ### Optimization — measured, not yet done
 
-Both came out of profiling the PostgreSQL export on 2026-08-22, and both sit
-squarely inside the freeze: no new capability, no format change.
+Came out of profiling the PostgreSQL export on 2026-08-22, and sits squarely
+inside the freeze: no new capability, no format change.
 
-**`rows.Values()` on the PostgreSQL read path — measured, and smaller than it
-looks.** pgx allocates a fresh `[]any` per row and boxes every value into it, and
-the line carries 21% of CPU samples. But the achievable saving is bounded by the
-wire: reading the same 100k×16 costs 103.9 ms as raw bytes, 125.8 ms scanning
-into reusable typed destinations, and 150.3 ms through `Values()`. **The whole
-prize is 24.5 ms** — about 6% of the export — plus some share of the GC relief
-from 2.7M fewer allocations.
+**~~`rows.Values()` on the PostgreSQL read path~~ — done.** `readAllRowsTyped`
+(`pkg/adapters/postgres/read_typed.go`) scans into reused, per-column typed
+`pgtype.*` destinations instead of letting `rows.Values()` allocate a fresh
+`[]any` per row and box every decoded value into it. Each destination is then
+converted back to the exact `any` shape `Values()` already produced for that
+cell (`time.Time` or `pgtype.InfinityModifier` for dates, `pgtype.Numeric` by
+value, …), so `pgCellToTDTP` runs completely unmodified downstream.
 
-Against that, the loop in `readRowsWithSQL` has to be rebuilt around typed
-destinations with a schema→destination mapping and a formatter per type, and a
-schema/column mismatch stops being a soft conversion and becomes a hard scan
-error. Worth doing only after the cheaper items above are gone.
+Measured end to end on a live PostgreSQL 16, 524 288 rows × 9 columns (three
+text, `id`, `NUMERIC`, `BOOLEAN`, three date/time — the shape that made
+`Values()` 76% of read allocations in the first place), three repeats:
+
+| | before | after |
+|---|---|---|
+| time | 1258 ms | **1044 ms** (−17%) |
+| memory | 469 MB | **325 MB** (−31%) |
+| allocations | 16.26M | **11.54M** (−29%) |
+
+The earlier estimate on this line ("24.5 ms, about 6% of the export") measured
+only the decode step in isolation and turned out to understate the real
+number — end to end the win is close to 3× that.
+
+Scoped to `ReadAllRows` only, the one place the adapter builds its own
+`SELECT * FROM table` against the same table `GetTableSchema` just described,
+so column order and type are guaranteed to match by position — the same
+precedent already set for SQLite's `CAST(...AS TEXT)` path. `ReadRowsWithSQL`
+(TDTQL, `--where`, views) takes a caller-built query where that guarantee does
+not hold, and keeps the old `rows.Values()` path unchanged.
+
+Deliberately excludes `REAL`/`FLOAT`/`DOUBLE` (TDTP doesn't distinguish float4
+from float8, and widening float4 into float64 changes the formatted digits) and
+any `TEXT` field with a non-empty `Subtype` (uuid/json/jsonb/inet/cidr/macaddr/
+xml/array — `pgtype.Text` isn't guaranteed to hand back what `pgValueToString`
+expects for those). `pgTypedScanSupported` gates on this before the query runs;
+a schema outside the list falls straight through to the old path, unchanged.
 
 **~~`DECIMAL` and `REAL` still round-trip through `ParseValue`~~ — done for
 PostgreSQL.** 412 ms → 335 ms, 1.2M fewer allocations. Establishing that the

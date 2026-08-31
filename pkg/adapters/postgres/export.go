@@ -368,6 +368,16 @@ func (a *Adapter) ReadAllRows(ctx context.Context, tableName string, pkgSchema p
 		quotedTable = QuoteIdentifier(a.schema) + "." + quotedTable
 	}
 	sql := fmt.Sprintf("SELECT * FROM %s", quotedTable)
+
+	// Типизированный путь — только здесь. Мы сами построили "SELECT * FROM
+	// table" по той же схеме, что вернул GetTableSchema для этой же таблицы,
+	// так что порядок и типы колонок гарантированно совпадают с pkgSchema.
+	// ReadRowsWithSQL строит запрос вызывающий код (TDTQL, --where,
+	// представления), и совпадение там ничем не гарантировано — тот путь
+	// остаётся на rows.Values().
+	if pgTypedScanSupported(pkgSchema) {
+		return a.readAllRowsTyped(ctx, sql, pkgSchema)
+	}
 	return a.readRowsWithSQL(ctx, sql, pkgSchema)
 }
 
