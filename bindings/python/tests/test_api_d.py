@@ -45,6 +45,22 @@ class TestDRead:
         with pytest.raises(TDTPParseError):
             d_client.D_read("/no/such/file.tdtp")
 
+    def test_columnar_compressed_matches_rowmajor(
+        self, d_client, columnar_compressed_tdtp_path, compressed_tdtp_path
+    ) -> None:
+        """D_read on a --columnar --compress packet must return the same rows
+        as the row-major compressed fixture built from the same data.
+
+        Regression: dDecompressRows (exports_d_compress.go) had the identical
+        bug as jDecompressRows (see test_api_j.py's
+        test_columnar_compressed_file) — decompressed the blob by hand and
+        never re-expanded the columnar layout, so D_read handed back one row
+        per schema COLUMN instead of per record.
+        """
+        with d_client.D_read_ctx(str(columnar_compressed_tdtp_path)) as columnar:
+            with d_client.D_read_ctx(str(compressed_tdtp_path)) as reference:
+                assert columnar.get_rows() == reference.get_rows()
+
     def test_context_manager_frees(self, d_client, sample_tdtp_path) -> None:
         with d_client.D_read_ctx(str(sample_tdtp_path)) as h:
             pass
