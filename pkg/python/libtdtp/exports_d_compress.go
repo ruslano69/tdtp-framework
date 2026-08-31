@@ -33,15 +33,24 @@ func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 	}
 
 	// Rebuild pkt.Data.Rows from decompressed lines so ExpandCompactRows can work.
-	decompRows := make([]packet.Row, 0, len(lines))
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		decompRows = append(decompRows, packet.Row{Value: line})
+	//
+	// Every line is kept, empty ones included — see the identical comment in
+	// jDecompressRows (exports_j_compress.go). Dropping one silently shifts
+	// every line after it into the wrong slot.
+	decompRows := make([]packet.Row, len(lines))
+	for i, line := range lines {
+		decompRows[i] = packet.Row{Value: line}
 	}
 	pkt.Data.Rows = decompRows
 	pkt.Data.Compression = ""
+
+	// Columnar layout has to be unpacked before compact and before GetRowValues
+	// below — see the identical comment in jDecompressRows. Without it, a
+	// --columnar --compress packet hands back one "row" per schema COLUMN.
+	if err := packet.ExpandColumnarRows(pkt); err != nil {
+		dSetError(out, "columnar expand error: "+err.Error())
+		return 1
+	}
 
 	// Expand compact carry-forward encoding so callers always receive fully-populated rows.
 	if pkt.Data.Compact {
@@ -101,6 +110,14 @@ func D_ApplyCompress(pkt *C.D_Packet, level C.int, out *C.D_Packet) C.int {
 // D_ApplyDecompress decompresses a single-blob packet, writing plain rows to out.
 // Returns 0 on success, 1 on error.
 // Caller must release out with D_FreePacket.
+//
+// Does NOT expand a columnar layout: D_Packet (tdtp_structs.h) carries no
+// Layout field at all, so a caller assembling one by hand — this function's
+// whole reason for existing — has no way to say "these rows are columns."
+// D_ReadFile/D_ParseBytes go through dDecompressRows instead, which reads
+// pkt.Data.Layout off the *packet.DataPacket before it is ever flattened into
+// a D_Packet, and does expand it. Giving this function the same fix would
+// need a Layout field on D_Packet — an ABI change, not a bugfix.
 //
 //export D_ApplyDecompress
 func D_ApplyDecompress(pkt *C.D_Packet, out *C.D_Packet) C.int {

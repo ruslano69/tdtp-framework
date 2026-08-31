@@ -106,6 +106,25 @@ class TestJRead:
         assert len(first) > 0
         assert first[0] == "1"  # ID of first row from create_test_db.py
 
+    def test_columnar_compressed_file(
+        self, j_client, columnar_compressed_tdtp_path, compressed_tdtp_path
+    ) -> None:
+        """J_read on a --columnar --compress packet must return the same rows
+        as the row-major compressed fixture built from the same data.
+
+        Regression: jDecompressRows (exports_j_compress.go) duplicated
+        Parser.DecompressData's job by hand and never called
+        packet.ExpandColumnarRows after decompressing. Data.Layout="columns"
+        stayed set, so the caller got one "row" per schema COLUMN instead of
+        per record — 10 real rows came back as N rows, one of which was the
+        entire ID column as a single list. No error either way; the row
+        count and the values were simply wrong.
+        """
+        columnar = j_client.J_read(str(columnar_compressed_tdtp_path))
+        reference = j_client.J_read(str(compressed_tdtp_path))
+        assert columnar["data"] == reference["data"]
+        assert len(columnar["data"]) == COMPRESSED_TOTAL_ROWS
+
 
 # ---------------------------------------------------------------------------
 # I/O — J_WriteFile
