@@ -262,6 +262,9 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 
 	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
 	generator := e.newGenerator()
+	if e.config.TDTP.Columnar {
+		generator.SetColumnarLayout(true)
+	}
 	rows := dataPacket.GetRows()
 	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
 	if err != nil {
@@ -344,7 +347,7 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		// SetDefaults уже свёл Compress в Compression; || оставлен для конфигов,
 		// собранных в коде в обход загрузчика.
 		if e.config.TDTP.Compression || e.config.TDTP.Compress {
-			if err := e.compressDataPacket(part, e.config.TDTP.CompressAlgo, e.config.TDTP.CompressLevel); err != nil {
+			if err := e.compressDataPacket(part, e.config.TDTP.CompressAlgo, e.config.TDTP.CompressLevel, e.config.TDTP.Columnar); err != nil {
 				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)
 			}
 		}
@@ -844,12 +847,19 @@ func (e *Exporter) ValidateConfig() error {
 }
 
 // compressDataPacket сжимает данные в DataPacket указанным алгоритмом и уровнем.
-func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string, level int) error {
+func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string, level int, columnar bool) error {
 	// Materialize rawRows (GenerateReference fast-path) перед сжатием.
 	// Без этого Data.Rows пуст и сжатие молча пропускается.
 	dataPacket.MaterializeRows()
 	if len(dataPacket.Data.Rows) == 0 {
 		return nil // Нечего сжимать
+	}
+
+	// Раскладка по колонкам — здесь, между материализацией и сжатием, как в
+	// compressPacketData (cmd/tdtpcli/commands/export.go). EnsureColumnar
+	// идемпотентна.
+	if columnar {
+		packet.EnsureColumnar(dataPacket)
 	}
 
 	if algo == "" {
@@ -887,14 +897,11 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string
 	}
 
 	// Обновляем DataPacket сжатыми данными, сохраняя compact/tail атрибуты
-	dataPacket.Data = packet.Data{
-		Compression: algo,
-		Compact:     dataPacket.Data.Compact,
-		Tail:        dataPacket.Data.Tail,
-		Rows: []packet.Row{
-			{Value: compressedData},
-		},
-	}
+	// Полем, не литералом целиком: Data к этому моменту может нести Layout
+	// (см. EnsureColumnar выше) — присвоить Data{} заново значило бы его
+	// потерять и получить на диске сжатый пакет без layout="columns".
+	dataPacket.Data.Compression = algo
+	dataPacket.Data.Rows = []packet.Row{{Value: compressedData}}
 
 	return nil
 }

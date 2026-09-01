@@ -87,6 +87,13 @@ func decompressTDTPPacket(pkt *packet.DataPacket) error {
 		pkt.Data.Rows[i] = packet.Row{Value: r}
 	}
 
+	// Must run before VerifyRowCount: decompression yields one string per
+	// COLUMN under --columnar, and this was the one decompress-then-verify
+	// copy (of three) missing the expansion.
+	if err := packet.ExpandColumnarRows(pkt); err != nil {
+		return fmt.Errorf("columnar expansion failed: %w", err)
+	}
+
 	// Integrity: RecordsInPart must match the actual decompressed row count,
 	// at every version. This used to be gated on NeedsRowCountCheck, i.e.
 	// skipped from v1.4 up because "XXH3 is the authoritative check" — but the
