@@ -15,55 +15,17 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
-// jDecompressRows decompresses a zstd packet and returns a jPacket JSON.
+// jDecompressRows decompresses a packet and returns a jPacket JSON.
 // Active when built with: go build -tags compress -buildmode=c-shared
 func jDecompressRows(pkt *packet.DataPacket) *C.char {
 	if len(pkt.Data.Rows) == 0 {
 		return jOK(packetToJPacket(pkt, [][]string{}))
 	}
 
-	compressed := []byte(pkt.Data.Rows[0].Value)
-	if pkt.Data.Checksum != "" {
-		if err := processors.ValidateChecksum(compressed, pkt.Data.Checksum); err != nil {
-			return jErr(fmt.Sprintf("checksum validation failed: %v", err))
-		}
+	if err := processors.DecompressPacket(context.Background(), pkt); err != nil {
+		return jErr(err.Error())
 	}
 
-	lines, err := processors.DecompressDataForTdtpWithAlgo(pkt.Data.Rows[0].Value, pkt.Data.Compression)
-	if err != nil {
-		return jErr(fmt.Sprintf("decompress error: %v", err))
-	}
-
-	// Rebuild pkt.Data.Rows from decompressed lines so ExpandCompactRows can work.
-	//
-	// Every line is kept, empty ones included. A decompressed line here can
-	// legitimately be empty — an all-NULL column under --columnar, or a
-	// single-field row whose one value is empty — and dropping it shifts
-	// every line after it into the wrong slot. The canonical call site
-	// (cmd/tdtpcli/commands/broker.go, through parser.DecompressData) does
-	// not filter either; this used to, and disagreed with it silently.
-	decompRows := make([]packet.Row, len(lines))
-	for i, line := range lines {
-		decompRows[i] = packet.Row{Value: line}
-	}
-	pkt.Data.Rows = decompRows
-	pkt.Data.Compression = ""
-	pkt.Data.Checksum = ""
-
-	// Columnar layout has to be unpacked before compact, and before anything
-	// downstream reads pkt.GetRows(). packet.Parser.DecompressData does this
-	// same thing for the Go-native read path — see its comment on why this
-	// is "the point where the compressed and uncompressed paths converge, and
-	// the only place the unpacking is guaranteed to happen exactly once."
-	// Without it a --columnar --compress packet decompresses to N lines, one
-	// per COLUMN, and every J_ read function (including this one) hands the
-	// caller those N "rows" as if they were real ones — no error, just wrong
-	// data with the schema's own column names lined up beside it.
-	if err := packet.ExpandColumnarRows(pkt); err != nil {
-		return jErr(fmt.Sprintf("columnar expand error: %v", err))
-	}
-
-	// Expand compact carry-forward encoding so callers always receive fully-populated rows.
 	if pkt.Data.Compact {
 		if err := packet.ExpandCompactRows(pkt); err != nil {
 			return jErr(fmt.Sprintf("compact expand error: %v", err))

@@ -662,11 +662,6 @@ func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 	return brokers.New(brokerConfig)
 }
 
-// decompressData decompresses compressed data using processors package
-func decompressData(compressed, algo string) ([]string, error) {
-	return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
-}
-
 // decryptLegacyBlobIfNeeded returns raw as-is unless it's a legacy v1.3
 // whole-packet binary blob (IsEncryptedBlob), in which case it decrypts
 // via xZMercury and returns the recovered plaintext TDTP XML. Must run
@@ -730,12 +725,8 @@ func parseAndDecryptBrokerMessage(ctx context.Context, raw []byte, mercuryURL st
 		return nil, err
 	}
 
-	if parser.IsCompressed(pkt) {
-		if err := parser.DecompressData(ctx, pkt, func(dCtx context.Context, compressed, algo string) ([]string, error) {
-			return decompressData(compressed, algo)
-		}); err != nil {
-			return nil, err
-		}
+	if err := processors.DecompressPacket(ctx, pkt); err != nil {
+		return nil, err
 	}
 	if pkt.Data.Compact {
 		if err := packet.ExpandCompactRows(pkt); err != nil {

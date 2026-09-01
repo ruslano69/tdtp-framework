@@ -295,27 +295,9 @@ func DryDecompress(compressed, algo string) error {
 	}
 }
 
-// DecompressDataForTdtpAlgo распаковывает данные TDTP-пакета по имени алгоритма.
+// DecompressDataForTdtpAlgo was a byte-for-byte duplicate of
+// DecompressDataForTdtpWithAlgo. Kept as a forwarding alias for callers
+// outside this repo.
 func DecompressDataForTdtpAlgo(compressed, algo string) ([]string, error) {
-	if compressed == "" {
-		return nil, nil
-	}
-
-	var (
-		data []byte
-		err  error
-	)
-	switch algo {
-	case AlgoKanzi:
-		data, err = DecompressKanzi([]byte(compressed))
-	default: // AlgoZstd
-		data, err = Decompress([]byte(compressed))
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	return strings.Split(string(data), "\n"), nil
+	return DecompressDataForTdtpWithAlgo(compressed, algo)
 }

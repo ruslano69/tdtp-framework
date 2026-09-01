@@ -35,6 +35,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
 // ListenConfig holds configuration for the streaming consumer daemon.
@@ -137,7 +138,7 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 
 		// Parse packet (handles optional decompression)
 		pkt, err := parser.ParseBytesWithDecompression(xmlData, func(ctx context.Context, compressed string, algo string) ([]string, error) {
-			return decompressData(compressed, algo)
+			return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
 		})
 		if err != nil {
 			fmt.Printf("[listen] parse error (skipping message): %v\n", err)

@@ -4,6 +4,27 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Eight hand-written copies of "decompress a TDTP packet" collapsed into one
+
+Found while chasing the columnar bugs below: the same ~15-line sequence
+(validate checksum, decompress, expand a columnar layout, verify
+`RecordsInPart`) had been copied by hand into `pkg/etl`, the CLI's `--test`
+and its export/import paths, both Python C-ABI readers, `pkg/xlsx`, and
+`cmd/tdtp-svg` — eight independent rewrites of one another. Two had drifted
+into real bugs: `pkg/xlsx/converter.go`'s `ToXLSX` and `cmd/tdtp-svg`'s
+`decompressDataSection` never expanded a columnar layout at all, so
+`--to-xlsx`/`--export-xlsx` or `tdtp-svg` on a `--columnar --compress` file
+would have hit the same silent corruption fixed in the Python bindings
+(previous entry) — column data returned as if it were rows, no error. A
+third, `pkg/etl/loader.go`, hardcoded zstd regardless of what the packet
+actually declared, so a pipeline reading a kanzi-compressed source would
+have failed outright.
+
+`processors.DecompressPacket` (new, `pkg/processors/decompress_packet.go`)
+is now the one implementation; all eight call sites use it. Also merged
+`DecompressDataForTdtpAlgo` into `DecompressDataForTdtpWithAlgo` — the two
+were byte-for-byte identical.
+
 ### `--columnar` had no pipeline equivalent, and its compressed form couldn't be read back by one either
 
 `output.tdtp.columnar` is new — the YAML config had no way to ask for the

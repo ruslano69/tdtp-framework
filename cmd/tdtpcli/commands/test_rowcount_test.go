@@ -58,7 +58,7 @@ func TestValidatePacket_CompressedRowCountIsChecked(t *testing.T) {
 	if err == nil {
 		t.Fatal("a compressed packet whose header overstates the row count must fail")
 	}
-	if !strings.Contains(err.Error(), "row count") {
+	if !strings.Contains(err.Error(), "RecordsInPart mismatch") {
 		t.Errorf("error does not name the problem: %v", err)
 	}
 	// Возвращается настоящее число, а не заявленное — иначе итоговая сумма по
