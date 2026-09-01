@@ -2,6 +2,7 @@
 package xlsx
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -40,24 +41,8 @@ const maxExcelInt int64 = 999_999_999_999_999
 //
 //	err := xlsx.ToXLSX(packet, "output.xlsx", "Orders")
 func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
-	// Check if data is compressed and decompress if needed
-	if pkt.Data.Compression != "" {
-		if len(pkt.Data.Rows) != 1 {
-			return fmt.Errorf("compressed data should have exactly 1 row, got %d", len(pkt.Data.Rows))
-		}
-
-		// Decompress data
-		decompressedRows, err := processors.DecompressDataForTdtp(pkt.Data.Rows[0].Value)
-		if err != nil {
-			return fmt.Errorf("failed to decompress data: %w", err)
-		}
-
-		// Replace compressed row with decompressed rows
-		pkt.Data.Rows = make([]packet.Row, len(decompressedRows))
-		for i, row := range decompressedRows {
-			pkt.Data.Rows[i] = packet.Row{Value: row}
-		}
-		pkt.Data.Compression = "" // Mark as decompressed
+	if err := processors.DecompressPacket(context.Background(), pkt); err != nil {
+		return fmt.Errorf("failed to decompress data: %w", err)
 	}
 
 	// Set default sheet name

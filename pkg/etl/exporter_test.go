@@ -2,8 +2,10 @@ package etl
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -87,6 +89,81 @@ func TestExporter_TDTP_CompactRoundTrip(t *testing.T) {
 				t.Errorf("row %d field %d = %q, want %q (fixed field value lost)", i, j, got[i][j], want[i][j])
 			}
 		}
+	}
+}
+
+// TestExporter_TDTP_Columnar covers output.tdtp.columnar (--columnar had no
+// pipeline equivalent until this field existed). Plain and compressed both
+// round-trip through the real writer and the real pkg/etl reader
+// (loadTDTPFile), so a regression in either the wiring here or in
+// decompressTDTPPacket's own ExpandColumnarRows call fails this test.
+func TestExporter_TDTP_Columnar(t *testing.T) {
+	schema := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "id", Type: "TEXT"},
+			{Name: "note", Type: "TEXT"},
+		},
+	}
+	want := make([][]string, 50)
+	for i := range want {
+		want[i] = []string{fmt.Sprintf("%d", i), fmt.Sprintf("note-%d-padding-so-this-exceeds-the-1kb-compression-floor", i)}
+	}
+
+	for _, tc := range []struct {
+		name     string
+		compress bool
+	}{
+		{"plain", false},
+		{"compressed", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataPacket := packet.NewDataPacket(packet.TypeReference, "t")
+			dataPacket.Schema = schema
+			dataPacket.Data = packet.RowsToData(want)
+
+			dest := filepath.Join(t.TempDir(), "out.tdtp.xml")
+			exporter := NewExporter(OutputConfig{
+				Type: "tdtp",
+				TDTP: &TDTPOutputConfig{
+					Destination: dest,
+					Columnar:    true,
+					Compression: tc.compress,
+				},
+			})
+			if _, err := exporter.Export(context.Background(), dataPacket); err != nil {
+				t.Fatalf("Export: %v", err)
+			}
+
+			written, err := os.ReadFile(dest)
+			if err != nil {
+				t.Fatalf("read output: %v", err)
+			}
+			// ParseBytes expands columns->rows unconditionally, so the layout
+			// attribute has to be checked on the raw bytes, not the parsed
+			// struct.
+			if !strings.Contains(string(written), `layout="columns"`) {
+				t.Fatalf("written file has no layout=\"columns\" attribute: %s", written)
+			}
+			if tc.compress && !strings.Contains(string(written), `compression="`) {
+				t.Fatal("expected the fixture to be large enough to actually compress")
+			}
+
+			got, err := loadTDTPFile(SourceConfig{Type: "tdtp", DSN: dest})
+			if err != nil {
+				t.Fatalf("loadTDTPFile: %v", err)
+			}
+			gotRows := got.GetRows()
+			if len(gotRows) != len(want) {
+				t.Fatalf("rows = %d, want %d", len(gotRows), len(want))
+			}
+			for i := range want {
+				for j := range want[i] {
+					if gotRows[i][j] != want[i][j] {
+						t.Errorf("row %d field %d = %q, want %q", i, j, gotRows[i][j], want[i][j])
+					}
+				}
+			}
+		})
 	}
 }
 

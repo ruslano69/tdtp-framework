@@ -8,6 +8,7 @@ package etl
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ type exporterMockBinder struct {
 	calls          int
 	registeredHash string
 	registerCalls  int
+	registerErr    error
 }
 
 func (m *exporterMockBinder) BindKey(ctx context.Context, packageUUID, pipelineName string) (*mercury.KeyBinding, error) {
@@ -37,6 +39,9 @@ func (m *exporterMockBinder) BindKey(ctx context.Context, packageUUID, pipelineN
 // pointed at this test's placeholder SecurityConfig.MercuryURL.
 func (m *exporterMockBinder) RegisterHash(ctx context.Context, uuid string, part int, xxh3, tableName, sender, packetVersion string) error {
 	m.registerCalls++
+	if m.registerErr != nil {
+		return m.registerErr
+	}
 	m.registeredHash = xxh3
 	return nil
 }
@@ -138,6 +143,50 @@ func TestExporter_ExportToTDTP_V15Default(t *testing.T) {
 	}
 	if binder.registeredHash == "" {
 		t.Error("RegisterHash called with empty xxh3")
+	}
+}
+
+// A failed integrity step must write an error packet, not silently skip the
+// destination — the special path errors.As detects through PacketChain's
+// wrapping in buildTDTPChain.
+func TestExporter_ExportToTDTP_IntegrityFailureWritesErrorPacket(t *testing.T) {
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out.tdtp.xml")
+
+	cfg := OutputConfig{
+		Type: "tdtp",
+		TDTP: &TDTPOutputConfig{Destination: dest},
+	}
+	cfg.TDTP.Encryption = true
+
+	binder := &exporterMockBinder{keyB64: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=", mode: "dev"}
+	binder.registerErr = errors.New("mercury unreachable")
+	exp := NewExporter(cfg).
+		WithSecurity(SecurityConfig{MercuryURL: "unused-mock-overrides-this"}, "pkg-uuid-unused", "test-pipeline").
+		WithMercuryBinder(binder)
+
+	pkt := makeExporterTestPacket(t)
+	_, err := exp.Export(context.Background(), pkt)
+	if err == nil {
+		t.Fatal("Export: expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mercury unreachable") {
+		t.Errorf("Export error = %q, want it to name the underlying registrar failure", err)
+	}
+
+	raw, readErr := os.ReadFile(dest)
+	if readErr != nil {
+		t.Fatalf("no error packet written: %v", readErr)
+	}
+	if strings.Contains(string(raw), "Alice") {
+		t.Fatal("error packet contains plaintext row data")
+	}
+	if !strings.Contains(string(raw), "<Type>error</Type>") {
+		t.Errorf("output is not an error packet: %s", raw)
+	}
+	if !strings.Contains(string(raw), "mercury unreachable") {
+		t.Errorf("error packet does not name the failure: %s", raw)
 	}
 }
 

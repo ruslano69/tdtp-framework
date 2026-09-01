@@ -2,6 +2,59 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased]
+
+### Eight hand-written copies of "decompress a TDTP packet" collapsed into one
+
+Found while chasing the columnar bugs below: the same ~15-line sequence
+(validate checksum, decompress, expand a columnar layout, verify
+`RecordsInPart`) had been copied by hand into `pkg/etl`, the CLI's `--test`
+and its export/import paths, both Python C-ABI readers, `pkg/xlsx`, and
+`cmd/tdtp-svg` — eight independent rewrites of one another. Two had drifted
+into real bugs: `pkg/xlsx/converter.go`'s `ToXLSX` and `cmd/tdtp-svg`'s
+`decompressDataSection` never expanded a columnar layout at all, so
+`--to-xlsx`/`--export-xlsx` or `tdtp-svg` on a `--columnar --compress` file
+would have hit the same silent corruption fixed in the Python bindings
+(previous entry) — column data returned as if it were rows, no error. A
+third, `pkg/etl/loader.go`, hardcoded zstd regardless of what the packet
+actually declared, so a pipeline reading a kanzi-compressed source would
+have failed outright.
+
+`processors.DecompressPacket` (new, `pkg/processors/decompress_packet.go`)
+is now the one implementation; all eight call sites use it. Also merged
+`DecompressDataForTdtpAlgo` into `DecompressDataForTdtpWithAlgo` — the two
+were byte-for-byte identical.
+
+### `--columnar` had no pipeline equivalent, and its compressed form couldn't be read back by one either
+
+`output.tdtp.columnar` is new — the YAML config had no way to ask for the
+column-major layout at all. Wired the same way `--export --columnar` already
+does it: `SetColumnarLayout` before splitting into parts, and an explicit
+`EnsureColumnar` before compression, since compression happens outside the
+writer's own materialization step.
+
+Two bugs surfaced while wiring it. `compressDataPacket` in `pkg/etl` replaced
+`Data` with a fresh struct literal after compressing, dropping `Layout` along
+with it — a columnar pipeline export would have written a compressed packet
+with no `layout="columns"` attribute at all. And `pkg/etl/loader.go`'s own
+decompression routine, a third hand-written copy of the same decompress-then-
+verify logic already fixed twice elsewhere, never called `ExpandColumnarRows`
+— a pipeline reading its own `--columnar --compress` output as a source
+failed on the row-count check that follows.
+
+Both fixed. `TestExporter_TDTP_Columnar` covers plain and compressed through
+the real writer and the real `pkg/etl` reader; mutation-tested against all
+three fixes.
+
+### Changed — `pkg/etl`'s TDTP writer orders its steps from `pkg/transform` now, not a hand-coded chain
+
+`exportToTDTP` used to be its own manually ordered `if` sequence, a second
+copy of the ordering `cmd/tdtpcli/commands/export.go` already gets from
+`transform.Plan`. No behavior change — same steps, same order, same
+error-packet-on-integrity-failure path (a new test pins that one
+specifically) — just one source of truth for the order instead of two that
+had to be kept in sync by hand.
+
 ## [1.26.0] — 2026-08-31
 
 ### `LoadData` stops re-boxing a value the slot already holds

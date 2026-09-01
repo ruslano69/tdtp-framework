@@ -161,6 +161,9 @@ type TDTPOutputConfig struct {
 	// Fast — пропустить DetectAndApply при генерации выходных TDTP/Kafka-пакетов.
 	// Переопределяет performance.fast на уровне output.
 	Fast bool `yaml:"fast"`
+	// Columnar — Data.Layout="columns" (--columnar на CLI). До этого поля
+	// пайплайн не мог попросить колоночную раскладку никак.
+	Columnar bool `yaml:"columnar"`
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ

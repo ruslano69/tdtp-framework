@@ -61,42 +61,11 @@ func tdtpMultiPartFiles(filePath string) []string {
 	return parts
 }
 
-// decompressTDTPPacket распаковывает строки пакета если они сжаты (zstd).
-// Алгоритм идентичен ImportFile: checksum → decompress → замена rows.
+// decompressTDTPPacket распаковывает строки пакета, если они сжаты.
+// Логика (checksum → decompress → columnar expand → row count) — в
+// processors.DecompressPacket, общей для всех читателей TDTP.
 func decompressTDTPPacket(pkt *packet.DataPacket) error {
-	if pkt.Data.Compression == "" {
-		return nil
-	}
-	if len(pkt.Data.Rows) != 1 {
-		return fmt.Errorf("compressed TDTP packet must have exactly 1 row, got %d", len(pkt.Data.Rows))
-	}
-	compressed := pkt.Data.Rows[0].Value
-	if pkt.Data.Checksum != "" {
-		if err := processors.ValidateChecksum([]byte(compressed), pkt.Data.Checksum); err != nil {
-			return fmt.Errorf("checksum mismatch: %w", err)
-		}
-	}
-	rows, err := processors.DecompressDataForTdtp(compressed)
-	if err != nil {
-		return fmt.Errorf("failed to decompress: %w", err)
-	}
-	pkt.Data.Compression = ""
-	pkt.Data.Checksum = ""
-	pkt.Data.Rows = make([]packet.Row, len(rows))
-	for i, r := range rows {
-		pkt.Data.Rows[i] = packet.Row{Value: r}
-	}
-
-	// Integrity: RecordsInPart must match the actual decompressed row count,
-	// at every version. This used to be gated on NeedsRowCountCheck, i.e.
-	// skipped from v1.4 up because "XXH3 is the authoritative check" — but the
-	// hashes cover the Schema and the row values, never the header counter, so
-	// from v1.4 up nothing checked it at all.
-	if err := packet.VerifyRowCount(pkt); err != nil {
-		return fmt.Errorf("%w (data may be truncated or corrupt)", err)
-	}
-
-	return nil
+	return processors.DecompressPacket(context.Background(), pkt)
 }
 
 // loadTDTPFile читает TDTP XML-файл напрямую, минуя адаптерный слой.

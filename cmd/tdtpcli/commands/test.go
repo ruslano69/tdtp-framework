@@ -198,65 +198,31 @@ func validatePacket(pkt *packet.DataPacket, label string) (int, error) {
 			label, len(pkt.Data.Rows))
 		return 0, fmt.Errorf("invalid compressed structure")
 	}
-	compressedValue := pkt.Data.Rows[0].Value
 
-	// XXH3 checksum validation
-	if pkt.Data.Checksum != "" {
-		if err := processors.ValidateChecksum([]byte(compressedValue), pkt.Data.Checksum); err != nil {
-			fmt.Printf("  ✗ %s: checksum mismatch (stored=%s): %v\n",
-				label, pkt.Data.Checksum, err)
-			return 0, err
-		}
-	}
-
-	// Распаковываем и СЧИТАЕМ строки, а не просто проверяем блоб на целость.
-	//
-	// Раньше здесь стоял DryDecompress, а счётчиком объявлялся сам заголовок:
-	// "RecordsInPart в заголовке — авторитетный счётчик строк; содержимое <Data>
-	// непрозрачно". Для сжатого пакета это означало, что --test заявленное число
-	// не проверял, а повторял: пакет с RecordsInPart=999 и пятью строками внутри
-	// проходил проверку и отчитывался о 999 строках. Ровно ту проверку, которую
-	// --test обещает в справке ("count rows vs header"), сжатые пакеты и не
-	// получали.
-	//
-	// Дороже это почти не стало: DryDecompress и так распаковывал блоб целиком и
-	// выбрасывал результат — теперь результат используется. Объём распакованного
-	// по-прежнему ограничен MaxDecompressedBytes.
+	// Распаковываем и СЧИТАЕМ строки, а не просто проверяем блоб на целость —
+	// --test обещает "count rows vs header" даже для сжатых пакетов. tmp — не
+	// pkt: этот вызов не должен видимо мутировать пакет, который дальше могут
+	// использовать другие проходы. DecompressPacket сверяет RecordsInPart сам;
+	// tmp.Data.Compression пуст ровно тогда, когда распаковка реально прошла,
+	// так что настоящее число строк доступно даже если она отказала уже на
+	// этой сверке.
 	decompStart := time.Now()
-	rows, err := processors.DecompressDataForTdtpAlgo(compressedValue, pkt.Data.Compression)
+	tmp := *pkt
+	err := processors.DecompressPacket(context.Background(), &tmp)
 	decompTime := time.Since(decompStart)
-	if err != nil {
+	if err != nil && tmp.Data.Compression != "" {
 		fmt.Printf("  ✗ %s: decompress failed (%s): %v\n",
 			label, decompTime.Round(time.Millisecond), err)
 		return 0, err
 	}
-
-	// Колоночная раскладка: распакованное — это колонки, а не строки, и считать
-	// их против RecordsInPart бессмысленно. Разворачиваем тем же кодом, что и
-	// обычный разбор, чтобы счёт шёл по строкам.
-	actual := len(rows)
-	if pkt.Data.Layout == packet.LayoutColumns {
-		tmp := *pkt
-		tmp.Data.Compression = ""
-		tmp.Data.Rows = make([]packet.Row, len(rows))
-		for i, v := range rows {
-			tmp.Data.Rows[i] = packet.Row{Value: v}
-		}
-		if err := packet.ExpandColumnarRows(&tmp); err != nil {
-			fmt.Printf("  ✗ %s: columnar expansion failed: %v\n", label, err)
-			return 0, err
-		}
-		actual = len(tmp.Data.Rows)
+	actual := len(tmp.Data.Rows)
+	if err != nil {
+		fmt.Printf("  ✗ %s: algo=%s, %v\n", label, pkt.Data.Compression, err)
+		return actual, err
 	}
-
 	checksumMark := ""
 	if pkt.Data.Checksum != "" {
 		checksumMark = ", checksum OK"
-	}
-	if pkt.Header.RecordsInPart > 0 && actual != pkt.Header.RecordsInPart {
-		fmt.Printf("  ✗ %s: algo=%s, RecordsInPart=%d but the decompressed data has %d rows\n",
-			label, pkt.Data.Compression, pkt.Header.RecordsInPart, actual)
-		return actual, fmt.Errorf("row count mismatch")
 	}
 	fmt.Printf("  ✓ %s: algo=%s, %d rows, decompressed %s%s\n",
 		label, pkt.Data.Compression, actual, decompTime.Round(time.Millisecond), checksumMark)

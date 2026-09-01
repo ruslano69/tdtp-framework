@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -152,17 +153,5 @@ func compressDataSection(pkt *packet.DataPacket, algo string, level int) error {
 
 // decompressDataSection reverses compressDataSection.
 func decompressDataSection(pkt *packet.DataPacket) error {
-	if len(pkt.Data.Rows) != 1 {
-		return fmt.Errorf("compressed packet must have exactly 1 row, got %d", len(pkt.Data.Rows))
-	}
-	rows, err := processors.DecompressDataForTdtpWithAlgo(pkt.Data.Rows[0].Value, pkt.Data.Compression)
-	if err != nil {
-		return err
-	}
-	pkt.Data.Rows = make([]packet.Row, len(rows))
-	for i, v := range rows {
-		pkt.Data.Rows[i] = packet.Row{Value: v}
-	}
-	pkt.Data.Compression = ""
-	return nil
+	return processors.DecompressPacket(context.Background(), pkt)
 }

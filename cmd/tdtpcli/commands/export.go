@@ -856,55 +856,14 @@ func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableCh
 // decompressPacketData decompresses the Data section of a packet.
 // Алгоритм определяется из pkt.Data.Compression — поддерживает zstd и kanzi.
 func decompressPacketData(pkt *packet.DataPacket) error {
-	if pkt.Data.Compression == "" {
-		return nil // Not compressed
-	}
-
-	if len(pkt.Data.Rows) != 1 {
-		return fmt.Errorf("compressed packet should have exactly 1 row, got %d", len(pkt.Data.Rows))
-	}
-
-	compressedData := pkt.Data.Rows[0].Value
-
-	// Validate checksum if present (BEFORE decompression for speed)
-	if pkt.Data.Checksum != "" {
-		if err := processors.ValidateChecksum([]byte(compressedData), pkt.Data.Checksum); err != nil {
-			return fmt.Errorf("data corruption detected: %w", err)
-		}
-		fmt.Printf("  ✓ Checksum validated: %s\n", pkt.Data.Checksum)
-	}
-
-	// Decompress — dispatch by algorithm stored in packet
-	rows, err := processors.DecompressDataForTdtpAlgo(compressedData, pkt.Data.Compression)
-	if err != nil {
+	checksum := pkt.Data.Checksum // captured before DecompressPacket clears it
+	wasCompressed := pkt.Data.Compression != ""
+	if err := processors.DecompressPacket(context.Background(), pkt); err != nil {
 		return err
 	}
-
-	// Update packet with decompressed data
-	pkt.Data.Compression = ""
-	pkt.Data.Checksum = "" // Clear checksum after validation
-	pkt.Data.Rows = make([]packet.Row, len(rows))
-	for i, row := range rows {
-		pkt.Data.Rows[i] = packet.Row{Value: row}
+	if wasCompressed && checksum != "" {
+		fmt.Printf("  ✓ Checksum validated: %s\n", checksum)
 	}
-
-	// Колоночная раскладка разворачивается ЗДЕСЬ, и до счёта строк.
-	//
-	// Это третья копия связки «распаковать и сверить счётчик» — две другие в
-	// packet.DecompressData и etl/loader.go. Копию пропустили, когда разворот
-	// вносили в первые две, и --to-csv/--to-html/--to-tdtp начали отвергать
-	// сжатый колоночный пакет: распаковка даёт по строке на КОЛОНКУ, и восемь
-	// колонок сравнивались с десятью строками заголовка.
-	if err := packet.ExpandColumnarRows(pkt); err != nil {
-		return err
-	}
-
-	// Счёт строк — общей функцией, без версионного гейта: заголовок не покрыт
-	// ни одним хешем, так что «начиная с v1.4 за него отвечает XXH3» неверно.
-	if err := packet.VerifyRowCount(pkt); err != nil {
-		return fmt.Errorf("%w after decompression (data may be truncated or corrupt)", err)
-	}
-
 	return nil
 }
 

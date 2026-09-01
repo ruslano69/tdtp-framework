@@ -9,13 +9,14 @@ package main
 */
 import "C"
 import (
+	"context"
 	"unsafe"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 )
 
-// dDecompressRows decompresses a zstd D_Packet and fills out with plain rows.
+// dDecompressRows decompresses a D_Packet and fills out with plain rows.
 // Active when built with: go build -tags compress -buildmode=c-shared
 func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 	if len(pkt.Data.Rows) == 0 {
@@ -26,33 +27,11 @@ func dDecompressRows(pkt *packet.DataPacket, out *C.D_Packet) C.int {
 	}
 
 	parser := packet.NewParser()
-	lines, err := processors.DecompressDataForTdtpWithAlgo(pkt.Data.Rows[0].Value, pkt.Data.Compression)
-	if err != nil {
-		dSetError(out, "decompress error: "+err.Error())
+	if err := processors.DecompressPacket(context.Background(), pkt); err != nil {
+		dSetError(out, err.Error())
 		return 1
 	}
 
-	// Rebuild pkt.Data.Rows from decompressed lines so ExpandCompactRows can work.
-	//
-	// Every line is kept, empty ones included — see the identical comment in
-	// jDecompressRows (exports_j_compress.go). Dropping one silently shifts
-	// every line after it into the wrong slot.
-	decompRows := make([]packet.Row, len(lines))
-	for i, line := range lines {
-		decompRows[i] = packet.Row{Value: line}
-	}
-	pkt.Data.Rows = decompRows
-	pkt.Data.Compression = ""
-
-	// Columnar layout has to be unpacked before compact and before GetRowValues
-	// below — see the identical comment in jDecompressRows. Without it, a
-	// --columnar --compress packet hands back one "row" per schema COLUMN.
-	if err := packet.ExpandColumnarRows(pkt); err != nil {
-		dSetError(out, "columnar expand error: "+err.Error())
-		return 1
-	}
-
-	// Expand compact carry-forward encoding so callers always receive fully-populated rows.
 	if pkt.Data.Compact {
 		if err := packet.ExpandCompactRows(pkt); err != nil {
 			dSetError(out, "compact expand error: "+err.Error())
