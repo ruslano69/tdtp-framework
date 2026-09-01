@@ -3,6 +3,7 @@ package etl
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -262,9 +263,6 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 
 	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
 	generator := e.newGenerator()
-	if e.config.TDTP.Columnar {
-		generator.SetColumnarLayout(true)
-	}
 	rows := dataPacket.GetRows()
 	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
 	if err != nil {
@@ -288,68 +286,27 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		// fails this is where the error packet has to land.
 		partDest := tdtpPartDestination(destination, part.Header.PartNumber, part.Header.TotalParts)
 
-		// Compact-формат применяем к каждой части отдельно, ПОСЛЕ сплита.
-		// Раньше это делалось один раз над dataPacket ДО GenerateReference:
-		// ApplyCompact корректно проставлял carry-forward пропуски и
-		// Data.Compact=true на dataPacket, но GenerateReference берёт
-		// dataPacket.GetRows() (уже с пропусками) и кладёт их в part.rawRows
-		// напрямую (fast-path, без RowsToData) — так что part.Data.Compact
-		// оставался false. Получался пакет с пустыми значениями в fixed-полях
-		// БЕЗ пометки compact="true", и ExpandCompactRows на стороне читателя
-		// (--to-csv/--to-xlsx/--to-tdtp/--import) видел Compact=false и
-		// молча пропускал разворачивание — пропуски так и оставались пустыми.
-		// Применяя ApplyCompact к каждому part после сплита (аналогично
-		// сжатию ниже), Data.Compact и carry-forward кодируются в одном и
-		// том же объекте, который реально сериализуется в XML.
-		if e.config.TDTP.Compact {
-			fixedNames := packet.ResolveFixedFields(part.Schema, e.config.TDTP.FixedFields)
-			if len(fixedNames) > 0 {
-				if err := packet.ApplyCompact(part, fixedNames, e.config.TDTP.CompactTail); err != nil {
-					return fmt.Errorf("failed to apply compact format for part %d: %w", part.Header.PartNumber, err)
-				}
-			}
+		// compact/integrity/columnar/compress, in pkg/transform's order —
+		// see buildTDTPChain and CLAUDE.md's "Adding a format or a
+		// transformation".
+		chain, err := e.buildTDTPChain(integrityRegistrar, part)
+		if err != nil {
+			return fmt.Errorf("part %d: %w", part.Header.PartNumber, err)
 		}
-
-		// v1.4 integrity is mandatory ahead of v1.5 encryption, not
-		// opt-in — see pkg/pipeline/produce.go's doc comment: without
-		// this, VerifyAndPrepare's consumer-side pre-flight (which always
-		// runs once --mercury-url is set, and v1.5 decryption requires
-		// it) blocks the packet with HASH_NOT_REGISTERED. Must run before
-		// compression (hashes cover plaintext).
-		if e.config.TDTP.Encryption && !e.config.TDTP.EncryptionV13 {
-			if err := pipeline.ComputeAndRegisterIntegrity(ctx, part, integrityRegistrar, e.pipelineName); err != nil {
-				// Same doctrine as exportEncrypted, applied to the step that
-				// runs before it: plaintext is never written, and writing
-				// nothing is silence — the consumer cannot tell a failed
-				// export from an export that was never asked for. So the
+		if err := chain.ProcessPacket(ctx, part); err != nil {
+			var intErr *integrityStepError
+			if errors.As(err, &intErr) {
+				// Plaintext must never be written in place of a failed
+				// integrity step, and writing nothing is silence — the
 				// error packet takes the data's place at the destination.
-				//
-				// This step is where an unreachable Mercury actually surfaces,
-				// since registration precedes encryption. Returning early from
-				// here skipped writeErrorPacket entirely, while the caller
-				// (cmd/tdtpcli/commands/pipeline.go) still announced "Error
-				// packet written to output" — the one outcome the doctrine
-				// exists to prevent, reported as if it had been honoured.
-				wrapped := fmt.Errorf("integrity for part %d: %w", part.Header.PartNumber, err)
-				if writeErr := e.writeErrorPacket(ctx, generator, partDest, mercury.ErrorCode(err), wrapped.Error()); writeErr != nil {
-					// Deliberately not wrapping the Mercury error here: the
-					// receipt could not be written either, so this is a hard
-					// failure and must not be mistaken for graceful
-					// degradation by the caller's errors.Is check.
+				wrapped := fmt.Errorf("integrity for part %d: %w", part.Header.PartNumber, intErr.err)
+				if writeErr := e.writeErrorPacket(ctx, generator, partDest, mercury.ErrorCode(intErr.err), wrapped.Error()); writeErr != nil {
 					return fmt.Errorf("write error packet after integrity failure for part %d: %w",
 						part.Header.PartNumber, writeErr)
 				}
 				return wrapped
 			}
-		}
-
-		// Сжатие применяем к каждой части отдельно
-		// SetDefaults уже свёл Compress в Compression; || оставлен для конфигов,
-		// собранных в коде в обход загрузчика.
-		if e.config.TDTP.Compression || e.config.TDTP.Compress {
-			if err := e.compressDataPacket(part, e.config.TDTP.CompressAlgo, e.config.TDTP.CompressLevel, e.config.TDTP.Columnar); err != nil {
-				return fmt.Errorf("failed to compress part %d: %w", part.Header.PartNumber, err)
-			}
+			return fmt.Errorf("part %d: %w", part.Header.PartNumber, err)
 		}
 
 		if e.config.TDTP.Encryption && e.config.TDTP.EncryptionV13 {

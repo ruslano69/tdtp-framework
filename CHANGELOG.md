@@ -25,6 +25,15 @@ Both fixed. `TestExporter_TDTP_Columnar` covers plain and compressed through
 the real writer and the real `pkg/etl` reader; mutation-tested against all
 three fixes.
 
+### Changed — `pkg/etl`'s TDTP writer orders its steps from `pkg/transform` now, not a hand-coded chain
+
+`exportToTDTP` used to be its own manually ordered `if` sequence, a second
+copy of the ordering `cmd/tdtpcli/commands/export.go` already gets from
+`transform.Plan`. No behavior change — same steps, same order, same
+error-packet-on-integrity-failure path (a new test pins that one
+specifically) — just one source of truth for the order instead of two that
+had to be kept in sync by hand.
+
 ## [1.26.0] — 2026-08-31
 
 ### `LoadData` stops re-boxing a value the slot already holds
