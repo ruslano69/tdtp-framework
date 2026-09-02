@@ -521,6 +521,30 @@ already half-present as `retry_attempts`, but the same question applies to
 every strategy above, not only "retry") rather than leaving each fallback's
 own failure mode implicit.
 
+**Guiding scope, stated by the person who'll approve the design:** a pipeline
+run is not a long-lived daemon fighting to stay alive — it's the opposite of
+a service that never unloads and never sleeps, always fighting a network that
+may recover, disk that may free up, a broker that may come back once someone
+restarts it. A pipeline run is short-lived and disposable. Its job is: try
+one fix or emit a warning, and if that doesn't clear it, **fail loud and
+fail fast** — a clear error packet, a clear non-zero exit, a clear
+`result_log` entry. Whatever decides to retry the whole thing later — a
+schedule in `cmd/orchestrator`, cron, systemd, k8s — is a separate layer with
+its own state and its own judgment about backoff, and does not need the
+pipeline itself to reimplement that judgment. **The one hard requirement is
+never staying silent** — every failure mode has to surface somewhere a
+supervisor can see it, not get swallowed.
+
+This narrows 2.4 considerably from the four-strategies list above: self-
+retry and self-fallback inside a single pipeline run are probably *not* in
+scope at all under this framing — they belong to the orchestrator, which
+already has schedules and job records built for exactly this. What might
+still be worth designing here is narrower: making `on_output_error`'s
+"fail" path actually distinguish *why* it failed (so the supervisor's own
+retry logic can tell "network blip, try again" from "config is wrong, don't
+bother"), and possibly the broker-alert side channel, since that's
+information a schedule-based retry can't reconstruct on its own.
+
 ### Grace period for `tdtp.lic`
 
 Today expired = fatal, which hurts integrators mid-project. Proposal:
