@@ -124,6 +124,23 @@ the reason was a real bug (see below). Left open for the other four adapters,
 which still print floats with `'g'` and so cannot take the same shortcut until
 they are fixed.
 
+### `output.tdtp.*` has no part-size control — not started
+
+`packet_kb` (`TDTPOutputConfig`'s Kafka-only sibling, `pkg/etl/exporter.go`
+line ~1108) governs part size for `output.type: kafka` only. For
+`output.type: tdtp` (file or S3), `exportToTDTP` always builds its generator
+with the library default (`packet.DefaultMaxMessageSize`, ~1.9 MB of real
+XML) — there is no YAML key that reaches `Generator.SetMaxMessageSize`, the
+way `--packet-size` does on the CLI's `--export`.
+
+Same shape of gap as `output.tdtp.columnar` before it was closed: a real CLI
+capability with no pipeline equivalent. Not fixed here because nobody has
+actually hit the default part size being wrong for a `tdtp`-output pipeline
+yet — filed so the fix is ready to reach for rather than rediscovered.
+`CLAUDE.md`'s existing warning stands: whatever field is added must **not**
+reuse or align with `packet_kb`'s formula (no `×2`) — that multiplier exists
+for `--packet-size`'s own reasons and doesn't transfer.
+
 ### The scientific-notation decimal bug — done, with one adapter unverified
 
 Fixed in PostgreSQL and SQLite, where a `DECIMAL` column really does hand the
