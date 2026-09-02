@@ -477,7 +477,7 @@ What remains is genuinely new surface and stays behind the freeze:
 Add and drop columns, change types, on schema drift between the packet and the
 target table. Prerequisite for `--import-stream`, which needs schema negotiation.
 
-### 2.4 Real semantics for `error_handling`'s four unenforced fields
+### 2.4 Pipeline survivability belongs to the orchestrator, which has no tools for it yet
 
 `ErrorHandlingConfig` (`pkg/etl/config.go`) parses, defaults and validates
 `on_transform_error`, `on_output_error`, `retry_attempts` and
@@ -536,14 +536,35 @@ never staying silent** — every failure mode has to surface somewhere a
 supervisor can see it, not get swallowed.
 
 This narrows 2.4 considerably from the four-strategies list above: self-
-retry and self-fallback inside a single pipeline run are probably *not* in
-scope at all under this framing — they belong to the orchestrator, which
-already has schedules and job records built for exactly this. What might
-still be worth designing here is narrower: making `on_output_error`'s
-"fail" path actually distinguish *why* it failed (so the supervisor's own
-retry logic can tell "network blip, try again" from "config is wrong, don't
-bother"), and possibly the broker-alert side channel, since that's
-information a schedule-based retry can't reconstruct on its own.
+retry and self-fallback inside a single pipeline run are *not* in scope —
+that's the pipeline's own job description settled, not just a preference.
+Retry-with-backoff, fallback-on-repeated-failure and alerting belong to the
+supervisor. `docs/ETL_PIPELINE.md`'s `error_handling` section stays exactly
+what it honestly is today: `on_source_error` (real), and four fields that
+are accepted, validated, and never acted on — not a placeholder waiting to
+be filled in, a closed decision.
+
+**What's actually missing is on the other side.** Checked
+`cmd/orchestrator`: it has none of this either. A schedule
+(`ScheduleRecord`) is a bare cron expression plus `last_status` — a failed
+run just waits for the next regular tick, with no backoff, no earlier
+retry, and no distinction between "the network blipped" and "the config is
+wrong and every future tick will fail the same way." The 2.0 work is
+building that layer, not extending the pipeline:
+
+- per-schedule retry policy (attempts, backoff) distinct from the cron
+  interval itself — a schedule that fires every 15 minutes should not have
+  to wait 15 minutes to retry a failure that clears in 30 seconds
+- reading the pipeline's own signal for *why* it failed, once the pipeline
+  side gives it one to read (an error code on the error packet is the
+  natural carrier — already exists, just not classified into
+  transient/permanent yet)
+- the alert side channel, if it's wanted, lives here too — the orchestrator
+  already has job records and a result-log style output; a queue alert is
+  the same shape of thing already built once for `result_log`
+- its own bounded-retry guard, for the same reason every strategy in the
+  list above needs one: a retry policy that can retry forever on a
+  permanent failure is not a safety net, it's a second silent failure mode
 
 ### Grace period for `tdtp.lic`
 
