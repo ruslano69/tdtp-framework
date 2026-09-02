@@ -137,6 +137,29 @@ still has no `×2` — the two were never meant to align.
 budget and at `packet_size_mb: 1`, and requires the second to produce more
 parts. Mutation-tested: removing the wiring in `exportToTDTP` fails it.
 
+### `error_handling.on_transform_error`/`on_output_error`/`retry_attempts`/`retry_delay_seconds` — accepted, not enforced
+
+Found rereading `docs/ETL_PIPELINE.md` end to end against `pkg/etl/config.go`.
+`ErrorHandlingConfig` parses, defaults and validates all five of its fields,
+but only `on_source_error` is read anywhere execution actually branches on it
+(`loader.go`, `processor.go`, both `continue`/`fail` paths tested). The other
+four are round-tripped through `cmd/tdtp-xray`'s settings screen and nothing
+else — a transform or output failure always stops the pipeline immediately,
+regardless of what `on_transform_error`/`on_output_error` say, and nothing
+ever retries regardless of `retry_attempts`/`retry_delay_seconds`.
+
+Not fixed here: real retry semantics need a design pass of their own (retry
+the whole output step? a TDTP file may already be partially written; retry a
+transform whose result table workspace is already populated?) rather than
+being bolted on while auditing documentation. `docs/ETL_PIPELINE.md` now says
+this plainly instead of implying the four fields work.
+
+Also fixed in the same pass: `output.rabbitmq.vhost` was documented and had
+no backing field at all (`RabbitMQOutputConfig` lacked `VHost`) — a pipeline
+naming any vhost but `/` silently connected to `/` instead. That one *is*
+fixed (`rabbitMQBrokerConfig`, tested), because wiring an already-declared
+field through is a one-line change; inventing retry semantics is not.
+
 ### The scientific-notation decimal bug — done, with one adapter unverified
 
 Fixed in PostgreSQL and SQLite, where a `DECIMAL` column really does hand the

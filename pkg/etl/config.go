@@ -178,6 +178,10 @@ type RabbitMQOutputConfig struct {
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	Queue    string `yaml:"queue"`
+	// VHost — виртуальный хост RabbitMQ. Пусто = "/", как и у самого RabbitMQ.
+	// До этого поля документация YAML показывала vhost, а структура его не
+	// читала: значение молча терялось, и пайплайн всегда шёл в "/".
+	VHost string `yaml:"vhost"`
 }
 
 // KafkaOutputConfig определяет параметры отправки в Kafka
