@@ -566,6 +566,34 @@ building that layer, not extending the pipeline:
   list above needs one: a retry policy that can retry forever on a
   permanent failure is not a safety net, it's a second silent failure mode
 
+**A starting point narrower than all of the above, and worth building
+first: inventory before scheduling, not at 3 AM when the cron fires.** A
+lone `tdtpcli --pipeline` run has no view of anything beyond its own YAML —
+it cannot know a sibling scenario's database is also down. The orchestrator
+is the one thing that loads the whole scenarios directory at once and is
+positioned to know, up front, whether every source and output every
+scenario declares is actually reachable.
+
+It doesn't do this today. `LoadScenariosDir`/`LoadScenario`
+(`cmd/orchestrator/scenario.go`) parse *only* the `orchestrator:` YAML
+block — name, params, permissions, runner. The `sources:`/`output:` sections
+underneath, the ones that actually name a DSN or a broker host, are never
+even unmarshaled at load time, let alone connected to. A scenario with a
+typo'd DSN, an unreachable RabbitMQ host, or a `transform.sql` that doesn't
+parse loads into the orchestrator without a complaint and stays silent
+until its schedule fires for the first time.
+
+The shape of the fix: on load (and on a refresh trigger — the scenarios
+directory is not read-only), parse each scenario's full pipeline config via
+`pkg/etl.LoadConfig`, and open/ping every source and output connection it
+declares — not run the pipeline, just confirm what it depends on answers.
+A scenario that fails this gets marked, surfaced (this is also a "never
+stay silent" case), and left out of the schedule rather than being allowed
+to fail predictably on its first real tick. Cheap relative to what it
+prevents: this is exactly the class of failure — "the config was wrong
+before anyone ran it" — that costs the most when it's discovered by an
+unattended 3 AM run instead of at deploy time.
+
 ### Grace period for `tdtp.lic`
 
 Today expired = fatal, which hurts integrators mid-project. Proposal:
