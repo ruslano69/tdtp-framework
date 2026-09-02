@@ -63,11 +63,10 @@ func streamExportTable(
 
 	// Размер части. У потока свой счётчик — StreamingGenerator.partSizeBytes, а
 	// не maxMessageSize из ExportHelper, — поэтому setter на адаптере до него не
-	// доходит и --packet-size приходится ставить здесь отдельно. Бюджет считает
-	// та же packetSizeBudget, что и остальные пути.
+	// доходит и --packet-size приходится ставить здесь отдельно.
 	gen := packet.NewStreamingGenerator()
 	if opts.PacketSizeMB > 0 {
-		gen.SetPartSize(packetSizeBudget(opts.PacketSizeMB))
+		gen.SetPartSize(packet.PacketSizeBudget(opts.PacketSizeMB))
 	}
 	partsChan, summaryChan := gen.GeneratePartsStream(ctx, rowsChan, schema, tableName, packet.TypeReference)
 

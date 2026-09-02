@@ -236,23 +236,6 @@ func (p *integrityProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacke
 }
 
 // ExportTable exports a table to TDTP XML file
-// packetSizeBudget переводит --packet-size N — мегабайты готового XML — в
-// бюджет генератора.
-//
-// Множитель 2 не запас на конверт: estimateRowSize считает len(value)*2, то
-// есть бюджет измеряется в единицах вдвое крупнее UTF-8 байта, и N мегабайт
-// реального XML стоят 2N бюджета. Соотношение держится на любом алфавите,
-// потому что len() в Go считает байты, а не символы.
-//
-// Формула живёт здесь одна на оба пути. До этого она была только в broker.go —
-// а файловый экспорт, не имея её, флаг молча игнорировал.
-//
-// Не путать с packet_kb в пайплайновом YAML: там множителя нет намеренно, и
-// выравнивать их между собой нельзя (см. CLAUDE.md).
-func packetSizeBudget(mb int) int {
-	return mb * 2 * 1024 * 1024
-}
-
 func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOptions) error {
 	// Create adapter
 	adapter, err := adapters.New(ctx, *config)
@@ -302,7 +285,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		if !ok {
 			return fmt.Errorf("--packet-size is not supported by the %s adapter", config.Type)
 		}
-		sizer.SetMaxMessageSize(packetSizeBudget(opts.PacketSizeMB))
+		sizer.SetMaxMessageSize(packet.PacketSizeBudget(opts.PacketSizeMB))
 	}
 
 	// --fallback-row-limit: safety-net против обвала на in-memory сканах

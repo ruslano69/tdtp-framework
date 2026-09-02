@@ -124,6 +124,19 @@ the reason was a real bug (see below). Left open for the other four adapters,
 which still print floats with `'g'` and so cannot take the same shortcut until
 they are fixed.
 
+### ~~`output.tdtp.*` has no part-size control~~ — done
+
+`output.tdtp.packet_size_mb` now reaches `Generator.SetMaxMessageSize` the
+same way `--packet-size` does on the CLI — same formula, in fact:
+`packetSizeBudget` moved from `cmd/tdtpcli/commands` to
+`packet.PacketSizeBudget` so both paths share one implementation instead of
+the pipeline growing a second copy. `packet_kb` (Kafka-only) is untouched and
+still has no `×2` — the two were never meant to align.
+
+`TestExporter_TDTP_PacketSizeMB` exports a ~1.2 MB dataset at the default
+budget and at `packet_size_mb: 1`, and requires the second to produce more
+parts. Mutation-tested: removing the wiring in `exportToTDTP` fails it.
+
 ### The scientific-notation decimal bug — done, with one adapter unverified
 
 Fixed in PostgreSQL and SQLite, where a `DECIMAL` column really does hand the

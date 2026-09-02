@@ -4,6 +4,15 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### `--packet-size` had no pipeline equivalent either
+
+Same shape of gap `--columnar` had: `output.tdtp.packet_size_mb` is new — the
+YAML config had no way to size a pipeline's TDTP parts at all, always taking
+the library default (~1.9 MB). Wired the same way the CLI's `--packet-size`
+does, and now shares its exact formula: `packetSizeBudget` moved out of
+`cmd/tdtpcli/commands` into `packet.PacketSizeBudget`, so this didn't need a
+second copy of it.
+
 ### Eight hand-written copies of "decompress a TDTP packet" collapsed into one
 
 Found while chasing the columnar bugs below: the same ~15-line sequence

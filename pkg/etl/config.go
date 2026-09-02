@@ -164,6 +164,11 @@ type TDTPOutputConfig struct {
 	// Columnar — Data.Layout="columns" (--columnar на CLI). До этого поля
 	// пайплайн не мог попросить колоночную раскладку никак.
 	Columnar bool `yaml:"columnar"`
+	// PacketSizeMB — размер части в МБ реального XML (--packet-size на CLI).
+	// 0 = дефолт генератора (~1.9 МБ). НЕ то же самое, что packet_kb у
+	// Kafka-вывода: там нет множителя ×2, и выравнивать формулы нельзя
+	// (см. packet.PacketSizeBudget и CLAUDE.md).
+	PacketSizeMB int `yaml:"packet_size_mb"`
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ

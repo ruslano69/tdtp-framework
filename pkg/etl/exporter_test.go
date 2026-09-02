@@ -167,6 +167,56 @@ func TestExporter_TDTP_Columnar(t *testing.T) {
 	}
 }
 
+// TestExporter_TDTP_PacketSizeMB covers output.tdtp.packet_size_mb
+// (--packet-size had no pipeline equivalent until this field existed).
+// A dataset just over 1 MB of row values exports as one part at the
+// generator's default budget and splits into several once packet_size_mb=1
+// asks for a smaller one.
+func TestExporter_TDTP_PacketSizeMB(t *testing.T) {
+	schema := packet.Schema{
+		Fields: []packet.Field{
+			{Name: "id", Type: "TEXT"},
+			{Name: "note", Type: "TEXT"},
+		},
+	}
+	const rowCount = 6000 // ~200 bytes/row -> ~1.2 MB of values
+	want := make([][]string, rowCount)
+	for i := range want {
+		want[i] = []string{
+			fmt.Sprintf("%d", i),
+			strings.Repeat("x", 180) + fmt.Sprintf("-%d", i),
+		}
+	}
+
+	countParts := func(t *testing.T, mb int) int {
+		t.Helper()
+		dataPacket := packet.NewDataPacket(packet.TypeReference, "t")
+		dataPacket.Schema = schema
+		dataPacket.Data = packet.RowsToData(want)
+
+		dest := filepath.Join(t.TempDir(), "out.tdtp.xml")
+		exporter := NewExporter(OutputConfig{
+			Type: "tdtp",
+			TDTP: &TDTPOutputConfig{Destination: dest, PacketSizeMB: mb},
+		})
+		if _, err := exporter.Export(context.Background(), dataPacket); err != nil {
+			t.Fatalf("Export: %v", err)
+		}
+		parts := tdtpMultiPartFiles(dest)
+		if parts == nil {
+			return 1
+		}
+		return len(parts)
+	}
+
+	defaultParts := countParts(t, 0)
+	smallParts := countParts(t, 1)
+	if smallParts <= defaultParts {
+		t.Fatalf("packet_size_mb=1 gave %d part(s), want more than the default's %d",
+			smallParts, defaultParts)
+	}
+}
+
 func TestExporter_getDestination(t *testing.T) {
 	tests := []struct {
 		name   string
