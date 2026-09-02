@@ -583,10 +583,17 @@ typo'd DSN, an unreachable RabbitMQ host, or a `transform.sql` that doesn't
 parse loads into the orchestrator without a complaint and stays silent
 until its schedule fires for the first time.
 
-The shape of the fix: on load (and on a refresh trigger — the scenarios
-directory is not read-only), parse each scenario's full pipeline config via
-`pkg/etl.LoadConfig`, and open/ping every source and output connection it
-declares — not run the pipeline, just confirm what it depends on answers.
+The shape of the fix, and the same two-step check the bridge above already
+runs before it opens for real traffic: on load (and on a refresh trigger —
+the scenarios directory is not read-only), parse each scenario's full
+pipeline config via `pkg/etl.LoadConfig`, open every source and output
+connection it declares, and where the transport supports it, round-trip an
+actual test message rather than stopping at "the socket opened" — a
+broker that accepts a TCP connection but rejects every publish on a
+missing queue or a bad vhost passes a bare ping and fails the first real
+send. Not running the pipeline itself, just confirming what it depends on
+actually works, not merely answers.
+
 A scenario that fails this gets marked, surfaced (this is also a "never
 stay silent" case), and left out of the schedule rather than being allowed
 to fail predictably on its first real tick. Cheap relative to what it
