@@ -137,28 +137,14 @@ still has no `×2` — the two were never meant to align.
 budget and at `packet_size_mb: 1`, and requires the second to produce more
 parts. Mutation-tested: removing the wiring in `exportToTDTP` fails it.
 
-### `error_handling.on_transform_error`/`on_output_error`/`retry_attempts`/`retry_delay_seconds` — accepted, not enforced
+### `output.rabbitmq.vhost` — done
 
 Found rereading `docs/ETL_PIPELINE.md` end to end against `pkg/etl/config.go`.
-`ErrorHandlingConfig` parses, defaults and validates all five of its fields,
-but only `on_source_error` is read anywhere execution actually branches on it
-(`loader.go`, `processor.go`, both `continue`/`fail` paths tested). The other
-four are round-tripped through `cmd/tdtp-xray`'s settings screen and nothing
-else — a transform or output failure always stops the pipeline immediately,
-regardless of what `on_transform_error`/`on_output_error` say, and nothing
-ever retries regardless of `retry_attempts`/`retry_delay_seconds`.
-
-Not fixed here: real retry semantics need a design pass of their own (retry
-the whole output step? a TDTP file may already be partially written; retry a
-transform whose result table workspace is already populated?) rather than
-being bolted on while auditing documentation. `docs/ETL_PIPELINE.md` now says
-this plainly instead of implying the four fields work.
-
-Also fixed in the same pass: `output.rabbitmq.vhost` was documented and had
-no backing field at all (`RabbitMQOutputConfig` lacked `VHost`) — a pipeline
-naming any vhost but `/` silently connected to `/` instead. That one *is*
-fixed (`rabbitMQBrokerConfig`, tested), because wiring an already-declared
-field through is a one-line change; inventing retry semantics is not.
+`RabbitMQOutputConfig` had no `VHost` field at all, so a pipeline naming any
+vhost but `/` silently connected to `/` instead. Fixed (`rabbitMQBrokerConfig`,
+tested) — a one-line wiring fix for an already-declared field, unlike the
+`error_handling` design question found in the same pass (below, moved behind
+the freeze — it is not this kind of fix).
 
 ### The scientific-notation decimal bug — done, with one adapter unverified
 
@@ -490,6 +476,50 @@ What remains is genuinely new surface and stays behind the freeze:
 
 Add and drop columns, change types, on schema drift between the packet and the
 target table. Prerequisite for `--import-stream`, which needs schema negotiation.
+
+### 2.4 Real semantics for `error_handling`'s four unenforced fields
+
+`ErrorHandlingConfig` (`pkg/etl/config.go`) parses, defaults and validates
+`on_transform_error`, `on_output_error`, `retry_attempts` and
+`retry_delay_seconds`, but nothing in the pipeline runner reads them — only
+`on_source_error` actually branches on anything. Found rereading
+`docs/ETL_PIPELINE.md` against the code; `docs/ETL_PIPELINE.md` now says so
+plainly instead of implying the four fields work, but the fields themselves
+are unchanged.
+
+Not a 1.x bug fix, because there is no single obvious behavior to restore —
+the design space is genuinely open, and the number of ways a pipeline can
+fail (source, transform, output) multiplied by the number of ways to respond
+to each is large enough that a fourth quiet default would just be a
+differently-wrong guess:
+
+- **fall back to a secondary output** — already exists as `output.fallback`
+  for the primary/fallback channel pair, but nothing routes an
+  `on_output_error: fallback` (or similar) into triggering it explicitly;
+  right now the only path in is the circuit breaker, which switches on
+  *any* primary failure, not on a policy choice per error type
+- **raise an alert through a broker** — a side channel separate from both
+  the primary output and `result_log`, for "the pipeline is unhealthy" as
+  opposed to "this run's result"
+- **fail with a distinguishable exit code / error packet**, the one thing
+  that already happens today, unconditionally
+- **retry the failing step after a delay**, which is not idempotent for
+  free: a `transform` failure may have already populated the result table
+  in the workspace, an `output` failure may have already written some of a
+  multi-part TDTP file or partially drained a spool — retrying blindly
+  risks compounding the failure rather than recovering from it
+- **retry the whole pipeline** (as opposed to just the failing step) after
+  a timeout, which is a different knob than `retry_attempts` on a single
+  step and does not currently exist as a concept anywhere in the config
+
+And the part that makes this a design problem rather than four independent
+flags: **any of the above can itself fail** — the fallback output can be
+unreachable too, the broker carrying the alert can be down, the retried
+step can fail again. A real design has to say what happens then (a bounded
+retry count so this cannot loop forever is the obvious first constraint,
+already half-present as `retry_attempts`, but the same question applies to
+every strategy above, not only "retry") rather than leaving each fallback's
+own failure mode implicit.
 
 ### Grace period for `tdtp.lic`
 
