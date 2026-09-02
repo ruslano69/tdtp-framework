@@ -57,12 +57,24 @@ description: "..."          # optional
 # ─── SOURCES ──────────────────────────────────────────────────────────────────
 sources:
   - name: table_alias       # table name in the SQLite workspace (required)
-    type: sqlite            # sqlite | postgres | mssql | mysql | tdtp
-    dsn: "path/to/db.db"    # DSN, or path to a TDTP file
-    query: |                # SQL query (not used by type: tdtp)
+    type: sqlite            # sqlite | postgres | mssql | mysql | tdtp | tdtp-enc | tdtp-s3
+    dsn: "path/to/db.db"    # DSN, or path to a TDTP file (or S3 key for tdtp-s3)
+    query: |                # SQL query (not used by type: tdtp/tdtp-enc/tdtp-s3)
       SELECT id, name FROM users
     timeout: 30             # seconds (0 = no timeout)
-    multi_part: false       # type: tdtp — load every part of the set
+    multi_part: false       # type: tdtp/tdtp-s3 — load every part of the set
+    fast: false              # skip SpecialValues detection for this source's own export path
+    no_date_sentinels: []    # e.g. ["1900-01-01", "1753-01-01"] — DB-specific "no date" values
+    sanitize:                # field-name sanitizer, applied on this source's own import paths
+      translit: false        # transliterate non-ASCII names
+      clear: false           # replace unsafe characters (spaces, %, $, ...)
+    mercury_url: ""          # type: tdtp-enc only — xZMercury URL for burn-on-read decrypt
+    mercury_timeout_ms: 5000 # type: tdtp-enc only
+    s3:                      # type: tdtp-s3 only — S3-compatible storage config
+      bucket: "my-bucket"
+      endpoint: "http://localhost:9000"
+      access_key: "..."
+      secret_key: "..."
 
 # ─── WORKSPACE ────────────────────────────────────────────────────────────────
 workspace:
@@ -86,8 +98,22 @@ output:
   tdtp:
     destination: "out/result.xml"
     format: "xml"           # xml (the only supported value)
-    compression: false      # zstd
-    encryption: false       # AES-256-GCM through xZMercury
+    compression: false      # zstd — same setting as `compress` below; SetDefaults folds compress into it
+    compress_algo: "zstd"   # zstd (default) | kanzi
+    compress_level: 3       # zstd 1-19, kanzi 6-7
+    encryption: false       # AES-256-GCM through xZMercury (v1.5 section-level by default)
+    encryption_v13: false   # true = legacy v1.3 whole-blob format instead of v1.5
+    compact: false          # v1.3.1 compact format (carry-forward fixed fields)
+    compact_tail: false     # v1.3.1: write an explicit tail row
+    fixed_fields: []        # v1.3.1: explicit fixed-field names; empty = auto-detect from `_` prefix
+    columnar: false         # Data layout="columns" — see --columnar on the CLI
+    packet_size_mb: 0       # part size in MB of real XML; 0 = library default (~1.9 MB)
+    fast: false             # skip SpecialValues detection for this output; overrides performance.fast
+    s3:                     # S3-compatible destination instead of a local path
+      bucket: "my-bucket"
+      endpoint: "http://localhost:9000"
+      access_key: "..."
+      secret_key: "..."
 
   rabbitmq:                 # when type: rabbitmq
     host: localhost
@@ -102,6 +128,10 @@ output:
     topic: etl_results
     packet_kb: 750          # packet size before compression, KB (see "Message size")
     batch_send: 10          # packets per produce request
+    spool_dir: ""           # "" = os.TempDir()/tdtp-kafka-spool; a path makes the spool persistent
+    mem_limit_mb: 0         # 0 = disk-spool (resumable); >0 = in-memory path with backpressure, no resumability
+    compress_algo: "zstd"   # zstd (default) | none
+    compress_level: 3       # zstd level
 
   xlsx:                     # when type: xlsx
     destination: "out/result.xlsx"
@@ -112,6 +142,8 @@ security:
   mercury_url: "http://mercury:3000"  # xZMercury URL
   key_ttl_seconds: 86400              # key TTL in Redis (default 86400)
   mercury_timeout_ms: 5000            # request timeout (default 5000)
+  recipient_resource: ""              # recipient queue/resource name, for the audit trail
+  server_secret: ""                   # HMAC key for xZMercury responses; falls back to $MERCURY_SERVER_SECRET
 
 # ─── RESULT LOG ───────────────────────────────────────────────────────────────
 result_log:
@@ -124,19 +156,36 @@ result_log:
 
 # ─── PERFORMANCE ──────────────────────────────────────────────────────────────
 performance:
-  timeout: 300              # whole-pipeline limit, seconds
   batch_size: 10000
   parallel_sources: true    # load sources concurrently
   max_memory_mb: 2048
+  fast: false                # global --fast: skip SpecialValues detection everywhere; ~5x faster GenerateReference
 
 # ─── ERROR HANDLING ───────────────────────────────────────────────────────────
 error_handling:
-  on_source_error: "fail"   # fail | continue
-  on_transform_error: "fail"
-  on_export_error: "fail"
-  retry_count: 3
-  retry_delay_sec: 5
+  on_source_error: "fail"        # fail | continue — the only one of these five actually enforced (see below)
+  on_transform_error: "fail"     # accepted, validated, not yet acted on
+  on_output_error: "fail"        # accepted, validated, not yet acted on
+  retry_attempts: 3              # accepted, not yet acted on — nothing retries
+  retry_delay_seconds: 5         # accepted, not yet acted on
 ```
+
+**Only `on_source_error` changes what actually happens.** `continue` skips a
+failed source and carries on with the rest; `fail` (default) stops the
+pipeline on the first source error — both are real, both are exercised by
+tests. `on_transform_error`, `on_output_error`, `retry_attempts` and
+`retry_delay_seconds` are parsed, defaulted, and validated for their allowed
+values, but nothing in the pipeline runner reads them at the point a
+transform or an output actually fails — such a failure always stops the
+pipeline immediately, regardless of what these four say. Filed as an open
+item in `TODO_NEXT.md`; do not rely on them today. `performance.timeout` is
+not a real field at all — earlier revisions of this document described one
+that was never implemented.
+
+**Note the two spellings of the same field:** `output.tdtp.compression` and
+`output.tdtp.compress` set the same thing (the loader folds `compress` into
+`compression`); either works, but reading `compress` back after `SetDefaults`
+runs will show `false` even when compression is on — read `compression`.
 
 ### Kafka: message size
 
@@ -184,6 +233,8 @@ prints the size of every packet in the batch.
 | `mssql` | `server=host;user id=sa;password=X;database=DB` | SQL SELECT |
 | `mysql` | `user:pass@tcp(host:3306)/db?parseTime=true` | SQL SELECT |
 | `tdtp` | `path/to/file.tdtp.xml` | not used |
+| `tdtp-enc` | `path/to/file.tdtp.enc` | not used — needs `mercury_url` |
+| `tdtp-s3` | `s3://bucket/key`, or just `key` with `s3.bucket` set | not used |
 
 ---
 
@@ -741,8 +792,12 @@ A **downstream consumer** receives an ordinary TDTP packet, and can:
 ```
 --pipeline <file>     Path to the YAML configuration
 --unsafe              Allow any SQL (requires admin; use sudo)
---enc                 Override: set output.tdtp.encryption=true
+--enc                 Override: set output.tdtp.encryption=true (v1.5 section-level)
+--enc13               Override: same, but the legacy v1.3 whole-blob format
 --enc-dev             Dev mode: local key (non-production builds only)
+--mask <fields>       Mask sensitive fields, comma-separated (email,phone,card)
+--validate <file>     Validate fields against a YAML rules file
+--normalize <file>    Normalize fields against a YAML rules file
 ```
 
 **Precedence:**

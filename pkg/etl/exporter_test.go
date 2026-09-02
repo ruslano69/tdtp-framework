@@ -217,6 +217,21 @@ func TestExporter_TDTP_PacketSizeMB(t *testing.T) {
 	}
 }
 
+// TestRabbitMQBrokerConfig_CarriesVHost covers output.rabbitmq.vhost —
+// documented in docs/ETL_PIPELINE.md but absent from RabbitMQOutputConfig
+// until this field existed, so a pipeline naming any vhost other than "/"
+// silently connected to "/" instead.
+func TestRabbitMQBrokerConfig_CarriesVHost(t *testing.T) {
+	cfg := &RabbitMQOutputConfig{
+		Host: "broker", Port: 5672, User: "u", Password: "p",
+		Queue: "q", VHost: "/staging",
+	}
+	got := rabbitMQBrokerConfig(cfg)
+	if got.VHost != "/staging" {
+		t.Errorf("VHost = %q, want %q", got.VHost, "/staging")
+	}
+}
+
 func TestExporter_getDestination(t *testing.T) {
 	tests := []struct {
 		name   string

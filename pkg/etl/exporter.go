@@ -70,6 +70,21 @@ func (e *Exporter) newGenerator() *packet.Generator {
 	return g
 }
 
+// rabbitMQBrokerConfig переводит RabbitMQOutputConfig в brokers.Config —
+// общая для exportToRabbitMQ и ExportStream, вместо двух копий литерала.
+func rabbitMQBrokerConfig(cfg *RabbitMQOutputConfig) brokers.Config {
+	return brokers.Config{
+		Type:     "rabbitmq",
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		User:     cfg.User,
+		Password: cfg.Password,
+		Queue:    cfg.Queue,
+		VHost:    cfg.VHost,
+		Durable:  true, // Очередь переживает перезапуск
+	}
+}
+
 // NewExporter создает новый экспортер
 func NewExporter(config OutputConfig) *Exporter {
 	e := &Exporter{config: config}
@@ -555,15 +570,7 @@ func (e *Exporter) exportToRabbitMQ(ctx context.Context, dataPacket *packet.Data
 	cfg := e.config.RabbitMQ
 
 	// Создаем broker
-	broker, err := brokers.New(brokers.Config{
-		Type:     "rabbitmq",
-		Host:     cfg.Host,
-		Port:     cfg.Port,
-		User:     cfg.User,
-		Password: cfg.Password,
-		Queue:    cfg.Queue,
-		Durable:  true, // Очередь переживает перезапуск
-	})
+	broker, err := brokers.New(rabbitMQBrokerConfig(cfg))
 	if err != nil {
 		return fmt.Errorf("failed to create RabbitMQ broker: %w", err)
 	}
@@ -922,15 +929,7 @@ func (e *Exporter) exportStreamToRabbitMQ(ctx context.Context, streamResult *Str
 	}
 
 	// Создаем broker
-	broker, err := brokers.New(brokers.Config{
-		Type:     "rabbitmq",
-		Host:     cfg.Host,
-		Port:     cfg.Port,
-		User:     cfg.User,
-		Password: cfg.Password,
-		Queue:    cfg.Queue,
-		Durable:  true,
-	})
+	broker, err := brokers.New(rabbitMQBrokerConfig(cfg))
 	if err != nil {
 		result.Errors = append(result.Errors, err)
 		return result, fmt.Errorf("failed to create RabbitMQ broker: %w", err)

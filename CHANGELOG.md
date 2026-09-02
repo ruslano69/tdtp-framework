@@ -4,6 +4,23 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — `output.rabbitmq.vhost` was documented and did nothing
+
+`RabbitMQOutputConfig` had no `VHost` field at all, so a pipeline naming any
+vhost other than `/` silently connected to `/` instead — the YAML key was
+accepted (unknown keys are dropped, not rejected) and simply had no effect.
+Found rereading `docs/ETL_PIPELINE.md` end to end against the actual config
+structs, which also turned up several sections documenting fewer fields than
+actually exist (`output.tdtp`, `output.kafka`, `security`), one documenting a
+field that was never implemented (`performance.timeout`), and three
+`error_handling` YAML keys that don't match their real names
+(`on_export_error`/`retry_count`/`retry_delay_sec` vs. the code's
+`on_output_error`/`retry_attempts`/`retry_delay_seconds`) — all corrected.
+Separately, `on_transform_error`, `on_output_error`, `retry_attempts` and
+`retry_delay_seconds` turned out to be accepted and validated but never acted
+on by the pipeline runner; documented as such rather than fixed (see
+`TODO_NEXT.md` — real retry semantics need their own design pass).
+
 ### `--packet-size` had no pipeline equivalent either
 
 Same shape of gap `--columnar` had: `output.tdtp.packet_size_mb` is new — the

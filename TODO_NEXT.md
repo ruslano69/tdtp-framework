@@ -137,6 +137,15 @@ still has no `×2` — the two were never meant to align.
 budget and at `packet_size_mb: 1`, and requires the second to produce more
 parts. Mutation-tested: removing the wiring in `exportToTDTP` fails it.
 
+### `output.rabbitmq.vhost` — done
+
+Found rereading `docs/ETL_PIPELINE.md` end to end against `pkg/etl/config.go`.
+`RabbitMQOutputConfig` had no `VHost` field at all, so a pipeline naming any
+vhost but `/` silently connected to `/` instead. Fixed (`rabbitMQBrokerConfig`,
+tested) — a one-line wiring fix for an already-declared field, unlike the
+`error_handling` design question found in the same pass (below, moved behind
+the freeze — it is not this kind of fix).
+
 ### The scientific-notation decimal bug — done, with one adapter unverified
 
 Fixed in PostgreSQL and SQLite, where a `DECIMAL` column really does hand the
@@ -467,6 +476,130 @@ What remains is genuinely new surface and stays behind the freeze:
 
 Add and drop columns, change types, on schema drift between the packet and the
 target table. Prerequisite for `--import-stream`, which needs schema negotiation.
+
+### 2.4 Pipeline survivability belongs to the orchestrator, which has no tools for it yet
+
+`ErrorHandlingConfig` (`pkg/etl/config.go`) parses, defaults and validates
+`on_transform_error`, `on_output_error`, `retry_attempts` and
+`retry_delay_seconds`, but nothing in the pipeline runner reads them — only
+`on_source_error` actually branches on anything. Found rereading
+`docs/ETL_PIPELINE.md` against the code; `docs/ETL_PIPELINE.md` now says so
+plainly instead of implying the four fields work, but the fields themselves
+are unchanged.
+
+Not a 1.x bug fix, because there is no single obvious behavior to restore —
+the design space is genuinely open, and the number of ways a pipeline can
+fail (source, transform, output) multiplied by the number of ways to respond
+to each is large enough that a fourth quiet default would just be a
+differently-wrong guess:
+
+- **fall back to a secondary output** — already exists as `output.fallback`
+  for the primary/fallback channel pair, but nothing routes an
+  `on_output_error: fallback` (or similar) into triggering it explicitly;
+  right now the only path in is the circuit breaker, which switches on
+  *any* primary failure, not on a policy choice per error type
+- **raise an alert through a broker** — a side channel separate from both
+  the primary output and `result_log`, for "the pipeline is unhealthy" as
+  opposed to "this run's result"
+- **fail with a distinguishable exit code / error packet**, the one thing
+  that already happens today, unconditionally
+- **retry the failing step after a delay**, which is not idempotent for
+  free: a `transform` failure may have already populated the result table
+  in the workspace, an `output` failure may have already written some of a
+  multi-part TDTP file or partially drained a spool — retrying blindly
+  risks compounding the failure rather than recovering from it
+- **retry the whole pipeline** (as opposed to just the failing step) after
+  a timeout, which is a different knob than `retry_attempts` on a single
+  step and does not currently exist as a concept anywhere in the config
+
+And the part that makes this a design problem rather than four independent
+flags: **any of the above can itself fail** — the fallback output can be
+unreachable too, the broker carrying the alert can be down, the retried
+step can fail again. A real design has to say what happens then (a bounded
+retry count so this cannot loop forever is the obvious first constraint,
+already half-present as `retry_attempts`, but the same question applies to
+every strategy above, not only "retry") rather than leaving each fallback's
+own failure mode implicit.
+
+**Guiding scope, stated by the person who'll approve the design:** a pipeline
+run is not a long-lived daemon fighting to stay alive — it's the opposite of
+a service that never unloads and never sleeps, always fighting a network that
+may recover, disk that may free up, a broker that may come back once someone
+restarts it. A pipeline run is short-lived and disposable. Its job is: try
+one fix or emit a warning, and if that doesn't clear it, **fail loud and
+fail fast** — a clear error packet, a clear non-zero exit, a clear
+`result_log` entry. Whatever decides to retry the whole thing later — a
+schedule in `cmd/orchestrator`, cron, systemd, k8s — is a separate layer with
+its own state and its own judgment about backoff, and does not need the
+pipeline itself to reimplement that judgment. **The one hard requirement is
+never staying silent** — every failure mode has to surface somewhere a
+supervisor can see it, not get swallowed.
+
+This narrows 2.4 considerably from the four-strategies list above: self-
+retry and self-fallback inside a single pipeline run are *not* in scope —
+that's the pipeline's own job description settled, not just a preference.
+Retry-with-backoff, fallback-on-repeated-failure and alerting belong to the
+supervisor. `docs/ETL_PIPELINE.md`'s `error_handling` section stays exactly
+what it honestly is today: `on_source_error` (real), and four fields that
+are accepted, validated, and never acted on — not a placeholder waiting to
+be filled in, a closed decision.
+
+**What's actually missing is on the other side.** Checked
+`cmd/orchestrator`: it has none of this either. A schedule
+(`ScheduleRecord`) is a bare cron expression plus `last_status` — a failed
+run just waits for the next regular tick, with no backoff, no earlier
+retry, and no distinction between "the network blipped" and "the config is
+wrong and every future tick will fail the same way." The 2.0 work is
+building that layer, not extending the pipeline:
+
+- per-schedule retry policy (attempts, backoff) distinct from the cron
+  interval itself — a schedule that fires every 15 minutes should not have
+  to wait 15 minutes to retry a failure that clears in 30 seconds
+- reading the pipeline's own signal for *why* it failed, once the pipeline
+  side gives it one to read (an error code on the error packet is the
+  natural carrier — already exists, just not classified into
+  transient/permanent yet)
+- the alert side channel, if it's wanted, lives here too — the orchestrator
+  already has job records and a result-log style output; a queue alert is
+  the same shape of thing already built once for `result_log`
+- its own bounded-retry guard, for the same reason every strategy in the
+  list above needs one: a retry policy that can retry forever on a
+  permanent failure is not a safety net, it's a second silent failure mode
+
+**A starting point narrower than all of the above, and worth building
+first: inventory before scheduling, not at 3 AM when the cron fires.** A
+lone `tdtpcli --pipeline` run has no view of anything beyond its own YAML —
+it cannot know a sibling scenario's database is also down. The orchestrator
+is the one thing that loads the whole scenarios directory at once and is
+positioned to know, up front, whether every source and output every
+scenario declares is actually reachable.
+
+It doesn't do this today. `LoadScenariosDir`/`LoadScenario`
+(`cmd/orchestrator/scenario.go`) parse *only* the `orchestrator:` YAML
+block — name, params, permissions, runner. The `sources:`/`output:` sections
+underneath, the ones that actually name a DSN or a broker host, are never
+even unmarshaled at load time, let alone connected to. A scenario with a
+typo'd DSN, an unreachable RabbitMQ host, or a `transform.sql` that doesn't
+parse loads into the orchestrator without a complaint and stays silent
+until its schedule fires for the first time.
+
+The shape of the fix, and the same two-step check the bridge above already
+runs before it opens for real traffic: on load (and on a refresh trigger —
+the scenarios directory is not read-only), parse each scenario's full
+pipeline config via `pkg/etl.LoadConfig`, open every source and output
+connection it declares, and where the transport supports it, round-trip an
+actual test message rather than stopping at "the socket opened" — a
+broker that accepts a TCP connection but rejects every publish on a
+missing queue or a bad vhost passes a bare ping and fails the first real
+send. Not running the pipeline itself, just confirming what it depends on
+actually works, not merely answers.
+
+A scenario that fails this gets marked, surfaced (this is also a "never
+stay silent" case), and left out of the schedule rather than being allowed
+to fail predictably on its first real tick. Cheap relative to what it
+prevents: this is exactly the class of failure — "the config was wrong
+before anyone ran it" — that costs the most when it's discovered by an
+unattended 3 AM run instead of at deploy time.
 
 ### Grace period for `tdtp.lic`
 
