@@ -32,6 +32,15 @@ func DefaultCompressionOptions() CompressionOptions {
 // т.к. размер строк считается в UTF-16 единицах (MSMQ/COM-совместимость).
 const DefaultMaxMessageSize = 3_800_000
 
+// PacketSizeBudget переводит N мегабайт реального XML в бюджет для
+// SetMaxMessageSize — те же единицы, что estimateRowSize (вдвое больше
+// UTF-8 байта). Общая для CLI (--packet-size) и pipeline
+// (output.tdtp.packet_size_mb); не путать с packet_kb в YAML — там
+// множителя нет намеренно, и выравнивать их нельзя (см. CLAUDE.md).
+func PacketSizeBudget(mb int) int {
+	return mb * 2 * 1024 * 1024
+}
+
 // measureEnvelopeSize возвращает стоимость XML-конверта одной части в тех же
 // единицах, что и estimateRowSize (т.е. вдвое больше байт UTF-8).
 //

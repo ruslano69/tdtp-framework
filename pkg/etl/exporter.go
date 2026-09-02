@@ -263,6 +263,9 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 
 	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
 	generator := e.newGenerator()
+	if e.config.TDTP.PacketSizeMB > 0 {
+		generator.SetMaxMessageSize(packet.PacketSizeBudget(e.config.TDTP.PacketSizeMB))
+	}
 	rows := dataPacket.GetRows()
 	parts, err := generator.GenerateReference(dataPacket.Header.TableName, dataPacket.Schema, rows)
 	if err != nil {

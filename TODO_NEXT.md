@@ -124,22 +124,18 @@ the reason was a real bug (see below). Left open for the other four adapters,
 which still print floats with `'g'` and so cannot take the same shortcut until
 they are fixed.
 
-### `output.tdtp.*` has no part-size control — not started
+### ~~`output.tdtp.*` has no part-size control~~ — done
 
-`packet_kb` (`TDTPOutputConfig`'s Kafka-only sibling, `pkg/etl/exporter.go`
-line ~1108) governs part size for `output.type: kafka` only. For
-`output.type: tdtp` (file or S3), `exportToTDTP` always builds its generator
-with the library default (`packet.DefaultMaxMessageSize`, ~1.9 MB of real
-XML) — there is no YAML key that reaches `Generator.SetMaxMessageSize`, the
-way `--packet-size` does on the CLI's `--export`.
+`output.tdtp.packet_size_mb` now reaches `Generator.SetMaxMessageSize` the
+same way `--packet-size` does on the CLI — same formula, in fact:
+`packetSizeBudget` moved from `cmd/tdtpcli/commands` to
+`packet.PacketSizeBudget` so both paths share one implementation instead of
+the pipeline growing a second copy. `packet_kb` (Kafka-only) is untouched and
+still has no `×2` — the two were never meant to align.
 
-Same shape of gap as `output.tdtp.columnar` before it was closed: a real CLI
-capability with no pipeline equivalent. Not fixed here because nobody has
-actually hit the default part size being wrong for a `tdtp`-output pipeline
-yet — filed so the fix is ready to reach for rather than rediscovered.
-`CLAUDE.md`'s existing warning stands: whatever field is added must **not**
-reuse or align with `packet_kb`'s formula (no `×2`) — that multiplier exists
-for `--packet-size`'s own reasons and doesn't transfer.
+`TestExporter_TDTP_PacketSizeMB` exports a ~1.2 MB dataset at the default
+budget and at `packet_size_mb: 1`, and requires the second to produce more
+parts. Mutation-tested: removing the wiring in `exportToTDTP` fails it.
 
 ### The scientific-notation decimal bug — done, with one adapter unverified
 
