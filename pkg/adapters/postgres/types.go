@@ -92,8 +92,30 @@ func PostgreSQLToTDTP(pgType string) (schema.DataType, string, error) {
 	}
 }
 
-// TDTPToPostgreSQL конвертирует TDTP тип в PostgreSQL CREATE TABLE тип
+// TDTPToPostgreSQL конвертирует TDTP тип в PostgreSQL CREATE TABLE тип.
+// Текстовые поля без специального subtype всегда становятся TEXT — см.
+// TDTPToPostgreSQLStrict, если нужно восстановить заявленную длину.
 func TDTPToPostgreSQL(field packet.Field) string {
+	return TDTPToPostgreSQLStrict(field, false)
+}
+
+// TDTPToPostgreSQLStrict — как TDTPToPostgreSQL, но при strict=true
+// восстанавливает VARCHAR(field.Length) для TEXT/VARCHAR/CHAR/String без
+// специального subtype, вместо безусловного TEXT.
+//
+// strict=false (по умолчанию, и то же что TDTPToPostgreSQL) — CREATE TABLE
+// не может обрезать данные при импорте: 7887de4 сначала восстанавливал
+// VARCHAR(N) отсюда и был отменён именно потому, что это резало данные на
+// интеграционных тестах ("Данные обрезались при импорте из-за ограничения
+// длины"). Регрессия закрыта не тестом, а удалением кода — strict=true
+// возвращает то же поведение осознанно, по флагу, а не по умолчанию.
+//
+// strict=true — колонка получает то же ограничение длины, что было на
+// источнике; вставка более длинного значения падает с ошибкой БД сразу,
+// а не расширяется молча до TEXT. Точное совпадение длины гарантировано
+// только при импорте назад в ту же СУБД, откуда шёл экспорт — единица
+// длины (символы/байты) и правила усечения различаются между движками.
+func TDTPToPostgreSQLStrict(field packet.Field, strict bool) string {
 	tdtpType := schema.DataType(field.Type)
 	subtype := field.Subtype
 
@@ -154,7 +176,10 @@ func TDTPToPostgreSQL(field packet.Field) string {
 		return fmt.Sprintf("NUMERIC(%d,%d)", precision, scale)
 
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:
-		// Force TEXT to avoid truncation issues during import
+		if strict && field.Length > 0 {
+			return fmt.Sprintf("VARCHAR(%d)", field.Length)
+		}
+		// Force TEXT to avoid truncation issues during import (default; see doc comment above)
 		return "TEXT"
 
 	case schema.TypeBoolean, schema.TypeBool:

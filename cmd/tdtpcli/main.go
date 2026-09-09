@@ -935,9 +935,10 @@ func main() {
 
 	// Build adapter config
 	adapterConfig := adapters.Config{
-		Type:    config.Database.Type,
-		DSN:     config.Database.BuildDSN(),
-		Charset: config.Database.Charset,
+		Type:         config.Database.Type,
+		DSN:          config.Database.BuildDSN(),
+		Charset:      config.Database.Charset,
+		StrictSchema: *flags.StrictSchema || config.Database.StrictSchema,
 	}
 
 	// License gate: the configured DB adapter must be permitted.

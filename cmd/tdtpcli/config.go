@@ -57,6 +57,12 @@ type DatabaseConfig struct {
 	SSLMode     string `yaml:"sslmode,omitempty"`      // PostgreSQL SSL mode
 	DSN         string `yaml:"dsn,omitempty"`          // Raw connection string (overrides other fields; required for access)
 	Charset     string `yaml:"charset,omitempty"`      // Charset for string decoding, e.g. "windows-1251" (ODBC/legacy drivers)
+
+	// StrictSchema restores VARCHAR(n)/CHAR(n) instead of TEXT when a
+	// table is created during import (PostgreSQL adapter only). Off by
+	// default: an oversized value then fails the insert instead of being
+	// silently widened to TEXT. See adapters.Config.StrictSchema.
+	StrictSchema bool `yaml:"strict_schema,omitempty"`
 }
 
 // BrokerConfig contains message broker settings

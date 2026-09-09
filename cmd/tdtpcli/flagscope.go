@@ -49,7 +49,7 @@ var commandFlags = map[string][]string{
 	"export-broker":    {"batch", "compress", "compress-algo", "compress-level", "enc", "enc13", "export-broker", "fields", "hash", "l", "limit", "mask", "mercury-caller", "normalize", "offset", "order-by", "packet-size", "validate", "w", "where"},
 	"export-xlsx":      {"export-xlsx", "fields", "l", "limit", "mask", "normalize", "offset", "order-by", "output", "sheet", "translit", "validate", "w", "where"},
 	"from-xlsx":        {"from-xlsx", "output", "sheet"},
-	"import":           {"clear", "expect-var", "fields", "import", "strategy", "table", "translit"},
+	"import":           {"clear", "expect-var", "fields", "import", "strategy", "strict-schema", "table", "translit"},
 	"import-broker":    {"expect-var", "import-broker", "keep", "output", "raw", "strategy", "table"},
 	"import-xlsx":      {"import-xlsx", "sheet", "strategy", "table"},
 	"inspect":          {"inspect"},

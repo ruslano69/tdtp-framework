@@ -1080,6 +1080,74 @@ Start it with `pg_ctlcluster 16 main start`.
 
 ---
 
+## PostgreSQL VARCHAR(n)/CHAR(n): TEXT by default, `--strict-schema` restores length (IMPORTANT)
+
+`PostgreSQLToTDTP` collapses `varchar(n)`, `char(n)` and `text` into one TDTP
+`TEXT` type ([types.go:44](pkg/adapters/postgres/types.go:44)) — the length is
+still carried as `field.Length`
+([BuildFieldFromPGColumn](pkg/adapters/postgres/types.go:209)), it just isn't
+enforced on the way back in. When `CreateTable` builds a fresh table
+(`TDTPToPostgreSQL`/`TDTPToPostgreSQLStrict`), a plain text field with no
+special subtype gets `TEXT`, unconditionally, by default.
+
+**This was tried the other way once and reverted for a real reason, not a
+hypothetical one.** `git log -L156,158:pkg/adapters/postgres/types.go` shows
+commit `7887de4` removing exactly this — `VARCHAR(field.Length)` when
+`Length > 0` — with the commit message stating the cause plainly: *"Данные
+обрезались при импорте из-за ограничения длины"* (data got truncated on
+import because of the length limit). No regression test survives that
+incident; the fix was deleting the code, not pinning the failure.
+
+**`--strict-schema` (`adapters.Config.StrictSchema`) brings it back, opt-in.**
+`TDTPToPostgreSQLStrict(field, strict)` is the same switch;
+`TDTPToPostgreSQL` is now a thin wrapper calling it with `strict=false`, so
+the default is byte-for-byte the pre-existing behaviour. With `strict=true`
+and `field.Length > 0`, a plain text field becomes `VARCHAR(n)` instead of
+`TEXT` — subtyped fields (`uuid`, `json`, `jsonb`, `inet`, `cidr`, `macaddr`,
+`xml`, …) are resolved earlier in the switch and are untouched either way.
+
+The trade this makes explicit: with the flag on, a value longer than the
+declared length now **fails the insert with a database error** instead of
+silently landing in an unconstrained `TEXT` column. That is the point — for
+a format whose stated goal is schema-preserving transfer, silently
+substituting a wider type is its own kind of lossy, just one that doesn't
+error. Off by default because the recorded failure mode of the strict
+behaviour is real; on by request because failing loudly on a declared
+constraint is what "restore the schema" is supposed to mean.
+
+**Fidelity is only as good as the length unit is portable.** `field.Length`
+is whatever the *source* column declared — Postgres counts characters, other
+engines don't necessarily agree (bytes vs. characters, collation-dependent
+truncation). `--strict-schema` reconstructing the exact same `VARCHAR(n)` is
+only guaranteed reimporting into the same database type the packet was
+exported from; the packet carries no source-DB-type field to detect a
+cross-engine round trip automatically, so `Adapter.Connect` prints this
+caveat once whenever the flag is on, rather than trying to guess.
+
+Wired as `--strict-schema` on `--import` (`cmd/tdtpcli/flagscope.go`) and
+`database.strict_schema` in the CLI config YAML; both feed
+`adapters.Config.StrictSchema`.
+
+**Deliberately not wired into `--pipeline`.** `pkg/etl` has no database
+write target at all to hang this on: `output.type` is one of `tdtp`,
+`rabbitmq`, `kafka`, `xlsx` ([config.go:415-464](pkg/etl/config.go)); the
+adapters a pipeline can name under `sources[].type` (including `postgres`)
+are read-only there, via `adapters.New` in
+[loader.go:474](pkg/etl/loader.go:474). The one `CreateTable` inside
+`pkg/etl` ([importer.go:309](pkg/etl/importer.go:309)) targets the SQLite
+workspace, not an external database — and SQLite doesn't distinguish
+`VARCHAR(n)` from `TEXT` at all, so the flag would have nothing to do there
+even if plumbed through. If a `database` output type is ever added to
+`pkg/etl/config.go`, give it its own `strict_schema`, checked against the
+adapter it targets — don't add the field to pipeline config ahead of that
+output existing.
+
+Tests: `pkg/adapters/postgres/types_test.go` pins the default (`TEXT`
+regardless of `Length`), the strict reconstruction (`VARCHAR(n)`, and the
+`Length<=0` fallback to `TEXT`), and that subtyped fields ignore the flag.
+
+---
+
 ## MySQL dates: precision is not optional (IMPORTANT)
 
 ### Starting MySQL here
