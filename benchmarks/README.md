@@ -7,9 +7,17 @@ excludes this directory).
 | Program | Question answered |
 |---------|------------------|
 | `bench_direct` | Is `database/sql` mutex the throughput bottleneck? (No — direct access gives <5% gain) |
-| `bench_duckdb` | Is DuckDB in-memory faster than modernc SQLite for read-heavy workloads? |
 | `bench_dynamic` | What is the per-row overhead of the TDTP framework vs raw XML? |
 | `bench_raw` | Baseline: raw SQLite → custom XML with no framework, minimum possible overhead |
+
+**`bench_duckdb` — answered, removed.** Asked whether DuckDB in-memory beats
+modernc SQLite for the pipeline's read-heavy workload. It doesn't: three
+times slower end to end (`database/sql` crosses into cgo on every call;
+DuckDB's fast path is the Appender, which needs its own load path outside
+`database/sql`), no win on binary size, no win on memory. SQLite stayed the
+workspace engine. Numbers and method are in `CLAUDE.md` → "DuckDB как
+рабочая БД пайплайна"; the code itself (and the `go-duckdb` cgo dependency)
+was deleted once the question was settled rather than kept around unused.
 
 ## Build & Run
 
