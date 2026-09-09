@@ -30,6 +30,10 @@ type Adapter struct {
 	pool   *pgxpool.Pool
 	schema string // public, custom, etc.
 
+	// strictSchema — см. adapters.Config.StrictSchema. Читается только в
+	// buildColumnDefinition (types.go: TDTPToPostgreSQLStrict).
+	strictSchema bool
+
 	// Base helpers (added in refactoring)
 	exportHelper *base.ExportHelper
 	importHelper *base.ImportHelper
@@ -74,6 +78,13 @@ func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	a.schema = cfg.Schema
 	if a.schema == "" {
 		a.schema = "public" // default schema
+	}
+	a.strictSchema = cfg.StrictSchema
+	if a.strictSchema {
+		fmt.Println("NOTICE: --strict-schema on — CREATE TABLE restores VARCHAR(n)/CHAR(n) " +
+			"from the packet's declared length; an oversized value now fails the insert " +
+			"instead of silently widening to TEXT. Exact length fidelity is only " +
+			"guaranteed when re-importing into the same database type it was exported from.")
 	}
 
 	// Initialize base helpers (added in refactoring)

@@ -601,6 +601,51 @@ prevents: this is exactly the class of failure — "the config was wrong
 before anyone ran it" — that costs the most when it's discovered by an
 unattended 3 AM run instead of at deploy time.
 
+### 2.5 Pipeline database output — `--pipeline` cannot write to a database at all
+
+Raised while wiring `--strict-schema` for `--import` (see `CLAUDE.md` →
+"PostgreSQL VARCHAR(n)/CHAR(n)") and checking whether `--pipeline` needed the
+same flag. It doesn't, because there is nothing to attach it to: **`pkg/etl`
+has no database write target today, in either direction beyond reading.**
+
+- `output.type` is one of `tdtp`, `rabbitmq`, `kafka`, `xlsx`
+  (`pkg/etl/config.go:415-464`) — file, broker, or spreadsheet, full stop.
+- `sources[].type` accepts `postgres`/`mssql`/`mysql`/`sqlite`, but only ever
+  read-only, through `adapters.New` in `pkg/etl/loader.go:474`.
+- The one `CreateTable` inside `pkg/etl` (`pkg/etl/importer.go:309`) targets
+  the in-memory SQLite *workspace*, not an external database.
+
+So a pipeline that should land its transformed rows straight into a target
+table — instead of producing a `.tdtp.xml` for a separate manual `--import`
+— cannot do that in one step. Today it's always two commands and a human (or
+a second scenario) in between.
+
+**Shape of the fix, following what `--import` already has:** a new
+`output.type: database` with its own sub-config (target adapter type/DSN,
+table name — or `result_table` if unset —, import strategy mirroring
+`ImportOptions`/`--strategy`). Implementation is mostly wiring: the same
+`base.TableManager`/`base.ImportHelper` machinery `--import` already drives
+(`pkg/adapters/base/import_helper.go`) works from a `packet.DataPacket` in
+memory, so the pipeline's `transform` result table can feed it directly
+without an intermediate TDTP round-trip.
+
+**`strict_schema` belongs to this new config, not to the pipeline as a
+whole.** Give the `database` output its own `strict_schema` key (same
+semantics as `adapters.Config.StrictSchema` today), checked against
+whichever adapter it targets — do not retrofit the field onto
+`pkg/etl/config.go` ahead of this output existing, and do not let a
+pipeline-global setting quietly apply to an output that isn't a database.
+
+**Squarely behind the freeze, not a 1.x fix.** This is a new output type and
+a new capability (a pipeline writing to a database), exactly what the table
+at the top of this file rules out for 1.x ("New adapters" / "New flags,
+commands or subsystems"). It also inherits 2.4's open question rather than
+resolving it: what a `database` output does on a partial-batch failure
+(some rows inserted, `CreateTable` succeeded but `INSERT` didn't) needs the
+same "fail loud, let the supervisor retry" answer 2.4 already settled for
+the pipeline as a whole — this is one more place that discipline has to
+hold, not a reason to reopen it.
+
 ### Grace period for `tdtp.lic`
 
 Today expired = fatal, which hurts integrators mid-project. Proposal:

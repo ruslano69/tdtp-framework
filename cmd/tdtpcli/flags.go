@@ -140,6 +140,9 @@ type Flags struct {
 	Translit *bool // transliterate non-ASCII field names to ASCII via go-unidecode
 	Clear    *bool // replace special chars (%, @, #, space, …) in field names with safe tokens
 
+	// Schema fidelity (--import, PostgreSQL target)
+	StrictSchema *bool // restore VARCHAR(n)/CHAR(n) instead of TEXT when auto-creating the table
+
 	// Data Processors
 	Mask      *string
 	Validate  *string
@@ -283,6 +286,7 @@ func ParseFlags() *Flags {
 	// Field Name Sanitization
 	f.Translit = flag.Bool("translit", false, "Transliterate non-ASCII field names to ASCII (Cyrillic, European diacritics) using go-unidecode. Use with --import.")
 	f.Clear = flag.Bool("clear", false, "Replace special chars in field names with safe tokens (% → _pct, @ → _at, space → _, …). Use with --import.")
+	f.StrictSchema = flag.Bool("strict-schema", false, "Restore VARCHAR(n)/CHAR(n) from the packet's declared length instead of TEXT when auto-creating the table (PostgreSQL target only). An oversized value then fails the insert instead of silently widening to TEXT. Use with --import.")
 
 	// Data Processors
 	f.Mask = flag.String("mask", "", "Mask sensitive fields (comma-separated: email,phone,card)")

@@ -300,7 +300,7 @@ func (a *Adapter) createTableFromSchema(ctx context.Context, tableName string, p
 // buildColumnDefinition строит определение колонки для CREATE TABLE
 func (a *Adapter) buildColumnDefinition(field packet.Field) string {
 	quotedName := QuoteIdentifier(field.Name)
-	pgType := TDTPToPostgreSQL(field)
+	pgType := TDTPToPostgreSQLStrict(field, a.strictSchema)
 
 	return fmt.Sprintf("%s %s", quotedName, pgType)
 }
