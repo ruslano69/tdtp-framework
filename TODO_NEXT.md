@@ -710,6 +710,66 @@ shape applies here.
   already states for the decompression-bomb limits, applied one layer
   further out.
 
+### 2.7 Reject an unrecognized `Field.subtype` instead of silently ignoring it
+
+Proposed while cataloguing `subtype` for `docs/tdtp.xsd` (#313): today an
+unrecognized subtype is never an error anywhere in the framework — it's
+inert metadata the moment nothing has a case for it. Concretely,
+`TDTPToPostgreSQLStrict`'s `switch subtype`
+(`pkg/adapters/postgres/types.go`) has **no `default:` case at all**: an
+unmatched value (empty, a typo, or a value that only means something to a
+*different* adapter — MSSQL's `rowversion` reaching the PostgreSQL writer,
+say) falls straight through, and the field is created from its base TDTP
+type alone, subtype silently dropped. Every adapter's `TDTPToX` switch
+behaves the same way.
+
+**The proposal: for 2.0, an unrecognized subtype should refuse rather than
+fall through — fail loud, the same principle `CLAUDE.md` already states
+for a decompression bomb or a missing v1.4 hash.**
+
+**This is not the `warnUnusedFlags` precedent, and the difference is worth
+being explicit about.** `cmd/tdtpcli/flagscope.go` deliberately *warns*
+rather than refuses on an unclaimed flag, because an extra flag is inert —
+the command just ignores it, nothing downstream is wrong. An unrecognized
+subtype is not inert: it can silently produce a *wrong* table (MSSQL's
+`rowversion` is an auto-generated, effectively read-only binary value —
+silently downgrading it to a plain writable `TEXT` column is not a no-op,
+it's a different column). The flagscope reasoning for leniency does not
+transfer here; if anything it argues the other way.
+
+**Where the check has to live, and why the existing catalogue isn't
+directly reusable for it:** `docs/tdtp.xsd`'s `KnownSubtypeEnum` is a flat
+list — every subtype from every adapter, merged, because it exists to
+document what the wire format can legally carry, not to police any one
+adapter's conversion. "Known" for *this* purpose has to be scoped per
+target adapter × base type, matching each adapter's own switch — MSSQL's
+`rowversion` is perfectly valid for MSSQL and exactly the case that should
+be refused for PostgreSQL. Building the check means turning each adapter's
+switch statement into an explicit registry it can also check membership
+against, not pointing at the XSD's flat enum as-is.
+
+Two complementary places to enforce it, not a choice between them:
+- **At the point of use** — each adapter's own `TDTPToX` conversion refuses
+  when it can't map the subtype, instead of quietly building a schema that
+  drifted from the source.
+- **At the perimeter** — folds into 2.6's `validate --strict`: check every
+  `Field.subtype` against the *target* adapter's known set before import
+  starts, so the refusal happens before any DDL runs, not partway through
+  a multi-table import.
+
+**Open, and worth measuring rather than assuming an answer to:** whether
+any real 1.x-vintage packet in the wild carries a subtype that is
+unrecognized-but-harmless on purpose (an opaque hint meant for a different
+consumer, say) — refusing those would be a real regression for whoever
+relies on the current silent-pass-through, not just a strictness upgrade.
+This is also, precisely, "changes to the packet wire format" /
+"changes the meaning of an existing" behavior — the freeze table's own
+"Not allowed in 1.x" column — so it belongs here regardless, but the
+backward-compatibility question should be checked against real packets
+before deciding whether the refusal is per-field (drop that one value,
+warn) or per-packet (refuse the whole import), not decided by
+assumption.
+
 ### Grace period for `tdtp.lic`
 
 Today expired = fatal, which hurts integrators mid-project. Proposal:
