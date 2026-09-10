@@ -169,6 +169,14 @@ type TDTPOutputConfig struct {
 	// Kafka-вывода: там нет множителя ×2, и выравнивать формулы нельзя
 	// (см. packet.PacketSizeBudget и CLAUDE.md).
 	PacketSizeMB int `yaml:"packet_size_mb"`
+	// Integrity — проставить v1.4 xxh3_128 хеши (Schema+Data+Packet),
+	// независимо от Encryption. Раньше этот шаг попадал в цепочку только
+	// как побочный эффект encryption: true — обычный (нешифрованный)
+	// экспорт не мог получить хеш никаким способом. Зеркалит --integrity
+	// у CLI (cmd/tdtpcli/commands/export.go, needsIntegrity): без
+	// security.mercury_url — только локальный хеш для последующей сверки,
+	// с ним — ещё и регистрация в xZMercury.
+	Integrity bool `yaml:"integrity"`
 }
 
 // RabbitMQOutputConfig определяет параметры отправки в RabbitMQ

@@ -49,13 +49,28 @@ func (e *Exporter) SetFast(fast bool) {
 	e.fast = fast
 }
 
-// resolveHashRegistrar returns a pipeline.HashRegistrar for the mandatory
-// v1.5 integrity step: e.mercuryBinder if it also implements HashRegistrar
-// (the same dev-mode/test substitute already used for BindKey), else a
-// production mercury.Client built from e.security.MercuryURL.
+// resolveHashRegistrar returns a pipeline.HashRegistrar for the integrity
+// step (mandatory when v1.5 encryption is active, opt-in via
+// TDTPOutputConfig.Integrity otherwise): e.mercuryBinder if it also
+// implements HashRegistrar (the same dev-mode/test substitute already used
+// for BindKey), else a production mercury.Client built from
+// e.security.MercuryURL — or nil when that URL is empty.
+//
+// nil is not an error case: ComputeAndRegisterIntegrity treats a nil
+// registrar as "compute the local xxh3 hashes, skip registration" — the
+// same local-only mode CLI's --integrity falls back to without
+// --mercury-url (buildExportChain leaves mclient nil there for the same
+// reason). Returning a real mercury.Client pointed at an empty URL instead
+// would make RegisterHash dial that empty URL and fail every plain
+// `integrity: true` pipeline that has no Mercury configured — encryption's
+// own path never hit this because v1.5 key binding already requires
+// security.mercury_url to be set.
 func (e *Exporter) resolveHashRegistrar() pipeline.HashRegistrar {
 	if hr, ok := e.mercuryBinder.(pipeline.HashRegistrar); ok {
 		return hr
+	}
+	if e.security.MercuryURL == "" {
+		return nil
 	}
 	return mercury.NewClient(e.security.MercuryURL, e.security.MercuryTimeoutMs)
 }
@@ -287,10 +302,12 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 		return fmt.Errorf("failed to generate parts: %w", err)
 	}
 
-	// v1.5 encryption needs a Mercury client shared across all parts for the
-	// mandatory integrity step below — one instance, not one per part.
+	// The integrity step needs a registrar shared across all parts — one
+	// instance, not one per part. Two independent triggers, same as CLI's
+	// needsIntegrity: v1.5 encryption requires it unconditionally; plain
+	// TDTPOutputConfig.Integrity requests it on its own, encryption or not.
 	var integrityRegistrar pipeline.HashRegistrar
-	if e.config.TDTP.Encryption && !e.config.TDTP.EncryptionV13 {
+	if e.config.TDTP.Integrity || (e.config.TDTP.Encryption && !e.config.TDTP.EncryptionV13) {
 		integrityRegistrar = e.resolveHashRegistrar()
 	}
 
@@ -862,6 +879,18 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string
 	if stats.CompressedSize >= int(float64(stats.OriginalSize)*0.9) {
 		return nil
 	}
+
+	// Checksum сжатых байт (xxh3-64) — на CLI ставится безусловно при
+	// --compress (cmd/tdtpcli/commands/export.go: EnableChecksum: compress,
+	// "--hash" давно deprecated ровно потому что это стало автоматическим).
+	// Здесь этого шага не было вовсе: compress: true — дефолт в шаблоне
+	// конфига, так что без этой строки практически ни один пайплайн не
+	// получал даже базовый checksum сжатых данных, не говоря об
+	// integrity выше. Не путать два разных механизма: это хеш сжатых
+	// байт (проверяет, что декомпрессия дала то же самое), а Integrity
+	// выше — xxh3_128 по исходным строкам ДО сжатия (защита от подмены
+	// содержимого).
+	dataPacket.Data.Checksum = processors.ComputeChecksum([]byte(compressedData))
 
 	// Обновляем DataPacket сжатыми данными, сохраняя compact/tail атрибуты
 	// Полем, не литералом целиком: Data к этому моменту может нести Layout
