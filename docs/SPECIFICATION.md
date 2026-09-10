@@ -383,8 +383,13 @@ Rows are pipe-delimited.
 | Attribute | Type | Values | Description |
 |-----------|------|--------|-------------|
 | compression | string | `"zstd"` | Compression algorithm (optional, v1.2+) |
-| checksum | string | hex | XXH3 hash of the compressed data (v1.2+) |
+| checksum | string | hex | XXH3-64 of the compressed bytes (optional, v1.2+) |
 | **compact** | bool | `"true"` | v1.3.1: fixed fields are written only when they change |
+| tail | bool | `"true"` | v1.3.1: the chunk's last row repeats every fixed field explicitly, so the chunk can be decoded on its own |
+| carry | string | pipe-joined | v1.3.1: the fixed-field state this chunk starts from, so a chunk can be decoded independently of the ones before it |
+| xxh3 | string | hex | v1.4: xxh3_128 of the raw rows, before compression — see "Integrity" below |
+| encryption | string | `"aes-256-gcm"` | v1.5: this section is ciphertext; see [tdtp-protocol-schema.md](tdtp-protocol-schema.md) → "v1.5" |
+| layout | string | `"columns"` | tdtpcli 1.26+: each `<R>` holds one column's values instead of one row — see "Columnar layout" below |
 
 **Compression (v1.2+):**
 
@@ -408,12 +413,23 @@ With `compression="zstd"` set:
 - **Escaping the separator:** backslash escaping for a pipe inside a value
   - `|` → `\|`
   - `\` → `\\`
+- **Escaping newlines:** a literal LF inside a value is escaped to the
+  two-character sequence `\n` (backslash + `n`), not left as a raw newline.
+  Rows compressed into one blob are joined by a real `\n` between chunks, so
+  any value-level LF has to be gone before that join happens, or it would be
+  read back as a row boundary instead of data — the same rule applies
+  whether or not the packet is actually compressed, so uncompressed and
+  compressed packets escape identically.
 - **XML entities:** XML special characters are escaped automatically
   - `<` → `&lt;`
   - `>` → `&gt;`
   - `&` → `&amp;`
   - `"` → `&quot;`
   - `'` → `&apos;`
+  - `\r` (CR, alone or as part of CRLF) → `&#xD;` — not left raw. Per XML
+    §2.11 every conformant parser normalizes a raw CR or CRLF to LF on read;
+    without this escape, a value containing CR would come back changed on
+    the very first round trip through any XML library, TDTP's own included.
 
 **Escaping examples:**
 ```xml
@@ -431,7 +447,51 @@ With `compression="zstd"` set:
 <!-- Both -->
 <R>C:\\path\|to\|file|value2</R>
 <!-- decodes to: ["C:\path|to|file", "value2"] -->
+
+<!-- Newline inside a value (e.g. a pretty-printed JSON blob in a TEXT column) -->
+<R>line one\nline two|value2</R>
+<!-- decodes to: ["line one\nline two", "value2"] — a real LF, restored -->
 ```
+
+**Columnar layout (tdtpcli 1.26+):**
+
+With `layout="columns"` set, `<Data>` holds one `<R>` per schema field
+instead of one `<R>` per row — each `<R>` is that column's values, in row
+order, joined and escaped exactly like a row-major `<R>` (same pipe /
+backslash / LF rules above). Row count comes from splitting any one column
+by `|`, not from counting `<R>` elements.
+
+```xml
+<!-- Row-major (default): 3 rows, 2 fields -->
+<Data>
+  <R>1|john_doe</R>
+  <R>2|jane_smith</R>
+  <R>3|bob</R>
+</Data>
+
+<!-- Columnar: the same 3 rows, 2 fields -->
+<Data layout="columns">
+  <R>1|2|3</R>
+  <R>john_doe|jane_smith|bob</R>
+</Data>
+```
+
+Grouping same-typed values together lets a compressor find matches sooner:
+measured 13–19% smaller for zstd at no extra time; negligible for kanzi,
+whose BWT already gathers the same contexts on its own regardless of
+layout.
+
+`layout="columns"` composes with compression rather than replacing it: a
+compressed, columnar packet still ends up as one `<R>` holding the blob
+(`<Data compression="zstd" layout="columns" xxh3="...">`), with `layout`
+kept as the marker telling the reader to expand the decompressed bytes into
+columns before expanding those columns into rows. The write order is
+fixed — `compact → integrity → columnar → compress → encrypt` — because
+v1.4 integrity hashes cover the plain row-major values, before the
+columnar transpose runs; a reader has to reverse that same chain in order
+(decompress, then expand columns back to rows, *then* verify the hash), or
+it hashes columns against a fingerprint taken over rows and gets a
+mismatch on every packet.
 
 ### Integrity
 
