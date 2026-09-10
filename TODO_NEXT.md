@@ -649,6 +649,67 @@ same "fail loud, let the supervisor retry" answer 2.4 already settled for
 the pipeline as a whole — this is one more place that discipline has to
 hold, not a reason to reopen it.
 
+### 2.6 `tdtpcli validate --strict` — an actual XSD engine at the perimeter
+
+`docs/tdtp.xsd` exists now (added while building it as a documentation
+artifact — see its own header for what it does and does not cover), but
+nothing in `tdtpcli` reads it. Right now "is this packet structurally
+valid" is answered implicitly, mid-parse, by whatever `ParseBytes`/
+`tryFastParse` happen to accept or reject — there is no single command that
+answers it up front, before a decompression, a DB transaction, or a
+Mercury round trip has started spending resources on a packet that was
+already structurally wrong.
+
+**The CGO trade-off is the whole design question here, and it isn't new to
+this codebase.** `encoding/xml` cannot validate against an XSD at all —
+full W3C XML Schema 1.0 conformance in Go means binding to `libxml2`
+through CGO, and CGO already cost this project clean cross-compilation
+once: the DuckDB experiment (`CLAUDE.md` → "DuckDB как рабочая БД
+пайплайна") is written up specifically because cgo turned out to be the
+real price of that idea, not the engine swap itself. `nokafka`/`nosqlite`
+are the existing precedent for gating a heavy or non-portable dependency
+behind a build tag rather than making every build pay for it — the same
+shape applies here.
+
+**Proposed split, so the common path stays pure Go and static:**
+
+- `//go:embed schema/tdtp.xsd` (or `docs/tdtp.xsd` in place — deciding the
+  canonical location is part of this work) ships the reference schema
+  inside the binary and the library, so it travels with every build and
+  can never point at a stale copy on disk.
+- A built-in, pure-Go structural pre-check (`encoding/xml.Decoder`-based:
+  tag order, cardinality, known attributes) runs unconditionally, in every
+  build, including `CGO_ENABLED=0` cross-compiles and anything embedding
+  the library. This is **not** "parse the XSD generically" — that's a
+  real XML-Schema engine, which is the thing being avoided. It means
+  hand-coding this one schema's actual constraints as Go checks, the same
+  way the schema itself was written by hand against the real structs
+  rather than derived automatically. Scope and effort for that are
+  unestimated; do not treat "embed the file" as the size of this item.
+- `tdtpcli validate --strict` is a separate, explicitly opt-in command
+  wired to a real XSD engine — CGO/libxml2 behind a build tag, or shelling
+  out to `xmllint`, or a plugin — for CI pipelines, broker gateways, and
+  cross-department ingress checks that can afford the dependency and want
+  the real thing, not the fast approximation.
+
+**What this buys, concretely:**
+
+- **Fail fast at the perimeter.** A broker consumer or gateway rejects a
+  packet with a bad enum, an unknown type, or a cardinality violation in
+  the time it takes to run the structural pre-check — before a worker
+  allocates the buffer for a kanzi decompression or opens a PostgreSQL
+  transaction on data that was never going to parse.
+- **Independent SDKs stop depending on this Go parser's specific
+  tolerances.** A C#/.NET, Java, or Rust integration validates against
+  `tdtp.xsd` with its own language's standard XSD validator in its own
+  unit tests, instead of having to match whatever `tryFastParse`/
+  `xml.Unmarshal` happen to accept.
+- **A malformed or hostile packet can be rejected at the network edge**
+  (API gateway, ingress, broker) before it reaches anything internal —
+  the same "close the window before the signature" principle `CLAUDE.md`
+  already states for the decompression-bomb limits, applied one layer
+  further out.
+
 ### Grace period for `tdtp.lic`
 
 Today expired = fatal, which hurts integrators mid-project. Proposal:
