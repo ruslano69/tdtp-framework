@@ -174,7 +174,7 @@
     <xs:attribute name="scale" type="xs:nonNegativeInteger" use="optional"/>
     <xs:attribute name="key" type="xs:boolean" use="optional" default="false"/>
     <xs:attribute name="timezone" type="xs:string" use="optional"/>
-    <xs:attribute name="subtype" type="xs:string" use="optional"/>
+    <xs:attribute name="subtype" type="SubtypeValue" use="optional"/>
     <!-- Read-only source column (timestamp, computed) — carried through so
          a consumer knows not to attempt writing it back. -->
     <xs:attribute name="readonly" type="xs:boolean" use="optional" default="false"/>
@@ -213,6 +213,82 @@
       <xs:enumeration value="DATETIME"/>
       <xs:enumeration value="TIMESTAMP"/>
       <xs:enumeration value="BLOB"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- subtype refines a TDTP base type into the exact source/target column
+       type, source adapter by source adapter. It is a plain Go string with
+       no central registry — each adapter's own TDTPToX / XToTDTP switch
+       defines and consumes its own vocabulary — so, like DataTypeValue
+       above, this is a union with xs:string, not a closed list: an
+       adapter added later, or a subtype this catalogue missed, must still
+       validate. The enumeration below is every subtype value actually
+       assigned or switched on across pkg/adapters/{postgres,mssql,mysql}
+       today, grouped by where it comes from:
+
+       PostgreSQL (pkg/adapters/postgres/types.go) — domain types carried
+       as TEXT: uuid, json, jsonb, inet, cidr, macaddr, xml, array; plus
+       serial, bigserial (INTEGER refinements) and time, timestamptz
+       (TIMESTAMP refinements — PostgreSQL `time` has no dedicated TDTP
+       type, see DataTypeValue's note above).
+
+       MS SQL Server (pkg/adapters/mssql/types.go) — integer width:
+       tinyint, smallint, int, bigint; money, smallmoney (DECIMAL);
+       real (REAL/FLOAT); datetime, smalldatetime, datetimeoffset
+       (DATETIME/TIMESTAMP); binary, image (BLOB); and TEXT refinements
+       rowversion, sql_variant, time, uniqueidentifier, xml, text, ntext,
+       varchar, char, nchar.
+
+       MySQL (pkg/adapters/mysql) — time: MySQL TIME is a signed DURATION
+       (-838:59:59..838:59:59), not a time-of-day, and neither time.Time
+       nor PostgreSQL's `time` type can represent its full range — it
+       travels as TEXT with subtype="time" verbatim, text in, text out.
+
+       subtype="time" is consequently NOT one meaning across adapters:
+       PostgreSQL's and MSSQL's "time" is a clock reading, MySQL's is an
+       elapsed duration that can exceed 24 hours or go negative. A
+       consumer cannot tell which from the subtype string alone — it has
+       to already know which adapter produced the field, e.g. from the
+       pipeline/source context, since nothing in the packet itself
+       records the source database type. -->
+  <xs:simpleType name="SubtypeValue">
+    <xs:union memberTypes="KnownSubtypeEnum xs:string"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="KnownSubtypeEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="uuid"/>
+      <xs:enumeration value="json"/>
+      <xs:enumeration value="jsonb"/>
+      <xs:enumeration value="inet"/>
+      <xs:enumeration value="cidr"/>
+      <xs:enumeration value="macaddr"/>
+      <xs:enumeration value="xml"/>
+      <xs:enumeration value="array"/>
+      <xs:enumeration value="serial"/>
+      <xs:enumeration value="bigserial"/>
+      <xs:enumeration value="time"/>
+      <xs:enumeration value="timestamptz"/>
+      <xs:enumeration value="tinyint"/>
+      <xs:enumeration value="smallint"/>
+      <xs:enumeration value="int"/>
+      <xs:enumeration value="bigint"/>
+      <xs:enumeration value="money"/>
+      <xs:enumeration value="smallmoney"/>
+      <xs:enumeration value="real"/>
+      <xs:enumeration value="datetime"/>
+      <xs:enumeration value="smalldatetime"/>
+      <xs:enumeration value="datetimeoffset"/>
+      <xs:enumeration value="binary"/>
+      <xs:enumeration value="image"/>
+      <xs:enumeration value="rowversion"/>
+      <xs:enumeration value="sql_variant"/>
+      <xs:enumeration value="uniqueidentifier"/>
+      <xs:enumeration value="text"/>
+      <xs:enumeration value="ntext"/>
+      <xs:enumeration value="varchar"/>
+      <xs:enumeration value="char"/>
+      <xs:enumeration value="nchar"/>
     </xs:restriction>
   </xs:simpleType>
 
