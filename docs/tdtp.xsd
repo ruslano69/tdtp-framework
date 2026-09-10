@@ -1,0 +1,487 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified"
+           version="1.5">
+
+  <xs:annotation>
+    <xs:documentation><![CDATA[
+      TDTP (Table Data Transfer Protocol) — XML Schema for validating TDTP
+      data packets, v1.0 through v1.5.
+
+      Ground truth for this schema is the Go implementation
+      (pkg/core/packet/types.go, query.go, integrity.go), not the other way
+      around — every element, attribute and cardinality here was checked
+      against the actual `xml:"..."` struct tags rather than derived from
+      prose. Where the two disagree, the code wins and this file is wrong;
+      file an issue.
+
+      This schema validates STRUCTURE only. It cannot express, and does not
+      attempt to express:
+        - the pipe/backslash/LF escaping convention inside <R> element text
+          (see docs/SPECIFICATION.md → "Data" → "Formatting rules")
+        - the exact byte layout of a compressed <R> blob (base64 + zstd/
+          kanzi framing)
+        - xxh3_128 hash canonicalization, including the exact
+          encoding/xml marshaling <Schema> must byte-match for SchemaXXH3
+          to agree across implementations (see docs/SPECIFICATION.md →
+          "Integrity" → "Canonical value formatting")
+        - the v1.5 section-encryption format: base64(nonce||ciphertext),
+          key binding via xZMercury (see docs/tdtp-protocol-schema.md →
+          "v1.5")
+        - the legacy v1.3 whole-packet encrypted format, which is opaque
+          binary and is not XML at all — no XSD can validate it
+
+      Supports:
+        - v1.0: Base protocol, Schema, Data, TDTQL
+        - v1.2: Compression (zstd/kanzi), Data.checksum
+        - v1.3: Error packets, whole-packet encryption (out of band — see above)
+        - v1.3.1: Compact mode (fixed fields, carry-forward, tail, SpecialValues)
+        - v1.4: Three-level xxh3_128 integrity (Packet, Schema, Data), PipelineContext
+        - v1.5: Section-level encryption (aes-256-gcm) of QueryContext/Schema/Data;
+                 encrypted Data keeps its normal single <R> child (ciphertext as
+                 that row's value) rather than becoming mixed content the way
+                 Schema/QueryContext do
+        - tdtpcli 1.26+: Data layout="columns" (columnar row storage)
+    ]]></xs:documentation>
+  </xs:annotation>
+
+  <!-- ===================================================================== -->
+  <!-- 1. ROOT ELEMENT: DataPacket                                          -->
+  <!-- ===================================================================== -->
+  <xs:element name="DataPacket" type="DataPacketType"/>
+
+  <xs:complexType name="DataPacketType">
+    <xs:sequence>
+      <xs:element name="Header" type="HeaderType"/>
+
+      <!-- TDTQL request (Query) or response context (QueryContext) -->
+      <xs:choice minOccurs="0">
+        <xs:element name="Query" type="QueryType"/>
+        <xs:element name="QueryContext" type="QueryContextType"/>
+      </xs:choice>
+
+      <!-- v1.4: pipeline metadata embedded at export time -->
+      <xs:element name="PipelineContext" type="PipelineContextType" minOccurs="0"/>
+
+      <!-- Schema and Data are unconditionally present on the wire: both are
+           plain (non-pointer, non-omitempty) Go struct fields, so
+           encoding/xml always emits them — even as an empty <Schema/> and
+           <Data/> for a Header.Type that has nothing to say about a table
+           (e.g. "alarm"). Do not model these as optional. -->
+      <xs:element name="Schema" type="SchemaType"/>
+      <xs:element name="Data" type="DataType"/>
+
+      <xs:element name="AlarmDetails" type="AlarmDetailsType" minOccurs="0"/>
+    </xs:sequence>
+
+    <xs:attribute name="protocol" type="xs:string" use="required" fixed="TDTP"/>
+    <xs:attribute name="version" type="VersionType" use="required"/>
+
+    <!-- v1.4: PacketXXH3 = xxh3_128(SchemaXXH3 + "|" + DataXXH3) -->
+    <xs:attribute name="xxh3" type="Hash128Type" use="optional"/>
+  </xs:complexType>
+
+  <!-- "1.0", "1.3.1", "1.5", ... -->
+  <xs:simpleType name="VersionType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9]+(\.[0-9]+)*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- xxh3_128 (32 hex chars) or the legacy xxh3_64 checksum (16 hex chars) -->
+  <xs:simpleType name="Hash128Type">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-fA-F]{16,64}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ===================================================================== -->
+  <!-- 2. HEADER                                                            -->
+  <!-- ===================================================================== -->
+  <xs:complexType name="HeaderType">
+    <xs:all>
+      <xs:element name="Type" type="PacketTypeEnum"/>
+      <xs:element name="TableName" type="xs:string" minOccurs="0"/>
+      <xs:element name="MessageID" type="xs:string"/>
+      <xs:element name="InReplyTo" type="xs:string" minOccurs="0"/>
+      <xs:element name="PartNumber" type="xs:int" minOccurs="0"/>
+      <xs:element name="TotalParts" type="xs:int" minOccurs="0"/>
+      <xs:element name="RecordsInPart" type="xs:int" minOccurs="0"/>
+      <!-- xs:string, not xs:dateTime: the Go side formats via time.Time's
+           own layout (RFC3339-ish with variable sub-second precision), and
+           constraining this to xs:dateTime's stricter grammar risks
+           rejecting a byte-valid, already-shipped packet over a lexical
+           technicality XSD was never asked to police. -->
+      <xs:element name="Timestamp" type="xs:string"/>
+      <xs:element name="Sender" type="xs:string" minOccurs="0"/>
+      <xs:element name="Recipient" type="xs:string" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- "delta" has no named Go constant (TypeDelta) but is a real, documented
+       value (docs/SPECIFICATION.md "Delta packet" example); MessageType is
+       a plain Go string type, so nothing stops a producer writing it. -->
+  <xs:simpleType name="PacketTypeEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="reference"/>
+      <xs:enumeration value="delta"/>
+      <xs:enumeration value="request"/>
+      <xs:enumeration value="response"/>
+      <xs:enumeration value="alarm"/>
+      <xs:enumeration value="error"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ===================================================================== -->
+  <!-- 3. SCHEMA                                                            -->
+  <!-- ===================================================================== -->
+  <!-- mixed="true": v1.5 encrypted Schema replaces Field/Dictionary
+       entirely with base64(nonce||ciphertext) as direct element text. -->
+  <xs:complexType name="SchemaType" mixed="true">
+    <xs:sequence minOccurs="0">
+      <xs:element name="Field" type="FieldType" minOccurs="0" maxOccurs="unbounded"/>
+      <!-- v1.4: abbreviation table for repeated long values (e.g. the
+           Mercury URL under the "@MRC" token). Not built automatically by
+           anything in the framework — arrives from an external producer,
+           or from the one built-in "@MRC" entry export.go writes. -->
+      <xs:element name="Dictionary" type="DictionaryType" minOccurs="0"/>
+    </xs:sequence>
+    <!-- v1.4: xxh3_128 of this element's own canonical bytes (this attribute excluded) -->
+    <xs:attribute name="xxh3" type="Hash128Type" use="optional"/>
+    <xs:attribute name="encryption" type="EncryptionType" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="DictionaryType">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="Entry" type="DictEntryType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="DictEntryType">
+    <xs:attribute name="short" type="xs:string" use="required"/>
+    <xs:attribute name="full" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="FieldType">
+    <xs:sequence>
+      <!-- v1.3.1: NULL/NaN/Infinity/-Infinity/NoDate sentinel tokens -->
+      <xs:element name="SpecialValues" type="SpecialValuesType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="type" type="DataTypeValue" use="required"/>
+    <xs:attribute name="length" type="xs:int" use="optional"/>
+    <xs:attribute name="precision" type="xs:nonNegativeInteger" use="optional"/>
+    <xs:attribute name="scale" type="xs:nonNegativeInteger" use="optional"/>
+    <xs:attribute name="key" type="xs:boolean" use="optional" default="false"/>
+    <xs:attribute name="timezone" type="xs:string" use="optional"/>
+    <xs:attribute name="subtype" type="xs:string" use="optional"/>
+    <!-- Read-only source column (timestamp, computed) — carried through so
+         a consumer knows not to attempt writing it back. -->
+    <xs:attribute name="readonly" type="xs:boolean" use="optional" default="false"/>
+    <!-- v1.3.1 compact mode: field is constant across a run of rows -->
+    <xs:attribute name="fixed" type="xs:boolean" use="optional" default="false"/>
+  </xs:complexType>
+
+  <!-- The 9 canonical (post-NormalizeType) types, plus the 7 accepted
+       aliases a producer may legitimately write instead (schema/types.go,
+       NormalizeType): INT→INTEGER, FLOAT/DOUBLE→REAL, VARCHAR/CHAR/STRING
+       →TEXT, BOOL→BOOLEAN. Union with xs:string rather than a closed
+       enumeration deliberately — Field.type is a plain Go string with no
+       wire-level validation of its own, and a closed list here would
+       reject real, already-shipped packets over spelling this schema
+       doesn't happen to list. There is no "TIME" wire type: PostgreSQL
+       `time` is TIMESTAMP with subtype="time", not its own type value. -->
+  <xs:simpleType name="DataTypeValue">
+    <xs:union memberTypes="KnownDataTypeEnum xs:string"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="KnownDataTypeEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="INTEGER"/>
+      <xs:enumeration value="INT"/>
+      <xs:enumeration value="REAL"/>
+      <xs:enumeration value="FLOAT"/>
+      <xs:enumeration value="DOUBLE"/>
+      <xs:enumeration value="DECIMAL"/>
+      <xs:enumeration value="TEXT"/>
+      <xs:enumeration value="VARCHAR"/>
+      <xs:enumeration value="CHAR"/>
+      <xs:enumeration value="STRING"/>
+      <xs:enumeration value="BOOLEAN"/>
+      <xs:enumeration value="BOOL"/>
+      <xs:enumeration value="DATE"/>
+      <xs:enumeration value="DATETIME"/>
+      <xs:enumeration value="TIMESTAMP"/>
+      <xs:enumeration value="BLOB"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="SpecialValuesType">
+    <xs:choice minOccurs="1" maxOccurs="unbounded">
+      <xs:element name="Null" type="MarkerValueType"/>
+      <xs:element name="Infinity" type="MarkerValueType"/>
+      <xs:element name="NegInfinity" type="MarkerValueType"/>
+      <xs:element name="NaN" type="MarkerValueType"/>
+      <xs:element name="NoDate" type="MarkerValueType"/>
+    </xs:choice>
+  </xs:complexType>
+
+  <xs:complexType name="MarkerValueType">
+    <xs:attribute name="marker" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- ===================================================================== -->
+  <!-- 4. DATA                                                              -->
+  <!-- ===================================================================== -->
+  <!-- NOT mixed: unlike Schema/QueryContext, v1.5-encrypted Data keeps its
+       normal single <R> child — the ciphertext is that row's text, not
+       direct content of <Data> itself. -->
+  <xs:complexType name="DataType">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="R" type="xs:string"/>
+    </xs:sequence>
+    <!-- v1.2: compression algorithm; when set, Rows holds exactly one <R>
+         with the base64-encoded compressed blob -->
+    <xs:attribute name="compression" type="CompressionType" use="optional"/>
+    <!-- v1.2: xxh3-64 of the COMPRESSED bytes (backward-compat checksum;
+         distinct from the v1.4 xxh3 attribute below, which covers the
+         UNCOMPRESSED rows) -->
+    <xs:attribute name="checksum" type="xs:string" use="optional"/>
+    <!-- v1.3.1: fixed fields written only on a group's first row -->
+    <xs:attribute name="compact" type="xs:boolean" use="optional"/>
+    <!-- v1.3.1: this chunk's last row repeats every fixed field explicitly,
+         for standalone streaming validation -->
+    <xs:attribute name="tail" type="xs:boolean" use="optional"/>
+    <!-- v1.3.1: pipe-joined fixed-field state this chunk starts from, so it
+         can be decoded independently of the chunks before it -->
+    <xs:attribute name="carry" type="xs:string" use="optional"/>
+    <!-- v1.4: xxh3_128 of the raw, uncompressed row values -->
+    <xs:attribute name="xxh3" type="Hash128Type" use="optional"/>
+    <!-- v1.5: this section is ciphertext (see DataType's doc comment above) -->
+    <xs:attribute name="encryption" type="EncryptionType" use="optional"/>
+    <!-- tdtpcli 1.26+: "columns" = each <R> holds one field's values across
+         all rows (pipe-joined) instead of one row's fields. Absent = the
+         default row-major layout. -->
+    <xs:attribute name="layout" type="LayoutType" use="optional"/>
+  </xs:complexType>
+
+  <xs:simpleType name="LayoutType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="columns"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="CompressionType">
+    <xs:union memberTypes="KnownCompressionEnum xs:string"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="KnownCompressionEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="zstd"/>
+      <xs:enumeration value="kanzi"/>
+      <xs:enumeration value="none"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="EncryptionType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="aes-256-gcm"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ===================================================================== -->
+  <!-- 5. PIPELINE CONTEXT (v1.4)                                           -->
+  <!-- ===================================================================== -->
+  <xs:complexType name="PipelineContextType">
+    <xs:sequence>
+      <xs:element name="Pipeline" type="PipelineInfoType"/>
+      <xs:element name="Variables" type="PipelineVariablesType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="PipelineInfoType">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="version" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="PipelineVariablesType">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="Var" type="PipelineVarType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="PipelineVarType">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="value" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- ===================================================================== -->
+  <!-- 6. TDTQL: Query (request) & QueryContext (response)                  -->
+  <!-- ===================================================================== -->
+  <xs:complexType name="QueryType">
+    <xs:sequence>
+      <!-- Column projection. Each <Field> holds the column NAME AS ITS OWN
+           TEXT CONTENT ("<Field>col1</Field>"), not as an attribute — this
+           is the one place TDTQL's <Field> differs in shape from Schema's
+           attribute-carrying <Field name="...">. Absent/empty = SELECT *. -->
+      <xs:element name="Fields" type="QueryFieldsType" minOccurs="0"/>
+      <xs:element name="Filters" type="FiltersType" minOccurs="0"/>
+      <xs:element name="OrderBy" type="OrderByType" minOccurs="0"/>
+      <xs:element name="Limit" type="xs:nonNegativeInteger" minOccurs="0"/>
+      <xs:element name="Offset" type="xs:nonNegativeInteger" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="language" type="xs:string" use="required"/>
+    <xs:attribute name="version" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="QueryFieldsType">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="Field" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- Filters holds at most one And and/or one Or GROUP at the top level —
+       there is no bare <Filter> directly under <Filters>; a single
+       condition still has to sit inside an <And> or <Or>. This mirrors
+       Go's Filters{And, Or *LogicalGroup} exactly (two distinct types, not
+       one recursive one — an earlier draft of this schema conflated them
+       and allowed a top-level bare <Filter>, which the real writer never
+       produces and a strict reader would then reject). -->
+  <xs:complexType name="FiltersType">
+    <xs:sequence>
+      <xs:element name="And" type="LogicalGroupType" minOccurs="0"/>
+      <xs:element name="Or" type="LogicalGroupType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- A LogicalGroup mixes plain conditions with nested groups freely, in
+       any combination and any count — Go: Filters []Filter, And
+       []LogicalGroup, Or []LogicalGroup, all optional/repeatable. -->
+  <xs:complexType name="LogicalGroupType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="Filter" type="FilterConditionType"/>
+      <xs:element name="And" type="LogicalGroupType"/>
+      <xs:element name="Or" type="LogicalGroupType"/>
+    </xs:choice>
+  </xs:complexType>
+
+  <xs:complexType name="FilterConditionType">
+    <xs:attribute name="field" type="xs:string" use="required"/>
+    <xs:attribute name="operator" type="OperatorEnum" use="required"/>
+    <xs:attribute name="value" type="xs:string" use="required"/>
+    <!-- "between" only -->
+    <xs:attribute name="value2" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <xs:simpleType name="OperatorEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="eq"/>
+      <xs:enumeration value="ne"/>
+      <xs:enumeration value="gt"/>
+      <xs:enumeration value="gte"/>
+      <xs:enumeration value="lt"/>
+      <xs:enumeration value="lte"/>
+      <xs:enumeration value="between"/>
+      <xs:enumeration value="in"/>
+      <xs:enumeration value="not_in"/>
+      <xs:enumeration value="like"/>
+      <xs:enumeration value="not_like"/>
+      <xs:enumeration value="is_null"/>
+      <xs:enumeration value="is_not_null"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Either the single-field attribute form (<OrderBy field="x"
+       direction="ASC"/>) or the multi-field child form (<OrderBy><Field
+       name="x" direction="ASC"/>...</OrderBy>) — Go's OrderBy carries both
+       shapes on the same struct, and the child element's own tag is
+       "Field" (same name as QueryFieldsType's, different shape: this one
+       carries name+direction as attributes, that one carries the column
+       name as text). There is no wrapping <Fields> container around these. -->
+  <xs:complexType name="OrderByType">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="Field" type="OrderFieldType"/>
+    </xs:sequence>
+    <xs:attribute name="field" type="xs:string" use="optional"/>
+    <xs:attribute name="direction" type="SortDirectionEnum" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="OrderFieldType">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="direction" type="SortDirectionEnum" use="required"/>
+  </xs:complexType>
+
+  <xs:simpleType name="SortDirectionEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ASC"/>
+      <xs:enumeration value="DESC"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- mixed="true": v1.5 encrypted QueryContext replaces OriginalQuery/
+       ExecutionResults/FilterStatistics entirely with base64(nonce||
+       ciphertext) as direct element text. -->
+  <xs:complexType name="QueryContextType" mixed="true">
+    <xs:sequence minOccurs="0">
+      <xs:element name="OriginalQuery" type="QueryType"/>
+      <xs:element name="ExecutionResults" type="ExecutionResultsType"/>
+      <xs:element name="FilterStatistics" type="FilterStatisticsType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="encryption" type="EncryptionType" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="ExecutionResultsType">
+    <xs:all>
+      <xs:element name="TotalRecordsInTable" type="xs:nonNegativeInteger"/>
+      <xs:element name="RecordsAfterFilters" type="xs:nonNegativeInteger"/>
+      <xs:element name="RecordsReturned" type="xs:nonNegativeInteger"/>
+      <xs:element name="MoreDataAvailable" type="xs:boolean"/>
+      <xs:element name="NextOffset" type="xs:nonNegativeInteger" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- Per-filter match counts, for a response explaining how it arrived at
+       its row count. Distinct from FiltersType above: this one always
+       carries a recordsMatched count per condition and per Or group, and
+       has no And-group shape at all (Go: FilterStatistics{Filters
+       []FilterStat, Or []OrStat} — no And). -->
+  <xs:complexType name="FilterStatisticsType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="Filter" type="FilterStatType"/>
+      <xs:element name="Or" type="OrStatType"/>
+    </xs:choice>
+  </xs:complexType>
+
+  <xs:complexType name="FilterStatType">
+    <xs:attribute name="field" type="xs:string" use="required"/>
+    <xs:attribute name="operator" type="OperatorEnum" use="required"/>
+    <xs:attribute name="value" type="xs:string" use="required"/>
+    <xs:attribute name="recordsMatched" type="xs:nonNegativeInteger" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="OrStatType">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="Filter" type="FilterStatType"/>
+    </xs:sequence>
+    <xs:attribute name="recordsMatched" type="xs:nonNegativeInteger" use="required"/>
+  </xs:complexType>
+
+  <!-- ===================================================================== -->
+  <!-- 7. ALARM DETAILS                                                     -->
+  <!-- ===================================================================== -->
+  <!-- There is no separate top-level "Alarm" element — only AlarmDetails.
+       (DataPacket carries *AlarmDetails alone; no "Alarm" field exists in
+       the Go struct at all.) -->
+  <xs:complexType name="AlarmDetailsType">
+    <xs:all>
+      <xs:element name="Severity" type="xs:string"/>
+      <xs:element name="Code" type="xs:string"/>
+      <xs:element name="Message" type="xs:string"/>
+      <!-- xZMercury server mode ("dev"/"prod") that issued or burned a key;
+           present only on a key-related alarm. -->
+      <xs:element name="ServerMode" type="xs:string" minOccurs="0"/>
+      <xs:element name="AffectedRecords" type="xs:nonNegativeInteger" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+</xs:schema>
