@@ -103,6 +103,10 @@ output:
     compress_level: 3       # zstd 1-19, kanzi 6-7
     encryption: false       # AES-256-GCM through xZMercury (v1.5 section-level by default)
     encryption_v13: false   # true = legacy v1.3 whole-blob format instead of v1.5
+    integrity: false        # v1.4 xxh3_128 hashes (Schema+Data+Packet), independent of encryption
+                             # — equivalent to --integrity on the CLI. Registers with xZMercury
+                             # only when security.mercury_url is set; local hashes otherwise.
+                             # (encryption: true always stamps these too, whether or not this is set.)
     compact: false          # v1.3.1 compact format (carry-forward fixed fields)
     compact_tail: false     # v1.3.1: write an explicit tail row
     fixed_fields: []        # v1.3.1: explicit fixed-field names; empty = auto-detect from `_` prefix

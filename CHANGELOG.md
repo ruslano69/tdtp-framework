@@ -4,6 +4,32 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### `output.tdtp.integrity` — pipelines had no way to request a checksum without encrypting
+
+Two related gaps, both meaning a plain (unencrypted) pipeline export almost
+never carried any checksum at all:
+
+- The v1.4 integrity step (xxh3_128 over Schema+Data+Packet) only ever
+  entered the export chain as a side effect of `encryption: true`
+  (`pkg/etl/export_chain.go`). `TDTPOutputConfig` had no independent
+  `integrity` field — unlike the CLI, where `--integrity` works on its own,
+  without `--enc`. New `output.tdtp.integrity: true` mirrors it; registers
+  with xZMercury only when `security.mercury_url` is set, local hashes
+  otherwise (`Exporter.resolveHashRegistrar` now returns `nil` for an empty
+  URL instead of a `mercury.Client` that would dial it and fail — the same
+  local-only fallback the CLI already had).
+- `compressDataPacket` never set `Data.Checksum` (xxh3-64 of the compressed
+  bytes) at all, even though the CLI's equivalent path has done so
+  unconditionally since `--hash` became a no-op (`EnableChecksum: compress`
+  in `cmd/tdtpcli/main.go`). Since `compress: true` is the documented
+  pipeline default, this was the larger of the two gaps — most pipeline
+  exports were missing even the basic decompression-integrity checksum, not
+  only the tamper-evidence one. Fixed the same way: set unconditionally
+  whenever compression actually runs.
+
+Found investigating why pipeline output "almost never" had a checksum.
+Tests: `pkg/etl/exporter_integrity_test.go`.
+
 ### Fixed — `output.rabbitmq.vhost` was documented and did nothing
 
 `RabbitMQOutputConfig` had no `VHost` field at all, so a pipeline naming any

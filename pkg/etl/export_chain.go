@@ -22,7 +22,7 @@ func (e *Exporter) buildTDTPChain(registrar pipeline.HashRegistrar, part *packet
 			steps[transform.StageCompact] = &compactStepProc{fixedNames: fixedNames, tail: cfg.CompactTail}
 		}
 	}
-	if cfg.Encryption && !cfg.EncryptionV13 {
+	if cfg.Integrity || (cfg.Encryption && !cfg.EncryptionV13) {
 		steps[transform.StageIntegrity] = &integrityStepProc{registrar: registrar, sender: e.pipelineName}
 	}
 	if cfg.Columnar {
