@@ -626,6 +626,70 @@ On registration the Mercury address is embedded in the packet dictionary as the
 token `@MRC`, so a consumer can find the registry without being configured for
 it.
 
+#### Canonical value formatting, for cross-implementation xxh3 agreement
+
+`DataXXH3` is `xxh3_128(MessageID bytes + row₀.Value + "\n" + row₁.Value +
+"\n" + ... )` — the *exact* escaped `<R>` text, each row followed by a
+literal `\n` (this is also why a value's own LF has to be escaped away
+first; see "Escaping newlines" above). Two implementations agree on
+`DataXXH3` only if they produce byte-identical row text, which means
+agreeing on how every value is formatted before escaping — not just on the
+hash algorithm.
+
+For most sources that's straightforward: integers as plain decimal digits,
+text as-is, booleans as `"1"`/`"0"`. **REAL and DECIMAL are the one type
+where formatting is a real, standardizable choice, not an accident of one
+language's printf:** the canonical form is the *shortest decimal string
+that parses back to the exact same IEEE-754 double*, in plain notation,
+never scientific (Go: `strconv.FormatFloat(v, 'f', -1, 64)`). A formatter
+that rounds to a fixed number of digits, or falls back to `%e`/`%g` for
+very large or very small magnitudes, will not match — that was a real bug
+here (see `TODO_NEXT.md` → "The scientific-notation decimal bug") before
+every adapter was fixed to always use `'f'`. Most languages' "shortest
+round-trip" float formatter (Python's `repr(float)`, Rust's default
+`Display` for `f64`, JavaScript's `Number.prototype.toString`) produces the
+same digit sequence for the same double in the overwhelming majority of
+cases, because the shortest such decimal is mathematically unique for
+almost every double — but this is worth testing against real corpus data,
+not assumed from the algorithm's name alone.
+
+**SQLite specifically makes this harder than a strictly-typed source**,
+because SQLite's type affinity is a suggestion, not an enforcement: a
+column declared `REAL` can actually hold `TEXT`, `INTEGER`, `REAL`, or
+`NULL` storage class per row, and the canonical text depends on which
+storage class is actually present — not on the column's declared type:
+
+| Storage class actually in the cell | Canonical text |
+|---|---|
+| `TEXT` | the stored string, byte-for-byte, unmodified |
+| `INTEGER` | the same decimal digits `strconv.FormatInt` would produce — no `.0` appended |
+| `REAL` | the exact stored text (e.g. `2460909.11`), not the shortest-round-trip *re-derivation* of the float — a value stored as `2.46090911e+06` and one stored as `2460909.11` are the same double but must not be reformatted into each other |
+| `NULL` | the field's NULL marker (`SpecialValues.Null.Marker`, default `[NULL]`) |
+
+`TestDateStorageClasses` (`pkg/adapters/sqlite`) pins all four cases for
+date-typed columns specifically; the same storage-class dependency applies
+to any `REAL`-declared column. An independent implementation reading a
+SQLite file directly (rather than through this driver) has to replicate
+`PRAGMA table_info`'s or the cell's own storage-class detection, not just
+the column's declared type — formatting by declared type alone reproduces
+the *value* but not necessarily this implementation's exact canonical
+*bytes*, and only the bytes hash the same.
+
+Dates: `DATE` formats as `2026-08-21` (date only); `DATETIME`/`TIMESTAMP`
+format as RFC3339Nano in UTC (`2026-08-21T14:38:11.11Z`), trailing
+fractional zeros trimmed, always with a `Z` offset since the value is
+normalized to UTC first — see "SQLite dates" in `CLAUDE.md` for the full
+per-storage-class parsing rules feeding into this.
+
+**Out of scope here, and harder than value formatting:** `SchemaXXH3`
+hashes `encoding/xml`'s own marshaling of the `Schema` struct (attribute
+order, absence of extra whitespace, self-closing empty elements — all
+exactly as Go's XML marshaler happens to produce them). Reproducing that
+from another language means matching a specific marshaler's serialization
+convention, not a documented wire format; nothing about it is SQLite-
+specific, but it is a real, separate obstacle to independent-implementation
+hash agreement that this section does not attempt to specify.
+
 ### Query (TDTQL)
 
 The filter structure.
