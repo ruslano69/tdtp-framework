@@ -222,9 +222,23 @@
        defines and consumes its own vocabulary — so, like DataTypeValue
        above, this is a union with xs:string, not a closed list: an
        adapter added later, or a subtype this catalogue missed, must still
-       validate. The enumeration below is every subtype value actually
-       assigned or switched on across pkg/adapters/{postgres,mssql,mysql}
-       today, grouped by where it comes from:
+       validate.
+
+       This mirrors how the Go code itself already treats subtype, not just
+       a hedge against the future: the framework has never forbidden a
+       subtype value it doesn't recognize, it just leaves it as inert
+       metadata when there is no conversion for it. TDTPToPostgreSQLStrict's
+       `switch subtype` (pkg/adapters/postgres/types.go), for one concrete
+       example, has no `default:` case at all — an unmatched subtype
+       (empty, a typo, or one that only means something to a different
+       adapter, e.g. MSSQL's "rowversion" reaching the PostgreSQL writer)
+       simply falls through and the field is handled by its base TDTP type
+       alone, subtype ignored, never rejected. A closed enumeration here
+       would validate more strictly than the framework itself does.
+
+       The enumeration below is every subtype value actually assigned or
+       switched on across pkg/adapters/{postgres,mssql,mysql} today,
+       grouped by where it comes from:
 
        PostgreSQL (pkg/adapters/postgres/types.go) — domain types carried
        as TEXT: uuid, json, jsonb, inet, cidr, macaddr, xml, array; plus
