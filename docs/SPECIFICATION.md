@@ -383,8 +383,13 @@ Rows are pipe-delimited.
 | Attribute | Type | Values | Description |
 |-----------|------|--------|-------------|
 | compression | string | `"zstd"` | Compression algorithm (optional, v1.2+) |
-| checksum | string | hex | XXH3 hash of the compressed data (v1.2+) |
+| checksum | string | hex | XXH3-64 of the compressed bytes (optional, v1.2+) |
 | **compact** | bool | `"true"` | v1.3.1: fixed fields are written only when they change |
+| tail | bool | `"true"` | v1.3.1: the chunk's last row repeats every fixed field explicitly, so the chunk can be decoded on its own |
+| carry | string | pipe-joined | v1.3.1: the fixed-field state this chunk starts from, so a chunk can be decoded independently of the ones before it |
+| xxh3 | string | hex | v1.4: xxh3_128 of the raw rows, before compression — see "Integrity" below |
+| encryption | string | `"aes-256-gcm"` | v1.5: this section is ciphertext; see [tdtp-protocol-schema.md](tdtp-protocol-schema.md) → "v1.5" |
+| layout | string | `"columns"` | tdtpcli 1.26+: each `<R>` holds one column's values instead of one row — see "Columnar layout" below |
 
 **Compression (v1.2+):**
 
@@ -408,12 +413,23 @@ With `compression="zstd"` set:
 - **Escaping the separator:** backslash escaping for a pipe inside a value
   - `|` → `\|`
   - `\` → `\\`
+- **Escaping newlines:** a literal LF inside a value is escaped to the
+  two-character sequence `\n` (backslash + `n`), not left as a raw newline.
+  Rows compressed into one blob are joined by a real `\n` between chunks, so
+  any value-level LF has to be gone before that join happens, or it would be
+  read back as a row boundary instead of data — the same rule applies
+  whether or not the packet is actually compressed, so uncompressed and
+  compressed packets escape identically.
 - **XML entities:** XML special characters are escaped automatically
   - `<` → `&lt;`
   - `>` → `&gt;`
   - `&` → `&amp;`
   - `"` → `&quot;`
   - `'` → `&apos;`
+  - `\r` (CR, alone or as part of CRLF) → `&#xD;` — not left raw. Per XML
+    §2.11 every conformant parser normalizes a raw CR or CRLF to LF on read;
+    without this escape, a value containing CR would come back changed on
+    the very first round trip through any XML library, TDTP's own included.
 
 **Escaping examples:**
 ```xml
@@ -431,7 +447,51 @@ With `compression="zstd"` set:
 <!-- Both -->
 <R>C:\\path\|to\|file|value2</R>
 <!-- decodes to: ["C:\path|to|file", "value2"] -->
+
+<!-- Newline inside a value (e.g. a pretty-printed JSON blob in a TEXT column) -->
+<R>line one\nline two|value2</R>
+<!-- decodes to: ["line one\nline two", "value2"] — a real LF, restored -->
 ```
+
+**Columnar layout (tdtpcli 1.26+):**
+
+With `layout="columns"` set, `<Data>` holds one `<R>` per schema field
+instead of one `<R>` per row — each `<R>` is that column's values, in row
+order, joined and escaped exactly like a row-major `<R>` (same pipe /
+backslash / LF rules above). Row count comes from splitting any one column
+by `|`, not from counting `<R>` elements.
+
+```xml
+<!-- Row-major (default): 3 rows, 2 fields -->
+<Data>
+  <R>1|john_doe</R>
+  <R>2|jane_smith</R>
+  <R>3|bob</R>
+</Data>
+
+<!-- Columnar: the same 3 rows, 2 fields -->
+<Data layout="columns">
+  <R>1|2|3</R>
+  <R>john_doe|jane_smith|bob</R>
+</Data>
+```
+
+Grouping same-typed values together lets a compressor find matches sooner:
+measured 13–19% smaller for zstd at no extra time; negligible for kanzi,
+whose BWT already gathers the same contexts on its own regardless of
+layout.
+
+`layout="columns"` composes with compression rather than replacing it: a
+compressed, columnar packet still ends up as one `<R>` holding the blob
+(`<Data compression="zstd" layout="columns" xxh3="...">`), with `layout`
+kept as the marker telling the reader to expand the decompressed bytes into
+columns before expanding those columns into rows. The write order is
+fixed — `compact → integrity → columnar → compress → encrypt` — because
+v1.4 integrity hashes cover the plain row-major values, before the
+columnar transpose runs; a reader has to reverse that same chain in order
+(decompress, then expand columns back to rows, *then* verify the hash), or
+it hashes columns against a fingerprint taken over rows and gets a
+mismatch on every packet.
 
 ### Integrity
 
@@ -565,6 +625,70 @@ GET /api/hashes/{uuid}/{part}?xxh3=c3d4...
 On registration the Mercury address is embedded in the packet dictionary as the
 token `@MRC`, so a consumer can find the registry without being configured for
 it.
+
+#### Canonical value formatting, for cross-implementation xxh3 agreement
+
+`DataXXH3` is `xxh3_128(MessageID bytes + row₀.Value + "\n" + row₁.Value +
+"\n" + ... )` — the *exact* escaped `<R>` text, each row followed by a
+literal `\n` (this is also why a value's own LF has to be escaped away
+first; see "Escaping newlines" above). Two implementations agree on
+`DataXXH3` only if they produce byte-identical row text, which means
+agreeing on how every value is formatted before escaping — not just on the
+hash algorithm.
+
+For most sources that's straightforward: integers as plain decimal digits,
+text as-is, booleans as `"1"`/`"0"`. **REAL and DECIMAL are the one type
+where formatting is a real, standardizable choice, not an accident of one
+language's printf:** the canonical form is the *shortest decimal string
+that parses back to the exact same IEEE-754 double*, in plain notation,
+never scientific (Go: `strconv.FormatFloat(v, 'f', -1, 64)`). A formatter
+that rounds to a fixed number of digits, or falls back to `%e`/`%g` for
+very large or very small magnitudes, will not match — that was a real bug
+here (see `TODO_NEXT.md` → "The scientific-notation decimal bug") before
+every adapter was fixed to always use `'f'`. Most languages' "shortest
+round-trip" float formatter (Python's `repr(float)`, Rust's default
+`Display` for `f64`, JavaScript's `Number.prototype.toString`) produces the
+same digit sequence for the same double in the overwhelming majority of
+cases, because the shortest such decimal is mathematically unique for
+almost every double — but this is worth testing against real corpus data,
+not assumed from the algorithm's name alone.
+
+**SQLite specifically makes this harder than a strictly-typed source**,
+because SQLite's type affinity is a suggestion, not an enforcement: a
+column declared `REAL` can actually hold `TEXT`, `INTEGER`, `REAL`, or
+`NULL` storage class per row, and the canonical text depends on which
+storage class is actually present — not on the column's declared type:
+
+| Storage class actually in the cell | Canonical text |
+|---|---|
+| `TEXT` | the stored string, byte-for-byte, unmodified |
+| `INTEGER` | the same decimal digits `strconv.FormatInt` would produce — no `.0` appended |
+| `REAL` | the exact stored text (e.g. `2460909.11`), not the shortest-round-trip *re-derivation* of the float — a value stored as `2.46090911e+06` and one stored as `2460909.11` are the same double but must not be reformatted into each other |
+| `NULL` | the field's NULL marker (`SpecialValues.Null.Marker`, default `[NULL]`) |
+
+`TestDateStorageClasses` (`pkg/adapters/sqlite`) pins all four cases for
+date-typed columns specifically; the same storage-class dependency applies
+to any `REAL`-declared column. An independent implementation reading a
+SQLite file directly (rather than through this driver) has to replicate
+`PRAGMA table_info`'s or the cell's own storage-class detection, not just
+the column's declared type — formatting by declared type alone reproduces
+the *value* but not necessarily this implementation's exact canonical
+*bytes*, and only the bytes hash the same.
+
+Dates: `DATE` formats as `2026-08-21` (date only); `DATETIME`/`TIMESTAMP`
+format as RFC3339Nano in UTC (`2026-08-21T14:38:11.11Z`), trailing
+fractional zeros trimmed, always with a `Z` offset since the value is
+normalized to UTC first — see "SQLite dates" in `CLAUDE.md` for the full
+per-storage-class parsing rules feeding into this.
+
+**Out of scope here, and harder than value formatting:** `SchemaXXH3`
+hashes `encoding/xml`'s own marshaling of the `Schema` struct (attribute
+order, absence of extra whitespace, self-closing empty elements — all
+exactly as Go's XML marshaler happens to produce them). Reproducing that
+from another language means matching a specific marshaler's serialization
+convention, not a documented wire format; nothing about it is SQLite-
+specific, but it is a real, separate obstacle to independent-implementation
+hash agreement that this section does not attempt to specify.
 
 ### Query (TDTQL)
 
