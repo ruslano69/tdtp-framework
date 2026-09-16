@@ -185,6 +185,13 @@ func ImportFile(ctx context.Context, config *adapters.Config, opts ImportOptions
 		}
 
 		if pkt.Data.Compression != "" {
+			// Forgery gate BEFORE decompression: reject a packet whose
+			// compressed header alone would drive the decoder to allocate
+			// gigabytes. Runs here because the Mercury integrity audit below
+			// only sees decompressed rows and so is blind to a hostile header.
+			if err := rejectForgedCompression(pkt); err != nil {
+				return fmt.Errorf("import blocked for '%s': %w", src.label, err)
+			}
 			fmt.Printf("  Decompressing (%s)...\n", pkt.Data.Compression)
 			if err := decompressPacketData(pkt); err != nil {
 				return fmt.Errorf("decompression failed: %w", err)
