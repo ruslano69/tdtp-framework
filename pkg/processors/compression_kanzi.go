@@ -60,6 +60,16 @@ func DecompressKanzi(input []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to decode base64: %w", err)
 	}
 
+	// Defense in depth: the decoder allocates a block buffer sized by the
+	// stream header's block-size field, before it has read a single byte of
+	// content, so a hostile header alone is a memory bomb. Refuse an oversized
+	// block here — independently of any caller-side gate — so the library API
+	// and the broker path are safe on their own. MaxDecompressedBytes only
+	// bounds the output and cannot stop this. See kanzi_header.go.
+	if err := guardKanziBlockSize(decoded[:n]); err != nil {
+		return nil, fmt.Errorf("kanzi decompress refused: %w", err)
+	}
+
 	r, err := kio.NewReader(&nopReadCloser{bytes.NewReader(decoded[:n])}, 1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kanzi reader: %w", err)
