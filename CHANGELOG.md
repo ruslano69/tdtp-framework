@@ -4,6 +4,50 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Security — a kanzi packet could exhaust importer memory before any check
+
+An imported packet is decompressed before the Mercury integrity audit runs
+(the audit hashes the plain rows, so it cannot act earlier). The kanzi
+decoder allocates a block buffer sized by the stream header's block-size
+field before reading a single byte of content, so a ~100 KB packet that
+declares a 1 GiB block drove `tdtpcli --import` to ~2.7 GB of commit — and
+to a fatal, unrecoverable Go out-of-memory on a memory-tight host. The
+payload can be entirely genuine (it decompresses to real rows, its checksum
+and integrity hash both match), so nothing downstream stopped it; with
+several imports running at once, one such packet from anyone who can write
+to the broker was a denial-of-service vector. `MaxDecompressedBytes` did not
+help — it bounds the output, not the header-driven allocation.
+
+Two defenses, sharing one allocation-free header parser
+(`pkg/processors/kanzi_header.go`, mirroring kanzi-go's v6 `readHeader` and
+its 24-bit header checksum, then walking every block-length prefix without
+decoding):
+
+- Import forgery gate (`rejectForgedCompression` in
+  `cmd/tdtpcli/commands/security.go`, called from `import.go` before
+  decompression): admits only what tdtp itself writes — version 6, an L6/L7
+  preset, a 1 MiB block, a declared output within `MaxDecompressedBytes`, a
+  valid header checksum and in-bounds block prefixes — and rejects anything
+  else as a forgery before a byte is allocated. The allowed preset set is
+  derived from `kanziPresets` via kanzi-go's factories, so it cannot drift.
+- Decompressor guard (`DecompressKanzi`): refuses a header whose block size
+  exceeds 1 MiB before creating the reader, so the library API and the
+  broker path are safe on their own.
+
+Verified end to end: a genuine packet still imports (7280 rows, 63 MB); the
+bomb is rejected at 53 MB (was exit 0 / 2776 MB), and under a 384 MiB cap it
+is rejected instead of crashing. zstd was checked and is not affected — its
+decoder is already built with `WithDecoderMaxMemory`, which bounds output
+and window before allocation (a 9.6 KB → 300 MB frame is refused at 45 MB).
+Tests: `pkg/processors/kanzi_header_test.go`.
+
+### Security — amqp091-go bumped to v1.13.0 (GO-2026-6372)
+
+`govulncheck` flags GO-2026-6372 in `github.com/rabbitmq/amqp091-go@v1.10.0`:
+a broker-controlled oversized payload can exhaust memory or violate the
+protocol, reachable from every `pkg/brokers/rabbitmq.go` entry point. Fixed
+in v1.13.0; the upgrade touches only the module version and its checksums.
+
 ### `output.tdtp.integrity` — pipelines had no way to request a checksum without encrypting
 
 Two related gaps, both meaning a plain (unencrypted) pipeline export almost
