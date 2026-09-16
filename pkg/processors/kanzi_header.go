@@ -22,12 +22,12 @@ import (
 // same way, so a stream that kanzi-go would accept parses identically here.
 
 const (
-	kanziMagic       = 0x4B414E5A // "KANZ"
-	kanziVersion     = 6          // kanzi-go 2.5.x writes v6 only
-	kanziHeaderHash  = 0x1E35A7BD
-	kanziTDTPBlock   = 1 << 20 // the only block size tdtp's writer ever emits
-	kanziMaxOutput   = MaxDecompressedBytes
-	kanziBlockSlack  = 2048 // kanzi's _EXTRA_BUFFER_SIZE, matched by the decoders
+	kanziMagic      = 0x4B414E5A // "KANZ"
+	kanziVersion    = 6          // kanzi-go 2.5.x writes v6 only
+	kanziHeaderHash = 0x1E35A7BD
+	kanziTDTPBlock  = 1 << 20 // the only block size tdtp's writer ever emits
+	kanziMaxOutput  = MaxDecompressedBytes
+	kanziBlockSlack = 2048 // kanzi's _EXTRA_BUFFER_SIZE, matched by the decoders
 )
 
 // kanziHeader is what the pre-decompression checks need; the rest of the
