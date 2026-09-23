@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
@@ -23,6 +24,43 @@ var pre1900Cutoff = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
 // maxExcelInt is 10^15 - 1: the largest integer Excel can represent exactly
 // as IEEE-754 float64 (15 significant digits). Larger values must be strings.
 const maxExcelInt int64 = 999_999_999_999_999
+
+// Excel worksheet hard limits (ECMA-376 / Excel 2007+). A file that exceeds
+// them opens as "corrupt" with silent data loss, so ToXLSX refuses loudly
+// instead of writing one. Package vars (not consts) so unit tests can shrink
+// them; production code never assigns them.
+var (
+	// maxExcelRows counts the header row: 1 header + 1_048_575 data rows.
+	maxExcelRows = 1_048_576
+	// maxExcelCols is column XFD.
+	maxExcelCols = 16_384
+	// maxExcelCellChars is the 32_767-character limit per cell.
+	maxExcelCellChars = 32_767
+)
+
+// checkExcelLimits rejects packets that cannot fit on one worksheet.
+// Called after decompression, when len(pkt.Data.Rows) is the logical count.
+func checkExcelLimits(table string, ncols, nrows int) error {
+	if ncols > maxExcelCols {
+		return fmt.Errorf("table %q has %d columns, Excel supports at most %d per sheet",
+			table, ncols, maxExcelCols)
+	}
+	if nrows+1 > maxExcelRows {
+		return fmt.Errorf("table %q has %d data rows, Excel supports at most %d per sheet (+1 header row)",
+			table, nrows, maxExcelRows-1)
+	}
+	return nil
+}
+
+// checkExcelCellChars rejects a single cell value longer than Excel stores.
+// Numbers and serial dates are short by construction; only strings are checked.
+func checkExcelCellChars(table, col string, row int, s string) error {
+	if n := utf8.RuneCountInString(s); n > maxExcelCellChars {
+		return fmt.Errorf("table %q cell %s%d (%d characters) exceeds the Excel per-cell limit of %d",
+			table, col, row, n, maxExcelCellChars)
+	}
+	return nil
+}
 
 // ToXLSX - convert TDTP packet to XLSX file
 //
@@ -55,12 +93,21 @@ func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 
 	sheet := newSheet(sheetName)
 
+	// Excel cannot open a sheet past its row/column limits — fail here with
+	// the table name and counts instead of writing a "corrupt" file.
+	if err := checkExcelLimits(pkt.Header.TableName, len(pkt.Schema.Fields), len(pkt.Data.Rows)); err != nil {
+		return err
+	}
+
 	// Write headers. The header row is the schema: "name (TYPE)", "*" for a
 	// key. FromXLSX reads the types back out of it.
 	for col, field := range pkt.Schema.Fields {
 		header := fmt.Sprintf("%s (%s)", field.Name, field.Type)
 		if field.Key {
 			header += " *"
+		}
+		if err := checkExcelCellChars(pkt.Header.TableName, columnName(col+1), 1, header); err != nil {
+			return err
 		}
 		sheet.setString(col+1, 1, header, styleHeader)
 	}
@@ -101,6 +148,11 @@ func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 			if cellVal == nil {
 				// NaN / Inf / [NULL] marker → blank cell
 				continue
+			}
+			if s, ok := cellVal.(string); ok {
+				if err := checkExcelCellChars(pkt.Header.TableName, columnName(col+1), rowIdx+2, s); err != nil {
+					return err
+				}
 			}
 
 			writeCell(sheet, col+1, rowIdx+2, cellVal, forceStr, fieldType)

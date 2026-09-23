@@ -4,6 +4,37 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### `--to-xlsx` enforces Excel worksheet limits instead of writing a corrupt file
+
+`xlsx.ToXLSX` accepted any packet: past 1_048_576 rows (header included),
+16_384 columns (XFD) or 32_767 characters per cell Excel reports the file as
+corrupt and drops data silently. All three are now refused loudly, with the
+table name and the offending count/cell address in the error — from the one
+place both `--to-xlsx` and `--export-xlsx` funnel through, so no new flags
+were needed. Character counting is in runes, not bytes (`utf8.RuneCountInString`),
+and a refused conversion leaves no file behind. Tests: `pkg/xlsx/limits_test.go`
+(limits are package vars so the real `ToXLSX` path is exercised without
+million-row fixtures); CLI side covered by the new TC17 wide-table group below
+(the true spec limits can't be triggered through the CLI — SQLite itself caps
+a table at 2000 columns).
+
+### `--to-xlsx`/`--from-xlsx` no longer demand a config file
+
+Both are file-only operations, like `--to-csv`/`--to-html`/`--to-tdtp` — but
+they were missing from the `noDBRequired` list in `cmd/tdtpcli/main.go`, so
+running them outside a project directory died with `Failed to load config:
+open config.yaml`. Added both flags to the list.
+
+### New CLI suite `tests/cli/test_xlsx.py`, mirroring `test_csv.py`
+
+TC1–TC16 with the same fixtures and numbering (basic, sheet name instead of
+delimiters, Cyrillic instead of `--cp`, special-characters instead of `--bom`,
+fields, where incl. IN and filter-on-non-projected-column, order-by, limit/tail,
+offset, zstd, compact v1.3.1, v1.4 integrity, combined queries, `-l` alias,
+`--output`, error cases) plus TC17 for wide tables (41 columns: refs past Z
+stay aligned). The XLSX reader is stdlib-only (`zipfile` + `ElementTree`), no
+`openpyxl` dependency. 51 checks, all green; `test_csv.py` still 43/43.
+
 ### Security — a kanzi packet could exhaust importer memory before any check
 
 An imported packet is decompressed before the Mercury integrity audit runs

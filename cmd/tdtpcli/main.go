@@ -883,6 +883,8 @@ func main() {
 		*flags.Merge != "" ||
 		*flags.ToHTML != "" ||
 		*flags.ToCSV != "" ||
+		*flags.ToXLSX != "" ||
+		*flags.FromXLSX != "" ||
 		*flags.ToCompact != "" ||
 		*flags.ToTDTP != "" ||
 		*flags.Map != "" || // --map uses its own target DSN from mapping.yaml, not config.yaml
