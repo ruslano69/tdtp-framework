@@ -164,6 +164,9 @@ func compressAndSign(pkt *packet.DataPacket, algo string, level int, enableCheck
 	}
 	pkt.Data.Compression = algo
 	pkt.Data.Rows = []packet.Row{{Value: compressed}}
+	// Compression is a v1.2 feature — stamp the version, like the CLI
+	// and pipeline export paths do.
+	packet.BumpVersion(pkt, "1.2")
 	return nil
 }
 

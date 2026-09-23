@@ -268,6 +268,8 @@ func ApplyCompact(pkt *DataPacket, fixedFieldNames []string, tail bool) error {
 	}
 
 	pkt.Data = RowsToCompactData(rows, pkt.Schema, tail)
-	pkt.Version = "1.3.1"
+	// Compact is a v1.3.1 feature — stamp the version (BumpVersion, not
+	// assignment: a later step must never be able to downgrade this).
+	BumpVersion(pkt, "1.3.1")
 	return nil
 }

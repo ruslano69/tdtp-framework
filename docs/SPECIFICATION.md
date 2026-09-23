@@ -27,12 +27,13 @@ integrity xxh3_128 hashes + xzMercury, v1.5 section-level encryption)
    - [Integrity](#integrity)
    - [Query (TDTQL)](#query-tdtql)
    - [QueryContext](#querycontext)
-5. [Data types](#data-types)
-6. [TDTQL query language](#tdtql-query-language)
-7. [Compact format v1.3.1](#compact-format-v131)
-8. [Examples](#examples)
-9. [Adapter-specific behaviour of SpecialValues](#adapter-specific-behaviour-of-specialvalues)
-10. [Versioning](#versioning)
+5. [Validating packets](#validating-packets)
+6. [Data types](#data-types)
+7. [TDTQL query language](#tdtql-query-language)
+8. [Compact format v1.3.1](#compact-format-v131)
+9. [Examples](#examples)
+10. [Adapter-specific behaviour of SpecialValues](#adapter-specific-behaviour-of-specialvalues)
+11. [Versioning](#versioning)
 
 ---
 
@@ -729,6 +730,33 @@ Execution context, present only in a response.
   </ExecutionResults>
 </QueryContext>
 ```
+
+---
+
+## Validating packets
+
+Writing your own exporter or importer? Check the output against the machine-readable
+schema and the reference validator before shipping it:
+
+- `docs/tdtp.xsd` — the normative XML Schema (structure, v1.0–v1.5 plus the
+  `layout="columns"` extension). Any XSD 1.0 engine validates against it directly.
+- `tdtp-validate` (`cmd/tdtp-validate`) — the reference checker. It runs the
+  embedded `tdtp.xsd` (a test fails if the copy drifts from the file, so the
+  schema stays the single source of truth), then the semantics no XSD can
+  express: row shape vs Schema, `RecordsInPart`, duplicate field names,
+  version-vs-features consistency (compression → 1.2, compact → 1.3.1,
+  integrity → 1.4, encryption → 1.5), xxh3 verification, QueryContext
+  counters. It can also raise/lower the stamped version
+  (`--stamp-integrity` / `--strip-integrity`).
+
+```sh
+go build -tags nokafka -o tdtp-validate ./cmd/tdtp-validate/
+tdtp-validate export.tdtp.xml
+```
+
+A file the validator rejects will, sooner or later, be rejected (or silently
+misread) by every other implementation — validate early, especially the row
+shape and the version stamp.
 
 ---
 

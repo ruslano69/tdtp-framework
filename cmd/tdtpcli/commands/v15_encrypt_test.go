@@ -102,6 +102,31 @@ func TestEncryptDecryptV15_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestEncryptPacketV15_StampsVersion15: section encryption is a v1.5
+// feature, so the wire packet must declare version 1.5 (stamped by
+// packet.EncryptSections via BumpVersion — never a downgrade).
+func TestEncryptPacketV15_StampsVersion15(t *testing.T) {
+	t.Setenv("MERCURY_SERVER_SECRET", "dev-mode")
+	srv := newMercuryEncMock(t)
+	defer srv.Close()
+
+	ctx := context.Background()
+	pkt := makeV15TestPacket(t)
+	if pkt.Version != "1.0" {
+		t.Fatalf("precondition: fresh packet version = %q, want 1.0", pkt.Version)
+	}
+	xmlData, _, err := EncryptPacketV15(ctx, pkt, srv.URL, "test-pipeline")
+	if err != nil {
+		t.Fatalf("EncryptPacketV15: %v", err)
+	}
+	if pkt.Version != "1.5" {
+		t.Errorf("Version = %q after v1.5 encryption, want 1.5", pkt.Version)
+	}
+	if !strings.Contains(string(xmlData), `version="1.5"`) {
+		t.Error("wire XML does not declare version=\"1.5\"")
+	}
+}
+
 // TestEncryptPacketV15_WithoutCompression guards against a real near-miss:
 // GenerateReference leaves rows in the unexported rawRows field until
 // something materializes them onto Data.Rows — compression does that as a
