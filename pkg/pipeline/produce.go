@@ -41,7 +41,7 @@ type HashRegistrar interface {
 // overwriting the "1.4" this function sets — the final packet ends up
 // correctly versioned either way).
 func ComputeAndRegisterIntegrity(ctx context.Context, pkt *packet.DataPacket, client HashRegistrar, sender string) error {
-	pkt.Version = "1.4"
+	packet.BumpVersion(pkt, "1.4")
 	if _, err := packet.ComputeIntegrity(pkt); err != nil {
 		return fmt.Errorf("compute integrity: %w", err)
 	}

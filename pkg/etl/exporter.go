@@ -899,6 +899,11 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string
 	dataPacket.Data.Compression = algo
 	dataPacket.Data.Rows = []packet.Row{{Value: compressedData}}
 
+	// Compression is a v1.2 feature — stamp the version (never lowers a
+	// higher stamp, e.g. 1.4 from integrity). Same fix as the CLI's
+	// compressPacketData, which shipped version="1.0" on compressed files.
+	packet.BumpVersion(dataPacket, "1.2")
+
 	return nil
 }
 

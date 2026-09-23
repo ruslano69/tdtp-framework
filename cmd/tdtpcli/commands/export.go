@@ -167,7 +167,8 @@ func (p *integrityProc) ProcessPacket(ctx context.Context, pkt *packet.DataPacke
 	// pipeline (VerifyAndPrepare) recognises this packet as v1.4 and runs the
 	// 3-step pre-flight (Mercury → local xxh3 → Dictionary expansion).
 	// Without this, consumer treats packet as pre-v1.4 and skips all integrity checks.
-	pkt.Version = "1.4"
+	// BumpVersion, not assignment: the packet may already carry a higher stamp.
+	packet.BumpVersion(pkt, "1.4")
 
 	// Embed Mercury base URL in Dictionary as @MRC so the consumer knows
 	// where to call GET /api/hashes/{uuid}/{part}?xxh3=... for pre-flight.
@@ -825,6 +826,11 @@ func compressPacketData(pkt *packet.DataPacket, level int, algo string, enableCh
 	// Update packet with compressed data
 	pkt.Data.Compression = algo
 	pkt.Data.Rows = []packet.Row{{Value: compressed}}
+
+	// Compression is a v1.2 feature — stamp the version so the packet
+	// describes itself correctly (BumpVersion never lowers a higher
+	// stamp, e.g. 1.4 from an earlier integrity step).
+	packet.BumpVersion(pkt, "1.2")
 
 	// Log compression stats
 	fmt.Printf("  → Compressed: %d → %d bytes (ratio: %.2fx)\n",

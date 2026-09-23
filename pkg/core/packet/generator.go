@@ -243,7 +243,7 @@ func (g *Generator) GenerateReference(tableName string, schema Schema, rows [][]
 		// v1.3 readers ignore unknown <Dictionary> via xml.Decoder
 		// default, so this is forward-compatible.
 		if schema.Dictionary != nil && len(schema.Dictionary.Entries) > 0 {
-			packet.Version = "1.4"
+			BumpVersion(packet, "1.4")
 		}
 		packet.Header.MessageID = fmt.Sprintf("%s-P%d", messageIDBase, i+1)
 		packet.Header.PartNumber = i + 1

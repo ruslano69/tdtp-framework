@@ -94,6 +94,30 @@ func CompareProtocolVersions(a, b string) (int, bool) {
 // versionLegacyMax — последняя версия, живущая на счёте строк вместо хешей.
 const versionLegacyMax = "1.3.1"
 
+// BumpVersion raises pkt.Version to at least minVersion, numerically
+// compared — never lowers it.
+//
+// Every producer-side feature stamps the version its feature introduced
+// (compression → 1.2, compact → 1.3.1, integrity → 1.4, encryption → 1.5),
+// so a packet's version is the max of the features it uses. Direct
+// assignment (pkt.Version = "1.4") breaks this the moment steps combine —
+// e.g. integrity stamping 1.4 and a later compact step overwriting it with
+// 1.3.1 — which is how compressed packets shipped version="1.0" for years.
+//
+// An unparsable current version is left untouched: same convention as
+// NeedsRowCountCheck, unknown counts as newer, and clobbering it would
+// destroy information.
+func BumpVersion(pkt *DataPacket, minVersion string) {
+	cur, okCur := ParseProtocolVersion(pkt.Version)
+	min, okMin := ParseProtocolVersion(minVersion)
+	if !okCur || !okMin {
+		return
+	}
+	if cur.Compare(min) < 0 {
+		pkt.Version = minVersion
+	}
+}
+
 // versionIntroduced — версия, в которой возможность появилась. Пакет,
 // пользующийся возможностью, но объявляющий версию ниже, сам себя описывает
 // неверно.

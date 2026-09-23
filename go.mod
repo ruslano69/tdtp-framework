@@ -2,8 +2,6 @@ module github.com/ruslano69/tdtp-framework
 
 go 1.25.0
 
-toolchain go1.26.5
-
 require (
 	github.com/alexbrainman/odbc v0.0.0-20250601004241-49e6b2bc0cf0
 	github.com/alicebob/miniredis/v2 v2.37.0
@@ -20,6 +18,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jacoelho/xsd v0.5.1
 	github.com/klauspost/compress v1.18.0
 	github.com/mozillazg/go-unidecode v0.2.0
 	github.com/prometheus/client_golang v1.23.2
@@ -91,3 +90,5 @@ require (
 )
 
 replace golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 => golang.org/x/mod v0.29.0
+
+replace github.com/jacoelho/xsd => ./third_party/xsd

@@ -4,6 +4,49 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Compressed exports stamp version 1.2 (were 1.0); version is now max-of-features
+
+A compressed packet declaring `version="1.0"` describes itself incorrectly —
+compression is a v1.2 feature. `compressPacketData` (CLI), `Exporter.
+compressDataPacket` (pipelines) and `compressAndSign` (Python C-ABI) never
+stamped anything, so every `--compress` file shipped 1.0. New `packet.
+BumpVersion` raises the version to a floor without ever lowering a higher
+stamp (integrity-over-compression stays 1.4); the pre-existing direct
+assignments (compact → 1.3.1, dictionary/integrity → 1.4, encryption → 1.5)
+were converted to it, except `Downgrade`, which is a deliberate downgrade.
+Verified end to end: plain → 1.0, `--compress` → 1.2, `--compact` → 1.3.1,
+`--integrity` → 1.4, `--compress --integrity` → 1.4. Old 1.0-compressed
+archives keep reading as before (see `warnVersionBelowFeatures`).
+Tests: `packet/TestBumpVersion`, `commands/export_version_test.go`,
+`etl/exporter_version_test.go`.
+
+### New tool: `tdtp-validate` checks a .tdtp.xml against the spec
+
+`cmd/tdtp-validate` (separate binary, `tdtp-validate file.tdtp.xml [-q]`)
+validates structure with the real `docs/tdtp.xsd`, executed by a pure-Go
+XSD 1.0 engine (vendored fork of `github.com/jacoelho/xsd` v0.5.1 in
+`third_party/xsd` — upstream requires Go ≥ 1.27, the fork is mechanically
+ported to the repo's Go 1.25 with zero behavior change, proven by building
+and testing under a real 1.25 toolchain; wired via `replace`, so `go.mod`
+gains two lines, while the `go 1.25.0` directive, `go.work` and the CI
+matrix stay exactly as they were). The schema is embedded via a generated constant refreshed by
+`go generate`, with a test failing on drift, so the file stays the single
+source of truth instead of a hand transcription. A small overlay adds the
+stricter-than-XSD rules (non-blank names, no structured children under
+ciphertext), plus semantics no XSD can express: row shape vs
+Schema after decompression and compact/columnar expansion (in reverse
+production order), RecordsInPart, duplicate field names, Dictionary validity,
+checksum-without-compression, version-vs-features consistency (compression → 1.2
+and up, now that producers stamp it), three-level xxh3 verification,
+QueryContext counter consistency and OriginalQuery fields against the Schema.
+Encrypted sections are reported, not judged (opaque). Exit 0/1, `-q` for exit-code-only use in scripts.
+`--stamp-integrity` / `--strip-integrity` (with `--output`, never in-place)
+raise or lower the stamped version: stamping computes the three-level xxh3
+and sets 1.4 (round-tripping compressed/columnar packets so hashes cover
+plaintext row-major values, like the export chain), stripping removes the
+hashes and resolves the version down to the remaining features. Both refuse
+unsound input and re-validate before writing.
+
 ### `--to-xlsx` enforces Excel worksheet limits instead of writing a corrupt file
 
 `xlsx.ToXLSX` accepted any packet: past 1_048_576 rows (header included),

@@ -104,7 +104,9 @@ func EncryptSections(pkt *DataPacket, key []byte) error {
 		// plaintext this ciphertext decrypts to, needed to reverse it.
 	}
 
-	pkt.Version = "1.5"
+	// Section encryption is a v1.5 feature — stamp the version (never
+	// downgrades: BumpVersion keeps a higher stamp if one is present).
+	BumpVersion(pkt, "1.5")
 	return nil
 }
 
