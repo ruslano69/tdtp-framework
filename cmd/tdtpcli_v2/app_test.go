@@ -130,3 +130,49 @@ func TestApp_DuplicateRegistrationPanics(t *testing.T) {
 	a.Register(newValidateCommand())
 	a.Register(newValidateCommand())
 }
+
+func TestApp_TopHelpFlag(t *testing.T) {
+	for _, argv := range [][]string{{"--help"}, {"-h"}} {
+		code, stdout, _ := runApp(t, argv...)
+		if code != ExitOK {
+			t.Errorf("exit = %d, want %d for %v", code, ExitOK, argv)
+		}
+		if !strings.Contains(stdout, "usage:") {
+			t.Errorf("should print usage, got %q", stdout)
+		}
+	}
+}
+
+func TestApp_CommandHelpFlag(t *testing.T) {
+	for _, argv := range [][]string{{"validate", "--help"}, {"validate", "-h"}} {
+		code, stdout, _ := runApp(t, argv...)
+		if code != ExitOK {
+			t.Errorf("exit = %d, want %d for %v", code, ExitOK, argv)
+		}
+		if !strings.Contains(stdout, "stamp-integrity") {
+			t.Errorf("should print command help, got %q", stdout)
+		}
+	}
+}
+
+func TestParseGlobals_Forms(t *testing.T) {
+	g, rest, err := parseGlobals([]string{"--json", "--config", "c.yaml", "validate", "f"})
+	if err != nil || !g.JSON || g.Config != "c.yaml" || len(rest) != 2 {
+		t.Errorf("got %+v %v %v", g, rest, err)
+	}
+	g, _, err = parseGlobals([]string{"--quiet=false", "--json=1", "validate"})
+	if err != nil || g.Quiet || !g.JSON {
+		t.Errorf("got %+v %v", g, err)
+	}
+	if _, _, err := parseGlobals([]string{"--quiet=maybe", "validate"}); err == nil {
+		t.Error("non-boolean --quiet should fail")
+	}
+	if _, _, err := parseGlobals([]string{"--nope", "validate"}); err == nil {
+		t.Error("unknown global flag should fail")
+	}
+	// Command flags after positionals must not leak into globals.
+	g, rest, err = parseGlobals([]string{"to-csv", "f.xml", "--output", "o.csv"})
+	if err != nil || len(rest) != 4 {
+		t.Errorf("globals must stop at the command: %+v %v %v", g, rest, err)
+	}
+}

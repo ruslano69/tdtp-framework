@@ -25,4 +25,15 @@
   (exit 3), unreadable input stays operational (exit 1).
 - v1 `--inspect`/`--test` resolve through the compat shim with a
   deprecation notice.
+
+### Wave 1b: `to-csv` / `to-xlsx`
+
+- Shared `queryFlags` bundle (`--where`/`-w`, `--order-by`, `--limit`/`-l`,
+  `--offset`, `--fields`) built on `pkg/cliquery` + `tdtql.SplitFieldList`
+  exactly like v1; `pflag` replaces stdlib `flag` (interspersed flags and
+  real shorthands — stdlib stops at the first positional). Produced files
+  are byte-identical to v1 (proven with `fc`); stdout differs by the v1
+  license banner only.
+- `--help`/`-h` per command (exit 0); globals parsed by hand so the global
+  set never chokes on command flags.
 - `docs/CLI_V2.md`: philosophy, command checklist, exit codes.

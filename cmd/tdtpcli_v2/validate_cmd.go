@@ -34,8 +34,7 @@ semantics (row shapes, counters, version-vs-features, xxh3 integrity).
 	fs.IntVar(&c.maxMB, "max-mb", 256, "reject files larger than this")
 	fs.BoolVar(&c.stamp, "stamp-integrity", false, "compute xxh3 hashes, set version 1.4, write to --output")
 	fs.BoolVar(&c.strip, "strip-integrity", false, "drop xxh3 hashes, lower version, write to --output")
-	fs.StringVar(&c.output, "output", "", "output file for --stamp/--strip-integrity (short: -o)")
-	fs.StringVar(&c.output, "o", "", "output file (alias)")
+	fs.StringVarP(&c.output, "output", "o", "", "output file for --stamp/--strip-integrity")
 	c.FlagSet = fs
 	return c
 }

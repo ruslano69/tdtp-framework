@@ -22,6 +22,8 @@ type compatEntry struct {
 var compatTable = map[string]compatEntry{
 	"inspect": {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
 	"test":    {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
+	"to-csv":  {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
+	"to-xlsx": {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
 }
 
 // compatResolve rewrites argv when it starts with a known v1 flag.

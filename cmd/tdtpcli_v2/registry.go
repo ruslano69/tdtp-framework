@@ -4,5 +4,7 @@ package main
 func RegisterAll(a *App) {
 	a.Register(newInspectCommand())
 	a.Register(newTestCommand())
+	a.Register(newToCSVCommand())
+	a.Register(newToXLSXCommand())
 	a.Register(newValidateCommand())
 }

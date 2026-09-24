@@ -46,6 +46,10 @@ func (a *App) Register(c Command) {
 // exit code. Global flags precede the command name; command flags follow
 // it — each FlagSet sees only its own.
 func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
+	if len(argv) == 1 && (argv[0] == "-h" || argv[0] == "--help") {
+		a.writeUsage(stdout)
+		return ExitOK
+	}
 	globals, rest, err := parseGlobals(argv)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -58,7 +62,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	}
 
 	name, args := rest[0], rest[1:]
-	if name == "help" {
+	if name == "help" || name == "-h" || name == "--help" {
 		a.writeHelp(stdout, args)
 		return ExitOK
 	}
@@ -83,8 +87,15 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		fmt.Fprintln(stderr, "flags:")
 		fs.PrintDefaults()
 	}
+	if hasHelpFlag(args) {
+		fmt.Fprintln(stdout, cmd.Long())
+		fmt.Fprintln(stdout, "flags:")
+		fs.SetOutput(stdout)
+		fs.PrintDefaults()
+		return ExitOK
+	}
 	if err := fs.Parse(args); err != nil {
-		// flag package already printed the parse error to stderr.
+		// pflag already printed the parse error to stderr.
 		return ExitUsage
 	}
 	positional := fs.Args()
@@ -174,6 +185,18 @@ func prependGlobals(g GlobalFlags, args []string) []string {
 		out = append(out, "--json")
 	}
 	return append(out, args...)
+}
+
+// hasHelpFlag reports a -h/--help request anywhere in args. pflag does
+// not add a help flag on its own; v2 answers it with the command's Long
+// help on stdout (exit 0) instead of a parse error.
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" || a == "-help" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(w io.Writer, v any) {
