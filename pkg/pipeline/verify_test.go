@@ -186,7 +186,10 @@ func TestVerify_MercuryDown_Downgrade(t *testing.T) {
 	}
 }
 
-// TestVerify_PreV14_PassThrough: v1.0 / v1.3.1 packets are never checked.
+// TestVerify_PreV14_PassThrough: pre-v1.4 packets are never checked —
+// and never restamped. The assertion is "version untouched", not a
+// whitelist: producers stamp compression as 1.2 now (used to be 1.0),
+// and passthrough must stay transparent to any pre-v1.4 version.
 func TestVerify_PreV14_PassThrough(t *testing.T) {
 	called := false
 	v := verifierFunc(func(_ context.Context, _ string, _ int, _, _ string) (*mercury.HashRecord, error) {
@@ -194,13 +197,16 @@ func TestVerify_PreV14_PassThrough(t *testing.T) {
 		return nil, nil
 	})
 
-	pkt := makeV131Packet(t)
-	result, err := pipeline.VerifyAndPrepare(context.Background(), pkt, v, pipeline.FallbackBlock)
-	if err != nil {
-		t.Fatalf("pre-v1.4 should pass through: %v", err)
-	}
-	if result.Version != "1.0" && result.Version != "1.3.1" {
-		t.Errorf("unexpected version: %q", result.Version)
+	for _, version := range []string{"1.0", "1.2", "1.3", "1.3.1"} {
+		pkt := makeV131Packet(t)
+		pkt.Version = version
+		result, err := pipeline.VerifyAndPrepare(context.Background(), pkt, v, pipeline.FallbackBlock)
+		if err != nil {
+			t.Fatalf("pre-v1.4 should pass through: %v", err)
+		}
+		if result.Version != version {
+			t.Errorf("version = %q, want untouched %q", result.Version, version)
+		}
 	}
 	if called {
 		t.Error("Mercury must not be called for pre-v1.4 packets")

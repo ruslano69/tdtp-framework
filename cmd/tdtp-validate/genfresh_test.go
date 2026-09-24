@@ -8,6 +8,7 @@ package main
 // means someone edited one side without the other.
 
 import (
+	"bytes"
 	"os"
 	"testing"
 )
@@ -17,6 +18,9 @@ func TestEmbeddedSchemaMatchesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read docs/tdtp.xsd: %v", err)
 	}
+	// Same CRLF→LF normalization as genxsd: checkout line endings must not
+	// count as drift.
+	raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	if string(raw) != tdtpXSDText {
 		t.Fatalf("spec_xsd_gen.go drifted from docs/tdtp.xsd — run: go generate ./cmd/tdtp-validate/")
 	}
