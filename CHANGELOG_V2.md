@@ -40,6 +40,14 @@
 - Proven identical to v1 on sqlite (normalized comparison, variables
   included). Unsafe/admin paths intentionally untested (need privileges).
 
+### Wave 3: `to-tdtp` / `to-compact` (file→file transforms)
+
+- Same engines (`ConvertTDTPToTDTP`, `ConvertToCompact`) with the shared
+  `queryFlags` bundle; `--v1`/`--v13`/`--v14` resolution and in-place
+  default (no `--output` overwrites the input) mirror v1 exactly.
+- Proven identical to v1 (normalized comparison, filters and
+  `--fixed-fields` included).
+
 ### Wave 0: skeleton + `validate`
 
 - New binary `cmd/tdtpcli_v2`: registry dispatcher, per-command flag
