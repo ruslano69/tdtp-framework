@@ -23,6 +23,7 @@ type compatEntry struct {
 // compatTable is filled as commands port (wave 1+).
 var compatTable = map[string]compatEntry{
 	"export":     {command: []string{"export"}, notice: "--export is deprecated, use 'tdtpcli_v2 export'"},
+	"import":     {command: []string{"import"}, notice: "--import is deprecated, use 'tdtpcli_v2 import'"},
 	"inspect":    {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
 	"test":       {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
 	"to-csv":     {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
@@ -30,6 +31,7 @@ var compatTable = map[string]compatEntry{
 	"to-xlsx":    {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
 	"list":       {command: []string{"list"}, notice: "--list is deprecated, use 'tdtpcli_v2 list'"},
 	"list-views": {command: []string{"list"}, args: []string{"--views"}, notice: "--list-views is deprecated, use 'tdtpcli_v2 list --views'"},
+	"pipeline":   {command: []string{"pipeline"}, notice: "--pipeline is deprecated, use 'tdtpcli_v2 pipeline'"},
 }
 
 // compatResolve rewrites argv when it starts with a known v1 flag.

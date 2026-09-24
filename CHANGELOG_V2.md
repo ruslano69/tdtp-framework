@@ -20,6 +20,26 @@
   compressed exports identical to v1 modulo MessageID/Timestamp
   (normalized comparison).
 
+### Wave 2: `import` (file → database)
+
+- Same engine (`commands.ImportFile`): strategies replace/ignore/fail/copy
+  (`--strategy`, default replace), `--table` override, `--fields`
+  whitelist, `--clear`/`--translit` sanitising, repeatable `--expect-var`
+  (same `name=value` grammar as v1). Mask/processors travel later.
+- Exit codes: unknown strategy or malformed expect-var → 2 (usage);
+  unreadable input or database failure → 1; the engine's own import
+  errors stay operational.
+- Round-trip proven on sqlite (export → import, replace-is-idempotent,
+  fail-on-duplicate, whitelist narrows the table).
+
+### Wave 3: `pipeline` (ETL from YAML)
+
+- Same engine (`commands.ExecutePipeline`): safe mode by default,
+  `--unsafe`/`--unsafe-cert`, `--enc`/`--enc13` overrides, `@name=value`
+  variables with v1's grammar (quotes stripped, stray args rejected).
+- Proven identical to v1 on sqlite (normalized comparison, variables
+  included). Unsafe/admin paths intentionally untested (need privileges).
+
 ### Wave 0: skeleton + `validate`
 
 - New binary `cmd/tdtpcli_v2`: registry dispatcher, per-command flag

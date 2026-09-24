@@ -73,6 +73,7 @@ func splitFields(s string) []string {
 	}
 	return tdtql.SplitFieldList(s)
 }
+
 // outputFile mirrors v1's determineOutputFile: explicit --output wins,
 // otherwise <input>.<ext> next to the source.
 func outputFile(output, input, ext string) string {
