@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+### Wave 2: `export` (database → file)
+
+- `pkg/cliconfig`: the v1 YAML model moved out of `package main`
+  (unimportable) with zero behaviour change — v1 keeps working through
+  type aliases, proven by its own tests. v2 reads the same file format.
+- Same engine (`commands.ExportTable`): table/positional, full
+  `queryFlags`, compress (+level/algo), compact (+fixed-fields/tail),
+  integrity (+mercury-url), columnar, readonly-fields, fast.
+  Mask/processors and encryption travel later (config-driven).
+- Verified on live postgres (`hr_portal`, 160 tables): filtered and
+  compressed exports identical to v1 modulo MessageID/Timestamp
+  (normalized comparison).
+
 ### Wave 0: skeleton + `validate`
 
 - New binary `cmd/tdtpcli_v2`: registry dispatcher, per-command flag
@@ -42,4 +55,16 @@
 - Same pattern: `commands.ConvertTDTPToHTML` directly, `--open`/`--row`
   passed through (`--row` parsed exactly like v1, invalid silently 0),
   produced file byte-identical to v1 (`fc`: no differences).
+
+### Wave 1d: `list` (+ config sharing)
+
+- `pkg/cliconfig`: the v1 YAML model moved out of `package main`
+  (unimportable) with zero behaviour change — v1 keeps working through
+  type aliases in `cmd/tdtpcli/config_alias.go`, proven by v1's own
+  tests. v2 reads the same file format; first command needing a DB.
+- Shared `commands.MatchesPattern` exported (was unexported) so both
+  contracts agree on glob/`%` filtering.
+- Adapter registration mirrored (`drivers*.go` with the same tags).
+- `--json` carries table/view names via a direct adapter query
+  (`Output.JSONEnabled` skips it in text mode).
 - `docs/CLI_V2.md`: philosophy, command checklist, exit codes.

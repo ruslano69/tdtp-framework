@@ -57,6 +57,22 @@ func (q *queryFlags) build() (*packet.Query, error) {
 	return query, nil
 }
 
+// fieldsList splits the --fields projection the way v1 does
+// (splitCommaSeparated → tdtql.SplitFieldList, bracket-quoting aware).
+func (q *queryFlags) fieldsList() []string {
+	if q.fields == "" {
+		return nil
+	}
+	return tdtql.SplitFieldList(q.fields)
+}
+
+// splitFields splits any comma-separated flag value the v1 way.
+func splitFields(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return tdtql.SplitFieldList(s)
+}
 // outputFile mirrors v1's determineOutputFile: explicit --output wins,
 // otherwise <input>.<ext> next to the source.
 func outputFile(output, input, ext string) string {

@@ -11,20 +11,25 @@ import "strings"
 // native `tdtpcli_v2 <command>` form.
 
 // compatEntry maps one v1 flag to a v2 command prefix; the flag's own
-// value (usually the input file) is appended after it.
+// value (usually the input file) is appended after it. args injects fixed
+// arguments between the command and the user's (e.g. --list-views becomes
+// `list --views`).
 type compatEntry struct {
 	command []string // e.g. {"validate"}
+	args    []string // fixed args after the command, before the user's
 	notice  string
 }
 
-// compatTable is filled as commands port (wave 1+). Entries below are
-// live: --inspect/--test resolve to their subcommands.
+// compatTable is filled as commands port (wave 1+).
 var compatTable = map[string]compatEntry{
-	"inspect": {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
-	"test":    {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
-	"to-csv":  {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
-	"to-html": {command: []string{"to-html"}, notice: "--to-html is deprecated, use 'tdtpcli_v2 to-html'"},
-	"to-xlsx": {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
+	"export":     {command: []string{"export"}, notice: "--export is deprecated, use 'tdtpcli_v2 export'"},
+	"inspect":    {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
+	"test":       {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
+	"to-csv":     {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
+	"to-html":    {command: []string{"to-html"}, notice: "--to-html is deprecated, use 'tdtpcli_v2 to-html'"},
+	"to-xlsx":    {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
+	"list":       {command: []string{"list"}, notice: "--list is deprecated, use 'tdtpcli_v2 list'"},
+	"list-views": {command: []string{"list"}, args: []string{"--views"}, notice: "--list-views is deprecated, use 'tdtpcli_v2 list --views'"},
 }
 
 // compatResolve rewrites argv when it starts with a known v1 flag.
@@ -39,5 +44,7 @@ func compatResolve(argv []string) ([]string, string, bool) {
 	if !ok {
 		return nil, "", false
 	}
-	return append(append([]string{}, e.command...), argv[1:]...), e.notice, true
+	out := append([]string{}, e.command...)
+	out = append(out, e.args...)
+	return append(out, argv[1:]...), e.notice, true
 }

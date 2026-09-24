@@ -38,17 +38,21 @@ func (b *Base) Long() string          { return b.CmdLong }
 func (b *Base) Flags() *pflag.FlagSet { return b.FlagSet }
 
 // Output is the rendering contract: humans read text, pipelines read JSON.
-// Human is silenced under --quiet; JSON emits only under --json.
+// Human is silenced unless the run is textual; JSON emits only when the
+// run asked for it — JSONEnabled lets commands skip expensive payloads
+// (extra queries, re-reads) when nobody consumes them.
 type Output struct {
-	Human func(format string, args ...any)
-	JSON  func(v any)
+	Human       func(format string, args ...any)
+	JSON        func(v any)
+	JSONEnabled bool
 }
 
 // Discard is an Output that renders nothing (for tests).
 func Discard(out io.Writer) Output {
 	_ = out
 	return Output{
-		Human: func(format string, args ...any) {},
-		JSON:  func(v any) {},
+		Human:       func(format string, args ...any) {},
+		JSON:        func(v any) {},
+		JSONEnabled: false,
 	}
 }

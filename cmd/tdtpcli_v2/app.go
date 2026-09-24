@@ -115,6 +115,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 				writeJSON(stdout, v)
 			}
 		},
+		JSONEnabled: globals.JSON,
 	}
 
 	deps := &Deps{ConfigPath: globals.Config}
