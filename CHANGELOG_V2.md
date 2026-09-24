@@ -36,4 +36,10 @@
   license banner only.
 - `--help`/`-h` per command (exit 0); globals parsed by hand so the global
   set never chokes on command flags.
+
+### Wave 1c: `to-html`
+
+- Same pattern: `commands.ConvertTDTPToHTML` directly, `--open`/`--row`
+  passed through (`--row` parsed exactly like v1, invalid silently 0),
+  produced file byte-identical to v1 (`fc`: no differences).
 - `docs/CLI_V2.md`: philosophy, command checklist, exit codes.
