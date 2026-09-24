@@ -36,23 +36,26 @@ jobs:
           GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
           GOWORK: off         # resolve dependencies from go.mod alone, the way a consumer does
         run: |
-          # Build for multiple platforms
+          # Build for multiple platforms.
+          # -trimpath -ldflags="-s -w": strip debug info and build paths —
+          # release binaries ship without them (saves ~10 MB per binary).
           mkdir -p dist
+          LDFLAGS="-s -w"
 
           # Linux amd64
-          GOOS=linux GOARCH=amd64 go build -o dist/tdtpcli-linux-amd64 ./cmd/tdtpcli
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o dist/tdtpcli-linux-amd64 ./cmd/tdtpcli
 
           # Linux arm64
-          GOOS=linux GOARCH=arm64 go build -o dist/tdtpcli-linux-arm64 ./cmd/tdtpcli
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o dist/tdtpcli-linux-arm64 ./cmd/tdtpcli
 
           # Windows amd64
-          GOOS=windows GOARCH=amd64 go build -o dist/tdtpcli-windows-amd64.exe ./cmd/tdtpcli
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o dist/tdtpcli-windows-amd64.exe ./cmd/tdtpcli
 
           # macOS amd64
-          GOOS=darwin GOARCH=amd64 go build -o dist/tdtpcli-darwin-amd64 ./cmd/tdtpcli
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o dist/tdtpcli-darwin-amd64 ./cmd/tdtpcli
 
           # macOS arm64
-          GOOS=darwin GOARCH=arm64 go build -o dist/tdtpcli-darwin-arm64 ./cmd/tdtpcli
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o dist/tdtpcli-darwin-arm64 ./cmd/tdtpcli
 
       - name: Create checksums
         run: |
