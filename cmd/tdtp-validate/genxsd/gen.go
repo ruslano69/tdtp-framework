@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strconv"
@@ -33,6 +34,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Normalize line endings: the generator runs on Windows (CRLF checkout)
+	// and CI on Linux (LF) — the embedded copy must not depend on that.
+	raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	if len(raw) == 0 {
 		return fmt.Errorf("%s is empty", in)
 	}
