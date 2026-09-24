@@ -1,7 +1,6 @@
 // tdtp-validate checks TDTP files for conformance to the protocol
-// specification (docs/tdtp.xsd: structure; packet semantics: row shapes,
-// counters, version-vs-features, xxh3 integrity) and can raise or lower
-// the stamped version (applying or removing the xxh3 integrity hashes).
+// specification. Thin frontend over pkg/validate (shared with tdtpcli_v2) —
+// all logic lives there; this main only parses flags and prints reports.
 //
 // Usage:
 //
@@ -11,22 +10,15 @@
 //	tdtp-validate --stamp-integrity --output stamped.xml file.tdtp.xml
 //	tdtp-validate --strip-integrity --output plain.xml file.tdtp.xml
 //
-// Mutation flags require exactly one input file plus --output (never
-// in-place), are mutually exclusive, and refuse unsound input: only the
-// version-predates error is excused, since restoring the version is the
-// point. Stamps are local-only (no Mercury registration) — same as
-// tdtpcli --integrity without --mercury-url.
-//
-// Exit code is 0 when every file validates, 1 otherwise (including IO
-// errors). Encrypted (.tdtp.enc) and legacy whole-packet-encrypted files
-// are opaque binary, not XML — no XSD can validate those, and neither
-// can this tool: it reports them as unparsable.
+// Exit code is 0 when every file validates, 1 otherwise.
 package main
 
 import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/ruslano69/tdtp-framework/pkg/validate"
 )
 
 func main() {
@@ -61,16 +53,23 @@ func run() error {
 		return fmt.Errorf("mutation flags need exactly one input file plus --output")
 	}
 
-	failed := false
 	if *stamp || *strip {
-		rep, err := processFile(files[0], *output, *stamp, *strip, *maxMB)
+		rep, err := validate.ProcessFile(files[0], *output, *stamp, *strip, *maxMB)
 		if !*quiet {
 			fmt.Print(rep.Format())
 		}
 		return err
 	}
+
+	// Pure validation reads through ProcessFile too (no output written
+	// without mutation flags) so both frontends share one code path.
+	failed := false
 	for _, f := range files {
-		if !validateFile(f, *quiet, *maxMB) {
+		rep, err := validate.ProcessFile(f, "", false, false, *maxMB)
+		if !*quiet {
+			fmt.Print(rep.Format())
+		}
+		if err != nil || !rep.Valid() {
 			failed = true
 		}
 	}
@@ -78,40 +77,4 @@ func run() error {
 		return fmt.Errorf("validation failed")
 	}
 	return nil
-}
-
-// validateFile returns true when the file conforms.
-func validateFile(path string, quiet bool, maxMB int) bool {
-	data, err := readCapped(path, maxMB)
-	if err != nil {
-		if !quiet {
-			fmt.Printf("%s: INVALID\n  x %v\n", path, err)
-		}
-		return false
-	}
-	rep := Validate(data, path)
-	if !quiet {
-		fmt.Print(rep.Format())
-	}
-	return rep.Valid()
-}
-
-// readCapped reads the file, refusing absurd sizes up front: encoding/xml
-// expands internal entities without a billion-laughs guard, so a validator
-// handed a hostile file should not be the one to find out.
-func readCapped(path string, maxMB int) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if maxMB > 0 && info.Size() > int64(maxMB)<<20 {
-		return nil, fmt.Errorf("file is %d bytes, over the --max-mb %d limit", info.Size(), maxMB)
-	}
-	return os.ReadFile(path)
-}
-
-// writeFile stores mutated output with owner-only permissions, matching
-// the rest of the framework (export paths use 0o600 for packet files).
-func writeFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o600)
 }

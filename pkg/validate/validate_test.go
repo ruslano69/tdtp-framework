@@ -1,4 +1,4 @@
-package main
+package validate
 
 // validate_test.go — tdtp-validate conformance tests.
 //

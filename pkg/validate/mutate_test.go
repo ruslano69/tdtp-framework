@@ -1,4 +1,4 @@
-package main
+package validate
 
 // mutate_test.go — stamp/strip integrity round-trips.
 //
@@ -117,18 +117,18 @@ func TestStamp_RefusesInvalid(t *testing.T) {
 	if _, _, err := stampIntegrity([]byte(bad)); err == nil {
 		// stampIntegrity itself does not validate — refusal happens in
 		// processFile. Stamping here must at least not produce VALID output.
-		t.Log("stamp ran (refusal is processFile's job, tested below)")
+		t.Log("stamp ran (refusal is ProcessFile's job, tested below)")
 	}
 	rep, err := processFileContent("bad.xml", bad, true, false)
 	if err == nil {
-		t.Fatal("processFile should refuse an invalid file")
+		t.Fatal("ProcessFile should refuse an invalid file")
 	}
 	if rep.Valid() {
 		t.Error("report for refused file must not claim VALID")
 	}
 }
 
-// processFileContent is processFile without the disk IO, for tests.
+// processFileContent is ProcessFile without the disk IO, for tests.
 func processFileContent(name, doc string, stamp, strip bool) (Report, error) {
 	data := []byte(doc)
 	if pre := validate(data, name, true); !pre.Valid() {

@@ -1,4 +1,4 @@
-package main
+package validate
 
 // validate.go — semantic pass of tdtp-validate plus the entry point.
 //
@@ -40,15 +40,15 @@ import (
 
 // Report is the validation verdict for one file.
 type Report struct {
-	File     string
-	Version  string
-	PktType  string
-	Table    string
-	Rows     int
-	Cols     int
-	Features []string
-	Notes    []string // mutation side remarks (recompression, layout restore)
-	Errors   []string
+	File     string   `json:"file"`
+	Version  string   `json:"version"`
+	PktType  string   `json:"packet_type"`
+	Table    string   `json:"table"`
+	Rows     int      `json:"rows"`
+	Cols     int      `json:"cols"`
+	Features []string `json:"features,omitempty"`
+	Notes    []string `json:"notes,omitempty"`
+	Errors   []string `json:"errors,omitempty"`
 }
 
 // Valid reports whether the file conforms.
