@@ -2,7 +2,7 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
-## [Unreleased]
+## [1.26.1] - 2026-09-24
 
 ### Compressed exports stamp version 1.2 (were 1.0); version is now max-of-features
 
