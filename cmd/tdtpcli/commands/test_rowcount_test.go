@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func makeCompressedPacket(t *testing.T, rows int, declared int) *packet.DataPack
 func TestValidatePacket_CompressedRowCountIsChecked(t *testing.T) {
 	pkt := makeCompressedPacket(t, 5, 999)
 
-	got, err := validatePacket(pkt, "tampered.tdtp")
+	got, err := validatePacket(io.Discard, pkt, "tampered.tdtp")
 	if err == nil {
 		t.Fatal("a compressed packet whose header overstates the row count must fail")
 	}
@@ -73,7 +74,7 @@ func TestValidatePacket_CompressedRowCountIsChecked(t *testing.T) {
 func TestValidatePacket_CompressedHonestPacketPasses(t *testing.T) {
 	for _, n := range []int{1, 5, 100} {
 		pkt := makeCompressedPacket(t, n, n)
-		got, err := validatePacket(pkt, "honest.tdtp")
+		got, err := validatePacket(io.Discard, pkt, "honest.tdtp")
 		if err != nil {
 			t.Errorf("%d rows: honest packet rejected: %v", n, err)
 		}
@@ -87,7 +88,7 @@ func TestValidatePacket_CompressedHonestPacketPasses(t *testing.T) {
 // на несжатом пути.
 func TestValidatePacket_CompressedUnstatedCountIsNotChecked(t *testing.T) {
 	pkt := makeCompressedPacket(t, 5, 0)
-	got, err := validatePacket(pkt, "unstated.tdtp")
+	got, err := validatePacket(io.Discard, pkt, "unstated.tdtp")
 	if err != nil {
 		t.Errorf("RecordsInPart=0 must not trigger the check: %v", err)
 	}

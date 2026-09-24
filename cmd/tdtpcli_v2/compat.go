@@ -17,8 +17,12 @@ type compatEntry struct {
 	notice  string
 }
 
-// compatTable is filled as commands port (wave 1+). Empty in wave 0.
-var compatTable = map[string]compatEntry{}
+// compatTable is filled as commands port (wave 1+). Entries below are
+// live: --inspect/--test resolve to their subcommands.
+var compatTable = map[string]compatEntry{
+	"inspect": {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
+	"test":    {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
+}
 
 // compatResolve rewrites argv when it starts with a known v1 flag.
 // It returns the rewritten argv, the deprecation notice, and whether
