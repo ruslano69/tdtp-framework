@@ -252,13 +252,6 @@ func lastSegment(path string) string {
 	return path
 }
 
-func trunc(s string, max int) string {
-	if len([]rune(s)) <= max {
-		return s
-	}
-	return string([]rune(s)[:max]) + "…"
-}
-
 // checkStructure runs the whole structural pass over raw XML: well-formedness,
 // the embedded XSD, then the stricter-than-XSD overlay.
 func checkStructure(data []byte) []string {
