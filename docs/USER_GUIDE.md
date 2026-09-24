@@ -2,7 +2,7 @@
 
 **tdtpcli** is the command-line tool for TDTP (Table Data Transfer Protocol).
 
-**Version:** 1.26.0
+**Version:** 1.26.1
 
 ---
 
