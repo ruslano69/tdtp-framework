@@ -90,22 +90,22 @@ func InspectFileTo(w io.Writer, ctx context.Context, inputFile string, storageCf
 	specialValues := detectSpecialValues(pkt)
 
 	// --- YAML output ---
-	fmt.Fprintf(w, "table: %s\n", pkt.Header.TableName)
-	fmt.Fprintf(w, "type: %s\n", pkt.Header.Type)
-	fmt.Fprintf(w, "protocol: %s %s\n", pkt.Protocol, pkt.Version)
-	fmt.Fprintf(w, "timestamp: %s\n", pkt.Header.Timestamp.UTC().Format("2006-01-02T15:04:05Z"))
-	fmt.Fprintf(w, "fields_count: %d\n", len(pkt.Schema.Fields))
-	fmt.Fprintln(w, "fields:")
+	reportf(w, "table: %s\n", pkt.Header.TableName)
+	reportf(w, "type: %s\n", pkt.Header.Type)
+	reportf(w, "protocol: %s %s\n", pkt.Protocol, pkt.Version)
+	reportf(w, "timestamp: %s\n", pkt.Header.Timestamp.UTC().Format("2006-01-02T15:04:05Z"))
+	reportf(w, "fields_count: %d\n", len(pkt.Schema.Fields))
+	reportln(w, "fields:")
 	for _, f := range pkt.Schema.Fields {
 		attrs := buildFieldAttrs(f)
-		fmt.Fprintf(w, "  - name: %-24s type: %-12s%s\n", f.Name, f.Type, attrs)
+		reportf(w, "  - name: %-24s type: %-12s%s\n", f.Name, f.Type, attrs)
 	}
-	fmt.Fprintf(w, "total_rows: %d\n", rowCount)
-	fmt.Fprintf(w, "parts: %s\n", parts)
-	fmt.Fprintf(w, "compress: %s\n", compress)
-	fmt.Fprintf(w, "checksum: %s\n", checksum)
-	fmt.Fprintf(w, "filter: %s\n", filter)
-	fmt.Fprintf(w, "special_values: %s\n", specialValues)
+	reportf(w, "total_rows: %d\n", rowCount)
+	reportf(w, "parts: %s\n", parts)
+	reportf(w, "compress: %s\n", compress)
+	reportf(w, "checksum: %s\n", checksum)
+	reportf(w, "filter: %s\n", filter)
+	reportf(w, "special_values: %s\n", specialValues)
 
 	if pkt.PipelineContext != nil {
 		pc := pkt.PipelineContext
@@ -113,11 +113,11 @@ func InspectFileTo(w io.Writer, ctx context.Context, inputFile string, storageCf
 		if pc.Pipeline.Version != "" {
 			ver = " v" + pc.Pipeline.Version
 		}
-		fmt.Fprintf(w, "pipeline: %s%s\n", pc.Pipeline.Name, ver)
+		reportf(w, "pipeline: %s%s\n", pc.Pipeline.Name, ver)
 		if len(pc.Variables) > 0 {
-			fmt.Fprintln(w, "pipeline_vars:")
+			reportln(w, "pipeline_vars:")
 			for _, v := range pc.Variables {
-				fmt.Fprintf(w, "  %s: %s\n", v.Name, v.Value)
+				reportf(w, "  %s: %s\n", v.Name, v.Value)
 			}
 		}
 	}

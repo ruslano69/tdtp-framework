@@ -59,20 +59,20 @@ func ListTablesTo(w io.Writer, ctx context.Context, config *adapters.Config, pat
 	// Display results
 	if len(filtered) == 0 {
 		if pattern != "" {
-			fmt.Fprintf(w, "No tables matching %q\n", pattern)
+			reportf(w, "No tables matching %q\n", pattern)
 		} else {
-			fmt.Fprintln(w, "No tables found")
+			reportln(w, "No tables found")
 		}
 		return nil
 	}
 
 	if pattern != "" {
-		fmt.Fprintf(w, "Found %d table(s) matching %q:\n", len(filtered), pattern)
+		reportf(w, "Found %d table(s) matching %q:\n", len(filtered), pattern)
 	} else {
-		fmt.Fprintf(w, "Found %d table(s):\n", len(filtered))
+		reportf(w, "Found %d table(s):\n", len(filtered))
 	}
 	for i, table := range filtered {
-		fmt.Fprintf(w, "  %d. %s\n", i+1, table)
+		reportf(w, "  %d. %s\n", i+1, table)
 	}
 
 	return nil
@@ -101,26 +101,23 @@ func ListViewsTo(w io.Writer, ctx context.Context, config *adapters.Config) erro
 
 	// Display results
 	if len(views) == 0 {
-		fmt.Fprintln(w, "No views found")
+		reportln(w, "No views found")
 		return nil
 	}
 
-	fmt.Fprintf(w, "Found %d view(s):\n", len(views))
+	reportf(w, "Found %d view(s):\n", len(views))
 	for i, view := range views {
 		// U* prefix for updatable views, R* prefix for read-only views
 		prefix := "R*"
 		if view.IsUpdatable {
 			prefix = "U*"
 		}
-		fmt.Fprintf(w, "  %d. %s%s\n", i+1, prefix, view.Name)
+		reportf(w, "  %d. %s%s\n", i+1, prefix, view.Name)
 	}
 
-	fmt.Fprintln(w, "\nLegend:")
-	fmt.Fprintln(w, "  U* = Updatable view (can import)")
-	fmt.Fprintln(w, "  R* = Read-only view (export only)")
+	reportln(w, "\nLegend:")
+	reportln(w, "  U* = Updatable view (can import)")
+	reportln(w, "  R* = Read-only view (export only)")
 
 	return nil
 }
-
-
-

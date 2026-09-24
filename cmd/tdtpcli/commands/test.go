@@ -61,12 +61,12 @@ func TestFileTo(w io.Writer, ctx context.Context, filePath string, storageCfg *s
 	// Report missing parts immediately — they cannot be verified further
 	if len(missing) > 0 {
 		for _, m := range missing {
-			fmt.Fprintf(w, "  ✗ missing: %s\n", filepath.Base(m))
+			reportf(w, "  ✗ missing: %s\n", filepath.Base(m))
 		}
 		return fmt.Errorf("batch is incomplete: %d part(s) missing", len(missing))
 	}
 
-	fmt.Fprintf(w, "Testing %d TDTP file(s)...\n", len(files))
+	reportf(w, "Testing %d TDTP file(s)...\n", len(files))
 
 	// Open storage once for all files if needed (remote path)
 	var store storage.ObjectStorage
@@ -95,14 +95,14 @@ func TestFileTo(w io.Writer, ctx context.Context, filePath string, storageCfg *s
 			_, _, key, _ := storage.ParseURI(f)
 			rc, getErr := store.Get(ctx, key)
 			if getErr != nil {
-				fmt.Fprintf(w, "  ✗ %s: S3 read failed: %v\n", key, getErr)
+				reportf(w, "  ✗ %s: S3 read failed: %v\n", key, getErr)
 				parseErrors++
 				continue
 			}
 			data, readErr := io.ReadAll(rc)
 			_ = rc.Close()
 			if readErr != nil {
-				fmt.Fprintf(w, "  ✗ %s: S3 read failed: %v\n", key, readErr)
+				reportf(w, "  ✗ %s: S3 read failed: %v\n", key, readErr)
 				parseErrors++
 				continue
 			}
@@ -111,7 +111,7 @@ func TestFileTo(w io.Writer, ctx context.Context, filePath string, storageCfg *s
 			pkt, err = parser.ParseFile(f)
 		}
 		if err != nil {
-			fmt.Fprintf(w, "  ✗ %s: XML parse failed: %v\n", filepath.Base(f), err)
+			reportf(w, "  ✗ %s: XML parse failed: %v\n", filepath.Base(f), err)
 			parseErrors++
 			continue
 		}
@@ -142,8 +142,8 @@ func TestFileTo(w io.Writer, ctx context.Context, filePath string, storageCfg *s
 		return fmt.Errorf("integrity check failed: %d packet error(s)", packErrors)
 	}
 
-	fmt.Fprintf(w, "✓ Total rows: %d\n", totalRows)
-	fmt.Fprintf(w, "✓ Integrity check passed (%s)\n", time.Since(start).Round(time.Millisecond))
+	reportf(w, "✓ Total rows: %d\n", totalRows)
+	reportf(w, "✓ Integrity check passed (%s)\n", time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
@@ -175,11 +175,11 @@ func validateBatchConsistency(w io.Writer, parts []parsedPart) error {
 
 	if len(errs) > 0 {
 		for _, e := range errs {
-			fmt.Fprintln(w, e)
+			reportln(w, e)
 		}
 		return fmt.Errorf("batch consistency: %d error(s)", len(errs))
 	}
-	fmt.Fprintf(w, "  ✓ batch: %d parts, InReplyTo=%q, table=%q\n",
+	reportf(w, "  ✓ batch: %d parts, InReplyTo=%q, table=%q\n",
 		len(parts), firstInReplyTo, firstTable)
 	return nil
 }
@@ -190,17 +190,17 @@ func validatePacket(w io.Writer, pkt *packet.DataPacket, label string) (int, err
 	if pkt.Data.Compression == "" {
 		actual := len(pkt.Data.Rows)
 		if pkt.Header.RecordsInPart > 0 && actual != pkt.Header.RecordsInPart {
-			fmt.Fprintf(w, "  ✗ %s: RecordsInPart=%d but XML has %d rows\n",
+			reportf(w, "  ✗ %s: RecordsInPart=%d but XML has %d rows\n",
 				label, pkt.Header.RecordsInPart, actual)
 			return actual, fmt.Errorf("row count mismatch")
 		}
-		fmt.Fprintf(w, "  ✓ %s: uncompressed, %d rows, table=%q\n", label, actual, pkt.Header.TableName)
+		reportf(w, "  ✓ %s: uncompressed, %d rows, table=%q\n", label, actual, pkt.Header.TableName)
 		return actual, nil
 	}
 
 	// Compressed: must have exactly 1 blob row
 	if len(pkt.Data.Rows) != 1 {
-		fmt.Fprintf(w, "  ✗ %s: compressed packet must have 1 data row, got %d\n",
+		reportf(w, "  ✗ %s: compressed packet must have 1 data row, got %d\n",
 			label, len(pkt.Data.Rows))
 		return 0, fmt.Errorf("invalid compressed structure")
 	}
@@ -217,20 +217,20 @@ func validatePacket(w io.Writer, pkt *packet.DataPacket, label string) (int, err
 	err := processors.DecompressPacket(context.Background(), &tmp)
 	decompTime := time.Since(decompStart)
 	if err != nil && tmp.Data.Compression != "" {
-		fmt.Fprintf(w, "  ✗ %s: decompress failed (%s): %v\n",
+		reportf(w, "  ✗ %s: decompress failed (%s): %v\n",
 			label, decompTime.Round(time.Millisecond), err)
 		return 0, err
 	}
 	actual := len(tmp.Data.Rows)
 	if err != nil {
-		fmt.Fprintf(w, "  ✗ %s: algo=%s, %v\n", label, pkt.Data.Compression, err)
+		reportf(w, "  ✗ %s: algo=%s, %v\n", label, pkt.Data.Compression, err)
 		return actual, err
 	}
 	checksumMark := ""
 	if pkt.Data.Checksum != "" {
 		checksumMark = ", checksum OK"
 	}
-	fmt.Fprintf(w, "  ✓ %s: algo=%s, %d rows, decompressed %s%s\n",
+	reportf(w, "  ✓ %s: algo=%s, %d rows, decompressed %s%s\n",
 		label, pkt.Data.Compression, actual, decompTime.Round(time.Millisecond), checksumMark)
 	return actual, nil
 }

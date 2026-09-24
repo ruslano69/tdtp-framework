@@ -15,6 +15,7 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	os.Exit(NewApp().Run(ctx, os.Args[1:], os.Stdout, os.Stderr))
+	code := NewApp().Run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
