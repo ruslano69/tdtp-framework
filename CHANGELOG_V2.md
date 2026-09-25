@@ -7,6 +7,30 @@
 
 ## [Unreleased]
 
+### v2-native: deterministic `merge --sort`
+
+- Union order follows Go map iteration (fast, random per run — proven:
+  two v1 runs of the same merge disagree). `--sort fields` +
+  `--order asc|desc` order the merged rows before writing.
+- Comparison is TYPE-AWARE via `schema.Converter`, not `ParseFloat`
+  heuristics: INTEGER/REAL/DECIMAL numerically, DATE/DATETIME
+  chronologically, BOOLEAN false < true, TEXT lexicographically
+  (`010,10,9` — a postal-code column must not sort as numbers), NULL
+  first (flipped with direction, like PostgreSQL). Unknown columns fail
+  loudly. New `SortFields`/`SortDesc` on shared `MergeOptions`; v1
+  untouched (no --sort flag there).
+
+### Wave 3: `diff` / `merge` (file-only)
+
+- Same engines (`DiffFilesTo`, `MergeFilesTo`; shared printers gained
+  `io.Writer` like the rest). `diff` exits 0 whether files match or not
+  (v1 semantics); `--json` carries `{equal, added, removed, modified}`.
+  `merge` takes positionals (v1 takes one comma value — the compat shim
+  splits it), `--output` required.
+- Proven identical to v1 modulo the banner; merge compared as row sets —
+  union order is nondeterministic in the engine itself (map iteration;
+  v1↔v1 runs differ too).
+
 ### v2-native: `to-json` (no v1 predecessor)
 
 - New shared `pkg/tdtpjson`: TDTP → JSON array of objects with schema
@@ -50,6 +74,17 @@
   variables with v1's grammar (quotes stripped, stray args rejected).
 - Proven identical to v1 on sqlite (normalized comparison, variables
   included). Unsafe/admin paths intentionally untested (need privileges).
+
+### Wave 3: `export-broker` / `import-broker`
+
+- Same engines (`ExportToBroker`, `ImportFromBroker`); the queue comes
+  exclusively from config (same security rule as v1). Shared
+  `commands.BrokerConfigFromCliconfig` (v1 delegates to it now);
+  `SetQuietOutput` wired so `--quiet`/`--json` silence engine progress.
+- `import-broker`: strategy/table/output/raw/keep/expect-var/mercury-url.
+- Proven on live RabbitMQ both directions: v2→v1 and v1→v2 round-trips
+  carry identical rows. Live test gated by `TDTP_BROKER_TEST=1` (CI has
+  no broker).
 
 ### Wave 3: `to-tdtp` / `to-compact` (file→file transforms)
 

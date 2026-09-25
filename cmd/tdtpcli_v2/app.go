@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
 )
 
 // App is the v2 dispatcher: a command registry plus global flags and the
@@ -120,6 +122,9 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	}
 
 	deps := &Deps{ConfigPath: globals.Config}
+	// Process-wide quiet for shared engines that print progress themselves
+	// (broker export, v1.5 UUID lines). Same call v1's main makes.
+	commands.SetQuietOutput(globals.Quiet || globals.JSON)
 	handler := a.chain(cmd.Run)
 	if err := handler(ctx, deps, out, positional); err != nil {
 		code := exitCode(err)

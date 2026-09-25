@@ -1,12 +1,13 @@
 package main
 
 import (
-	"github.com/spf13/pflag"
+	"fmt"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/cliquery"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
+	"github.com/spf13/pflag"
 )
 
 // queryflags.go — the TDTQL flag bundle shared by every command that
@@ -64,6 +65,20 @@ func (q *queryFlags) fieldsList() []string {
 		return nil
 	}
 	return tdtql.SplitFieldList(q.fields)
+}
+
+// parseExpectVars parses repeatable name=value flags (same grammar as v1:
+// name non-empty, value may be empty).
+func parseExpectVars(vars []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, s := range vars {
+		eq := strings.IndexByte(s, '=')
+		if eq < 1 {
+			return nil, fmt.Errorf("--expect-var requires name=value format, got: %s", s)
+		}
+		out[s[:eq]] = s[eq+1:]
+	}
+	return out, nil
 }
 
 // splitFields splits any comma-separated flag value the v1 way.

@@ -4,6 +4,19 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — `merge` on compressed/columnar/compact files merged blobs, not rows
+
+`MergeFiles` fed raw `Data.Rows` straight into the merger: a compressed
+packet contributed its single opaque blob as one "row", columnar Rs went
+in as columns. Found live merging two identical 25,908-row
+kanzi+columnar files into a 1-row result. Inputs are now normalized to
+plain rows first (decompress → columnar → compact expansion, the same
+order readers use). Merged output with stamped inputs is re-stamped
+fresh (`BumpVersion` 1.4 + `ComputeIntegrity`) instead of carrying the
+inputs' now-stale hashes; plain inputs keep byte-identical 1.0 output.
+Also new: deterministic order via shared `SortFields`/`SortDesc`
+(`merge --sort` in the v2 CLI) with type-aware comparison.
+
 ### Fixed — `--export-xlsx` wrote empty sheets
 
 `GenerateReference` keeps rows in the unexported `rawRows` fast-path with

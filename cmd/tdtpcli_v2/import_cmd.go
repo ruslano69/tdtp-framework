@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
 )
@@ -52,14 +51,11 @@ func (c *importCommand) Validate(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("need exactly one input file, got %d", len(args))
 	}
-	c.expectMap = map[string]string{}
-	for _, s := range c.expectVars {
-		eq := strings.IndexByte(s, '=')
-		if eq < 1 {
-			return fmt.Errorf("--expect-var requires name=value format, got: %s", s)
-		}
-		c.expectMap[s[:eq]] = s[eq+1:]
+	m, err := parseExpectVars(c.expectVars)
+	if err != nil {
+		return err
 	}
+	c.expectMap = m
 	return nil
 }
 
