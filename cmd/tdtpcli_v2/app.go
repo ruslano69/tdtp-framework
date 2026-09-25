@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"sort"
 
@@ -54,7 +53,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	}
 	globals, rest, err := parseGlobals(argv)
 	if err != nil {
-		fmt.Fprintln(stderr, "error:", err)
+		eprintln(stderr, "error:", err)
 		a.writeUsage(stderr)
 		return ExitUsage
 	}
@@ -71,13 +70,13 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	// v1 flat-flag compatibility shim (compat.go). Runs before lookup so
 	// `--to-csv f.xml` still works during the transition.
 	if newArgs, notice, ok := compatResolve(append([]string{name}, args...)); ok {
-		fmt.Fprintln(stderr, "note:", notice)
+		eprintln(stderr, "note:", notice)
 		return a.Run(ctx, prependGlobals(globals, newArgs), stdout, stderr)
 	}
 
 	cmd, ok := a.commands[name]
 	if !ok {
-		fmt.Fprintf(stderr, "error: unknown command %q\n", name)
+		eprintf(stderr, "error: unknown command %q\n", name)
 		a.writeUsage(stderr)
 		return ExitUsage
 	}
@@ -85,13 +84,13 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	fs := cmd.Flags()
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, cmd.Long())
-		fmt.Fprintln(stderr, "flags:")
+		eprintln(stderr, cmd.Long())
+		eprintln(stderr, "flags:")
 		fs.PrintDefaults()
 	}
 	if hasHelpFlag(args) {
-		fmt.Fprintln(stdout, cmd.Long())
-		fmt.Fprintln(stdout, "flags:")
+		eprintln(stdout, cmd.Long())
+		eprintln(stdout, "flags:")
 		fs.SetOutput(stdout)
 		fs.PrintDefaults()
 		return ExitOK
@@ -102,14 +101,14 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	}
 	positional := fs.Args()
 	if err := cmd.Validate(positional); err != nil {
-		fmt.Fprintln(stderr, "error:", err)
+		eprintln(stderr, "error:", err)
 		return ExitUsage
 	}
 
 	out := Output{
 		Human: func(format string, args ...any) {
 			if !globals.Quiet && !globals.JSON {
-				fmt.Fprintf(stdout, format, args...)
+				eprintf(stdout, format, args...)
 			}
 		},
 		JSON: func(v any) {
@@ -131,7 +130,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		// Usage errors already explain themselves; operational and data
 		// errors go to stderr in text mode (JSON mode carries them in-band).
 		if !globals.JSON {
-			fmt.Fprintln(stderr, "error:", err)
+			eprintln(stderr, "error:", err)
 		}
 		return code
 	}
@@ -147,8 +146,8 @@ func (a *App) chain(h Handler) Handler {
 
 // writeUsage lists global flags and command names.
 func (a *App) writeUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: tdtpcli_v2 [--quiet|--json] [--config FILE] <command> [flags] [args]")
-	fmt.Fprintln(w, "\ncommands:")
+	eprintln(w, "usage: tdtpcli_v2 [--quiet|--json] [--config FILE] <command> [flags] [args]")
+	eprintln(w, "\ncommands:")
 	names := make([]string, 0, len(a.commands))
 	seen := map[Command]bool{}
 	for _, c := range a.commands {
@@ -159,9 +158,9 @@ func (a *App) writeUsage(w io.Writer) {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		fmt.Fprintf(w, "  %-12s %s\n", n, a.commands[n].Short())
+		eprintf(w, "  %-12s %s\n", n, a.commands[n].Short())
 	}
-	fmt.Fprintln(w, "\nhelp <command> prints full help for one command.")
+	eprintln(w, "\nhelp <command> prints full help for one command.")
 }
 
 // writeHelp prints one command's Long help, or the usage when unknown.
@@ -171,10 +170,10 @@ func (a *App) writeHelp(w io.Writer, args []string) {
 		return
 	}
 	if c, ok := a.commands[args[0]]; ok {
-		fmt.Fprintln(w, c.Long())
+		eprintln(w, c.Long())
 		return
 	}
-	fmt.Fprintf(w, "unknown command %q\n\n", args[0])
+	eprintf(w, "unknown command %q\n\n", args[0])
 	a.writeUsage(w)
 }
 

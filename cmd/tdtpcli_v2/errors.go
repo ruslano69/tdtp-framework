@@ -1,6 +1,10 @@
 package main
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"io"
+)
 
 // errors.go — the v2 error taxonomy. Commands return typed errors; App maps
 // them to exit codes and to the active output format, so every command
@@ -45,4 +49,21 @@ func exitCode(err error) int {
 		return ExitInvalid
 	}
 	return ExitFail
+}
+
+// eprintf/eprintln print best-effort output (help, errors, reports),
+// ignoring write errors. Stdout/stderr have no recovery path a command
+// could act on — failing over a diagnostic line while the work itself
+// succeeded would be the wrong trade. Same rationale as
+// commands.reportf; the single //nolint lives here instead of at every
+// call site.
+//
+//nolint:errcheck // best-effort output by design
+func eprintf(w io.Writer, format string, args ...any) {
+	fmt.Fprintf(w, format, args...)
+}
+
+//nolint:errcheck // best-effort output by design, see eprintf
+func eprintln(w io.Writer, args ...any) {
+	fmt.Fprintln(w, args...)
 }
