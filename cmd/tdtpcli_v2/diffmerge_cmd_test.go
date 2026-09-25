@@ -3,6 +3,7 @@ package main
 // diffmerge_cmd_test.go — diff/merge through the dispatcher.
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,12 +293,33 @@ func TestMergeCmd_CompressedInput(t *testing.T) {
 	}
 	data, _ := os.ReadFile(out)
 	s := string(data)
-	n := strings.Count(s, "<R>")
-	if n != 3 {
-		t.Errorf("merged rows = %d, want 3 logical rows (not 2 blobs)", n)
+	// Output format follows the first file: zstd in, zstd out.
+	if !strings.Contains(s, `compression="zstd"`) {
+		t.Fatal("merging compressed files should stay compressed (first file wins)")
+	}
+	pkt, err := packet.NewParser().ParseBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := processors.DecompressPacket(context.Background(), pkt); err != nil {
+		t.Fatal(err)
+	}
+	rows := pkt.GetRows()
+	if len(rows) != 3 {
+		t.Errorf("merged rows = %d, want 3 logical rows (not 2 blobs)", len(rows))
+	}
+	joined := make([]string, len(rows))
+	for i, r := range rows {
+		joined[i] = strings.Join(r, "|")
 	}
 	for _, want := range []string{"1|x", "2|y", "3|z"} {
-		if !strings.Contains(s, want) {
+		found := false
+		for _, j := range joined {
+			if j == want {
+				found = true
+			}
+		}
+		if !found {
 			t.Errorf("merged output should contain %q", want)
 		}
 	}

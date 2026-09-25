@@ -85,6 +85,10 @@
 - Proven on live RabbitMQ both directions: v2→v1 and v1→v2 round-trips
   carry identical rows. Live test gated by `TDTP_BROKER_TEST=1` (CI has
   no broker).
+- Output format follows the FIRST file: merging compressed inputs keeps
+  their algorithm (explicit `--compress` still forces zstd). Also fixed
+  alongside: `--compress` on merge was a no-op (dead generator path) —
+  now compresses explicitly with checksum and version 1.2.
 
 ### Wave 3: `to-tdtp` / `to-compact` (file→file transforms)
 

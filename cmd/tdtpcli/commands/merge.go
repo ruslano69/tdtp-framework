@@ -48,6 +48,7 @@ func MergeFilesTo(w io.Writer, ctx context.Context, options MergeOptions) error 
 
 	fmt.Fprintf(w, "Merging %d files...\n", len(options.InputFiles))
 	hadIntegrity := false
+	firstAlgo := ""
 	for i, file := range options.InputFiles {
 		pkt, err := parser.ParseFile(file)
 		if err != nil {
@@ -62,6 +63,13 @@ func MergeFilesTo(w io.Writer, ctx context.Context, options MergeOptions) error 
 			hadIntegrity = true
 		}
 		if pkt.Data.Compression != "" {
+			// Output format follows the FIRST file: remember its
+			// algorithm so the merged result stays compressed the
+			// same way unless --compress says otherwise. The level is
+			// not recorded in the packet — defaults apply on write.
+			if i == 0 {
+				firstAlgo = pkt.Data.Compression
+			}
 			if err := processors.DecompressPacket(ctx, pkt); err != nil {
 				return fmt.Errorf("failed to decompress file %s: %w", file, err)
 			}
@@ -142,11 +150,44 @@ func MergeFilesTo(w io.Writer, ctx context.Context, options MergeOptions) error 
 		}
 	}
 
-	// Сохраняем результат
-	generator := packet.NewGenerator()
+	// Optional compression of the merged output. The generator-level flag
+	// never compressed anything (found live: --compress produced a plain
+	// file), so this compresses explicitly — AFTER integrity, so hashes
+	// cover the plain rows exactly like the export chain does. Bumps the
+	// version to 1.2 unless integrity already raised it higher.
+	//
+	// What to compress WITH: explicit --compress means zstd, otherwise the
+	// output inherits the FIRST input's algorithm (output format follows
+	// the first file). Levels are packet-unrecorded, defaults apply.
+	algo := ""
 	if options.Compress {
-		generator.EnableCompression()
+		algo = "zstd"
+	} else {
+		algo = firstAlgo
 	}
+	if algo != "" {
+		result.Packet.MaterializeRows()
+		rows := make([]string, len(result.Packet.Data.Rows))
+		for i, r := range result.Packet.Data.Rows {
+			rows[i] = r.Value
+		}
+		level := 3
+		if algo == "kanzi" {
+			level = 6
+		}
+		blob, _, err := processors.CompressDataForTdtpAlgo(rows, algo, level)
+		if err != nil {
+			return fmt.Errorf("failed to compress merged output: %w", err)
+		}
+		result.Packet.Data.Checksum = processors.ComputeChecksum([]byte(blob))
+		result.Packet.Data.Compression = algo
+		result.Packet.Data.Rows = []packet.Row{{Value: blob}}
+		packet.BumpVersion(result.Packet, "1.2")
+	}
+
+	// Сохраняем результат (compression already applied above when requested;
+	// the generator flag path never compressed — see above).
+	generator := packet.NewGenerator()
 
 	err = generator.WriteToFile(result.Packet, options.OutputFile)
 	if err != nil {
