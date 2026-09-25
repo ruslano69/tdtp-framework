@@ -120,7 +120,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		Stdout:      stdout,
 	}
 
-	deps := &Deps{ConfigPath: globals.Config}
+	deps := &Deps{ConfigPath: globals.Config, Quiet: globals.Quiet || globals.JSON}
 	// Process-wide quiet for shared engines that print progress themselves
 	// (broker export, v1.5 UUID lines). Same call v1's main makes.
 	commands.SetQuietOutput(globals.Quiet || globals.JSON)

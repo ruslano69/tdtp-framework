@@ -7,6 +7,10 @@ package main
 
 type Deps struct {
 	// ConfigPath is the --config value, carried for the commands that
-	// will need it (wave 2+). File-only commands ignore it entirely.
+	// need it (file-only commands ignore it entirely).
 	ConfigPath string
+	// Quiet mirrors --quiet (or --json, which implies it for engines):
+	// engines that print progress themselves read it from here instead
+	// of a global, so tests can drive them silently.
+	Quiet bool
 }

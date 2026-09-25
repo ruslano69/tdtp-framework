@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### Wave 3: `sync` (incremental by watermark)
+
+- Same engine (`commands.IncrementalSync`): `--tracking-field`
+  (default `updated_at`), `--checkpoint-file`, `--batch-size`,
+  `--fields`, `--to-broker`, compress trio. `--table`/positional.
+- `Deps.Quiet` now flows into engines that print progress themselves
+  (was process-global only) — `--quiet`/`--json` stay clean.
+- Proven: full first run, delta-only second run, v1-identical output
+  (normalized comparison).
+
+### Wave 1: `inspect-table`
+
+- Same engine (`commands.InspectTableTo` — v1 printers gained the
+  `io.Writer` parameter like the rest); `--json` renders the shared
+  `adapters.TableReport`, which grew `json:` tags next to its `yaml:`
+  ones (additive, v1 text untouched).
+- Proven against live postgres on a real table (uuid keys, FKs, custom
+  enum): text identical to v1 modulo the banner.
+
 ### v2-native: deterministic `merge --sort`
 
 - Union order follows Go map iteration (fast, random per run — proven:

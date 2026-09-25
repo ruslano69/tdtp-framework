@@ -33,6 +33,7 @@ var compatTable = map[string]compatEntry{
 	"import":        {command: []string{"import"}, notice: "--import is deprecated, use 'tdtpcli_v2 import'"},
 	"import-xlsx":   {command: []string{"import-xlsx"}, notice: "--import-xlsx is deprecated, use 'tdtpcli_v2 import-xlsx'"},
 	"inspect":       {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
+	"inspect-table": {command: []string{"inspect-table"}, notice: "--inspect-table is deprecated, use 'tdtpcli_v2 inspect-table'"},
 	"test":          {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
 	"to-csv":        {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
 	"to-compact":    {command: []string{"to-compact"}, notice: "--to-compact is deprecated, use 'tdtpcli_v2 to-compact'"},
@@ -42,7 +43,8 @@ var compatTable = map[string]compatEntry{
 	"list":          {command: []string{"list"}, notice: "--list is deprecated, use 'tdtpcli_v2 list'"},
 	"list-views":    {command: []string{"list"}, args: []string{"--views"}, notice: "--list-views is deprecated, use 'tdtpcli_v2 list --views'"},
 	"merge":         {command: []string{"merge"}, splitComma: true, notice: "--merge is deprecated, use 'tdtpcli_v2 merge'"},
-	"pipeline":      {command: []string{"pipeline"}, notice: "--pipeline is deprecated, use 'tdtpcli_v2 pipeline'"},
+	"pipeline":   {command: []string{"pipeline"}, notice: "--pipeline is deprecated, use 'tdtpcli_v2 pipeline'"},
+	"sync-incremental": {command: []string{"sync"}, notice: "--sync-incremental is deprecated, use 'tdtpcli_v2 sync'"},
 }
 
 // compatResolve rewrites argv when it starts with a known v1 flag.
