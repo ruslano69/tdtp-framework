@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### v2-native: `to-json` (no v1 predecessor)
+
+- New shared `pkg/tdtpjson`: TDTP → JSON array of objects with schema
+  field names as keys and honestly typed values (numbers, bools, nulls,
+  ISO dates; >2^53 ints as strings, NaN/Inf as null). Streams row by row
+  — constant memory on 100 MB pages. Same `queryFlags` bundle for
+  filtering/sorting/projection; `--pretty` for humans, compact default
+  for pipelines; `-o -` streams to stdout.
+- `Output.Stdout` joined the render contract so data-to-stdout stays
+  capturable in tests.
+
 ### Wave 2: `export` (database → file)
 
 - `pkg/cliconfig`: the v1 YAML model moved out of `package main`
@@ -47,6 +58,16 @@
   default (no `--output` overwrites the input) mirror v1 exactly.
 - Proven identical to v1 (normalized comparison, filters and
   `--fixed-fields` included).
+
+### Wave 3: `export-xlsx` / `import-xlsx` / `from-xlsx`
+
+- Same engines (`ExportTableToXLSX`, `ConvertXLSXToTDTP`,
+  `ImportXLSXToTable`); `--sheet`/`--strategy` passed through.
+- Fixed a real v1 bug on the way: `GenerateReference` keeps rows in the
+  unexported `rawRows` fast-path, and `ExportTableToXLSX` merged empty
+  `Data.Rows` — `--export-xlsx` wrote empty sheets. Fixed by
+  materializing before the merge plus a defensive `MaterializeRows` in
+  `xlsx.ToXLSX`; pinned by a round-trip test. v1 benefits identically.
 
 ### Wave 0: skeleton + `validate`
 

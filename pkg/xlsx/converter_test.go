@@ -2,6 +2,8 @@ package xlsx
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -193,5 +195,39 @@ func TestIsExcelError(t *testing.T) {
 		if isExcelError(ok) {
 			t.Errorf("expected %q NOT to be Excel error", ok)
 		}
+	}
+}
+
+// TestToXLSX_FreshGeneratorPacket pins the rawRows trap: GenerateReference
+// keeps rows in the unexported fast-path field with Data.Rows empty, and a
+// writer reading Data.Rows alone ships an empty sheet. Found live via
+// --export-xlsx writing 0 rows for a 2-row table.
+func TestToXLSX_FreshGeneratorPacket(t *testing.T) {
+	gen := packet.NewGenerator()
+	pkts, err := gen.GenerateReference("staff",
+		packet.Schema{Fields: []packet.Field{
+			{Name: "ID", Type: "INTEGER", Key: true},
+			{Name: "Name", Type: "TEXT"},
+		}},
+		[][]string{{"1", "Ann"}, {"2", "Ben"}})
+	if err != nil {
+		t.Fatalf("GenerateReference: %v", err)
+	}
+	if len(pkts[0].Data.Rows) != 0 {
+		t.Skip("generator populates Data.Rows directly — fast-path trap not present")
+	}
+	path := filepath.Join(t.TempDir(), "fresh.xlsx")
+	if err := ToXLSX(pkts[0], path, "S"); err != nil {
+		t.Fatalf("ToXLSX: %v", err)
+	}
+	back, err := FromXLSX(path, "S")
+	if err != nil {
+		t.Fatalf("FromXLSX: %v", err)
+	}
+	if len(back.Data.Rows) != 2 {
+		t.Fatalf("round-trip rows = %d, want 2", len(back.Data.Rows))
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("output missing: %v", err)
 	}
 }

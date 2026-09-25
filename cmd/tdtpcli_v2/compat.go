@@ -22,8 +22,11 @@ type compatEntry struct {
 
 // compatTable is filled as commands port (wave 1+).
 var compatTable = map[string]compatEntry{
-	"export":     {command: []string{"export"}, notice: "--export is deprecated, use 'tdtpcli_v2 export'"},
-	"import":     {command: []string{"import"}, notice: "--import is deprecated, use 'tdtpcli_v2 import'"},
+	"export":      {command: []string{"export"}, notice: "--export is deprecated, use 'tdtpcli_v2 export'"},
+	"export-xlsx": {command: []string{"export-xlsx"}, notice: "--export-xlsx is deprecated, use 'tdtpcli_v2 export-xlsx'"},
+	"from-xlsx":   {command: []string{"from-xlsx"}, notice: "--from-xlsx is deprecated, use 'tdtpcli_v2 from-xlsx'"},
+	"import":      {command: []string{"import"}, notice: "--import is deprecated, use 'tdtpcli_v2 import'"},
+	"import-xlsx": {command: []string{"import-xlsx"}, notice: "--import-xlsx is deprecated, use 'tdtpcli_v2 import-xlsx'"},
 	"inspect":    {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
 	"test":       {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
 	"to-csv":     {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},

@@ -2,6 +2,18 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased]
+
+### Fixed — `--export-xlsx` wrote empty sheets
+
+`GenerateReference` keeps rows in the unexported `rawRows` fast-path with
+`Data.Rows` empty, and `ExportTableToXLSX` merged `Data.Rows` alone —
+every row silently dropped. Fixed by materializing each packet before
+the merge, plus a defensive `MaterializeRows` at the top of `xlsx.ToXLSX`
+covering all present and future callers. Found porting the command to
+the v2 CLI; pinned by a `GenerateReference`→`ToXLSX`→`FromXLSX`
+round-trip test.
+
 ## [1.26.1] - 2026-09-24
 
 ### Compressed exports stamp version 1.2 (were 1.0); version is now max-of-features

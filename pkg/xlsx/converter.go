@@ -79,6 +79,11 @@ func checkExcelCellChars(table, col string, row int, s string) error {
 //
 //	err := xlsx.ToXLSX(packet, "output.xlsx", "Orders")
 func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
+	// Flush the GenerateReference fast-path: a freshly generated packet
+	// carries rows in unexported rawRows with Data.Rows empty, and every
+	// reader below looks at Data.Rows. Parsed packets never have rawRows,
+	// so this is a no-op for them.
+	pkt.MaterializeRows()
 	if err := processors.DecompressPacket(context.Background(), pkt); err != nil {
 		return fmt.Errorf("failed to decompress data: %w", err)
 	}

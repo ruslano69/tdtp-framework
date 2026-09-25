@@ -248,9 +248,15 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 
 	fmt.Printf("✓ Exported %d packet(s)\n", len(packets))
 
-	// Merge all packets into the first one (XLSX has no size limits unlike TDTP parts)
+	// Merge all packets into the first one (XLSX has no size limits unlike TDTP parts).
+	// Materialize first: GenerateReference keeps rows in the unexported
+	// rawRows fast-path with Data.Rows empty — merging Data.Rows alone
+	// would silently drop every row (found live: --export-xlsx wrote an
+	// empty sheet). Same trap compressDataPacket documents in pkg/etl.
 	pkt := packets[0]
+	pkt.MaterializeRows()
 	for _, extra := range packets[1:] {
+		extra.MaterializeRows()
 		pkt.Data.Rows = append(pkt.Data.Rows, extra.Data.Rows...)
 	}
 

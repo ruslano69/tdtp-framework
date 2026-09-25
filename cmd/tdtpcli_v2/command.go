@@ -40,19 +40,25 @@ func (b *Base) Flags() *pflag.FlagSet { return b.FlagSet }
 // Output is the rendering contract: humans read text, pipelines read JSON.
 // Human is silenced unless the run is textual; JSON emits only when the
 // run asked for it — JSONEnabled lets commands skip expensive payloads
-// (extra queries, re-reads) when nobody consumes them.
+// (extra queries, re-reads) when nobody consumes them. Stdout is the raw
+// data stream for commands that write payload to stdout (to-json -);
+// tests substitute it with a buffer.
 type Output struct {
 	Human       func(format string, args ...any)
 	JSON        func(v any)
 	JSONEnabled bool
+	Stdout      io.Writer
 }
 
 // Discard is an Output that renders nothing (for tests).
 func Discard(out io.Writer) Output {
-	_ = out
+	if out == nil {
+		out = io.Discard
+	}
 	return Output{
 		Human:       func(format string, args ...any) {},
 		JSON:        func(v any) {},
 		JSONEnabled: false,
+		Stdout:      out,
 	}
 }
