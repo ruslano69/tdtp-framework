@@ -2,7 +2,7 @@
 
 **tdtpcli** is the command-line tool for TDTP (Table Data Transfer Protocol).
 
-**Version:** 1.26.1
+**Version:** 1.26.2
 
 ---
 
@@ -28,8 +28,9 @@
 9. [Filtering with TDTQL](#filtering-with-tdtql)
 10. [Message brokers](#message-brokers)
 11. [Worked examples](#worked-examples)
-12. [Troubleshooting](#troubleshooting)
-13. [CLI usage examples](#cli-usage-examples)
+12. [External reference snapshots](#external-reference-snapshots)
+13. [Troubleshooting](#troubleshooting)
+14. [CLI usage examples](#cli-usage-examples)
 
 ---
 
@@ -2056,6 +2057,44 @@ A million rows, ten thousand at a time:
   grep "balance" | \
   wc -l
 ```
+
+---
+
+## External reference snapshots (new in 2.0)
+
+Reference data owned by someone else (postal localities, currency rates,
+classifiers) does not belong in production storage — yet infrequent
+operations still need it. The pattern: keep the snapshot as a versioned
+TDTP file next to the pipeline, pull it in only for the operation.
+
+```bash
+# 1. Snapshot once (kanzi for cold storage — half the size of zstd)
+tdtpcli --config pg.yaml --export localities \
+  --compress --compress-algo kanzi \
+  --output snapshots/localities_2026-09-25.tdtp.xml
+
+# 2. Gate every use: structure, counters, xxh3 (fails on hand edits)
+tdtp-validate snapshots/localities_2026-09-25.tdtp.xml
+# or: tdtpcli_v2 validate snapshots/localities_2026-09-25.tdtp.xml
+
+# 3. Query like an API — partial matches, no database
+tdtpcli_v2 to-json snapshots/localities_2026-09-25.tdtp.xml \
+  --fields locality,postal_code \
+  --where "locality LIKE '%ов%'" \
+  --output matches.json
+# jq '.[] | select(.postal_code | startswith("77"))' matches.json
+```
+
+Why this holds together:
+
+- The version stamp + xxh3 record *which* snapshot slice took part in the
+  operation — auditable years later ("why was it calculated this way").
+- The validator rejects hand-edited files *before* use, not after.
+- Production never stores data it is not responsible for and never
+  depends on someone else's freshness — staleness is explicit in the
+  filename, not hidden in a table.
+- Latency does not matter here: ~0.2 s per 25K rows even with kanzi
+  decompression; for hot lookups use zstd snapshots (2× faster reads).
 
 ---
 

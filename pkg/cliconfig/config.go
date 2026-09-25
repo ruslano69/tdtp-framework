@@ -1,5 +1,9 @@
-// Package main provides functionality for the TDTP framework.
-package main
+// Package cliconfig holds the tdtpcli YAML configuration model, shared by
+// the v1 and v2 command lines. It used to live in cmd/tdtpcli (package
+// main, unimportable); v2's database commands need the same file format,
+// so the model moved here. Behaviour is unchanged — cmd/tdtpcli keeps
+// type aliases below, and its code did not move.
+package cliconfig
 
 import (
 	"fmt"

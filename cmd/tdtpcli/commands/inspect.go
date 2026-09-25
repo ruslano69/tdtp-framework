@@ -14,6 +14,12 @@ import (
 // InspectFile reads a TDTP XML file (local or s3://) and prints a clean YAML summary
 // suitable for LLM/agent consumption. storageCfg may be nil for local files.
 func InspectFile(ctx context.Context, inputFile string, storageCfg *storage.Config) error {
+	return InspectFileTo(os.Stdout, ctx, inputFile, storageCfg)
+}
+
+// InspectFileTo is InspectFile writing its report to w instead of stdout,
+// so embedders (tdtpcli_v2 --quiet/--json) control the output stream.
+func InspectFileTo(w io.Writer, ctx context.Context, inputFile string, storageCfg *storage.Config) error {
 	var data []byte
 	var err error
 
@@ -84,22 +90,22 @@ func InspectFile(ctx context.Context, inputFile string, storageCfg *storage.Conf
 	specialValues := detectSpecialValues(pkt)
 
 	// --- YAML output ---
-	fmt.Printf("table: %s\n", pkt.Header.TableName)
-	fmt.Printf("type: %s\n", pkt.Header.Type)
-	fmt.Printf("protocol: %s %s\n", pkt.Protocol, pkt.Version)
-	fmt.Printf("timestamp: %s\n", pkt.Header.Timestamp.UTC().Format("2006-01-02T15:04:05Z"))
-	fmt.Printf("fields_count: %d\n", len(pkt.Schema.Fields))
-	fmt.Println("fields:")
+	reportf(w, "table: %s\n", pkt.Header.TableName)
+	reportf(w, "type: %s\n", pkt.Header.Type)
+	reportf(w, "protocol: %s %s\n", pkt.Protocol, pkt.Version)
+	reportf(w, "timestamp: %s\n", pkt.Header.Timestamp.UTC().Format("2006-01-02T15:04:05Z"))
+	reportf(w, "fields_count: %d\n", len(pkt.Schema.Fields))
+	reportln(w, "fields:")
 	for _, f := range pkt.Schema.Fields {
 		attrs := buildFieldAttrs(f)
-		fmt.Printf("  - name: %-24s type: %-12s%s\n", f.Name, f.Type, attrs)
+		reportf(w, "  - name: %-24s type: %-12s%s\n", f.Name, f.Type, attrs)
 	}
-	fmt.Printf("total_rows: %d\n", rowCount)
-	fmt.Printf("parts: %s\n", parts)
-	fmt.Printf("compress: %s\n", compress)
-	fmt.Printf("checksum: %s\n", checksum)
-	fmt.Printf("filter: %s\n", filter)
-	fmt.Printf("special_values: %s\n", specialValues)
+	reportf(w, "total_rows: %d\n", rowCount)
+	reportf(w, "parts: %s\n", parts)
+	reportf(w, "compress: %s\n", compress)
+	reportf(w, "checksum: %s\n", checksum)
+	reportf(w, "filter: %s\n", filter)
+	reportf(w, "special_values: %s\n", specialValues)
 
 	if pkt.PipelineContext != nil {
 		pc := pkt.PipelineContext
@@ -107,11 +113,11 @@ func InspectFile(ctx context.Context, inputFile string, storageCfg *storage.Conf
 		if pc.Pipeline.Version != "" {
 			ver = " v" + pc.Pipeline.Version
 		}
-		fmt.Printf("pipeline: %s%s\n", pc.Pipeline.Name, ver)
+		reportf(w, "pipeline: %s%s\n", pc.Pipeline.Name, ver)
 		if len(pc.Variables) > 0 {
-			fmt.Println("pipeline_vars:")
+			reportln(w, "pipeline_vars:")
 			for _, v := range pc.Variables {
-				fmt.Printf("  %s: %s\n", v.Name, v.Value)
+				reportf(w, "  %s: %s\n", v.Name, v.Value)
 			}
 		}
 	}

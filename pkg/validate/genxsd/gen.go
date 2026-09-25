@@ -41,8 +41,8 @@ func run() error {
 		return fmt.Errorf("%s is empty", in)
 	}
 	code := "// Code generated from docs/tdtp.xsd by genxsd. DO NOT EDIT.\n" +
-		"// Regenerate: go generate ./cmd/tdtp-validate/\n\n" +
-		"package main\n\n" +
+		"// Regenerate: go generate ./pkg/validate/\n\n" +
+		"package validate\n\n" +
 		"// tdtpXSDText is docs/tdtp.xsd verbatim. The validator compiles it\n" +
 		"// once (specEngine) and validates every file against it — the schema\n" +
 		"// file is the single source of truth, this constant its synced copy.\n" +

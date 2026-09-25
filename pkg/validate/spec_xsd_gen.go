@@ -1,7 +1,7 @@
 // Code generated from docs/tdtp.xsd by genxsd. DO NOT EDIT.
-// Regenerate: go generate ./cmd/tdtp-validate/
+// Regenerate: go generate ./pkg/validate/
 
-package main
+package validate
 
 // tdtpXSDText is docs/tdtp.xsd verbatim. The validator compiles it
 // once (specEngine) and validates every file against it — the schema

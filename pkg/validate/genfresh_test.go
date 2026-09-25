@@ -1,4 +1,4 @@
-package main
+package validate
 
 // genfresh_test.go — the embedded schema must equal docs/tdtp.xsd.
 //

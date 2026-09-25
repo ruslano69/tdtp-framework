@@ -1,0 +1,67 @@
+package main
+
+import "strings"
+
+// compat.go — the v1 flat-flag compatibility shim.
+//
+// During the transition, invocations in the old shape (`tdtpcli_v2
+// --to-csv f.xml`) resolve to the equivalent v2 subcommand with a
+// deprecation notice on stderr. One release, then this file is deleted.
+// Contract (tested): the resolved form behaves byte-identically to the
+// native `tdtpcli_v2 <command>` form.
+
+// compatEntry maps one v1 flag to a v2 command prefix; the flag's own
+// value (usually the input file) is appended after it. args injects fixed
+// arguments between the command and the user's (e.g. --list-views becomes
+// `list --views`). splitComma splits the first user argument on commas
+// (v1 --merge takes "a,b,c" as one value; v2 takes positionals).
+type compatEntry struct {
+	command    []string // e.g. {"validate"}
+	args       []string // fixed args after the command, before the user's
+	splitComma bool
+	notice     string
+}
+
+// compatTable is filled as commands port (wave 1+).
+var compatTable = map[string]compatEntry{
+	"diff":          {command: []string{"diff"}, notice: "--diff is deprecated, use 'tdtpcli_v2 diff'"},
+	"export":        {command: []string{"export"}, notice: "--export is deprecated, use 'tdtpcli_v2 export'"},
+	"export-broker": {command: []string{"export-broker"}, notice: "--export-broker is deprecated, use 'tdtpcli_v2 export-broker'"},
+	"import-broker": {command: []string{"import-broker"}, notice: "--import-broker is deprecated, use 'tdtpcli_v2 import-broker'"},
+	"export-xlsx":   {command: []string{"export-xlsx"}, notice: "--export-xlsx is deprecated, use 'tdtpcli_v2 export-xlsx'"},
+	"from-xlsx":     {command: []string{"from-xlsx"}, notice: "--from-xlsx is deprecated, use 'tdtpcli_v2 from-xlsx'"},
+	"import":        {command: []string{"import"}, notice: "--import is deprecated, use 'tdtpcli_v2 import'"},
+	"import-xlsx":   {command: []string{"import-xlsx"}, notice: "--import-xlsx is deprecated, use 'tdtpcli_v2 import-xlsx'"},
+	"inspect":       {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
+	"test":          {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
+	"to-csv":        {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
+	"to-compact":    {command: []string{"to-compact"}, notice: "--to-compact is deprecated, use 'tdtpcli_v2 to-compact'"},
+	"to-html":       {command: []string{"to-html"}, notice: "--to-html is deprecated, use 'tdtpcli_v2 to-html'"},
+	"to-tdtp":       {command: []string{"to-tdtp"}, notice: "--to-tdtp is deprecated, use 'tdtpcli_v2 to-tdtp'"},
+	"to-xlsx":       {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
+	"list":          {command: []string{"list"}, notice: "--list is deprecated, use 'tdtpcli_v2 list'"},
+	"list-views":    {command: []string{"list"}, args: []string{"--views"}, notice: "--list-views is deprecated, use 'tdtpcli_v2 list --views'"},
+	"merge":         {command: []string{"merge"}, splitComma: true, notice: "--merge is deprecated, use 'tdtpcli_v2 merge'"},
+	"pipeline":      {command: []string{"pipeline"}, notice: "--pipeline is deprecated, use 'tdtpcli_v2 pipeline'"},
+}
+
+// compatResolve rewrites argv when it starts with a known v1 flag.
+// It returns the rewritten argv, the deprecation notice, and whether
+// the argv matched at all.
+func compatResolve(argv []string) ([]string, string, bool) {
+	if len(argv) == 0 || !strings.HasPrefix(argv[0], "-") {
+		return nil, "", false
+	}
+	name := strings.TrimLeft(argv[0], "-")
+	e, ok := compatTable[name]
+	if !ok {
+		return nil, "", false
+	}
+	out := append([]string{}, e.command...)
+	out = append(out, e.args...)
+	rest := argv[1:]
+	if e.splitComma && len(rest) > 0 {
+		rest = append(strings.Split(rest[0], ","), rest[1:]...)
+	}
+	return append(out, rest...), e.notice, true
+}

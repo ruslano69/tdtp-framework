@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/diff"
@@ -20,6 +22,12 @@ type DiffOptions struct {
 
 // DiffFiles сравнивает два TDTP файла
 func DiffFiles(ctx context.Context, options *DiffOptions) error {
+	return DiffFilesTo(os.Stdout, ctx, options)
+}
+
+// DiffFilesTo is DiffFiles writing its report to w instead of stdout,
+// so embedders (tdtpcli_v2 --quiet/--json) control the output stream.
+func DiffFilesTo(w io.Writer, ctx context.Context, options *DiffOptions) error {
 	// Парсим первый файл
 	parser := packet.NewParser()
 	packetA, err := parser.ParseFile(options.FileA)
@@ -52,19 +60,19 @@ func DiffFiles(ctx context.Context, options *DiffOptions) error {
 		if err != nil {
 			return fmt.Errorf("failed to format JSON: %w", err)
 		}
-		fmt.Println(output)
+		reportln(w, output)
 	default:
 		// Text формат
 		output := result.FormatText()
-		fmt.Print(output)
+		reportf(w, "%s", output)
 	}
 
 	// Возвращаем exit code в зависимости от результата
 	if result.IsEqual() {
-		fmt.Println("\n✓ Files are identical")
+		reportln(w, "\n✓ Files are identical")
 		return nil
 	} else {
-		fmt.Println("\n✗ Files differ")
+		reportln(w, "\n✗ Files differ")
 		// Не возвращаем ошибку, просто информируем о различиях
 		return nil
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/brokers"
+	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/pipeline"
@@ -38,6 +39,33 @@ type BrokerConfig struct {
 	QueuePath      string   // MSMQ: полный путь к очереди (например: ".\private$\tdtp_in")
 	Brokers        []string // Kafka: список брокеров (["localhost:9092"])
 	ConsumerGroup  string   // Kafka: consumer group ID
+}
+
+// BrokerConfigFromCliconfig builds the runtime broker config from the YAML
+// model. The queue/topic comes exclusively from config, never from CLI
+// flags: the operator owns the destination, the user only names the table.
+// Shared by the v1 and v2 CLIs (v1's buildBrokerConfig delegates here).
+func BrokerConfigFromCliconfig(config *cliconfig.Config) BrokerConfig {
+	return BrokerConfig{
+		Type:           config.Broker.Type,
+		Host:           config.Broker.Host,
+		Port:           config.Broker.Port,
+		User:           config.Broker.User,
+		Password:       config.Broker.Password,
+		Queue:          config.Broker.Queue,
+		VHost:          config.Broker.VHost,
+		UseTLS:         config.Broker.UseTLS,
+		TLSSkipVerify:  config.Broker.TLSSkipVerify,
+		Exchange:       config.Broker.Exchange,
+		RoutingKey:     config.Broker.RoutingKey,
+		Durable:        config.Broker.Durable,
+		AutoDelete:     config.Broker.AutoDelete,
+		Exclusive:      config.Broker.Exclusive,
+		PassiveDeclare: config.Broker.PassiveDeclare,
+		QueuePath:      config.Broker.QueuePath,
+		Brokers:        config.Broker.Brokers,
+		ConsumerGroup:  config.Broker.ConsumerGroup,
+	}
 }
 
 // ExportToBroker exports table data to message broker.

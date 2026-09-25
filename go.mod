@@ -27,6 +27,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.34.0
 	github.com/segmentio/kafka-go v0.4.48
+	github.com/spf13/pflag v1.0.10
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/term v0.44.0

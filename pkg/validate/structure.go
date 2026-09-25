@@ -1,4 +1,4 @@
-package main
+package validate
 
 // structure.go — structural pass of tdtp-validate.
 //

@@ -1,4 +1,4 @@
-package main
+package validate
 
 // mutate.go — version/integrity mutations for tdtp-validate.
 //
@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
@@ -160,9 +161,30 @@ func stripIntegrity(data []byte) ([]byte, error) {
 	return out, nil
 }
 
-// processFile validates, optionally mutates, re-validates and writes.
+// readCapped reads the file, refusing absurd sizes up front: encoding/xml
+// expands internal entities without a billion-laughs guard, so a validator
+// handed a hostile file should not be the one to find out.
+func readCapped(path string, maxMB int) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if maxMB > 0 && info.Size() > int64(maxMB)<<20 {
+		return nil, fmt.Errorf("file is %d bytes, over the --max-mb %d limit", info.Size(), maxMB)
+	}
+	return os.ReadFile(path)
+}
+
+// writeFile stores mutated output with owner-only permissions, matching
+// the rest of the framework (export paths use 0o600 for packet files).
+func writeFile(path string, data []byte) error {
+	return os.WriteFile(path, data, 0o600)
+}
+
+// ProcessFile validates, optionally mutates, re-validates and writes.
 // Returns the final report (of the WRITTEN bytes in mutation mode) for display.
-func processFile(path, output string, stamp, strip bool, maxMB int) (Report, error) {
+// stamp/strip require output; without them output is ignored (pure validation).
+func ProcessFile(path, output string, stamp, strip bool, maxMB int) (Report, error) {
 	data, err := readCapped(path, maxMB)
 	if err != nil {
 		return Report{File: path, Errors: []string{err.Error()}}, err
