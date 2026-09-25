@@ -60,19 +60,19 @@ func DiffFilesTo(w io.Writer, ctx context.Context, options *DiffOptions) error {
 		if err != nil {
 			return fmt.Errorf("failed to format JSON: %w", err)
 		}
-		fmt.Fprintln(w, output)
+		reportln(w, output)
 	default:
 		// Text формат
 		output := result.FormatText()
-		fmt.Fprint(w, output)
+		reportf(w, "%s", output)
 	}
 
 	// Возвращаем exit code в зависимости от результата
 	if result.IsEqual() {
-		fmt.Fprintln(w, "\n✓ Files are identical")
+		reportln(w, "\n✓ Files are identical")
 		return nil
 	} else {
-		fmt.Fprintln(w, "\n✗ Files differ")
+		reportln(w, "\n✗ Files differ")
 		// Не возвращаем ошибку, просто информируем о различиях
 		return nil
 	}

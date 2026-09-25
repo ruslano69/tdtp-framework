@@ -46,7 +46,7 @@ func MergeFilesTo(w io.Writer, ctx context.Context, options MergeOptions) error 
 	parser := packet.NewParser()
 	packets := make([]*packet.DataPacket, len(options.InputFiles))
 
-	fmt.Fprintf(w, "Merging %d files...\n", len(options.InputFiles))
+	reportf(w, "Merging %d files...\n", len(options.InputFiles))
 	hadIntegrity := false
 	firstAlgo := ""
 	for i, file := range options.InputFiles {
@@ -85,7 +85,7 @@ func MergeFilesTo(w io.Writer, ctx context.Context, options MergeOptions) error 
 			}
 		}
 		packets[i] = pkt
-		fmt.Fprintf(w, "  ✓ Loaded %s (%d rows)\n", file, len(pkt.Data.Rows))
+		reportf(w, "  ✓ Loaded %s (%d rows)\n", file, len(pkt.Data.Rows))
 	}
 
 	// Определяем стратегию
@@ -117,16 +117,16 @@ func MergeFilesTo(w io.Writer, ctx context.Context, options MergeOptions) error 
 	}
 
 	// Выводим статистику
-	fmt.Fprintf(w, "\n%s", result.FormatText())
+	reportf(w, "\n%s", result.FormatText())
 
 	if options.ShowConflicts && len(result.Conflicts) > 0 {
-		fmt.Fprintf(w, "\nDetailed conflicts:\n")
+		reportf(w, "\nDetailed conflicts:\n")
 		for i, c := range result.Conflicts {
 			if i >= 20 {
-				fmt.Fprintf(w, "... and %d more\n", len(result.Conflicts)-20)
+				reportf(w, "... and %d more\n", len(result.Conflicts)-20)
 				break
 			}
-			fmt.Fprintf(w, "  Key %s: %s\n", c.Key, c.Resolution)
+			reportf(w, "  Key %s: %s\n", c.Key, c.Resolution)
 		}
 	}
 
@@ -194,7 +194,7 @@ func MergeFilesTo(w io.Writer, ctx context.Context, options MergeOptions) error 
 		return fmt.Errorf("failed to write output file: %w", err)
 	}
 
-	fmt.Fprintf(w, "\n✓ Merged file saved to: %s\n", options.OutputFile)
+	reportf(w, "\n✓ Merged file saved to: %s\n", options.OutputFile)
 	return nil
 }
 
