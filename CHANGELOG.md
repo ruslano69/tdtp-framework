@@ -2,7 +2,7 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
-## [Unreleased]
+## [1.26.2] - 2026-09-25
 
 ### Fixed — `merge` on compressed/columnar/compact files merged blobs, not rows
 
