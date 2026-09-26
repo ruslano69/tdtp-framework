@@ -33,6 +33,8 @@ for reproducible, diffable output.`
 	fs := newCommandFlagSet("merge")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (required)")
 	fs.StringVar(&c.strategy, "strategy", "union", "merge strategy")
+	fs.StringVar(&c.strategy, "merge-strategy", "union", "deprecated alias for --strategy")
+	_ = fs.MarkDeprecated("merge-strategy", "please use --strategy instead")
 	fs.StringVar(&c.keyFields, "key-fields", "", "comma-separated key fields")
 	fs.BoolVar(&c.compress, "compress", false, "compress the output")
 	fs.BoolVar(&c.showConflicts, "show-conflicts", false, "show detailed conflicts")

@@ -92,6 +92,64 @@ func TestCompat_ResolvesRegistered(t *testing.T) {
 	}
 }
 
+func TestTryCompat_GlobalsFirst(t *testing.T) {
+	// The tests/cli shape: --config first, then the v1 flag.
+	got, _, ok := tryCompat([]string{"--config", "c.yaml", "--export", "users"})
+	if !ok || len(got) != 4 || got[0] != "--config" || got[1] != "c.yaml" || got[2] != "export" {
+		t.Errorf("rewrote to %v, want [--config c.yaml export users]", got)
+	}
+	// Bare v1 shape resolves with no globals attached.
+	got, _, ok = tryCompat([]string{"--to-csv", "f.xml"})
+	if !ok || len(got) != 2 || got[0] != "to-csv" {
+		t.Errorf("rewrote to %v, want [to-csv f.xml]", got)
+	}
+	// Truly unknown flags still fail.
+	if _, _, ok := tryCompat([]string{"--config", "c.yaml", "--nope"}); ok {
+		t.Error("unknown flag must not resolve even after globals")
+	}
+	if _, _, ok := tryCompat([]string{"--nope", "f"}); ok {
+		t.Error("unknown flag must not resolve")
+	}
+	// Flags before the verb (v1 accepted them there) move after.
+	got, _, ok = tryCompat([]string{"--ignore-fields", "Balance", "--diff", "a.xml", "b.xml"})
+	if !ok || len(got) != 5 || got[0] != "diff" || got[1] != "a.xml" || got[2] != "b.xml" ||
+		got[3] != "--ignore-fields" || got[4] != "Balance" {
+		t.Errorf("verb scan rewrote to %v", got)
+	}
+	// --verb=value form.
+	got, _, ok = tryCompat([]string{"--list=order*"})
+	if !ok || len(got) != 2 || got[0] != "list" || got[1] != "order*" {
+		t.Errorf("=form rewrote to %v", got)
+	}
+	// --limit/--offset on import are dropped with a notice (v1 ignores them).
+	got, notice, ok := tryCompat([]string{"--config", "c.yaml", "--import", "f.xml", "--table", "t", "--limit", "3"})
+	if !ok {
+		t.Fatal("import shape must resolve")
+	}
+	for _, tok := range got {
+		if tok == "--limit" || tok == "3" {
+			t.Errorf("import limit not stripped: %v", got)
+		}
+	}
+	if !strings.Contains(notice, "--limit") {
+		t.Errorf("notice should mention the strip, got %q", notice)
+	}
+	// ...but kept for every other command.
+	got, _, ok = tryCompat([]string{"--export", "users", "--limit", "3"})
+	if !ok {
+		t.Fatal("export shape must resolve")
+	}
+	found := false
+	for _, tok := range got {
+		if tok == "--limit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("export must keep --limit: %v", got)
+	}
+}
+
 func TestExitCode_Mapping(t *testing.T) {
 	if exitCode(nil) != ExitOK {
 		t.Error("nil → ExitOK")

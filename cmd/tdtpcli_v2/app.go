@@ -53,6 +53,16 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	}
 	globals, rest, err := parseGlobals(argv)
 	if err != nil {
+		// v1 shapes (`tdtpcli_v2 --to-csv f.xml`, or with globals first:
+		// `tdtpcli_v2 --config f.yaml --export ...`, the form the
+		// tests/cli suites use) die in parseGlobals — it only knows
+		// --config/--quiet/--json — before the shim below ever sees the
+		// flag. Resolve first so the documented compat contract holds;
+		// truly unknown flags still fail right after.
+		if newArgs, notice, ok := tryCompat(argv); ok {
+			eprintln(stderr, "note:", notice)
+			return a.Run(ctx, newArgs, stdout, stderr)
+		}
 		eprintln(stderr, "error:", err)
 		a.writeUsage(stderr)
 		return ExitUsage

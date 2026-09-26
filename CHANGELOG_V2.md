@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### Compat shim: the `tests/cli` suites now run against v2 unchanged
+
+- The shim was unreachable: `parseGlobals` rejected a bare v1 flag
+  (`tdtpcli_v2 --to-csv f.xml`) and anything after `--config` short of a
+  bare command name (`--config f.yaml --export ...`, the shape every suite
+  uses) before `compatResolve` ever ran. `tryCompat` now resolves both,
+  plus flags-before-the-verb (`--ignore-fields B --diff a b`, a documented
+  v1 quirk the suites rely on) and the `--verb=value` spelling.
+- `export` grew the v1 flags it was missing: `--hash` (no-op, checksum
+  already rides with `--compress`), `--packet-size`, `--stream`,
+  `--fallback-row-limit` (default 1 000 000, like v1), and the
+  flag-over-config compression merge (`export.compress`,
+  `compress_level`, `compress_algo`).
+- `merge` accepts `--merge-strategy` as a deprecated alias of `--strategy`.
+- `import` drops `--limit`/`--offset` in the shim with a notice (v1
+  warnUnusedFlags: accepted, nothing acted on it — pinned by sqlite
+  T14.7). Native v2 stays strict: a foreign flag does not parse there.
+- Proven by the porting rule itself: `test_sqlite.py` 122/122,
+  `test_xlsx.py` 51/51, `test_csv.py` 43/43 against `tdtpcli_v2` via
+  `TDTPCLI_BIN` swap, from a clean outdir. DB suites (postgres/mysql)
+  use the same mechanism; they need live servers.
+
 ### v2-native: deterministic `merge --sort`
 
 - Union order follows Go map iteration (fast, random per run — proven:
