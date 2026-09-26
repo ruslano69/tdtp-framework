@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 
 	"github.com/zeebo/xxh3"
@@ -102,6 +103,34 @@ func VerifyIntegrity(pkt *DataPacket) error {
 // Fast pre-flight check: reads only the root attribute — no rows needed.
 func HasIntegrity(pkt *DataPacket) bool {
 	return pkt.XXH3 != ""
+}
+
+// ErrVersionWithoutIntegrity marks a packet that declares v1.4 or later but
+// carries no xxh3 hashes.
+var ErrVersionWithoutIntegrity = errors.New("carries no xxh3 integrity hashes")
+
+// CheckDeclaredIntegrity is the version↔contents rule every reader shares:
+// a packet declaring v1.4 or later must carry xxh3 hashes, because those
+// hashes are what v1.4 is — it has no other feature. Such a packet without
+// them is not a lenient old file (unlike a compressed packet declaring 1.0,
+// which the protocol simply never re-stamped); its version and contents
+// contradict each other.
+//
+// VerifyIntegrity alone cannot say this: it returns nil for an unstamped
+// packet, and callers read that silence as "verified". Before this rule was
+// shared, one relabelled packet got three answers — import refused it
+// (pipeline.VerifyAndPrepare), validate called it VALID, and --test printed
+// "Integrity check passed".
+//
+// Checks only presence; pair it with VerifyIntegrity for the values. Nil for
+// pre-v1.4 versions.
+func CheckDeclaredIntegrity(pkt *DataPacket) error {
+	if NeedsRowCountCheck(pkt.Version) || HasIntegrity(pkt) {
+		return nil
+	}
+	return fmt.Errorf("packet declares version %s but %w: "+
+		"v1.4 and later are defined by those hashes, so the version and the "+
+		"contents contradict each other", pkt.Version, ErrVersionWithoutIntegrity)
 }
 
 // computeHashes does the actual hashing without modifying pkt.

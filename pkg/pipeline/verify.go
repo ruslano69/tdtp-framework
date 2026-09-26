@@ -153,11 +153,11 @@ func VerifyAndPrepare(
 	// It also brings the two paths to the same answer. With Mercury configured
 	// this already fails, and the difference in outcome depended on nothing but
 	// whether a registry happened to be reachable.
-	if !packet.HasIntegrity(pkt) {
-		return nil, fmt.Errorf(
-			"packet declares version %s but carries no xxh3 integrity hashes: "+
-				"v1.4 and later are defined by those hashes, so the version and the "+
-				"contents contradict each other", pkt.Version)
+	//
+	// The rule itself lives in packet.CheckDeclaredIntegrity so validate and
+	// --test apply the same one instead of a copy.
+	if err := packet.CheckDeclaredIntegrity(pkt); err != nil {
+		return nil, err
 	}
 	if err := packet.VerifyIntegrity(pkt); err != nil {
 		return nil, fmt.Errorf("local integrity check failed: %w", err)

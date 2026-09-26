@@ -281,3 +281,25 @@ func TestValidate_PartialIntegrityStamp(t *testing.T) {
 	doc := mutate(t, validXML(t), "<Data>", `<Data xxh3="0123456789abcdef0123456789abcdef">`)
 	mustBeInvalid(t, "partial.xml", doc, "partial stamp")
 }
+
+// v1.4+ without hashes: the version and the contents contradict each other.
+// Validate used to call this VALID while import refused it — the rule is now
+// packet.CheckDeclaredIntegrity, shared with pipeline.VerifyAndPrepare.
+func TestValidate_VersionWithoutIntegrity(t *testing.T) {
+	for _, v := range []string{"1.4", "1.5"} {
+		doc := mutate(t, validXML(t), `protocol="TDTP" version="1.0"`, `protocol="TDTP" version="`+v+`"`)
+		mustBeInvalid(t, "relabelled-"+v+".xml", doc, "carries no xxh3 integrity hashes")
+	}
+}
+
+// A type outside schema.IsValidType fails the XSD now: the union with
+// xs:string was closed, because every typed reader refuses such a packet
+// anyway ("unsupported type" on import, after CREATE TABLE).
+func TestValidate_UnknownFieldType(t *testing.T) {
+	doc := mutate(t, validXML(t), `type="TEXT"`, `type="STRNG"`)
+	mustBeInvalid(t, "unknown-type.xml", doc, "enumeration")
+	// Every alias IsValidType accepts stays valid.
+	for _, alias := range []string{"VARCHAR", "CHAR", "STRING"} {
+		mustBeValid(t, alias+".xml", mutate(t, validXML(t), `type="TEXT"`, `type="`+alias+`"`))
+	}
+}

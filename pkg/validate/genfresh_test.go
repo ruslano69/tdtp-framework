@@ -22,7 +22,7 @@ func TestEmbeddedSchemaMatchesFile(t *testing.T) {
 	// count as drift.
 	raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	if string(raw) != tdtpXSDText {
-		t.Fatalf("spec_xsd_gen.go drifted from docs/tdtp.xsd — run: go generate ./cmd/tdtp-validate/")
+		t.Fatalf("spec_xsd_gen.go drifted from docs/tdtp.xsd — run: go generate ./pkg/validate/")
 	}
 	if len(tdtpXSD) != len(raw) {
 		t.Fatalf("tdtpXSD has %d bytes, docs/tdtp.xsd has %d", len(tdtpXSD), len(raw))

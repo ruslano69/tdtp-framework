@@ -28,12 +28,24 @@ broken.tdtp.xml: 1.0 table="orders" rows=0 cols=6
 
 ## What it checks
 
+**Where a new rule goes.** A constraint on one value in isolation — an
+allowed list, a pattern, presence, cardinality — belongs in
+`docs/tdtp.xsd`: the schema is the contract other implementations validate
+against with their own XSD engines, and a rule kept only in Go is invisible
+to them. A constraint that relates several places in the packet, or needs
+decompression or computing, belongs in the semantics layer: XSD 1.0 cannot
+express it, and XSD 1.1 `xs:assert` is not an option — .NET and the stock
+Java validator are 1.0-only. Example of each: `Field/@type` is a closed
+list in the schema; "v1.4+ carries xxh3" joins the root `version` to
+attributes on `Schema`/`Data`, so it is `packet.CheckDeclaredIntegrity`.
+
+
 **Structure** — the real `docs/tdtp.xsd`, executed by a pure-Go XSD 1.0
 engine (vendored fork of `github.com/jacoelho/xsd` v0.5.1 in
 `third_party/xsd`: upstream needs Go ≥ 1.27, the fork is ported to the
 repo's Go 1.25 — see its README). The schema is embedded via a generated
 constant (`spec_xsd_gen.go`, refreshed by `go generate
-./cmd/tdtp-validate/`); a test fails if the copy drifts from the file, so
+./pkg/validate/`); a test fails if the copy drifts from the file, so
 the schema stays the single source of truth — nothing is transcribed by
 hand. Presence, order, cardinality, attributes, enumerations, patterns and
 unions all come from the file, with path/line/column diagnostics. A small
@@ -44,7 +56,9 @@ children under ciphertext, non-degenerate QueryContext).
 Schema after decompression and compact/columnar expansion (in reverse
 production order); RecordsInPart; duplicate field names; Dictionary
 validity; checksum-without-compression; version-vs-features consistency
-(compression → 1.2, compact → 1.3.1, integrity → 1.4, encryption → 1.5);
+in both directions (compression → 1.2, compact → 1.3.1, integrity → 1.4,
+encryption → 1.5; and v1.4+ must carry xxh3 — `packet.CheckDeclaredIntegrity`,
+the same rule import and `--test` apply);
 three-level xxh3 verification; QueryContext counter consistency and
 OriginalQuery fields against the Schema. Encrypted (v1.5) sections are
 reported, not judged — ciphertext is opaque.
