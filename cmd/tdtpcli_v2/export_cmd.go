@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
-	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 )
 
 // exportCommand is `tdtpcli_v2 export` — database table to a TDTP file.
@@ -90,10 +88,11 @@ type exportJSON struct {
 
 func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = args
-	cfg, expCfg, err := exportConfigs(d.ConfigPath)
+	yamlCfg, cfg, err := d.databaseConfig("export")
 	if err != nil {
-		return UsageError{Err: err} // missing/unreadable config is user error
+		return err // typed: bad config → usage, unlicensed adapter → operational
 	}
+	expCfg := yamlCfg.Export
 	query, err := c.q.build()
 	if err != nil {
 		return UsageError{Err: err}
@@ -144,22 +143,4 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 	out.Human("Exported %s to %s\n", c.table, target)
 	out.JSON(exportJSON{Valid: true, Table: c.table, Output: target})
 	return nil
-}
-
-// exportConfigs loads the v1-format YAML once and returns both the database
-// adapter config and the export: section (compression defaults). Same file
-// adapterConfig reads; kept separate so list-style commands pay nothing.
-func exportConfigs(path string) (*adapters.Config, cliconfig.ExportConfig, error) {
-	if path == "" {
-		return nil, cliconfig.ExportConfig{}, fmt.Errorf("export needs --config with a database section")
-	}
-	cfg, err := cliconfig.LoadConfig(path)
-	if err != nil {
-		return nil, cliconfig.ExportConfig{}, fmt.Errorf("failed to load config: %w", err)
-	}
-	return &adapters.Config{
-		Type:    cfg.Database.Type,
-		DSN:     cfg.Database.BuildDSN(),
-		Charset: cfg.Database.Charset,
-	}, cfg.Export, nil
 }

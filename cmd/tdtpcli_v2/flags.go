@@ -10,9 +10,10 @@ import (
 // own FlagSet (see Command). Globals are accepted BEFORE the command
 // name only: `tdtpcli_v2 --json validate f.xml`.
 type GlobalFlags struct {
-	Config string
-	Quiet  bool
-	JSON   bool
+	Config  string
+	License string // tdtp.lic path; else TDTP_LICENSE, ./tdtp.lic, Community
+	Quiet   bool
+	JSON    bool
 }
 
 // parseGlobals parses the leading flag run of argv and reports where the
@@ -34,15 +35,18 @@ func parseGlobals(argv []string) (GlobalFlags, []string, error) {
 		}
 		name, value, hasValue := strings.Cut(strings.TrimLeft(tok, "-"), "=")
 		switch name {
-		case "config":
-			if hasValue {
-				g.Config = value
-			} else {
+		case "config", "license":
+			if !hasValue {
 				i++
 				if i >= len(argv) {
-					return g, nil, fmt.Errorf("flag --config needs a value")
+					return g, nil, fmt.Errorf("flag --%s needs a value", name)
 				}
-				g.Config = argv[i]
+				value = argv[i]
+			}
+			if name == "config" {
+				g.Config = value
+			} else {
+				g.License = value
 			}
 		case "quiet", "q":
 			v, err := parseBoolFlag("--quiet", value, hasValue)
@@ -62,6 +66,27 @@ func parseGlobals(argv []string) (GlobalFlags, []string, error) {
 		i++
 	}
 	return g, argv[i:], nil
+}
+
+// globalFlagSpan reports how many argv tokens starting at k form one global
+// flag: 2 for "--config x"/"--license x", 1 for the =value spellings and
+// --quiet/-q/--json, 0 when argv[k] is not a global. The single list the
+// compat shim consults — it used to keep three copies of it.
+func globalFlagSpan(argv []string, k int) int {
+	tok := argv[k]
+	for _, name := range []string{"--config", "--license"} {
+		if tok == name && k+1 < len(argv) {
+			return 2
+		}
+		if strings.HasPrefix(tok, name+"=") {
+			return 1
+		}
+	}
+	if tok == "--quiet" || tok == "-q" || strings.HasPrefix(tok, "--quiet=") ||
+		tok == "--json" || strings.HasPrefix(tok, "--json=") {
+		return 1
+	}
+	return 0
 }
 
 // parseBoolFlag interprets a bare flag as true and --flag=value strictly.

@@ -22,7 +22,7 @@ type App struct {
 func NewApp() *App {
 	a := &App{
 		commands:    map[string]Command{},
-		middlewares: []Middleware{recoverMiddleware},
+		middlewares: []Middleware{recoverMiddleware, licenseMiddleware(commands.ResolveLicense)},
 	}
 	RegisterAll(a)
 	return a
@@ -132,15 +132,20 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 				writeJSON(stdout, v)
 			}
 		},
+		Notice: func(format string, args ...any) {
+			if !globals.Quiet && !globals.JSON {
+				eprintf(stderr, format, args...)
+			}
+		},
 		JSONEnabled: globals.JSON,
 		Stdout:      stdout,
 	}
 
-	deps := &Deps{ConfigPath: globals.Config}
+	deps := &Deps{ConfigPath: globals.Config, LicensePath: globals.License}
 	// Process-wide quiet for shared engines that print progress themselves
 	// (broker export, v1.5 UUID lines). Same call v1's main makes.
 	commands.SetQuietOutput(globals.Quiet || globals.JSON)
-	handler := a.chain(cmd.Run)
+	handler := a.chain(cmd, cmd.Run)
 	if err := handler(ctx, deps, out, positional); err != nil {
 		code := exitCode(err)
 		// Text mode: the error goes to stderr. JSON mode carries it
@@ -160,16 +165,16 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	return ExitOK
 }
 
-func (a *App) chain(h Handler) Handler {
+func (a *App) chain(cmd Command, h Handler) Handler {
 	for i := len(a.middlewares) - 1; i >= 0; i-- {
-		h = a.middlewares[i](h)
+		h = a.middlewares[i](cmd, h)
 	}
 	return h
 }
 
 // writeUsage lists global flags and command names.
 func (a *App) writeUsage(w io.Writer) {
-	eprintln(w, "usage: tdtpcli_v2 [--quiet|--json] [--config FILE] <command> [flags] [args]")
+	eprintln(w, "usage: tdtpcli_v2 [--quiet|--json] [--config FILE] [--license FILE] <command> [flags] [args]")
 	eprintln(w, "\ncommands:")
 	names := make([]string, 0, len(a.commands))
 	seen := map[Command]bool{}
@@ -206,6 +211,9 @@ func prependGlobals(g GlobalFlags, args []string) []string {
 	var out []string
 	if g.Config != "" {
 		out = append(out, "--config", g.Config)
+	}
+	if g.License != "" {
+		out = append(out, "--license", g.License)
 	}
 	if g.Quiet {
 		out = append(out, "--quiet")

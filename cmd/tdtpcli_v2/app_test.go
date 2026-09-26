@@ -169,7 +169,7 @@ func TestExitCode_Mapping(t *testing.T) {
 }
 
 func TestMiddleware_Recover(t *testing.T) {
-	h := recoverMiddleware(func(ctx context.Context, d *Deps, out Output, args []string) error {
+	h := recoverMiddleware(nil, func(ctx context.Context, d *Deps, out Output, args []string) error {
 		panic("boom")
 	})
 	err := h(context.Background(), &Deps{}, Discard(nil), nil)

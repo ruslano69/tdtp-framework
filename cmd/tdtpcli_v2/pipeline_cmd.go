@@ -41,6 +41,21 @@ SQL allowlist check. --enc/--enc13 override the output encryption.`
 
 // Validate takes the config path plus @name=value variables (same grammar
 // as v1: @ prefix, non-empty name, surrounding quotes stripped).
+// Features: the licensed capabilities this run's flags ask for — the same
+// two v1 gates up front (--enc/--enc13 → "enc", --unsafe → "unsafe").
+// --unsafe-cert alone unlocks nothing (v1: only --unsafe is gated), so it
+// asks for nothing.
+func (c *pipelineCommand) Features() []string {
+	var f []string
+	if c.enc || c.encLegacy {
+		f = append(f, "enc")
+	}
+	if c.unsafe {
+		f = append(f, "unsafe")
+	}
+	return f
+}
+
 func (c *pipelineCommand) Validate(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("need a pipeline config file")

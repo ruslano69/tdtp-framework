@@ -112,7 +112,7 @@ func TestBrokerConfigFromCliconfig(t *testing.T) {
 	// The shared builder keeps v1/v2 queue resolution identical; the
 	// queue comes from config, never from flags.
 	_, cfg, _ := writeBrokerDB(t)
-	adb, bcc, err := loadConfigs(cfg)
+	adb, bcc, err := loadConfigs(&Deps{ConfigPath: cfg}, "export-broker")
 	if err != nil {
 		t.Fatalf("loadConfigs: %v", err)
 	}

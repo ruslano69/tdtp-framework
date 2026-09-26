@@ -12,13 +12,17 @@ which command. v2 inverts that:
   over shared `pkg/` logic — never duplicated. A bug fixed in `pkg/`
   is fixed in 1.XX and 2.0 at once.
 - **One lifecycle.** Parse globals → match command → `Validate` →
-  middleware (recover; license/audit/timing join later) → `Run` →
+  middleware (recover → license; audit/resilience join later) → `Run` →
   typed error → exit code. Adding a cross-cutting concern is one chain
   element, not edits in N branches.
 - **Typed errors, stable codes.** `UsageError` → 2, `DataError` → 3
   ("the tool worked, the answer is no"), anything operational → 1.
 - **Two audiences.** Humans read text; pipelines read `--json`.
-  `--quiet` suppresses the human channel only.
+  `--quiet` suppresses the human channel only. Notices that are neither
+  data nor a result (the `License:` banner) go to stderr via
+  `out.Notice`, so stdout stays clean for `to-json -o -`.
+- **Globals:** `--config`, `--license`, `--quiet`, `--json` — before the
+  command name. Everything else belongs to a command.
 
 ## Adding a command (checklist)
 
@@ -26,6 +30,10 @@ which command. v2 inverts that:
    `new<Name>Command()` filling name/aliases/help/flags, `Validate`
    (arity, required, mutual exclusion), `Run` (pure logic via `pkg/`,
    render via `out.Human`/`out.JSON`, typed errors out).
+   Database access goes through `d.databaseConfig(name)` — the only
+   builder of `adapters.Config`, and the license adapter gate; a flag that
+   needs a licensed feature (`--enc`, `--unsafe`) is declared by
+   implementing `FeatureGated`. Tests enforce both.
 2. One line in `cmd/tdtpcli_v2/registry.go`.
 3. Tests in `<name>_cmd_test.go` driving `App.Run` in-process (no
    subprocesses): happy path, `Validate` rejections, foreign-flag

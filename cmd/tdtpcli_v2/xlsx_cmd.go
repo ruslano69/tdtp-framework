@@ -58,9 +58,9 @@ type exportXLSXJSON struct {
 
 func (c *exportXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = args
-	cfg, err := adapterConfig(d.ConfigPath)
+	_, cfg, err := d.databaseConfig(c.Name())
 	if err != nil {
-		return UsageError{Err: err}
+		return err // typed in databaseConfig
 	}
 	query, err := c.q.build()
 	if err != nil {
@@ -180,9 +180,9 @@ func (c *importXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args [
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
-	cfg, err := adapterConfig(d.ConfigPath)
+	_, cfg, err := d.databaseConfig(c.Name())
 	if err != nil {
-		return UsageError{Err: err}
+		return err // typed in databaseConfig
 	}
 	strategy, err := commands.ParseImportStrategy(c.strategy)
 	if err != nil {

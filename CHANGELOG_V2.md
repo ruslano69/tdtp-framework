@@ -7,6 +7,37 @@
 
 ## [Unreleased]
 
+### Security — the license gate v2 did not have
+
+- v2 never resolved `tdtp.lic`. On the Community floor
+  `tdtpcli_v2 --config pg.yaml export t` read PostgreSQL, and
+  `pipeline --enc` / `--unsafe` and `export-broker --enc` ran — v1 refuses
+  all of them before any work.
+- `licenseMiddleware` (chain: recover → license) resolves the license the
+  way v1 does (`--license`, `TDTP_LICENSE`, `./tdtp.lic`, Community); an
+  invalid file is fatal. Commands declare licensed features through
+  `FeatureGated`; the adapter gate lives in `Deps.databaseConfig`, now the
+  only place that builds `adapters.Config`. Refusals use v1's texts
+  (shared `commands.CheckFeature`/`CheckAdapter`) and exit 1; in `--json`
+  mode they arrive in-band like any other failure.
+- Held by tests that do not rely on a hand-kept list: one parses the
+  package and fails if `adapters.Config` is built anywhere else; another
+  derives every DB command from the source and requires a Community
+  refusal test for it. A paid license is tested with `license.New`
+  through an injectable resolver, no vendor key needed.
+- New global `--license` (the compat shim hoists it from anywhere, like
+  `--config`); the global-flag list the shim consults is one function
+  now, not three copies.
+- Deliberate differences from v1: the adapter is gated where a database
+  is used, not whenever a config file is loaded; the `License:` banner
+  is a stderr notice (`Output.Notice`), since stdout carries data.
+- `database.strict_schema` from the config now reaches the adapter —
+  both old builders dropped it.
+- Found, not changed (`TODO_NEXT_V2.md` 3.5): in both CLIs the Community
+  50 000-row cap is never enforced, `s3` is never gated, pipeline source
+  adapters are never gated, and a mistyped `--license` path silently
+  means Community.
+
 ### Changed — the engines moved to `pkg/cli/commands`
 
 - `cmd/tdtpcli/commands` → `pkg/cli/commands` (`git mv`, package name
