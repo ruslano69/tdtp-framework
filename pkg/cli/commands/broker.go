@@ -135,6 +135,20 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 		return nil
 	}
 
+	// Row processors (--mask/--validate/--normalize) — the first step of
+	// ExportTable's chain (transform.StageRowProcessors), before compression
+	// and encryption. procMgr used to be accepted here and never called:
+	// `--export-broker users --mask email` sent the addresses in clear, and
+	// v1's flag table listed --mask for this command, so nothing warned.
+	// Before the row count, which a validate filter changes.
+	if procMgr != nil && procMgr.HasProcessors() {
+		for _, pkt := range packets {
+			if err := procMgr.ProcessPacket(ctx, pkt); err != nil {
+				return fmt.Errorf("pre-export processors: %w", err)
+			}
+		}
+	}
+
 	var totalRows int64
 	for _, pkt := range packets {
 		totalRows += int64(len(pkt.GetRows()))
@@ -145,7 +159,7 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	}
 
 	// Create broker (параллельно с подготовкой данных)
-	broker, err := createBroker(brokerCfg)
+	broker, err := newExportBroker(brokerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create broker: %w", err)
 	}
@@ -654,6 +668,11 @@ func brokerOutputFilename(outputFile string, n, total int) string {
 }
 
 // createBroker creates a message broker based on configuration
+// newExportBroker is the broker ExportToBroker sends to. A variable only so
+// a test can capture what is actually sent — the processors bug above was
+// invisible to every test that checked configuration instead of messages.
+var newExportBroker = createBroker
+
 func createBroker(cfg *BrokerConfig) (brokers.MessageBroker, error) {
 	// Kafka brokers list: use explicit Brokers slice; fall back to Host:Port
 	kafkaBrokers := cfg.Brokers

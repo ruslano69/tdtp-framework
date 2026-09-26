@@ -136,15 +136,18 @@ fails to parse under the shim — loudly, at least.
 
 | Command | Missing in v2 | Needs |
 |---|---|---|
-| `export` | `--mask`, `--validate`, `--normalize`, `--enc`, `--enc13`, `--mercury-caller`, `s3://` output | 3.5 items 1, 4 |
-| `export-broker` | `--mask`, `--validate`, `--normalize`, `--mercury-caller`, `--batch`, `--hash` | 3.5 item 4 |
-| `export-xlsx` | `--translit`, `--mask`, `--validate`, `--normalize` | 3.5 item 4 |
+| `export` | `--enc`, `--enc13`, `--mercury-caller`, `s3://` output | 3.5 item 4 |
+| `export-broker` | `--mercury-caller`, `--batch`, `--hash` | — |
+| `export-xlsx` | `--translit` | — |
 | `import` | `--strict-schema`, `s3://` input | 3.5 item 4 |
 | `to-csv`, `to-xlsx` | `--translit`; `s3://` input/output for `to-xlsx` | — / item 4 |
-| `pipeline` | `--mask`, `--validate`, `--normalize` | 3.5 item 4 |
 
-Processors are one bundle, like `queryFlags`: `addProcessorFlags(fs, &p)`
-once, not the same three flags pasted into five commands.
+**~~Processors~~ — done 2026-09-26.** `--mask`/`--validate`/`--normalize`
+are one bundle (`processorflags.go`) on `export`, `export-broker`,
+`export-xlsx`, `import`, `import-xlsx`. Not on `pipeline`: its processors
+live in the YAML, and v1's `--pipeline` accepted these flags and ignored
+them. Porting them found three bugs in the shared chain, all fixed for v1
+too — see `CHANGELOG.md`.
 
 ### Wave 3.7 — the commands not yet ported
 

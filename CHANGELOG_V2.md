@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### Wave 3.6: `--mask` / `--validate` / `--normalize`
+
+- One bundle (`processorflags.go`, like `queryFlags`) on `export`,
+  `export-broker`, `export-xlsx`, `import`, `import-xlsx`; built in `Run`
+  before any database work; a bad or section-less rules file is a usage
+  error (exit 2).
+- Not on `pipeline` — processors belong in its YAML; `pipeline --mask` does
+  not parse (v1 accepted it and did nothing).
+- A test parses the package: every command holding the bundle must build it
+  in `Run`, and the five holders are pinned. That the built chain is then
+  passed on, the compiler enforces (an unused `procs` does not compile).
+- Porting it surfaced three bugs in the shared chain (broker never masked,
+  filter kept removed rows, escaped pipes shifted masked columns) — fixed
+  for both CLIs, see `CHANGELOG.md`.
+
 ### Security — the license gate v2 did not have
 
 - v2 never resolved `tdtp.lic`. On the Community floor
