@@ -375,10 +375,11 @@ and the path needs deciding rather than pointing at `/tmp` again.
   --untracked-files=all` reports zero untracked files. The funcfinder outputs
   that would otherwise land there (`.codemap/`, `docs/analysis/`) are
   gitignored.
-- `TestCompressDataForTdtp` (`pkg/processors/compression_test.go:133`) asserts
-  `stats.Time != 0` after compressing three short rows. On Windows the clock is
-  coarser than the work, so the assertion flakes. It is testing the timer, not
-  the compressor — assert on the output instead.
+- ~~`TestCompressDataForTdtp` flakes on Windows~~ — **fixed.** It asserted
+  `stats.Time != 0` after compressing three short rows, and the Windows clock
+  is coarser than that work. It now checks what the stats describe — the
+  original size is the joined rows, the ratio is original/compressed — and of
+  the timer only that it is not negative.
 - ~~`benchmarks/bench_duckdb` needs cgo...~~ — **removed.** This entry used to
   say the code "was reverted rather than kept" (DuckDB as the pipeline
   workspace was tried and measured — three times slower on load, because
