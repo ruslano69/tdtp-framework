@@ -423,3 +423,65 @@ func TestMergeCmd_SortTextIsLexicographic(t *testing.T) {
 		t.Errorf("TEXT sort should order 010,10,9 — got:\n%.400s", s)
 	}
 }
+
+// A declared NULL marker is NULL, not text: "[NULL]" sorted after "9"
+// lexicographically, putting NULLs last while the help promised first.
+func TestMergeCmd_SortNullMarkerFirst(t *testing.T) {
+	const pkt = `<DataPacket protocol="TDTP" version="1.0"><Header><Type>reference</Type>` +
+		`<TableName>t</TableName><MessageID>M</MessageID><PartNumber>1</PartNumber>` +
+		`<TotalParts>1</TotalParts><RecordsInPart>3</RecordsInPart><Timestamp>2026-01-01T00:00:00Z</Timestamp></Header>` +
+		`<Schema><Field name="id" type="INTEGER" key="true"></Field>` +
+		`<Field name="zip" type="TEXT"><SpecialValues><Null marker="[NULL]"></Null></SpecialValues></Field></Schema>` +
+		`<Data><R>1|9</R><R>2|[NULL]</R><R>3|010</R></Data></DataPacket>`
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.xml")
+	b := filepath.Join(dir, "b.xml")
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, []byte(pkt), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(dir, "m.xml")
+	for _, order := range []string{"asc", "desc"} {
+		code, _, stderr := runApp(t, "merge", a, b, "--output", out, "--sort", "zip", "--order", order)
+		if code != ExitOK {
+			t.Fatalf("exit = %d: %s", code, stderr)
+		}
+		data, _ := os.ReadFile(out)
+		s := string(data)
+		iNull, i010, i9 := strings.Index(s, "<R>2|"), strings.Index(s, "<R>3|"), strings.Index(s, "<R>1|")
+		ok := iNull >= 0 && iNull < i010 && i010 < i9 // asc: NULL, "010", "9"
+		if order == "desc" {
+			ok = i9 >= 0 && i9 < i010 && i010 < iNull
+		}
+		if !ok {
+			t.Errorf("order %s: NULL placement wrong:\n%.600s", order, s)
+		}
+	}
+}
+
+// A missing input is operational (exit 1), like inspect/test; only a file
+// that was read and rejected is a verdict on the data (exit 3).
+func TestDiffMerge_ExitCodesForBadInput(t *testing.T) {
+	a := writeDiffFixture(t, "a.xml", [][]string{{"1", "x"}})
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.xml")
+	garbage := filepath.Join(dir, "garbage.xml")
+	if err := os.WriteFile(garbage, []byte("not xml at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "m.xml")
+	for _, tc := range []struct {
+		argv []string
+		want int
+	}{
+		{[]string{"diff", a, missing}, ExitFail},
+		{[]string{"merge", a, missing, "--output", out}, ExitFail},
+		{[]string{"diff", a, garbage}, ExitInvalid},
+		{[]string{"merge", a, garbage, "--output", out}, ExitInvalid},
+	} {
+		if code, _, _ := runApp(t, tc.argv...); code != tc.want {
+			t.Errorf("%v: exit = %d, want %d", tc.argv[:2], code, tc.want)
+		}
+	}
+}

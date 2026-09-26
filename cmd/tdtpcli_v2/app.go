@@ -106,7 +106,11 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		return ExitOK
 	}
 	if err := fs.Parse(args); err != nil {
-		// pflag already printed the parse error to stderr.
+		// pflag prints parse errors only when it is NOT ContinueOnError
+		// (its failf skips the print in exactly the mode we use), so an
+		// unknown flag used to exit 2 with nothing on stderr at all.
+		eprintln(stderr, "error:", err)
+		eprintf(stderr, "run 'tdtpcli_v2 help %s' for its flags\n", cmd.Name())
 		return ExitUsage
 	}
 	positional := fs.Args()
@@ -115,6 +119,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		return ExitUsage
 	}
 
+	jsonEmitted := false
 	out := Output{
 		Human: func(format string, args ...any) {
 			if !globals.Quiet && !globals.JSON {
@@ -123,6 +128,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		},
 		JSON: func(v any) {
 			if globals.JSON {
+				jsonEmitted = true
 				writeJSON(stdout, v)
 			}
 		},
@@ -137,10 +143,17 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	handler := a.chain(cmd.Run)
 	if err := handler(ctx, deps, out, positional); err != nil {
 		code := exitCode(err)
-		// Usage errors already explain themselves; operational and data
-		// errors go to stderr in text mode (JSON mode carries them in-band).
-		if !globals.JSON {
+		// Text mode: the error goes to stderr. JSON mode carries it
+		// in-band — but only a command that rendered a verdict before
+		// failing (validate's {valid:false, errors}) has done so; every
+		// other failure (missing config, unreadable input, DB down) used
+		// to exit with nothing on either stream. Emit a minimal verdict
+		// for those so a pipeline reading stdout always gets an answer.
+		switch {
+		case !globals.JSON:
 			eprintln(stderr, "error:", err)
+		case !jsonEmitted:
+			writeJSON(stdout, errorJSON{Valid: false, Error: err.Error(), ExitCode: code})
 		}
 		return code
 	}
@@ -213,6 +226,14 @@ func hasHelpFlag(args []string) bool {
 		}
 	}
 	return false
+}
+
+// errorJSON is the --json verdict App emits for a failed command that
+// rendered nothing itself.
+type errorJSON struct {
+	Valid    bool   `json:"valid"`
+	Error    string `json:"error"`
+	ExitCode int    `json:"exit_code"`
 }
 
 func writeJSON(w io.Writer, v any) {

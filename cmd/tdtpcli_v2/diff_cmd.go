@@ -54,6 +54,9 @@ type diffJSON struct {
 
 func (c *diffCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = d
+	if err := checkReadable(args); err != nil {
+		return err // unreadable input is operational (exit 1)
+	}
 	opts := &commands.DiffOptions{
 		FileA:         args[0],
 		FileB:         args[1],
@@ -64,7 +67,7 @@ func (c *diffCommand) Run(ctx context.Context, d *Deps, out Output, args []strin
 	}
 	var buf bytes.Buffer
 	if err := commands.DiffFilesTo(&buf, ctx, opts); err != nil {
-		return DataError{Err: err} // unreadable/incomparable input
+		return DataError{Err: err} // malformed/incomparable input
 	}
 	out.Human("%s", buf.String())
 	if out.JSONEnabled {

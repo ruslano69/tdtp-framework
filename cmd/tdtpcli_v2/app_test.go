@@ -7,7 +7,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -232,5 +235,72 @@ func TestParseGlobals_Forms(t *testing.T) {
 	g, rest, err = parseGlobals([]string{"to-csv", "f.xml", "--output", "o.csv"})
 	if err != nil || len(rest) != 4 {
 		t.Errorf("globals must stop at the command: %+v %v %v", g, rest, err)
+	}
+}
+
+// A foreign flag must fail LOUDLY. pflag in ContinueOnError mode returns
+// the error without printing it, so exit 2 used to come with an empty
+// stderr — the exit code alone was all TestApp_ForeignFlagRejected saw.
+func TestApp_ForeignFlagNamedOnStderr(t *testing.T) {
+	code, _, stderr := runApp(t, "validate", "--bogus", "f.xml")
+	if code != ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+	if !strings.Contains(stderr, "bogus") {
+		t.Errorf("stderr must name the rejected flag, got %q", stderr)
+	}
+}
+
+// --json failures the command did not render itself (missing config,
+// unreadable input) used to exit with nothing on either stream.
+func TestApp_JSONErrorInBand(t *testing.T) {
+	code, stdout, _ := runApp(t, "--json", "export", "users")
+	if code != ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+	var v struct {
+		Valid    bool   `json:"valid"`
+		Error    string `json:"error"`
+		ExitCode int    `json:"exit_code"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &v); err != nil {
+		t.Fatalf("stdout must carry a JSON verdict, got %q: %v", stdout, err)
+	}
+	if v.Valid || v.Error == "" || v.ExitCode != ExitUsage {
+		t.Errorf("verdict = %+v", v)
+	}
+}
+
+// ...and a command that rendered its own verdict is not followed by a
+// second JSON document.
+func TestApp_JSONErrorNotDoubled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.xml")
+	if err := os.WriteFile(path, []byte("<DataPacket/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runApp(t, "--json", "validate", path)
+	if code != ExitInvalid {
+		t.Fatalf("exit = %d, want %d", code, ExitInvalid)
+	}
+	if n := strings.Count(strings.TrimSpace(stdout), "\n"); n != 0 {
+		t.Errorf("want exactly one JSON document, got %d lines:\n%s", n+1, stdout)
+	}
+}
+
+func TestTryCompat_GlobalsAfterVerb(t *testing.T) {
+	// v1 flags were global: --config after the verb was valid there.
+	got, _, ok := tryCompat([]string{"--export", "users", "--config", "c.yaml", "--quiet"})
+	want := []string{"--config", "c.yaml", "--quiet", "export", "users"}
+	if !ok || strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("rewrote to %v, want %v", got, want)
+	}
+}
+
+func TestTryCompat_ImportNegativeLimitStripped(t *testing.T) {
+	// v1's tail-N spelling: the value is "-5", and it must go with the flag,
+	// not stay behind as a bogus shorthand for pflag to choke on.
+	got, _, ok := tryCompat([]string{"--import", "f.xml", "--limit", "-5"})
+	if !ok || strings.Join(got, " ") != "import f.xml" {
+		t.Errorf("rewrote to %v, want [import f.xml]", got)
 	}
 }

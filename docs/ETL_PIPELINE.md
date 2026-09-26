@@ -179,7 +179,13 @@ Each source load is retried up to `retry_attempts` times (default 3, first
 delay `retry_delay_seconds`, then exponential backoff — `pkg/retry`, the same
 combination as `cmd/tdtpcli/production.go`'s circuit-breaker+retry pair, minus
 the breaker). Only source loading is retried: it is side-effect free (pure
-read), while repeating a transform or an output is not idempotent. When the
+read), while repeating a transform or an output is not idempotent. Two source
+types always get a single attempt: `tdtp-enc`, because its Mercury key is
+burn-on-read (a retry after the key was taken reports `KeyBurnedError` — a
+theft signal — instead of the real failure), and `tdtp`, a local file with
+nothing transient to wait out. Note that every other error is retried,
+permanent ones included: with the defaults a typo in `query` fails after
+about 15 s of backoff, not at once. When the
 attempts run out, `continue` skips the failed source and carries on with the
 rest; `fail` (default) stops the pipeline — both are real, both are exercised
 by tests. `on_transform_error` and `on_output_error` are parsed, defaulted,
