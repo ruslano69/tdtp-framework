@@ -2,6 +2,31 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased]
+
+### Security — `tdtpserve` answered a broken filter with the whole dataset
+
+`GET /api/data/<name>` and `/data/<name>` failed OPEN: an unparsable `where`
+or `order_by`, `limit=abc`, or a negative `limit`/`offset` returned HTTP 200
+with **every row** of the dataset and the error in a side field
+(`filter_error`). A client with a typo in its condition got the whole table,
+behind authentication. Now `400 {"error": "filter: ..."}` with no rows; the
+HTML page renders the form and the error with no rows, also 400. The
+`filter_error` field is gone: 200 means the filter was applied.
+
+### Fixed — `tdtpserve` had its own WHERE parser, and it was wrong
+
+It split the condition on `" AND "` / `" OR "`: `id BETWEEN 100 AND 200` —
+the example from its own README — was refused, while mixed AND/OR,
+parentheses and `a = = 'b'` were accepted and silently turned into wrong
+filters. Removed; the server now uses the shared TDTQL translator the CLI's
+`--where`/`--order-by` use (`pkg/cliquery`), so one language has one parser
+and its errors are 400s.
+
+Still open, in the shared translator itself (so in the CLI too): trailing
+tokens after a complete expression are ignored — `dept = 'hr' AMD id > 5`
+drops the second condition, `order_by=dept SIDEWAYS` sorts ascending.
+
 ## [1.26.3] - 2026-09-26
 
 ### Security — `--mask`/`--validate`/`--normalize` did not do what they said
