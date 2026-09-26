@@ -6,7 +6,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // App is the v2 dispatcher: a command registry plus global flags and the

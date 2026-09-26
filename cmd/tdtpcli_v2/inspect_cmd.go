@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 

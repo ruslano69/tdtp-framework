@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // mergeCommand is `tdtpcli_v2 merge` — combine TDTP files into one.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // pipelineCommand is `tdtpcli_v2 pipeline` — ETL from a YAML config.

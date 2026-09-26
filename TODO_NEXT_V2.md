@@ -9,52 +9,175 @@ to v1 only on demand.
 ## Architecture (the whole bet)
 
 - **A flag belongs to its command.** Each command declares its own
-  `flag.FlagSet`; there is no global flag soup. `flagscope.go` /
+  `pflag.FlagSet`; there is no global flag soup. `flagscope.go` /
   `warnUnusedFlags` die as a class — a foreign flag simply does not parse.
 - **Thin lifecycle in `app.go`:** parse globals → match command →
-  `command.Validate` → middleware (license → audit → timing) → `Run` →
-  typed error → exit code. `main.go` stays ~50 lines.
+  `command.Validate` → middleware (license → audit → resilience) → `Run` →
+  typed error → exit code. `main.go` stays small.
 - **Typed errors:** `UsageError` → exit 2, `DataError` → exit 3,
-  IO/DB/network → exit 1. Commands return them; `main` maps to code and
+  IO/DB/network → exit 1. Commands return them; `App` maps to code and
   format (text vs `--json`).
-- **DI container (`deps.go`):** config, adapters, storage, Mercury, output —
-  built once, lazily (file-only commands never touch a DB).
+- **DI container (`deps.go`):** config, adapters, storage, Mercury,
+  processors — built once, lazily (file-only commands never touch a DB).
 - **Output contract:** `--quiet` / `--json` global. Humans read text,
-  pipelines read JSON (`{file, valid, errors[]}`-shaped per command).
+  pipelines read JSON (`{file, valid, errors[]}`-shaped per command; App
+  emits `{valid:false, error, exit_code}` for a failure the command did
+  not render itself).
 
 ## Layout
 
 ```
 cmd/tdtpcli_v2/
-  main.go         # App.New + os.Exit, ~50 lines
+  main.go         # NewApp().Run + os.Exit
   app.go          # registry, dispatch, generated help, middleware chain
-  command.go      # Command interface + BaseCommand
+  command.go      # Command interface + Base, Output contract
   flags.go        # ONLY globals: --config, --quiet/--json
-  errors.go       # UsageError / DataError / exit codes
-  deps.go         # lazy service container
-  middleware.go   # recover (license/audit/timing join later)
-  compat.go       # v1 flat flags → v2 subcommands shim (one release, then delete)
-  validate_cmd.go # wave 0: thin wrapper, proves the framework
+  errors.go       # UsageError / DataError / exit codes, checkReadable
+  deps.go         # service container — still a stub (ConfigPath only)
+  middleware.go   # recover only; license/audit/resilience are wave 3.5
+  compat.go       # v1 flat flags → v2 subcommands shim
+  queryflags.go   # shared --where/--order-by/--limit/--offset/--fields bundle
   registry.go     # all Register() calls in one place
+  <name>_cmd.go   # one file per command, thin over pkg/cli/commands
+pkg/cli/commands/ # the engines BOTH binaries call
 ```
 
 Binary name during transition: `tdtpcli_v2` (unambiguous in CI/logs).
-Finale (wave 4): `rm -rf cmd/tdtpcli`, `git mv cmd/tdtpcli_v2 cmd/tdtpcli`.
 
-## Waves
+**The engines live in `pkg/cli/commands`, not under either binary.** Until
+2026-09-26 they were `cmd/tdtpcli/commands`, so the wave-4 step
+`rm -rf cmd/tdtpcli` would have deleted the code v2 runs on. Moved with
+`git mv`; the package name is unchanged (`commands`), only import paths
+moved. Nothing in there calls `os.Exit` — keep it that way, it is a
+library now.
 
-| Wave | Content | Risk |
-|------|---------|------|
-| 0 | skeleton + `validate` wrapper + `docs/CLI_V2.md` | zero — proves the framework |
-| 1 | `inspect`, `test`, `list`, `to-csv`, `to-xlsx`, `to-html` | read-only |
-| 2 | `export`, `from-*`, `import` | writes; sqlite e2e each |
-| 3 | `pipeline`, brokers, `sync`, `enc*` | needs Mercury/infra in CI |
-| 4 | delete `cmd/tdtpcli`, rename, merge changelogs | finale |
+## Status — 2026-09-26
 
-Porting rule: a command counts as ported when its `tests/cli/` suite passes
-against the new binary unchanged (`TDTPCLI_BIN` swap — the mechanism exists).
-Compat shim (`--to-csv` → `tdtp to-csv` + deprecation warning) lives one
-release; shim output must be byte-identical to the native form.
+**Ported** — the suite passes against `tdtpcli_v2` unchanged, or, where no
+suite exists, output is proven identical to v1 by normalized comparison:
+`validate` (new), `inspect`, `test`, `list` (+`--views` for
+`--list-views`), `to-csv`, `to-xlsx`, `to-html`, `to-json` (new), `to-tdtp`,
+`to-compact`, `export`, `import`, `export-xlsx`, `import-xlsx`, `from-xlsx`,
+`pipeline`, `export-broker`, `import-broker`, `diff`, `merge`.
+
+`tests/cli`: `test_sqlite.py` 122/122, `test_csv.py` 43/43,
+`test_xlsx.py` 51/51 against both binaries. **Not yet run against v2:**
+`test_postgres.py`, `test_mysql.py`, `test_mssql_msmq.py`, `test_kafka.py`,
+`test_encryption.py`, `test_audit_database.py`. Each needs live
+infrastructure, and several will fail today for the gaps listed below —
+which is the point of running them: they are the checklist.
+
+**Not ported:** `sync-incremental`, `map` (+`--listen`/`--drain`/
+`--dry-run`), `listen`, `steps`, `inspect-table`, `process-request`,
+`create-config-{pg,mssql,sqlite,mysql}`, `--version`.
+
+## Remaining work, in order
+
+The order is by what blocks what, not by size. Wave 3.5 comes first because
+every command ported before it has to be revisited once it lands; the later
+a middleware arrives, the more commands it has to be retrofitted into.
+
+### Wave 3.5 — cross-cutting concerns (blocks shipping v2 to anyone)
+
+v1 wraps every command in the same four things inside `main.go`. v2 has
+none of them yet, and one of them is a hole rather than a missing feature.
+
+1. **License — P0, a bypass today.** v1 resolves `tdtp.lic`
+   (`commands.ResolveLicense`), refuses licensed-only features up front
+   (`GateFeature("enc")`, `GateFeature("unsafe")`) and refuses non-sqlite
+   adapters on the community floor (`GateAdapter`). v2 calls none of them:
+   `tdtpcli_v2 --config pg.yaml export t` works without a license, and so
+   does `pipeline --enc`. Shape: the middleware resolves the license once;
+   a command declares what it needs through an optional interface
+   (`Features() []string`, checked before `Run`); the adapter gate lives
+   where the adapter config is built (item 4), so no command can forget
+   it. Global `--license` joins `--config` in `flags.go`.
+   Test: every command that can reach a non-sqlite adapter or an `--enc*`
+   flag refuses on the community floor — generated from the registry, not
+   listed by hand, the way `pkg/transform` generates its matrix.
+2. **Audit.** v1 sets an `audit.Operation` per branch and threads
+   `commands.WithOpMetrics(ctx)` so engines report row counts back. As a
+   middleware plus an optional `AuditOp() audit.Operation` on the command.
+   `test_audit_database.py` is the acceptance suite.
+3. **Resilience.** v1 runs each engine call through
+   `prodFeatures.ExecuteWithResilience` (circuit breaker + retry from
+   config). Middleware, config-driven, off unless configured — as in v1.
+4. **A real `Deps`.** Today each command loads the YAML itself
+   (`exportConfigs`, `adapterConfig`, …) and builds `adapters.Config` its
+   own way — `StrictSchema` is already lost on the v2 import path because
+   of it. One lazy loader: config parsed once; `AdapterConfig()` (with
+   `StrictSchema`, `Charset` and the license adapter gate);
+   `StorageConfig()` for `s3://`; `Processors()` for mask/validate/
+   normalize. File-only commands still never touch it.
+5. **Build parity.** `drivers_s3.go` (`nos3` tag) is missing, so v2 has no
+   S3 driver registered at all; the `production` tag (`pipeline_prod.go`)
+   is untested for v2. CI runs v2's tests but `release.yml` does not ship
+   the binary — decide when it starts to.
+
+### Wave 3.6 — close the flag gaps in ported commands
+
+Each of these is accepted by v1 and absent in v2. A v1 script using one
+fails to parse under the shim — loudly, at least.
+
+| Command | Missing in v2 | Needs |
+|---|---|---|
+| `export` | `--mask`, `--validate`, `--normalize`, `--enc`, `--enc13`, `--mercury-caller`, `s3://` output | 3.5 items 1, 4 |
+| `export-broker` | `--mask`, `--validate`, `--normalize`, `--mercury-caller`, `--batch`, `--hash` | 3.5 item 4 |
+| `export-xlsx` | `--translit`, `--mask`, `--validate`, `--normalize` | 3.5 item 4 |
+| `import` | `--strict-schema`, `s3://` input | 3.5 item 4 |
+| `to-csv`, `to-xlsx` | `--translit`; `s3://` input/output for `to-xlsx` | — / item 4 |
+| `pipeline` | `--mask`, `--validate`, `--normalize` | 3.5 item 4 |
+
+Processors are one bundle, like `queryFlags`: `addProcessorFlags(fs, &p)`
+once, not the same three flags pasted into five commands.
+
+### Wave 3.7 — the commands not yet ported
+
+Lowest risk first; each lands with its suite run against v2.
+
+| Command | Why here | Acceptance |
+|---|---|---|
+| `inspect-table` | read-only, one engine call | normalized v1 comparison |
+| `version`, `init-config <db>` | trivial; the four `create-config-*` become one command with a positional | byte-identical sample files |
+| `steps` | spawns sub-processes — must spawn **v2**, not whatever `tdtpcli` is on PATH | `pkg/workflow` tests + a v2 e2e |
+| `map` (+`--dry-run`, `--drain`) | file/S3/broker input, its own target DSN | `map_test.go` engine tests + broker e2e (`TDTP_BROKER_TEST=1`) |
+| `listen`, `map --listen` | long-running daemon: signals, NACK/requeue, graceful stop — test the shutdown path, not only the happy path | RabbitMQ e2e |
+| `sync-incremental` | checkpoint file + broker target | `test_postgres.py` sync group |
+| `process-request` | excluded from lint in `.golangci.yml` — read it before porting | — |
+
+### Wave 4 — finale (every box must hold)
+
+- [ ] 3.5, 3.6 and 3.7 done; every `tests/cli` suite green against
+      `tdtpcli_v2` on live infrastructure.
+- [ ] Migration guide: the deliberate differences from v1 in one list —
+      exit codes (`validate` INVALID 1 → 3; `diff`/`merge` unreadable
+      input → 1), `export` flag-over-config means "given", not
+      "off-default", `merge` takes positionals, `--sort`/`to-json`/
+      `validate` are new. `CHANGELOG_V2.md` records each; collect them.
+- [ ] `rm -rf cmd/tdtpcli` (safe since the engines moved to `pkg/`),
+      `git mv cmd/tdtpcli_v2 cmd/tdtpcli`, binary name `tdtpcli`.
+- [ ] Update everything that names the binary or its path: `ci.yml`,
+      `release.yml`, `deployments/docker/Dockerfile.worker`, the
+      `tests/cli` defaults, `docs/`, `CLAUDE.md` (the `flagscope.go`
+      section becomes history — the class of bug it guarded is gone).
+- [ ] Merge `CHANGELOG_V2.md` into `CHANGELOG.md` as 2.0.0.
+- [ ] **The compat shim stays one release after the rename**, not until
+      it: the day `tdtpcli` becomes v2 is the day old scripts start going
+      through it. Delete `compat.go` in 2.1.
+
+## Porting rule
+
+A command counts as ported when its `tests/cli/` suite passes against the
+new binary unchanged (`TDTPCLI_BIN` swap). Where no suite exists: a
+normalized comparison with v1 output (MessageID/Timestamp masked) plus
+in-process tests through `App.Run`. The shim's resolved output must be
+byte-identical to the native form.
+
+**Test the streams, not only the exit code.** The first review of v2
+found two framework promises broken while their tests passed: "a foreign
+flag fails at parse time" (exit 2 — with an empty stderr) and "`--json`
+carries errors in-band" (exit 1 — with an empty stdout). Both tests
+checked the code alone.
 
 ## Shared-code rules
 
@@ -66,7 +189,4 @@ release; shim output must be byte-identical to the native form.
 
 `CHANGELOG_V2.md` in root, next to `CHANGELOG.md` (easy diff, same format,
 `## [Unreleased]` → dated versions). Merged into `CHANGELOG.md` at wave 4.
-Header note below explains why there are two.
-
----
-*Teams: skeleton+validate first; commands port independently after that.*
+The header note there explains why there are two.

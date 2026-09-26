@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // toCSVCommand is `tdtpcli_v2 to-csv` — TDTP file to CSV. Same conversion

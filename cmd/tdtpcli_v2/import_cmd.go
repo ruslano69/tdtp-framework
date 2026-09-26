@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // importCommand is `tdtpcli_v2 import` — TDTP file into a database table.
