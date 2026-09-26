@@ -456,7 +456,7 @@ target list and a `--compress` option, and its integrity must be computed
 **The export half is done and this entry is what is left of the plan.**
 `--stream` (BETA) is on `bench/sqlite-date-columns`, not yet merged: a
 `ReadAllRowsStream` in each of SQLite, MSSQL, MySQL and PostgreSQL, driven from
-`cmd/tdtpcli/commands/export_stream.go` through `GeneratePartsStream`. It went
+`pkg/cli/commands/export_stream.go` through `GeneratePartsStream`. It went
 in against a production case rather than a wish — a 24 M-row table wanted about
 17 GB and could not be exported at all; streamed it holds 63 MB flat and writes
 1408 parts in 213 s.

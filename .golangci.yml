@@ -22,8 +22,8 @@ linters:
       - integration_test\.go
       - ^examples/
       - benchmarks
-      - cmd/tdtpcli/commands/inspect\.go
-      - cmd/tdtpcli/commands/process_request\.go
+      - pkg/cli/commands/inspect\.go
+      - pkg/cli/commands/process_request\.go
       - tests/integration/kafka_perf
       - scripts
     rules:

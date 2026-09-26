@@ -173,7 +173,7 @@ type TDTPOutputConfig struct {
 	// независимо от Encryption. Раньше этот шаг попадал в цепочку только
 	// как побочный эффект encryption: true — обычный (нешифрованный)
 	// экспорт не мог получить хеш никаким способом. Зеркалит --integrity
-	// у CLI (cmd/tdtpcli/commands/export.go, needsIntegrity): без
+	// у CLI (pkg/cli/commands/export.go, needsIntegrity): без
 	// security.mercury_url — только локальный хеш для последующей сверки,
 	// с ним — ещё и регистрация в xZMercury.
 	Integrity bool `yaml:"integrity"`

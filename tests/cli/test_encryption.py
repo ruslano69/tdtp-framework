@@ -83,7 +83,7 @@ def _free_port() -> int:
 MERCURY_ADDR = os.environ.get("TDTP_MERCURY_ADDR") or f"127.0.0.1:{_free_port()}"
 MERCURY_URL  = f"http://{MERCURY_ADDR}"
 # "dev-mode" is a literal sentinel FileEncryptor.Encrypt checks for
-# (cmd/tdtpcli/commands/encrypt.go / pkg/processors/encryption.go) — it
+# (pkg/cli/commands/encrypt.go / pkg/processors/encryption.go) — it
 # skips HMAC verification entirely rather than comparing against a secret.
 # Required here because cmd/xzmercury-mock's Bind handler signs only
 # HMAC(secret, uuid) — no ":mode" suffix, no "mode" field in its response —
@@ -91,7 +91,7 @@ MERCURY_URL  = f"http://{MERCURY_ADDR}"
 # (added later to keep dev-bound keys from verifying against a prod
 # secret). Real xZMercury or a mock updated to match would need the real
 # secret instead; "dev-mode" is this codebase's own established bypass for
-# exactly this situation — same pattern cmd/tdtpcli/commands/enc_tier_test.go
+# exactly this situation — same pattern pkg/cli/commands/enc_tier_test.go
 # already uses for its own mock Mercury server.
 MERCURY_SECRET = "dev-mode"
 

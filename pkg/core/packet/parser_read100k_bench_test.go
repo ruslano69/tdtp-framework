@@ -114,7 +114,7 @@ func BenchmarkGetRows100k(b *testing.B) {
 
 // BenchmarkGetRowValuesInto100k — путь потребителя, который значения
 // использует и выбрасывает: буфер переиспользуется, аллокаций нет.
-// Так работает, например, проекция колонок в cmd/tdtpcli/commands/import.go.
+// Так работает, например, проекция колонок в pkg/cli/commands/import.go.
 func BenchmarkGetRowValuesInto100k(b *testing.B) {
 	parts := build100kParts(b, false)
 

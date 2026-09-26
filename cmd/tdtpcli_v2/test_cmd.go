@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // testCommand is `tdtpcli_v2 test` — integrity of a TDTP file (or a

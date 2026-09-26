@@ -104,7 +104,7 @@ matching the plan.
 - **Six of seven Dictionary tokens are unimplemented.** Of `@MRC`, `@SHA`,
   `@SZ`, `@LOCK`, `@TTL`, `@ALG`, `@SRC`, `@VER`, only `@MRC` exists in code
   (written by `--integrity --mercury-url` at
-  [`cmd/tdtpcli/commands/export.go:140`](../cmd/tdtpcli/commands/export.go)).
+  [`pkg/cli/commands/export.go:140`](../pkg/cli/commands/export.go)).
   This is not news — [`docs/dictionary-as-dependency-manifest.md`](dictionary-as-dependency-manifest.md)
   already tracks it honestly in its own implementation-status table (`@LOCK`
   consumer support and `@SHA` pre-verification both marked "not yet
@@ -194,7 +194,7 @@ It exists, and it is not a separate binary.
 Ed25519-signed JSON document (`License.Sign`/`VerifyWith`) naming a licensee,
 an expiry, a tier, a list of permitted adapters, and a list of permitted
 features. `tdtpcli` gates on it directly:
-[`cmd/tdtpcli/commands/license_gate.go`](../cmd/tdtpcli/commands/license_gate.go)'s
+[`pkg/cli/commands/license_gate.go`](../pkg/cli/commands/license_gate.go)'s
 `GateFeature` is called before `--enc` and before `--unsafe`
 ([`cmd/tdtpcli/main.go:837-842`](../cmd/tdtpcli/main.go)), and the community
 floor is restricted to the SQLite adapter alone. This is live, not draft —

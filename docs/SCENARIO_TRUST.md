@@ -64,7 +64,7 @@ enforcement*.
 | Building block | File | What it gives |
 |----------------|------|---------------|
 | `CapabilityCert` | `pkg/license/cert.go` | An Ed25519-signed token: the operation (`"schema-write"` already exists), a scope over tables and databases (`CoversTable`, globs), host locking, an expiry, and **a nonce with replay protection through the audit log** |
-| `applyUnsafeGate` | `cmd/tdtpcli/commands/unsafe_gate.go` | A worked example of a gate: a certificate, or a fallback to `IsAdmin()` |
+| `applyUnsafeGate` | `pkg/cli/commands/unsafe_gate.go` | A worked example of a gate: a certificate, or a fallback to `IsAdmin()` |
 | CA / EnvCert | `xzmercury/internal/ca`, `cmd/tdtp-ca` | Challenge-response, hardware attestation, a separate root for environments |
 | `tdtp-certify` | `xzmercury/cmd/tdtp-certify` | Vendor-side `issue-license`, `revoke-cert`, `list-active` — an established CLI pattern for issuing and revoking |
 | `ProjectRequest` workflow | `cmd/orchestrator/requests.go` | Staged approval (`submit → test → approve/reject`). Today it is a status flag in SQLite rather than a cryptographic act, but the place to attach a signature already exists |

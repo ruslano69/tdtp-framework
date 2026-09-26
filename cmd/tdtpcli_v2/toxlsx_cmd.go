@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // toXLSXCommand is `tdtpcli_v2 to-xlsx` — TDTP file to XLSX. Same engine

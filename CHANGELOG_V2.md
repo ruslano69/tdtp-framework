@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### Changed — the engines moved to `pkg/cli/commands`
+
+- `cmd/tdtpcli/commands` → `pkg/cli/commands` (`git mv`, package name
+  unchanged, only import paths). v2 was importing its engines from under
+  the v1 binary, so the planned wave-4 `rm -rf cmd/tdtpcli` would have
+  deleted the code v2 runs on. Both binaries build under every tag
+  combination (`production`, `nokafka nosqlite`); `tests/cli` sqlite/csv/
+  xlsx pass against both. Path references in comments, live docs and
+  `.golangci.yml` exclusions follow; CHANGELOG history is left as written.
+- `TODO_NEXT_V2.md` rewritten from a wave sketch into the remaining plan:
+  status, wave 3.5 (license — a bypass today —, audit, resilience, a real
+  `Deps`, S3/production build parity), 3.6 (flag gaps per ported
+  command), 3.7 (unported commands by risk), and a wave-4 checklist.
+
 ### Fixed — silent failures in the framework itself
 
 - An unknown or foreign flag exited 2 with **nothing on stderr**: pflag
