@@ -60,21 +60,13 @@ var compatTable = map[string]compatEntry{
 func tryCompat(argv []string) ([]string, string, bool) {
 	i := 0
 	var globals []string
-forGlobals:
 	for i < len(argv) {
-		tok := argv[i]
-		switch {
-		case tok == "--config" && i+1 < len(argv):
-			globals = append(globals, tok, argv[i+1])
-			i += 2
-		case strings.HasPrefix(tok, "--config="),
-			tok == "--quiet" || tok == "-q" || strings.HasPrefix(tok, "--quiet="),
-			tok == "--json" || strings.HasPrefix(tok, "--json="):
-			globals = append(globals, tok)
-			i++
-		default:
-			break forGlobals
+		n := globalFlagSpan(argv, i)
+		if n == 0 {
+			break
 		}
+		globals = append(globals, argv[i:i+n]...)
+		i += n
 	}
 	// Verb scan: the first token that resolves as a v1 verb wins.
 	// Tokens before it are that command's flags (v1 accepted them there);
@@ -105,9 +97,10 @@ forGlobals:
 	tail := append([]string{}, newArgs...)
 	tail = append(tail, argv[i:verb]...)
 	// v1 flags were global, so `--export users --config f.yaml` was as
-	// valid as the config-first form. In v2 --config/--quiet/--json are
-	// globals and must precede the command; no command FlagSet declares
-	// them, so any found in the tail can only be the global — hoist it.
+	// valid as the config-first form. In v2 --config/--license/--quiet/
+	// --json are globals and must precede the command; no command FlagSet
+	// declares them, so any found in the tail can only be the global —
+	// hoist it.
 	hoisted, tail := hoistGlobals(tail)
 	out := append([]string{}, globals...)
 	out = append(out, hoisted...)
@@ -116,23 +109,18 @@ forGlobals:
 	return out, notice, true
 }
 
-// hoistGlobals splits --config (both spellings, with its value), --quiet/-q
-// and --json out of a rewritten v1 tail. Returns (globals, rest).
+// hoistGlobals splits the global flags (globalFlagSpan) out of a rewritten
+// v1 tail. Returns (globals, rest).
 func hoistGlobals(tail []string) ([]string, []string) {
 	var globals, rest []string
-	for k := 0; k < len(tail); k++ {
-		tok := tail[k]
-		switch {
-		case tok == "--config" && k+1 < len(tail):
-			globals = append(globals, tok, tail[k+1])
-			k++
-		case strings.HasPrefix(tok, "--config="),
-			tok == "--quiet" || tok == "-q" || strings.HasPrefix(tok, "--quiet="),
-			tok == "--json" || strings.HasPrefix(tok, "--json="):
-			globals = append(globals, tok)
-		default:
-			rest = append(rest, tok)
+	for k := 0; k < len(tail); {
+		if n := globalFlagSpan(tail, k); n > 0 {
+			globals = append(globals, tail[k:k+n]...)
+			k += n
+			continue
 		}
+		rest = append(rest, tail[k])
+		k++
 	}
 	return globals, rest
 }
@@ -191,21 +179,15 @@ func stripImportLimits(argv *[]string, notice string) string {
 }
 
 // isImportCommand reports whether rewritten argv runs the import command.
-// Globals (if any) precede it: --config/--quiet/--json plus --config's value
-// are skipped, the first remaining token is the command.
+// Globals (if any, with their values) precede it and are skipped; the first
+// remaining token is the command.
 func isImportCommand(argv []string) bool {
-	for k := 0; k < len(argv); k++ {
-		tok := argv[k]
-		if tok == "--config" && k+1 < len(argv) {
-			k++ // its value is not the command
+	for k := 0; k < len(argv); {
+		if n := globalFlagSpan(argv, k); n > 0 {
+			k += n
 			continue
 		}
-		if strings.HasPrefix(tok, "--config=") ||
-			tok == "--quiet" || tok == "-q" || strings.HasPrefix(tok, "--quiet=") ||
-			tok == "--json" || strings.HasPrefix(tok, "--json=") {
-			continue
-		}
-		return tok == "import"
+		return argv[k] == "import"
 	}
 	return false
 }

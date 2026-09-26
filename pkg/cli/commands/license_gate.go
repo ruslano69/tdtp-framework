@@ -73,7 +73,22 @@ func resolveLicensePath(flagPath string) string {
 // GateFeature returns an error if the active license does not permit feature.
 // Used to guard --enc (feature "enc"), --unsafe (feature "unsafe"), S3, etc.
 func GateFeature(feature string) error {
-	lic := ActiveLicense()
+	return CheckFeature(ActiveLicense(), feature)
+}
+
+// GateAdapter returns an error if the active license does not permit the adapter.
+func GateAdapter(adapter string) error {
+	return CheckAdapter(ActiveLicense(), adapter)
+}
+
+// CheckFeature is GateFeature against an explicit license rather than the
+// process-wide one. The v2 CLI carries its license in Deps, so its gates do
+// not depend on who called ResolveLicense last; the refusal text is the
+// same for both CLIs. A nil license is the Community floor (fail closed).
+func CheckFeature(lic *license.License, feature string) error {
+	if lic == nil {
+		lic = license.Community()
+	}
 	if lic.AllowsFeature(feature) {
 		return nil
 	}
@@ -81,9 +96,11 @@ func GateFeature(feature string) error {
 		feature, lic.GetTier(), lic.LicenseeName())
 }
 
-// GateAdapter returns an error if the active license does not permit the adapter.
-func GateAdapter(adapter string) error {
-	lic := ActiveLicense()
+// CheckAdapter is GateAdapter against an explicit license; see CheckFeature.
+func CheckAdapter(lic *license.License, adapter string) error {
+	if lic == nil {
+		lic = license.Community()
+	}
 	if lic.AllowsAdapter(adapter) {
 		return nil
 	}

@@ -6,26 +6,18 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
-	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 )
 
 // loadConfigs loads the YAML config and builds both the database and the
 // broker configs. The queue/topic comes exclusively from config, never
 // from CLI flags (same security rule as v1: the operator owns the
-// destination, the user only names the table).
-func loadConfigs(configPath string) (*adapters.Config, commands.BrokerConfig, error) {
-	if configPath == "" {
-		return nil, commands.BrokerConfig{}, fmt.Errorf("broker commands need --config with database and broker sections")
-	}
-	cfg, err := cliconfig.LoadConfig(configPath)
-	if err != nil {
-		return nil, commands.BrokerConfig{}, fmt.Errorf("failed to load config: %w", err)
-	}
-	adb, err := adapterConfig(configPath)
+// destination, the user only names the table). Errors are typed by
+// databaseConfig.
+func loadConfigs(d *Deps, cmdName string) (*adapters.Config, commands.BrokerConfig, error) {
+	cfg, adb, err := d.databaseConfig(cmdName)
 	if err != nil {
 		return nil, commands.BrokerConfig{}, err
 	}
-	_ = cfg
 	return adb, commands.BrokerConfigFromCliconfig(cfg), nil
 }
 
@@ -67,6 +59,14 @@ Needs --config with database and broker sections.`
 }
 
 // Validate needs --table (or a positional table name).
+// Features: --enc/--enc13 need the "enc" feature, as in v1.
+func (c *exportBrokerCommand) Features() []string {
+	if c.enc || c.encLegacy {
+		return []string{"enc"}
+	}
+	return nil
+}
+
 func (c *exportBrokerCommand) Validate(args []string) error {
 	if c.table == "" {
 		if len(args) == 1 {
@@ -90,9 +90,9 @@ type exportBrokerJSON struct {
 
 func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = args
-	adb, bcc, err := loadConfigs(d.ConfigPath)
+	adb, bcc, err := loadConfigs(d, c.Name())
 	if err != nil {
-		return UsageError{Err: err}
+		return err // typed in databaseConfig
 	}
 	query, err := c.q.build()
 	if err != nil {
@@ -165,9 +165,9 @@ type importBrokerJSON struct {
 
 func (c *importBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = args
-	adb, bcc, err := loadConfigs(d.ConfigPath)
+	adb, bcc, err := loadConfigs(d, c.Name())
 	if err != nil {
-		return UsageError{Err: err}
+		return err // typed in databaseConfig
 	}
 	strategy, err := commands.ParseImportStrategy(c.strategy)
 	if err != nil {

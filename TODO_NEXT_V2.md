@@ -31,10 +31,10 @@ cmd/tdtpcli_v2/
   main.go         # NewApp().Run + os.Exit
   app.go          # registry, dispatch, generated help, middleware chain
   command.go      # Command interface + Base, Output contract
-  flags.go        # ONLY globals: --config, --quiet/--json
+  flags.go        # ONLY globals: --config, --license, --quiet/--json
   errors.go       # UsageError / DataError / exit codes, checkReadable
-  deps.go         # service container — still a stub (ConfigPath only)
-  middleware.go   # recover only; license/audit/resilience are wave 3.5
+  deps.go         # service container; databaseConfig = the one gated adapter-config builder
+  middleware.go   # recover → license; audit/resilience are wave 3.5
   compat.go       # v1 flat flags → v2 subcommands shim
   queryflags.go   # shared --where/--order-by/--limit/--offset/--fields bundle
   registry.go     # all Register() calls in one place
@@ -82,19 +82,35 @@ a middleware arrives, the more commands it has to be retrofitted into.
 v1 wraps every command in the same four things inside `main.go`. v2 has
 none of them yet, and one of them is a hole rather than a missing feature.
 
-1. **License — P0, a bypass today.** v1 resolves `tdtp.lic`
-   (`commands.ResolveLicense`), refuses licensed-only features up front
-   (`GateFeature("enc")`, `GateFeature("unsafe")`) and refuses non-sqlite
-   adapters on the community floor (`GateAdapter`). v2 calls none of them:
-   `tdtpcli_v2 --config pg.yaml export t` works without a license, and so
-   does `pipeline --enc`. Shape: the middleware resolves the license once;
-   a command declares what it needs through an optional interface
-   (`Features() []string`, checked before `Run`); the adapter gate lives
-   where the adapter config is built (item 4), so no command can forget
-   it. Global `--license` joins `--config` in `flags.go`.
-   Test: every command that can reach a non-sqlite adapter or an `--enc*`
-   flag refuses on the community floor — generated from the registry, not
-   listed by hand, the way `pkg/transform` generates its matrix.
+1. **~~License — P0, a bypass~~ — done 2026-09-26.** `licenseMiddleware`
+   resolves `tdtp.lic` exactly as v1 (`--license`, `TDTP_LICENSE`,
+   `./tdtp.lic`, Community); a command asks for features through
+   `FeatureGated` (`pipeline`: `enc`, `unsafe`; `export-broker`: `enc`);
+   the adapter gate sits in `Deps.databaseConfig`, the only place that
+   builds `adapters.Config` — `TestAdapterConfigBuiltOnlyInDeps` parses the
+   package to hold that, and `TestLicense_DBCommandTableIsComplete` derives
+   the DB commands from the source, so a new one cannot skip the refusal
+   test. Same refusal texts (`commands.CheckFeature`/`CheckAdapter`), exit
+   1 as in v1. Deliberate differences: the adapter is gated where a
+   database is used, not whenever a config is loaded (v1 refused
+   `--config pg.yaml --to-csv f.xml` on Community); the banner is a
+   stderr notice, since v2's stdout is the data channel.
+
+   **Found on the way, open in BOTH CLIs — product decisions, not bugs to
+   patch quietly:**
+   - `GateRowCount` is never called. The Community floor's 50 000-row
+     cap (`license.Community`, and the header of `license_gate.go`) is
+     enforced nowhere.
+   - The `s3` feature is never gated: S3 input/output works on Community.
+   - Pipeline **source** adapters are never gated (`pipeline` loads no
+     database config), so a Community pipeline reads PostgreSQL. The
+     `etl` feature and `PipelineLimit` are unused as well.
+   - `--license /typo` silently falls back to Community (`license.Load`
+     treats a missing file as "no license"). A downgrade, not a bypass,
+     but it surfaces as a confusing "not licensed" later.
+
+   Enforcing any of the first three changes what existing Community users
+   can do today — decide per item, then land it in v2 first.
 2. **Audit.** v1 sets an `audit.Operation` per branch and threads
    `commands.WithOpMetrics(ctx)` so engines report row counts back. As a
    middleware plus an optional `AuditOp() audit.Operation` on the command.
@@ -102,11 +118,10 @@ none of them yet, and one of them is a hole rather than a missing feature.
 3. **Resilience.** v1 runs each engine call through
    `prodFeatures.ExecuteWithResilience` (circuit breaker + retry from
    config). Middleware, config-driven, off unless configured — as in v1.
-4. **A real `Deps`.** Today each command loads the YAML itself
-   (`exportConfigs`, `adapterConfig`, …) and builds `adapters.Config` its
-   own way — `StrictSchema` is already lost on the v2 import path because
-   of it. One lazy loader: config parsed once; `AdapterConfig()` (with
-   `StrictSchema`, `Charset` and the license adapter gate);
+4. **A real `Deps`.** Started with the license work: `databaseConfig`
+   is now the single adapter-config builder (gated, and it carries
+   `database.strict_schema`, which the two old builders dropped). Still
+   to come: parse the config once per run instead of per call;
    `StorageConfig()` for `s3://`; `Processors()` for mask/validate/
    normalize. File-only commands still never touch it.
 5. **Build parity.** `drivers_s3.go` (`nos3` tag) is missing, so v2 has no

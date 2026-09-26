@@ -7,7 +7,6 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
-	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 )
 
 // listCommand is `tdtpcli_v2 list` — tables (and views) in the database.
@@ -49,27 +48,10 @@ type listJSON struct {
 	Views  []string `json:"views,omitempty"`
 }
 
-// adapterConfig builds the database adapter config from the v1-format
-// YAML file, the same way v1's main does.
-func adapterConfig(path string) (*adapters.Config, error) {
-	if path == "" {
-		return nil, fmt.Errorf("list needs --config with a database section")
-	}
-	cfg, err := cliconfig.LoadConfig(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-	return &adapters.Config{
-		Type:    cfg.Database.Type,
-		DSN:     cfg.Database.BuildDSN(),
-		Charset: cfg.Database.Charset,
-	}, nil
-}
-
 func (c *listCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	cfg, err := adapterConfig(d.ConfigPath)
+	_, cfg, err := d.databaseConfig("list")
 	if err != nil {
-		return UsageError{Err: err} // missing/unreadable config is user error
+		return err // typed: bad config → usage, unlicensed adapter → operational
 	}
 	pattern := ""
 	if len(args) == 1 {

@@ -71,9 +71,9 @@ func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 	if _, err := os.Stat(path); err != nil {
 		return err // unreadable input is operational (exit 1)
 	}
-	cfg, err := adapterConfig(d.ConfigPath)
+	_, cfg, err := d.databaseConfig("import")
 	if err != nil {
-		return UsageError{Err: err} // missing/unreadable config is user error
+		return err // typed: bad config → usage, unlicensed adapter → operational
 	}
 	strategy, err := commands.ParseImportStrategy(c.strategy)
 	if err != nil {
