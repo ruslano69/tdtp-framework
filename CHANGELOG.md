@@ -4,6 +4,48 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — `--test` said "Integrity check passed" without checking xxh3
+
+`--test` (`check-integrity` in v2) compared row counts and the compression
+checksum and never touched the v1.4 hashes. A packet with one row altered,
+or a plain packet relabelled `version="1.4"` with no hashes at all, printed
+`✓ Integrity check passed`. It now verifies xxh3 on every v1.4+ packet
+(`, xxh3 OK` in the per-part line) and refuses one that declares 1.4+
+without hashes.
+
+It also reads packets the way import does. `ParseFile` unfolds compact rows
+on read, but the hash covers them folded (the export chain runs compact →
+integrity), so the first version of this check refused every uncompressed
+compact+integrity export. Local and S3 inputs now share one parse path —
+S3 used to skip the columnar expansion.
+
+### Fixed — one packet, three verdicts on its version
+
+The "v1.4+ must carry xxh3" rule lived only inside
+`pipeline.VerifyAndPrepare`, so a relabelled packet was refused by import,
+VALID for `validate`, and passed by `--test`. It is now
+`packet.CheckDeclaredIntegrity`, used by all three; the validator checks
+version ↔ features in both directions. `--stamp-integrity` still repairs
+such a packet (its pre-check skips the version rules).
+
+### Changed — `docs/tdtp.xsd`: `Field/@type` is a closed list
+
+`DataTypeValue` was a union with `xs:string`, so any spelling validated.
+It rejected nothing the framework accepts: a type outside
+`schema.IsValidType` fails every typed reader anyway — import refused it
+with `unsupported type`, after `CREATE TABLE` had already run. The list is
+exactly the 16 values `IsValidType` accepts, case included. `subtype`
+stays open (no central vocabulary — TODO_NEXT 2.7).
+
+### Fixed — smaller
+
+- The shared read gate said "export blocked" on import, the converters,
+  the broker and `listen` — it never guards export. Now "packet refused".
+- The schema drift test told you to run `go generate ./cmd/tdtp-validate/`,
+  a no-op since the validator moved; the directive lives in
+  `./pkg/validate/`. Same stale path fixed in its README, `gen.go` and
+  `third_party/xsd/README.md`.
+
 ### Pipeline source loads now honor `retry_attempts` / `retry_delay_seconds`
 
 `error_handling.retry_attempts` and `retry_delay_seconds` were parsed,

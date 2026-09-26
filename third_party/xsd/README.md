@@ -1,6 +1,6 @@
 # third_party/xsd — vendored fork of github.com/jacoelho/xsd v0.5.1
 
-Pure-Go XSD 1.0 validator (MIT, see LICENSE). Used by `cmd/tdtp-validate`
+Pure-Go XSD 1.0 validator (MIT, see LICENSE). Used by `pkg/validate` (the `tdtp-validate` binary and `tdtpcli_v2 validate`)
 to execute `docs/tdtp.xsd` instead of transcribing it by hand.
 
 ## Why a fork, and why vendored
@@ -38,6 +38,6 @@ Changed vs v0.5.1 (all marked with `NOTE (fork)` comments):
    `GOTOOLCHAIN=go1.25.0` surfaces any new 1.27-isms as compile errors;
    fix them the same mechanical way.
 3. Prove it: `GOTOOLCHAIN=go1.25.0 go test -tags nokafka -count=1
-   ./cmd/tdtp-validate/ ./pkg/core/packet/` from the repo root — the
+   ./pkg/validate/ ./pkg/core/packet/` from the repo root — the
    validator suite asserts engine diagnostics verbatim, so behavior drift
    fails loudly.

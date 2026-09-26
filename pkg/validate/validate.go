@@ -154,8 +154,9 @@ func packetFeatures(pkt *packet.DataPacket) []string {
 type semchecker struct {
 	errs []string
 	rows int
-	// skipVersion silences the version-predates error: the mutation itself
-	// restores the version, so that error must not block it.
+	// skipVersion silences both version-consistency errors (a version
+	// predating a feature, v1.4+ without hashes): the mutation itself
+	// restores the version/stamp, so those errors must not block it.
 	skipVersion bool
 }
 
@@ -165,7 +166,13 @@ func (c *semchecker) serrf(format string, args ...any) {
 
 func checkSemantics(c *semchecker, pkt *packet.DataPacket) {
 	if !c.skipVersion {
+		// Both directions of version ↔ features: a feature needs its
+		// version (the table), and v1.4+ needs its hashes — the shared
+		// reader rule, so validate and import cannot disagree again.
 		checkVersionCoversFeatures(c, pkt)
+		if err := packet.CheckDeclaredIntegrity(pkt); err != nil {
+			c.serrf("DataPacket: %v", err)
+		}
 	}
 	checkFieldNames(c, pkt)
 	checkHeader(c, pkt)

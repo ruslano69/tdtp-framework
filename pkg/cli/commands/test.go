@@ -106,9 +106,15 @@ func TestFileTo(w io.Writer, ctx context.Context, filePath string, storageCfg *s
 				parseErrors++
 				continue
 			}
-			pkt, err = parser.ParseBytes(data)
+			pkt, err = parseForTest(parser, data)
 		} else {
-			pkt, err = parser.ParseFile(f)
+			data, readErr := os.ReadFile(f)
+			if readErr != nil {
+				reportf(w, "  ✗ %s: read failed: %v\n", filepath.Base(f), readErr)
+				parseErrors++
+				continue
+			}
+			pkt, err = parseForTest(parser, data)
 		}
 		if err != nil {
 			reportf(w, "  ✗ %s: XML parse failed: %v\n", filepath.Base(f), err)
@@ -194,7 +200,13 @@ func validatePacket(w io.Writer, pkt *packet.DataPacket, label string) (int, err
 				label, pkt.Header.RecordsInPart, actual)
 			return actual, fmt.Errorf("row count mismatch")
 		}
-		reportf(w, "  ✓ %s: uncompressed, %d rows, table=%q\n", label, actual, pkt.Header.TableName)
+		tmp := *pkt
+		mark, err := verifyIntegrityStamp(&tmp)
+		if err != nil {
+			reportf(w, "  ✗ %s: %v\n", label, err)
+			return actual, err
+		}
+		reportf(w, "  ✓ %s: uncompressed, %d rows, table=%q%s\n", label, actual, pkt.Header.TableName, mark)
 		return actual, nil
 	}
 
@@ -230,9 +242,56 @@ func validatePacket(w io.Writer, pkt *packet.DataPacket, label string) (int, err
 	if pkt.Data.Checksum != "" {
 		checksumMark = ", checksum OK"
 	}
-	reportf(w, "  ✓ %s: algo=%s, %d rows, decompressed %s%s\n",
-		label, pkt.Data.Compression, actual, decompTime.Round(time.Millisecond), checksumMark)
+	// Hashes cover the plain rows, so they are checked on tmp — after
+	// decompression, never on the blob.
+	integrityMark, err := verifyIntegrityStamp(&tmp)
+	if err != nil {
+		reportf(w, "  ✗ %s: algo=%s, %v\n", label, pkt.Data.Compression, err)
+		return actual, err
+	}
+	reportf(w, "  ✓ %s: algo=%s, %d rows, decompressed %s%s%s\n",
+		label, pkt.Data.Compression, actual, decompTime.Round(time.Millisecond), checksumMark, integrityMark)
 	return actual, nil
+}
+
+// parseForTest reads a packet the way import does, because --test now
+// checks the same xxh3 import checks. ParseBytes leaves compact rows folded:
+// the hash is computed on them (export chain: compact → integrity →
+// columnar → compress), and ParseFile's early compact expansion made every
+// uncompressed compact+integrity packet mismatch. Columnar IS expanded, as
+// ParseFile does — it is laid out after the hash, and the row count needs
+// rows, not columns (ExpandColumnarRows is a no-op on compressed data;
+// DecompressPacket expands those). Local and S3 inputs now share this path;
+// S3 used to skip the columnar step.
+func parseForTest(p *packet.Parser, data []byte) (*packet.DataPacket, error) {
+	pkt, err := p.ParseBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := packet.ExpandColumnarRows(pkt); err != nil {
+		return nil, err
+	}
+	return pkt, nil
+}
+
+// verifyIntegrityStamp is the xxh3 half of --test. The command is named
+// check-integrity in v2 and prints "Integrity check passed", yet it used
+// to compare only row counts and the compression checksum: a v1.4 packet
+// with one row altered, or relabelled 1.4 with no hashes at all, passed.
+// Now: v1.4+ must carry hashes (packet.CheckDeclaredIntegrity, the rule
+// import applies) and they must match (packet.VerifyIntegrity).
+// pkt must hold plain rows; it may be materialized in place.
+func verifyIntegrityStamp(pkt *packet.DataPacket) (string, error) {
+	if err := packet.CheckDeclaredIntegrity(pkt); err != nil {
+		return "", err
+	}
+	if !packet.HasIntegrity(pkt) {
+		return "", nil
+	}
+	if err := packet.VerifyIntegrity(pkt); err != nil {
+		return "", err
+	}
+	return ", xxh3 OK", nil
 }
 
 // resolvePartSet takes any file in a multi-part set and returns:

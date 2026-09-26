@@ -66,7 +66,9 @@ func applyV14SecurityGate(ctx context.Context, pkt *packet.DataPacket, mercuryUR
 
 	result, err := pipeline.VerifyAndPrepare(ctx, pkt, verifier, pipeline.FallbackDegrade)
 	if err != nil {
-		return fmt.Errorf("security check failed — export blocked: %w", err)
+		// Not "export blocked": this gate guards import, the converters, the
+		// broker and listen — every reader — and never the export path.
+		return fmt.Errorf("security check failed — packet refused: %w", err)
 	}
 
 	switch {

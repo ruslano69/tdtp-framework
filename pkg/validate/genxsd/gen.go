@@ -7,7 +7,7 @@
 // instead. docs/tdtp.xsd stays the single source of truth: genfresh_test.go
 // fails the build if the checked-in copy drifts from it.
 //
-// Regenerate: go generate ./cmd/tdtp-validate/
+// Regenerate: go generate ./pkg/validate/
 package main
 
 import (
