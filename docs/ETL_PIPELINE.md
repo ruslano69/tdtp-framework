@@ -167,22 +167,26 @@ performance:
 
 # ─── ERROR HANDLING ───────────────────────────────────────────────────────────
 error_handling:
-  on_source_error: "fail"        # fail | continue — the only one of these five actually enforced (see below)
+  on_source_error: "fail"        # fail | continue — what to do when a source still fails after retries (see below)
   on_transform_error: "fail"     # accepted, validated, not yet acted on
   on_output_error: "fail"        # accepted, validated, not yet acted on
-  retry_attempts: 3              # accepted, not yet acted on — nothing retries
-  retry_delay_seconds: 5         # accepted, not yet acted on
+  retry_attempts: 3              # total attempts per source load (1 = no retry), exponential backoff via pkg/retry
+  retry_delay_seconds: 5         # initial delay between source-load retries (doubles each attempt)
 ```
 
-**Only `on_source_error` changes what actually happens.** `continue` skips a
-failed source and carries on with the rest; `fail` (default) stops the
-pipeline on the first source error — both are real, both are exercised by
-tests. `on_transform_error`, `on_output_error`, `retry_attempts` and
-`retry_delay_seconds` are parsed, defaulted, and validated for their allowed
-values, but nothing in the pipeline runner reads them at the point a
-transform or an output actually fails — such a failure always stops the
-pipeline immediately, regardless of what these four say. Filed as an open
-item in `TODO_NEXT.md`; do not rely on them today. `performance.timeout` is
+**`on_source_error` plus source-load retries change what actually happens.**
+Each source load is retried up to `retry_attempts` times (default 3, first
+delay `retry_delay_seconds`, then exponential backoff — `pkg/retry`, the same
+combination as `cmd/tdtpcli/production.go`'s circuit-breaker+retry pair, minus
+the breaker). Only source loading is retried: it is side-effect free (pure
+read), while repeating a transform or an output is not idempotent. When the
+attempts run out, `continue` skips the failed source and carries on with the
+rest; `fail` (default) stops the pipeline — both are real, both are exercised
+by tests. `on_transform_error` and `on_output_error` are parsed, defaulted,
+and validated for their allowed values, but nothing in the pipeline runner
+reads them at the point a transform or an output actually fails — such a
+failure always stops the pipeline immediately, regardless of what these two
+say. Filed as an open item in `TODO_NEXT.md`. `performance.timeout` is
 not a real field at all — earlier revisions of this document described one
 that was never implemented.
 

@@ -19,6 +19,7 @@ import (
 	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
+	"github.com/ruslano69/tdtp-framework/pkg/retry"
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
@@ -362,8 +363,9 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 				TableName:  src.Name,
 			}
 
-			// Загружаем данные из источника
-			pkt, err := l.loadFromSource(ctx, src)
+			// Загружаем данные из источника (с ретраями по
+			// error_handling.retry_attempts / retry_delay_seconds)
+			pkt, err := l.loadFromSourceWithRetry(ctx, src)
 			if err != nil {
 				result.Error = err
 			} else {
@@ -429,8 +431,9 @@ func (l *Loader) LoadOne(ctx context.Context, sourceName string) (*SourceData, e
 
 	defer l.closeAdapters(ctx)
 
-	// Загружаем данные
-	pkt, err := l.loadFromSource(ctx, *source)
+	// Загружаем данные (с ретраями по
+	// error_handling.retry_attempts / retry_delay_seconds)
+	pkt, err := l.loadFromSourceWithRetry(ctx, *source)
 	if err != nil {
 		return &SourceData{
 			SourceName: source.Name,
@@ -506,6 +509,43 @@ func (l *Loader) closeAdapters(ctx context.Context) {
 		_ = a.Close(ctx)
 		delete(l.adapters, key)
 	}
+}
+
+// loadFromSourceWithRetry оборачивает loadFromSource ретраями из
+// error_handling: retry_attempts — общее число попыток (включая первую),
+// retry_delay_seconds — начальная задержка, дальше экспоненциальный backoff
+// (pkg/retry, как в cmd/tdtpcli/production.go).
+//
+// attempts <= 1 (включая ноль у Loader, собранных вручную без
+// PipelineConfig.SetDefaults) — одна попытка, старое поведение без задержек.
+// Ретраится только загрузка источника: она side-effect free (чистое чтение),
+// в отличие от transform/output, где повтор неидемпотентен.
+func (l *Loader) loadFromSourceWithRetry(ctx context.Context, source SourceConfig) (*packet.DataPacket, error) {
+	attempts := l.errorHandling.RetryAttempts
+	if attempts <= 1 {
+		return l.loadFromSource(ctx, source)
+	}
+	delay := time.Duration(l.errorHandling.RetryDelaySeconds) * time.Second
+	if delay < 0 {
+		delay = 0
+	}
+	cfg := retry.EnableRetry(attempts, delay)
+	if cfg.MaxDelay < cfg.InitialDelay {
+		cfg.MaxDelay = cfg.InitialDelay
+	}
+	retryer, err := retry.NewRetryer(cfg)
+	if err != nil {
+		// Некорректная retry-конфигурация не должна ронять загрузку —
+		// откатываемся к одной попытке (fail loud даст сам loadFromSource).
+		return l.loadFromSource(ctx, source)
+	}
+	var pkt *packet.DataPacket
+	err = retryer.Do(ctx, func(ctx context.Context) error {
+		var err error
+		pkt, err = l.loadFromSource(ctx, source)
+		return err
+	})
+	return pkt, err
 }
 
 // loadFromSource загружает данные из конкретного источника

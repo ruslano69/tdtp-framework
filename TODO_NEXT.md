@@ -484,8 +484,11 @@ target table. Prerequisite for `--import-stream`, which needs schema negotiation
 
 `ErrorHandlingConfig` (`pkg/etl/config.go`) parses, defaults and validates
 `on_transform_error`, `on_output_error`, `retry_attempts` and
-`retry_delay_seconds`, but nothing in the pipeline runner reads them — only
-`on_source_error` actually branches on anything. Found rereading
+`retry_delay_seconds`. Since the `[Unreleased]` CHANGELOG entry,
+`retry_attempts`/`retry_delay_seconds` drive source-load retries
+(`Loader.loadFromSourceWithRetry`, side-effect free by construction) —
+`on_transform_error` and `on_output_error` are still never read, and only
+`on_source_error` branches on anything after the retries run out. Found rereading
 `docs/ETL_PIPELINE.md` against the code; `docs/ETL_PIPELINE.md` now says so
 plainly instead of implying the four fields work, but the fields themselves
 are unchanged.

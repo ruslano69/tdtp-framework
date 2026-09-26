@@ -2,6 +2,23 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased]
+
+### Pipeline source loads now honor `retry_attempts` / `retry_delay_seconds`
+
+`error_handling.retry_attempts` and `retry_delay_seconds` were parsed,
+defaulted (3 / 5 s) and validated — but nothing read them: a source load
+failed once and the pipeline stopped. `Loader` now wraps each source load
+(`LoadAll`, `LoadOne`) in `pkg/retry` with exponential backoff, the same
+combination `cmd/tdtpcli/production.go` uses for CLI operations. Only the
+source load is retried — it is side-effect free, while repeating a transform
+or an output is not idempotent (`on_transform_error` / `on_output_error`
+stay accepted-but-inert, see `TODO_NEXT.md` 2.4). `retry_attempts` counts
+total attempts including the first; `<= 1` (including zero on hand-built
+`Loader`s that skip `SetDefaults`) keeps the old single-try behavior, so
+existing unit tests are unaffected. Pinned by
+`pkg/etl/loader_retry_test.go`; `docs/ETL_PIPELINE.md` updated.
+
 ## [1.26.2] - 2026-09-25
 
 ### Fixed — `merge` on compressed/columnar/compact files merged blobs, not rows
