@@ -1,0 +1,8 @@
+# Editors create new files with LF, matching .gitattributes (eol=lf).
+root = true
+
+[*]
+end_of_line = lf
+
+[*.{bat,cmd,vbs}]
+end_of_line = crlf
