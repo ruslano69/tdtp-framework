@@ -14,6 +14,7 @@ import (
 // processors travel later (config-driven, like export).
 type importCommand struct {
 	Base
+	p          processorFlags
 	table      string
 	fields     string
 	strategy   string
@@ -42,6 +43,7 @@ Needs --config: this command talks to a database.`
 	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII")
 	fs.Var(&c.expectVars, "expect-var", "require PipelineContext variable to match (name=value); repeatable")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL for v1.4 verification (else local only)")
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
 }
@@ -67,6 +69,10 @@ type importJSON struct {
 }
 
 func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
+	procs, err := c.p.build() // before any database work
+	if err != nil {
+		return err
+	}
 	path := args[0]
 	if _, err := os.Stat(path); err != nil {
 		return err // unreadable input is operational (exit 1)
@@ -84,6 +90,7 @@ func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		table = "(from file)"
 	}
 	err = commands.ImportFile(ctx, cfg, commands.ImportOptions{
+		ProcessorMgr:     procs,
 		FilePath:         path,
 		TargetTable:      c.table,
 		Fields:           splitFields(c.fields),

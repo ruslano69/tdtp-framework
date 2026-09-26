@@ -4,6 +4,39 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Security — `--mask`/`--validate`/`--normalize` did not do what they said
+
+Found porting the flags to v2. The processors themselves (`pkg/processors`)
+were right and tested; every bug was in the untested glue that feeds them
+packet rows. Its tests checked only that a processor had been configured —
+none ever looked at the rows that came out.
+
+- **`--export-broker --mask` sent data in clear.** `ExportToBroker` took the
+  processor chain and never called it; the flag table listed `--mask` for
+  the command, so nothing warned. Now applied first, before compression and
+  encryption, as `--export` does.
+- **`on_error: filter` passed the rows it removed.** Only the first N rows
+  were overwritten with the chain's output, so the tail of the original rows
+  stayed in the packet; with every row invalid, all of them were exported.
+  Rows are now replaced whole and `RecordsInPart` follows.
+- **`--mask` could mask the wrong column.** Rows were split on a bare `|`,
+  ignoring the `\|` escape: a value holding a pipe shifted later columns, so
+  `--mask email` masked part of a neighbouring field and left the address.
+  Rows are now split and re-joined the way the parser does.
+- **A rules file without its section was silently ignored** — `--validate`
+  naming a file with no `rules:` (or `--normalize` without `fields:`)
+  validated nothing. Now an error; the test that pinned the silence as
+  expected behaviour asserts the error instead.
+- **`--pipeline` accepted the three flags and ignored them** (its processors
+  come from the YAML). The flag table no longer claims them for pipeline, so
+  v1 now prints its "does not read" notice. `--import` and `--import-xlsx`
+  do apply them but were not listed, and warned wrongly; now listed.
+- The "Added field masker/validator/normalizer" lines respect `--quiet`.
+
+The chain moved from `cmd/tdtpcli` to `pkg/cli/commands` (`RowProcessors`)
+so both CLIs build the same one. New tests assert on output only: rows after
+the chain, messages actually sent to the broker, files written.
+
 ### Fixed — `--test` said "Integrity check passed" without checking xxh3
 
 `--test` (`check-integrity` in v2) compared row counts and the compression

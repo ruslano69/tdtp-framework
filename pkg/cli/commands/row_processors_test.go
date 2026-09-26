@@ -1,8 +1,9 @@
-package main
+package commands
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
@@ -72,7 +73,7 @@ func TestDetectMaskPattern(t *testing.T) {
 }
 
 func TestProcessorManager_HasProcessors(t *testing.T) {
-	pm := NewProcessorManager()
+	pm := NewRowProcessors()
 
 	// Initially no processors
 	if pm.HasProcessors() {
@@ -121,7 +122,7 @@ func TestProcessorManager_AddMaskProcessor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pm := NewProcessorManager()
+			pm := NewRowProcessors()
 			err := pm.AddMaskProcessor(tt.maskFields)
 
 			if tt.expectError {
@@ -152,7 +153,7 @@ func TestProcessorManager_AddValidateProcessor(t *testing.T) {
 	}
 
 	t.Run("empty path skips silently", func(t *testing.T) {
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		if err := pm.AddValidateProcessor(""); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -161,21 +162,20 @@ func TestProcessorManager_AddValidateProcessor(t *testing.T) {
 		}
 	})
 
-	t.Run("yaml without rules section skips silently", func(t *testing.T) {
+	// This case used to be pinned as "skips silently" — the test asserted the
+	// bug: --validate with the wrong file validated nothing, and said nothing.
+	t.Run("yaml without rules section is an error", func(t *testing.T) {
 		path := writeTemp(t, "# no rules here\nsome_other_key: value\n")
-		pm := NewProcessorManager()
-		if err := pm.AddValidateProcessor(path); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		if pm.HasProcessors() {
-			t.Error("expected no processors when rules section is absent")
+		pm := NewRowProcessors()
+		if err := pm.AddValidateProcessor(path); err == nil || !strings.Contains(err.Error(), `no "rules:" section`) {
+			t.Errorf("want a missing-section error, got %v", err)
 		}
 	})
 
 	t.Run("valid rules yaml loads validator", func(t *testing.T) {
 		content := "rules:\n  email: email\n  age: range:0-150\n"
 		path := writeTemp(t, content)
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		if err := pm.AddValidateProcessor(path); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -185,7 +185,7 @@ func TestProcessorManager_AddValidateProcessor(t *testing.T) {
 	})
 
 	t.Run("non-existent file returns error", func(t *testing.T) {
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		err := pm.AddValidateProcessor(filepath.Join(t.TempDir(), "missing.yaml"))
 		if err == nil {
 			t.Error("expected error for missing file, got nil")
@@ -194,7 +194,7 @@ func TestProcessorManager_AddValidateProcessor(t *testing.T) {
 
 	t.Run("invalid yaml returns error", func(t *testing.T) {
 		path := writeTemp(t, "rules: [\nbad yaml{{{\n")
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		if err := pm.AddValidateProcessor(path); err == nil {
 			t.Error("expected error for invalid yaml, got nil")
 		}
@@ -202,7 +202,7 @@ func TestProcessorManager_AddValidateProcessor(t *testing.T) {
 
 	t.Run("invalid rule type returns error", func(t *testing.T) {
 		path := writeTemp(t, "rules:\n  age: nonexistent_rule\n")
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		if err := pm.AddValidateProcessor(path); err == nil {
 			t.Error("expected error for unknown rule type, got nil")
 		}
@@ -224,7 +224,7 @@ func TestProcessorManager_AddNormalizeProcessor(t *testing.T) {
 	}
 
 	t.Run("empty path skips silently", func(t *testing.T) {
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		if err := pm.AddNormalizeProcessor(""); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -233,21 +233,18 @@ func TestProcessorManager_AddNormalizeProcessor(t *testing.T) {
 		}
 	})
 
-	t.Run("yaml without fields section skips silently", func(t *testing.T) {
+	t.Run("yaml without fields section is an error", func(t *testing.T) {
 		path := writeTemp(t, "# no fields here\nsome_other_key: value\n")
-		pm := NewProcessorManager()
-		if err := pm.AddNormalizeProcessor(path); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		if pm.HasProcessors() {
-			t.Error("expected no processors when fields section is absent")
+		pm := NewRowProcessors()
+		if err := pm.AddNormalizeProcessor(path); err == nil || !strings.Contains(err.Error(), `no "fields:" section`) {
+			t.Errorf("want a missing-section error, got %v", err)
 		}
 	})
 
 	t.Run("valid fields yaml loads normalizer", func(t *testing.T) {
 		content := "fields:\n  email: email\n  phone: phone\n  city: uppercase\n"
 		path := writeTemp(t, content)
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		if err := pm.AddNormalizeProcessor(path); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -257,7 +254,7 @@ func TestProcessorManager_AddNormalizeProcessor(t *testing.T) {
 	})
 
 	t.Run("non-existent file returns error", func(t *testing.T) {
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		err := pm.AddNormalizeProcessor(filepath.Join(t.TempDir(), "missing.yaml"))
 		if err == nil {
 			t.Error("expected error for missing file, got nil")
@@ -266,7 +263,7 @@ func TestProcessorManager_AddNormalizeProcessor(t *testing.T) {
 
 	t.Run("invalid normalize rule returns error", func(t *testing.T) {
 		path := writeTemp(t, "fields:\n  name: nonexistent_rule\n")
-		pm := NewProcessorManager()
+		pm := NewRowProcessors()
 		if err := pm.AddNormalizeProcessor(path); err == nil {
 			t.Error("expected error for unknown rule, got nil")
 		}

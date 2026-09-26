@@ -12,6 +12,7 @@ import (
 // to XLSX. Same engine as v1 (commands.ExportTableToXLSX).
 type exportXLSXCommand struct {
 	Base
+	p      processorFlags
 	table  string
 	sheet  string
 	output string
@@ -30,6 +31,7 @@ Needs --config: this command talks to a database.`
 	fs.StringVar(&c.sheet, "sheet", "Sheet1", "worksheet name")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <table>.xlsx)")
 	addQueryFlags(fs, &c.q)
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
 }
@@ -57,6 +59,10 @@ type exportXLSXJSON struct {
 }
 
 func (c *exportXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
+	procs, err := c.p.build() // before any database work
+	if err != nil {
+		return err
+	}
 	_ = args
 	_, cfg, err := d.databaseConfig(c.Name())
 	if err != nil {
@@ -68,10 +74,11 @@ func (c *exportXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args [
 	}
 	target := outputFile(c.output, c.table, "xlsx")
 	err = commands.ExportTableToXLSX(ctx, cfg, commands.XLSXOptions{
-		TableName:  c.table,
-		OutputFile: target,
-		SheetName:  c.sheet,
-		Query:      query,
+		ProcessorMgr: procs,
+		TableName:    c.table,
+		OutputFile:   target,
+		SheetName:    c.sheet,
+		Query:        query,
 	})
 	if err != nil {
 		return err
@@ -143,6 +150,7 @@ func (c *fromXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []s
 // table. Same engine as v1 (commands.ImportXLSXToTable).
 type importXLSXCommand struct {
 	Base
+	p        processorFlags
 	sheet    string
 	strategy string
 }
@@ -157,6 +165,7 @@ Needs --config: this command talks to a database.`
 	fs := newCommandFlagSet("import-xlsx")
 	fs.StringVar(&c.sheet, "sheet", "Sheet1", "worksheet to read")
 	fs.StringVar(&c.strategy, "strategy", "replace", "import strategy: replace, ignore, fail, copy")
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
 }
@@ -176,6 +185,10 @@ type importXLSXJSON struct {
 }
 
 func (c *importXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
+	procs, err := c.p.build() // before any database work
+	if err != nil {
+		return err
+	}
 	path := args[0]
 	if _, err := os.Stat(path); err != nil {
 		return err
@@ -189,9 +202,10 @@ func (c *importXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args [
 		return UsageError{Err: err}
 	}
 	err = commands.ImportXLSXToTable(ctx, cfg, commands.XLSXOptions{
-		InputFile: path,
-		SheetName: c.sheet,
-		Strategy:  strategy,
+		ProcessorMgr: procs,
+		InputFile:    path,
+		SheetName:    c.sheet,
+		Strategy:     strategy,
 	})
 	if err != nil {
 		return err

@@ -13,6 +13,7 @@ import (
 // and encryption travel in a later wave (config-driven, not flag-driven).
 type exportCommand struct {
 	Base
+	p                processorFlags
 	table            string
 	output           string
 	compress         bool
@@ -60,6 +61,7 @@ self-describing packet (schema + rows + query context). Needs --config.`
 	fs.IntVar(&c.packetSize, "packet-size", 0, "max packet size in MB (0 = built-in default ~1.9MB)")
 	fs.Int64Var(&c.fallbackRowLimit, "fallback-row-limit", 1000000, "max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)")
 	addQueryFlags(fs, &c.q)
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
 }
@@ -87,6 +89,10 @@ type exportJSON struct {
 }
 
 func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
+	procs, err := c.p.build() // before any database work
+	if err != nil {
+		return err
+	}
 	_ = args
 	yamlCfg, cfg, err := d.databaseConfig("export")
 	if err != nil {
@@ -117,6 +123,7 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 	}
 	target := outputFile(c.output, c.table, "tdtp.xml")
 	err = commands.ExportTable(ctx, cfg, commands.ExportOptions{
+		ProcessorMgr:     procs,
 		TableName:        c.table,
 		OutputFile:       target,
 		Query:            query,

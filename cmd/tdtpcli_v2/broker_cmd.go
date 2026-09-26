@@ -25,6 +25,7 @@ func loadConfigs(d *Deps, cmdName string) (*adapters.Config, commands.BrokerConf
 // Same engine as v1 (commands.ExportToBroker).
 type exportBrokerCommand struct {
 	Base
+	p             processorFlags
 	table         string
 	compress      bool
 	compressLevel int
@@ -54,6 +55,7 @@ Needs --config with database and broker sections.`
 	fs.BoolVar(&c.encLegacy, "enc13", false, "legacy v1.3 whole-blob encryption")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL")
 	addQueryFlags(fs, &c.q)
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
 }
@@ -89,6 +91,10 @@ type exportBrokerJSON struct {
 }
 
 func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
+	procs, err := c.p.build() // before any database work
+	if err != nil {
+		return err
+	}
 	_ = args
 	adb, bcc, err := loadConfigs(d, c.Name())
 	if err != nil {
@@ -100,7 +106,7 @@ func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args
 	}
 	brokerCfg := bcc
 	err = commands.ExportToBroker(ctx, adb, &brokerCfg, c.table, query,
-		c.compress, c.compressLevel, c.compressAlgo, nil, c.packetSize,
+		c.compress, c.compressLevel, c.compressAlgo, procs, c.packetSize,
 		c.mercuryURL, c.enc || c.encLegacy, c.encLegacy)
 	if err != nil {
 		return err
