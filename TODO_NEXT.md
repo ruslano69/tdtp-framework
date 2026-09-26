@@ -736,6 +736,19 @@ before deciding whether the refusal is per-field (drop that one value,
 warn) or per-packet (refuse the whole import), not decided by
 assumption.
 
+### 2.8 Column constraints in the Schema — draft and prototype
+
+NOT NULL, primary-key column order, UNIQUE keys, and CHECK-derived ranges,
+enumerations and patterns — sourced from SQL Server first. Draft:
+[`docs/proposals/schema-constraints.md`](docs/proposals/schema-constraints.md);
+read-only prototype: `cmd/tdtp-constraints-probe` over
+`pkg/adapters/mssql/constraints.go`. Agreed switch (§6): phase 1 always,
+phase 2 behind `export --constraints` / `export.constraints: true`, import
+recreates only under `--strict-schema`. Next step is running the probe on the
+real HR schema before the format is decided (§8 of the draft). NOT NULL is
+the loss that happens today on every transfer: `IS_NULLABLE` is read by the
+MSSQL adapter and dropped.
+
 ### Grace period for `tdtp.lic`
 
 Today expired = fatal, which hurts integrators mid-project. Proposal:
