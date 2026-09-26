@@ -2,7 +2,7 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
-## [Unreleased]
+## [1.26.3] - 2026-09-26
 
 ### Security — `--mask`/`--validate`/`--normalize` did not do what they said
 
