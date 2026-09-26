@@ -147,18 +147,23 @@ func TestCompressDataForTdtp(t *testing.T) {
 		t.Error("Expected non-empty compressed data")
 	}
 
-	// Проверяем статистику
-	if stats.OriginalSize == 0 {
-		t.Error("Expected non-zero original size in stats")
+	// Проверяем статистику по тому, что она описывает, а не по таймеру.
+	// Раньше здесь было stats.Time != 0: на Windows часы грубее, чем сжатие
+	// трёх коротких строк, и тест падал через раз, проверяя таймер вместо
+	// компрессора. Время утверждается только в том, что верно на любых
+	// часах: оно не отрицательно.
+	joined := strings.Join(rows, "\n") // CompressDataForTdtp склеивает строки через \n
+	if stats.OriginalSize != len(joined) {
+		t.Errorf("OriginalSize = %d, want %d (the joined rows)", stats.OriginalSize, len(joined))
 	}
-	if stats.CompressedSize == 0 {
-		t.Error("Expected non-zero compressed size in stats")
+	if stats.CompressedSize <= 0 {
+		t.Errorf("CompressedSize = %d, want > 0", stats.CompressedSize)
 	}
-	if stats.Ratio <= 0 {
-		t.Error("Expected positive compression ratio")
+	if want := float64(stats.OriginalSize) / float64(stats.CompressedSize); stats.Ratio != want {
+		t.Errorf("Ratio = %v, want OriginalSize/CompressedSize = %v", stats.Ratio, want)
 	}
-	if stats.Time == 0 {
-		t.Error("Expected non-zero compression time")
+	if stats.Time < 0 {
+		t.Errorf("Time = %v, a duration cannot be negative", stats.Time)
 	}
 
 	t.Logf("Stats: original=%d, compressed=%d, ratio=%.2f, time=%v",
