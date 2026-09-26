@@ -48,14 +48,16 @@ func get(srv *Server, handler func(http.ResponseWriter, *http.Request), path str
 	return rec
 }
 
-// Each must be REJECTED. Trailing garbage after a complete expression
-// ("dept = 'hr' AMD id > 5", "dept SIDEWAYS") is not here yet: the shared
-// TDTQL translator still ignores it — a pkg/core/tdtql fix, separate.
+// Each must be REJECTED — including trailing garbage after a complete
+// expression, which the shared TDTQL translator used to drop in silence.
 var badFilters = map[string]url.Values{
 	"unparsable where":  {"where": {"dept = = 'hr'"}},
 	"dangling AND":      {"where": {"dept = 'hr' AND"}},
 	"unknown column":    {"where": {"no_such_col = 'x'"}},
 	"unparsable order":  {"order_by": {"dept,"}},
+	"typo AMD for AND":  {"where": {"dept = 'hr' AMD id > 5"}},
+	"stray paren":       {"where": {"dept = 'hr')"}},
+	"unknown direction": {"order_by": {"dept SIDEWAYS"}},
 	"non-numeric limit": {"limit": {"abc"}},
 	"negative limit":    {"limit": {"-5"}},
 	"non-numeric off":   {"offset": {"x"}},

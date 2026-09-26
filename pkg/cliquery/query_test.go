@@ -448,3 +448,22 @@ func TestBuildQuery_AllFlagsTogether(t *testing.T) {
 		t.Errorf("expected 2 WHERE filters, got %d", len(q.Filters.And.Filters))
 	}
 }
+
+// The CLI and tdtpserve both build queries here; a typo must fail, not widen
+// the result.
+func TestBuildQuery_RejectsTrailingTokens(t *testing.T) {
+	cases := []struct {
+		wheres  []string
+		orderBy string
+	}{
+		{[]string{"dept = 'hr' AMD id > 5"}, ""},
+		{[]string{"dept = 'hr')"}, ""},
+		{nil, "dept SIDEWAYS"},
+		{nil, "id LIMIT 5"},
+	}
+	for _, c := range cases {
+		if _, err := cliquery.BuildQuery(c.wheres, c.orderBy, 0, 0); err == nil {
+			t.Errorf("where=%v order=%q: accepted, want an error", c.wheres, c.orderBy)
+		}
+	}
+}

@@ -23,9 +23,24 @@ filters. Removed; the server now uses the shared TDTQL translator the CLI's
 `--where`/`--order-by` use (`pkg/cliquery`), so one language has one parser
 and its errors are 400s.
 
-Still open, in the shared translator itself (so in the CLI too): trailing
-tokens after a complete expression are ignored — `dept = 'hr' AMD id > 5`
-drops the second condition, `order_by=dept SIDEWAYS` sorts ascending.
+### Fixed — TDTQL dropped whatever followed the last clause it understood
+
+The shared translator (`pkg/core/tdtql`) returned as soon as it had parsed
+WHERE / ORDER BY / LIMIT / OFFSET and never checked it had reached the end
+of the input. Anything after was discarded in silence — and the worst case
+widened the result: `--where "dept = 'hr' AMD id > 5"` (a typo for AND)
+filtered on `dept` alone and returned more rows than asked. `dept = 'hr')`,
+`--order-by "dept SIDEWAYS"` and `"dept DESC extra"` passed too. Now an
+error naming the stray token; one trailing `;` stays accepted.
+
+Two related drops closed alongside: a WHERE condition carrying its own
+`ORDER BY`/`LIMIT`/`OFFSET` had them parsed and thrown away
+(`TranslateWhere` now refuses), and `--order-by "id LIMIT 5"` kept the sort
+and lost the limit (new `TranslateOrderBy`, used by `pkg/cliquery`).
+
+Reaches every caller: the CLI's `--where`/`--order-by` (v1 and v2),
+`tdtpserve` (now a 400), and the Python bindings' filter functions (now
+`TDTPFilterError`).
 
 ## [1.26.3] - 2026-09-26
 
