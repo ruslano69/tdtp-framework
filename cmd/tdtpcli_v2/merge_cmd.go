@@ -66,6 +66,9 @@ type mergeJSON struct {
 
 func (c *mergeCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = d
+	if err := checkReadable(args); err != nil {
+		return err // unreadable input is operational (exit 1)
+	}
 	var buf bytes.Buffer
 	err := commands.MergeFilesTo(&buf, ctx, commands.MergeOptions{
 		InputFiles:    args,

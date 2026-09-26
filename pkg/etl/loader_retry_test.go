@@ -71,3 +71,22 @@ func TestLoader_RetryWrapperSuccess(t *testing.T) {
 		t.Fatalf("expected 2 rows, got %+v", results)
 	}
 }
+
+// tdtp (local file) and tdtp-enc (burn-on-read Mercury key) get exactly one
+// attempt: a retried tdtp-enc load would report KeyBurnedError in place of
+// the real failure.
+func TestLoader_NoRetryForFileSources(t *testing.T) {
+	for _, typ := range []string{"tdtp", "tdtp-enc"} {
+		src := SourceConfig{Name: "s", Type: typ, DSN: filepath.Join(t.TempDir(), "missing.xml")}
+		l := NewLoader([]SourceConfig{src}, ErrorHandlingConfig{
+			OnSourceError: "fail", RetryAttempts: 3, RetryDelaySeconds: 0,
+		})
+		_, err := l.LoadAll(context.Background())
+		if err == nil {
+			t.Fatalf("%s: expected error", typ)
+		}
+		if strings.Contains(err.Error(), "max retry attempts") {
+			t.Errorf("%s must not retry, got: %v", typ, err)
+		}
+	}
+}

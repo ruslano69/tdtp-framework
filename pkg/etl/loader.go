@@ -520,9 +520,17 @@ func (l *Loader) closeAdapters(ctx context.Context) {
 // PipelineConfig.SetDefaults) — одна попытка, старое поведение без задержек.
 // Ретраится только загрузка источника: она side-effect free (чистое чтение),
 // в отличие от transform/output, где повтор неидемпотентен.
+//
+// Два типа источника — исключения, у них одна попытка всегда:
+//   - tdtp-enc: ключ из xZMercury burn-on-read. Если первая попытка забрала
+//     ключ и упала позже (расшифровка, разбор), повтор получит 410 и вернёт
+//     KeyBurnedError — то есть сигнал «ключ украден» вместо настоящей
+//     причины. Загрузка здесь не side-effect free.
+//   - tdtp: локальный файл. Нечему восстанавливаться, а с дефолтами
+//     (3 попытки, 5 с) опечатка в пути ждала бы 15 с до ошибки.
 func (l *Loader) loadFromSourceWithRetry(ctx context.Context, source SourceConfig) (*packet.DataPacket, error) {
 	attempts := l.errorHandling.RetryAttempts
-	if attempts <= 1 {
+	if attempts <= 1 || source.Type == "tdtp-enc" || source.Type == "tdtp" {
 		return l.loadFromSource(ctx, source)
 	}
 	delay := time.Duration(l.errorHandling.RetryDelaySeconds) * time.Second

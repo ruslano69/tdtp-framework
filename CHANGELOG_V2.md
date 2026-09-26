@@ -7,6 +7,44 @@
 
 ## [Unreleased]
 
+### Fixed — silent failures in the framework itself
+
+- An unknown or foreign flag exited 2 with **nothing on stderr**: pflag
+  prints parse errors only when it is *not* `ContinueOnError`, the one
+  mode v2 uses. `TestApp_ForeignFlagRejected` checked the exit code alone,
+  so "a foreign flag fails at parse time" held — silently. The error and a
+  `help <command>` hint are printed now.
+- `--json` failures a command did not render itself (missing config,
+  unreadable input, DB down) produced no output on either stream. App now
+  emits `{valid:false, error, exit_code}` on stdout unless the command
+  already wrote its own verdict (validate's `{valid:false, errors}` is not
+  followed by a second document).
+- Compat shim: `--config`/`--quiet`/`--json` after the v1 verb
+  (`--export users --config c.yaml`, valid in v1 where every flag was
+  global) are hoisted in front of the command; `--import ... --limit -5`
+  drops the negative value with the flag instead of leaving `-5` behind
+  for pflag to reject.
+- `merge --sort` put NULLs **last**: a declared `[NULL]` marker was
+  compared as text and sorts after `9`. Markers from `SpecialValues` now
+  rank before comparison — NULL/NoDate first, then -Infinity, values,
+  +Infinity, NaN (PostgreSQL's order), flipped with `--order desc`.
+- `to-json --pretty` left a blank line after `[`.
+- `export_cmd.go` was not gofmt-clean.
+- `diff`/`merge`: an input that cannot be opened is operational, exit 1,
+  the same as `inspect`/`test` and `docs/CLI_V2.md`. It was exit 3 (the
+  engines fold every failure into one error). A file that was read and
+  rejected (malformed, incomparable) stays a data verdict, exit 3.
+
+### Changed — `export`: a given flag beats the config
+
+- `--compress`, `--compress-level` and `--compress-algo` win over the
+  config's `export:` section when they are **given**, checked with pflag's
+  `Changed`. v1 (and v2 until now) compared the value with the default
+  instead: an explicit `--compress-level 3` or `--compress-algo zstd` lost
+  to the config, and `--compress=false` could not switch off
+  `compress: true`. Invocations that leave the flags alone produce the
+  same file as before; the tests/cli suites pass unchanged.
+
 ### Compat shim: the `tests/cli` suites now run against v2 unchanged
 
 - The shim was unreachable: `parseGlobals` rejected a bare v1 flag

@@ -19,6 +19,12 @@ total attempts including the first; `<= 1` (including zero on hand-built
 existing unit tests are unaffected. Pinned by
 `pkg/etl/loader_retry_test.go`; `docs/ETL_PIPELINE.md` updated.
 
+Not retried, ever: `tdtp-enc` sources (the xZMercury key is burn-on-read —
+a second attempt after the first one took the key gets 410 and reports
+`KeyBurnedError`, a theft signal, in place of the real failure) and plain
+`tdtp` files (a local path has nothing transient to wait out; with the
+defaults a wrong path would otherwise fail after ~15 s instead of at once).
+
 ## [1.26.2] - 2026-09-25
 
 ### Fixed — `merge` on compressed/columnar/compact files merged blobs, not rows

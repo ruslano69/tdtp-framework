@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -86,7 +87,7 @@ forGlobals:
 		}
 		// A "--flag value" pair: the value cannot be a verb, skip both.
 		// A bare "--flag" at the end is skipped singly by the loop itself.
-		if strings.HasPrefix(argv[j], "-") && j+1 < len(argv) && !strings.HasPrefix(argv[j+1], "-") {
+		if strings.HasPrefix(argv[j], "-") && j+1 < len(argv) && isFlagValue(argv[j+1]) {
 			j++
 		}
 	}
@@ -101,11 +102,50 @@ forGlobals:
 	// transforms, e.g. --merge's comma split — do NOT rebuild it from the
 	// raw tokens). Pre-verb flags append at the end: pflag parses flags
 	// anywhere, positionals keep their order.
+	tail := append([]string{}, newArgs...)
+	tail = append(tail, argv[i:verb]...)
+	// v1 flags were global, so `--export users --config f.yaml` was as
+	// valid as the config-first form. In v2 --config/--quiet/--json are
+	// globals and must precede the command; no command FlagSet declares
+	// them, so any found in the tail can only be the global — hoist it.
+	hoisted, tail := hoistGlobals(tail)
 	out := append([]string{}, globals...)
-	out = append(out, newArgs...)
-	out = append(out, argv[i:verb]...)
+	out = append(out, hoisted...)
+	out = append(out, tail...)
 	notice = stripImportLimits(&out, notice)
 	return out, notice, true
+}
+
+// hoistGlobals splits --config (both spellings, with its value), --quiet/-q
+// and --json out of a rewritten v1 tail. Returns (globals, rest).
+func hoistGlobals(tail []string) ([]string, []string) {
+	var globals, rest []string
+	for k := 0; k < len(tail); k++ {
+		tok := tail[k]
+		switch {
+		case tok == "--config" && k+1 < len(tail):
+			globals = append(globals, tok, tail[k+1])
+			k++
+		case strings.HasPrefix(tok, "--config="),
+			tok == "--quiet" || tok == "-q" || strings.HasPrefix(tok, "--quiet="),
+			tok == "--json" || strings.HasPrefix(tok, "--json="):
+			globals = append(globals, tok)
+		default:
+			rest = append(rest, tok)
+		}
+	}
+	return globals, rest
+}
+
+// isFlagValue reports whether tok, following a value-taking flag, is its
+// value: anything not shaped like a flag, plus negative numbers
+// (`--limit -5` is v1's tail-N spelling, not a shorthand flag).
+func isFlagValue(tok string) bool {
+	if !strings.HasPrefix(tok, "-") {
+		return true
+	}
+	_, err := strconv.Atoi(tok)
+	return err == nil
 }
 
 // importIgnoredFlags are v1 query flags that --import accepts and ignores
@@ -136,7 +176,7 @@ func stripImportLimits(argv *[]string, notice string) string {
 			stripped = true
 			// "--flag value": drop the value too (the =form carries its
 			// value inline and needs no extra skip).
-			if !strings.Contains(tok, "=") && k+1 < len(out) && !strings.HasPrefix(out[k+1], "-") {
+			if !strings.Contains(tok, "=") && k+1 < len(out) && isFlagValue(out[k+1]) {
 				k++
 			}
 			continue

@@ -236,28 +236,38 @@ func sortMergedRows(pkt *packet.DataPacket, fields []string, desc bool) error {
 	}
 	type typedRow struct {
 		raw    packet.Row
-		values []*schema.TypedValue
+		values []sortCell
 	}
 	typed := make([]typedRow, len(pkt.Data.Rows))
 	for i, row := range pkt.Data.Rows {
 		values := parser.GetRowValues(row)
-		tv := make([]*schema.TypedValue, len(pkt.Schema.Fields))
+		tv := make([]sortCell, len(pkt.Schema.Fields))
 		for c := range pkt.Schema.Fields {
 			raw := ""
 			if c < len(values) {
 				raw = values[c]
 			}
+			// Declared markers first: "[NULL]" is not text to be ordered
+			// after "9" — it is NULL, and it sorts first like any NULL.
+			if rank, ok := markerRank(pkt.Schema.Fields[c].SpecialValues, raw); ok {
+				tv[c] = sortCell{rank: rank, tv: &schema.TypedValue{IsNull: rank == rankNull, RawValue: raw}}
+				continue
+			}
 			v, err := conv.ParseValue(raw, defs[c])
 			if err != nil {
 				v = &schema.TypedValue{RawValue: raw}
 			}
-			tv[c] = v
+			rank := rankValue
+			if v.IsNull {
+				rank = rankNull
+			}
+			tv[c] = sortCell{rank: rank, tv: v}
 		}
 		typed[i] = typedRow{raw: row, values: tv}
 	}
 	less := func(a, b typedRow) bool {
 		for _, c := range cols {
-			if d := compareTyped(a.values[c], b.values[c]); d != 0 {
+			if d := compareCells(a.values[c], b.values[c]); d != 0 {
 				if desc {
 					return d > 0
 				}
@@ -274,6 +284,60 @@ func sortMergedRows(pkt *packet.DataPacket, fields []string, desc bool) error {
 	pkt.Data.Rows = joined
 	pkt.Header.RecordsInPart = len(joined)
 	return nil
+}
+
+// Sort ranks: where a cell sits before its value is compared. Markers
+// declared in a field's SpecialValues never reach ParseValue — as text
+// they would order by their spelling ("[NULL]" after "9", "INF" among
+// the I's), so they get a fixed place instead: NULL (and NoDate, which
+// imports as NULL) first, then -Infinity, ordinary values, +Infinity,
+// NaN last — PostgreSQL's order for all four.
+const (
+	rankNull = iota
+	rankNegInf
+	rankValue
+	rankPosInf
+	rankNaN
+)
+
+// sortCell is one parsed cell plus its rank.
+type sortCell struct {
+	rank int
+	tv   *schema.TypedValue
+}
+
+// markerRank maps raw to a rank when it equals one of the field's
+// declared markers.
+func markerRank(sv *packet.SpecialValues, raw string) (int, bool) {
+	if sv == nil {
+		return 0, false
+	}
+	is := func(m *packet.MarkerValue) bool { return m != nil && m.Marker == raw }
+	switch {
+	case is(sv.Null), is(sv.NoDate):
+		return rankNull, true
+	case is(sv.NegInfinity):
+		return rankNegInf, true
+	case is(sv.Infinity):
+		return rankPosInf, true
+	case is(sv.NaN):
+		return rankNaN, true
+	}
+	return 0, false
+}
+
+// compareCells orders by rank, then (within ordinary values) by value.
+func compareCells(a, b sortCell) int {
+	if a.rank != b.rank {
+		if a.rank < b.rank {
+			return -1
+		}
+		return 1
+	}
+	if a.rank != rankValue {
+		return 0
+	}
+	return compareTyped(a.tv, b.tv)
 }
 
 // compareTyped orders two parsed values: NULL first, then by kind —

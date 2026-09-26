@@ -98,39 +98,45 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 	if err != nil {
 		return UsageError{Err: err}
 	}
-	// Compression merges flag over config exactly like v1's main
-	// (cmd/tdtpcli/main.go): the flag wins when set off-default,
-	// otherwise the config file's export: section applies.
-	compress := c.compress || expCfg.Compress
+	// Compression: a flag given on the command line wins, otherwise the
+	// config file's export: section applies, otherwise the flag default.
+	// v1 (stdlib flag) could not tell "given" from "left at default" and
+	// used the value instead — so an explicit --compress-level 3 lost to a
+	// config level, and --compress=false could not switch off a config
+	// compress: true. pflag's Changed answers the actual question.
+	compress := c.compress
+	if !c.FlagSet.Changed("compress") {
+		compress = c.compress || expCfg.Compress
+	}
 	compressLevel := c.compressLevel
-	if compressLevel == 3 && expCfg.CompressLevel > 0 {
+	if !c.FlagSet.Changed("compress-level") && expCfg.CompressLevel > 0 {
 		compressLevel = expCfg.CompressLevel
 	}
 	compressAlgo := c.compressAlgo
-	if compressAlgo == "zstd" && expCfg.CompressAlgo != "" {
+	if !c.FlagSet.Changed("compress-algo") && expCfg.CompressAlgo != "" {
 		compressAlgo = expCfg.CompressAlgo
 	}
 	target := outputFile(c.output, c.table, "tdtp.xml")
 	err = commands.ExportTable(ctx, cfg, commands.ExportOptions{
-		TableName:      c.table,
-		OutputFile:     target,
-		Query:          query,
-		Fields:         c.q.fieldsList(),
-		Compress:       compress,
-		CompressLevel:  compressLevel,
-		CompressAlgo:   compressAlgo,
-		EnableChecksum: compress, // checksum rides with compression (--hash is no-op, kept for compat)
-		ReadOnlyFields: c.readonly,
-		Fast:           c.fast,
-		Columnar:       c.columnar,
-		Stream:         c.stream,
-		PacketSizeMB:   c.packetSize,
+		TableName:        c.table,
+		OutputFile:       target,
+		Query:            query,
+		Fields:           c.q.fieldsList(),
+		Compress:         compress,
+		CompressLevel:    compressLevel,
+		CompressAlgo:     compressAlgo,
+		EnableChecksum:   compress, // checksum rides with compression (--hash is no-op, kept for compat)
+		ReadOnlyFields:   c.readonly,
+		Fast:             c.fast,
+		Columnar:         c.columnar,
+		Stream:           c.stream,
+		PacketSizeMB:     c.packetSize,
 		FallbackRowLimit: c.fallbackRowLimit,
-		Compact:        c.compact,
-		FixedFields:    splitFields(c.fixedFields),
-		CompactTail:    c.compactTail,
-		IntegrityV14:   c.integrity,
-		MercuryURL:     c.mercuryURL,
+		Compact:          c.compact,
+		FixedFields:      splitFields(c.fixedFields),
+		CompactTail:      c.compactTail,
+		IntegrityV14:     c.integrity,
+		MercuryURL:       c.mercuryURL,
 	})
 	if err != nil {
 		return err // database/export failure is operational (exit 1)
