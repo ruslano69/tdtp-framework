@@ -149,3 +149,18 @@ func TestResolveTargetVersion(t *testing.T) {
 		t.Error("--v1 --v13 together must fail")
 	}
 }
+
+// A typo in --where ("AMD" for "AND") used to be dropped by the TDTQL
+// translator along with the rest of the condition: the file was written
+// with every row matching the first half. Now a usage error, and no file.
+func TestToCSV_WhereTypoWritesNothing(t *testing.T) {
+	in := writeDiffFixture(t, "in.xml", [][]string{{"1", "x"}, {"2", "y"}})
+	out := filepath.Join(t.TempDir(), "out.csv")
+	code, _, stderr := runApp(t, "to-csv", in, "-o", out, "--where", "id >= 1 AMD v = 'x'")
+	if code != ExitUsage {
+		t.Errorf("exit %d, want %d; stderr: %s", code, ExitUsage, stderr)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("a file was written for a condition that was never fully applied")
+	}
+}
