@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ruslano69/tdtp-framework/pkg/cliquery"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 	"github.com/ruslano69/tdtp-framework/pkg/etl"
@@ -291,6 +292,12 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if res.FilterErr != "" {
+		// The page still renders — the form, so the query can be fixed, and
+		// the error bar — but with no rows and a 400: the filter was not
+		// applied, so no rows are an answer to it.
+		w.WriteHeader(http.StatusBadRequest)
+	}
 	s.renderData(w, res.Dataset, res.Rows, res.Where, res.OrderBy, res.Limit, res.Offset, res.FilterErr)
 }
 
@@ -310,6 +317,12 @@ type datasetQuery struct {
 // queryDataset resolves name against s.datasets and applies TDTQL filtering
 // from q (where/order_by/limit/offset). ok is false if no such dataset.
 // Takes s.mu for reading itself — callers must not already hold it.
+//
+// Fails CLOSED: when the query cannot be applied, FilterErr is set and Rows
+// is nil. It used to fail open — an unparsable where, or limit=abc, returned
+// EVERY row of the dataset with HTTP 200 and the error in a side field, so a
+// client asking for one department's rows with a typo in the condition got
+// the whole table, behind authentication. Callers answer 400 on FilterErr.
 func (s *Server) queryDataset(name string, q url.Values) (res *datasetQuery, ok bool) {
 	s.mu.RLock()
 	ds, found := s.datasets[name]
@@ -319,25 +332,51 @@ func (s *Server) queryDataset(name string, q url.Values) (res *datasetQuery, ok 
 	}
 
 	res = &datasetQuery{Dataset: ds, Where: q.Get("where"), OrderBy: q.Get("order_by")}
-	res.Limit, _ = strconv.Atoi(q.Get("limit"))   //nolint:errcheck // invalid values are silently treated as 0
-	res.Offset, _ = strconv.Atoi(q.Get("offset")) //nolint:errcheck // invalid values are silently treated as 0
+	var err error
+	if res.Limit, err = nonNegativeParam(q, "limit"); err != nil {
+		res.FilterErr = err.Error()
+		return res, true
+	}
+	if res.Offset, err = nonNegativeParam(q, "offset"); err != nil {
+		res.FilterErr = err.Error()
+		return res, true
+	}
 
-	res.Rows = extractRows(ds.Packet)
+	rows := extractRows(ds.Packet)
 	if res.Where != "" || res.OrderBy != "" || res.Limit > 0 || res.Offset > 0 {
 		query, err := buildQuery(res.Where, res.OrderBy, res.Limit, res.Offset)
 		if err != nil {
 			res.FilterErr = err.Error()
+			return res, true
 		} else if query != nil {
 			exec := tdtql.NewExecutor()
-			result, err := exec.Execute(query, res.Rows, ds.Packet.Schema)
+			result, err := exec.Execute(query, rows, ds.Packet.Schema)
 			if err != nil {
 				res.FilterErr = err.Error()
-			} else {
-				res.Rows = result.FilteredRows
+				return res, true
 			}
+			rows = result.FilteredRows
 		}
 	}
+	res.Rows = rows
 	return res, true
+}
+
+// nonNegativeParam reads an optional integer query parameter. Absent means
+// 0; anything else must be a non-negative integer. Negative values are
+// refused rather than ignored: the CLI reads a negative --limit as "last N",
+// so silently treating limit=-5 as "no limit" would answer a different
+// question than the one asked.
+func nonNegativeParam(q url.Values, name string) (int, error) {
+	raw := q.Get(name)
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s: must be a non-negative integer, got %q", name, raw)
+	}
+	return n, nil
 }
 
 // extractRows gets all rows from a DataPacket as [][]string
@@ -354,143 +393,18 @@ func extractRows(pkt *packet.DataPacket) [][]string {
 // Query building (WHERE / ORDER BY / LIMIT / OFFSET → packet.Query)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// buildQuery hands the query params to the shared TDTQL translator — the one
+// the CLI's --where/--order-by use. tdtpserve used to carry a second, ad-hoc
+// parser that split the condition on " AND " / " OR ": it rejected
+// "BETWEEN x AND y" from its own README, and silently turned mixed AND/OR,
+// parentheses and "a = = 'b'" into wrong filters instead of errors. One
+// language now, one parser, and its errors become 400s.
 func buildQuery(where, orderBy string, limit, offset int) (*packet.Query, error) {
-	if where == "" && orderBy == "" && limit == 0 && offset == 0 {
-		return nil, nil
+	var wheres []string
+	if strings.TrimSpace(where) != "" {
+		wheres = []string{where}
 	}
-
-	q := packet.NewQuery()
-
-	if where != "" {
-		filters, err := parseWhere(where)
-		if err != nil {
-			return nil, fmt.Errorf("WHERE: %w", err)
-		}
-		q.Filters = filters
-	}
-
-	if orderBy != "" {
-		ob, err := parseOrderBy(orderBy)
-		if err != nil {
-			return nil, fmt.Errorf("ORDER BY: %w", err)
-		}
-		q.OrderBy = ob
-	}
-
-	if limit > 0 {
-		q.Limit = limit
-	}
-	if offset > 0 {
-		q.Offset = offset
-	}
-
-	return q, nil
-}
-
-func parseWhere(where string) (*packet.Filters, error) {
-	where = strings.TrimSpace(where)
-
-	if strings.Contains(where, " AND ") {
-		parts := strings.Split(where, " AND ")
-		filters := make([]packet.Filter, 0, len(parts))
-		for _, p := range parts {
-			f, err := parseSimpleFilter(strings.TrimSpace(p))
-			if err != nil {
-				return nil, err
-			}
-			filters = append(filters, f)
-		}
-		return &packet.Filters{And: &packet.LogicalGroup{Filters: filters}}, nil
-	}
-
-	if strings.Contains(where, " OR ") {
-		parts := strings.Split(where, " OR ")
-		filters := make([]packet.Filter, 0, len(parts))
-		for _, p := range parts {
-			f, err := parseSimpleFilter(strings.TrimSpace(p))
-			if err != nil {
-				return nil, err
-			}
-			filters = append(filters, f)
-		}
-		return &packet.Filters{Or: &packet.LogicalGroup{Filters: filters}}, nil
-	}
-
-	f, err := parseSimpleFilter(where)
-	if err != nil {
-		return nil, err
-	}
-	return &packet.Filters{And: &packet.LogicalGroup{Filters: []packet.Filter{f}}}, nil
-}
-
-func parseSimpleFilter(cond string) (packet.Filter, error) {
-	cond = strings.TrimSpace(cond)
-	ops := []string{">=", "<=", "!=", "=", ">", "<", " LIKE ", " IN ", " BETWEEN ", " IS NOT NULL", " IS NULL"}
-
-	for _, op := range ops {
-		idx := strings.Index(strings.ToUpper(cond), op)
-		if idx == -1 {
-			continue
-		}
-		field := strings.TrimSpace(cond[:idx])
-		if op == " IS NULL" || op == " IS NOT NULL" {
-			return packet.Filter{Field: field, Operator: strings.TrimSpace(op)}, nil
-		}
-		valuePart := strings.TrimSpace(cond[idx+len(op):])
-		var value, value2 string
-		if strings.Contains(strings.ToUpper(op), "BETWEEN") {
-			parts := strings.SplitN(valuePart, " AND ", 2)
-			if len(parts) != 2 {
-				return packet.Filter{}, fmt.Errorf("BETWEEN needs two values: %s", cond)
-			}
-			value = strings.Trim(strings.TrimSpace(parts[0]), "'\"")
-			value2 = strings.Trim(strings.TrimSpace(parts[1]), "'\"")
-		} else {
-			value = strings.Trim(valuePart, "'\"")
-		}
-		tdtpOp := map[string]string{
-			"=": "eq", "!=": "ne", ">": "gt", "<": "lt",
-			">=": "gte", "<=": "lte", "LIKE": "like",
-			"IN": "in", "BETWEEN": "between",
-			"IS NULL": "is_null", "IS NOT NULL": "is_not_null",
-		}[strings.TrimSpace(op)]
-		if tdtpOp == "" {
-			tdtpOp = strings.ToLower(strings.TrimSpace(op))
-		}
-		return packet.Filter{Field: field, Operator: tdtpOp, Value: value, Value2: value2}, nil
-	}
-	return packet.Filter{}, fmt.Errorf("cannot parse condition: %s", cond)
-}
-
-func parseOrderBy(orderBy string) (*packet.OrderBy, error) {
-	parts := strings.Split(orderBy, ",")
-	if len(parts) == 1 {
-		tokens := strings.Fields(strings.TrimSpace(parts[0]))
-		if len(tokens) == 0 {
-			return nil, fmt.Errorf("empty ORDER BY")
-		}
-		dir := "ASC"
-		if len(tokens) > 1 && strings.EqualFold(tokens[1], "DESC") {
-			dir = "DESC"
-		}
-		return &packet.OrderBy{Field: tokens[0], Direction: dir}, nil
-	}
-	fields := make([]packet.OrderField, 0, len(parts))
-	for _, p := range parts {
-		tokens := strings.Fields(strings.TrimSpace(p))
-		if len(tokens) == 0 {
-			continue
-		}
-		dir := "ASC"
-		if len(tokens) > 1 && strings.EqualFold(tokens[1], "DESC") {
-			dir = "DESC"
-		}
-		fields = append(fields, packet.OrderField{Name: tokens[0], Direction: dir})
-	}
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("invalid ORDER BY: %s", orderBy)
-	}
-	return &packet.OrderBy{Fields: fields}, nil
+	return cliquery.BuildQuery(wheres, orderBy, limit, offset)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

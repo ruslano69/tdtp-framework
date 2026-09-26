@@ -21,15 +21,16 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
-// apiDataResponse is the JSON shape for GET /api/data/<name>.
+// apiDataResponse is the JSON shape for GET /api/data/<name>. A 200 means
+// the requested filter was applied; there is no filter_error field any more
+// — a query that cannot be applied is a 400 with no rows (queryDataset).
 type apiDataResponse struct {
-	Name        string        `json:"name"`
-	IsView      bool          `json:"is_view"`
-	Type        string        `json:"type"`
-	Schema      packet.Schema `json:"schema"`
-	Rows        [][]string    `json:"rows"`
-	RowCount    int           `json:"row_count"`
-	FilterError string        `json:"filter_error,omitempty"`
+	Name     string        `json:"name"`
+	IsView   bool          `json:"is_view"`
+	Type     string        `json:"type"`
+	Schema   packet.Schema `json:"schema"`
+	Rows     [][]string    `json:"rows"`
+	RowCount int           `json:"row_count"`
 }
 
 // handleAPIData serves GET /api/data/<name>, applying the same
@@ -48,14 +49,18 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if res.FilterErr != "" {
+		writeAPIError(w, http.StatusBadRequest, "filter: "+res.FilterErr)
+		return
+	}
+
 	writeAPIJSON(w, http.StatusOK, apiDataResponse{
-		Name:        res.Dataset.Name,
-		IsView:      res.Dataset.IsView,
-		Type:        res.Dataset.Type,
-		Schema:      res.Dataset.Packet.Schema,
-		Rows:        res.Rows,
-		RowCount:    len(res.Rows),
-		FilterError: res.FilterErr,
+		Name:     res.Dataset.Name,
+		IsView:   res.Dataset.IsView,
+		Type:     res.Dataset.Type,
+		Schema:   res.Dataset.Packet.Schema,
+		Rows:     res.Rows,
+		RowCount: len(res.Rows),
 	})
 }
 
