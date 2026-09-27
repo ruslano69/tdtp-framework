@@ -73,7 +73,8 @@ func (c *inspectCommand) Run(ctx context.Context, d *Deps, out Output, args []st
 		return err // unreadable input is operational (exit 1), not invalid data
 	}
 	var buf bytes.Buffer
-	if err := commands.InspectFileTo(&buf, ctx, path, storageCfg); err != nil {
+	pkt, err := commands.InspectFileReport(&buf, ctx, path, storageCfg)
+	if err != nil {
 		return DataError{Err: err}
 	}
 	if out.Quiet && !out.JSONEnabled {
@@ -83,30 +84,15 @@ func (c *inspectCommand) Run(ctx context.Context, d *Deps, out Output, args []st
 	} else {
 		out.Human("%s", buf.String())
 	}
-	if storageCfg != nil {
-		// The human report above already holds every fact; re-reading
-		// the object for the JSON contract would fetch it twice.
-		out.JSON(inspectJSON{Valid: true, File: path})
-		return nil
+	if out.JSONEnabled {
+		out.JSON(inspectJSONFromPacket(path, pkt))
 	}
-	out.JSON(c.describe(path))
 	return nil
 }
 
-// describe parses the file again for the JSON contract. The YAML text
-// above stays the single human formatter (shared with v1).
-func (c *inspectCommand) describe(path string) inspectJSON {
+// inspectJSONFromPacket uses the packet already parsed for the human report.
+func inspectJSONFromPacket(path string, pkt *packet.DataPacket) inspectJSON {
 	rep := inspectJSON{Valid: true, File: path}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
-	pkt, err := packet.NewParser().ParseBytes(data)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
 	rep.Table = pkt.Header.TableName
 	rep.Type = string(pkt.Header.Type)
 	rep.Protocol = pkt.Protocol

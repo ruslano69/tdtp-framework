@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
@@ -72,51 +71,24 @@ func (c *listCommand) Run(ctx context.Context, d *Deps, out Output, args []strin
 		pattern = args[0]
 	}
 	var buf bytes.Buffer
+	var names []string
 	if c.views {
-		err = commands.ListViewsTo(&buf, ctx, cfg)
+		names, err = commands.ListViewsReport(&buf, ctx, cfg)
 	} else {
-		err = commands.ListTablesTo(&buf, ctx, cfg, pattern)
+		names, err = commands.ListTablesReport(&buf, ctx, cfg, pattern)
 	}
 	if err != nil {
 		return err // database failure is operational (exit 1)
 	}
 	out.Human("%s", buf.String())
-	out.JSON(c.describe(ctx, cfg, pattern))
+	if out.JSONEnabled {
+		rep := listJSON{Valid: true}
+		if c.views {
+			rep.Views = names
+		} else {
+			rep.Tables = names
+		}
+		out.JSON(rep)
+	}
 	return nil
-}
-
-// describe builds the JSON contract with a direct adapter query. The
-// human text above stays the single formatter (shared with v1); JSON
-// carries the names pipelines iterate over. Runs only under --json
-// (see Output.JSONEnabled).
-func (c *listCommand) describe(ctx context.Context, cfg *adapters.Config, pattern string) listJSON {
-	rep := listJSON{Valid: true}
-	adapter, err := adapters.New(ctx, *cfg)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
-	defer func() { _ = adapter.Close(ctx) }()
-	if c.views {
-		views, err := adapter.GetViewNames(ctx)
-		if err != nil {
-			rep.Valid = false
-			return rep
-		}
-		for _, v := range views {
-			rep.Views = append(rep.Views, v.Name)
-		}
-		return rep
-	}
-	tables, err := adapter.GetTableNames(ctx)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
-	for _, t := range tables {
-		if commands.MatchesPattern(t, pattern) {
-			rep.Tables = append(rep.Tables, t)
-		}
-	}
-	return rep
 }

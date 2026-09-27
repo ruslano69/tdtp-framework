@@ -5,6 +5,7 @@ package main
 // contract: verdicts, exit codes, JSON shapes, multipart handling.
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -80,6 +81,25 @@ func TestInspectCmd_JSON(t *testing.T) {
 	}
 	if !v.Fields[0].Key || v.Fields[0].Name != "id" {
 		t.Errorf("key column not reported: %+v", v.Fields)
+	}
+}
+
+func TestInspectCmd_JSONUsesReportedPacket(t *testing.T) {
+	f := writeInspectFixture(t, "a.xml", [][]string{{"1", "x"}})
+	var got inspectJSON
+	out := Output{
+		Human: func(string, ...any) {
+			if err := os.Remove(f); err != nil {
+				t.Fatal(err)
+			}
+		},
+		JSON: func(v any) { got = v.(inspectJSON) }, JSONEnabled: true,
+	}
+	if err := newInspectCommand().Run(context.Background(), &Deps{}, out, []string{f}); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || got.Table != "orders" || got.Rows != 1 {
+		t.Fatalf("JSON should describe the reported packet: %+v", got)
 	}
 }
 

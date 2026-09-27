@@ -73,6 +73,26 @@ func TestDiffCmd_JSON(t *testing.T) {
 	}
 }
 
+func TestDiffCmd_JSONUsesReportedComparison(t *testing.T) {
+	a := writeDiffFixture(t, "a.xml", [][]string{{"1", "x"}})
+	b := writeDiffFixture(t, "b.xml", [][]string{{"1", "y"}})
+	var got diffJSON
+	out := Output{
+		Human: func(string, ...any) {
+			if err := os.Remove(b); err != nil {
+				t.Fatal(err)
+			}
+		},
+		JSON: func(v any) { got = v.(diffJSON) }, JSONEnabled: true,
+	}
+	if err := newDiffCommand().Run(context.Background(), &Deps{}, out, []string{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Equal || got.Modified != 1 {
+		t.Fatalf("JSON should describe the reported comparison: %+v", got)
+	}
+}
+
 func TestDiffCmd_Arity(t *testing.T) {
 	a := writeDiffFixture(t, "a.xml", [][]string{{"1", "x"}})
 	code, _, _ := runApp(t, "diff", a)

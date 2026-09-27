@@ -20,6 +20,13 @@ func InspectFile(ctx context.Context, inputFile string, storageCfg *storage.Conf
 // InspectFileTo is InspectFile writing its report to w instead of stdout,
 // so embedders (tdtpcli_v2 --quiet/--json) control the output stream.
 func InspectFileTo(w io.Writer, ctx context.Context, inputFile string, storageCfg *storage.Config) error {
+	_, err := InspectFileReport(w, ctx, inputFile, storageCfg)
+	return err
+}
+
+// InspectFileReport writes the v1 report and returns the packet parsed for
+// that report, so callers can render structured output without reading it again.
+func InspectFileReport(w io.Writer, ctx context.Context, inputFile string, storageCfg *storage.Config) (*packet.DataPacket, error) {
 	var data []byte
 	var err error
 
@@ -31,29 +38,29 @@ func InspectFileTo(w io.Writer, ctx context.Context, inputFile string, storageCf
 		}
 		store, openErr := storage.New(cfg)
 		if openErr != nil {
-			return fmt.Errorf("failed to open storage: %w", openErr)
+			return nil, fmt.Errorf("failed to open storage: %w", openErr)
 		}
 		defer func() { _ = store.Close() }()
 		rc, getErr := store.Get(ctx, key)
 		if getErr != nil {
-			return fmt.Errorf("failed to get s3 object %s: %w", key, getErr)
+			return nil, fmt.Errorf("failed to get s3 object %s: %w", key, getErr)
 		}
 		defer func() { _ = rc.Close() }()
 		data, err = io.ReadAll(rc)
 		if err != nil {
-			return fmt.Errorf("failed to read s3 object: %w", err)
+			return nil, fmt.Errorf("failed to read s3 object: %w", err)
 		}
 	} else {
 		data, err = os.ReadFile(inputFile)
 		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
+			return nil, fmt.Errorf("failed to read file: %w", err)
 		}
 	}
 
 	parser := packet.NewParser()
 	pkt, err := parser.ParseBytes(data)
 	if err != nil {
-		return fmt.Errorf("failed to parse TDTP packet: %w", err)
+		return nil, fmt.Errorf("failed to parse TDTP packet: %w", err)
 	}
 
 	// Row count: prefer header RecordsInPart (no decompression needed),
@@ -122,7 +129,7 @@ func InspectFileTo(w io.Writer, ctx context.Context, inputFile string, storageCf
 		}
 	}
 
-	return nil
+	return pkt, nil
 }
 
 // buildFieldAttrs returns inline YAML attributes for a field (key, subtype, length, precision/scale, readonly).
