@@ -27,6 +27,9 @@ type XLSXOptions struct {
 	StorageCfg *storage.Config
 	StorageKey string // object key for output
 
+	// Translit renders non-ASCII field names as ASCII headers.
+	Translit bool
+
 	// MercuryURL enables full executor verification for v1.4 packets.
 	// Empty → local xxh3 integrity check only (FallbackDegrade policy).
 	MercuryURL string
@@ -135,6 +138,12 @@ func ConvertTDTPToXLSX(ctx context.Context, opts XLSXOptions) error {
 			}
 			fmt.Printf("  Projection: %d column(s) selected\n", len(pkt.Schema.Fields))
 		}
+	}
+
+	// Header transliteration (--translit), after filtering/projection.
+	if opts.Translit {
+		translitHeaders(pkt.Schema.Fields)
+		fmt.Printf("  Headers transliterated to ASCII\n")
 	}
 
 	// Determine local output path (temp file when uploading to S3)
@@ -267,6 +276,12 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 			return fmt.Errorf("processor failed: %w", err)
 		}
 		fmt.Printf("✓ Data processors applied\n")
+	}
+
+	// Header transliteration (--translit), after the DB-side filtering.
+	if opts.Translit {
+		translitHeaders(pkt.Schema.Fields)
+		fmt.Printf("✓ Headers transliterated to ASCII\n")
 	}
 
 	// Determine sheet name

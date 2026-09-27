@@ -21,6 +21,7 @@ type CSVOptions struct {
 	Delimiter  rune   // field separator; default ','
 	CP         string // code page: "utf8" (default), "1251", "866"
 	BOM        bool   // prepend UTF-8 BOM (helps Excel auto-detect)
+	Translit   bool   // transliterate non-ASCII field names to ASCII headers
 	Query      *packet.Query
 
 	// MercuryURL enables full executor verification for v1.4 packets.
@@ -130,6 +131,12 @@ func ConvertTDTPToCSV(ctx context.Context, opts CSVOptions) error {
 		colIndices = projIndices
 		schemaFields = projFields
 		fmt.Printf("✓ Projection: %d column(s) selected\n", len(schemaFields))
+	}
+
+	// Header transliteration (--translit), after filtering/projection.
+	if opts.Translit {
+		translitHeaders(schemaFields)
+		fmt.Printf("✓ Headers transliterated to ASCII\n")
 	}
 
 	// Open output writer

@@ -13,11 +13,12 @@ import (
 // to XLSX. Same engine as v1 (commands.ExportTableToXLSX).
 type exportXLSXCommand struct {
 	Base
-	p      processorFlags
-	table  string
-	sheet  string
-	output string
-	q      queryFlags
+	p        processorFlags
+	table    string
+	sheet    string
+	translit bool
+	output   string
+	q        queryFlags
 }
 
 func newExportXLSXCommand() *exportXLSXCommand {
@@ -30,6 +31,7 @@ Needs --config: this command talks to a database.`
 	fs := newCommandFlagSet("export-xlsx")
 	fs.StringVar(&c.table, "table", "", "table to export (required)")
 	fs.StringVar(&c.sheet, "sheet", "Sheet1", "worksheet name")
+	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII headers")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <table>.xlsx)")
 	addQueryFlags(fs, &c.q)
 	addProcessorFlags(fs, &c.p)
@@ -88,6 +90,7 @@ func (c *exportXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args [
 		TableName:    c.table,
 		OutputFile:   target,
 		SheetName:    c.sheet,
+		Translit:     c.translit,
 		Query:        query,
 	})
 	if err != nil {

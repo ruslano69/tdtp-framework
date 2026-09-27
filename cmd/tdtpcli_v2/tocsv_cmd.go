@@ -17,6 +17,7 @@ type toCSVCommand struct {
 	delimiter string
 	cp        string
 	bom       bool
+	translit  bool
 	output    string
 	q         queryFlags
 }
@@ -33,6 +34,7 @@ apply in memory, --delimiter/--cp/--bom control the CSV dialect.`
 	fs.StringVarP(&c.delimiter, "delimiter", "d", ",", "CSV field separator")
 	fs.StringVar(&c.cp, "cp", "utf8", "output code page: utf8, 1251, 866")
 	fs.BoolVar(&c.bom, "bom", false, "prepend UTF-8 BOM")
+	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII headers")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <input>.csv)")
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
@@ -107,6 +109,7 @@ func (c *toCSVCommand) Run(ctx context.Context, d *Deps, out Output, args []stri
 		Delimiter:  parseDelimiter(c.delimiter),
 		CP:         c.cp,
 		BOM:        c.bom,
+		Translit:   c.translit,
 		Query:      query,
 		MercuryURL: "",
 	})
