@@ -157,6 +157,7 @@ func TestAudit_ConcurrentWriters(t *testing.T) {
 	cfg := writeAuditCfg(t, "  database:\n    type: sqlite\n    dsn: "+strings.ReplaceAll(dbPath, "\\", "/")+"\n    table: audit_log\n    batch_size: 1\n    auto_create_table: true\n")
 	const n = 8
 	codes := make([]int, n)
+	stderrs := make([]string, n)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -172,12 +173,13 @@ func TestAudit_ConcurrentWriters(t *testing.T) {
 			out := filepath.Join(dir, fmt.Sprintf("u_%d.csv", i))
 			codes[i] = NewApp().Run(context.Background(),
 				[]string{"--config", cfg, "to-csv", in, "--output", out}, &stdout, &stderr)
+			stderrs[i] = stderr.String()
 		}(i)
 	}
 	wg.Wait()
 	for i, code := range codes {
 		if code != ExitOK {
-			t.Errorf("goroutine %d exit = %d", i, code)
+			t.Errorf("goroutine %d exit = %d, stderr: %.300s", i, code, stderrs[i])
 		}
 	}
 	rows := auditDBRows(t, dbPath)

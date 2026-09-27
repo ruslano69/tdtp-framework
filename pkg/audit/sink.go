@@ -2,8 +2,10 @@ package audit
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // sink.go — opening the audit trail's own SQL connection, shared by both
@@ -44,34 +46,78 @@ var auditSinkDrivers = map[string]string{
 // natively.
 const sqliteTimeFormatParam = "_time_format=sqlite"
 
-// withSQLiteTimeFormat appends sqliteTimeFormatParam to a SQLite DSN, leaving
-// an explicit _time_format alone so an operator can still override it.
-func withSQLiteTimeFormat(dsn string) string {
-	if strings.Contains(dsn, "_time_format=") {
-		return dsn
-	}
+// withSQLiteParams appends the driver's DSN parameters: the timestamp
+// format plus busy_timeout. DSN parameters run on EVERY pooled connection
+// at open time (driver.go: `_pragma` values "will be run as a PRAGMA
+// statement"), which is the whole point: the previous revision ran
+// `PRAGMA busy_timeout` via db.Exec after open, and database/sql could
+// land a later statement on a different pooled connection — one without
+// busy_timeout — failing with an immediate SQLITE_BUSY instead of waiting
+// (found by -race on parallel in-process runs). journal_mode is NOT here:
+// it bypasses the busy handler (proven: fails in ~1ms under lock), so it
+// goes through enableWAL below instead. Explicit operator values are left
+// alone so they still override.
+func withSQLiteParams(dsn string) string {
 	sep := "?"
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	return dsn + sep + sqliteTimeFormatParam
+	if !strings.Contains(dsn, "_time_format=") {
+		dsn += sep + sqliteTimeFormatParam
+		sep = "&"
+	}
+	if !strings.Contains(dsn, "busy_timeout") {
+		dsn += sep + "_pragma=busy_timeout(5000)"
+	}
+	return dsn
+}
+
+// sqliteBusy reports SQLITE_BUSY without importing the driver: both
+// sqlite drivers in the tree surface Code() int == 5 on lock contention.
+func sqliteBusy(err error) bool {
+	var coder interface{ Code() int }
+	if errors.As(err, &coder) {
+		return coder.Code() == 5
+	}
+	return false
+}
+
+// enableWAL switches the database to WAL mode, retrying while another
+// opener holds the lock. Retrying is required, not polite: PRAGMA
+// journal_mode bypasses the busy handler entirely (it fails in ~1ms with
+// the timeout set), so concurrent first-opens — eight CLI processes, or
+// eight goroutines under -race — would otherwise fail all but one.
+// Bounded (~10s); anything but SQLITE_BUSY fails fast.
+func enableWAL(db *sql.DB) error {
+	const tries = 200
+	const delay = 50 * time.Millisecond
+	var err error
+	for i := 0; i < tries; i++ {
+		if _, err = db.Exec("PRAGMA journal_mode = WAL"); err == nil {
+			return nil
+		}
+		if !sqliteBusy(err) {
+			return fmt.Errorf("failed to enable WAL: %w", err)
+		}
+		time.Sleep(delay)
+	}
+	return fmt.Errorf("failed to enable WAL after %v: %w", tries*delay, err)
 }
 
 // OpenDatabaseSink opens the audit trail's own SQL connection. The caller
 // owns closing it: DatabaseAppender.Close flushes+closes its prepared
 // statement, not the *sql.DB itself — same as every other adapter.
 //
-// SQLite gets two pragmas, and their order is load-bearing. SQLite allows
-// only one writer at a time; without a busy_timeout, a second concurrent
-// process (writing its own audit entry, or racing AutoCreateTable's
-// CREATE TABLE IF NOT EXISTS on first run) gets an immediate SQLITE_BUSY
-// "database is locked" instead of waiting. WAL mode lets readers proceed
-// without blocking on a writer; busy_timeout makes a genuinely concurrent
-// writer wait and retry instead of erroring immediately.
-//
-// busy_timeout MUST be set first: switching journal_mode itself takes
-// SQLite's write lock, so if THAT statement is the one that races against
-// another process, busy_timeout isn't active yet to make it wait.
+// SQLite allows only one writer at a time; without a busy_timeout, a
+// second concurrent process (writing its own audit entry, or racing
+// AutoCreateTable's CREATE TABLE IF NOT EXISTS on first run) gets an
+// immediate SQLITE_BUSY "database is locked" instead of waiting —
+// confirmed by running 8 processes concurrently before this handling:
+// 3 of 8 failed outright. WAL mode lets readers proceed without blocking
+// on a writer; busy_timeout (in the DSN, so every pooled connection
+// carries it from open) makes genuinely concurrent writers wait and
+// retry; the WAL switch itself goes through enableWAL. One connection
+// per pool keeps writers serialized on top.
 func OpenDatabaseSink(dbType, dsn string) (*sql.DB, error) {
 	driverName, ok := auditSinkDrivers[dbType]
 	if !ok {
@@ -79,7 +125,7 @@ func OpenDatabaseSink(dbType, dsn string) (*sql.DB, error) {
 	}
 
 	if dbType == "sqlite" {
-		dsn = withSQLiteTimeFormat(dsn)
+		dsn = withSQLiteParams(dsn)
 	}
 
 	db, err := sql.Open(driverName, dsn)
@@ -88,11 +134,19 @@ func OpenDatabaseSink(dbType, dsn string) (*sql.DB, error) {
 	}
 
 	if dbType == "sqlite" {
-		for _, pragma := range []string{"PRAGMA busy_timeout = 5000", "PRAGMA journal_mode = WAL"} {
-			if _, err := db.Exec(pragma); err != nil {
-				_ = db.Close()
-				return nil, fmt.Errorf("failed to apply %q: %w", pragma, err)
-			}
+		// One connection per pool: fewer concurrent writers against the
+		// single-writer file, and every statement shares the connection
+		// that already carries busy_timeout.
+		db.SetMaxOpenConns(1)
+		// sql.Open is lazy — Ping forces the connect (and the DSN
+		// pragmas with it), so a bad DSN fails here, not on first use.
+		if err := db.Ping(); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to open audit database connection: %w", err)
+		}
+		if err := enableWAL(db); err != nil {
+			_ = db.Close()
+			return nil, err
 		}
 	}
 

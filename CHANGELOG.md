@@ -4,6 +4,17 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — concurrent audit opens raced on the WAL switch
+
+`PRAGMA journal_mode` bypasses the SQLite busy handler (fails in ~1ms
+under lock, proven live), so concurrent first-opens of one audit
+database failed all but one — and the old `db.Exec` pragmas could land
+on a pooled connection without `busy_timeout` at all. The shared
+`OpenDatabaseSink` now carries `busy_timeout` in the DSN (every pooled
+connection), pins one connection per pool, and takes the WAL switch
+through a bounded busy-only retry. Found by `-race` on parallel audit
+writers; fixes both CLIs.
+
 ### Fixed — process-wide license raced under concurrent runs
 
 `commands.ResolveLicense` reassigned the package-level license on every
