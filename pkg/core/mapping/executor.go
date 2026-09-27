@@ -3,6 +3,8 @@ package mapping
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -18,6 +20,8 @@ type ExecOptions struct {
 	// instead — a drain that consumes forty messages should not print forty
 	// lines when the scheduler only wants the total.
 	Quiet bool
+	// Output receives the dry-run plan and progress. Nil keeps stdout for v1.
+	Output io.Writer
 }
 
 // Execute applies cfg to pkt: remaps fields for each target and upserts into the target DB.
@@ -29,6 +33,10 @@ func Execute(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, dr
 // ExecuteWithOptions is Execute with room for settings that are not "dry run".
 func ExecuteWithOptions(ctx context.Context, cfg *MappingConfig, pkt *packet.DataPacket, opts ExecOptions) error {
 	dryRun := opts.DryRun
+	output := opts.Output
+	if output == nil {
+		output = os.Stdout
+	}
 	rows := pkt.GetRows()
 
 	for _, target := range cfg.Targets {
@@ -43,10 +51,10 @@ func ExecuteWithOptions(ctx context.Context, cfg *MappingConfig, pkt *packet.Dat
 		}
 
 		if dryRun {
-			fmt.Printf("[dry-run] target=%q schema=%q table=%q rows=%d upsert_key=%q\n",
+			_, _ = fmt.Fprintf(output, "[dry-run] target=%q schema=%q table=%q rows=%d upsert_key=%q\n",
 				target.Table, schemaName, tableName, len(rows), target.UpsertKey)
 			for i, f := range mapped.Schema.Fields {
-				fmt.Printf("  field[%d]: %s (key=%v)\n", i, f.Name, f.Key)
+				_, _ = fmt.Fprintf(output, "  field[%d]: %s (key=%v)\n", i, f.Name, f.Key)
 			}
 			continue
 		}
@@ -68,7 +76,7 @@ func ExecuteWithOptions(ctx context.Context, cfg *MappingConfig, pkt *packet.Dat
 		}
 		_ = adapter.Close(ctx)
 		if !opts.Quiet {
-			fmt.Printf("✓ %d rows upserted → %s.%s\n", len(rows), schemaName, tableName)
+			_, _ = fmt.Fprintf(output, "✓ %d rows upserted → %s.%s\n", len(rows), schemaName, tableName)
 		}
 	}
 	return nil

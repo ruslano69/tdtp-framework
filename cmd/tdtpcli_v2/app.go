@@ -142,7 +142,9 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 			}
 		},
 		JSONEnabled: globals.JSON,
+		Quiet:       globals.Quiet,
 		Stdout:      stdout,
+		Stderr:      stderr,
 	}
 
 	deps := &Deps{ConfigPath: globals.Config, LicensePath: globals.License}

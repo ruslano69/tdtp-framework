@@ -34,12 +34,15 @@ type SyncAuditor interface {
 
 // MapOptions holds parameters for the --map command.
 type MapOptions struct {
-	MappingFile string      // path to mapping.yaml
-	InputFile   string      // path to source .tdtp.xml (or .tdtp.enc) file
-	DryRun      bool        // print what would happen without writing to DB
-	MercuryURL  string      // xZMercury base URL for decrypting .enc input (burn-on-read)
-	Listen      bool        // daemon mode: loop on broker queue until SIGTERM
-	Auditor     SyncAuditor // per-message audit in loop mode; nil = disabled
+	MappingFile string                                              // path to mapping.yaml
+	InputFile   string                                              // path to source .tdtp.xml (or .tdtp.enc) file
+	DryRun      bool                                                // print what would happen without writing to DB
+	MercuryURL  string                                              // xZMercury base URL for decrypting .enc input (burn-on-read)
+	Listen      bool                                                // daemon mode: loop on broker queue until SIGTERM
+	Auditor     SyncAuditor                                         // per-message audit in loop mode; nil = disabled
+	Output      io.Writer                                           // progress and results; nil keeps stdout for v1
+	AdapterGate func(string) error                                  // optional target-adapter license gate
+	newBroker   func(brokers.Config) (brokers.MessageBroker, error) // test seam for loop modes
 
 	// Drain turns the loop into a unit of work: consume until the queue has
 	// been idle this long, then exit. --listen never ends, which is right for
@@ -56,6 +59,20 @@ type MapOptions struct {
 	Quiet bool
 }
 
+func (o MapOptions) stdout() io.Writer {
+	if o.Output != nil {
+		return o.Output
+	}
+	return os.Stdout
+}
+
+func (o MapOptions) broker(cfg brokers.Config) (brokers.MessageBroker, error) {
+	if o.newBroker != nil {
+		return o.newBroker(cfg)
+	}
+	return brokers.New(cfg)
+}
+
 // RunMap executes a cross-system field mapping: reads a TDTP packet, applies
 // the field/enum remap from mappingFile, and upserts rows into the target DB.
 // With opts.Listen=true it enters daemon mode, continuously consuming from the
@@ -66,9 +83,14 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	if err != nil {
 		return fmt.Errorf("--map: %w", err)
 	}
+	if !opts.DryRun && opts.AdapterGate != nil {
+		if err := opts.AdapterGate(cfg.TargetConn.Type); err != nil {
+			return err
+		}
+	}
 
 	if !opts.Quiet {
-		fmt.Printf("Mapping: %s\n", cfg.ID)
+		_, _ = fmt.Fprintf(opts.stdout(), "Mapping: %s\n", cfg.ID)
 	}
 
 	// Extract broker/S3 config from mapping YAML input_source section
@@ -103,7 +125,7 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 		markDone      func(bool)
 	)
 	if opts.DryRun {
-		fmt.Println("  [dry-run mode — no data will be written]")
+		_, _ = fmt.Fprintln(opts.stdout(), "  [dry-run mode — no data will be written]")
 		markDone = func(bool) {} // no-op
 	} else {
 		id, done, err := mapping.CheckAndRecord(cfg)
@@ -115,20 +137,30 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	}
 	success := false
 	defer func() { markDone(success) }()
-	fmt.Printf("  correlation_id: %s\n", correlationID)
-	fmt.Printf("  source: %s → target: %s\n", cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
+	if !opts.Quiet {
+		_, _ = fmt.Fprintf(opts.stdout(), "  correlation_id: %s\n", correlationID)
+		_, _ = fmt.Fprintf(opts.stdout(), "  source: %s → target: %s\n", cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
+	}
 
 	// Parse input TDTP packet — local file, S3 URI, or broker URI
 	pkt, err := loadPacket(ctx, opts.InputFile, opts.MercuryURL, s3cfg, brokercfg)
 	if err != nil {
 		return fmt.Errorf("--map: load input %q: %w", opts.InputFile, err)
 	}
-	fmt.Printf("  input: %s (%d rows, %d fields)\n",
-		pkt.Header.TableName, pkt.Header.RecordsInPart, len(pkt.Schema.Fields))
+	if !opts.Quiet {
+		_, _ = fmt.Fprintf(opts.stdout(), "  input: %s (%d rows, %d fields)\n",
+			pkt.Header.TableName, pkt.Header.RecordsInPart, len(pkt.Schema.Fields))
+	}
 
 	// Execute mapping
-	if err := mapping.Execute(ctx, cfg, pkt, opts.DryRun); err != nil {
+	started := time.Now()
+	if err := mapping.ExecuteWithOptions(ctx, cfg, pkt, mapping.ExecOptions{
+		DryRun: opts.DryRun, Quiet: opts.Quiet, Output: opts.stdout(),
+	}); err != nil {
 		return fmt.Errorf("--map execute: %w", err)
+	}
+	if opts.Quiet && !opts.DryRun {
+		reportQuietRowsTo(opts.stdout(), mapTargetName(cfg), int64(len(pkt.GetRows())), time.Since(started))
 	}
 
 	success = true // deferred done(success) marks the run completed
@@ -149,7 +181,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	}
 
 	// Connect once — keep the connection open for the daemon lifetime.
-	br, err := brokers.New(bcfg)
+	br, err := opts.broker(bcfg)
 	if err != nil {
 		return fmt.Errorf("broker driver: %w", err)
 	}
@@ -164,30 +196,34 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	}
 
 	if !opts.Quiet {
-		fmt.Printf("%s started  mapping=%s  queue=%s\n", tag, cfg.ID, bcfg.Queue)
-		fmt.Printf("%s source: %s → target: %s\n", tag,
+		_, _ = fmt.Fprintf(opts.stdout(), "%s started  mapping=%s  queue=%s\n", tag, cfg.ID, bcfg.Queue)
+		_, _ = fmt.Fprintf(opts.stdout(), "%s source: %s → target: %s\n", tag,
 			cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
 		if opts.DryRun {
-			fmt.Printf("%s dry-run mode — no data will be written\n", tag)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s dry-run mode — no data will be written\n", tag)
 		}
 		if opts.Drain > 0 {
-			fmt.Printf("%s stops once the queue has been empty for %s\n\n", tag, opts.Drain)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s stops once the queue has been empty for %s\n\n", tag, opts.Drain)
 		} else {
-			fmt.Printf("%s Press Ctrl+C to stop\n\n", tag)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s Press Ctrl+C to stop\n\n", tag)
 		}
 	}
 
 	// Graceful shutdown: SIGTERM/SIGINT → cancel listenCtx → Receive unblocks.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigCh)
 
 	listenCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	go func() {
-		<-sigCh
-		fmt.Printf("\n[map:listen] shutdown signal received, finishing current message...\n")
-		cancel()
+		select {
+		case <-sigCh:
+			_, _ = fmt.Fprintf(opts.stdout(), "\n[map:listen] shutdown signal received, finishing current message...\n")
+			cancel()
+		case <-listenCtx.Done():
+		}
 	}()
 
 	parser := packet.NewParser()
@@ -221,8 +257,8 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 			if idle {
 				break // nothing left to drain — the run is done
 			}
-			fmt.Printf("%s receive error: %v — reconnecting\n", tag, err)
-			if reconnectErr := reconnectBroker(listenCtx, br); reconnectErr != nil {
+			_, _ = fmt.Fprintf(opts.stdout(), "%s receive error: %v — reconnecting\n", tag, err)
+			if reconnectErr := reconnectBroker(listenCtx, br, opts.stdout()); reconnectErr != nil {
 				break // context cancelled during reconnect
 			}
 			continue
@@ -236,28 +272,28 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		// "Consumer: dual-format detection").
 		data, err = decryptLegacyBlobIfNeeded(listenCtx, data, opts.MercuryURL)
 		if err != nil {
-			fmt.Printf("%s decrypt error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s decrypt error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		pkt, err := parser.ParseBytes(data)
 		if err != nil {
-			fmt.Printf("%s parse error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s parse error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := decryptV15PacketIfNeeded(listenCtx, pkt, opts.MercuryURL); err != nil {
-			fmt.Printf("%s decrypt error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s decrypt error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := decompressPacketData(pkt); err != nil {
-			fmt.Printf("%s decompress error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s decompress error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := parser.ExpandCompactRows(pkt); err != nil {
-			fmt.Printf("%s expand error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s expand error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
@@ -266,8 +302,9 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		if err := mapping.ExecuteWithOptions(listenCtx, cfg, pkt, mapping.ExecOptions{
 			DryRun: opts.DryRun,
 			Quiet:  opts.Quiet,
+			Output: opts.stdout(),
 		}); err != nil {
-			fmt.Printf("%s execute error: %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s execute error: %v\n", tag, err)
 			// Отказ пишется в аудит наравне с успехом: сообщение уходит в nack
 			// и возвращается в очередь, не оставляя следа нигде, кроме stdout
 			// демона — а его никто не читает через неделю работы.
@@ -279,7 +316,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		// ACK / commit offset only after successful upsert.
 		if a, ok := br.(acker); ok {
 			if err := a.AckLast(); err != nil {
-				fmt.Printf("%s ack error: %v\n", tag, err)
+				_, _ = fmt.Fprintf(opts.stdout(), "%s ack error: %v\n", tag, err)
 			}
 		}
 		if committer, ok := br.(interface{ CommitLast(context.Context) error }); ok {
@@ -290,7 +327,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		elapsed := time.Since(t0).Round(time.Millisecond)
 		work += elapsed
 		if !opts.Quiet {
-			fmt.Printf("%s ✓  rows=%-6d  total=%-6d  %s\n", tag, rows, total, elapsed)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s ✓  rows=%-6d  total=%-6d  %s\n", tag, rows, total, elapsed)
 		}
 		recordSync(listenCtx, opts.Auditor, bcfg.Queue, int64(rows), elapsed, nil)
 	}
@@ -298,11 +335,11 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	if opts.Quiet {
 		// Same shape as --sync-incremental reports on the way out, so one job
 		// log reads as a single table of what moved: name, rows, time.
-		reportQuietRows(mapTargetName(cfg), int64(total), work)
+		reportQuietRowsTo(opts.stdout(), mapTargetName(cfg), int64(total), work)
 		return nil
 	}
 
-	fmt.Printf("%s stopped. total rows upserted: %d\n", tag, total)
+	_, _ = fmt.Fprintf(opts.stdout(), "%s stopped. total rows upserted: %d\n", tag, total)
 	return nil
 }
 
@@ -329,7 +366,7 @@ func nackIfAble(br brokers.MessageBroker) {
 // Returns nil when the connection is restored, ctx.Err() if the context is cancelled.
 // This is the same pattern used in the production QueueBridge: log once on disconnect,
 // then reconnect silently — no error-per-second spam during extended outages.
-func reconnectBroker(ctx context.Context, br brokers.MessageBroker) error {
+func reconnectBroker(ctx context.Context, br brokers.MessageBroker, output io.Writer) error {
 	_ = br.Close() // ignore: connection may already be gone at the TCP level
 	delay := 2 * time.Second
 	const maxDelay = 30 * time.Second
@@ -340,13 +377,13 @@ func reconnectBroker(ctx context.Context, br brokers.MessageBroker) error {
 			return ctx.Err()
 		}
 		if err := br.Connect(ctx); err != nil {
-			fmt.Printf("[map:listen] reconnect failed: %v — retry in %v\n", err, delay)
+			_, _ = fmt.Fprintf(output, "[map:listen] reconnect failed: %v — retry in %v\n", err, delay)
 			if delay < maxDelay {
 				delay *= 2
 			}
 			continue
 		}
-		fmt.Printf("[map:listen] ✓ reconnected to broker\n")
+		_, _ = fmt.Fprintln(output, "[map:listen] ✓ reconnected to broker")
 		return nil
 	}
 }

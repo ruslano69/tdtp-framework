@@ -4,6 +4,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -260,7 +261,11 @@ func ExportToBrokerWithOptions(ctx context.Context, dbConfig *adapters.Config, b
 // the same thing: export and sync report wall time, while --drain reports the
 // time it spent on messages, its wall clock being mostly the idle window.
 func reportQuietRows(name string, rows int64, d time.Duration) {
-	fmt.Printf("%s  %d rows  %s\n", name, rows, d.Round(time.Millisecond))
+	reportQuietRowsTo(os.Stdout, name, rows, d)
+}
+
+func reportQuietRowsTo(w io.Writer, name string, rows int64, d time.Duration) {
+	_, _ = fmt.Fprintf(w, "%s  %d rows  %s\n", name, rows, d.Round(time.Millisecond))
 }
 
 // defaultIdleTimeout is how long --import-broker waits for the next message

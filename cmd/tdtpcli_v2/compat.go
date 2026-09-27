@@ -44,8 +44,10 @@ var compatTable = map[string]compatEntry{
 	"to-xlsx":       {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
 	"list":          {command: []string{"list"}, notice: "--list is deprecated, use 'tdtpcli_v2 list'"},
 	"list-views":    {command: []string{"list"}, args: []string{"--views"}, notice: "--list-views is deprecated, use 'tdtpcli_v2 list --views'"},
+	"map":           {command: []string{"map"}, notice: "--map is deprecated, use 'tdtpcli_v2 map'"},
 	"merge":         {command: []string{"merge"}, splitComma: true, notice: "--merge is deprecated, use 'tdtpcli_v2 merge'"},
 	"pipeline":      {command: []string{"pipeline"}, notice: "--pipeline is deprecated, use 'tdtpcli_v2 pipeline'"},
+	"steps":         {command: []string{"steps"}, notice: "--steps is deprecated, use 'tdtpcli_v2 steps'"},
 }
 
 // tryCompat rewrites v1 argv with leading globals (`--config f.yaml
