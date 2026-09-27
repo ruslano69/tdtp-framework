@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/spf13/pflag"
 )
 
@@ -22,23 +21,7 @@ func addProcessorFlags(fs *pflag.FlagSet, p *processorFlags) {
 	fs.StringVar(&p.normalize, "normalize", "", "normalization rules YAML (fields:)")
 }
 
-// build returns the chain, or a nil interface when no flag was given — never
-// a typed nil, which engines would take for a configured chain. A rules file
-// that cannot be read, parsed, or has no section of its own is a usage
-// error, reported before any database work.
-func (p *processorFlags) build() (commands.ProcessorManager, error) {
-	if p.mask == "" && p.validate == "" && p.normalize == "" {
-		return nil, nil
-	}
-	pm := commands.NewRowProcessors()
-	if err := pm.AddMaskProcessor(p.mask); err != nil {
-		return nil, UsageError{Err: err}
-	}
-	if err := pm.AddValidateProcessor(p.validate); err != nil {
-		return nil, UsageError{Err: err}
-	}
-	if err := pm.AddNormalizeProcessor(p.normalize); err != nil {
-		return nil, UsageError{Err: err}
-	}
-	return pm, nil
-}
+// Flag chains are built by Deps.processors (flags first, config-file
+// section as fallback) — there is no per-bundle build method on purpose:
+// two builders would drift apart unnoticed, which is exactly how v1's
+// --export-broker --mask sent addresses in clear.
