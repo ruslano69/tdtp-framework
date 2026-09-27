@@ -79,6 +79,7 @@ func BrokerConfigFromCliconfig(config *cliconfig.Config) BrokerConfig {
 //     Header.MessageID.
 //   - encryptLegacy=true (--enc13): whole-packet binary blob via
 //     EncryptPacket, same as --export --enc13 produces to a file.
+//
 // BrokerExportOptions mirrors ExportToBroker's parameters, plus IntegrityV14.
 // New code takes this; the positional form stays for v1 (frozen) and dies
 // with it at wave 4 — fourteen positionals were already one too many
@@ -97,6 +98,11 @@ type BrokerExportOptions struct {
 	// without MercuryURL, registered with it) — the --integrity the file
 	// export has and the broker path never did.
 	IntegrityV14 bool
+	// MercuryCaller overrides the sender identity on registration
+	// (default: the table name). v1 accepts --mercury-caller here and
+	// ignores it; v2 honors it, like it honors --translit where v1
+	// does not — a flag must do what it says.
+	MercuryCaller string
 }
 
 func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, compressAlgo string, procMgr ProcessorManager, packetSizeMB int, mercuryURL string, encrypt, encryptLegacy bool) error {
@@ -231,6 +237,7 @@ func ExportToBrokerWithOptions(ctx context.Context, dbConfig *adapters.Config, b
 		EncryptLegacy: opts.EncryptLegacy,
 		MercuryURL:    opts.MercuryURL,
 		IntegrityV14:  opts.IntegrityV14,
+		MercuryCaller: opts.MercuryCaller,
 		Quiet:         quiet,
 	}); err != nil {
 		return err
@@ -838,6 +845,8 @@ type brokerSendOptions struct {
 	// without MercuryURL, registered with it) — the --integrity the file
 	// export has and the broker path never did (until now).
 	IntegrityV14 bool
+	// MercuryCaller overrides the sender identity on registration.
+	MercuryCaller string
 
 	// Quiet drops the per-packet progress lines. The caller still reports the
 	// outcome — under --quiet a scheduled run wants one line per table, not
@@ -880,18 +889,22 @@ func sendPacketsToBroker(ctx context.Context, broker brokers.MessageBroker, pack
 		go func(i int, pkt *packet.DataPacket) {
 			defer wg.Done()
 
-		// v1.4 integrity is mandatory ahead of v1.5 encryption, not
-		// opt-in — see pkg/pipeline/produce.go's doc comment: without
-		// this, VerifyAndPrepare's consumer-side pre-flight (which
-		// always runs once --mercury-url is set, and v1.5 decryption
-		// requires it) blocks the packet with HASH_NOT_REGISTERED.
-		// Must run before compression (hashes cover plaintext).
-		if needsIntegrity {
-			if err := pipeline.ComputeAndRegisterIntegrity(ctx, pkt, integrityRegistrar, opts.TableName); err != nil {
-				errs[i] = fmt.Errorf("packet %d integrity: %w", i+1, err)
-				return
+			// v1.4 integrity is mandatory ahead of v1.5 encryption, not
+			// opt-in — see pkg/pipeline/produce.go's doc comment: without
+			// this, VerifyAndPrepare's consumer-side pre-flight (which
+			// always runs once --mercury-url is set, and v1.5 decryption
+			// requires it) blocks the packet with HASH_NOT_REGISTERED.
+			// Must run before compression (hashes cover plaintext).
+			if needsIntegrity {
+				sender := opts.TableName
+				if opts.MercuryCaller != "" {
+					sender = opts.MercuryCaller
+				}
+				if err := pipeline.ComputeAndRegisterIntegrity(ctx, pkt, integrityRegistrar, sender); err != nil {
+					errs[i] = fmt.Errorf("packet %d integrity: %w", i+1, err)
+					return
+				}
 			}
-		}
 
 			if opts.Compress {
 				// columnar=false: брокерный путь раскладку не предлагает, и включать её

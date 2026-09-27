@@ -27,6 +27,7 @@ type exportCommand struct {
 	compactTail      bool
 	integrity        bool
 	mercuryURL       string
+	mercuryCaller    string
 	columnar         bool
 	readonly         bool
 	fast             bool
@@ -64,6 +65,7 @@ self-describing packet (schema + rows + query context). Needs --config.`
 	fs.IntVar(&c.packetSize, "packet-size", 0, "max packet size in MB (0 = built-in default ~1.9MB)")
 	fs.Int64Var(&c.fallbackRowLimit, "fallback-row-limit", 1000000, "max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)")
 	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level encryption (needs Mercury)")
+	fs.StringVar(&c.mercuryCaller, "mercury-caller", "", "sender identity for Mercury registration (default: tdtpcli)")
 	addQueryFlags(fs, &c.q)
 	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
@@ -180,6 +182,7 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		CompactTail:      c.compactTail,
 		IntegrityV14:     c.integrity,
 		MercuryURL:       mercuryURL,
+		MercuryCaller:    c.mercuryCaller,
 		Encrypt:          c.enc,
 		EncryptLegacy:    false, // v1.3 whole-blob writing is disabled in v2
 		StorageCfg:       exportStorageCfg,

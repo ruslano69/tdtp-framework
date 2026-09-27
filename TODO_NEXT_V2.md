@@ -143,8 +143,8 @@ fails to parse under the shim — loudly, at least.
 
 | Command | Missing in v2 | Needs |
 |---|---|---|
-| `export` | `--mercury-caller` (~~`--enc` done, `--enc13` dropped, `s3://` output done 2026-09-27~~) | 3.5 item 4 |
-| `export-broker` | `--mercury-caller` (~~`--batch`, `--hash` done 2026-09-27, v1-identical no-ops; `--integrity` done, live MSMQ+Mercury~~) | — |
+| `export` | (~~`--mercury-caller` done 2026-09-27; `--enc` done, `--enc13` dropped, `s3://` output done~~) | 3.5 item 4 |
+| `export-broker` | (~~`--mercury-caller` done 2026-09-27, honored for real; `--batch`, `--hash` done, v1-identical no-ops; `--integrity` done, live MSMQ+Mercury~~) | — |
 | `export-xlsx` | (~~`--translit` done 2026-09-27, implemented for real — v1 ignores it~~) | — |
 | `import` | `--strict-schema` (~~`s3://` input done 2026-09-27~~) | 3.5 item 4 |
 | `to-csv`, `to-xlsx` | (~~`--translit` done 2026-09-27, implemented for real; `s3://` for `to-xlsx` done, live against weed~~) | — / item 4 |

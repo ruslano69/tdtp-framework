@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### Wave 3.6: `--mercury-caller` (export, export-broker)
+
+- Sender identity on Mercury registration. `export` plumbs the flag
+  straight through (v1 parity). `export-broker` honors it for real:
+  sender is the caller when given, else the table (v1 accepts the flag
+  and silently ignores it there — same class as `--translit`).
+- Proven live: registered sender reads back `customcaller` (file),
+  `brokercaller` (broker), and `users` by default.
+
 ### Wave 3.6: `--integrity` on `export-broker` (both features work)
 
 - `--hash` stays a v1-identical no-op (the XXH3-64 checksum of the

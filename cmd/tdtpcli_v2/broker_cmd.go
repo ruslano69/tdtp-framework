@@ -39,6 +39,7 @@ type exportBrokerCommand struct {
 	enc           bool
 	integrity     bool
 	mercuryURL    string
+	mercuryCaller string
 	q             queryFlags
 }
 
@@ -60,6 +61,7 @@ Needs --config with database and broker sections.`
 	fs.BoolVar(&c.hash, "hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level encryption (needs Mercury)")
 	fs.BoolVar(&c.integrity, "integrity", false, "stamp v1.4 xxh3 hashes before compression (registered with --mercury-url)")
+	fs.StringVar(&c.mercuryCaller, "mercury-caller", "", "sender identity for Mercury registration (default: table name)")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL")
 	addQueryFlags(fs, &c.q)
 	addProcessorFlags(fs, &c.p)
@@ -140,6 +142,7 @@ func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args
 			Encrypt:       c.enc,
 			EncryptLegacy: false, // v1.3 whole-blob writing is disabled in v2
 			IntegrityV14:  c.integrity,
+			MercuryCaller: c.mercuryCaller,
 		})
 	if err != nil {
 		return err
