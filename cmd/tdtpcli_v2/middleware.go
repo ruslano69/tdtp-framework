@@ -12,8 +12,9 @@ import (
 type Handler func(ctx context.Context, d *Deps, out Output, args []string) error
 
 // Middleware wraps a Handler for one command. Chain order is fixed in
-// NewApp: recover → license → audit → (future: resilience). A new
-// cross-cutting concern is one chain element, never edits in N commands.
+// NewApp: recover → license → audit → resilience. A new cross-cutting
+// concern is one chain element, never edits in N commands. Audit wraps
+// resilience so the trail records the post-retry outcome, not each attempt.
 // It receives the command because some concerns depend on what the
 // command's parsed flags ask for (FeatureGated).
 type Middleware func(cmd Command, next Handler) Handler
