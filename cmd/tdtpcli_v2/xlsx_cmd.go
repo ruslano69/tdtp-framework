@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -34,6 +35,15 @@ Needs --config: this command talks to a database.`
 	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's export-xlsx branch.
+func (c *exportXLSXCommand) AuditInfo(_ *Deps, _ []string) (audit.Operation, map[string]string) {
+	return audit.OpExport, map[string]string{
+		"command": "export-xlsx",
+		"table":   c.table,
+		"output":  outputFile(c.output, c.table, "xlsx"),
+	}
 }
 
 // Validate needs --table (or a positional table name).
@@ -111,6 +121,19 @@ writes a TDTP packet. No database needed.`
 	return c
 }
 
+// AuditInfo mirrors v1's from-xlsx branch.
+func (c *fromXLSXCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "from-xlsx",
+		"input":   input,
+		"output":  outputFile(c.output, input, "tdtp.xml"),
+	}
+}
+
 // Validate needs exactly one input file.
 func (c *fromXLSXCommand) Validate(args []string) error {
 	if len(args) != 1 {
@@ -168,6 +191,19 @@ Needs --config: this command talks to a database.`
 	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's import-xlsx branch.
+func (c *importXLSXCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	file := ""
+	if len(args) > 0 {
+		file = args[0]
+	}
+	return audit.OpImport, map[string]string{
+		"command":  "import-xlsx",
+		"file":     file,
+		"strategy": c.strategy,
+	}
 }
 
 // Validate needs exactly one input file.

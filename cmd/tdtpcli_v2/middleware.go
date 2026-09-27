@@ -12,7 +12,7 @@ import (
 type Handler func(ctx context.Context, d *Deps, out Output, args []string) error
 
 // Middleware wraps a Handler for one command. Chain order is fixed in
-// NewApp: recover → license → (future: audit, resilience). A new
+// NewApp: recover → license → audit → (future: resilience). A new
 // cross-cutting concern is one chain element, never edits in N commands.
 // It receives the command because some concerns depend on what the
 // command's parsed flags ask for (FeatureGated).

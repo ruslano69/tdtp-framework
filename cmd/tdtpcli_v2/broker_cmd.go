@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -67,6 +68,18 @@ func (c *exportBrokerCommand) Features() []string {
 		return []string{"enc"}
 	}
 	return nil
+}
+
+// AuditInfo mirrors v1's export-broker branch. The queue comes from the
+// config (never flags, same security rule); an unreadable config omits
+// broker/queue keys — Run itself then fails with the proper typed error.
+func (c *exportBrokerCommand) AuditInfo(d *Deps, _ []string) (audit.Operation, map[string]string) {
+	meta := map[string]string{"command": "export-broker", "table": c.table}
+	if _, bcc, err := loadConfigs(d, c.Name()); err == nil {
+		meta["broker"] = bcc.Type
+		meta["queue"] = bcc.Queue
+	}
+	return audit.OpExport, meta
 }
 
 func (c *exportBrokerCommand) Validate(args []string) error {
@@ -148,6 +161,17 @@ batches stay queued. Needs --config with database and broker sections.`
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL for v1.4 verification (else local only)")
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's import-broker branch (queue from config, same
+// rule as export-broker above).
+func (c *importBrokerCommand) AuditInfo(d *Deps, _ []string) (audit.Operation, map[string]string) {
+	meta := map[string]string{"command": "import-broker", "strategy": c.strategy}
+	if _, bcc, err := loadConfigs(d, c.Name()); err == nil {
+		meta["broker"] = bcc.Type
+		meta["queue"] = bcc.Queue
+	}
+	return audit.OpImport, meta
 }
 
 // Validate parses the expect-vars.

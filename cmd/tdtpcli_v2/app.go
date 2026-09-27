@@ -22,7 +22,7 @@ type App struct {
 func NewApp() *App {
 	a := &App{
 		commands:    map[string]Command{},
-		middlewares: []Middleware{recoverMiddleware, licenseMiddleware(commands.ResolveLicense)},
+		middlewares: []Middleware{recoverMiddleware, licenseMiddleware(commands.ResolveLicense), auditMiddleware},
 	}
 	RegisterAll(a)
 	return a

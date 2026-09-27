@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -36,6 +37,21 @@ apply in memory, --delimiter/--cp/--bom control the CSV dialect.`
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's to-csv branch, dialect included.
+func (c *toCSVCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	return audit.OpTransform, map[string]string{
+		"command":   "to-csv",
+		"input":     input,
+		"output":    outputFile(c.output, input, "csv"),
+		"delimiter": c.delimiter,
+		"cp":        c.cp,
+	}
 }
 
 // Validate needs exactly one input file.

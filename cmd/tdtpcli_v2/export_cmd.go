@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 )
 
 // exportCommand is `tdtpcli_v2 export` — database table to a TDTP file.
@@ -64,6 +65,15 @@ self-describing packet (schema + rows + query context). Needs --config.`
 	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's export branch: table plus resolved output file.
+func (c *exportCommand) AuditInfo(_ *Deps, _ []string) (audit.Operation, map[string]string) {
+	return audit.OpExport, map[string]string{
+		"command": "export",
+		"table":   c.table,
+		"output":  outputFile(c.output, c.table, "tdtp.xml"),
+	}
 }
 
 // Validate needs --table (or a positional table name).

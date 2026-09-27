@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -54,6 +55,23 @@ func (c *pipelineCommand) Features() []string {
 		f = append(f, "unsafe")
 	}
 	return f
+}
+
+// AuditInfo mirrors v1's pipeline branch: config plus safe/unsafe mode.
+func (c *pipelineCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	config := ""
+	if len(args) > 0 {
+		config = args[0]
+	}
+	mode := "safe"
+	if c.unsafe {
+		mode = "unsafe"
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "pipeline",
+		"config":  config,
+		"mode":    mode,
+	}
 }
 
 func (c *pipelineCommand) Validate(args []string) error {

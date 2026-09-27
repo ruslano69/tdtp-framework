@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### Wave 3.5: audit (middleware + `Audited`)
+
+- One chain element (`recover → license → audit`): init on entry (logger
+  from the config's `audit:` section, `WithOpMetrics` side channel),
+  one entry on exit with operation, metadata, resource, row count and
+  duration — success or failure. Logger init failure is fatal like v1;
+  a failed write or Close only warns, never fails the command.
+- Both sinks from one entry, like v1: console/file text appenders plus
+  the database appender. The DB connection opener (driver selection,
+  sqlite `_time_format`, `busy_timeout`-before-WAL) moved to shared
+  `pkg/audit.OpenDatabaseSink`; v1 delegates to it, zero behaviour change.
+- Commands opt in via `AuditInfo(d, args)` with v1's operation + metadata
+  per branch (17 commands). The file verdicts (`test`, `inspect`,
+  `validate`) stay out, like v1's early return. Native v2 stays strict
+  where v1 warned: `pipeline --mask` does not parse.
+- Proven by the acceptance suite itself: `test_audit_database.py` 8/8
+  against `tdtpcli_v2` (incl. A3 — 8 parallel processes, one audit DB),
+  plus in-process parallel writers and `-race` over the touched packages.
+- `-race` on the new parallel test found a real shared-code race:
+  `commands.ResolveLicense` reassigned the process-wide license on every
+  run; now `atomic.Pointer` (same shape as `quietOutput`). Fixes both CLIs.
+
 ### Wave 3.6: `--mask` / `--validate` / `--normalize`
 
 - One bundle (`processorflags.go`, like `queryFlags`) on `export`,

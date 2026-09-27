@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -31,6 +32,19 @@ apply in memory, --sheet names the worksheet.`
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's to-xlsx branch.
+func (c *toXLSXCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "to-xlsx",
+		"input":   input,
+		"output":  outputFile(c.output, input, "xlsx"),
+	}
 }
 
 // Validate needs exactly one input file.

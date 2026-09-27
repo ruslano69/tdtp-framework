@@ -12,9 +12,10 @@ which command. v2 inverts that:
   over shared `pkg/` logic — never duplicated. A bug fixed in `pkg/`
   is fixed in 1.XX and 2.0 at once.
 - **One lifecycle.** Parse globals → match command → `Validate` →
-  middleware (recover → license; audit/resilience join later) → `Run` →
+  middleware (recover → license → audit; resilience joins later) → `Run` →
   typed error → exit code. Adding a cross-cutting concern is one chain
-  element, not edits in N branches.
+  element, not edits in N branches. Audit is init-on-entry / record-on-exit
+  around `Run`, fed by an optional `Audited` method on the command.
 - **Typed errors, stable codes.** `UsageError` → 2, `DataError` → 3
   ("the tool worked, the answer is no"), anything operational → 1.
 - **Two audiences.** Humans read text; pipelines read `--json`.

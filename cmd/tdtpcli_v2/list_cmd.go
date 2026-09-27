@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -31,6 +32,19 @@ to a database.`
 	fs.BoolVar(&c.views, "views", false, "list views instead of tables")
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo names the operation v1 logs per branch: list carries its
+// pattern, list-views is its own command there too.
+func (c *listCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	if c.views {
+		return audit.OpQuery, map[string]string{"command": "list-views"}
+	}
+	pattern := ""
+	if len(args) > 0 {
+		pattern = args[0]
+	}
+	return audit.OpQuery, map[string]string{"command": "list", "pattern": pattern}
 }
 
 // Validate takes at most one positional pattern.

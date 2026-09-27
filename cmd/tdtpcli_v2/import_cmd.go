@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -46,6 +47,19 @@ Needs --config: this command talks to a database.`
 	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's import branch: file plus strategy.
+func (c *importCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	file := ""
+	if len(args) > 0 {
+		file = args[0]
+	}
+	return audit.OpImport, map[string]string{
+		"command":  "import",
+		"file":     file,
+		"strategy": c.strategy,
+	}
 }
 
 // Validate needs exactly one input file and well-formed expect-vars.

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
@@ -42,6 +44,15 @@ for reproducible, diffable output.`
 	fs.StringVar(&c.sortOrder, "order", "asc", "sort direction: asc or desc")
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's merge branch: comma-joined inputs plus output.
+func (c *mergeCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	return audit.OpTransform, map[string]string{
+		"command": "merge",
+		"files":   strings.Join(args, ","),
+		"output":  c.output,
+	}
 }
 
 // Validate needs at least two inputs plus --output, and a sane --order.

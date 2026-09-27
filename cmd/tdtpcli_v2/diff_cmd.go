@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/diff"
@@ -34,6 +35,22 @@ Exit code is 0 whether the files match or not.`
 	fs.BoolVar(&c.caseSens, "case-sensitive", false, "case-sensitive comparison")
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's diff branch: both files.
+func (c *diffCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	a, b := "", ""
+	if len(args) > 0 {
+		a = args[0]
+	}
+	if len(args) > 1 {
+		b = args[1]
+	}
+	return audit.OpQuery, map[string]string{
+		"command": "diff",
+		"file_a":  a,
+		"file_b":  b,
+	}
 }
 
 // Validate needs exactly two input files.

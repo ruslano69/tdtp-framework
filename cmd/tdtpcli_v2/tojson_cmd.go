@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/tdtpjson"
 )
@@ -36,6 +37,25 @@ is for pipelines. Use "-" or omit --output for stdout.`
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo follows the sibling converters (OpTransform). v1 has no
+// --to-json, so there is no legacy metadata shape to mirror — same keys
+// as to-csv minus the dialect, "stdout" when no file is written.
+func (c *toJSONCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	target := c.output
+	if target == "" || target == "-" {
+		target = "stdout"
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "to-json",
+		"input":   input,
+		"output":  target,
+	}
 }
 
 // Validate needs exactly one input file.
