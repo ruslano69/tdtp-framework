@@ -21,10 +21,16 @@
 - Proven: unit on the wire bytes (1.4 + fingerprint, no broker needed);
   live MSMQ roundtrip (10 rows), local-only and Mercury-registered
   (`registered:true, match:true` on query).
-- Known, out of scope: `import-broker` does not enforce hashes on
-  consume, and its `--output` re-marshal resets the version to 1.0
-  (hashes survive, `--test` passes) — pre-existing, same for v1's
-  packets; consumer-side enforcement is a separate 2.0 decision.
+- Consumer enforcement verified live, not just wired: a tampered packet
+  (one row value changed, stale hashes) placed in the queue is refused
+  with `packet refused (message …): data hash mismatch` (stored vs
+  computed shown), rc=1, nothing written; the untampered twin imports
+  10 rows. The message ID rides in the refusal so the audit trail names
+  the poisoned packet. Both consume paths (batch and `--keep`) run
+  `applyV14SecurityGate`; only `--raw` skips it, by definition
+  (bytes as-is).
+- Known, out of scope: `import-broker --output` re-marshal resets the
+  version to 1.0 (hashes survive, `--test` passes) — pre-existing.
 
 ### Wave 3.6: `export-broker` `--batch` / `--hash` (deprecated no-ops)
 
