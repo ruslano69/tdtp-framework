@@ -7,6 +7,48 @@
 
 ## [Unreleased]
 
+### Wave 3.6: `--integrity` on `export-broker` (both features work)
+
+- `--hash` stays a v1-identical no-op (the XXH3-64 checksum of the
+  compressed blob rides with `--compress` automatically); `--integrity`
+  is new and real: v1.4 xxh3-128 hashes stamped before compression,
+  registered in Mercury with `--mercury-url` (local-only without it).
+  The two answer different questions — transport intact vs content
+  authentic — and the file export already had both.
+- Engine: `IntegrityV14` in `brokerSendOptions` (internal, no signature
+  churn) plus `ExportToBrokerWithOptions`; the 14-positional
+  `ExportToBroker` delegates with `false`, so v1 (frozen) is untouched.
+- Proven: unit on the wire bytes (1.4 + fingerprint, no broker needed);
+  live MSMQ roundtrip (10 rows), local-only and Mercury-registered
+  (`registered:true, match:true` on query).
+- Known, out of scope: `import-broker` does not enforce hashes on
+  consume, and its `--output` re-marshal resets the version to 1.0
+  (hashes survive, `--test` passes) — pre-existing, same for v1's
+  packets; consumer-side enforcement is a separate 2.0 decision.
+
+### Wave 3.6: `export-broker` `--batch` / `--hash` (deprecated no-ops)
+
+- Accepted and ignored, exactly as v1 (both are `[deprecated, no-op]`
+  there; the engine never receives them). Pinned by a parse-level unit
+  test — the point is they must not exit 2.
+
+### Wave 3.6/3.7: `--translit` that works, `inspect-table`, `version`, `init-config`, `to-xlsx` over S3
+
+- `--translit` on `to-csv`/`to-xlsx`/`export-xlsx` is real in v2:
+  non-ASCII field names become ASCII headers after filtering/projection
+  (row values untouched). Deliberate difference: v1 accepts the flag on
+  these commands and silently ignores it (its allowlist claims them, no
+  engine code reads it — the exact class `flagscope.go` was built to
+  catch). Proven live (`Имя,Фамилия` → `Imia,Familiia`).
+- `inspect-table TABLE --config` (new `InspectTableTo` in shared code,
+  v1 delegates; reports byte-identical on sqlite and mssql).
+- `version` (command plus bare `--version` flag, from `pkg/core/version`)
+  and `init-config (postgres|mssql|mysql|sqlite)` (one command for v1's
+  four `create-config-*`, byte-identical files via the shared builders).
+- `to-xlsx` reads and writes `s3://` through `--config` storage (the
+  engine already did; v2 never passed it `StorageCfg`). Proven live
+  against weed both directions.
+
 ### Wave 3.6: `--enc` on export, `--enc13` dropped, `--enc-dev` dev-gated
 
 - `export` grew `--enc` (license `enc` gate via `Features()`, Mercury URL

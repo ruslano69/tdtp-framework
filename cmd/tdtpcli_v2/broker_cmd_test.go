@@ -59,6 +59,28 @@ func TestExportBroker_NoTable(t *testing.T) {
 	}
 }
 
+func TestExportBroker_IntegrityParses(t *testing.T) {
+	// --integrity is a real flag (not a foreign one): with no broker
+	// running the run fails operationally, never at parse time.
+	_, cfg, _ := writeBrokerDB(t)
+	code, _, _ := runApp(t, "--config", cfg, "export-broker", "parcels",
+		"--integrity")
+	if code == ExitUsage {
+		t.Errorf("exit = %d: --integrity must parse, not fail", code)
+	}
+}
+
+func TestExportBroker_DeprecatedNoOps(t *testing.T) {
+	// --batch/--hash are v1-identical no-ops: they must parse (not exit
+	// 2). With no broker running the run then fails operationally.
+	_, cfg, _ := writeBrokerDB(t)
+	code, _, _ := runApp(t, "--config", cfg, "export-broker", "parcels",
+		"--batch", "5", "--hash")
+	if code == ExitUsage {
+		t.Errorf("exit = %d: deprecated flags must parse, not fail", code)
+	}
+}
+
 func TestImportBroker_RejectsPositionals(t *testing.T) {
 	_, cfg, _ := writeBrokerDB(t)
 	code, _, _ := runApp(t, "--config", cfg, "import-broker", "stray")
@@ -112,7 +134,7 @@ func TestBrokerConfigFromCliconfig(t *testing.T) {
 	// The shared builder keeps v1/v2 queue resolution identical; the
 	// queue comes from config, never from flags.
 	_, cfg, _ := writeBrokerDB(t)
-	adb, bcc, err := loadConfigs(&Deps{ConfigPath: cfg}, "export-broker")
+	adb, bcc, _, err := loadConfigs(&Deps{ConfigPath: cfg}, "export-broker")
 	if err != nil {
 		t.Fatalf("loadConfigs: %v", err)
 	}

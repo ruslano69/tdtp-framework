@@ -111,10 +111,11 @@ none of them yet, and one of them is a hole rather than a missing feature.
 
    Enforcing any of the first three changes what existing Community users
    can do today — decide per item, then land it in v2 first.
-2. **Audit.** v1 sets an `audit.Operation` per branch and threads
-   `commands.WithOpMetrics(ctx)` so engines report row counts back. As a
-   middleware plus an optional `AuditOp() audit.Operation` on the command.
-   `test_audit_database.py` is the acceptance suite.
+2. **~~Audit~~ — done 2026-09-27.** `auditMiddleware` + `Audited`
+   (`AuditInfo(d, args)` with v1's operation + metadata; `test`,
+   `inspect`, `validate` stay out like v1). Both sinks from one entry;
+   DB opener shared as `pkg/audit.OpenDatabaseSink`.
+   `test_audit_database.py` 8/8 on both binaries.
 3. **~~Resilience~~ — done 2026-09-27.** `resilienceMiddleware`,
    last in the chain so audit records the post-retry outcome: breaker
    inside, retry outside, per-run instances from the config's
@@ -143,10 +144,10 @@ fails to parse under the shim — loudly, at least.
 | Command | Missing in v2 | Needs |
 |---|---|---|
 | `export` | `--mercury-caller` (~~`--enc` done, `--enc13` dropped, `s3://` output done 2026-09-27~~) | 3.5 item 4 |
-| `export-broker` | `--mercury-caller`, `--batch`, `--hash` | — |
-| `export-xlsx` | `--translit` | — |
+| `export-broker` | `--mercury-caller` (~~`--batch`, `--hash` done 2026-09-27, v1-identical no-ops; `--integrity` done, live MSMQ+Mercury~~) | — |
+| `export-xlsx` | (~~`--translit` done 2026-09-27, implemented for real — v1 ignores it~~) | — |
 | `import` | `--strict-schema` (~~`s3://` input done 2026-09-27~~) | 3.5 item 4 |
-| `to-csv`, `to-xlsx` | `--translit`; `s3://` input/output for `to-xlsx` | — / item 4 |
+| `to-csv`, `to-xlsx` | (~~`--translit` done 2026-09-27, implemented for real; `s3://` for `to-xlsx` done, live against weed~~) | — / item 4 |
 
 **~~Processors~~ — done 2026-09-26.** `--mask`/`--validate`/`--normalize`
 are one bundle (`processorflags.go`) on `export`, `export-broker`,
@@ -161,8 +162,8 @@ Lowest risk first; each lands with its suite run against v2.
 
 | Command | Why here | Acceptance |
 |---|---|---|
-| `inspect-table` | read-only, one engine call | normalized v1 comparison |
-| `version`, `init-config <db>` | trivial; the four `create-config-*` become one command with a positional | byte-identical sample files |
+| ~~`inspect-table` — done 2026-09-27~~ | read-only, one engine call | byte-identical reports on sqlite and mssql |
+| ~~`version`, `init-config <db>` — done 2026-09-27~~ | trivial; the four `create-config-*` become one command with a positional | byte-identical sample files, unit-pinned |
 | `steps` | spawns sub-processes — must spawn **v2**, not whatever `tdtpcli` is on PATH | `pkg/workflow` tests + a v2 e2e |
 | `map` (+`--dry-run`, `--drain`) | file/S3/broker input, its own target DSN | `map_test.go` engine tests + broker e2e (`TDTP_BROKER_TEST=1`) |
 | `listen`, `map --listen` | long-running daemon: signals, NACK/requeue, graceful stop — test the shutdown path, not only the happy path | RabbitMQ e2e |

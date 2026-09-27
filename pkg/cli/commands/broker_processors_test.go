@@ -35,6 +35,51 @@ func (b *captureBroker) Receive(context.Context) ([]byte, error) { return nil, n
 func (b *captureBroker) Ping(context.Context) error              { return nil }
 func (b *captureBroker) GetBrokerType() string                   { return "capture" }
 
+// --export-broker --integrity stamps v1.4 hashes before compression,
+// local-only without a Mercury URL. Asserted on the wire messages:
+// version 1.4 plus non-empty packet fingerprint (the --hash checksum is
+// a different, 64-bit, compressed-blob mechanism).
+func TestExportToBrokerWithOptions_Integrity(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "b.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);
+		INSERT INTO users VALUES (1,'a@x.io'),(2,'b@x.io')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	capture := &captureBroker{}
+	orig := newExportBroker
+	newExportBroker = func(*BrokerConfig) (brokers.MessageBroker, error) { return capture, nil }
+	t.Cleanup(func() { newExportBroker = orig })
+
+	err = ExportToBrokerWithOptions(context.Background(),
+		&adapters.Config{Type: "sqlite", DSN: dbPath},
+		&BrokerConfig{Type: "rabbitmq", Queue: "q"}, "users", nil,
+		BrokerExportOptions{IntegrityV14: true})
+	if err != nil {
+		t.Fatalf("ExportToBrokerWithOptions: %v", err)
+	}
+	if len(capture.sent) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	for _, m := range capture.sent {
+		pkt, err := packet.NewParser().ParseBytes(m)
+		if err != nil {
+			t.Fatalf("sent message does not parse: %v", err)
+		}
+		if pkt.Version != "1.4" {
+			t.Errorf("version = %q, want 1.4 (integrity stamp)", pkt.Version)
+		}
+		if pkt.XXH3 == "" {
+			t.Error("packet carries no xxh3 fingerprint")
+		}
+	}
+}
+
 // --export-broker --mask used to send addresses in clear: ExportToBroker took
 // procMgr and never called it. Asserted on the messages that left, not on
 // whether a processor was configured.

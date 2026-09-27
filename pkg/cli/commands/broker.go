@@ -79,7 +79,40 @@ func BrokerConfigFromCliconfig(config *cliconfig.Config) BrokerConfig {
 //     Header.MessageID.
 //   - encryptLegacy=true (--enc13): whole-packet binary blob via
 //     EncryptPacket, same as --export --enc13 produces to a file.
+// BrokerExportOptions mirrors ExportToBroker's parameters, plus IntegrityV14.
+// New code takes this; the positional form stays for v1 (frozen) and dies
+// with it at wave 4 — fourteen positionals were already one too many
+// (see the --quiet comment below), a fifteenth bool next to two others
+// would be a step backwards from the thing it fixes.
+type BrokerExportOptions struct {
+	Compress      bool
+	CompressLevel int
+	CompressAlgo  string
+	ProcessorMgr  ProcessorManager
+	PacketSizeMB  int
+	MercuryURL    string
+	Encrypt       bool
+	EncryptLegacy bool
+	// IntegrityV14 stamps v1.4 xxh3 hashes before compression (local-only
+	// without MercuryURL, registered with it) — the --integrity the file
+	// export has and the broker path never did.
+	IntegrityV14 bool
+}
+
 func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, compress bool, compressLevel int, compressAlgo string, procMgr ProcessorManager, packetSizeMB int, mercuryURL string, encrypt, encryptLegacy bool) error {
+	return ExportToBrokerWithOptions(ctx, dbConfig, brokerCfg, tableName, query, BrokerExportOptions{
+		Compress:      compress,
+		CompressLevel: compressLevel,
+		CompressAlgo:  compressAlgo,
+		ProcessorMgr:  procMgr,
+		PacketSizeMB:  packetSizeMB,
+		MercuryURL:    mercuryURL,
+		Encrypt:       encrypt,
+		EncryptLegacy: encryptLegacy,
+	})
+}
+
+func ExportToBrokerWithOptions(ctx context.Context, dbConfig *adapters.Config, brokerCfg *BrokerConfig, tableName string, query *packet.Query, opts BrokerExportOptions) error {
 	// Create database adapter
 	adapter, err := adapters.New(ctx, *dbConfig)
 	if err != nil {
@@ -100,11 +133,11 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 
 	// Configure packet size if requested
 	type packetSizeSetter interface{ SetMaxMessageSize(int) }
-	if packetSizeMB > 0 {
+	if opts.PacketSizeMB > 0 {
 		if sizer, ok := adapter.(packetSizeSetter); ok {
-			sizer.SetMaxMessageSize(packet.PacketSizeBudget(packetSizeMB))
+			sizer.SetMaxMessageSize(packet.PacketSizeBudget(opts.PacketSizeMB))
 			if !quiet {
-				fmt.Printf("Packet size set to %dMB (internal estimate: %dMB)\n", packetSizeMB, packetSizeMB*2)
+				fmt.Printf("Packet size set to %dMB (internal estimate: %dMB)\n", opts.PacketSizeMB, opts.PacketSizeMB*2)
 			}
 		}
 	}
@@ -141,9 +174,9 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	// `--export-broker users --mask email` sent the addresses in clear, and
 	// v1's flag table listed --mask for this command, so nothing warned.
 	// Before the row count, which a validate filter changes.
-	if procMgr != nil && procMgr.HasProcessors() {
+	if opts.ProcessorMgr != nil && opts.ProcessorMgr.HasProcessors() {
 		for _, pkt := range packets {
-			if err := procMgr.ProcessPacket(ctx, pkt); err != nil {
+			if err := opts.ProcessorMgr.ProcessPacket(ctx, pkt); err != nil {
 				return fmt.Errorf("pre-export processors: %w", err)
 			}
 		}
@@ -166,30 +199,38 @@ func ExportToBroker(ctx context.Context, dbConfig *adapters.Config, brokerCfg *B
 	defer func() { _ = broker.Close() }()
 
 	// Параллельное сжатие + сериализация всех пакетов
-	if compress && !quiet {
-		fmt.Printf("Compressing data (algo: %s, level %d)...\n", compressAlgo, compressLevel)
+	if opts.Compress && !quiet {
+		fmt.Printf("Compressing data (algo: %s, level %d)...\n", opts.CompressAlgo, opts.CompressLevel)
 	}
-	if encrypt {
-		if mercuryURL == "" {
+	if opts.Encrypt {
+		if opts.MercuryURL == "" {
 			return fmt.Errorf("--enc/--enc13 requires --mercury-url pointing at a running xZMercury instance")
 		}
 		if !quiet {
-			if encryptLegacy {
+			if opts.EncryptLegacy {
 				fmt.Println("Encrypting data (TDTP v1.3 whole-blob via xZMercury)...")
 			} else {
 				fmt.Println("Encrypting data (TDTP v1.5 section-level via xZMercury)...")
 			}
 		}
 	}
+	if opts.IntegrityV14 && !quiet {
+		if opts.MercuryURL != "" {
+			fmt.Printf("v1.4 integrity + Mercury registration (%s)...\n", opts.MercuryURL)
+		} else {
+			fmt.Printf("v1.4 integrity (local hashes only, no Mercury registration)...\n")
+		}
+	}
 
 	if err := sendPacketsToBroker(ctx, broker, packets, brokerSendOptions{
 		TableName:     tableName,
-		Compress:      compress,
-		CompressLevel: compressLevel,
-		CompressAlgo:  compressAlgo,
-		Encrypt:       encrypt,
-		EncryptLegacy: encryptLegacy,
-		MercuryURL:    mercuryURL,
+		Compress:      opts.Compress,
+		CompressLevel: opts.CompressLevel,
+		CompressAlgo:  opts.CompressAlgo,
+		Encrypt:       opts.Encrypt,
+		EncryptLegacy: opts.EncryptLegacy,
+		MercuryURL:    opts.MercuryURL,
+		IntegrityV14:  opts.IntegrityV14,
 		Quiet:         quiet,
 	}); err != nil {
 		return err
@@ -793,6 +834,10 @@ type brokerSendOptions struct {
 	Encrypt       bool
 	EncryptLegacy bool
 	MercuryURL    string
+	// IntegrityV14 stamps v1.4 xxh3 hashes before compression (local-only
+	// without MercuryURL, registered with it) — the --integrity the file
+	// export has and the broker path never did (until now).
+	IntegrityV14 bool
 
 	// Quiet drops the per-packet progress lines. The caller still reports the
 	// outcome — under --quiet a scheduled run wants one line per table, not
@@ -815,12 +860,16 @@ func sendPacketsToBroker(ctx context.Context, broker brokers.MessageBroker, pack
 	xmlMsgs := make([][]byte, len(packets))
 	errs := make([]error, len(packets))
 
-	// v1.5 encryption needs a Mercury client shared across the per-packet
-	// goroutines below for the mandatory integrity step — one instance,
-	// not one per packet.
-	var integrityClient *mercury.Client
-	if opts.Encrypt && !opts.EncryptLegacy {
-		integrityClient = mercury.NewClient(opts.MercuryURL, 5000)
+	// The integrity step (mandatory ahead of v1.5 encryption, opt-in via
+	// IntegrityV14) needs one Mercury client shared across the per-packet
+	// goroutines below — one instance, not one per packet. Nil client =
+	// local hashes only (ComputeAndRegisterIntegrity registers only when
+	// it gets a client; MercuryURL is guaranteed non-empty on the --enc
+	// path by the caller above).
+	needsIntegrity := (opts.Encrypt && !opts.EncryptLegacy) || opts.IntegrityV14
+	var integrityRegistrar pipeline.HashRegistrar
+	if needsIntegrity && opts.MercuryURL != "" {
+		integrityRegistrar = mercury.NewClient(opts.MercuryURL, 5000)
 	}
 
 	// Encryption calls xZMercury over HTTP per packet — keep this concurrent
@@ -831,18 +880,18 @@ func sendPacketsToBroker(ctx context.Context, broker brokers.MessageBroker, pack
 		go func(i int, pkt *packet.DataPacket) {
 			defer wg.Done()
 
-			// v1.4 integrity is mandatory ahead of v1.5 encryption, not
-			// opt-in — see pkg/pipeline/produce.go's doc comment: without
-			// this, VerifyAndPrepare's consumer-side pre-flight (which
-			// always runs once --mercury-url is set, and v1.5 decryption
-			// requires it) blocks the packet with HASH_NOT_REGISTERED.
-			// Must run before compression (hashes cover plaintext).
-			if opts.Encrypt && !opts.EncryptLegacy {
-				if err := pipeline.ComputeAndRegisterIntegrity(ctx, pkt, integrityClient, opts.TableName); err != nil {
-					errs[i] = fmt.Errorf("packet %d integrity: %w", i+1, err)
-					return
-				}
+		// v1.4 integrity is mandatory ahead of v1.5 encryption, not
+		// opt-in — see pkg/pipeline/produce.go's doc comment: without
+		// this, VerifyAndPrepare's consumer-side pre-flight (which
+		// always runs once --mercury-url is set, and v1.5 decryption
+		// requires it) blocks the packet with HASH_NOT_REGISTERED.
+		// Must run before compression (hashes cover plaintext).
+		if needsIntegrity {
+			if err := pipeline.ComputeAndRegisterIntegrity(ctx, pkt, integrityRegistrar, opts.TableName); err != nil {
+				errs[i] = fmt.Errorf("packet %d integrity: %w", i+1, err)
+				return
 			}
+		}
 
 			if opts.Compress {
 				// columnar=false: брокерный путь раскладку не предлагает, и включать её

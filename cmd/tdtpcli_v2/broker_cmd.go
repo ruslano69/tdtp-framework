@@ -7,19 +7,21 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 )
 
 // loadConfigs loads the YAML config and builds both the database and the
-// broker configs. The queue/topic comes exclusively from config, never
-// from CLI flags (same security rule as v1: the operator owns the
-// destination, the user only names the table). Errors are typed by
-// databaseConfig.
-func loadConfigs(d *Deps, cmdName string) (*adapters.Config, commands.BrokerConfig, error) {
+// broker configs, plus the full file for callers that need other sections
+// (security.mercury_url fallback). The queue/topic comes exclusively from
+// config, never from CLI flags (same security rule as v1: the operator
+// owns the destination, the user only names the table). Errors are typed
+// by databaseConfig.
+func loadConfigs(d *Deps, cmdName string) (*adapters.Config, commands.BrokerConfig, *cliconfig.Config, error) {
 	cfg, adb, err := d.databaseConfig(cmdName)
 	if err != nil {
-		return nil, commands.BrokerConfig{}, err
+		return nil, commands.BrokerConfig{}, nil, err
 	}
-	return adb, commands.BrokerConfigFromCliconfig(cfg), nil
+	return adb, commands.BrokerConfigFromCliconfig(cfg), cfg, nil
 }
 
 // exportBrokerCommand is `tdtpcli_v2 export-broker` — table to the queue.
@@ -32,7 +34,10 @@ type exportBrokerCommand struct {
 	compressLevel int
 	compressAlgo  string
 	packetSize    int
+	batch         int  // deprecated no-op: use --batch-size (v1-identical)
+	hash          bool // deprecated no-op: checksum rides with --compress (v1-identical)
 	enc           bool
+	integrity     bool
 	mercuryURL    string
 	q             queryFlags
 }
@@ -51,7 +56,10 @@ Needs --config with database and broker sections.`
 	fs.IntVar(&c.compressLevel, "compress-level", 3, "compression level")
 	fs.StringVar(&c.compressAlgo, "compress-algo", "zstd", "compression algorithm")
 	fs.IntVar(&c.packetSize, "packet-size", 0, "packet size in MB (0 = built-in default)")
+	fs.IntVar(&c.batch, "batch", 1000, "[deprecated, no-op] use --batch-size")
+	fs.BoolVar(&c.hash, "hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level encryption (needs Mercury)")
+	fs.BoolVar(&c.integrity, "integrity", false, "stamp v1.4 xxh3 hashes before compression (registered with --mercury-url)")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL")
 	addQueryFlags(fs, &c.q)
 	addProcessorFlags(fs, &c.p)
@@ -73,7 +81,7 @@ func (c *exportBrokerCommand) Features() []string {
 // broker/queue keys — Run itself then fails with the proper typed error.
 func (c *exportBrokerCommand) AuditInfo(d *Deps, _ []string) (audit.Operation, map[string]string) {
 	meta := map[string]string{"command": "export-broker", "table": c.table}
-	if _, bcc, err := loadConfigs(d, c.Name()); err == nil {
+	if _, bcc, _, err := loadConfigs(d, c.Name()); err == nil {
 		meta["broker"] = bcc.Type
 		meta["queue"] = bcc.Queue
 	}
@@ -107,7 +115,7 @@ func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args
 		return err
 	}
 	_ = args
-	adb, bcc, err := loadConfigs(d, c.Name())
+	adb, bcc, yamlCfg, err := loadConfigs(d, c.Name())
 	if err != nil {
 		return err // typed in databaseConfig
 	}
@@ -115,10 +123,24 @@ func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args
 	if err != nil {
 		return UsageError{Err: err}
 	}
+	// Mercury URL: flag first, config security section second (v1's order).
+	mercuryURL := c.mercuryURL
+	if mercuryURL == "" && yamlCfg != nil {
+		mercuryURL = yamlCfg.Security.MercuryURL
+	}
 	brokerCfg := bcc
-	err = commands.ExportToBroker(ctx, adb, &brokerCfg, c.table, query,
-		c.compress, c.compressLevel, c.compressAlgo, procs, c.packetSize,
-		c.mercuryURL, c.enc, false)
+	err = commands.ExportToBrokerWithOptions(ctx, adb, &brokerCfg, c.table, query,
+		commands.BrokerExportOptions{
+			Compress:      c.compress,
+			CompressLevel: c.compressLevel,
+			CompressAlgo:  c.compressAlgo,
+			ProcessorMgr:  procs,
+			PacketSizeMB:  c.packetSize,
+			MercuryURL:    mercuryURL,
+			Encrypt:       c.enc,
+			EncryptLegacy: false, // v1.3 whole-blob writing is disabled in v2
+			IntegrityV14:  c.integrity,
+		})
 	if err != nil {
 		return err
 	}
@@ -165,7 +187,7 @@ batches stay queued. Needs --config with database and broker sections.`
 // rule as export-broker above).
 func (c *importBrokerCommand) AuditInfo(d *Deps, _ []string) (audit.Operation, map[string]string) {
 	meta := map[string]string{"command": "import-broker", "strategy": c.strategy}
-	if _, bcc, err := loadConfigs(d, c.Name()); err == nil {
+	if _, bcc, _, err := loadConfigs(d, c.Name()); err == nil {
 		meta["broker"] = bcc.Type
 		meta["queue"] = bcc.Queue
 	}
@@ -193,7 +215,7 @@ type importBrokerJSON struct {
 
 func (c *importBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = args
-	adb, bcc, err := loadConfigs(d, c.Name())
+	adb, bcc, _, err := loadConfigs(d, c.Name())
 	if err != nil {
 		return err // typed in databaseConfig
 	}
