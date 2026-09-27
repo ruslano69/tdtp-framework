@@ -44,7 +44,7 @@ func auditMiddleware(cmd Command, next Handler) Handler {
 		if !ok {
 			return next(ctx, d, out, args)
 		}
-		cfg := auditConfig(d.ConfigPath)
+		cfg := d.auditConfig()
 		if cfg == nil {
 			return next(ctx, d, out, args) // audit disabled or unconfigured: zero cost
 		}
@@ -94,15 +94,9 @@ func auditMiddleware(cmd Command, next Handler) Handler {
 // file with audit.enabled. No config, no section, or disabled — nil,
 // and the middleware passes through. A broken config file is also nil:
 // the command itself will fail on it with a proper UsageError.
-func auditConfig(path string) *cliconfig.AuditConfig {
-	if path == "" {
-		return nil
-	}
-	cfg, err := cliconfig.LoadConfig(path)
-	if err != nil {
-		return nil
-	}
-	if !cfg.Audit.Enabled {
+func (d *Deps) auditConfig() *cliconfig.AuditConfig {
+	cfg, err := d.loadConfig()
+	if err != nil || !cfg.Audit.Enabled {
 		return nil
 	}
 	return &cfg.Audit

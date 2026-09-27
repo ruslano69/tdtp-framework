@@ -84,7 +84,7 @@ type importJSON struct {
 }
 
 func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	procs, err := c.p.build() // before any database work
+	procs, err := d.processors(&c.p) // flags, else config file; before any database work
 	if err != nil {
 		return err
 	}

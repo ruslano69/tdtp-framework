@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### Wave 3.5: config once per run, config-file processors, production tag
+
+- `Deps` parses the YAML once per run (`loadConfig` cached); every
+  accessor derives from it with byte-identical error texts.
+- `Deps.processors()`: flags first, config-file `processors:` section
+  as fallback per type (that section was dead in v1 — parsed, never
+  read). New `RowProcessors.AddMaskRules/AddValidateRules/
+  AddNormalizeRules`; unknown validate types fail loud. Proven live
+  (config mask masks emails, announces "from config").
+- `production` tag verified for v2: suite green under
+  `-tags "production nokafka"`, `--enc-dev` absent from prod help.
+- Release recommendation (decision for the owner, not applied): ship a
+  `tdtpcli_v2` preview alongside v1 starting with the next tag (same
+  build flags), full switch at the wave-4 rename.
+
 ### Fixed: one result for text and JSON reports
 
 - `list` now queries the database once; its JSON names come from the same

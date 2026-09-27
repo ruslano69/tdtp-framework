@@ -6,6 +6,7 @@ package main
 // that a processor had been configured, and three bugs lived underneath.
 
 import (
+	"context"
 	"database/sql"
 	"go/ast"
 	"go/parser"
@@ -152,6 +153,98 @@ func TestProcessorFlags_RulesFileWithoutSection(t *testing.T) {
 	}
 }
 
+// maskFixturePacket builds a one-row packet for Deps.processors merge tests.
+func maskFixturePacket(t *testing.T) *packet.DataPacket {
+	t.Helper()
+	gen := packet.NewGenerator()
+	pkts, err := gen.GenerateReference("people",
+		packet.Schema{Fields: []packet.Field{
+			{Name: "name", Type: "TEXT"},
+			{Name: "email", Type: "TEXT"},
+		}},
+		[][]string{{"Ivan", "ivan.petrov@mail.ru"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pkts[0]
+}
+
+func writeProcCfg(t *testing.T, body string) string {
+	t.Helper()
+	return writeFile(t, t.TempDir(), "c.yaml",
+		"database:\n  type: sqlite\n  database: x.db\nprocessors:\n"+body)
+}
+
+func maskedEmail(t *testing.T, procs interface {
+	ProcessPacket(ctx context.Context, pkt *packet.DataPacket) error
+}) string {
+	t.Helper()
+	pkt := maskFixturePacket(t)
+	if err := procs.ProcessPacket(context.Background(), pkt); err != nil {
+		t.Fatal(err)
+	}
+	rows := pkt.GetRows()
+	if len(rows) != 1 || len(rows[0]) < 2 {
+		t.Fatalf("unexpected rows: %v", rows)
+	}
+	return rows[0][1]
+}
+
+// Config-file mask applies when flags name none.
+func TestDepsProcessors_ConfigFallback(t *testing.T) {
+	cfg := writeProcCfg(t, "  mask:\n  - field: email\n    strategy: partial\n")
+	procs, err := (&Deps{ConfigPath: cfg}).processors(&processorFlags{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if procs == nil {
+		t.Fatal("config mask must build a chain")
+	}
+	if got := maskedEmail(t, procs); got == "ivan.petrov@mail.ru" || !strings.Contains(got, "@") {
+		t.Errorf("email not masked: %q", got)
+	}
+}
+
+// A --mask flag wins over the whole config mask section (per-type
+// fallback, not merge): the config's field stays untouched.
+func TestDepsProcessors_FlagsWin(t *testing.T) {
+	cfg := writeProcCfg(t, "  mask:\n  - field: name\n    strategy: stars\n")
+	procs, err := (&Deps{ConfigPath: cfg}).processors(&processorFlags{mask: "email"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkt := maskFixturePacket(t)
+	if err := procs.ProcessPacket(context.Background(), pkt); err != nil {
+		t.Fatal(err)
+	}
+	rows := pkt.GetRows()
+	if rows[0][0] != "Ivan" {
+		t.Errorf("config mask must not run when --mask is given, name = %q", rows[0][0])
+	}
+	if rows[0][1] == "ivan.petrov@mail.ru" {
+		t.Errorf("flag mask must run, email = %q", rows[0][1])
+	}
+}
+
+// Neither flags nor config: nil chain, nil error (engines take nil as
+// "no processors", never a typed nil).
+func TestDepsProcessors_NeitherIsNil(t *testing.T) {
+	cfg := writeProcCfg(t, "  mask: []\n")
+	procs, err := (&Deps{ConfigPath: cfg}).processors(&processorFlags{})
+	if err != nil || procs != nil {
+		t.Errorf("got (%v, %v), want (nil, nil)", procs, err)
+	}
+}
+
+// A broken config rule is a usage error, like a bad rule file.
+func TestDepsProcessors_BadConfigRule(t *testing.T) {
+	cfg := writeProcCfg(t, "  validate:\n  - field: age\n    type: format\n")
+	_, err := (&Deps{ConfigPath: cfg}).processors(&processorFlags{})
+	if _, ok := err.(UsageError); !ok {
+		t.Errorf("err = %T (%v), want UsageError", err, err)
+	}
+}
+
 // pipeline takes processors from its YAML. v1's --pipeline accepted --mask
 // and ignored it; here the flag does not parse.
 func TestProcessorFlags_PipelineRefusesMask(t *testing.T) {
@@ -162,7 +255,8 @@ func TestProcessorFlags_PipelineRefusesMask(t *testing.T) {
 	}
 }
 
-// A command that registers the bundle must build it in Run. This is the v1
+// A command that registers the bundle must build it in Run (through
+// Deps.processors, flags first, config file as fallback). This is the v1
 // failure mode exactly: --export-broker and --pipeline listed --mask, and
 // never read it. (That the built chain is then used, the compiler checks:
 // an unused `procs` does not compile.)
@@ -174,8 +268,8 @@ func TestProcessorFlags_EveryHolderBuildsTheChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	holders := map[string]bool{}  // struct types with a processorFlags field
-	builders := map[string]bool{} // receivers whose Run calls c.p.build()
+			holders := map[string]bool{}  // struct types with a processorFlags field
+			builders := map[string]bool{} // receivers whose Run calls d.processors(&c.p)
 	for _, pkg := range pkgs {
 		for _, f := range pkg.Files {
 			ast.Inspect(f, func(n ast.Node) bool {
@@ -201,8 +295,10 @@ func TestProcessorFlags_EveryHolderBuildsTheChain(t *testing.T) {
 				}
 				recv := recvTypeName(fn.Recv.List[0].Type)
 				ast.Inspect(fn.Body, func(n ast.Node) bool {
-					if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "build" {
-						if inner, ok := sel.X.(*ast.SelectorExpr); ok && inner.Sel.Name == "p" {
+					// d.processors(&c.p): selector "processors" on
+					// identifier "d".
+					if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "processors" {
+						if id, ok := sel.X.(*ast.Ident); ok && id.Name == "d" {
 							builders[recv] = true
 						}
 					}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/processors"
 	"gopkg.in/yaml.v3"
@@ -150,6 +151,116 @@ func (pm *RowProcessors) AddNormalizeProcessor(rulesFile string) error {
 		fmt.Printf("✓ Added field normalizer from: %s\n", rulesFile)
 	}
 
+	return nil
+}
+
+// AddMaskRules builds a masker from config-file rules (cliconfig
+// ProcessorsConfig.Mask): - mask: [{field: email, strategy: partial}].
+// A strategy naming a valid MaskPattern is honored; anything else falls
+// back to name-based auto-detection — the same rule --mask applies to
+// bare field names.
+func (pm *RowProcessors) AddMaskRules(rules []cliconfig.MaskRule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	fieldsToMask := make(map[string]processors.MaskPattern, len(rules))
+	for _, r := range rules {
+		field := strings.TrimSpace(r.Field)
+		if field == "" {
+			continue
+		}
+		pattern := processors.MaskPattern(strings.TrimSpace(r.Strategy))
+		switch pattern {
+		case processors.MaskPartial, processors.MaskMiddle,
+			processors.MaskStars, processors.MaskFirst2Last2:
+			// honored as written
+		default:
+			pattern = detectMaskPattern(field)
+		}
+		fieldsToMask[field] = pattern
+	}
+	if len(fieldsToMask) == 0 {
+		return nil
+	}
+	pm.chain.Add(processors.NewFieldMasker(fieldsToMask))
+	if !QuietOutput() {
+		fmt.Printf("✓ Added field masker from config: %d field(s)\n", len(fieldsToMask))
+	}
+	return nil
+}
+
+// AddValidateRules builds a validator from config-file rules:
+// - validate: [{field: age, type: range, min: "0", max: "150"}].
+// Type must name a known rule (regex, range, enum, required, length,
+// email, phone, url, date); the param is Pattern, else Min-Max joined
+// exactly as the rule-file grammar spells it ("range:0-150"). Anything
+// else is a usage error, like a bad rule file.
+func (pm *RowProcessors) AddValidateRules(rules []cliconfig.ValidateRule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	fieldsToValidate := make(map[string][]processors.FieldValidationRule, len(rules))
+	for _, r := range rules {
+		field := strings.TrimSpace(r.Field)
+		if field == "" {
+			continue
+		}
+		typ := processors.ValidationRule(strings.TrimSpace(r.Type))
+		switch typ {
+		case processors.ValidateRegex, processors.ValidateRange,
+			processors.ValidateEnum, processors.ValidateRequired,
+			processors.ValidateLength, processors.ValidateEmail,
+			processors.ValidatePhone, processors.ValidateURL,
+			processors.ValidateDate:
+			// known type, same set the rule-file grammar accepts
+		default:
+			return fmt.Errorf("invalid validate rule for field %q: unknown type %q", field, r.Type)
+		}
+		param := strings.TrimSpace(r.Pattern)
+		if param == "" && (strings.TrimSpace(r.Min) != "" || strings.TrimSpace(r.Max) != "") {
+			param = strings.TrimSpace(r.Min) + "-" + strings.TrimSpace(r.Max)
+		}
+		fieldsToValidate[field] = append(fieldsToValidate[field], processors.FieldValidationRule{
+			Type:  typ,
+			Param: param,
+		})
+	}
+	if len(fieldsToValidate) == 0 {
+		return nil
+	}
+	validator, err := processors.NewFieldValidator(fieldsToValidate, false)
+	if err != nil {
+		return fmt.Errorf("failed to create validator from config: %w", err)
+	}
+	pm.chain.Add(validator)
+	if !QuietOutput() {
+		fmt.Printf("✓ Added field validator from config: %d field(s)\n", len(fieldsToValidate))
+	}
+	return nil
+}
+
+// AddNormalizeRules builds a normalizer from config-file rules:
+// - normalize: [{field: city, strategy: uppercase}].
+// Unknown strategies fail at build, like a bad rule file.
+func (pm *RowProcessors) AddNormalizeRules(rules []cliconfig.NormalizeRule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	fieldsToNormalize := make(map[string]processors.NormalizeRule, len(rules))
+	for _, r := range rules {
+		field := strings.TrimSpace(r.Field)
+		if field == "" {
+			continue
+		}
+		fieldsToNormalize[field] = processors.NormalizeRule(strings.TrimSpace(r.Strategy))
+	}
+	if len(fieldsToNormalize) == 0 {
+		return nil
+	}
+	pm.chain.Add(processors.NewFieldNormalizer(fieldsToNormalize))
+	if !QuietOutput() {
+		fmt.Printf("✓ Added field normalizer from config: %d field(s)\n", len(fieldsToNormalize))
+	}
 	return nil
 }
 

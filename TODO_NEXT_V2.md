@@ -63,11 +63,14 @@ suite exists, output is proven identical to v1 by normalized comparison:
 `--dry-run`, `--drain`, and `--listen`).
 
 `tests/cli`: `test_sqlite.py` 122/122, `test_csv.py` 43/43,
-`test_xlsx.py` 51/51 against both binaries. **Not yet run against v2:**
-`test_postgres.py`, `test_mysql.py`, `test_mssql_msmq.py`, `test_kafka.py`,
-`test_encryption.py`, `test_audit_database.py`. Each needs live
-infrastructure, and several will fail today for the gaps listed below —
-which is the point of running them: they are the checklist.
+`test_xlsx.py` 51/51 against both binaries. Live runs 2026-09-27, also
+green on both: `test_mssql_msmq.py` 23/23 (docker SQL 2022 + local MSMQ,
+direct-auth fallback, dev license), `test_encryption.py` 15/15
+(external xzMercury `--dev`, real HMAC), `test_audit_database.py` 8/8.
+**Not yet run against v2:** `test_postgres.py`, `test_mysql.py`,
+`test_kafka.py` — no live infrastructure here. Several will fail today
+for the gaps listed below — which is the point of running them: they
+are the checklist.
 
 **Not ported:** `sync-incremental`, standalone `listen`, `process-request`. The four legacy
 `create-config-*` flags are replaced by `init-config <db>`; `--version`
@@ -126,19 +129,21 @@ none of them yet, and one of them is a hole rather than a missing feature.
    `resilience:` section, off unless configured. Breaker transitions go
    to `out.Notice` (v1 prints them always). Attempt-count unit tests,
    `-race` clean, `test_sqlite.py` 122/122 on the passthrough.
-4. **A real `Deps`.** Started with the license work: `databaseConfig`
-   is now the single adapter-config builder (gated, and it carries
-   `database.strict_schema`, which the two old builders dropped).
-   **~~`StorageConfig()` for `s3://`~~ — done 2026-09-27**
-   (`Deps.storageConfig` + `remoteStorage`, bucket-from-URI-wins; wired
-   into `export`/`import`/`test`/`inspect`, proven by T8 live against
-   weed). Still to come: parse the config once per run instead of per
-   call; `Processors()` for mask/validate/normalize. File-only commands
-   still never touch the database half.
-5. **Build parity.** **~~`drivers_s3.go` (`nos3` tag)~~ — done
-   2026-09-27** (one blank import, mirrors v1). Left: the `production`
-   tag (`pipeline_prod.go`) is untested for v2. CI runs v2's tests but
-   `release.yml` does not ship the binary — decide when it starts to.
+4. **~~A real `Deps`~~ — done 2026-09-27.** Started with the license
+   work: `databaseConfig` is now the single adapter-config builder
+   (gated, and it carries `database.strict_schema`, which the two old
+   builders dropped). `StorageConfig()` for `s3://` (proven by T8 live
+   against weed). Config parses once per run (`loadConfig` cached, same
+   error texts). `Deps.processors()`: flags first, config-file
+   `processors:` section as fallback per type (dead in v1 — parsed,
+   never read), unknown rule types fail loud; five commands rewired.
+   File-only commands still never touch the database half.
+5. **Build parity.** `drivers_s3.go` (`nos3` tag) done 2026-09-27. The
+   `production` tag verified for v2 2026-09-27 (suite green under
+   `-tags "production nokafka"`, `--enc-dev` absent from prod help).
+   Left, as a decision: ship a `tdtpcli_v2` preview in `release.yml`
+   starting with the next tag (same build flags as v1), full switch at
+   the wave-4 rename. CI runs v2's tests but ships nothing yet.
 
 ### Wave 3.6 — close the flag gaps in ported commands
 

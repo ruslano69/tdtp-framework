@@ -27,7 +27,7 @@ import (
 func resilienceMiddleware(cmd Command, next Handler) Handler {
 	_ = cmd
 	return func(ctx context.Context, d *Deps, out Output, args []string) error {
-		cfg := resilienceConfig(d.ConfigPath)
+		cfg := d.resilienceConfig()
 		if cfg == nil {
 			return next(ctx, d, out, args)
 		}
@@ -57,11 +57,8 @@ func resilienceMiddleware(cmd Command, next Handler) Handler {
 // a config file with the circuit breaker or the retry enabled. Anything
 // else — nil, and the middleware passes through. A broken config file is
 // also nil: the command itself fails on it with a proper UsageError.
-func resilienceConfig(path string) *cliconfig.ResilienceConfig {
-	if path == "" {
-		return nil
-	}
-	cfg, err := cliconfig.LoadConfig(path)
+func (d *Deps) resilienceConfig() *cliconfig.ResilienceConfig {
+	cfg, err := d.loadConfig()
 	if err != nil {
 		return nil
 	}
