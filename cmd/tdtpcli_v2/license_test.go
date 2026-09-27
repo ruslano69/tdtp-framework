@@ -53,6 +53,7 @@ func dbCommandArgs(t *testing.T) map[string][]string {
 	xlsx := touch(t, "in.xlsx")
 	return map[string][]string{
 		"list":          {"list"},
+		"inspect-table": {"inspect-table", "t"},
 		"export":        {"export", "t"},
 		"import":        {"import", in},
 		"export-xlsx":   {"export-xlsx", "t"},

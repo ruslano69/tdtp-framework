@@ -10,7 +10,9 @@ func RegisterAll(a *App) {
 	a.Register(newImportBrokerCommand())
 	a.Register(newImportCommand())
 	a.Register(newImportXLSXCommand())
+	a.Register(newInitConfigCommand())
 	a.Register(newInspectCommand())
+	a.Register(newInspectTableCommand())
 	a.Register(newListCommand())
 	a.Register(newMergeCommand())
 	a.Register(newPipelineCommand())
@@ -22,4 +24,5 @@ func RegisterAll(a *App) {
 	a.Register(newToTDTPCommand())
 	a.Register(newToXLSXCommand())
 	a.Register(newValidateCommand())
+	a.Register(newVersionCommand())
 }

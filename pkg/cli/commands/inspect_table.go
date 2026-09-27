@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
@@ -13,6 +15,12 @@ import (
 //
 // tableName may include bracket-quoting: "[ZTR$Employee]" or "[dbo].[Orders]"
 func InspectTable(ctx context.Context, config *adapters.Config, tableName string) error {
+	return InspectTableTo(os.Stdout, ctx, config, tableName)
+}
+
+// InspectTableTo is InspectTable writing its report to w instead of stdout,
+// so embedders (tdtpcli_v2 --quiet/--json) control the output stream.
+func InspectTableTo(w io.Writer, ctx context.Context, config *adapters.Config, tableName string) error {
 	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
@@ -24,65 +32,65 @@ func InspectTable(ctx context.Context, config *adapters.Config, tableName string
 		return fmt.Errorf("inspect-table failed: %w", err)
 	}
 
-	printTableReport(report)
+	printTableReport(w, report)
 	return nil
 }
 
-// printTableReport emits a YAML-formatted TableReport to stdout.
-func printTableReport(r *adapters.TableReport) {
-	fmt.Printf("table: %s\n", r.Table)
+// printTableReport emits a YAML-formatted TableReport.
+func printTableReport(w io.Writer, r *adapters.TableReport) {
+	fmt.Fprintf(w, "table: %s\n", r.Table)
 	if r.Schema != "" {
-		fmt.Printf("schema: %s\n", r.Schema)
+		fmt.Fprintf(w, "schema: %s\n", r.Schema)
 	}
-	fmt.Printf("db_type: %s\n", r.DBType)
-	fmt.Printf("db_version: %s\n", r.DBVersion)
+	fmt.Fprintf(w, "db_type: %s\n", r.DBType)
+	fmt.Fprintf(w, "db_version: %s\n", r.DBVersion)
 
-	fmt.Printf("columns:\n")
+	fmt.Fprintf(w, "columns:\n")
 	for _, c := range r.Columns {
-		fmt.Printf("  - name: %s\n", yamlString(c.Name))
-		fmt.Printf("    native_type: %s\n", c.NativeType)
-		fmt.Printf("    tdtp_type: %s\n", c.TDTPType)
-		fmt.Printf("    nullable: %v\n", c.Nullable)
-		fmt.Printf("    primary_key: %v\n", c.PrimaryKey)
+		fmt.Fprintf(w, "  - name: %s\n", yamlString(c.Name))
+		fmt.Fprintf(w, "    native_type: %s\n", c.NativeType)
+		fmt.Fprintf(w, "    tdtp_type: %s\n", c.TDTPType)
+		fmt.Fprintf(w, "    nullable: %v\n", c.Nullable)
+		fmt.Fprintf(w, "    primary_key: %v\n", c.PrimaryKey)
 		if c.Identity {
-			fmt.Printf("    identity: true\n")
+			fmt.Fprintf(w, "    identity: true\n")
 		}
 		if c.Computed {
-			fmt.Printf("    computed: true\n")
+			fmt.Fprintf(w, "    computed: true\n")
 		}
 		if c.Default != "" {
-			fmt.Printf("    default: %s\n", yamlString(c.Default))
+			fmt.Fprintf(w, "    default: %s\n", yamlString(c.Default))
 		}
 		if c.Length > 0 {
-			fmt.Printf("    length: %d\n", c.Length)
+			fmt.Fprintf(w, "    length: %d\n", c.Length)
 		}
 		if c.Precision > 0 {
-			fmt.Printf("    precision: %d\n", c.Precision)
-			fmt.Printf("    scale: %d\n", c.Scale)
+			fmt.Fprintf(w, "    precision: %d\n", c.Precision)
+			fmt.Fprintf(w, "    scale: %d\n", c.Scale)
 		}
 	}
 
 	if len(r.ForeignKeys) > 0 {
-		fmt.Printf("foreign_keys:\n")
+		fmt.Fprintf(w, "foreign_keys:\n")
 		for _, fk := range r.ForeignKeys {
-			fmt.Printf("  - column: %s\n", yamlString(fk.Column))
-			fmt.Printf("    references_table: %s\n", fk.ReferencesTable)
-			fmt.Printf("    references_column: %s\n", fk.ReferencesColumn)
+			fmt.Fprintf(w, "  - column: %s\n", yamlString(fk.Column))
+			fmt.Fprintf(w, "    references_table: %s\n", fk.ReferencesTable)
+			fmt.Fprintf(w, "    references_column: %s\n", fk.ReferencesColumn)
 			if fk.OnDelete != "" && !strings.EqualFold(fk.OnDelete, "NO ACTION") {
-				fmt.Printf("    on_delete: %s\n", fk.OnDelete)
+				fmt.Fprintf(w, "    on_delete: %s\n", fk.OnDelete)
 			}
 		}
 	}
 
-	fmt.Printf("stats:\n")
-	fmt.Printf("  total_rows: %d\n", r.Stats.TotalRows)
+	fmt.Fprintf(w, "stats:\n")
+	fmt.Fprintf(w, "  total_rows: %d\n", r.Stats.TotalRows)
 
 	if len(r.Sample) > 0 {
-		fmt.Printf("sample:\n")
+		fmt.Fprintf(w, "sample:\n")
 		// Print in column order for readability
 		for _, col := range r.Columns {
 			if val, ok := r.Sample[col.Name]; ok {
-				fmt.Printf("  %s: %s\n", yamlString(col.Name), yamlString(val))
+				fmt.Fprintf(w, "  %s: %s\n", yamlString(col.Name), yamlString(val))
 			}
 		}
 	}

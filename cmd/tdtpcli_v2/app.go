@@ -51,6 +51,10 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		a.writeUsage(stdout)
 		return ExitOK
 	}
+	if len(argv) == 1 && (argv[0] == "--version" || argv[0] == "-V") {
+		printVersion(stdout)
+		return ExitOK
+	}
 	globals, rest, err := parseGlobals(argv)
 	if err != nil {
 		// v1 shapes (`tdtpcli_v2 --to-csv f.xml`, or with globals first:
