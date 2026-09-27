@@ -268,8 +268,8 @@ func TestProcessorFlags_EveryHolderBuildsTheChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-			holders := map[string]bool{}  // struct types with a processorFlags field
-			builders := map[string]bool{} // receivers whose Run calls d.processors(&c.p)
+	holders := map[string]bool{}  // struct types with a processorFlags field
+	builders := map[string]bool{} // receivers whose Run calls d.processors(&c.p)
 	for _, pkg := range pkgs {
 		for _, f := range pkg.Files {
 			ast.Inspect(f, func(n ast.Node) bool {
