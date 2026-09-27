@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -30,21 +31,31 @@ import (
 //	    depends_on: [export]
 //	    on_error: retry(3)
 func RunSteps(ctx context.Context, path string, vars map[string]string, quiet bool) error {
+	return RunStepsWithOptions(ctx, path, vars, workflow.RunOptions{Quiet: quiet})
+}
+
+// RunStepsWithOptions preserves the v1 workflow engine while allowing v2 to
+// route progress and child output through its own output contract.
+func RunStepsWithOptions(ctx context.Context, path string, vars map[string]string, opts workflow.RunOptions) error {
 	cfg, err := workflow.LoadWorkflow(path)
 	if err != nil {
 		return fmt.Errorf("--steps: %w", err)
 	}
+	stdout := opts.Stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
 
 	// The name survives --quiet: a captured log still has to say what it was.
 	// The description and step count do not — the workflow file states both.
-	fmt.Printf("Workflow: %s\n", cfg.Name)
-	if !quiet {
+	fmt.Fprintf(stdout, "Workflow: %s\n", cfg.Name)
+	if !opts.Quiet {
 		if cfg.Description != "" {
-			fmt.Printf("   %s\n", workflow.ApplyVars(cfg.Description, vars))
+			fmt.Fprintf(stdout, "   %s\n", workflow.ApplyVars(cfg.Description, vars))
 		}
-		fmt.Printf("   Steps: %d\n", len(cfg.Steps))
+		fmt.Fprintf(stdout, "   Steps: %d\n", len(cfg.Steps))
 	}
-	if len(vars) > 0 && !quiet {
+	if len(vars) > 0 && !opts.Quiet {
 		keys := make([]string, 0, len(vars))
 		for k := range vars {
 			keys = append(keys, k)
@@ -54,17 +65,17 @@ func RunSteps(ctx context.Context, path string, vars map[string]string, quiet bo
 		for _, k := range keys {
 			parts = append(parts, fmt.Sprintf("@%s=%s", k, vars[k]))
 		}
-		fmt.Printf("   Variables: %s\n", strings.Join(parts, ", "))
+		fmt.Fprintf(stdout, "   Variables: %s\n", strings.Join(parts, ", "))
 	}
-	if !quiet {
-		fmt.Println()
+	if !opts.Quiet {
+		fmt.Fprintln(stdout)
 	}
 
 	t0 := time.Now()
-	if err := workflow.Run(ctx, cfg, vars, workflow.RunOptions{Quiet: quiet}); err != nil {
+	if err := workflow.Run(ctx, cfg, vars, opts); err != nil {
 		return err
 	}
 
-	fmt.Printf("\n[steps] all steps completed in %s\n", time.Since(t0).Round(time.Millisecond))
+	fmt.Fprintf(stdout, "\n[steps] all steps completed in %s\n", time.Since(t0).Round(time.Millisecond))
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 	"github.com/ruslano69/tdtp-framework/pkg/license"
@@ -25,12 +26,16 @@ type Deps struct {
 	// resolved it (a test driving Run directly): gates treat that as the
 	// Community floor, never as "unlicensed means allowed".
 	License *license.License
+	// AuditLogger is available during an audited command's Run, so long
+	// lived consumers can record each processed message as well as the run.
+	AuditLogger *audit.AuditLogger
 }
 
 // databaseConfig loads the v1-format YAML and builds the adapter config —
-// the ONLY place in v2 that builds one, and the reason it is also where the
-// license adapter gate lives: a command cannot reach a database without
-// passing it. TestAdapterConfigBuiltOnlyInDeps holds that line.
+// the only place in v2 that builds an adapters.Config. Commands with a normal
+// --config database section pass its license gate here. The map engine owns
+// its target DSN in mapping YAML and receives a separate adapter gate before
+// it connects. TestAdapterConfigBuiltOnlyInDeps holds the CLI builder line.
 //
 // Errors are typed here so callers return them as they are: a missing or
 // unreadable config is UsageError (exit 2); an adapter the license does

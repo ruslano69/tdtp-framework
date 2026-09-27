@@ -57,7 +57,9 @@ type Output struct {
 	Notice      func(format string, args ...any) // stderr; not data (license banner)
 	JSON        func(v any)
 	JSONEnabled bool
+	Quiet       bool
 	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 // Discard is an Output that renders nothing (for tests).
@@ -70,6 +72,8 @@ func Discard(out io.Writer) Output {
 		Notice:      func(format string, args ...any) {},
 		JSON:        func(v any) {},
 		JSONEnabled: false,
+		Quiet:       true,
 		Stdout:      out,
+		Stderr:      io.Discard,
 	}
 }

@@ -4,6 +4,12 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — `--map --quiet` one-shot reports its row total
+
+The one-shot mapping path suppressed progress but also omitted the final
+row count. It now prints the same one-line result as `--drain` and
+`--listen`. Broker shutdown also stops its signal watcher when a run ends.
+
 ### Fixed — concurrent audit opens raced on the WAL switch
 
 `PRAGMA journal_mode` bypasses the SQLite busy handler (fails in ~1ms

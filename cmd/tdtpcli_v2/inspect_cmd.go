@@ -76,7 +76,13 @@ func (c *inspectCommand) Run(ctx context.Context, d *Deps, out Output, args []st
 	if err := commands.InspectFileTo(&buf, ctx, path, storageCfg); err != nil {
 		return DataError{Err: err}
 	}
-	out.Human("%s", buf.String())
+	if out.Quiet && !out.JSONEnabled {
+		// The schema report is inspect's result. v1 keeps it under --quiet,
+		// including when inspect is a workflow child.
+		_, _ = out.Stdout.Write(buf.Bytes())
+	} else {
+		out.Human("%s", buf.String())
+	}
 	if storageCfg != nil {
 		// The human report above already holds every fact; re-reading
 		// the object for the JSON contract would fetch it twice.

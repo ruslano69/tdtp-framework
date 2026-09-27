@@ -51,14 +51,16 @@ Binary name during transition: `tdtpcli_v2` (unambiguous in CI/logs).
 moved. Nothing in there calls `os.Exit` — keep it that way, it is a
 library now.
 
-## Status — 2026-09-26
+## Status — 2026-09-27
 
 **Ported** — the suite passes against `tdtpcli_v2` unchanged, or, where no
 suite exists, output is proven identical to v1 by normalized comparison:
 `validate` (new), `inspect`, `test`, `list` (+`--views` for
 `--list-views`), `to-csv`, `to-xlsx`, `to-html`, `to-json` (new), `to-tdtp`,
 `to-compact`, `export`, `import`, `export-xlsx`, `import-xlsx`, `from-xlsx`,
-`pipeline`, `export-broker`, `import-broker`, `diff`, `merge`.
+`pipeline`, `export-broker`, `import-broker`, `diff`, `merge`,
+`inspect-table`, `version`, `init-config`, `steps`, `map` (including
+`--dry-run`, `--drain`, and `--listen`).
 
 `tests/cli`: `test_sqlite.py` 122/122, `test_csv.py` 43/43,
 `test_xlsx.py` 51/51 against both binaries. **Not yet run against v2:**
@@ -67,9 +69,9 @@ suite exists, output is proven identical to v1 by normalized comparison:
 infrastructure, and several will fail today for the gaps listed below —
 which is the point of running them: they are the checklist.
 
-**Not ported:** `sync-incremental`, `map` (+`--listen`/`--drain`/
-`--dry-run`), `listen`, `steps`, `inspect-table`, `process-request`,
-`create-config-{pg,mssql,sqlite,mysql}`, `--version`.
+**Not ported:** `sync-incremental`, standalone `listen`, `process-request`. The four legacy
+`create-config-*` flags are replaced by `init-config <db>`; `--version`
+is supported.
 
 ## Remaining work, in order
 
@@ -89,8 +91,10 @@ none of them yet, and one of them is a hole rather than a missing feature.
    the adapter gate sits in `Deps.databaseConfig`, the only place that
    builds `adapters.Config` — `TestAdapterConfigBuiltOnlyInDeps` parses the
    package to hold that, and `TestLicense_DBCommandTableIsComplete` derives
-   the DB commands from the source, so a new one cannot skip the refusal
-   test. Same refusal texts (`commands.CheckFeature`/`CheckAdapter`), exit
+   the DB commands from the source, so a new `--config` database command
+   cannot skip the refusal test. `map` gets its target from mapping YAML;
+   its separate adapter gate has a dedicated refusal test. Same refusal
+   texts (`commands.CheckFeature`/`CheckAdapter`), exit
    1 as in v1. Deliberate differences: the adapter is gated where a
    database is used, not whenever a config is loaded (v1 refused
    `--config pg.yaml --to-csv f.xml` on Community); the banner is a
@@ -164,9 +168,9 @@ Lowest risk first; each lands with its suite run against v2.
 |---|---|---|
 | ~~`inspect-table` — done 2026-09-27~~ | read-only, one engine call | byte-identical reports on sqlite and mssql |
 | ~~`version`, `init-config <db>` — done 2026-09-27~~ | trivial; the four `create-config-*` become one command with a positional | byte-identical sample files, unit-pinned |
-| `steps` | spawns sub-processes — must spawn **v2**, not whatever `tdtpcli` is on PATH | `pkg/workflow` tests + a v2 e2e |
-| `map` (+`--dry-run`, `--drain`) | file/S3/broker input, its own target DSN | `map_test.go` engine tests + broker e2e (`TDTP_BROKER_TEST=1`) |
-| `listen`, `map --listen` | long-running daemon: signals, NACK/requeue, graceful stop — test the shutdown path, not only the happy path | RabbitMQ e2e |
+| ~~`steps` — done 2026-09-27~~ | `os.Executable()` spawns v2; native and `--steps` shim | v2 e2e: v2-only `to-json` child, dependency, `skip`, quiet and JSON streams |
+| ~~`map` (+`--dry-run`, `--drain`, `--listen`) — done 2026-09-27~~ | file/S3/broker input, its own target DSN | SQLite and live RabbitMQ e2e (`TDTP_BROKER_TEST=1`), per-message audit, shutdown/ACK/NACK tests |
+| `listen` (standalone) | long-running daemon: signals, NACK/requeue, graceful stop | RabbitMQ e2e |
 | `sync-incremental` | checkpoint file + broker target | `test_postgres.py` sync group |
 | `process-request` | excluded from lint in `.golangci.yml` — read it before porting | — |
 

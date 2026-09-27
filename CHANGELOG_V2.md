@@ -7,6 +7,36 @@
 
 ## [Unreleased]
 
+### Wave 3.7: `map` and broker loop modes
+
+- Added native `map mapping.yaml --input SRC` with `--dry-run`, `--drain`,
+  `--listen`, and `--mercury-url`; legacy `--map` resolves through the
+  compatibility shim. The mapping YAML supplies its own target DSN, and v2
+  checks that target adapter against the license before connecting.
+- Mapping progress uses the app output streams. `--json` keeps stdout as a
+  single verdict; `--quiet` keeps the row total. Broker loop mode records
+  audit entries for each processed message.
+- Tested file dry-run and SQLite import, plus live RabbitMQ one-shot,
+  `--drain`, and `--listen` with SQLite and per-message audit. Shutdown,
+  ACK, and NACK paths also have broker-independent tests.
+
+### Wave 3.7: `steps` workflows
+
+- `tdtpcli_v2 steps workflow.yaml [@name=value...]` runs the shared
+  dependency-wave engine; the `--steps` form resolves through the one-release
+  compatibility shim. Children use `os.Executable()`, so a v2 workflow runs
+  v2 commands, including a v2-only `to-json` step.
+- Workflow progress and child output use the app's streams. In `--json` mode
+  progress goes to stderr and stdout contains one verdict; `--quiet` reaches
+  child commands. The shared runner defaults to its former process streams
+  for v1 callers.
+- A binary end-to-end test covers the v2-only child, dependencies,
+  `on_error: skip`, compatibility, quiet propagation and JSON output.
+- Porting exposed a quiet-mode parity gap in `test`: v1 keeps the integrity
+  verdict under `--quiet`, while v2 suppressed it with the human preamble.
+  The same gap hid the entire `inspect` schema report. V2 now keeps both
+  results, so quiet workflows retain their useful output.
+
 ### Wave 3.6: `--mercury-caller` (export, export-broker)
 
 - Sender identity on Mercury registration. `export` plumbs the flag

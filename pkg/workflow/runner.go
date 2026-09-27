@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -41,6 +42,35 @@ type RunOptions struct {
 	// command reappears in the failure line, which is the moment it is worth
 	// having.
 	Quiet bool
+	// Stdout and Stderr receive workflow progress and child process output.
+	// Nil keeps the v1 behaviour of writing to the process streams.
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+func (o RunOptions) stdout() io.Writer {
+	if o.Stdout != nil {
+		return o.Stdout
+	}
+	return os.Stdout
+}
+
+func (o RunOptions) stderr() io.Writer {
+	if o.Stderr != nil {
+		return o.Stderr
+	}
+	return os.Stderr
+}
+
+type synchronizedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (w synchronizedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Write(p)
 }
 
 // Run executes the workflow using Kahn's topological-sort algorithm.
@@ -59,6 +89,11 @@ func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string, opts 
 	if err != nil {
 		return fmt.Errorf("cannot determine executable path: %w", err)
 	}
+	// Parallel steps can share an in-memory writer when invoked through App.Run.
+	// A single lock also covers JSON mode, where both streams target stderr.
+	var outputMu sync.Mutex
+	opts.Stdout = synchronizedWriter{mu: &outputMu, w: opts.stdout()}
+	opts.Stderr = synchronizedWriter{mu: &outputMu, w: opts.stderr()}
 
 	// Substitute vars in the description so callers that print it get the resolved value.
 	cfg.Description = applyVars(cfg.Description, vars)
@@ -148,7 +183,7 @@ func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string, opts 
 
 			if r.skipPropagated {
 				skipped[r.id] = true
-				fmt.Printf("[steps] ⏭  %s — skipped (ancestor was skipped)\n", r.id)
+				fmt.Fprintf(opts.stdout(), "[steps] ⏭  %s — skipped (ancestor was skipped)\n", r.id)
 				// Update in-degrees of dependents even on skip so the DAG drains.
 				for _, dep := range dependents[r.id] {
 					inDegree[dep]--
@@ -163,7 +198,7 @@ func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string, opts 
 				policy, _ := ParseOnError(step.OnError)
 				if policy.Action == "skip" {
 					skipped[r.id] = true
-					fmt.Printf("[steps] ⚠  %s — failed, continuing (on_error: skip): %v\n", r.id, r.err)
+					fmt.Fprintf(opts.stdout(), "[steps] ⚠  %s — failed, continuing (on_error: skip): %v\n", r.id, r.err)
 				} else {
 					return fmt.Errorf("step %q failed: %w", r.id, r.err)
 				}
@@ -210,7 +245,7 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 			// Exponential back-off: 2s, 4s, 8s, … capped at 30s.
 			delaySec := math.Min(float64(int(2)<<uint(attempt-2)), 30)
 			delay := time.Duration(delaySec) * time.Second
-			fmt.Printf("[steps] ↺  %s — retry %d/%d in %s\n", step.ID, attempt-1, policy.Retries, delay)
+			fmt.Fprintf(opts.stdout(), "[steps] ↺  %s — retry %d/%d in %s\n", step.ID, attempt-1, policy.Retries, delay)
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
@@ -219,22 +254,22 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 		}
 
 		if opts.Quiet {
-			fmt.Printf("[steps] ▶  %s\n", step.ID)
+			fmt.Fprintf(opts.stdout(), "[steps] ▶  %s\n", step.ID)
 		} else {
-			fmt.Printf("[steps] ▶  %s: %s\n", step.ID, resolved)
+			fmt.Fprintf(opts.stdout(), "[steps] ▶  %s: %s\n", step.ID, resolved)
 		}
 		cmd := exec.CommandContext(ctx, exe, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stdout = opts.stdout()
+		cmd.Stderr = opts.stderr()
 
 		lastErr = cmd.Run()
 		if lastErr == nil {
-			fmt.Printf("[steps] ✓  %s\n", step.ID)
+			fmt.Fprintf(opts.stdout(), "[steps] ✓  %s\n", step.ID)
 			return nil
 		}
 		// The command is echoed here even under --quiet: a step that failed is
 		// exactly when you need to know what was run.
-		fmt.Printf("[steps] ✗  %s: %v\n    command: %s\n", step.ID, lastErr, resolved)
+		fmt.Fprintf(opts.stdout(), "[steps] ✗  %s: %v\n    command: %s\n", step.ID, lastErr, resolved)
 	}
 	return lastErr
 }

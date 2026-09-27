@@ -52,6 +52,8 @@ func auditMiddleware(cmd Command, next Handler) Handler {
 		if err != nil {
 			return err
 		}
+		d.AuditLogger = logger
+		defer func() { d.AuditLogger = nil }()
 		ctx, opMetrics := commands.WithOpMetrics(ctx)
 		start := time.Now()
 		runErr := next(ctx, d, out, args)

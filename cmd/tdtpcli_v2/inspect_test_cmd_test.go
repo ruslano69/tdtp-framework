@@ -50,6 +50,14 @@ func TestInspectCmd_OK(t *testing.T) {
 	}
 }
 
+func TestInspectCmd_QuietKeepsReport(t *testing.T) {
+	f := writeInspectFixture(t, "a.xml", [][]string{{"1", "x"}})
+	code, stdout, _ := runApp(t, "--quiet", "inspect", f)
+	if code != ExitOK || !strings.Contains(stdout, "table: orders") {
+		t.Fatalf("quiet inspect report: exit=%d stdout=%q", code, stdout)
+	}
+}
+
 func TestInspectCmd_MissingFile(t *testing.T) {
 	code, _, _ := runApp(t, "inspect", filepath.Join(t.TempDir(), "nope.xml"))
 	if code != ExitFail {
@@ -83,6 +91,14 @@ func TestTestCmd_OK(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "Integrity check passed") {
 		t.Errorf("output should confirm integrity, got:\n%s", stdout)
+	}
+}
+
+func TestTestCmd_QuietKeepsVerdict(t *testing.T) {
+	f := writeInspectFixture(t, "a.xml", [][]string{{"1", "x"}})
+	code, stdout, _ := runApp(t, "--quiet", "test", f)
+	if code != ExitOK || !strings.Contains(stdout, "Integrity check passed") {
+		t.Fatalf("quiet integrity result: exit=%d stdout=%q", code, stdout)
 	}
 }
 
