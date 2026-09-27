@@ -750,6 +750,39 @@ real HR schema before the format is decided (§8 of the draft). NOT NULL is
 the loss that happens today on every transfer: `IS_NULLABLE` is read by the
 MSSQL adapter and dropped.
 
+### 2.9 Database failover with auth fallback, on the audit trail
+
+Motivation is a concrete enterprise case: the primary SQL Server dies
+mid-night and the pipeline must continue against the standby — which
+authenticates differently (primary: domain/NTLM, standby: direct SQL
+login). Two fallbacks in one, attempted in this order:
+
+1. Same server, different creds: a `DOMAIN\user` DSN tries NTLM first;
+   on 18452/18456 only, retry stripped to a plain SQL login. Network or
+   timeout errors skip this phase — the server is dead, creds are moot.
+2. Standby server: a `fallback:` database block (same shape, its own
+   DSN) is dialled when the primary is unreachable or both cred
+   variants fail. Bounded: three attempts per connect, total.
+
+Rules that make it shippable rather than scary: fallback only on
+login/network errors, never on query errors; at most one cred retry
+(wrong passwords already cost lockout counters); passwords never reach
+logs or the audit entry — only `server` (who answered), `auth`
+(`domain`|`direct`) and `failover: true|false` land in metadata, via
+extended `OpMetrics` (additive fields, picked up by the v2 audit
+middleware for free). True passwordless SSO (`trusted_connection`)
+is NOT part of this: the driver cannot do SSPI, that needs the
+`microsoft/go-mssqldb` swap as a separate decision.
+
+Placement: a shared helper in `pkg/cli/commands` (all adapters inherit
+it, no interface changes), wired into the ETL loader first (unattended
+runs are where failover matters), CLI `export`/`import` second.
+Testable without a domain: primary = dead port → standby docker proves
+the server leg; `NONEXISTENTDOMAIN\sa` + sa password proves the cred
+leg (NTLM 18452, then SQL success). `test_mssql_msmq.py` already does
+domain-first/direct-second at the suite layer (MSSQL_USER/MSSQL_PASSWORD
+env) — that stays as the e2e transport, not the product.
+
 ### Grace period for `tdtp.lic`
 
 Today expired = fatal, which hurts integrators mid-project. Proposal:
