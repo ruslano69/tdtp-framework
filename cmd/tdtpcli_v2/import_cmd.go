@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // importCommand is `tdtpcli_v2 import` — TDTP file into a database table.
@@ -88,12 +89,23 @@ func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		return err
 	}
 	path := args[0]
-	if _, err := os.Stat(path); err != nil {
-		return err // unreadable input is operational (exit 1)
+	// Missing local input is checked before config (operational, exit 1);
+	// a remote URI skips the stat — its storage comes from the config.
+	if !storage.IsRemote(path) {
+		if _, err := os.Stat(path); err != nil {
+			return err // unreadable input is operational (exit 1)
+		}
 	}
-	_, cfg, err := d.databaseConfig("import")
+	yamlCfg, cfg, err := d.databaseConfig("import")
 	if err != nil {
 		return err // typed: bad config → usage, unlicensed adapter → operational
+	}
+	// Resolve storage source: s3:// URI → object storage (v1's main.go
+	// pattern); otherwise the local file checked above.
+	var importStorageCfg *storage.Config
+	importStorageKey := ""
+	if storage.IsRemote(path) {
+		importStorageCfg, importStorageKey = remoteStorage(yamlCfg.Storage, path)
 	}
 	strategy, err := commands.ParseImportStrategy(c.strategy)
 	if err != nil {
@@ -113,6 +125,8 @@ func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		SanitizeTranslit: c.translit,
 		ExpectVars:       c.expectMap,
 		MercuryURL:       c.mercuryURL,
+		StorageCfg:       importStorageCfg,
+		StorageKey:       importStorageKey,
 	})
 	if err != nil {
 		return err // database/import failure is operational (exit 1)

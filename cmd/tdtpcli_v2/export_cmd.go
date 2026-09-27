@@ -6,6 +6,7 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // exportCommand is `tdtpcli_v2 export` — database table to a TDTP file.
@@ -132,6 +133,15 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		compressAlgo = expCfg.CompressAlgo
 	}
 	target := outputFile(c.output, c.table, "tdtp.xml")
+	// Resolve storage target: s3:// URI → object storage (v1's main.go
+	// pattern); otherwise a local file.
+	var exportStorageCfg *storage.Config
+	exportStorageKey := ""
+	display := target
+	if storage.IsRemote(target) {
+		exportStorageCfg, exportStorageKey = remoteStorage(yamlCfg.Storage, target)
+		target = "" // not writing to a local file
+	}
 	err = commands.ExportTable(ctx, cfg, commands.ExportOptions{
 		ProcessorMgr:     procs,
 		TableName:        c.table,
@@ -153,11 +163,13 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		CompactTail:      c.compactTail,
 		IntegrityV14:     c.integrity,
 		MercuryURL:       c.mercuryURL,
+		StorageCfg:       exportStorageCfg,
+		StorageKey:       exportStorageKey,
 	})
 	if err != nil {
 		return err // database/export failure is operational (exit 1)
 	}
-	out.Human("Exported %s to %s\n", c.table, target)
-	out.JSON(exportJSON{Valid: true, Table: c.table, Output: target})
+	out.Human("Exported %s to %s\n", c.table, display)
+	out.JSON(exportJSON{Valid: true, Table: c.table, Output: display})
 	return nil
 }

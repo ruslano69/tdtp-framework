@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // inspectCommand is `tdtpcli_v2 inspect` — structure of a TDTP file.
@@ -26,18 +26,15 @@ func newInspectCommand() *inspectCommand {
 	c.CmdLong = `tdtpcli_v2 inspect file.tdtp.xml
 
 Prints what the file is (table, types, keys, rows, compression) without
-needing a database. Remote s3:// input needs --config (wave 2).`
+needing a database. Remote s3:// input needs --config.`
 	c.FlagSet = newCommandFlagSet("inspect")
 	return c
 }
 
-// Validate needs exactly one input file.
+// Validate needs exactly one input file (local or s3://).
 func (c *inspectCommand) Validate(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("need exactly one input file, got %d", len(args))
-	}
-	if strings.HasPrefix(args[0], "s3://") {
-		return fmt.Errorf("s3:// input needs --config (wave 2)")
 	}
 	return nil
 }
@@ -62,16 +59,30 @@ type fieldJSON struct {
 }
 
 func (c *inspectCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = d
 	path := args[0]
-	if _, err := os.Stat(path); err != nil {
+	// Remote s3:// input resolves its storage from --config (v1's main.go
+	// pattern); a missing config is user error, like a missing file.
+	var storageCfg *storage.Config
+	if storage.IsRemote(path) {
+		var err error
+		storageCfg, err = d.storageConfig()
+		if err != nil {
+			return err
+		}
+	} else if _, err := os.Stat(path); err != nil {
 		return err // unreadable input is operational (exit 1), not invalid data
 	}
 	var buf bytes.Buffer
-	if err := commands.InspectFileTo(&buf, ctx, path, nil); err != nil {
+	if err := commands.InspectFileTo(&buf, ctx, path, storageCfg); err != nil {
 		return DataError{Err: err}
 	}
 	out.Human("%s", buf.String())
+	if storageCfg != nil {
+		// The human report above already holds every fact; re-reading
+		// the object for the JSON contract would fetch it twice.
+		out.JSON(inspectJSON{Valid: true, File: path})
+		return nil
+	}
 	out.JSON(c.describe(path))
 	return nil
 }

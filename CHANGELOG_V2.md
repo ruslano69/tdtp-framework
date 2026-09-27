@@ -7,6 +7,40 @@
 
 ## [Unreleased]
 
+### Wave 3.5: `s3://` (storage config + driver)
+
+- `drivers_s3.go` (`!nos3`, one blank import, mirrors v1) — without it
+  every S3 path died with `unknown storage type` (found live: pipeline
+  to S3 failed in the engine's storage factory).
+- `Deps.storageConfig()` + `remoteStorage()` (bucket-from-URI-wins,
+  v1's main.go pattern) wired into `export` (output), `import` (input,
+  local-missing check still first), `test` and `inspect` (remote needs
+  `--config`, the old "wave 2" refusals are gone).
+- Fixed alongside, shared code: `pkg/audit.OpenDatabaseSink` sqlite
+  branch hardened — `_pragma` busy_timeout in the DSN (every pooled
+  connection), `SetMaxOpenConns(1)`, and `journal_mode=WAL` through a
+  bounded busy-only retry. `PRAGMA journal_mode` bypasses the busy
+  handler (proven: fails in ~1ms under lock), so concurrent first-opens
+  failed all but one; `-race` on the audit parallel test caught it.
+- Proven: T8 `test_sqlite.py` 5/5 live against weed, full suite 127/127,
+  `-race` clean over the touched packages.
+
+### Wave 3.5: resilience (middleware)
+
+- `resilienceMiddleware`, last in the chain (`recover → license → audit →
+  resilience`) so the trail records the post-retry outcome: breaker inside,
+  retry outside, both from the config's `resilience:` section, both off
+  unless configured — field-for-field v1's `initCircuitBreaker` /
+  `initRetryManager` / `ExecuteWithResilience` semantics (init failure
+  fails the run, exhaustion reports `max retry attempts (N) exceeded`
+  at exit 1). Per-run instances like v1's per-process ones.
+- Deliberate difference: breaker transitions go to `out.Notice` (stderr
+  in text mode, silent under `--quiet`/`--json`); v1 prints them always.
+- Proven: attempt-count unit tests (retry-then-success, exhaustion,
+  breaker-alone, constructor validation), `-race` clean, `test_sqlite.py`
+  122/122 unchanged (default configs take the passthrough), plus a live
+  retry demo (3 attempts, backoff delays, rc=1).
+
 ### Wave 3.5: audit (middleware + `Audited`)
 
 - One chain element (`recover → license → audit`): init on entry (logger

@@ -115,19 +115,25 @@ none of them yet, and one of them is a hole rather than a missing feature.
    `commands.WithOpMetrics(ctx)` so engines report row counts back. As a
    middleware plus an optional `AuditOp() audit.Operation` on the command.
    `test_audit_database.py` is the acceptance suite.
-3. **Resilience.** v1 runs each engine call through
-   `prodFeatures.ExecuteWithResilience` (circuit breaker + retry from
-   config). Middleware, config-driven, off unless configured — as in v1.
+3. **~~Resilience~~ — done 2026-09-27.** `resilienceMiddleware`,
+   last in the chain so audit records the post-retry outcome: breaker
+   inside, retry outside, per-run instances from the config's
+   `resilience:` section, off unless configured. Breaker transitions go
+   to `out.Notice` (v1 prints them always). Attempt-count unit tests,
+   `-race` clean, `test_sqlite.py` 122/122 on the passthrough.
 4. **A real `Deps`.** Started with the license work: `databaseConfig`
    is now the single adapter-config builder (gated, and it carries
-   `database.strict_schema`, which the two old builders dropped). Still
-   to come: parse the config once per run instead of per call;
-   `StorageConfig()` for `s3://`; `Processors()` for mask/validate/
-   normalize. File-only commands still never touch it.
-5. **Build parity.** `drivers_s3.go` (`nos3` tag) is missing, so v2 has no
-   S3 driver registered at all; the `production` tag (`pipeline_prod.go`)
-   is untested for v2. CI runs v2's tests but `release.yml` does not ship
-   the binary — decide when it starts to.
+   `database.strict_schema`, which the two old builders dropped).
+   **~~`StorageConfig()` for `s3://`~~ — done 2026-09-27**
+   (`Deps.storageConfig` + `remoteStorage`, bucket-from-URI-wins; wired
+   into `export`/`import`/`test`/`inspect`, proven by T8 live against
+   weed). Still to come: parse the config once per run instead of per
+   call; `Processors()` for mask/validate/normalize. File-only commands
+   still never touch the database half.
+5. **Build parity.** **~~`drivers_s3.go` (`nos3` tag)~~ — done
+   2026-09-27** (one blank import, mirrors v1). Left: the `production`
+   tag (`pipeline_prod.go`) is untested for v2. CI runs v2's tests but
+   `release.yml` does not ship the binary — decide when it starts to.
 
 ### Wave 3.6 — close the flag gaps in ported commands
 
@@ -136,10 +142,10 @@ fails to parse under the shim — loudly, at least.
 
 | Command | Missing in v2 | Needs |
 |---|---|---|
-| `export` | `--enc`, `--enc13`, `--mercury-caller`, `s3://` output | 3.5 item 4 |
+| `export` | `--enc`, `--enc13`, `--mercury-caller` (~~`s3://` output done 2026-09-27~~) | 3.5 item 4 |
 | `export-broker` | `--mercury-caller`, `--batch`, `--hash` | — |
 | `export-xlsx` | `--translit` | — |
-| `import` | `--strict-schema`, `s3://` input | 3.5 item 4 |
+| `import` | `--strict-schema` (~~`s3://` input done 2026-09-27~~) | 3.5 item 4 |
 | `to-csv`, `to-xlsx` | `--translit`; `s3://` input/output for `to-xlsx` | — / item 4 |
 
 **~~Processors~~ — done 2026-09-26.** `--mask`/`--validate`/`--normalize`

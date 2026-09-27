@@ -7,12 +7,13 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 	"github.com/ruslano69/tdtp-framework/pkg/license"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // deps.go — the v2 service container. Services build lazily on first use
 // so file-only commands never pay for a database, a Mercury client, or a
-// config file they do not need. Storage, processors and Mercury join as
-// wave 3.5/3.6 lands (TODO_NEXT_V2.md).
+// config file they do not need. Processors and Mercury join as wave 3.6
+// lands (TODO_NEXT_V2.md).
 
 type Deps struct {
 	// ConfigPath is the --config value. File-only commands ignore it.
@@ -60,4 +61,30 @@ func (d *Deps) databaseConfig(cmdName string) (*cliconfig.Config, *adapters.Conf
 		// half is wave 3.6. Two builders used to drop it silently.
 		StrictSchema: cfg.Database.StrictSchema,
 	}, nil
+}
+
+// storageConfig loads the YAML and returns its storage section for s3://
+// URIs (wave 3.5.4). File-only commands use it without touching a
+// database; the license adapter gate does not apply (no database).
+func (d *Deps) storageConfig() (*storage.Config, error) {
+	if d.ConfigPath == "" {
+		return nil, UsageError{Err: fmt.Errorf("s3:// needs --config with a storage section")}
+	}
+	cfg, err := cliconfig.LoadConfig(d.ConfigPath)
+	if err != nil {
+		return nil, UsageError{Err: fmt.Errorf("failed to load config: %w", err)}
+	}
+	return &cfg.Storage, nil
+}
+
+// remoteStorage maps an s3:// URI to its storage config plus object key:
+// the bucket from the URI wins over the file's (v1's main.go pattern in
+// every branch that takes a remote path).
+func remoteStorage(st storage.Config, uri string) (*storage.Config, string) {
+	_, uriBucket, key, _ := storage.ParseURI(uri)
+	s3cfg := st.S3
+	if uriBucket != "" {
+		s3cfg.Bucket = uriBucket
+	}
+	return &storage.Config{Type: st.Type, S3: s3cfg}, key
 }
