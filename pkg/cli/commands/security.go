@@ -68,6 +68,11 @@ func applyV14SecurityGate(ctx context.Context, pkt *packet.DataPacket, mercuryUR
 	if err != nil {
 		// Not "export blocked": this gate guards import, the converters, the
 		// broker and listen — every reader — and never the export path.
+		// The message ID rides along so a refusal names WHICH packet was
+		// poisoned — the audit trail's error_message carries it.
+		if id := pkt.Header.MessageID; id != "" {
+			return fmt.Errorf("security check failed — packet refused (message %s): %w", id, err)
+		}
 		return fmt.Errorf("security check failed — packet refused: %w", err)
 	}
 
