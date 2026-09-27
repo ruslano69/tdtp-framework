@@ -36,15 +36,16 @@ func (c *versionCommand) Validate(args []string) error {
 }
 
 func (c *versionCommand) Run(_ context.Context, _ *Deps, out Output, _ []string) error {
-	// Stdout directly, like help: the answer, not human chatter —
-	// --quiet must not swallow the version.
+	// Stdout directly, like help: the answer, not human chatter.
+	// --quiet must not swallow the version; --json leaves it textual,
+	// like help (a version has no verdict shape).
 	printVersion(out.Stdout)
 	return nil
 }
 
 // printVersion writes the version banner for the `--version` flag form.
 func printVersion(out io.Writer) {
-	fmt.Fprintf(out, "tdtpcli_v2 version %s\n", version.Version)
-	fmt.Fprintf(out, "TDTP Framework - Table Data Transfer Protocol\n")
-	fmt.Fprintf(out, "https://github.com/ruslano69/tdtp-framework\n")
+	eprintf(out, "tdtpcli_v2 version %s\n", version.Version)
+	eprintf(out, "TDTP Framework - Table Data Transfer Protocol\n")
+	eprintf(out, "https://github.com/ruslano69/tdtp-framework\n")
 }

@@ -38,59 +38,59 @@ func InspectTableTo(w io.Writer, ctx context.Context, config *adapters.Config, t
 
 // printTableReport emits a YAML-formatted TableReport.
 func printTableReport(w io.Writer, r *adapters.TableReport) {
-	fmt.Fprintf(w, "table: %s\n", r.Table)
+	reportf(w, "table: %s\n", r.Table)
 	if r.Schema != "" {
-		fmt.Fprintf(w, "schema: %s\n", r.Schema)
+		reportf(w, "schema: %s\n", r.Schema)
 	}
-	fmt.Fprintf(w, "db_type: %s\n", r.DBType)
-	fmt.Fprintf(w, "db_version: %s\n", r.DBVersion)
+	reportf(w, "db_type: %s\n", r.DBType)
+	reportf(w, "db_version: %s\n", r.DBVersion)
 
-	fmt.Fprintf(w, "columns:\n")
+	reportf(w, "columns:\n")
 	for _, c := range r.Columns {
-		fmt.Fprintf(w, "  - name: %s\n", yamlString(c.Name))
-		fmt.Fprintf(w, "    native_type: %s\n", c.NativeType)
-		fmt.Fprintf(w, "    tdtp_type: %s\n", c.TDTPType)
-		fmt.Fprintf(w, "    nullable: %v\n", c.Nullable)
-		fmt.Fprintf(w, "    primary_key: %v\n", c.PrimaryKey)
+		reportf(w, "  - name: %s\n", yamlString(c.Name))
+		reportf(w, "    native_type: %s\n", c.NativeType)
+		reportf(w, "    tdtp_type: %s\n", c.TDTPType)
+		reportf(w, "    nullable: %v\n", c.Nullable)
+		reportf(w, "    primary_key: %v\n", c.PrimaryKey)
 		if c.Identity {
-			fmt.Fprintf(w, "    identity: true\n")
+			reportf(w, "    identity: true\n")
 		}
 		if c.Computed {
-			fmt.Fprintf(w, "    computed: true\n")
+			reportf(w, "    computed: true\n")
 		}
 		if c.Default != "" {
-			fmt.Fprintf(w, "    default: %s\n", yamlString(c.Default))
+			reportf(w, "    default: %s\n", yamlString(c.Default))
 		}
 		if c.Length > 0 {
-			fmt.Fprintf(w, "    length: %d\n", c.Length)
+			reportf(w, "    length: %d\n", c.Length)
 		}
 		if c.Precision > 0 {
-			fmt.Fprintf(w, "    precision: %d\n", c.Precision)
-			fmt.Fprintf(w, "    scale: %d\n", c.Scale)
+			reportf(w, "    precision: %d\n", c.Precision)
+			reportf(w, "    scale: %d\n", c.Scale)
 		}
 	}
 
 	if len(r.ForeignKeys) > 0 {
-		fmt.Fprintf(w, "foreign_keys:\n")
+		reportf(w, "foreign_keys:\n")
 		for _, fk := range r.ForeignKeys {
-			fmt.Fprintf(w, "  - column: %s\n", yamlString(fk.Column))
-			fmt.Fprintf(w, "    references_table: %s\n", fk.ReferencesTable)
-			fmt.Fprintf(w, "    references_column: %s\n", fk.ReferencesColumn)
+			reportf(w, "  - column: %s\n", yamlString(fk.Column))
+			reportf(w, "    references_table: %s\n", fk.ReferencesTable)
+			reportf(w, "    references_column: %s\n", fk.ReferencesColumn)
 			if fk.OnDelete != "" && !strings.EqualFold(fk.OnDelete, "NO ACTION") {
-				fmt.Fprintf(w, "    on_delete: %s\n", fk.OnDelete)
+				reportf(w, "    on_delete: %s\n", fk.OnDelete)
 			}
 		}
 	}
 
-	fmt.Fprintf(w, "stats:\n")
-	fmt.Fprintf(w, "  total_rows: %d\n", r.Stats.TotalRows)
+	reportf(w, "stats:\n")
+	reportf(w, "  total_rows: %d\n", r.Stats.TotalRows)
 
 	if len(r.Sample) > 0 {
-		fmt.Fprintf(w, "sample:\n")
+		reportf(w, "sample:\n")
 		// Print in column order for readability
 		for _, col := range r.Columns {
 			if val, ok := r.Sample[col.Name]; ok {
-				fmt.Fprintf(w, "  %s: %s\n", yamlString(col.Name), yamlString(val))
+				reportf(w, "  %s: %s\n", yamlString(col.Name), yamlString(val))
 			}
 		}
 	}
