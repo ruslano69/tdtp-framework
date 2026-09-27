@@ -4,6 +4,14 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — process-wide license raced under concurrent runs
+
+`commands.ResolveLicense` reassigned the package-level license on every
+run; concurrent in-process runs (tests, embedding orchestrator) raced on
+it despite the "safe for concurrent reads" comment. Now `atomic.Pointer`,
+same lock-free shape as the neighbouring `quietOutput`. Found by `-race`
+on the new v2 audit parallel-writers test; fixes both CLIs.
+
 ### Security — `tdtpserve` answered a broken filter with the whole dataset
 
 `GET /api/data/<name>` and `/data/<name>` failed OPEN: an unparsable `where`

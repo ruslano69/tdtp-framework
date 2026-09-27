@@ -13,13 +13,16 @@ package commands
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"github.com/ruslano69/tdtp-framework/pkg/license"
 )
 
-// active holds the verified license for the process. Set once by ResolveLicense.
-// Read-only after initialization; safe for concurrent reads.
-var active *license.License
+// active holds the verified license for the process. ResolveLicense stores
+// it on every run (not once per process, despite the old comment), so plain
+// assignment raced between concurrent runs — found by -race on parallel
+// App.Run. atomic.Pointer keeps the lock-free shape (cf. quietOutput).
+var active atomic.Pointer[license.License]
 
 // ResolveLicense determines the license path, loads, and verifies it.
 //
@@ -41,17 +44,17 @@ func ResolveLicense(flagPath string) (*license.License, error) {
 	if err := lic.Verify(); err != nil {
 		return nil, fmt.Errorf("license verification failed: %w", err)
 	}
-	active = lic
+	active.Store(lic)
 	return lic, nil
 }
 
 // ActiveLicense returns the resolved license, or the Community floor if
 // ResolveLicense was never called (defensive default).
 func ActiveLicense() *license.License {
-	if active == nil {
-		return license.Community()
+	if lic := active.Load(); lic != nil {
+		return lic
 	}
-	return active
+	return license.Community()
 }
 
 func resolveLicensePath(flagPath string) string {
