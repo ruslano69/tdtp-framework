@@ -35,17 +35,24 @@ func ListTables(ctx context.Context, config *adapters.Config, pattern string) er
 // ListTablesTo is ListTables writing its report to w instead of stdout,
 // so embedders (tdtpcli_v2 --quiet/--json) control the output stream.
 func ListTablesTo(w io.Writer, ctx context.Context, config *adapters.Config, pattern string) error {
+	_, err := ListTablesReport(w, ctx, config, pattern)
+	return err
+}
+
+// ListTablesReport writes the v1 report and returns the same filtered names
+// for callers that also need a structured result.
+func ListTablesReport(w io.Writer, ctx context.Context, config *adapters.Config, pattern string) ([]string, error) {
 	// Create adapter
 	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
-		return fmt.Errorf("failed to create adapter: %w", err)
+		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer func() { _ = adapter.Close(ctx) }()
 
 	// Get full table list from the database
 	tables, err := adapter.GetTableNames(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to list tables: %w", err)
+		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
 
 	// Filter by pattern
@@ -63,7 +70,7 @@ func ListTablesTo(w io.Writer, ctx context.Context, config *adapters.Config, pat
 		} else {
 			reportln(w, "No tables found")
 		}
-		return nil
+		return filtered, nil
 	}
 
 	if pattern != "" {
@@ -75,7 +82,7 @@ func ListTablesTo(w io.Writer, ctx context.Context, config *adapters.Config, pat
 		reportf(w, "  %d. %s\n", i+1, table)
 	}
 
-	return nil
+	return filtered, nil
 }
 
 // ListViews lists all database views with updatable status
@@ -86,27 +93,36 @@ func ListViews(ctx context.Context, config *adapters.Config) error {
 // ListViewsTo is ListViews writing its report to w instead of stdout,
 // so embedders (tdtpcli_v2 --quiet/--json) control the output stream.
 func ListViewsTo(w io.Writer, ctx context.Context, config *adapters.Config) error {
+	_, err := ListViewsReport(w, ctx, config)
+	return err
+}
+
+// ListViewsReport writes the v1 report and returns the names from the same
+// database query for callers that also need a structured result.
+func ListViewsReport(w io.Writer, ctx context.Context, config *adapters.Config) ([]string, error) {
 	// Create adapter
 	adapter, err := adapters.New(ctx, *config)
 	if err != nil {
-		return fmt.Errorf("failed to create adapter: %w", err)
+		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer func() { _ = adapter.Close(ctx) }()
 
 	// Get view list
 	views, err := adapter.GetViewNames(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to list views: %w", err)
+		return nil, fmt.Errorf("failed to list views: %w", err)
 	}
+	names := make([]string, 0, len(views))
 
 	// Display results
 	if len(views) == 0 {
 		reportln(w, "No views found")
-		return nil
+		return names, nil
 	}
 
 	reportf(w, "Found %d view(s):\n", len(views))
 	for i, view := range views {
+		names = append(names, view.Name)
 		// U* prefix for updatable views, R* prefix for read-only views
 		prefix := "R*"
 		if view.IsUpdatable {
@@ -119,5 +135,5 @@ func ListViewsTo(w io.Writer, ctx context.Context, config *adapters.Config) erro
 	reportln(w, "  U* = Updatable view (can import)")
 	reportln(w, "  R* = Read-only view (export only)")
 
-	return nil
+	return names, nil
 }

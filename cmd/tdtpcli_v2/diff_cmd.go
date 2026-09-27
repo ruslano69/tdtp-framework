@@ -7,8 +7,6 @@ import (
 
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
-	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
-	"github.com/ruslano69/tdtp-framework/pkg/diff"
 )
 
 // diffCommand is `tdtpcli_v2 diff` — compare two TDTP files. Same engine
@@ -83,41 +81,18 @@ func (c *diffCommand) Run(ctx context.Context, d *Deps, out Output, args []strin
 		OutputFormat:  "text",
 	}
 	var buf bytes.Buffer
-	if err := commands.DiffFilesTo(&buf, ctx, opts); err != nil {
+	result, err := commands.DiffFilesReport(&buf, ctx, opts)
+	if err != nil {
 		return DataError{Err: err} // malformed/incomparable input
 	}
 	out.Human("%s", buf.String())
 	if out.JSONEnabled {
-		out.JSON(c.summarize(args[0], args[1]))
+		out.JSON(diffJSON{
+			Equal:    result.IsEqual(),
+			Added:    result.Stats.AddedCount,
+			Removed:  result.Stats.RemovedCount,
+			Modified: result.Stats.ModifiedCount,
+		})
 	}
 	return nil
-}
-
-// summarize recomputes the diff for the JSON contract (stats only).
-// Text stays the single formatter (shared with v1).
-func (c *diffCommand) summarize(a, b string) diffJSON {
-	rep := diffJSON{}
-	parser := packet.NewParser()
-	pktA, err := parser.ParseFile(a)
-	if err != nil {
-		return rep
-	}
-	pktB, err := parser.ParseFile(b)
-	if err != nil {
-		return rep
-	}
-	differ := diff.NewDiffer(diff.DiffOptions{
-		KeyFields:     splitFields(c.keyFields),
-		IgnoreFields:  splitFields(c.ignoreFields),
-		CaseSensitive: c.caseSens,
-	})
-	res, err := differ.Compare(pktA, pktB)
-	if err != nil {
-		return rep
-	}
-	rep.Equal = res.IsEqual()
-	rep.Added = res.Stats.AddedCount
-	rep.Removed = res.Stats.RemovedCount
-	rep.Modified = res.Stats.ModifiedCount
-	return rep
 }

@@ -28,17 +28,24 @@ func DiffFiles(ctx context.Context, options *DiffOptions) error {
 // DiffFilesTo is DiffFiles writing its report to w instead of stdout,
 // so embedders (tdtpcli_v2 --quiet/--json) control the output stream.
 func DiffFilesTo(w io.Writer, ctx context.Context, options *DiffOptions) error {
+	_, err := DiffFilesReport(w, ctx, options)
+	return err
+}
+
+// DiffFilesReport writes the v1 report and returns the comparison used to
+// produce it, so callers can render structured output without recomputing.
+func DiffFilesReport(w io.Writer, ctx context.Context, options *DiffOptions) (*diff.DiffResult, error) {
 	// Парсим первый файл
 	parser := packet.NewParser()
 	packetA, err := parser.ParseFile(options.FileA)
 	if err != nil {
-		return fmt.Errorf("failed to parse file A (%s): %w", options.FileA, err)
+		return nil, fmt.Errorf("failed to parse file A (%s): %w", options.FileA, err)
 	}
 
 	// Парсим второй файл
 	packetB, err := parser.ParseFile(options.FileB)
 	if err != nil {
-		return fmt.Errorf("failed to parse file B (%s): %w", options.FileB, err)
+		return nil, fmt.Errorf("failed to parse file B (%s): %w", options.FileB, err)
 	}
 
 	// Выполняем сравнение
@@ -50,7 +57,7 @@ func DiffFilesTo(w io.Writer, ctx context.Context, options *DiffOptions) error {
 
 	result, err := differ.Compare(packetA, packetB)
 	if err != nil {
-		return fmt.Errorf("failed to compare files: %w", err)
+		return nil, fmt.Errorf("failed to compare files: %w", err)
 	}
 
 	// Выводим результат
@@ -58,7 +65,7 @@ func DiffFilesTo(w io.Writer, ctx context.Context, options *DiffOptions) error {
 	case "json":
 		output, err := result.FormatJSON()
 		if err != nil {
-			return fmt.Errorf("failed to format JSON: %w", err)
+			return nil, fmt.Errorf("failed to format JSON: %w", err)
 		}
 		reportln(w, output)
 	default:
@@ -70,11 +77,11 @@ func DiffFilesTo(w io.Writer, ctx context.Context, options *DiffOptions) error {
 	// Возвращаем exit code в зависимости от результата
 	if result.IsEqual() {
 		reportln(w, "\n✓ Files are identical")
-		return nil
+		return result, nil
 	} else {
 		reportln(w, "\n✗ Files differ")
 		// Не возвращаем ошибку, просто информируем о различиях
-		return nil
+		return result, nil
 	}
 }
 

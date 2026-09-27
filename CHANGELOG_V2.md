@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### Fixed: one result for text and JSON reports
+
+- `list` now queries the database once; its JSON names come from the same
+  listing as the text report, including when the database changes mid-run.
+- `inspect` reads and parses each local or S3 packet once. JSON for S3 now
+  includes the schema and row details already available to the text report.
+- `diff` compares the two packets once and uses that result for both formats.
+  The shared v1 reporting entry points retain their signatures and output.
+
 ### Wave 3.7: `map` and broker loop modes
 
 - Added native `map mapping.yaml --input SRC` with `--dry-run`, `--drain`,
