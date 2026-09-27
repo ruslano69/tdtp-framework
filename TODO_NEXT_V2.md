@@ -142,7 +142,7 @@ fails to parse under the shim — loudly, at least.
 
 | Command | Missing in v2 | Needs |
 |---|---|---|
-| `export` | `--enc`, `--enc13`, `--mercury-caller` (~~`s3://` output done 2026-09-27~~) | 3.5 item 4 |
+| `export` | `--mercury-caller` (~~`--enc` done, `--enc13` dropped, `s3://` output done 2026-09-27~~) | 3.5 item 4 |
 | `export-broker` | `--mercury-caller`, `--batch`, `--hash` | — |
 | `export-xlsx` | `--translit` | — |
 | `import` | `--strict-schema` (~~`s3://` input done 2026-09-27~~) | 3.5 item 4 |

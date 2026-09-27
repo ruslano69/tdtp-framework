@@ -33,7 +33,6 @@ type exportBrokerCommand struct {
 	compressAlgo  string
 	packetSize    int
 	enc           bool
-	encLegacy     bool
 	mercuryURL    string
 	q             queryFlags
 }
@@ -53,7 +52,6 @@ Needs --config with database and broker sections.`
 	fs.StringVar(&c.compressAlgo, "compress-algo", "zstd", "compression algorithm")
 	fs.IntVar(&c.packetSize, "packet-size", 0, "packet size in MB (0 = built-in default)")
 	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level encryption (needs Mercury)")
-	fs.BoolVar(&c.encLegacy, "enc13", false, "legacy v1.3 whole-blob encryption")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL")
 	addQueryFlags(fs, &c.q)
 	addProcessorFlags(fs, &c.p)
@@ -62,9 +60,9 @@ Needs --config with database and broker sections.`
 }
 
 // Validate needs --table (or a positional table name).
-// Features: --enc/--enc13 need the "enc" feature, as in v1.
+// Features: --enc needs the "enc" feature, as in v1 (no --enc13 in v2).
 func (c *exportBrokerCommand) Features() []string {
-	if c.enc || c.encLegacy {
+	if c.enc {
 		return []string{"enc"}
 	}
 	return nil
@@ -120,7 +118,7 @@ func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args
 	brokerCfg := bcc
 	err = commands.ExportToBroker(ctx, adb, &brokerCfg, c.table, query,
 		c.compress, c.compressLevel, c.compressAlgo, procs, c.packetSize,
-		c.mercuryURL, c.enc || c.encLegacy, c.encLegacy)
+		c.mercuryURL, c.enc, false)
 	if err != nil {
 		return err
 	}

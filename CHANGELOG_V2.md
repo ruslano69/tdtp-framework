@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+### Wave 3.6: `--enc` on export, `--enc13` dropped, `--enc-dev` dev-gated
+
+- `export` grew `--enc` (license `enc` gate via `Features()`, Mercury URL
+  from flag with config `security.mercury_url` fallback, same engine) —
+  the last `--enc` writer missing in v2. Legacy whole-blob writing is
+  disabled everywhere in 2.0: `--enc13` exists on no v2 command (a
+  foreign flag fails at parse, exit 2); old v1.3 files still decrypt on
+  import. `pipeline --enc-dev` arrived under the `!production` tag, mirroring
+  v1's `flags_dev.go` (present in dev builds, absent in prod).
+- Proven live against a real xzMercury `--dev` (real HMAC, no mock
+  bypass): `test_encryption.py` 15/15 on both binaries.
+
 ### Wave 3.5: `s3://` (storage config + driver)
 
 - `drivers_s3.go` (`!nos3`, one blank import, mirrors v1) — without it

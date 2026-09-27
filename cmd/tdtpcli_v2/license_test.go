@@ -188,7 +188,6 @@ func TestLicense_CommunityRefusesLicensedFlags(t *testing.T) {
 	p := touch(t, "p.yaml")
 	for _, argv := range [][]string{
 		{"pipeline", p, "--enc"},
-		{"pipeline", p, "--enc13"},
 		{"pipeline", p, "--unsafe"},
 		{"--config", cfg, "export-broker", "t", "--enc"},
 	} {
@@ -196,6 +195,11 @@ func TestLicense_CommunityRefusesLicensedFlags(t *testing.T) {
 		if code != ExitFail || !strings.Contains(stderr, "is not licensed") {
 			t.Errorf("%v: exit=%d, want %d with a feature refusal; stderr:\n%s", argv, code, ExitFail, stderr)
 		}
+	}
+	// --enc13 does not exist in v2 (v1.3 writing disabled): a foreign
+	// flag fails at parse time, before any license question.
+	if code, _, _ := runApp(t, "pipeline", p, "--enc13"); code != ExitUsage {
+		t.Errorf("pipeline --enc13: exit=%d, want %d (unknown flag)", code, ExitUsage)
 	}
 	// Flags off: nothing asked for, nothing refused on license grounds.
 	_, _, stderr := runApp(t, "pipeline", p)

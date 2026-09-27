@@ -33,6 +33,7 @@ type exportCommand struct {
 	stream           bool
 	packetSize       int
 	fallbackRowLimit int64
+	enc              bool
 	q                queryFlags
 }
 
@@ -62,10 +63,21 @@ self-describing packet (schema + rows + query context). Needs --config.`
 	fs.BoolVar(&c.stream, "stream", false, "[BETA] stream the export part by part instead of loading the whole table (requires --output, no S3)")
 	fs.IntVar(&c.packetSize, "packet-size", 0, "max packet size in MB (0 = built-in default ~1.9MB)")
 	fs.Int64Var(&c.fallbackRowLimit, "fallback-row-limit", 1000000, "max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)")
+	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level encryption (needs Mercury)")
 	addQueryFlags(fs, &c.q)
 	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// Features: --enc needs the "enc" feature, as in v1. There is no
+// --enc13 in v2: new whole-blob (v1.3) encryption is disabled, only v1.5
+// section-level is written. Old v1.3 files still decrypt on import.
+func (c *exportCommand) Features() []string {
+	if c.enc {
+		return []string{"enc"}
+	}
+	return nil
 }
 
 // AuditInfo mirrors v1's export branch: table plus resolved output file.
@@ -132,6 +144,11 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 	if !c.FlagSet.Changed("compress-algo") && expCfg.CompressAlgo != "" {
 		compressAlgo = expCfg.CompressAlgo
 	}
+	// Mercury URL: flag first, config security section second (v1's order).
+	mercuryURL := c.mercuryURL
+	if mercuryURL == "" {
+		mercuryURL = yamlCfg.Security.MercuryURL
+	}
 	target := outputFile(c.output, c.table, "tdtp.xml")
 	// Resolve storage target: s3:// URI → object storage (v1's main.go
 	// pattern); otherwise a local file.
@@ -162,7 +179,9 @@ func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		FixedFields:      splitFields(c.fixedFields),
 		CompactTail:      c.compactTail,
 		IntegrityV14:     c.integrity,
-		MercuryURL:       c.mercuryURL,
+		MercuryURL:       mercuryURL,
+		Encrypt:          c.enc,
+		EncryptLegacy:    false, // v1.3 whole-blob writing is disabled in v2
 		StorageCfg:       exportStorageCfg,
 		StorageKey:       exportStorageKey,
 	})
