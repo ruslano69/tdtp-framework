@@ -183,7 +183,7 @@ func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string, opts 
 
 			if r.skipPropagated {
 				skipped[r.id] = true
-				fmt.Fprintf(opts.stdout(), "[steps] ⏭  %s — skipped (ancestor was skipped)\n", r.id)
+				_, _ = fmt.Fprintf(opts.stdout(), "[steps] ⏭  %s — skipped (ancestor was skipped)\n", r.id)
 				// Update in-degrees of dependents even on skip so the DAG drains.
 				for _, dep := range dependents[r.id] {
 					inDegree[dep]--
@@ -198,7 +198,7 @@ func Run(ctx context.Context, cfg *WorkflowConfig, vars map[string]string, opts 
 				policy, _ := ParseOnError(step.OnError)
 				if policy.Action == "skip" {
 					skipped[r.id] = true
-					fmt.Fprintf(opts.stdout(), "[steps] ⚠  %s — failed, continuing (on_error: skip): %v\n", r.id, r.err)
+					_, _ = fmt.Fprintf(opts.stdout(), "[steps] ⚠  %s — failed, continuing (on_error: skip): %v\n", r.id, r.err)
 				} else {
 					return fmt.Errorf("step %q failed: %w", r.id, r.err)
 				}
@@ -245,7 +245,7 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 			// Exponential back-off: 2s, 4s, 8s, … capped at 30s.
 			delaySec := math.Min(float64(int(2)<<uint(attempt-2)), 30)
 			delay := time.Duration(delaySec) * time.Second
-			fmt.Fprintf(opts.stdout(), "[steps] ↺  %s — retry %d/%d in %s\n", step.ID, attempt-1, policy.Retries, delay)
+			_, _ = fmt.Fprintf(opts.stdout(), "[steps] ↺  %s — retry %d/%d in %s\n", step.ID, attempt-1, policy.Retries, delay)
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
@@ -254,9 +254,9 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 		}
 
 		if opts.Quiet {
-			fmt.Fprintf(opts.stdout(), "[steps] ▶  %s\n", step.ID)
+			_, _ = fmt.Fprintf(opts.stdout(), "[steps] ▶  %s\n", step.ID)
 		} else {
-			fmt.Fprintf(opts.stdout(), "[steps] ▶  %s: %s\n", step.ID, resolved)
+			_, _ = fmt.Fprintf(opts.stdout(), "[steps] ▶  %s: %s\n", step.ID, resolved)
 		}
 		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Stdout = opts.stdout()
@@ -264,12 +264,12 @@ func runStep(ctx context.Context, exe string, step StepConfig, vars map[string]s
 
 		lastErr = cmd.Run()
 		if lastErr == nil {
-			fmt.Fprintf(opts.stdout(), "[steps] ✓  %s\n", step.ID)
+			_, _ = fmt.Fprintf(opts.stdout(), "[steps] ✓  %s\n", step.ID)
 			return nil
 		}
 		// The command is echoed here even under --quiet: a step that failed is
 		// exactly when you need to know what was run.
-		fmt.Fprintf(opts.stdout(), "[steps] ✗  %s: %v\n    command: %s\n", step.ID, lastErr, resolved)
+		_, _ = fmt.Fprintf(opts.stdout(), "[steps] ✗  %s: %v\n    command: %s\n", step.ID, lastErr, resolved)
 	}
 	return lastErr
 }

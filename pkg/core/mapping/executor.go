@@ -51,10 +51,10 @@ func ExecuteWithOptions(ctx context.Context, cfg *MappingConfig, pkt *packet.Dat
 		}
 
 		if dryRun {
-			fmt.Fprintf(output, "[dry-run] target=%q schema=%q table=%q rows=%d upsert_key=%q\n",
+			_, _ = fmt.Fprintf(output, "[dry-run] target=%q schema=%q table=%q rows=%d upsert_key=%q\n",
 				target.Table, schemaName, tableName, len(rows), target.UpsertKey)
 			for i, f := range mapped.Schema.Fields {
-				fmt.Fprintf(output, "  field[%d]: %s (key=%v)\n", i, f.Name, f.Key)
+				_, _ = fmt.Fprintf(output, "  field[%d]: %s (key=%v)\n", i, f.Name, f.Key)
 			}
 			continue
 		}
@@ -76,7 +76,7 @@ func ExecuteWithOptions(ctx context.Context, cfg *MappingConfig, pkt *packet.Dat
 		}
 		_ = adapter.Close(ctx)
 		if !opts.Quiet {
-			fmt.Fprintf(output, "✓ %d rows upserted → %s.%s\n", len(rows), schemaName, tableName)
+			_, _ = fmt.Fprintf(output, "✓ %d rows upserted → %s.%s\n", len(rows), schemaName, tableName)
 		}
 	}
 	return nil

@@ -265,7 +265,7 @@ func reportQuietRows(name string, rows int64, d time.Duration) {
 }
 
 func reportQuietRowsTo(w io.Writer, name string, rows int64, d time.Duration) {
-	fmt.Fprintf(w, "%s  %d rows  %s\n", name, rows, d.Round(time.Millisecond))
+	_, _ = fmt.Fprintf(w, "%s  %d rows  %s\n", name, rows, d.Round(time.Millisecond))
 }
 
 // defaultIdleTimeout is how long --import-broker waits for the next message

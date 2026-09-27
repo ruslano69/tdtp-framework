@@ -48,12 +48,12 @@ func RunStepsWithOptions(ctx context.Context, path string, vars map[string]strin
 
 	// The name survives --quiet: a captured log still has to say what it was.
 	// The description and step count do not — the workflow file states both.
-	fmt.Fprintf(stdout, "Workflow: %s\n", cfg.Name)
+	_, _ = fmt.Fprintf(stdout, "Workflow: %s\n", cfg.Name)
 	if !opts.Quiet {
 		if cfg.Description != "" {
-			fmt.Fprintf(stdout, "   %s\n", workflow.ApplyVars(cfg.Description, vars))
+			_, _ = fmt.Fprintf(stdout, "   %s\n", workflow.ApplyVars(cfg.Description, vars))
 		}
-		fmt.Fprintf(stdout, "   Steps: %d\n", len(cfg.Steps))
+		_, _ = fmt.Fprintf(stdout, "   Steps: %d\n", len(cfg.Steps))
 	}
 	if len(vars) > 0 && !opts.Quiet {
 		keys := make([]string, 0, len(vars))
@@ -65,10 +65,10 @@ func RunStepsWithOptions(ctx context.Context, path string, vars map[string]strin
 		for _, k := range keys {
 			parts = append(parts, fmt.Sprintf("@%s=%s", k, vars[k]))
 		}
-		fmt.Fprintf(stdout, "   Variables: %s\n", strings.Join(parts, ", "))
+		_, _ = fmt.Fprintf(stdout, "   Variables: %s\n", strings.Join(parts, ", "))
 	}
 	if !opts.Quiet {
-		fmt.Fprintln(stdout)
+		_, _ = fmt.Fprintln(stdout)
 	}
 
 	t0 := time.Now()
@@ -76,6 +76,6 @@ func RunStepsWithOptions(ctx context.Context, path string, vars map[string]strin
 		return err
 	}
 
-	fmt.Fprintf(stdout, "\n[steps] all steps completed in %s\n", time.Since(t0).Round(time.Millisecond))
+	_, _ = fmt.Fprintf(stdout, "\n[steps] all steps completed in %s\n", time.Since(t0).Round(time.Millisecond))
 	return nil
 }

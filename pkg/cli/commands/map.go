@@ -90,7 +90,7 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	}
 
 	if !opts.Quiet {
-		fmt.Fprintf(opts.stdout(), "Mapping: %s\n", cfg.ID)
+		_, _ = fmt.Fprintf(opts.stdout(), "Mapping: %s\n", cfg.ID)
 	}
 
 	// Extract broker/S3 config from mapping YAML input_source section
@@ -125,7 +125,7 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 		markDone      func(bool)
 	)
 	if opts.DryRun {
-		fmt.Fprintln(opts.stdout(), "  [dry-run mode — no data will be written]")
+		_, _ = fmt.Fprintln(opts.stdout(), "  [dry-run mode — no data will be written]")
 		markDone = func(bool) {} // no-op
 	} else {
 		id, done, err := mapping.CheckAndRecord(cfg)
@@ -138,8 +138,8 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 	success := false
 	defer func() { markDone(success) }()
 	if !opts.Quiet {
-		fmt.Fprintf(opts.stdout(), "  correlation_id: %s\n", correlationID)
-		fmt.Fprintf(opts.stdout(), "  source: %s → target: %s\n", cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
+		_, _ = fmt.Fprintf(opts.stdout(), "  correlation_id: %s\n", correlationID)
+		_, _ = fmt.Fprintf(opts.stdout(), "  source: %s → target: %s\n", cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
 	}
 
 	// Parse input TDTP packet — local file, S3 URI, or broker URI
@@ -148,7 +148,7 @@ func RunMap(ctx context.Context, opts MapOptions) error {
 		return fmt.Errorf("--map: load input %q: %w", opts.InputFile, err)
 	}
 	if !opts.Quiet {
-		fmt.Fprintf(opts.stdout(), "  input: %s (%d rows, %d fields)\n",
+		_, _ = fmt.Fprintf(opts.stdout(), "  input: %s (%d rows, %d fields)\n",
 			pkt.Header.TableName, pkt.Header.RecordsInPart, len(pkt.Schema.Fields))
 	}
 
@@ -196,16 +196,16 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	}
 
 	if !opts.Quiet {
-		fmt.Fprintf(opts.stdout(), "%s started  mapping=%s  queue=%s\n", tag, cfg.ID, bcfg.Queue)
-		fmt.Fprintf(opts.stdout(), "%s source: %s → target: %s\n", tag,
+		_, _ = fmt.Fprintf(opts.stdout(), "%s started  mapping=%s  queue=%s\n", tag, cfg.ID, bcfg.Queue)
+		_, _ = fmt.Fprintf(opts.stdout(), "%s source: %s → target: %s\n", tag,
 			cfg.LoopGuard.SourceSystem, cfg.LoopGuard.TargetSystem)
 		if opts.DryRun {
-			fmt.Fprintf(opts.stdout(), "%s dry-run mode — no data will be written\n", tag)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s dry-run mode — no data will be written\n", tag)
 		}
 		if opts.Drain > 0 {
-			fmt.Fprintf(opts.stdout(), "%s stops once the queue has been empty for %s\n\n", tag, opts.Drain)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s stops once the queue has been empty for %s\n\n", tag, opts.Drain)
 		} else {
-			fmt.Fprintf(opts.stdout(), "%s Press Ctrl+C to stop\n\n", tag)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s Press Ctrl+C to stop\n\n", tag)
 		}
 	}
 
@@ -220,7 +220,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 	go func() {
 		select {
 		case <-sigCh:
-			fmt.Fprintf(opts.stdout(), "\n[map:listen] shutdown signal received, finishing current message...\n")
+			_, _ = fmt.Fprintf(opts.stdout(), "\n[map:listen] shutdown signal received, finishing current message...\n")
 			cancel()
 		case <-listenCtx.Done():
 		}
@@ -257,7 +257,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 			if idle {
 				break // nothing left to drain — the run is done
 			}
-			fmt.Fprintf(opts.stdout(), "%s receive error: %v — reconnecting\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s receive error: %v — reconnecting\n", tag, err)
 			if reconnectErr := reconnectBroker(listenCtx, br, opts.stdout()); reconnectErr != nil {
 				break // context cancelled during reconnect
 			}
@@ -272,28 +272,28 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		// "Consumer: dual-format detection").
 		data, err = decryptLegacyBlobIfNeeded(listenCtx, data, opts.MercuryURL)
 		if err != nil {
-			fmt.Fprintf(opts.stdout(), "%s decrypt error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s decrypt error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		pkt, err := parser.ParseBytes(data)
 		if err != nil {
-			fmt.Fprintf(opts.stdout(), "%s parse error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s parse error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := decryptV15PacketIfNeeded(listenCtx, pkt, opts.MercuryURL); err != nil {
-			fmt.Fprintf(opts.stdout(), "%s decrypt error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s decrypt error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := decompressPacketData(pkt); err != nil {
-			fmt.Fprintf(opts.stdout(), "%s decompress error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s decompress error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
 		if err := parser.ExpandCompactRows(pkt); err != nil {
-			fmt.Fprintf(opts.stdout(), "%s expand error (skipping): %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s expand error (skipping): %v\n", tag, err)
 			nackIfAble(br)
 			continue
 		}
@@ -304,7 +304,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 			Quiet:  opts.Quiet,
 			Output: opts.stdout(),
 		}); err != nil {
-			fmt.Fprintf(opts.stdout(), "%s execute error: %v\n", tag, err)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s execute error: %v\n", tag, err)
 			// Отказ пишется в аудит наравне с успехом: сообщение уходит в nack
 			// и возвращается в очередь, не оставляя следа нигде, кроме stdout
 			// демона — а его никто не читает через неделю работы.
@@ -316,7 +316,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		// ACK / commit offset only after successful upsert.
 		if a, ok := br.(acker); ok {
 			if err := a.AckLast(); err != nil {
-				fmt.Fprintf(opts.stdout(), "%s ack error: %v\n", tag, err)
+				_, _ = fmt.Fprintf(opts.stdout(), "%s ack error: %v\n", tag, err)
 			}
 		}
 		if committer, ok := br.(interface{ CommitLast(context.Context) error }); ok {
@@ -327,7 +327,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		elapsed := time.Since(t0).Round(time.Millisecond)
 		work += elapsed
 		if !opts.Quiet {
-			fmt.Fprintf(opts.stdout(), "%s ✓  rows=%-6d  total=%-6d  %s\n", tag, rows, total, elapsed)
+			_, _ = fmt.Fprintf(opts.stdout(), "%s ✓  rows=%-6d  total=%-6d  %s\n", tag, rows, total, elapsed)
 		}
 		recordSync(listenCtx, opts.Auditor, bcfg.Queue, int64(rows), elapsed, nil)
 	}
@@ -339,7 +339,7 @@ func runMapListen(ctx context.Context, cfg *mapping.MappingConfig,
 		return nil
 	}
 
-	fmt.Fprintf(opts.stdout(), "%s stopped. total rows upserted: %d\n", tag, total)
+	_, _ = fmt.Fprintf(opts.stdout(), "%s stopped. total rows upserted: %d\n", tag, total)
 	return nil
 }
 
@@ -377,13 +377,13 @@ func reconnectBroker(ctx context.Context, br brokers.MessageBroker, output io.Wr
 			return ctx.Err()
 		}
 		if err := br.Connect(ctx); err != nil {
-			fmt.Fprintf(output, "[map:listen] reconnect failed: %v — retry in %v\n", err, delay)
+			_, _ = fmt.Fprintf(output, "[map:listen] reconnect failed: %v — retry in %v\n", err, delay)
 			if delay < maxDelay {
 				delay *= 2
 			}
 			continue
 		}
-		fmt.Fprintln(output, "[map:listen] ✓ reconnected to broker")
+		_, _ = fmt.Fprintln(output, "[map:listen] ✓ reconnected to broker")
 		return nil
 	}
 }
