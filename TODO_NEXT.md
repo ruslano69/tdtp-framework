@@ -400,10 +400,10 @@ and the path needs deciding rather than pointing at `/tmp` again.
 ## Behind the freeze — 2.0
 
 Everything here is a capability change. **None of it goes into 1.x**, however
-ready it looks. Kept because the analysis is worth having when 2.0 opens, not
-because it is scheduled.
+ready it looks. Most entries are analysis for when 2.0 opens, not scheduled
+work. **Oracle is an explicit 2.0 commitment** (see `ROADMAP.md` → Next).
 
-### Oracle adapter — not started
+### Oracle adapter — committed for 2.0, not started
 
 Raised while comparing the framework against Soft Review's integration services
 (their stack is Oracle PL/SQL + J2EE). Oracle is the one mainstream DBMS

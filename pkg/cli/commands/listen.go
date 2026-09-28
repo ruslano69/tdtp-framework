@@ -27,6 +27,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -42,7 +43,8 @@ import (
 type ListenConfig struct {
 	BrokerCfg  *BrokerConfig
 	Strategy   adapters.ImportStrategy
-	MercuryURL string // v1.4 security gate; empty → local integrity only
+	MercuryURL string    // v1.4 security gate; empty → local integrity only
+	Output     io.Writer // nil preserves v1 stdout progress
 }
 
 // streamSession tracks an active streaming session by MessageID base.
@@ -69,6 +71,13 @@ func extractStreamBase(messageID string) string {
 // ListenKafkaStream runs the streaming consumer daemon.
 // It blocks until SIGTERM/SIGINT is received or a fatal error occurs.
 func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg ListenConfig) error {
+	output := cfg.Output
+	if output == nil {
+		output = os.Stdout
+	}
+	printf := func(format string, args ...any) {
+		_, _ = fmt.Fprintf(output, format, args...)
+	}
 	if !strings.EqualFold(cfg.BrokerCfg.Type, "kafka") {
 		return fmt.Errorf(
 			"--listen supports Kafka only (got: %q)\n\n"+
@@ -98,24 +107,15 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 	}
 
 	topic := cfg.BrokerCfg.Queue
-	fmt.Printf("[listen] streaming consumer started\n")
-	fmt.Printf("[listen] Kafka topic : %s\n", topic)
-	fmt.Printf("[listen] DB strategy : %s\n", cfg.Strategy)
-	fmt.Printf("[listen] WARNING: requires stable channel (99.99%% uptime recommended)\n")
-	fmt.Printf("[listen] Press Ctrl+C to stop\n\n")
+	printf("[listen] streaming consumer started\n")
+	printf("[listen] Kafka topic : %s\n", topic)
+	printf("[listen] DB strategy : %s\n", cfg.Strategy)
+	printf("[listen] WARNING: requires stable channel (99.99%% uptime recommended)\n")
+	printf("[listen] Press Ctrl+C to stop\n\n")
 
-	// Trap shutdown signals
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-
-	listenCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go func() {
-		<-sigCh
-		fmt.Printf("\n[listen] Shutdown signal received, draining...\n")
-		cancel()
-	}()
+	// The app may cancel the context itself; also stop on process signals.
+	listenCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
 
 	parser := packet.NewParser()
 	sessions := make(map[string]*streamSession)
@@ -127,7 +127,7 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 			if listenCtx.Err() != nil {
 				break // clean shutdown
 			}
-			fmt.Printf("[listen] receive error: %v — retrying in 2s\n", err)
+			printf("[listen] receive error: %v — retrying in 2s\n", err)
 			select {
 			case <-time.After(2 * time.Second):
 			case <-listenCtx.Done():
@@ -141,7 +141,7 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 			return processors.DecompressDataForTdtpWithAlgo(compressed, algo)
 		})
 		if err != nil {
-			fmt.Printf("[listen] parse error (skipping message): %v\n", err)
+			printf("[listen] parse error (skipping message): %v\n", err)
 			continue
 		}
 
@@ -159,12 +159,12 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 				StartedAt:     time.Now(),
 			}
 			sessions[sessionKey] = sess
-			fmt.Printf("[listen] new session  : %s → table '%s'\n", sessionKey, h.TableName)
+			printf("[listen] new session  : %s → table '%s'\n", sessionKey, h.TableName)
 		}
 
 		// ── Security gate (v1.4) ────────────────────────────────────────────────
 		if err := applyV14SecurityGate(listenCtx, pkt, cfg.MercuryURL); err != nil {
-			fmt.Printf("[listen] security gate blocked packet (session %s, part %d): %v\n",
+			printf("[listen] security gate blocked packet (session %s, part %d): %v\n",
 				sessionKey, h.PartNumber, err)
 			// Nack without requeue — tampered packets must not re-enter the queue.
 			if nacker, ok := broker.(interface{ NackLast(requeue bool) error }); ok {
@@ -176,7 +176,7 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 		// Import rows immediately (Variant A)
 		rowCount := len(pkt.Data.Rows)
 		if err := adapter.ImportPacket(listenCtx, pkt, cfg.Strategy); err != nil {
-			fmt.Printf("[listen] import error (session %s, part %d): %v\n",
+			printf("[listen] import error (session %s, part %d): %v\n",
 				sessionKey, h.PartNumber, err)
 			// Do NOT commit offset — Kafka will redeliver on reconnect
 			continue
@@ -190,35 +190,36 @@ func ListenKafkaStream(ctx context.Context, dbConfig *adapters.Config, cfg Liste
 			status = "final"
 		}
 
-		fmt.Printf("[listen] %-10s part=%d rows=%-6d table='%s' session=%s\n",
+		printf("[listen] %-10s part=%d rows=%-6d table='%s' session=%s\n",
 			status, h.PartNumber, rowCount, h.TableName, sessionKey)
 
 		// Commit offset only after successful import
 		if committer, ok := broker.(interface{ CommitLast(context.Context) error }); ok {
 			if err := committer.CommitLast(listenCtx); err != nil {
-				fmt.Printf("[listen] offset commit error: %v\n", err)
+				printf("[listen] offset commit error: %v\n", err)
 			}
 		}
 
 		// Close session on final part
 		if isFinal || (!isStreaming && !isFinal) {
 			elapsed := time.Since(sess.StartedAt).Round(time.Millisecond)
-			fmt.Printf("[listen] session done : %s — %d parts, %d rows, %s\n",
+			printf("[listen] session done : %s — %d parts, %d rows, %s\n",
 				sessionKey, sess.PartsReceived, sess.RowsTotal, elapsed)
 			delete(sessions, sessionKey)
 		}
 	}
 
 	// Report any sessions that were interrupted by shutdown
+	printf("\n[listen] Shutdown signal received, draining...\n")
 	if len(sessions) > 0 {
-		fmt.Printf("[listen] WARNING: %d incomplete session(s) at shutdown:\n", len(sessions))
+		printf("[listen] WARNING: %d incomplete session(s) at shutdown:\n", len(sessions))
 		for key, s := range sessions {
-			fmt.Printf("         - %s (table=%s parts=%d rows=%d)\n",
+			printf("         - %s (table=%s parts=%d rows=%d)\n",
 				key, s.TableName, s.PartsReceived, s.RowsTotal)
 		}
-		fmt.Printf("[listen] Partial data may exist in target tables (Variant A mode).\n")
+		printf("[listen] Partial data may exist in target tables (Variant A mode).\n")
 	}
 
-	fmt.Printf("[listen] stopped\n")
+	printf("[listen] stopped\n")
 	return nil
 }

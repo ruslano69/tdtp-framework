@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +28,9 @@ type SyncOptions struct {
 	// "<table>  <n> rows  <elapsed>". Everything it drops -- the table name,
 	// the tracking field, the checkpoint path -- is already on the command
 	// line that invoked this.
-	Quiet bool
+	Quiet  bool
+	Output io.Writer // nil preserves v1 stdout progress
+	Rows   *int64    // optional result count for structured CLI output
 
 	// BrokerCfg sends the result to a queue instead of writing files.
 	//
@@ -49,21 +53,28 @@ type SyncOptions struct {
 // IncrementalSync performs incremental synchronization of a table
 func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOptions) error {
 	started := time.Now()
+	output := opts.Output
+	if output == nil {
+		output = os.Stdout
+	}
 
 	// say prints the running commentary; --quiet drops all of it. Everything it
 	// says — the table, the tracking field, the checkpoint path — is already on
 	// the command line that invoked this.
 	say := func(format string, a ...any) {
 		if !opts.Quiet {
-			fmt.Printf(format, a...)
+			_, _ = fmt.Fprintf(output, format, a...)
 		}
 	}
 
 	// result is the one line --quiet leaves behind. Rows and elapsed are the
 	// only facts a captured run cannot reconstruct from its own arguments.
 	result := func(rows int64) {
+		if opts.Rows != nil {
+			*opts.Rows = rows
+		}
 		if opts.Quiet {
-			reportQuietRows(opts.TableName, rows, time.Since(started))
+			reportQuietRowsTo(output, opts.TableName, rows, time.Since(started))
 		}
 	}
 
@@ -131,7 +142,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 	if err != nil {
 		// Update state with error
 		if stateErr := stateMgr.UpdateStateWithError(opts.TableName, err); stateErr != nil {
-			fmt.Printf("⚠ Warning: failed to save error state: %v\n", stateErr)
+			_, _ = fmt.Fprintf(output, "⚠ Warning: failed to save error state: %v\n", stateErr)
 		}
 		return fmt.Errorf("export failed: %w", err)
 	}
@@ -189,13 +200,13 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 			// State records the failure so the next run can see it; the
 			// checkpoint itself stays where it was.
 			if stateErr := stateMgr.UpdateStateWithError(opts.TableName, err); stateErr != nil {
-				fmt.Printf("⚠ Warning: failed to save error state: %v\n", stateErr)
+				_, _ = fmt.Fprintf(output, "⚠ Warning: failed to save error state: %v\n", stateErr)
 			}
 			return err
 		}
 
 		if err := stateMgr.UpdateState(opts.TableName, newLastSyncValue, totalRows); err != nil {
-			fmt.Printf("⚠ Warning: failed to update sync state: %v\n", err)
+			_, _ = fmt.Fprintf(output, "⚠ Warning: failed to update sync state: %v\n", err)
 		} else {
 			say("✓ Checkpoint updated: %s\n", newLastSyncValue)
 		}
@@ -234,7 +245,7 @@ func IncrementalSync(ctx context.Context, config *adapters.Config, opts SyncOpti
 
 	// Update sync state with new last value
 	if err := stateMgr.UpdateState(opts.TableName, newLastSyncValue, totalRows); err != nil {
-		fmt.Printf("⚠ Warning: failed to update sync state: %v\n", err)
+		_, _ = fmt.Fprintf(output, "⚠ Warning: failed to update sync state: %v\n", err)
 	} else {
 		say("✓ Checkpoint updated: %s\n", newLastSyncValue)
 	}
@@ -370,7 +381,11 @@ func syncToBroker(ctx context.Context, packets []*packet.DataPacket, opts SyncOp
 	defer func() { _ = broker.Close() }()
 
 	if !opts.Quiet {
-		fmt.Printf("Sending %d packet(s) to %s queue %q...\n",
+		output := opts.Output
+		if output == nil {
+			output = os.Stdout
+		}
+		_, _ = fmt.Fprintf(output, "Sending %d packet(s) to %s queue %q...\n",
 			len(packets), opts.BrokerCfg.Type, opts.BrokerCfg.Queue)
 	}
 

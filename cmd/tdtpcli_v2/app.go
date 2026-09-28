@@ -77,9 +77,8 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 	}
 
 	name, args := rest[0], rest[1:]
-	if name == "help" || name == "-h" || name == "--help" {
-		a.writeHelp(stdout, args)
-		return ExitOK
+	if name == "help" || name == "-h" || name == "--help" || name == "-help" {
+		return a.writeHelp(stdout, stderr, args)
 	}
 	// v1 flat-flag compatibility shim (compat.go). Runs before lookup so
 	// `--to-csv f.xml` still works during the transition.
@@ -97,16 +96,9 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 
 	fs := cmd.Flags()
 	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		eprintln(stderr, cmd.Long())
-		eprintln(stderr, "flags:")
-		fs.PrintDefaults()
-	}
+	fs.Usage = func() { a.writeCommandHelp(stderr, cmd) }
 	if hasHelpFlag(args) {
-		eprintln(stdout, cmd.Long())
-		eprintln(stdout, "flags:")
-		fs.SetOutput(stdout)
-		fs.PrintDefaults()
+		a.writeCommandHelp(stdout, cmd)
 		return ExitOK
 	}
 	if err := fs.Parse(args); err != nil {
@@ -114,7 +106,7 @@ func (a *App) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) 
 		// (its failf skips the print in exactly the mode we use), so an
 		// unknown flag used to exit 2 with nothing on stderr at all.
 		eprintln(stderr, "error:", err)
-		eprintf(stderr, "run 'tdtpcli_v2 help %s' for its flags\n", cmd.Name())
+		eprintf(stderr, "run 'tdtpcli_v2 --help %s' for its flags\n", cmd.Name())
 		return ExitUsage
 	}
 	positional := fs.Args()
@@ -180,7 +172,15 @@ func (a *App) chain(cmd Command, h Handler) Handler {
 
 // writeUsage lists global flags and command names.
 func (a *App) writeUsage(w io.Writer) {
-	eprintln(w, "usage: tdtpcli_v2 [--quiet|--json] [--config FILE] [--license FILE] <command> [flags] [args]")
+	eprintln(w, "TDTP CLI 2.0 (preview) — inspect, transform and move TDTP data")
+	eprintln(w, "usage: tdtpcli_v2 [global flags] <command> [command flags] [args]")
+	eprintln(w, "       tdtpcli_v2 --help [command]")
+	eprintln(w, "\nglobal flags (before the command):")
+	eprintln(w, "  --config FILE   database, broker and storage configuration")
+	eprintln(w, "  --license FILE  license file (else TDTP_LICENSE, ./tdtp.lic or Community)")
+	eprintln(w, "  --quiet, -q     suppress progress, keep results")
+	eprintln(w, "  --json          write a machine-readable result to stdout")
+	eprintln(w, "  --help, -h      show this help or help for one command")
 	eprintln(w, "\ncommands:")
 	names := make([]string, 0, len(a.commands))
 	seen := map[Command]bool{}
@@ -192,23 +192,34 @@ func (a *App) writeUsage(w io.Writer) {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		eprintf(w, "  %-12s %s\n", n, a.commands[n].Short())
+		eprintf(w, "  %-18s %s\n", n, a.commands[n].Short())
 	}
-	eprintln(w, "\nhelp <command> prints full help for one command.")
+	eprintln(w, "\nexamples:")
+	eprintln(w, "  tdtpcli_v2 --config db.yaml list")
+	eprintln(w, "  tdtpcli_v2 --config db.yaml export orders --limit 5 --output orders.tdtp.xml")
+	eprintln(w, "  tdtpcli_v2 test orders.tdtp.xml")
+	eprintln(w, "  tdtpcli_v2 --help export")
+	eprintln(w, "\nexit codes: 0 success, 1 operational error, 2 usage error, 3 invalid data")
+	eprintln(w, "Database exports and safe pipelines read data; import and --unsafe pipeline can write.")
 }
 
-// writeHelp prints one command's Long help, or the usage when unknown.
-func (a *App) writeHelp(w io.Writer, args []string) {
+// writeHelp prints general or command help and returns an error for bad names.
+func (a *App) writeHelp(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		a.writeUsage(w)
-		return
+		a.writeUsage(stdout)
+		return ExitOK
+	}
+	if len(args) != 1 {
+		eprintln(stderr, "error: help expects one command name")
+		return ExitUsage
 	}
 	if c, ok := a.commands[args[0]]; ok {
-		eprintln(w, c.Long())
-		return
+		a.writeCommandHelp(stdout, c)
+		return ExitOK
 	}
-	eprintf(w, "unknown command %q\n\n", args[0])
-	a.writeUsage(w)
+	eprintf(stderr, "error: unknown command %q\n", args[0])
+	eprintln(stderr, "run 'tdtpcli_v2 --help' to list commands")
+	return ExitUsage
 }
 
 // prependGlobals re-attaches --quiet/--json/--config around rewritten args

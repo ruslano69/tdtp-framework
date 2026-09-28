@@ -629,6 +629,25 @@ def test_T4_roundtrip():
     pg_query("DROP TABLE IF EXISTS nullable_ts_src CASCADE")
     pg_query("DROP TABLE IF EXISTS rt_nullable_ts CASCADE")
 
+    # T4.10 — CLI flag restores the packet's VARCHAR length on a new table.
+    pg_query("DROP TABLE IF EXISTS strict_schema_src CASCADE")
+    pg_query("DROP TABLE IF EXISTS rt_strict_schema CASCADE")
+    pg_query("CREATE TABLE strict_schema_src (id INTEGER PRIMARY KEY, code VARCHAR(7))")
+    pg_query("INSERT INTO strict_schema_src VALUES (1, 'ABC1234')")
+    t = time.monotonic()
+    exported = run("--export", "strict_schema_src", "--output", out("t4_strict_schema.xml"))
+    imported = run("--config", CFG_IMP, "--import", out("t4_strict_schema.xml"),
+                   "--table", "rt_strict_schema", "--strict-schema") if exported.returncode == 0 else exported
+    lengths = pg_query(
+        "SELECT character_maximum_length FROM information_schema.columns "
+        "WHERE table_name='rt_strict_schema' AND column_name='code'"
+    ) if imported.returncode == 0 else []
+    record("T4.10 --strict-schema restores VARCHAR(7)",
+           imported.returncode == 0 and lengths == ["7"],
+           time.monotonic() - t, f"rc={imported.returncode} lengths={lengths}")
+    pg_query("DROP TABLE IF EXISTS strict_schema_src CASCADE")
+    pg_query("DROP TABLE IF EXISTS rt_strict_schema CASCADE")
+
     # Cleanup import tables
     for tbl in ("rt_users", "rt_users_comp", "rt_users_proj",
                 "rt_erp_entry", "rt_complex_proj"):

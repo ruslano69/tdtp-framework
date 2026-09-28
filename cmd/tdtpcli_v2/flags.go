@@ -35,6 +35,11 @@ func parseGlobals(argv []string) (GlobalFlags, []string, error) {
 		}
 		name, value, hasValue := strings.Cut(strings.TrimLeft(tok, "-"), "=")
 		switch name {
+		case "help", "h":
+			if hasValue {
+				return g, append([]string{"--help", value}, argv[i+1:]...), nil
+			}
+			return g, argv[i:], nil
 		case "config", "license":
 			if !hasValue {
 				i++

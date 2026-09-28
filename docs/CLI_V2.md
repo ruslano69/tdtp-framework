@@ -1,5 +1,7 @@
 # CLI v2 philosophy
 
+For scripts moving from v1, start with the [migration guide](CLI_V2_MIGRATION.md).
+
 One binary, many small commands. v1 (`cmd/tdtpcli`) grew a 1150-line
 `main.go`, one flat `Flags` struct for everything, and `flagscope.go`
 allowlists proving the system no longer knew which flags belonged to
@@ -30,6 +32,21 @@ which command. v2 inverts that:
 Global options go before the command; command options go after it. The v1
 flat-flag forms still work through the compatibility shim and print a
 deprecation note to stderr.
+
+### Help
+
+`--help` lists every command, global option, examples and exit codes.
+For one command, these forms show its synopsis, description, live flag
+defaults and examples without opening a database:
+
+```powershell
+.\tdtpcli_v2.exe --help export
+.\tdtpcli_v2.exe help export
+.\tdtpcli_v2.exe export --help
+```
+
+Global options such as `--config` come before the command in examples.
+An unknown help topic returns exit code 2.
 
 ### Workflows
 
@@ -124,9 +141,8 @@ byte-identical to the native form. The shim lives one release.
 Workflows use `tdtpcli_v2 steps workflow.yaml [@name=value...]` (or legacy
 `--steps`). The runner starts this same v2 executable for every step. Existing
 workflow YAML can keep legacy step commands such as `--test file.tdtp.xml`;
-they pass through the compatibility shim. Commands still awaiting a v2 port,
-including `--sync-incremental` and standalone `--listen`, need their own migration before
-those workflows can run under v2.
+they pass through the compatibility shim. Native `sync-incremental`, standalone
+Kafka `listen`, and `process-request` are available in the preview.
 
 Mappings use `tdtpcli_v2 map mapping.yaml --input SOURCE`; the legacy
 `--map` form is available through the shim. `--drain 5s` consumes a broker
