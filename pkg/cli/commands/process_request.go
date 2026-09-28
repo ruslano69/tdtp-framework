@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,10 +15,12 @@ import (
 
 // ProcessRequestOptions holds options for process-request operation
 type ProcessRequestOptions struct {
-	RequestFile   string           // Путь к входящему request.tdtp
-	OutputFile    string           // Куда писать response (опционально, иначе авто)
-	ConfigsDir    string           // Директория с конфигами вида {Recipient}.yaml
-	DefaultConfig *adapters.Config // Fallback если {Recipient}.yaml не найден
+	RequestFile   string             // Путь к входящему request.tdtp
+	OutputFile    string             // Куда писать response (опционально, иначе авто)
+	ConfigsDir    string             // Директория с конфигами вида {Recipient}.yaml
+	DefaultConfig *adapters.Config   // Fallback если {Recipient}.yaml не найден
+	CheckAdapter  func(string) error // optional license gate for recipient-specific configs
+	Output        io.Writer          // nil preserves v1 stdout progress
 }
 
 // adapterConfigFromYAML загружает adapters.Config из yaml-файла конфига tdtpcli
@@ -90,7 +93,10 @@ func adapterConfigFromYAML(path string) (*adapters.Config, error) {
 }
 
 // resolveAdapterConfig ищет конфиг {Recipient}.yaml в configsDir, затем использует defaultConfig
-func resolveAdapterConfig(recipient, configsDir string, defaultConfig *adapters.Config) (*adapters.Config, error) {
+func resolveAdapterConfig(recipient, configsDir string, defaultConfig *adapters.Config, output io.Writer) (*adapters.Config, error) {
+	if strings.ContainsAny(recipient, `/\:`) || recipient == "." || recipient == ".." {
+		return nil, fmt.Errorf("invalid recipient config name %q", recipient)
+	}
 	if recipient != "" && configsDir != "" {
 		candidates := []string{
 			filepath.Join(configsDir, recipient+".yaml"),
@@ -102,11 +108,11 @@ func resolveAdapterConfig(recipient, configsDir string, defaultConfig *adapters.
 				if err != nil {
 					return nil, fmt.Errorf("failed to load config for recipient '%s': %w", recipient, err)
 				}
-				fmt.Printf("  Config: %s\n", path)
+				_, _ = fmt.Fprintf(output, "  Config: %s\n", path)
 				return cfg, nil
 			}
 		}
-		fmt.Printf("  Warning: config '%s.yaml' not found in '%s', using default config\n", recipient, configsDir)
+		_, _ = fmt.Fprintf(output, "  Warning: config '%s.yaml' not found in '%s', using default config\n", recipient, configsDir)
 	}
 
 	if defaultConfig == nil {
@@ -117,6 +123,13 @@ func resolveAdapterConfig(recipient, configsDir string, defaultConfig *adapters.
 
 // ProcessRequest читает TDTP request-пакет, выполняет запрос и генерирует response
 func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
+	output := opts.Output
+	if output == nil {
+		output = os.Stdout
+	}
+	printf := func(format string, args ...any) {
+		_, _ = fmt.Fprintf(output, format, args...)
+	}
 	// 1. Парсим request файл
 	parser := packet.NewParser()
 	reqPacket, err := parser.ParseFile(opts.RequestFile)
@@ -133,16 +146,21 @@ func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
 	sender := reqPacket.Header.Sender
 	messageID := reqPacket.Header.MessageID
 
-	fmt.Printf("Processing request:\n")
-	fmt.Printf("  MessageID:  %s\n", messageID)
-	fmt.Printf("  Table:      %s\n", tableName)
-	fmt.Printf("  Sender:     %s\n", sender)
-	fmt.Printf("  Recipient:  %s\n", recipient)
+	printf("Processing request:\n")
+	printf("  MessageID:  %s\n", messageID)
+	printf("  Table:      %s\n", tableName)
+	printf("  Sender:     %s\n", sender)
+	printf("  Recipient:  %s\n", recipient)
 
 	// 2. Находим конфиг адаптера по Recipient
-	adapterConfig, err := resolveAdapterConfig(recipient, opts.ConfigsDir, opts.DefaultConfig)
+	adapterConfig, err := resolveAdapterConfig(recipient, opts.ConfigsDir, opts.DefaultConfig, output)
 	if err != nil {
 		return err
+	}
+	if opts.CheckAdapter != nil {
+		if err := opts.CheckAdapter(adapterConfig.Type); err != nil {
+			return err
+		}
 	}
 
 	// 3. Создаём адаптер
@@ -153,7 +171,7 @@ func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
 	defer func() { _ = adapter.Close(ctx) }()
 
 	// 4. Выполняем запрос
-	fmt.Printf("  Executing query on table '%s'...\n", tableName)
+	printf("  Executing query on table '%s'...\n", tableName)
 	var packets []*packet.DataPacket
 	if reqPacket.Query != nil {
 		// Экспорт с фильтрами из request
@@ -168,18 +186,19 @@ func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
 	}
 
 	if len(packets) == 0 {
-		fmt.Println("  Warning: no data returned")
+		printf("  Warning: no data returned\n")
 		return nil
 	}
 
 	// 5. Проставляем InReplyTo и корректируем Sender/Recipient во всех пакетах
 	for _, pkt := range packets {
+		pkt.Header.Type = packet.TypeResponse
 		pkt.Header.InReplyTo = messageID
 		pkt.Header.Sender = recipient
 		pkt.Header.Recipient = sender
 	}
 
-	fmt.Printf("  Generated %d response packet(s)\n", len(packets))
+	printf("  Generated %d response packet(s)\n", len(packets))
 
 	// 6. Определяем выходной файл
 	outputFile := opts.OutputFile
@@ -198,7 +217,7 @@ func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
 		if err := os.WriteFile(outputFile, xml, 0o600); err != nil {
 			return fmt.Errorf("failed to write response: %w", err)
 		}
-		fmt.Printf("  Response written to: %s\n", outputFile)
+		printf("  Response written to: %s\n", outputFile)
 	} else {
 		for i, pkt := range packets {
 			ext := filepath.Ext(outputFile)
@@ -212,10 +231,10 @@ func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
 			if err := os.WriteFile(partFile, xml, 0o600); err != nil {
 				return fmt.Errorf("failed to write response part %d: %w", i+1, err)
 			}
-			fmt.Printf("  Response part %d/%d written to: %s\n", i+1, len(packets), partFile)
+			printf("  Response part %d/%d written to: %s\n", i+1, len(packets), partFile)
 		}
 	}
 
-	fmt.Printf("Done. InReplyTo: %s\n", messageID)
+	printf("Done. InReplyTo: %s\n", messageID)
 	return nil
 }

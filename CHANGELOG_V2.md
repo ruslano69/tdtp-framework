@@ -7,6 +7,34 @@
 
 ## [Unreleased]
 
+### Complete CLI help
+
+- General `--help` now explains global flags, commands, examples, and exit
+  codes. `--help export`, `help export`, and `export --help` use one command
+  formatter with the command's actual flags and defaults.
+- Every registered command has a valid v2 synopsis and example. Unknown help
+  topics return usage exit code 2; tests cover all commands and help forms.
+
+### Preview completion: incremental sync, Kafka listener, request processing
+
+- Added native `sync-incremental` with checkpoint and broker output options,
+  standalone Kafka `listen`, and `process-request`, including flat-flag
+  compatibility. Their progress follows the v2 text/quiet/JSON output contract.
+- `listen` uses the application context for graceful shutdown and skips
+  automatic retries of a running daemon. Live Kafka sync-to-broker/listener
+  and SQLite import are covered by an opt-in end-to-end test.
+- `process-request` checks the recipient database adapter against the active
+  license, rejects recipient path traversal, and emits a TDTP response packet
+  rather than a reference packet. The shared response fix applies to v1 too.
+- Added `import --strict-schema`; the PostgreSQL CLI suite verifies that a
+  constrained source column keeps its declared length on import.
+- The release workflow now builds `tdtpcli_v2-preview-*` for the same five
+  platforms as v1 and includes those files in release checksums. Stable
+  `tdtpcli` assets remain v1 during the preview.
+- Community licensing remains as currently implemented for the preview. Row
+  limit, S3, and pipeline source/ETL enforcement decisions are deferred until
+  before 2.0. See [migration guide](docs/CLI_V2_MIGRATION.md).
+
 ### Wave 3.5: config once per run, config-file processors, production tag
 
 - `Deps` parses the YAML once per run (`loadConfig` cached); every
@@ -18,9 +46,8 @@
   (config mask masks emails, announces "from config").
 - `production` tag verified for v2: suite green under
   `-tags "production nokafka"`, `--enc-dev` absent from prod help.
-- Release recommendation (decision for the owner, not applied): ship a
-  `tdtpcli_v2` preview alongside v1 starting with the next tag (same
-  build flags), full switch at the wave-4 rename.
+- The next tagged release ships a separate `tdtpcli_v2` preview alongside
+  v1 with the same build flags; the stable-name switch remains wave 4.
 
 ### Fixed: one result for text and JSON reports
 

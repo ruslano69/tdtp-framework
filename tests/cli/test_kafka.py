@@ -315,7 +315,9 @@ def test_K2_roundtrip():
             conn.close()
     record("K2.2 --import-broker restores every row",
            p.returncode == 0 and imported == ROWS_PLAIN,
-           time.monotonic() - t, f"rc={p.returncode} rows={imported} want={ROWS_PLAIN}")
+           time.monotonic() - t,
+           f"rc={p.returncode} rows={imported} want={ROWS_PLAIN} "
+           f"stdout={p.stdout.strip()[:200]} stderr={p.stderr.strip()[:120]}")
 
     # Content, not just the count: a roundtrip that loses column values while
     # keeping the row count would pass the check above.

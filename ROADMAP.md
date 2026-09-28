@@ -8,9 +8,15 @@
 
 ## Next
 
+- **Oracle adapter for 2.0** — implement the shared `adapters.Adapter`
+  contract for Oracle and verify export/import round trips against a live
+  Oracle database. Not started; driver choice and the test environment are
+  the first decisions (see `TODO_NEXT.md` → "Oracle adapter").
 - **Streaming export/import** (`TotalParts=0`, "TCP for tables") — core is ready
-  (`pkg/core/packet/streaming.go`, channel-based `StreamingGenerator`), not yet wired to
-  the CLI (`--export-stream` / `--import-stream`)
+  (`pkg/core/packet/streaming.go`, channel-based `StreamingGenerator`). Beta
+  `export --stream` writes local files with bounded memory, then finalizes
+  their part counts; live `TotalParts=0` transfer and row-by-row
+  `--import-stream` are still missing from the CLI.
 - **Parallel import workers** — concurrent multi-part import (export already parallelizes
   compress+serialize; import is still sequential per part)
 - **Schema migration** — schema-drift *detection* by default (diff packet schema vs.
@@ -38,7 +44,7 @@
 
 ## Later
 
-- **Additional adapters** — Oracle, MongoDB, Redis, Cassandra, Snowflake
+- **Additional adapters** — MongoDB, Redis, Cassandra, Snowflake
 - **Additional object storage backends** — GCS, Azure Blob (S3-compatible already covered)
 - **Distributed tracing** — OpenTelemetry spans across pipeline/orchestrator/adapters
 - **Kubernetes** — operator + Helm charts for the orchestrator/xZMercury stack

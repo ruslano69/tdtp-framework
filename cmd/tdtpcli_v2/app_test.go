@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/pflag"
 )
 
 var errTest = errors.New("test error")
@@ -212,6 +214,61 @@ func TestApp_CommandHelpFlag(t *testing.T) {
 		}
 		if !strings.Contains(stdout, "stamp-integrity") {
 			t.Errorf("should print command help, got %q", stdout)
+		}
+	}
+}
+
+func TestApp_HelpForEveryCommand(t *testing.T) {
+	app := NewApp()
+	for name, cmd := range app.commands {
+		if name != cmd.Name() { // aliases share their command's help
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			spec, ok := commandHelp[name]
+			if !ok || len(spec.examples) == 0 {
+				t.Fatalf("%s needs a synopsis and example", name)
+			}
+			for _, argv := range [][]string{{"--help", name}, {"help", name}, {name, "--help"}} {
+				code, stdout, stderr := runApp(t, argv...)
+				if code != ExitOK || stderr != "" {
+					t.Errorf("%v: exit=%d stderr=%q", argv, code, stderr)
+				}
+				for _, want := range []string{"usage:", "tdtpcli_v2 [global flags] " + name, "command flags:", "examples:", spec.examples[0]} {
+					if !strings.Contains(stdout, want) {
+						t.Errorf("%v: help missing %q", argv, want)
+					}
+				}
+				cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+					if flag.Hidden {
+						return
+					}
+					if !strings.Contains(stdout, "--"+flag.Name) {
+						t.Errorf("%v: help missing flag --%s", argv, flag.Name)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestApp_HelpFormsAndErrors(t *testing.T) {
+	for _, argv := range [][]string{{"--help"}, {"-h"}, {"help"}} {
+		code, stdout, stderr := runApp(t, argv...)
+		if code != ExitOK || stderr != "" || !strings.Contains(stdout, "global flags (before the command):") || !strings.Contains(stdout, "--help export") {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q", argv, code, stdout, stderr)
+		}
+	}
+	for _, argv := range [][]string{{"--help=export"}, {"--config", "db.yaml", "--help", "export"}} {
+		code, stdout, stderr := runApp(t, argv...)
+		if code != ExitOK || stderr != "" || !strings.Contains(stdout, "--compress-level") {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q", argv, code, stdout, stderr)
+		}
+	}
+	for _, argv := range [][]string{{"--help", "missing"}, {"help", "missing"}, {"--help", "export", "extra"}} {
+		code, stdout, stderr := runApp(t, argv...)
+		if code != ExitUsage || stdout != "" || !strings.Contains(stderr, "error:") {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q", argv, code, stdout, stderr)
 		}
 	}
 }

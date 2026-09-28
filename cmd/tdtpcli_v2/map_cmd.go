@@ -29,7 +29,7 @@ func newMapCommand() *mapCommand {
 	c.CmdName = "map"
 	c.CmdShort = "remap a TDTP packet and upsert it into a target database"
 	c.CmdLong = `tdtpcli_v2 map mapping.yaml --input file.tdtp.xml [--dry-run]
-tdtpcli_v2 map mapping.yaml --input broker://queue [--drain 5s | --listen]
+For a broker source, use --input broker://queue with --drain 5s or --listen.
 
 The mapping YAML defines fields, target connection and optional broker/S3
 source credentials. --dry-run transforms without writing to the database.`

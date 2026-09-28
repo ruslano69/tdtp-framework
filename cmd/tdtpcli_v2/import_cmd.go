@@ -16,15 +16,16 @@ import (
 // processors travel later (config-driven, like export).
 type importCommand struct {
 	Base
-	p          processorFlags
-	table      string
-	fields     string
-	strategy   string
-	clear      bool
-	translit   bool
-	expectVars stringList
-	mercuryURL string
-	expectMap  map[string]string
+	p            processorFlags
+	table        string
+	fields       string
+	strategy     string
+	clear        bool
+	translit     bool
+	strictSchema bool
+	expectVars   stringList
+	mercuryURL   string
+	expectMap    map[string]string
 }
 
 func newImportCommand() *importCommand {
@@ -43,6 +44,7 @@ Needs --config: this command talks to a database.`
 	fs.StringVar(&c.strategy, "strategy", "replace", "import strategy: replace, ignore, fail, copy")
 	fs.BoolVar(&c.clear, "clear", false, "replace special chars in field names with safe tokens")
 	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII")
+	fs.BoolVar(&c.strictSchema, "strict-schema", false, "restore VARCHAR(n)/CHAR(n) from packet lengths when creating a PostgreSQL table")
 	fs.Var(&c.expectVars, "expect-var", "require PipelineContext variable to match (name=value); repeatable")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL for v1.4 verification (else local only)")
 	addProcessorFlags(fs, &c.p)
@@ -100,6 +102,7 @@ func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 	if err != nil {
 		return err // typed: bad config → usage, unlicensed adapter → operational
 	}
+	cfg.StrictSchema = cfg.StrictSchema || c.strictSchema
 	// Resolve storage source: s3:// URI → object storage (v1's main.go
 	// pattern); otherwise the local file checked above.
 	var importStorageCfg *storage.Config

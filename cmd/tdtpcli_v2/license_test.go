@@ -52,14 +52,17 @@ func dbCommandArgs(t *testing.T) map[string][]string {
 	in := touch(t, "in.xml")
 	xlsx := touch(t, "in.xlsx")
 	return map[string][]string{
-		"list":          {"list"},
-		"inspect-table": {"inspect-table", "t"},
-		"export":        {"export", "t"},
-		"import":        {"import", in},
-		"export-xlsx":   {"export-xlsx", "t"},
-		"import-xlsx":   {"import-xlsx", xlsx},
-		"export-broker": {"export-broker", "t"},
-		"import-broker": {"import-broker"},
+		"list":             {"list"},
+		"inspect-table":    {"inspect-table", "t"},
+		"export":           {"export", "t"},
+		"import":           {"import", in},
+		"export-xlsx":      {"export-xlsx", "t"},
+		"import-xlsx":      {"import-xlsx", xlsx},
+		"export-broker":    {"export-broker", "t"},
+		"import-broker":    {"import-broker"},
+		"sync-incremental": {"sync-incremental", "t", "--tracking-field", "id"},
+		"listen":           {"listen"},
+		"process-request":  {"process-request", in},
 	}
 }
 

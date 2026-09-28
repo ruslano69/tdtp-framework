@@ -23,7 +23,7 @@ func newInitConfigCommand() *initConfigCommand {
 	c.CmdLong = `tdtpcli_v2 init-config (postgres|mssql|mysql|sqlite) [--output config.yaml]
 
 Writes a sample config for the database type. Edit the credentials,
-then run e.g. tdtpcli_v2 list --config config.yaml.`
+then run e.g. tdtpcli_v2 --config config.yaml list.`
 	fs := newCommandFlagSet("init-config")
 	fs.StringVarP(&c.output, "output", "o", "config.yaml", "output file")
 	c.FlagSet = fs

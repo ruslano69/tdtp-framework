@@ -25,7 +25,9 @@ import (
 // resilienceMiddleware guards Run with the configured breaker and retry.
 // No config, unreadable config, or both switches off — passthrough.
 func resilienceMiddleware(cmd Command, next Handler) Handler {
-	_ = cmd
+	if nonRetryable, ok := cmd.(interface{ NoRetry() bool }); ok && nonRetryable.NoRetry() {
+		return next
+	}
 	return func(ctx context.Context, d *Deps, out Output, args []string) error {
 		cfg := d.resilienceConfig()
 		if cfg == nil {
