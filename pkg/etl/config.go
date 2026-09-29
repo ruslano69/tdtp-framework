@@ -71,7 +71,7 @@ func (s *SanitizeFieldsConfig) IsActive() bool {
 // SourceConfig определяет источник данных (PostgreSQL, MSSQL, MySQL, SQLite, TDTP, TDTP-enc, TDTP-S3)
 type SourceConfig struct {
 	Name             string `yaml:"name"`               // Имя источника (будет использовано как имя таблицы в workspace)
-	Type             string `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3
+	Type             string `yaml:"type"`               // Тип: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3, csv
 	DSN              string `yaml:"dsn"`                // Data Source Name: строка подключения, путь к файлу или s3://bucket/key
 	Query            string `yaml:"query"`              // SQL запрос для извлечения данных (не используется для type: tdtp/tdtp-enc/tdtp-s3)
 	Timeout          int    `yaml:"timeout"`            // Таймаут в секундах (0 = без таймаута)
@@ -85,6 +85,8 @@ type SourceConfig struct {
 	// Используется только для type: tdtp-s3. DSN может быть s3://bucket/key (bucket перекрывает S3.Bucket)
 	// или просто ключом (путём к объекту) при заданном S3.Bucket.
 	S3 *storage.S3Config `yaml:"s3,omitempty"`
+	// CSV loads raw text. Business types and validation belong in transform.sql.
+	CSV *CSVSourceConfig `yaml:"csv,omitempty"`
 	// Sanitize — правила санитайзинга имён полей.
 	// Применяется к схеме источника до загрузки данных в workspace.
 	// Пример:
@@ -95,6 +97,15 @@ type SourceConfig struct {
 	// Fast — пропустить DetectAndApply (SpecialValues) для этого источника.
 	// Переопределяет performance.fast на уровне источника.
 	Fast bool `yaml:"fast"`
+}
+
+// CSVSourceConfig describes the physical CSV layout. Columns remain TEXT in
+// the workspace so invalid values can be reported by SQL without being lost.
+type CSVSourceConfig struct {
+	Columns   []string `yaml:"columns"`
+	Delimiter string   `yaml:"delimiter"` // One character; default comma
+	Encoding  string   `yaml:"encoding"`  // utf-8 (default) or windows-1251
+	Header    *bool    `yaml:"header"`    // Default true
 }
 
 // WorkspaceConfig определяет временное хранилище для объединения данных
@@ -327,19 +338,40 @@ func (s *SourceConfig) Validate() error {
 		"tdtp":     true, // TDTP XML/JSON file — DSN is the file path, query not required
 		"tdtp-enc": true, // Encrypted TDTP file — requires mercury_url for key retrieval
 		"tdtp-s3":  true, // TDTP file in S3-compatible storage — DSN is s3://bucket/key or just key
+		"csv":      true, // Local CSV file; values are loaded as raw TEXT
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3, csv", s.Type)
 	}
 
 	// query обязателен для DB-источников, для TDTP-файлов не нужен
-	if s.Type != "tdtp" && s.Type != "tdtp-enc" && s.Type != "tdtp-s3" && s.Query == "" {
+	if s.Type != "tdtp" && s.Type != "tdtp-enc" && s.Type != "tdtp-s3" && s.Type != "csv" && s.Query == "" {
 		return fmt.Errorf("query is required for type '%s'", s.Type)
 	}
 
 	// multi_part имеет смысл только для tdtp и tdtp-s3
 	if s.MultiPart && s.Type != "tdtp" && s.Type != "tdtp-s3" {
 		return fmt.Errorf("multi_part is only supported for type 'tdtp' or 'tdtp-s3'")
+	}
+	if s.Type == "csv" {
+		if s.CSV == nil || len(s.CSV.Columns) == 0 {
+			return fmt.Errorf("csv.columns must list the source fields in file order")
+		}
+		seen := make(map[string]bool, len(s.CSV.Columns))
+		for _, name := range s.CSV.Columns {
+			if strings.TrimSpace(name) != name || name == "" || seen[name] {
+				return fmt.Errorf("csv.columns contains an empty, padded, or duplicate name %q", name)
+			}
+			seen[name] = true
+		}
+		if s.CSV.Delimiter != "" && (len([]rune(s.CSV.Delimiter)) != 1 || s.CSV.Delimiter == "\n" || s.CSV.Delimiter == "\r") {
+			return fmt.Errorf("csv.delimiter must be one character other than newline")
+		}
+		switch strings.ToLower(s.CSV.Encoding) {
+		case "", "utf-8", "utf8", "windows-1251", "cp1251", "1251":
+		default:
+			return fmt.Errorf("csv.encoding must be utf-8 or windows-1251")
+		}
 	}
 
 	// mercury_url обязателен для tdtp-enc

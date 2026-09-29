@@ -573,6 +573,9 @@ func (l *Loader) loadFromSource(ctx context.Context, source SourceConfig) (*pack
 	if source.Type == "tdtp" {
 		return loadTDTPFile(source)
 	}
+	if source.Type == "csv" {
+		return loadCSVFile(source)
+	}
 
 	// Зашифрованный TDTP-файл — получаем ключ от xZMercury и расшифровываем.
 	if source.Type == "tdtp-enc" {
