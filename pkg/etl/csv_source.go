@@ -23,7 +23,7 @@ func loadCSVFile(source SourceConfig) (*packet.DataPacket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open CSV %q: %w", source.DSN, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var input io.Reader = file
 	switch strings.ToLower(source.CSV.Encoding) {

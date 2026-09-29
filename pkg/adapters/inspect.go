@@ -7,12 +7,12 @@ type ColumnReport struct {
 	TDTPType   string `yaml:"tdtp_type" json:"tdtp_type"`
 	Nullable   bool   `yaml:"nullable" json:"nullable"`
 	PrimaryKey bool   `yaml:"primary_key" json:"primary_key"`
-	Identity   bool   `yaml:"identity,omitempty" json:"identity,omitempty"`  // auto-increment / IDENTITY column
-	Computed   bool   `yaml:"computed,omitempty" json:"computed,omitempty"`  // computed / generated column
-	Default    string `yaml:"default,omitempty" json:"default,omitempty"`   // default expression; empty if none
-	Length     int    `yaml:"length,omitempty" json:"length,omitempty"`    // char/varchar max length
+	Identity   bool   `yaml:"identity,omitempty" json:"identity,omitempty"`   // auto-increment / IDENTITY column
+	Computed   bool   `yaml:"computed,omitempty" json:"computed,omitempty"`   // computed / generated column
+	Default    string `yaml:"default,omitempty" json:"default,omitempty"`     // default expression; empty if none
+	Length     int    `yaml:"length,omitempty" json:"length,omitempty"`       // char/varchar max length
 	Precision  int    `yaml:"precision,omitempty" json:"precision,omitempty"` // numeric precision
-	Scale      int    `yaml:"scale,omitempty" json:"scale,omitempty"`     // numeric scale
+	Scale      int    `yaml:"scale,omitempty" json:"scale,omitempty"`         // numeric scale
 }
 
 // ForeignKeyReport describes a single FK constraint column reference.
@@ -40,4 +40,3 @@ type TableReport struct {
 	Stats       TableStats         `yaml:"stats" json:"stats"`
 	Sample      map[string]string  `yaml:"sample,omitempty" json:"sample,omitempty"`
 }
-
