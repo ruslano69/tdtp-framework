@@ -1,0 +1,89 @@
+# Example for an illustrative CSV layout, not a verified PFU export schema.
+# Pass @csv_path, @output_path, @reference_date and @max_days on the CLI.
+name: pfu-sick-leaves-csv
+sources:
+  - name: leaves
+    type: csv
+    dsn: "{{csv_path}}"
+    csv:
+      delimiter: ";"
+      encoding: utf-8
+      header: true
+      columns: [NUM_LN, NUM_CASE, VERSION, RN_OKP, FIO, DATE_START, DATE_END, STATUS]
+
+workspace:
+  type: sqlite
+  mode: ":memory:"
+
+transform:
+  result_table: pfu_sick_leaves
+  # The reference date and positive business limit come from CLI variables.
+  sql: |
+    WITH settings AS (
+      SELECT date('@reference_date') AS today, CAST('@max_days' AS INTEGER) AS max_days
+    ),
+    bounds AS (
+      SELECT today, max_days,
+        date(today, 'start of month', '-1 month',
+          '+' || (min(CAST(strftime('%d', today) AS INTEGER),
+                     CAST(strftime('%d', date(today, 'start of month', '-1 day')) AS INTEGER)) - 1) || ' days') AS lower_date,
+        date(today, 'start of month', '+1 month',
+          '+' || (min(CAST(strftime('%d', today) AS INTEGER),
+                     CAST(strftime('%d', date(today, 'start of month', '+2 months', '-1 day')) AS INTEGER)) - 1) || ' days') AS upper_date
+      FROM settings
+    ),
+    raw AS (
+      SELECT rowid AS source_row,
+        trim(coalesce(NUM_LN, '')) AS NUM_LN,
+        trim(coalesce(NUM_CASE, '')) AS NUM_CASE,
+        trim(coalesce(VERSION, '')) AS VERSION,
+        trim(coalesce(RN_OKP, '')) AS RN_OKP,
+        trim(coalesce(FIO, '')) AS FIO,
+        trim(coalesce(DATE_START, '')) AS DATE_START,
+        trim(coalesce(DATE_END, '')) AS DATE_END,
+        trim(coalesce(STATUS, '')) AS STATUS
+      FROM leaves
+    ),
+    checked AS (
+      SELECT raw.*,
+        CASE
+          WHEN NUM_LN = '' THEN 'NUM_LN is required'
+          WHEN NUM_CASE = '' THEN 'NUM_CASE is required'
+          WHEN RN_OKP = '' THEN 'RN_OKP is required'
+          WHEN FIO = '' THEN 'FIO is required'
+          WHEN STATUS = '' THEN 'STATUS is required'
+          WHEN VERSION = '' OR VERSION GLOB '*[^0-9]*' OR CAST(VERSION AS INTEGER) < 1
+            THEN 'VERSION must be a positive integer'
+          WHEN DATE_START NOT GLOB '????-??-??'
+            OR date(julianday(DATE_START)) IS NULL
+            OR date(julianday(DATE_START)) <> DATE_START
+            THEN 'DATE_START is not a valid YYYY-MM-DD date'
+          WHEN DATE_END NOT GLOB '????-??-??'
+            OR date(julianday(DATE_END)) IS NULL
+            OR date(julianday(DATE_END)) <> DATE_END
+            THEN 'DATE_END is not a valid YYYY-MM-DD date'
+          WHEN DATE_END < DATE_START THEN 'DATE_END is before DATE_START'
+          WHEN CAST(julianday(DATE_END) - julianday(DATE_START) AS INTEGER) + 1 > max_days
+            THEN 'duration exceeds max_days'
+          WHEN DATE_START < lower_date OR DATE_START > upper_date
+            THEN 'DATE_START is outside the calendar-month window'
+          ELSE NULL
+        END AS validation_error
+      FROM raw CROSS JOIN bounds
+    )
+    SELECT source_row, NUM_LN, NUM_CASE, VERSION, RN_OKP, FIO,
+      DATE_START, DATE_END, STATUS,
+      CASE WHEN validation_error IS NULL
+        THEN CAST(julianday(DATE_END) - julianday(DATE_START) AS INTEGER) + 1
+        ELSE NULL END AS DURATION_DAYS,
+      CASE WHEN validation_error IS NULL THEN 'OK' ELSE 'ERROR' END AS validation_status,
+      coalesce(validation_error, '') AS validation_error
+    FROM checked
+    ORDER BY source_row
+
+output:
+  type: tdtp
+  tdtp:
+    format: xml
+    destination: "{{output_path}}"
+    integrity: true

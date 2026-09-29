@@ -61,6 +61,7 @@ func dbCommandArgs(t *testing.T) map[string][]string {
 		"export-broker":    {"export-broker", "t"},
 		"import-broker":    {"import-broker"},
 		"sync-incremental": {"sync-incremental", "t", "--tracking-field", "id"},
+		"sync":             {"sync", "t", "--tracking-field", "id"},
 		"listen":           {"listen"},
 		"process-request":  {"process-request", in},
 	}

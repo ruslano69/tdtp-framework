@@ -31,6 +31,7 @@ var commandHelp = map[string]helpSpec{
 	"pipeline":         {"PIPELINE.yaml [@name=value...] [flags]", []string{"tdtpcli_v2 pipeline etl.yaml @date=2026-09-28"}},
 	"process-request":  {"REQUEST.tdtp.xml [flags]", []string{"tdtpcli_v2 --config db.yaml process-request request.tdtp.xml --output response.tdtp.xml"}},
 	"steps":            {"WORKFLOW.yaml [@name=value...]", []string{"tdtpcli_v2 steps workflow.yaml @input=orders.tdtp.xml"}},
+	"sync":             {"TABLE [flags]", []string{"tdtpcli_v2 --config db.yaml sync orders --tracking-field updated_at --checkpoint-file orders.checkpoint.yaml"}},
 	"sync-incremental": {"TABLE [flags]", []string{"tdtpcli_v2 --config db.yaml sync-incremental orders --tracking-field updated_at --checkpoint-file orders.checkpoint.yaml"}},
 	"test":             {"FILE.tdtp.xml", []string{"tdtpcli_v2 test orders.tdtp.xml"}},
 	"to-compact":       {"FILE.tdtp.xml [flags]", []string{"tdtpcli_v2 to-compact orders.tdtp.xml --output compact.xml"}},

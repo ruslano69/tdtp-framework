@@ -52,6 +52,16 @@ Writes changed rows to a TDTP file, or to the configured broker with
 	return c
 }
 
+// sync keeps the short command name available alongside sync-incremental.
+func newSyncAliasCommand() *syncCommand {
+	c := newSyncCommand()
+	c.CmdName = "sync"
+	c.CmdLong = `tdtpcli_v2 sync TABLE --config config.yaml [options...]
+
+Alias for sync-incremental.`
+	return c
+}
+
 func (c *syncCommand) Features() []string {
 	if c.enc {
 		return []string{"enc"}

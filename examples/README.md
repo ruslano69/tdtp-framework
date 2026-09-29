@@ -284,6 +284,33 @@ bash run_chain.sh
 
 ---
 
+### [Проверка CSV с больничными перед импортом](./pfu-csv/)
+**Сложность:** ⭐⭐ Средний
+**Время:** 5 минут
+
+Практический кейс без базы данных: CSV с больничными → SQL-проверки в ETL →
+один TDTP со всеми строками, статусом `OK`/`ERROR` и причиной ошибки.
+В папке лежат обезличенный CSV, готовый TDTP и инструкция для повторного запуска.
+Формат CSV иллюстративный; правила и состав колонок нужно согласовать с
+реальным источником.
+
+Подробнее: [README кейса](./pfu-csv/README.md).
+
+---
+
+### [XML-реестр больничных → TDTP](./pfu-xml/)
+**Сложность:** ⭐⭐ Средний
+**Время:** 5 минут
+
+Отдельный Go-конвертер для иллюстративного XML вида `<REESTR_LN><RECORD>`.
+В папке есть входной XML с двумя записями, тесты, TDTP с правильной строкой
+и `errors.xml` с причиной отклонения второй. Структура пока не сверена с
+реальным `export.xml` ПФУ.
+
+Подробнее: [README конвертера](./pfu-xml/README.md).
+
+---
+
 ## Сравнение примеров
 
 | Пример | Сложность | Компоненты | Production-Ready | Use Case |
@@ -297,6 +324,8 @@ bash run_chain.sh
 | 06-etl-pipeline | ⭐⭐⭐⭐ | All components | ✅ | Enterprise ETL |
 | 08-pipeline-encrypted | ⭐⭐ | ETL + xzmercury | ✅ | Encrypted pipeline, no external deps |
 | 09-s3-pipeline-chain | ⭐ | ETL + S3 + bash | ✅ | S3 fan-out, split by category |
+| pfu-csv | ⭐⭐ | CSV + SQLite SQL + TDTP | Пример для адаптации | Проверка строк до импорта |
+| pfu-xml | ⭐⭐ | Go XML-конвертер + TDTP | Пример для адаптации | XML-реестр с отчётом об ошибках |
 
 ## Основные компоненты
 
@@ -337,6 +366,8 @@ bash run_chain.sh
 - **Защитить API от сбоев** → [05-circuit-breaker](./05-circuit-breaker/)
 - **Полноценный ETL** → [06-etl-pipeline](./06-etl-pipeline/)
 - **ETL + шифрование (без внешних зависимостей)** → [08-pipeline-encrypted](./08-pipeline-encrypted/)
+- **Проверить CSV до импорта и сохранить ошибки в TDTP** → [pfu-csv](./pfu-csv/)
+- **Преобразовать XML-реестр больничных в TDTP** → [pfu-xml](./pfu-xml/)
 
 ## Production Checklist
 

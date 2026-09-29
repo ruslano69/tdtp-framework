@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Merged CLI v2 inspect and sync work
+
+- `inspect-table --json` now returns the complete table report, including
+  columns, keys and row counts. The text report remains shared with v1.
+- `sync` remains an alias for `sync-incremental`.
+
 ### Complete CLI help
 
 - General `--help` now explains global flags, commands, examples, and exit

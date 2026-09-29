@@ -57,9 +57,9 @@ description: "..."          # optional
 # ─── SOURCES ──────────────────────────────────────────────────────────────────
 sources:
   - name: table_alias       # table name in the SQLite workspace (required)
-    type: sqlite            # sqlite | postgres | mssql | mysql | tdtp | tdtp-enc | tdtp-s3
-    dsn: "path/to/db.db"    # DSN, or path to a TDTP file (or S3 key for tdtp-s3)
-    query: |                # SQL query (not used by type: tdtp/tdtp-enc/tdtp-s3)
+    type: sqlite            # sqlite | postgres | mssql | mysql | tdtp | tdtp-enc | tdtp-s3 | csv
+    dsn: "path/to/db.db"    # DSN, or path to a TDTP/CSV file (or S3 key for tdtp-s3)
+    query: |                # SQL query (not used by type: tdtp/tdtp-enc/tdtp-s3/csv)
       SELECT id, name FROM users
     timeout: 30             # seconds (0 = no timeout)
     multi_part: false       # type: tdtp/tdtp-s3 — load every part of the set
@@ -75,6 +75,11 @@ sources:
       endpoint: "http://localhost:9000"
       access_key: "..."
       secret_key: "..."
+    csv:                     # type: csv only — values stay TEXT for validation in transform.sql
+      columns: [id, name, date_start] # required, in file order
+      delimiter: ";"          # default: comma
+      encoding: utf-8        # or windows-1251
+      header: true           # default: true; names must match columns
 
 # ─── WORKSPACE ────────────────────────────────────────────────────────────────
 workspace:
@@ -249,6 +254,15 @@ prints the size of every packet in the batch.
 | `tdtp` | `path/to/file.tdtp.xml` | not used |
 | `tdtp-enc` | `path/to/file.tdtp.enc` | not used — needs `mercury_url` |
 | `tdtp-s3` | `s3://bucket/key`, or just `key` with `s3.bucket` set | not used |
+| `csv` | local file path; configure `csv.columns` | not used |
+
+CSV cells enter the SQLite workspace as raw TEXT. Use `transform.sql` to check
+business types and rules before casting; this preserves invalid input for a
+single TDTP result with diagnostic columns. The reader supports quoted fields,
+embedded newlines, UTF-8 (with optional BOM), and Windows-1251. Invalid CSV
+structure, header mismatches, and invalid UTF-8 stop the source. See
+the [practical CSV validation case](../examples/pfu-csv/README.md) for a
+reproducible date-and-duration validation example.
 
 ---
 

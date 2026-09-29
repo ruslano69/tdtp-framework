@@ -20,6 +20,7 @@ func RegisterAll(a *App) {
 	a.Register(newPipelineCommand())
 	a.Register(newProcessRequestCommand())
 	a.Register(newStepsCommand())
+	a.Register(newSyncAliasCommand())
 	a.Register(newSyncCommand())
 	a.Register(newTestCommand())
 	a.Register(newToCSVCommand())

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/audit"
 	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
@@ -53,18 +54,30 @@ func (c *inspectTableCommand) Run(ctx context.Context, d *Deps, out Output, args
 	if err != nil {
 		return err // typed in databaseConfig
 	}
+	if out.JSONEnabled {
+		adapter, err := adapters.New(ctx, *cfg)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = adapter.Close(ctx) }()
+		report, err := adapter.InspectTable(ctx, args[0])
+		if err != nil {
+			return err
+		}
+		out.JSON(inspectTableJSON{Valid: true, TableReport: report})
+		return nil
+	}
 	var buf bytes.Buffer
 	if err := commands.InspectTableTo(&buf, ctx, cfg, args[0]); err != nil {
 		return err // database failure is operational (exit 1)
 	}
 	out.Human("%s", buf.String())
-	out.JSON(inspectTableJSON{Valid: true, Table: args[0]})
 	return nil
 }
 
 // inspectTableJSON is the --json verdict (the YAML report stays the
 // human formatter, shared with v1).
 type inspectTableJSON struct {
-	Valid bool   `json:"valid"`
-	Table string `json:"table"`
+	Valid bool `json:"valid"`
+	*adapters.TableReport
 }

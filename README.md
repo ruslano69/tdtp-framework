@@ -775,6 +775,8 @@ cd examples/09-s3-pipeline-chain   && ./run_chain.sh   # S3 pipeline chain
 ```
 
 Examples documentation: [`examples/README.md`](examples/README.md).
+Practical CSV validation before import: [`examples/pfu-csv/`](examples/pfu-csv/README.md).
+Illustrative sick-leave XML converter: [`examples/pfu-xml/`](examples/pfu-xml/README.md).
 
 ---
 
