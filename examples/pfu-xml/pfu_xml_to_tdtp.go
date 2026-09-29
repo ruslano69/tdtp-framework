@@ -1,4 +1,4 @@
-// Run with: go run ./scripts/pfu_xml_to_tdtp.go --input export.xml --output leaves.tdtp.xml --max-days 30
+// Run with: go run ./examples/pfu-xml --input export.xml --output leaves.tdtp.xml --max-days 30
 package main
 
 import (

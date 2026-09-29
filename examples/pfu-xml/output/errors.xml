@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationReport total_records="2" valid_records="1" failed_records="1">
+  <Error record="2" num_ln="654321-0987654321-2">DATE_START: invalid calendar date &#34;2026-02-31&#34;; expected YYYY-MM-DD</Error>
+</ValidationReport>

@@ -298,6 +298,19 @@ bash run_chain.sh
 
 ---
 
+### [XML-реестр больничных → TDTP](./pfu-xml/)
+**Сложность:** ⭐⭐ Средний
+**Время:** 5 минут
+
+Отдельный Go-конвертер для иллюстративного XML вида `<REESTR_LN><RECORD>`.
+В папке есть входной XML с двумя записями, тесты, TDTP с правильной строкой
+и `errors.xml` с причиной отклонения второй. Структура пока не сверена с
+реальным `export.xml` ПФУ.
+
+Подробнее: [README конвертера](./pfu-xml/README.md).
+
+---
+
 ## Сравнение примеров
 
 | Пример | Сложность | Компоненты | Production-Ready | Use Case |
@@ -312,6 +325,7 @@ bash run_chain.sh
 | 08-pipeline-encrypted | ⭐⭐ | ETL + xzmercury | ✅ | Encrypted pipeline, no external deps |
 | 09-s3-pipeline-chain | ⭐ | ETL + S3 + bash | ✅ | S3 fan-out, split by category |
 | pfu-csv | ⭐⭐ | CSV + SQLite SQL + TDTP | Пример для адаптации | Проверка строк до импорта |
+| pfu-xml | ⭐⭐ | Go XML-конвертер + TDTP | Пример для адаптации | XML-реестр с отчётом об ошибках |
 
 ## Основные компоненты
 
@@ -353,6 +367,7 @@ bash run_chain.sh
 - **Полноценный ETL** → [06-etl-pipeline](./06-etl-pipeline/)
 - **ETL + шифрование (без внешних зависимостей)** → [08-pipeline-encrypted](./08-pipeline-encrypted/)
 - **Проверить CSV до импорта и сохранить ошибки в TDTP** → [pfu-csv](./pfu-csv/)
+- **Преобразовать XML-реестр больничных в TDTP** → [pfu-xml](./pfu-xml/)
 
 ## Production Checklist
 

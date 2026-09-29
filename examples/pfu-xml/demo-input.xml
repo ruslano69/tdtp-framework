@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<REESTR_LN>
+  <RECORD>
+    <NUM_LN>123456-1234567890-1</NUM_LN>
+    <NUM_CASE>123456</NUM_CASE>
+    <VERSION>1</VERSION>
+    <RN_OKP>0012345678</RN_OKP>
+    <FIO>Працівник Один</FIO>
+    <DATE_START>2026-09-27</DATE_START>
+    <DATE_END>2026-09-29</DATE_END>
+    <STATUS>Готово до сплати</STATUS>
+  </RECORD>
+  <RECORD>
+    <NUM_LN>654321-0987654321-2</NUM_LN>
+    <NUM_CASE>654321</NUM_CASE>
+    <VERSION>1</VERSION>
+    <RN_OKP>0098765432</RN_OKP>
+    <FIO>Працівник Два</FIO>
+    <DATE_START>2026-02-31</DATE_START>
+    <DATE_END>2026-03-05</DATE_END>
+    <STATUS>Готово до сплати</STATUS>
+  </RECORD>
+</REESTR_LN>
