@@ -130,7 +130,7 @@ func doToSVG(in, out string) error {
 }
 
 // compressDataSection compresses Data.Rows into a single blob, mirroring
-// the flow that cmd/tdtpcli/commands/export.go uses for DB exports.
+// the flow that pkg/cli/commands/export.go uses for DB exports.
 func compressDataSection(pkt *packet.DataPacket, algo string, level int) error {
 	pkt.MaterializeRows()
 	if len(pkt.Data.Rows) == 0 {

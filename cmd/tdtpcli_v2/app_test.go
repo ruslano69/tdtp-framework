@@ -7,9 +7,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/pflag"
 )
 
 var errTest = errors.New("test error")
@@ -92,6 +97,64 @@ func TestCompat_ResolvesRegistered(t *testing.T) {
 	}
 }
 
+func TestTryCompat_GlobalsFirst(t *testing.T) {
+	// The tests/cli shape: --config first, then the v1 flag.
+	got, _, ok := tryCompat([]string{"--config", "c.yaml", "--export", "users"})
+	if !ok || len(got) != 4 || got[0] != "--config" || got[1] != "c.yaml" || got[2] != "export" {
+		t.Errorf("rewrote to %v, want [--config c.yaml export users]", got)
+	}
+	// Bare v1 shape resolves with no globals attached.
+	got, _, ok = tryCompat([]string{"--to-csv", "f.xml"})
+	if !ok || len(got) != 2 || got[0] != "to-csv" {
+		t.Errorf("rewrote to %v, want [to-csv f.xml]", got)
+	}
+	// Truly unknown flags still fail.
+	if _, _, ok := tryCompat([]string{"--config", "c.yaml", "--nope"}); ok {
+		t.Error("unknown flag must not resolve even after globals")
+	}
+	if _, _, ok := tryCompat([]string{"--nope", "f"}); ok {
+		t.Error("unknown flag must not resolve")
+	}
+	// Flags before the verb (v1 accepted them there) move after.
+	got, _, ok = tryCompat([]string{"--ignore-fields", "Balance", "--diff", "a.xml", "b.xml"})
+	if !ok || len(got) != 5 || got[0] != "diff" || got[1] != "a.xml" || got[2] != "b.xml" ||
+		got[3] != "--ignore-fields" || got[4] != "Balance" {
+		t.Errorf("verb scan rewrote to %v", got)
+	}
+	// --verb=value form.
+	got, _, ok = tryCompat([]string{"--list=order*"})
+	if !ok || len(got) != 2 || got[0] != "list" || got[1] != "order*" {
+		t.Errorf("=form rewrote to %v", got)
+	}
+	// --limit/--offset on import are dropped with a notice (v1 ignores them).
+	got, notice, ok := tryCompat([]string{"--config", "c.yaml", "--import", "f.xml", "--table", "t", "--limit", "3"})
+	if !ok {
+		t.Fatal("import shape must resolve")
+	}
+	for _, tok := range got {
+		if tok == "--limit" || tok == "3" {
+			t.Errorf("import limit not stripped: %v", got)
+		}
+	}
+	if !strings.Contains(notice, "--limit") {
+		t.Errorf("notice should mention the strip, got %q", notice)
+	}
+	// ...but kept for every other command.
+	got, _, ok = tryCompat([]string{"--export", "users", "--limit", "3"})
+	if !ok {
+		t.Fatal("export shape must resolve")
+	}
+	found := false
+	for _, tok := range got {
+		if tok == "--limit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("export must keep --limit: %v", got)
+	}
+}
+
 func TestExitCode_Mapping(t *testing.T) {
 	if exitCode(nil) != ExitOK {
 		t.Error("nil → ExitOK")
@@ -108,7 +171,7 @@ func TestExitCode_Mapping(t *testing.T) {
 }
 
 func TestMiddleware_Recover(t *testing.T) {
-	h := recoverMiddleware(func(ctx context.Context, d *Deps, out Output, args []string) error {
+	h := recoverMiddleware(nil, func(ctx context.Context, d *Deps, out Output, args []string) error {
 		panic("boom")
 	})
 	err := h(context.Background(), &Deps{}, Discard(nil), nil)
@@ -155,6 +218,61 @@ func TestApp_CommandHelpFlag(t *testing.T) {
 	}
 }
 
+func TestApp_HelpForEveryCommand(t *testing.T) {
+	app := NewApp()
+	for name, cmd := range app.commands {
+		if name != cmd.Name() { // aliases share their command's help
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			spec, ok := commandHelp[name]
+			if !ok || len(spec.examples) == 0 {
+				t.Fatalf("%s needs a synopsis and example", name)
+			}
+			for _, argv := range [][]string{{"--help", name}, {"help", name}, {name, "--help"}} {
+				code, stdout, stderr := runApp(t, argv...)
+				if code != ExitOK || stderr != "" {
+					t.Errorf("%v: exit=%d stderr=%q", argv, code, stderr)
+				}
+				for _, want := range []string{"usage:", "tdtpcli_v2 [global flags] " + name, "command flags:", "examples:", spec.examples[0]} {
+					if !strings.Contains(stdout, want) {
+						t.Errorf("%v: help missing %q", argv, want)
+					}
+				}
+				cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+					if flag.Hidden {
+						return
+					}
+					if !strings.Contains(stdout, "--"+flag.Name) {
+						t.Errorf("%v: help missing flag --%s", argv, flag.Name)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestApp_HelpFormsAndErrors(t *testing.T) {
+	for _, argv := range [][]string{{"--help"}, {"-h"}, {"help"}} {
+		code, stdout, stderr := runApp(t, argv...)
+		if code != ExitOK || stderr != "" || !strings.Contains(stdout, "global flags (before the command):") || !strings.Contains(stdout, "--help export") {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q", argv, code, stdout, stderr)
+		}
+	}
+	for _, argv := range [][]string{{"--help=export"}, {"--config", "db.yaml", "--help", "export"}} {
+		code, stdout, stderr := runApp(t, argv...)
+		if code != ExitOK || stderr != "" || !strings.Contains(stdout, "--compress-level") {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q", argv, code, stdout, stderr)
+		}
+	}
+	for _, argv := range [][]string{{"--help", "missing"}, {"help", "missing"}, {"--help", "export", "extra"}} {
+		code, stdout, stderr := runApp(t, argv...)
+		if code != ExitUsage || stdout != "" || !strings.Contains(stderr, "error:") {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q", argv, code, stdout, stderr)
+		}
+	}
+}
+
 func TestParseGlobals_Forms(t *testing.T) {
 	g, rest, err := parseGlobals([]string{"--json", "--config", "c.yaml", "validate", "f"})
 	if err != nil || !g.JSON || g.Config != "c.yaml" || len(rest) != 2 {
@@ -174,5 +292,72 @@ func TestParseGlobals_Forms(t *testing.T) {
 	g, rest, err = parseGlobals([]string{"to-csv", "f.xml", "--output", "o.csv"})
 	if err != nil || len(rest) != 4 {
 		t.Errorf("globals must stop at the command: %+v %v %v", g, rest, err)
+	}
+}
+
+// A foreign flag must fail LOUDLY. pflag in ContinueOnError mode returns
+// the error without printing it, so exit 2 used to come with an empty
+// stderr — the exit code alone was all TestApp_ForeignFlagRejected saw.
+func TestApp_ForeignFlagNamedOnStderr(t *testing.T) {
+	code, _, stderr := runApp(t, "validate", "--bogus", "f.xml")
+	if code != ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+	if !strings.Contains(stderr, "bogus") {
+		t.Errorf("stderr must name the rejected flag, got %q", stderr)
+	}
+}
+
+// --json failures the command did not render itself (missing config,
+// unreadable input) used to exit with nothing on either stream.
+func TestApp_JSONErrorInBand(t *testing.T) {
+	code, stdout, _ := runApp(t, "--json", "export", "users")
+	if code != ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+	var v struct {
+		Valid    bool   `json:"valid"`
+		Error    string `json:"error"`
+		ExitCode int    `json:"exit_code"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &v); err != nil {
+		t.Fatalf("stdout must carry a JSON verdict, got %q: %v", stdout, err)
+	}
+	if v.Valid || v.Error == "" || v.ExitCode != ExitUsage {
+		t.Errorf("verdict = %+v", v)
+	}
+}
+
+// ...and a command that rendered its own verdict is not followed by a
+// second JSON document.
+func TestApp_JSONErrorNotDoubled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.xml")
+	if err := os.WriteFile(path, []byte("<DataPacket/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runApp(t, "--json", "validate", path)
+	if code != ExitInvalid {
+		t.Fatalf("exit = %d, want %d", code, ExitInvalid)
+	}
+	if n := strings.Count(strings.TrimSpace(stdout), "\n"); n != 0 {
+		t.Errorf("want exactly one JSON document, got %d lines:\n%s", n+1, stdout)
+	}
+}
+
+func TestTryCompat_GlobalsAfterVerb(t *testing.T) {
+	// v1 flags were global: --config after the verb was valid there.
+	got, _, ok := tryCompat([]string{"--export", "users", "--config", "c.yaml", "--quiet"})
+	want := []string{"--config", "c.yaml", "--quiet", "export", "users"}
+	if !ok || strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("rewrote to %v, want %v", got, want)
+	}
+}
+
+func TestTryCompat_ImportNegativeLimitStripped(t *testing.T) {
+	// v1's tail-N spelling: the value is "-5", and it must go with the flag,
+	// not stay behind as a bogus shorthand for pflag to choke on.
+	got, _, ok := tryCompat([]string{"--import", "f.xml", "--limit", "-5"})
+	if !ok || strings.Join(got, " ") != "import f.xml" {
+		t.Errorf("rewrote to %v, want [import f.xml]", got)
 	}
 }

@@ -178,3 +178,16 @@ func TestWrite_ManyRowsStayValid(t *testing.T) {
 		t.Fatalf("objects = %d, want 2000", len(objs))
 	}
 }
+
+// Pretty output has no blank line after "[": one object per line.
+func TestWrite_PrettyNoBlankLine(t *testing.T) {
+	pkt := &packet.DataPacket{Schema: packet.Schema{Fields: []packet.Field{{Name: "id", Type: "INTEGER"}}}}
+	pkt.Data.Rows = []packet.Row{{Value: "1"}, {Value: "2"}}
+	var buf bytes.Buffer
+	if _, err := Write(context.Background(), &buf, pkt, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := buf.String(), "[\n  {\"id\":1},\n  {\"id\":2}\n]"; got != want {
+		t.Errorf("pretty = %q, want %q", got, want)
+	}
+}

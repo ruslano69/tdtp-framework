@@ -185,14 +185,24 @@
   <!-- The 9 canonical (post-NormalizeType) types, plus the 7 accepted
        aliases a producer may legitimately write instead (schema/types.go,
        NormalizeType): INT→INTEGER, FLOAT/DOUBLE→REAL, VARCHAR/CHAR/STRING
-       →TEXT, BOOL→BOOLEAN. Union with xs:string rather than a closed
-       enumeration deliberately — Field.type is a plain Go string with no
-       wire-level validation of its own, and a closed list here would
-       reject real, already-shipped packets over spelling this schema
-       doesn't happen to list. There is no "TIME" wire type: PostgreSQL
-       `time` is TIMESTAMP with subtype="time", not its own type value. -->
+       →TEXT, BOOL→BOOLEAN. Exactly the set schema.IsValidType accepts,
+       case included (NormalizeType does not fold case).
+
+       Closed. This used to be a union with xs:string, on the theory that a
+       closed list would reject real, already-shipped packets spelling a
+       type this schema did not list. It rejected nothing the framework
+       accepts: any value outside this list already fails every typed
+       reader (import: "unsupported type: X", after CREATE TABLE has run).
+       The open union only let such a packet validate — so the perimeter
+       check this schema exists for passed a packet no consumer could use,
+       and SDKs validating against this file inherited the same blind spot.
+       Extending the type set means adding it here AND in IsValidType.
+
+       There is no "TIME" wire type: PostgreSQL `time` is TIMESTAMP with
+       subtype="time", not its own type value. subtype, below, stays open
+       on purpose — it has no central vocabulary (TODO_NEXT 2.7). -->
   <xs:simpleType name="DataTypeValue">
-    <xs:union memberTypes="KnownDataTypeEnum xs:string"/>
+    <xs:union memberTypes="KnownDataTypeEnum"/>
   </xs:simpleType>
 
   <xs:simpleType name="KnownDataTypeEnum">

@@ -171,7 +171,7 @@ something to build from scratch. Needed additions:
 
 **Phase 1.5 — close a real gap in tdtpcli itself (prerequisite for Phase 2/3)**
 
-Checked directly (`grep` on `cmd/tdtpcli/commands/broker.go`): the
+Checked directly (`grep` on `pkg/cli/commands/broker.go`): the
 export-broker path has **neither** `result_log` publish **nor** any
 encryption support — both exist only on the `--pipeline` command path.
 The import side is in a different, better state: `--map --input

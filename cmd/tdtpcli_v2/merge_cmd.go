@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // mergeCommand is `tdtpcli_v2 merge` — combine TDTP files into one.
@@ -33,6 +35,8 @@ for reproducible, diffable output.`
 	fs := newCommandFlagSet("merge")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (required)")
 	fs.StringVar(&c.strategy, "strategy", "union", "merge strategy")
+	fs.StringVar(&c.strategy, "merge-strategy", "union", "deprecated alias for --strategy")
+	_ = fs.MarkDeprecated("merge-strategy", "please use --strategy instead")
 	fs.StringVar(&c.keyFields, "key-fields", "", "comma-separated key fields")
 	fs.BoolVar(&c.compress, "compress", false, "compress the output")
 	fs.BoolVar(&c.showConflicts, "show-conflicts", false, "show detailed conflicts")
@@ -40,6 +44,15 @@ for reproducible, diffable output.`
 	fs.StringVar(&c.sortOrder, "order", "asc", "sort direction: asc or desc")
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's merge branch: comma-joined inputs plus output.
+func (c *mergeCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	return audit.OpTransform, map[string]string{
+		"command": "merge",
+		"files":   strings.Join(args, ","),
+		"output":  c.output,
+	}
 }
 
 // Validate needs at least two inputs plus --output, and a sane --order.
@@ -64,6 +77,9 @@ type mergeJSON struct {
 
 func (c *mergeCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = d
+	if err := checkReadable(args); err != nil {
+		return err // unreadable input is operational (exit 1)
+	}
 	var buf bytes.Buffer
 	err := commands.MergeFilesTo(&buf, ctx, commands.MergeOptions{
 		InputFiles:    args,

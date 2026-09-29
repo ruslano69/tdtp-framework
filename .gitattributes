@@ -1,3 +1,28 @@
+# Line endings: LF in the repository AND in every working copy.
+#
+# Git for Windows sets core.autocrlf=true system-wide, so without this every
+# checkout turned the (LF) repository into CRLF files on disk: `gofmt -l`
+# flagged the whole tree, CI's gofmt check could only be reproduced by
+# stripping \r first, and files written by LF-producing tools sat next to
+# CRLF ones. eol=lf applies whatever core.autocrlf says, on every clone.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF on disk: cmd.exe mis-parses labels and
+# multi-line blocks in LF batch files.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
+
+# Binary artefacts: never touched.
+*.xlsx binary
+*.db binary
+*.exe binary
+*.png binary
+*.jpg binary
+*.zip binary
+*.gz binary
+*.pdf binary
+
 # TDTP packets are byte-exact artefacts. docs/REGISTRATION_DOSSIER.md cites their
 # bytes as the BOF/EOF signatures submitted to PRONOM, so git must never
 # translate line endings on them — a CRLF checkout would hand a reviewer a file

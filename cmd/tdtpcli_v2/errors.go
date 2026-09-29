@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 )
 
 // errors.go — the v2 error taxonomy. Commands return typed errors; App maps
@@ -49,6 +50,21 @@ func exitCode(err error) int {
 		return ExitInvalid
 	}
 	return ExitFail
+}
+
+// checkReadable opens each input and closes it again. For commands whose
+// engine folds every failure into one error (diff, merge): a file that
+// cannot be opened is operational (exit 1) like in inspect/test, and only
+// what the engine rejects after reading it is a verdict on the data (3).
+func checkReadable(paths []string) error {
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			return fmt.Errorf("cannot read input: %w", err)
+		}
+		_ = f.Close()
+	}
+	return nil
 }
 
 // eprintf/eprintln print best-effort output (help, errors, reports),

@@ -2,6 +2,169 @@
 
 All notable changes to tdtp-framework are documented in this file.
 
+## [Unreleased]
+
+### Fixed — `--map --quiet` one-shot reports its row total
+
+The one-shot mapping path suppressed progress but also omitted the final
+row count. It now prints the same one-line result as `--drain` and
+`--listen`. Broker shutdown also stops its signal watcher when a run ends.
+
+### Fixed — concurrent audit opens raced on the WAL switch
+
+`PRAGMA journal_mode` bypasses the SQLite busy handler (fails in ~1ms
+under lock, proven live), so concurrent first-opens of one audit
+database failed all but one — and the old `db.Exec` pragmas could land
+on a pooled connection without `busy_timeout` at all. The shared
+`OpenDatabaseSink` now carries `busy_timeout` in the DSN (every pooled
+connection), pins one connection per pool, and takes the WAL switch
+through a bounded busy-only retry. Found by `-race` on parallel audit
+writers; fixes both CLIs.
+
+### Fixed — process-wide license raced under concurrent runs
+
+`commands.ResolveLicense` reassigned the package-level license on every
+run; concurrent in-process runs (tests, embedding orchestrator) raced on
+it despite the "safe for concurrent reads" comment. Now `atomic.Pointer`,
+same lock-free shape as the neighbouring `quietOutput`. Found by `-race`
+on the new v2 audit parallel-writers test; fixes both CLIs.
+
+### Security — `tdtpserve` answered a broken filter with the whole dataset
+
+`GET /api/data/<name>` and `/data/<name>` failed OPEN: an unparsable `where`
+or `order_by`, `limit=abc`, or a negative `limit`/`offset` returned HTTP 200
+with **every row** of the dataset and the error in a side field
+(`filter_error`). A client with a typo in its condition got the whole table,
+behind authentication. Now `400 {"error": "filter: ..."}` with no rows; the
+HTML page renders the form and the error with no rows, also 400. The
+`filter_error` field is gone: 200 means the filter was applied.
+
+### Fixed — `tdtpserve` had its own WHERE parser, and it was wrong
+
+It split the condition on `" AND "` / `" OR "`: `id BETWEEN 100 AND 200` —
+the example from its own README — was refused, while mixed AND/OR,
+parentheses and `a = = 'b'` were accepted and silently turned into wrong
+filters. Removed; the server now uses the shared TDTQL translator the CLI's
+`--where`/`--order-by` use (`pkg/cliquery`), so one language has one parser
+and its errors are 400s.
+
+### Fixed — TDTQL dropped whatever followed the last clause it understood
+
+The shared translator (`pkg/core/tdtql`) returned as soon as it had parsed
+WHERE / ORDER BY / LIMIT / OFFSET and never checked it had reached the end
+of the input. Anything after was discarded in silence — and the worst case
+widened the result: `--where "dept = 'hr' AMD id > 5"` (a typo for AND)
+filtered on `dept` alone and returned more rows than asked. `dept = 'hr')`,
+`--order-by "dept SIDEWAYS"` and `"dept DESC extra"` passed too. Now an
+error naming the stray token; one trailing `;` stays accepted.
+
+Two related drops closed alongside: a WHERE condition carrying its own
+`ORDER BY`/`LIMIT`/`OFFSET` had them parsed and thrown away
+(`TranslateWhere` now refuses), and `--order-by "id LIMIT 5"` kept the sort
+and lost the limit (new `TranslateOrderBy`, used by `pkg/cliquery`).
+
+Reaches every caller: the CLI's `--where`/`--order-by` (v1 and v2),
+`tdtpserve` (now a 400), and the Python bindings' filter functions (now
+`TDTPFilterError`).
+
+## [1.26.3] - 2026-09-26
+
+### Security — `--mask`/`--validate`/`--normalize` did not do what they said
+
+Found porting the flags to v2. The processors themselves (`pkg/processors`)
+were right and tested; every bug was in the untested glue that feeds them
+packet rows. Its tests checked only that a processor had been configured —
+none ever looked at the rows that came out.
+
+- **`--export-broker --mask` sent data in clear.** `ExportToBroker` took the
+  processor chain and never called it; the flag table listed `--mask` for
+  the command, so nothing warned. Now applied first, before compression and
+  encryption, as `--export` does.
+- **`on_error: filter` passed the rows it removed.** Only the first N rows
+  were overwritten with the chain's output, so the tail of the original rows
+  stayed in the packet; with every row invalid, all of them were exported.
+  Rows are now replaced whole and `RecordsInPart` follows.
+- **`--mask` could mask the wrong column.** Rows were split on a bare `|`,
+  ignoring the `\|` escape: a value holding a pipe shifted later columns, so
+  `--mask email` masked part of a neighbouring field and left the address.
+  Rows are now split and re-joined the way the parser does.
+- **A rules file without its section was silently ignored** — `--validate`
+  naming a file with no `rules:` (or `--normalize` without `fields:`)
+  validated nothing. Now an error; the test that pinned the silence as
+  expected behaviour asserts the error instead.
+- **`--pipeline` accepted the three flags and ignored them** (its processors
+  come from the YAML). The flag table no longer claims them for pipeline, so
+  v1 now prints its "does not read" notice. `--import` and `--import-xlsx`
+  do apply them but were not listed, and warned wrongly; now listed.
+- The "Added field masker/validator/normalizer" lines respect `--quiet`.
+
+The chain moved from `cmd/tdtpcli` to `pkg/cli/commands` (`RowProcessors`)
+so both CLIs build the same one. New tests assert on output only: rows after
+the chain, messages actually sent to the broker, files written.
+
+### Fixed — `--test` said "Integrity check passed" without checking xxh3
+
+`--test` (`check-integrity` in v2) compared row counts and the compression
+checksum and never touched the v1.4 hashes. A packet with one row altered,
+or a plain packet relabelled `version="1.4"` with no hashes at all, printed
+`✓ Integrity check passed`. It now verifies xxh3 on every v1.4+ packet
+(`, xxh3 OK` in the per-part line) and refuses one that declares 1.4+
+without hashes.
+
+It also reads packets the way import does. `ParseFile` unfolds compact rows
+on read, but the hash covers them folded (the export chain runs compact →
+integrity), so the first version of this check refused every uncompressed
+compact+integrity export. Local and S3 inputs now share one parse path —
+S3 used to skip the columnar expansion.
+
+### Fixed — one packet, three verdicts on its version
+
+The "v1.4+ must carry xxh3" rule lived only inside
+`pipeline.VerifyAndPrepare`, so a relabelled packet was refused by import,
+VALID for `validate`, and passed by `--test`. It is now
+`packet.CheckDeclaredIntegrity`, used by all three; the validator checks
+version ↔ features in both directions. `--stamp-integrity` still repairs
+such a packet (its pre-check skips the version rules).
+
+### Changed — `docs/tdtp.xsd`: `Field/@type` is a closed list
+
+`DataTypeValue` was a union with `xs:string`, so any spelling validated.
+It rejected nothing the framework accepts: a type outside
+`schema.IsValidType` fails every typed reader anyway — import refused it
+with `unsupported type`, after `CREATE TABLE` had already run. The list is
+exactly the 16 values `IsValidType` accepts, case included. `subtype`
+stays open (no central vocabulary — TODO_NEXT 2.7).
+
+### Fixed — smaller
+
+- The shared read gate said "export blocked" on import, the converters,
+  the broker and `listen` — it never guards export. Now "packet refused".
+- The schema drift test told you to run `go generate ./cmd/tdtp-validate/`,
+  a no-op since the validator moved; the directive lives in
+  `./pkg/validate/`. Same stale path fixed in its README, `gen.go` and
+  `third_party/xsd/README.md`.
+
+### Pipeline source loads now honor `retry_attempts` / `retry_delay_seconds`
+
+`error_handling.retry_attempts` and `retry_delay_seconds` were parsed,
+defaulted (3 / 5 s) and validated — but nothing read them: a source load
+failed once and the pipeline stopped. `Loader` now wraps each source load
+(`LoadAll`, `LoadOne`) in `pkg/retry` with exponential backoff, the same
+combination `cmd/tdtpcli/production.go` uses for CLI operations. Only the
+source load is retried — it is side-effect free, while repeating a transform
+or an output is not idempotent (`on_transform_error` / `on_output_error`
+stay accepted-but-inert, see `TODO_NEXT.md` 2.4). `retry_attempts` counts
+total attempts including the first; `<= 1` (including zero on hand-built
+`Loader`s that skip `SetDefaults`) keeps the old single-try behavior, so
+existing unit tests are unaffected. Pinned by
+`pkg/etl/loader_retry_test.go`; `docs/ETL_PIPELINE.md` updated.
+
+Not retried, ever: `tdtp-enc` sources (the xZMercury key is burn-on-read —
+a second attempt after the first one took the key gets 410 and reports
+`KeyBurnedError`, a theft signal, in place of the real failure) and plain
+`tdtp` files (a local path has nothing transient to wait out; with the
+defaults a wrong path would otherwise fail after ~15 s instead of at once).
+
 ## [1.26.2] - 2026-09-25
 
 ### Fixed — `merge` on compressed/columnar/compact files merged blobs, not rows

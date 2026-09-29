@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // importCommand is `tdtpcli_v2 import` — TDTP file into a database table.
@@ -14,14 +16,16 @@ import (
 // processors travel later (config-driven, like export).
 type importCommand struct {
 	Base
-	table      string
-	fields     string
-	strategy   string
-	clear      bool
-	translit   bool
-	expectVars stringList
-	mercuryURL string
-	expectMap  map[string]string
+	p            processorFlags
+	table        string
+	fields       string
+	strategy     string
+	clear        bool
+	translit     bool
+	strictSchema bool
+	expectVars   stringList
+	mercuryURL   string
+	expectMap    map[string]string
 }
 
 func newImportCommand() *importCommand {
@@ -40,10 +44,25 @@ Needs --config: this command talks to a database.`
 	fs.StringVar(&c.strategy, "strategy", "replace", "import strategy: replace, ignore, fail, copy")
 	fs.BoolVar(&c.clear, "clear", false, "replace special chars in field names with safe tokens")
 	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII")
+	fs.BoolVar(&c.strictSchema, "strict-schema", false, "restore VARCHAR(n)/CHAR(n) from packet lengths when creating a PostgreSQL table")
 	fs.Var(&c.expectVars, "expect-var", "require PipelineContext variable to match (name=value); repeatable")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL for v1.4 verification (else local only)")
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's import branch: file plus strategy.
+func (c *importCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	file := ""
+	if len(args) > 0 {
+		file = args[0]
+	}
+	return audit.OpImport, map[string]string{
+		"command":  "import",
+		"file":     file,
+		"strategy": c.strategy,
+	}
 }
 
 // Validate needs exactly one input file and well-formed expect-vars.
@@ -67,13 +86,29 @@ type importJSON struct {
 }
 
 func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	path := args[0]
-	if _, err := os.Stat(path); err != nil {
-		return err // unreadable input is operational (exit 1)
-	}
-	cfg, err := adapterConfig(d.ConfigPath)
+	procs, err := d.processors(&c.p) // flags, else config file; before any database work
 	if err != nil {
-		return UsageError{Err: err} // missing/unreadable config is user error
+		return err
+	}
+	path := args[0]
+	// Missing local input is checked before config (operational, exit 1);
+	// a remote URI skips the stat — its storage comes from the config.
+	if !storage.IsRemote(path) {
+		if _, err := os.Stat(path); err != nil {
+			return err // unreadable input is operational (exit 1)
+		}
+	}
+	yamlCfg, cfg, err := d.databaseConfig("import")
+	if err != nil {
+		return err // typed: bad config → usage, unlicensed adapter → operational
+	}
+	cfg.StrictSchema = cfg.StrictSchema || c.strictSchema
+	// Resolve storage source: s3:// URI → object storage (v1's main.go
+	// pattern); otherwise the local file checked above.
+	var importStorageCfg *storage.Config
+	importStorageKey := ""
+	if storage.IsRemote(path) {
+		importStorageCfg, importStorageKey = remoteStorage(yamlCfg.Storage, path)
 	}
 	strategy, err := commands.ParseImportStrategy(c.strategy)
 	if err != nil {
@@ -84,6 +119,7 @@ func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		table = "(from file)"
 	}
 	err = commands.ImportFile(ctx, cfg, commands.ImportOptions{
+		ProcessorMgr:     procs,
 		FilePath:         path,
 		TargetTable:      c.table,
 		Fields:           splitFields(c.fields),
@@ -92,6 +128,8 @@ func (c *importCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		SanitizeTranslit: c.translit,
 		ExpectVars:       c.expectMap,
 		MercuryURL:       c.mercuryURL,
+		StorageCfg:       importStorageCfg,
+		StorageKey:       importStorageKey,
 	})
 	if err != nil {
 		return err // database/import failure is operational (exit 1)

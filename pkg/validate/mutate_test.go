@@ -8,6 +8,8 @@ package validate
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -249,4 +251,25 @@ func TestResolveVersion(t *testing.T) {
 			t.Errorf("%s: resolveVersion = %q, want %q", c.name, got, c.want)
 		}
 	}
+}
+
+// --stamp-integrity repairs a relabelled packet instead of refusing it: the
+// ProcessFile pre-check skips the version rules, since stamping is what
+// restores them.
+func TestStamp_RepairsVersionWithoutIntegrity(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "relabelled.xml")
+	out := filepath.Join(dir, "repaired.xml")
+	doc := mutate(t, validXML(t), `protocol="TDTP" version="1.0"`, `protocol="TDTP" version="1.4"`)
+	if err := os.WriteFile(in, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ProcessFile(in, out, true, false, 0); err != nil {
+		t.Fatalf("ProcessFile --stamp-integrity: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustBeValid(t, "repaired.xml", string(data))
 }

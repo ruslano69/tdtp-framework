@@ -10,7 +10,9 @@ All tests operate on a temporary table `tdtp_test_emp` that is created
 before the run and dropped after — no production data is touched.
 
 Prerequisites (Windows, domain zt-2075):
-    - SQL Server reachable at MSSQL_HOST with Windows Authentication
+    - SQL Server reachable at MSSQL_HOST with Windows Authentication,
+      or — failing that — a direct SQL login via MSSQL_USER/MSSQL_PASSWORD
+      (domain is always tried first, direct is the fallback)
     - pyodbc + ODBC Driver 17 for SQL Server installed
     - MSMQ service running  (Get-Service MSMQ → Running)
     - Queue MSMQ_QUEUE exists (.\private$\tdtp_test)
@@ -54,6 +56,14 @@ CFG_IMP    = "/tmp/tdtp_mssql_import.yaml"
 MSSQL_HOST = os.environ.get("MSSQL_HOST", "sql-srv1")
 MSSQL_PORT = int(os.environ.get("MSSQL_PORT", "1433"))
 MSSQL_DB   = os.environ.get("MSSQL_DB",   "ZTR-Live")
+# Direct (SQL-login) fallback credentials. Empty = domain-only, as before:
+# without them a failed domain attempt raises, exactly like the old code.
+MSSQL_USER = os.environ.get("MSSQL_USER", "")
+MSSQL_PASSWORD = os.environ.get("MSSQL_PASSWORD", "")
+
+# Working auth mode, resolved on first successful connect: "domain" | "direct".
+# Config writers below follow it (windows_auth vs user/password).
+_AUTH_MODE = None
 
 # Temporary test table — created in setup, dropped in teardown
 TEST_TABLE  = "tdtp_test_emp"
@@ -146,20 +156,51 @@ def record(tid: str, passed: bool, elapsed: float, msg: str = ""):
 
 # ─── pyodbc helpers ───────────────────────────────────────────────────────────
 
-def _pyodbc_connect():
-    """Return a pyodbc connection using Windows Auth (SSPI)."""
+def _driver_name():
     import pyodbc  # imported lazily — only on Windows with pyodbc installed
     drivers = [d for d in pyodbc.drivers()
                if "SQL Server" in d and ("17" in d or "18" in d or "ODBC" in d)]
-    driver = drivers[0] if drivers else "ODBC Driver 17 for SQL Server"
-    conn_str = (
-        f"DRIVER={{{driver}}};"
+    return drivers[0] if drivers else "ODBC Driver 17 for SQL Server"
+
+
+def _pyodbc_connect():
+    """Domain auth (SSPI) first; if it fails and SQL creds are configured
+    (MSSQL_USER/MSSQL_PASSWORD), fall back to a direct UID/PWD login.
+    Remembers the working mode in _AUTH_MODE for the config writers.
+    Without direct creds a failed domain attempt raises, as before."""
+    global _AUTH_MODE
+    import pyodbc
+    base = (
+        f"DRIVER={{{_driver_name()}}};"
         f"SERVER={MSSQL_HOST},{MSSQL_PORT};"
         f"DATABASE={MSSQL_DB};"
-        "Trusted_Connection=yes;"
         "TrustServerCertificate=yes;"
     )
-    return pyodbc.connect(conn_str, timeout=10)
+    if _AUTH_MODE != "direct":
+        try:
+            conn = pyodbc.connect(base + "Trusted_Connection=yes;", timeout=10)
+            _AUTH_MODE = "domain"
+            return conn
+        except Exception:
+            if not MSSQL_USER:
+                raise
+    conn = pyodbc.connect(
+        base + f"UID={MSSQL_USER};PWD={MSSQL_PASSWORD};", timeout=10)
+    _AUTH_MODE = "direct"
+    return conn
+
+
+def _auth_yaml_lines():
+    """tdtpcli database auth block following the resolved mode.
+
+    Domain mode keeps windows_auth (the Go driver then fails on SSPI —
+    that path needs the customer stack); direct mode writes an explicit
+    SQL login, which every driver here understands.
+    """
+    if _AUTH_MODE == "direct" or (MSSQL_USER and _AUTH_MODE is None):
+        return [f"  user: \"{MSSQL_USER}\"",
+                f"  password: \"{MSSQL_PASSWORD}\""]
+    return ["  windows_auth: true"]
 
 
 def setup_mssql() -> bool:
@@ -217,7 +258,8 @@ def teardown_mssql():
 # ─── Availability checks ──────────────────────────────────────────────────────
 
 def mssql_available() -> bool:
-    """Return True if SQL Server is reachable via Windows Auth."""
+    """Return True if SQL Server is reachable via domain auth or, failing
+    that, via the configured direct SQL login."""
     if sys.platform != "win32":
         return False
     try:
@@ -263,7 +305,8 @@ def write_mssql_cfg(path: str, compress: bool = False,
         f.write(f"  port: {MSSQL_PORT}\n")
         f.write(f"  database: \"{MSSQL_DB}\"\n")
         f.write("  schema: dbo\n")
-        f.write("  windows_auth: true\n")
+        for line in _auth_yaml_lines():
+            f.write(line + "\n")
         f.write("  sslmode: disable\n")
         f.write("export:\n")
         f.write(f"  compress: {str(compress).lower()}\n")
@@ -289,7 +332,8 @@ def write_msmq_cfg(path: str, db_path: str = "/tmp/no.db",
             f.write(f"  port: {MSSQL_PORT}\n")
             f.write(f"  database: \"{MSSQL_DB}\"\n")
             f.write("  schema: dbo\n")
-            f.write("  windows_auth: true\n")
+            for line in _auth_yaml_lines():
+                f.write(line + "\n")
             f.write("  sslmode: disable\n")
         else:
             f.write(f"database:\n  type: sqlite\n  database: {db_path}\n")
@@ -487,7 +531,10 @@ def test_T4_roundtrip():
            time.monotonic() - t, f"rows={rows2}")
     _clean(imp_db2)
 
-    # T4.3 — import strategy=upsert → idempotent (import twice, same count)
+    # T4.3 — import twice → idempotent (same count). NOTE: the suite
+    # used to pass --strategy upsert here, but no such strategy exists
+    # (valid: replace, ignore, fail, copy — ParseImportStrategy rejects
+    # anything else on both CLIs); replace is the idempotent one.
     t = time.monotonic()
     imp_db3 = "/tmp/tdtp_mssql_imp3.db"
     _clean(imp_db3)
@@ -496,7 +543,7 @@ def test_T4_roundtrip():
         subprocess.run(
             [TDTPCLI, "--config", CFG_IMP,
              "--import", out("test_rt.tdtp.xml"),
-             "--table", "TestEmp", "--strategy", "upsert"],
+             "--table", "TestEmp", "--strategy", "replace"],
             capture_output=True, text=True, timeout=30,
         )
     rows3 = _sqlite_count(imp_db3, "TestEmp")
@@ -620,8 +667,18 @@ def test_T5_msmq_pipeline():
 # ─── Utilities ────────────────────────────────────────────────────────────────
 
 def _clean(path: str):
-    if os.path.exists(path):
-        os.remove(path)
+    # Windows: a just-exited tdtpcli (or an AV scan) may still hold the
+    # file (WinError 32). Retry briefly; if it never releases, warn and
+    # continue — _clean is hygiene, not an assertion, and every consumer
+    # recreates its DB afterwards. Dying here would lose the whole SUMMARY.
+    for _ in range(25):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+            return
+        except PermissionError:
+            time.sleep(0.2)
+    print(f"  {YELLOW}warn: _clean could not remove {path} (locked), continuing{RESET}")
 
 
 def _sqlite_count(db: str, table: str) -> int:
@@ -676,15 +733,17 @@ def preflight():
         sys.exit(1)
     if not mssql_available():
         print(f"{RED}ERROR: MSSQL not reachable at {MSSQL_HOST}:{MSSQL_PORT} "
-              f"db={MSSQL_DB} (Windows Auth){RESET}")
+              f"db={MSSQL_DB} (Windows Auth"
+              f"{' + direct login as ' + MSSQL_USER if MSSQL_USER else ''}){RESET}")
         print("Check: sql-srv1 is up, you are on the domain, "
-              "Windows Authentication is enabled")
+              "Windows Authentication is enabled — or set MSSQL_USER / "
+              "MSSQL_PASSWORD for a direct SQL login fallback")
         sys.exit(1)
     OUTDIR.mkdir(parents=True, exist_ok=True)
     ver = subprocess.run([TDTPCLI, "--version"],
                          capture_output=True, text=True).stdout.strip()
     print(f"tdtpcli: {ver}")
-    print(f"MSSQL:   {MSSQL_HOST}:{MSSQL_PORT}/{MSSQL_DB} (Windows Auth)")
+    print(f"MSSQL:   {MSSQL_HOST}:{MSSQL_PORT}/{MSSQL_DB} (auth: {_AUTH_MODE})")
     print(f"MSMQ:    {MSMQ_QUEUE}  "
           f"{'(running)' if msmq_available() else '(not running — T5 will skip)'}")
     print(f"Table:   {TEST_TABLE}  "

@@ -259,7 +259,7 @@ broker.Ack(received)
 Found while designing the `examples/travel-agency` orchestrator-governed
 showcase (see root `TODO_NEXT.md` → "Encryption format redesign" for the
 original investigation): v1.3 introduced encryption
-(`cmd/tdtpcli/commands/encrypt.go`) as a **whole-packet binary envelope** —
+(`pkg/cli/commands/encrypt.go`) as a **whole-packet binary envelope** —
 serialize the entire XML, wrap it in
 `[2B ver][1B algo][16B uuid][12B nonce][ciphertext]`. That's not XML at
 all: no `<DataPacket>`, nothing readable without the key, including
@@ -273,7 +273,7 @@ the same shape, for the same reason: **the packet should always parse as
 valid XML**, with only the genuinely sensitive sections turned opaque.
 
 Concretely, the whole-blob approach is what blocks
-`cmd/tdtpcli/commands/broker.go`'s `--export-broker` from ever supporting
+`pkg/cli/commands/broker.go`'s `--export-broker` from ever supporting
 encryption — a raw binary blob can't flow through the broker import path's
 XML parser (`ParseBytesWithDecompression`) the way a
 compressed-but-still-XML packet can.
@@ -415,7 +415,7 @@ different **client-side** uses of the exact same bind/retrieve contract.
 `pkg/mercury/client.go`'s `BindKey`/`RetrieveKey` need no signature change.
 The pairing this section set out to confirm already holds today — nothing
 in xZMercury blocks or needs to anticipate v1.5; only `pkg/crypto`,
-`pkg/core/packet`, and the `cmd/tdtpcli/commands/*` call sites change.
+`pkg/core/packet`, and the `pkg/cli/commands/*` call sites change.
 
 ### No graceful degrade — this is the one real asymmetry with v1.4
 
@@ -433,11 +433,11 @@ definition, not by policy choice.
 
 ### Backward compatibility — this is additive, not a replacement
 
-`IsEncryptedBlob`/`DecryptEncBlob` (`cmd/tdtpcli/commands/encrypt.go`)
+`IsEncryptedBlob`/`DecryptEncBlob` (`pkg/cli/commands/encrypt.go`)
 already have real, working callers on the current whole-blob format:
 
-- `cmd/tdtpcli/commands/import.go:127` (`--import`)
-- `cmd/tdtpcli/commands/map.go:163,338` (`--map`, including the `--listen`
+- `pkg/cli/commands/import.go:127` (`--import`)
+- `pkg/cli/commands/map.go:163,338` (`--map`, including the `--listen`
   daemon path — this is what `examples/travel-agency/consumer.py` calls
   today via `--map --input broker://queue`)
 

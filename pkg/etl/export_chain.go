@@ -11,7 +11,7 @@ import (
 )
 
 // buildTDTPChain orders the per-part steps via pkg/transform instead of a
-// hand-coded if-chain, matching cmd/tdtpcli/commands/export.go.
+// hand-coded if-chain, matching pkg/cli/commands/export.go.
 func (e *Exporter) buildTDTPChain(registrar pipeline.HashRegistrar, part *packet.DataPacket) (*processors.PacketChain, error) {
 	cfg := e.config.TDTP
 	steps := map[string]processors.PacketProcessor{}

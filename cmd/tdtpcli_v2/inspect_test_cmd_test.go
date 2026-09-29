@@ -5,6 +5,7 @@ package main
 // contract: verdicts, exit codes, JSON shapes, multipart handling.
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -50,6 +51,14 @@ func TestInspectCmd_OK(t *testing.T) {
 	}
 }
 
+func TestInspectCmd_QuietKeepsReport(t *testing.T) {
+	f := writeInspectFixture(t, "a.xml", [][]string{{"1", "x"}})
+	code, stdout, _ := runApp(t, "--quiet", "inspect", f)
+	if code != ExitOK || !strings.Contains(stdout, "table: orders") {
+		t.Fatalf("quiet inspect report: exit=%d stdout=%q", code, stdout)
+	}
+}
+
 func TestInspectCmd_MissingFile(t *testing.T) {
 	code, _, _ := runApp(t, "inspect", filepath.Join(t.TempDir(), "nope.xml"))
 	if code != ExitFail {
@@ -75,6 +84,25 @@ func TestInspectCmd_JSON(t *testing.T) {
 	}
 }
 
+func TestInspectCmd_JSONUsesReportedPacket(t *testing.T) {
+	f := writeInspectFixture(t, "a.xml", [][]string{{"1", "x"}})
+	var got inspectJSON
+	out := Output{
+		Human: func(string, ...any) {
+			if err := os.Remove(f); err != nil {
+				t.Fatal(err)
+			}
+		},
+		JSON: func(v any) { got = v.(inspectJSON) }, JSONEnabled: true,
+	}
+	if err := newInspectCommand().Run(context.Background(), &Deps{}, out, []string{f}); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || got.Table != "orders" || got.Rows != 1 {
+		t.Fatalf("JSON should describe the reported packet: %+v", got)
+	}
+}
+
 func TestTestCmd_OK(t *testing.T) {
 	f := writeInspectFixture(t, "a.xml", [][]string{{"1", "x"}})
 	code, stdout, _ := runApp(t, "test", f)
@@ -83,6 +111,14 @@ func TestTestCmd_OK(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "Integrity check passed") {
 		t.Errorf("output should confirm integrity, got:\n%s", stdout)
+	}
+}
+
+func TestTestCmd_QuietKeepsVerdict(t *testing.T) {
+	f := writeInspectFixture(t, "a.xml", [][]string{{"1", "x"}})
+	code, stdout, _ := runApp(t, "--quiet", "test", f)
+	if code != ExitOK || !strings.Contains(stdout, "Integrity check passed") {
+		t.Fatalf("quiet integrity result: exit=%d stdout=%q", code, stdout)
 	}
 }
 

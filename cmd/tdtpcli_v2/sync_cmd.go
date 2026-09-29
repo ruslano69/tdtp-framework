@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
-// syncCommand is `tdtpcli_v2 sync` — incremental table sync by a tracking
-// field (timestamp/sequence/version) with a checkpoint file. Same engine
-// as v1 (commands.IncrementalSync).
 type syncCommand struct {
 	Base
 	table          string
+	output         string
 	trackingField  string
 	checkpointFile string
 	batchSize      int
@@ -21,92 +20,124 @@ type syncCommand struct {
 	compress       bool
 	compressLevel  int
 	compressAlgo   string
-	output         string
+	hash           bool // v1 accepted this no-op
+	enc            bool
 	mercuryURL     string
+	p              processorFlags
 }
 
 func newSyncCommand() *syncCommand {
 	c := &syncCommand{}
-	c.CmdName = "sync"
-	c.CmdShort = "incrementally sync new/changed rows since the checkpoint"
-	c.CmdLong = `tdtpcli_v2 sync TABLE --config config.yaml [--output inc.xml] [options...]
+	c.CmdName = "sync-incremental"
+	c.CmdShort = "export only rows newer than the saved checkpoint"
+	c.CmdLong = `tdtpcli_v2 sync-incremental TABLE --config config.yaml [options...]
 
-Sends only rows newer than the checkpoint watermark
-(--tracking-field, default updated_at); the checkpoint advances either
-way. With --to-broker the increment goes to the queue from --config
-instead of a file. Needs --config: this command talks to a database.`
-	fs := newCommandFlagSet("sync")
-	fs.StringVar(&c.table, "table", "", "table to sync (required)")
-	fs.StringVar(&c.trackingField, "tracking-field", "updated_at", "watermark column")
-	fs.StringVar(&c.checkpointFile, "checkpoint-file", "checkpoint.yaml", "watermark state file")
-	fs.IntVar(&c.batchSize, "batch-size", 1000, "rows per batch")
-	fs.StringVar(&c.fields, "fields", "", "column projection (tracking field auto-included)")
-	fs.BoolVar(&c.toBroker, "to-broker", false, "send the increment to the queue instead of a file")
-	fs.BoolVar(&c.compress, "compress", false, "compress with zstd/kanzi")
-	fs.IntVar(&c.compressLevel, "compress-level", 3, "compression level")
-	fs.StringVar(&c.compressAlgo, "compress-algo", "zstd", "compression algorithm")
+Writes changed rows to a TDTP file, or to the configured broker with
+--to-broker. Advances the checkpoint only after successful output.`
+	fs := newCommandFlagSet(c.CmdName)
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <table>.xml)")
-	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL (else local only)")
+	fs.StringVar(&c.trackingField, "tracking-field", "updated_at", "timestamp, sequence or version field")
+	fs.StringVar(&c.checkpointFile, "checkpoint-file", "checkpoint.yaml", "checkpoint state file")
+	fs.IntVar(&c.batchSize, "batch-size", 1000, "maximum rows in one sync batch")
+	fs.StringVar(&c.fields, "fields", "", "comma-separated columns (tracking field is included automatically)")
+	fs.BoolVar(&c.toBroker, "to-broker", false, "send to the configured broker instead of writing a file")
+	fs.BoolVar(&c.compress, "compress", false, "compress broker packets")
+	fs.IntVar(&c.compressLevel, "compress-level", 3, "broker compression level")
+	fs.StringVar(&c.compressAlgo, "compress-algo", "zstd", "broker compression algorithm")
+	fs.BoolVar(&c.hash, "hash", false, "deprecated no-op")
+	fs.BoolVar(&c.enc, "enc", false, "encrypt broker packets with xZMercury")
+	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL (overrides config)")
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
 }
 
-// Validate needs --table (or a positional table name).
-func (c *syncCommand) Validate(args []string) error {
-	if c.table == "" {
-		if len(args) == 1 {
-			c.table = args[0]
-			return nil
-		}
-		return fmt.Errorf("need a table: --table NAME or a positional argument")
-	}
-	if len(args) > 0 {
-		return fmt.Errorf("unexpected positional arguments: %v", args)
+// sync keeps the short command name available alongside sync-incremental.
+func newSyncAliasCommand() *syncCommand {
+	c := newSyncCommand()
+	c.CmdName = "sync"
+	c.CmdLong = `tdtpcli_v2 sync TABLE --config config.yaml [options...]
+
+Alias for sync-incremental.`
+	return c
+}
+
+func (c *syncCommand) Features() []string {
+	if c.enc {
+		return []string{"enc"}
 	}
 	return nil
 }
 
-// syncJSON is the --json verdict.
-type syncJSON struct {
-	Valid  bool   `json:"valid"`
-	Table  string `json:"table"`
-	Output string `json:"output"`
+func (c *syncCommand) AuditInfo(d *Deps, _ []string) (audit.Operation, map[string]string) {
+	output := outputFile(c.output, c.table, "xml")
+	if c.toBroker {
+		if _, bcc, _, err := loadConfigs(d, c.Name()); err == nil {
+			output = "broker://" + bcc.Queue
+		}
+	}
+	return audit.OpExport, map[string]string{
+		"command": "sync-incremental", "table": c.table,
+		"tracking_field": c.trackingField, "checkpoint_file": c.checkpointFile,
+		"output": output,
+	}
 }
 
-func (c *syncCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = args
-	cfg, err := adapterConfig(d.ConfigPath)
+func (c *syncCommand) Validate(args []string) error {
+	if len(args) != 1 || args[0] == "" {
+		return fmt.Errorf("need exactly one table name")
+	}
+	c.table = args[0]
+	if c.batchSize <= 0 {
+		return fmt.Errorf("--batch-size must be positive")
+	}
+	return nil
+}
+
+func (c *syncCommand) Run(ctx context.Context, d *Deps, out Output, _ []string) error {
+	procs, err := d.processors(&c.p)
 	if err != nil {
-		return UsageError{Err: err}
+		return err
 	}
-	target := outputFile(c.output, c.table, "xml")
-	var brokerCfg *commands.BrokerConfig
+	adb, bcc, yamlCfg, err := loadConfigs(d, c.Name())
+	if err != nil {
+		return err
+	}
+	var broker *commands.BrokerConfig
 	if c.toBroker {
-		_, bcc, err := loadConfigs(d.ConfigPath)
-		if err != nil {
-			return UsageError{Err: err}
-		}
-		brokerCfg = &bcc
-		target = "broker://" + bcc.Queue
+		broker = &bcc
 	}
-	err = commands.IncrementalSync(ctx, cfg, commands.SyncOptions{
-		TableName:      c.table,
-		OutputFile:     target,
-		TrackingField:  c.trackingField,
-		CheckpointFile: c.checkpointFile,
-		BatchSize:      c.batchSize,
-		Fields:         splitFields(c.fields),
-		Quiet:          d.Quiet,
-		BrokerCfg:      brokerCfg,
-		Compress:       c.compress,
-		CompressLevel:  c.compressLevel,
-		CompressAlgo:   c.compressAlgo,
-		MercuryURL:     c.mercuryURL,
+	mercuryURL := c.mercuryURL
+	if mercuryURL == "" {
+		mercuryURL = yamlCfg.Security.MercuryURL
+	}
+	progress := out.Stdout
+	if out.JSONEnabled {
+		progress = out.Stderr
+	}
+	var rows int64
+	destination := outputFile(c.output, c.table, "xml")
+	err = commands.IncrementalSync(ctx, adb, commands.SyncOptions{
+		TableName: c.table, OutputFile: destination,
+		TrackingField: c.trackingField, CheckpointFile: c.checkpointFile,
+		BatchSize: c.batchSize, Fields: splitFields(c.fields),
+		ProcessorMgr: procs, Quiet: out.Quiet || out.JSONEnabled,
+		Output: progress, Rows: &rows, BrokerCfg: broker,
+		Compress:      c.compress || yamlCfg.Export.Compress,
+		CompressLevel: c.compressLevel, CompressAlgo: c.compressAlgo,
+		Encrypt: c.enc, EncryptLegacy: false, MercuryURL: mercuryURL,
 	})
 	if err != nil {
 		return err
 	}
-	out.Human("Synced %s to %s\n", c.table, target)
-	out.JSON(syncJSON{Valid: true, Table: c.table, Output: target})
+	if c.toBroker {
+		destination = "broker://" + bcc.Queue
+	}
+	out.JSON(struct {
+		Valid       bool   `json:"valid"`
+		Table       string `json:"table"`
+		Rows        int64  `json:"rows"`
+		Destination string `json:"destination"`
+	}{Valid: true, Table: c.table, Rows: rows, Destination: destination})
 	return nil
 }

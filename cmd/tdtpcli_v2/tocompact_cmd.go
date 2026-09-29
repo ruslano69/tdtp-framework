@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // toCompactCommand is `tdtpcli_v2 to-compact` — rewrite a TDTP file in
@@ -35,6 +36,24 @@ columns constant across all rows.`
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's to-compact branch. Like Run, no --output
+// means in-place overwrite.
+func (c *toCompactCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	target := c.output
+	if target == "" {
+		target = input
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "to-compact",
+		"input":   input,
+		"output":  target,
+	}
 }
 
 // Validate needs exactly one input file.

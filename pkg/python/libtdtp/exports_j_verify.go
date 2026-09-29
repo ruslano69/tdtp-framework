@@ -106,7 +106,7 @@ func J_Stamp(dataJSON *C.char, path *C.char) *C.char {
 	// Without this, a consumer re-reading the file treats it as pre-1.4 (by
 	// version string, not by hash presence) and silently skips the entire
 	// v1.4 gate — both the Mercury check and the local xxh3 recheck. Mirrors
-	// the identical requirement in cmd/tdtpcli/commands/export.go's integrityProc.
+	// the identical requirement in pkg/cli/commands/export.go's integrityProc.
 	// BumpVersion, not assignment: never downgrade a higher stamp.
 	packet.BumpVersion(pkt, "1.4")
 

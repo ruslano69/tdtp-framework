@@ -375,10 +375,11 @@ and the path needs deciding rather than pointing at `/tmp` again.
   --untracked-files=all` reports zero untracked files. The funcfinder outputs
   that would otherwise land there (`.codemap/`, `docs/analysis/`) are
   gitignored.
-- `TestCompressDataForTdtp` (`pkg/processors/compression_test.go:133`) asserts
-  `stats.Time != 0` after compressing three short rows. On Windows the clock is
-  coarser than the work, so the assertion flakes. It is testing the timer, not
-  the compressor — assert on the output instead.
+- ~~`TestCompressDataForTdtp` flakes on Windows~~ — **fixed.** It asserted
+  `stats.Time != 0` after compressing three short rows, and the Windows clock
+  is coarser than that work. It now checks what the stats describe — the
+  original size is the joined rows, the ratio is original/compressed — and of
+  the timer only that it is not negative.
 - ~~`benchmarks/bench_duckdb` needs cgo...~~ — **removed.** This entry used to
   say the code "was reverted rather than kept" (DuckDB as the pipeline
   workspace was tried and measured — three times slower on load, because
@@ -399,10 +400,10 @@ and the path needs deciding rather than pointing at `/tmp` again.
 ## Behind the freeze — 2.0
 
 Everything here is a capability change. **None of it goes into 1.x**, however
-ready it looks. Kept because the analysis is worth having when 2.0 opens, not
-because it is scheduled.
+ready it looks. Most entries are analysis for when 2.0 opens, not scheduled
+work. **Oracle is an explicit 2.0 commitment** (see `ROADMAP.md` → Next).
 
-### Oracle adapter — not started
+### Oracle adapter — committed for 2.0, not started
 
 Raised while comparing the framework against Soft Review's integration services
 (their stack is Oracle PL/SQL + J2EE). Oracle is the one mainstream DBMS
@@ -456,7 +457,7 @@ target list and a `--compress` option, and its integrity must be computed
 **The export half is done and this entry is what is left of the plan.**
 `--stream` (BETA) is on `bench/sqlite-date-columns`, not yet merged: a
 `ReadAllRowsStream` in each of SQLite, MSSQL, MySQL and PostgreSQL, driven from
-`cmd/tdtpcli/commands/export_stream.go` through `GeneratePartsStream`. It went
+`pkg/cli/commands/export_stream.go` through `GeneratePartsStream`. It went
 in against a production case rather than a wish — a 24 M-row table wanted about
 17 GB and could not be exported at all; streamed it holds 63 MB flat and writes
 1408 parts in 213 s.
@@ -484,8 +485,11 @@ target table. Prerequisite for `--import-stream`, which needs schema negotiation
 
 `ErrorHandlingConfig` (`pkg/etl/config.go`) parses, defaults and validates
 `on_transform_error`, `on_output_error`, `retry_attempts` and
-`retry_delay_seconds`, but nothing in the pipeline runner reads them — only
-`on_source_error` actually branches on anything. Found rereading
+`retry_delay_seconds`. Since the `[Unreleased]` CHANGELOG entry,
+`retry_attempts`/`retry_delay_seconds` drive source-load retries
+(`Loader.loadFromSourceWithRetry`, side-effect free by construction) —
+`on_transform_error` and `on_output_error` are still never read, and only
+`on_source_error` branches on anything after the retries run out. Found rereading
 `docs/ETL_PIPELINE.md` against the code; `docs/ETL_PIPELINE.md` now says so
 plainly instead of implying the four fields work, but the fields themselves
 are unchanged.
@@ -649,66 +653,29 @@ same "fail loud, let the supervisor retry" answer 2.4 already settled for
 the pipeline as a whole — this is one more place that discipline has to
 hold, not a reason to reopen it.
 
-### 2.6 `tdtpcli validate --strict` — an actual XSD engine at the perimeter
+### 2.6 An XSD engine at the perimeter — engine done, gate not wired
 
-`docs/tdtp.xsd` exists now (added while building it as a documentation
-artifact — see its own header for what it does and does not cover), but
-nothing in `tdtpcli` reads it. Right now "is this packet structurally
-valid" is answered implicitly, mid-parse, by whatever `ParseBytes`/
-`tryFastParse` happen to accept or reject — there is no single command that
-answers it up front, before a decompression, a DB transaction, or a
-Mercury round trip has started spending resources on a packet that was
-already structurally wrong.
+**The design question this entry was about is closed.** It weighed CGO/
+libxml2 against hand-coding the schema's rules in Go. Neither happened:
+`third_party/xsd` vendors a pure-Go XSD 1.0 engine (a fork of
+`jacoelho/xsd` ported to Go 1.25), and `pkg/validate` executes the real
+`docs/tdtp.xsd` with it — no CGO, no transcription, embedded through a
+generated constant that a test keeps in sync with the file. Frontends:
+`cmd/tdtp-validate` and `tdtpcli_v2 validate`. Measured: 343 ms on a
+9.8 MB packet, against 151 ms for `--test` on the same file.
 
-**The CGO trade-off is the whole design question here, and it isn't new to
-this codebase.** `encoding/xml` cannot validate against an XSD at all —
-full W3C XML Schema 1.0 conformance in Go means binding to `libxml2`
-through CGO, and CGO already cost this project clean cross-compilation
-once: the DuckDB experiment (`CLAUDE.md` → "DuckDB как рабочая БД
-пайплайна") is written up specifically because cgo turned out to be the
-real price of that idea, not the engine swap itself. `nokafka`/`nosqlite`
-are the existing precedent for gating a heavy or non-portable dependency
-behind a build tag rather than making every build pay for it — the same
-shape applies here.
+**What is still open is the gate itself.** Nothing on the read path calls
+`pkg/validate` — `import`, `import-broker`, `listen` and `map` still meet a
+bad packet only when parsing or conversion trips over it. The case this
+entry opened with still happens: a packet with an unknown field type was
+VALID until the schema was closed (2026-09-26), and import refused it only
+after `CREATE TABLE` had run. Wiring the validator in front of those
+readers — opt-in first, with its cost on large packets measured — is the
+remaining work; where it belongs (a flag, a config key, a v2 middleware)
+is part of it.
 
-**Proposed split, so the common path stays pure Go and static:**
-
-- `//go:embed schema/tdtp.xsd` (or `docs/tdtp.xsd` in place — deciding the
-  canonical location is part of this work) ships the reference schema
-  inside the binary and the library, so it travels with every build and
-  can never point at a stale copy on disk.
-- A built-in, pure-Go structural pre-check (`encoding/xml.Decoder`-based:
-  tag order, cardinality, known attributes) runs unconditionally, in every
-  build, including `CGO_ENABLED=0` cross-compiles and anything embedding
-  the library. This is **not** "parse the XSD generically" — that's a
-  real XML-Schema engine, which is the thing being avoided. It means
-  hand-coding this one schema's actual constraints as Go checks, the same
-  way the schema itself was written by hand against the real structs
-  rather than derived automatically. Scope and effort for that are
-  unestimated; do not treat "embed the file" as the size of this item.
-- `tdtpcli validate --strict` is a separate, explicitly opt-in command
-  wired to a real XSD engine — CGO/libxml2 behind a build tag, or shelling
-  out to `xmllint`, or a plugin — for CI pipelines, broker gateways, and
-  cross-department ingress checks that can afford the dependency and want
-  the real thing, not the fast approximation.
-
-**What this buys, concretely:**
-
-- **Fail fast at the perimeter.** A broker consumer or gateway rejects a
-  packet with a bad enum, an unknown type, or a cardinality violation in
-  the time it takes to run the structural pre-check — before a worker
-  allocates the buffer for a kanzi decompression or opens a PostgreSQL
-  transaction on data that was never going to parse.
-- **Independent SDKs stop depending on this Go parser's specific
-  tolerances.** A C#/.NET, Java, or Rust integration validates against
-  `tdtp.xsd` with its own language's standard XSD validator in its own
-  unit tests, instead of having to match whatever `tryFastParse`/
-  `xml.Unmarshal` happen to accept.
-- **A malformed or hostile packet can be rejected at the network edge**
-  (API gateway, ingress, broker) before it reaches anything internal —
-  the same "close the window before the signature" principle `CLAUDE.md`
-  already states for the decompression-bomb limits, applied one layer
-  further out.
+Where each new rule goes, schema or semantics layer, is written down in
+`pkg/validate/README.md`.
 
 ### 2.7 Reject an unrecognized `Field.subtype` instead of silently ignoring it
 
@@ -769,6 +736,52 @@ backward-compatibility question should be checked against real packets
 before deciding whether the refusal is per-field (drop that one value,
 warn) or per-packet (refuse the whole import), not decided by
 assumption.
+
+### 2.8 Column constraints in the Schema — draft and prototype
+
+NOT NULL, primary-key column order, UNIQUE keys, and CHECK-derived ranges,
+enumerations and patterns — sourced from SQL Server first. Draft:
+[`docs/proposals/schema-constraints.md`](docs/proposals/schema-constraints.md);
+read-only prototype: `cmd/tdtp-constraints-probe` over
+`pkg/adapters/mssql/constraints.go`. Agreed switch (§6): phase 1 always,
+phase 2 behind `export --constraints` / `export.constraints: true`, import
+recreates only under `--strict-schema`. Next step is running the probe on the
+real HR schema before the format is decided (§8 of the draft). NOT NULL is
+the loss that happens today on every transfer: `IS_NULLABLE` is read by the
+MSSQL adapter and dropped.
+
+### 2.9 Database failover with auth fallback, on the audit trail
+
+Motivation is a concrete enterprise case: the primary SQL Server dies
+mid-night and the pipeline must continue against the standby — which
+authenticates differently (primary: domain/NTLM, standby: direct SQL
+login). Two fallbacks in one, attempted in this order:
+
+1. Same server, different creds: a `DOMAIN\user` DSN tries NTLM first;
+   on 18452/18456 only, retry stripped to a plain SQL login. Network or
+   timeout errors skip this phase — the server is dead, creds are moot.
+2. Standby server: a `fallback:` database block (same shape, its own
+   DSN) is dialled when the primary is unreachable or both cred
+   variants fail. Bounded: three attempts per connect, total.
+
+Rules that make it shippable rather than scary: fallback only on
+login/network errors, never on query errors; at most one cred retry
+(wrong passwords already cost lockout counters); passwords never reach
+logs or the audit entry — only `server` (who answered), `auth`
+(`domain`|`direct`) and `failover: true|false` land in metadata, via
+extended `OpMetrics` (additive fields, picked up by the v2 audit
+middleware for free). True passwordless SSO (`trusted_connection`)
+is NOT part of this: the driver cannot do SSPI, that needs the
+`microsoft/go-mssqldb` swap as a separate decision.
+
+Placement: a shared helper in `pkg/cli/commands` (all adapters inherit
+it, no interface changes), wired into the ETL loader first (unattended
+runs are where failover matters), CLI `export`/`import` second.
+Testable without a domain: primary = dead port → standby docker proves
+the server leg; `NONEXISTENTDOMAIN\sa` + sa password proves the cred
+leg (NTLM 18452, then SQL success). `test_mssql_msmq.py` already does
+domain-first/direct-second at the suite layer (MSSQL_USER/MSSQL_PASSWORD
+env) — that stays as the e2e transport, not the product.
 
 ### Grace period for `tdtp.lic`
 

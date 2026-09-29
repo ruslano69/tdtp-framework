@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // toXLSXCommand is `tdtpcli_v2 to-xlsx` — TDTP file to XLSX. Same engine
 // as v1 (commands.ConvertTDTPToXLSX); the produced FILE is byte-identical.
 type toXLSXCommand struct {
 	Base
-	sheet  string
-	output string
-	q      queryFlags
+	sheet    string
+	translit bool
+	output   string
+	q        queryFlags
 }
 
 func newToXLSXCommand() *toXLSXCommand {
@@ -27,10 +30,24 @@ Converts without a database: --fields/--where/--order-by/--limit/--offset
 apply in memory, --sheet names the worksheet.`
 	fs := newCommandFlagSet("to-xlsx")
 	fs.StringVar(&c.sheet, "sheet", "Sheet1", "worksheet name")
+	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII headers")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <input>.xlsx)")
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's to-xlsx branch.
+func (c *toXLSXCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "to-xlsx",
+		"input":   input,
+		"output":  outputFile(c.output, input, "xlsx"),
+	}
 }
 
 // Validate needs exactly one input file.
@@ -49,9 +66,17 @@ type xlsxJSON struct {
 }
 
 func (c *toXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = d
 	input := args[0]
-	if _, err := os.Stat(input); err != nil {
+	// Remote s3:// input resolves its storage from --config (v1's main.go
+	// pattern); a missing config is user error, like a missing file.
+	var xlsxStorageCfg *storage.Config
+	if storage.IsRemote(input) {
+		var err error
+		xlsxStorageCfg, err = d.storageConfig()
+		if err != nil {
+			return err
+		}
+	} else if _, err := os.Stat(input); err != nil {
 		return err // unreadable input is operational (exit 1)
 	}
 	query, err := c.q.build()
@@ -59,12 +84,25 @@ func (c *toXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []str
 		return UsageError{Err: err} // malformed filter/sort is user error
 	}
 	target := outputFile(c.output, input, "xlsx")
+	// Remote s3:// output uploads through a temp file (engine pattern);
+	// the bucket from the URI wins over the file's.
+	xlsxStorageKey := ""
+	if storage.IsRemote(target) {
+		sc, err := d.storageConfig()
+		if err != nil {
+			return err
+		}
+		xlsxStorageCfg, xlsxStorageKey = remoteStorage(*sc, target)
+	}
 	err = commands.ConvertTDTPToXLSX(ctx, commands.XLSXOptions{
 		InputFile:  input,
 		OutputFile: target,
 		SheetName:  c.sheet,
+		Translit:   c.translit,
 		Query:      query,
 		MercuryURL: "",
+		StorageCfg: xlsxStorageCfg,
+		StorageKey: xlsxStorageKey,
 	})
 	if err != nil {
 		return DataError{Err: err} // conversion failure = invalid data

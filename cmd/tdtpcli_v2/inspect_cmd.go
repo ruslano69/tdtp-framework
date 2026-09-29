@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // inspectCommand is `tdtpcli_v2 inspect` — structure of a TDTP file.
@@ -26,18 +26,15 @@ func newInspectCommand() *inspectCommand {
 	c.CmdLong = `tdtpcli_v2 inspect file.tdtp.xml
 
 Prints what the file is (table, types, keys, rows, compression) without
-needing a database. Remote s3:// input needs --config (wave 2).`
+needing a database. Remote s3:// input needs --config.`
 	c.FlagSet = newCommandFlagSet("inspect")
 	return c
 }
 
-// Validate needs exactly one input file.
+// Validate needs exactly one input file (local or s3://).
 func (c *inspectCommand) Validate(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("need exactly one input file, got %d", len(args))
-	}
-	if strings.HasPrefix(args[0], "s3://") {
-		return fmt.Errorf("s3:// input needs --config (wave 2)")
 	}
 	return nil
 }
@@ -62,34 +59,40 @@ type fieldJSON struct {
 }
 
 func (c *inspectCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = d
 	path := args[0]
-	if _, err := os.Stat(path); err != nil {
+	// Remote s3:// input resolves its storage from --config (v1's main.go
+	// pattern); a missing config is user error, like a missing file.
+	var storageCfg *storage.Config
+	if storage.IsRemote(path) {
+		var err error
+		storageCfg, err = d.storageConfig()
+		if err != nil {
+			return err
+		}
+	} else if _, err := os.Stat(path); err != nil {
 		return err // unreadable input is operational (exit 1), not invalid data
 	}
 	var buf bytes.Buffer
-	if err := commands.InspectFileTo(&buf, ctx, path, nil); err != nil {
+	pkt, err := commands.InspectFileReport(&buf, ctx, path, storageCfg)
+	if err != nil {
 		return DataError{Err: err}
 	}
-	out.Human("%s", buf.String())
-	out.JSON(c.describe(path))
+	if out.Quiet && !out.JSONEnabled {
+		// The schema report is inspect's result. v1 keeps it under --quiet,
+		// including when inspect is a workflow child.
+		_, _ = out.Stdout.Write(buf.Bytes())
+	} else {
+		out.Human("%s", buf.String())
+	}
+	if out.JSONEnabled {
+		out.JSON(inspectJSONFromPacket(path, pkt))
+	}
 	return nil
 }
 
-// describe parses the file again for the JSON contract. The YAML text
-// above stays the single human formatter (shared with v1).
-func (c *inspectCommand) describe(path string) inspectJSON {
+// inspectJSONFromPacket uses the packet already parsed for the human report.
+func inspectJSONFromPacket(path string, pkt *packet.DataPacket) inspectJSON {
 	rep := inspectJSON{Valid: true, File: path}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
-	pkt, err := packet.NewParser().ParseBytes(data)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
 	rep.Table = pkt.Header.TableName
 	rep.Type = string(pkt.Header.Type)
 	rep.Protocol = pkt.Protocol

@@ -51,6 +51,11 @@ func (t *Translator) TranslateWhere(whereClause string) (*packet.Filters, error)
 	if stmt.Where == nil {
 		return nil, fmt.Errorf("no WHERE clause found")
 	}
+	// A condition that carries its own ORDER BY / LIMIT / OFFSET would have
+	// them parsed and then dropped — only the filters are returned here.
+	if len(stmt.OrderBy) > 0 || stmt.Limit != nil || stmt.Offset != nil {
+		return nil, fmt.Errorf("a WHERE condition must not contain ORDER BY, LIMIT or OFFSET")
+	}
 
 	// Генерация только фильтров
 	filters, err := t.generator.generateFilters(stmt.Where)
@@ -59,6 +64,22 @@ func (t *Translator) TranslateWhere(whereClause string) (*packet.Filters, error)
 	}
 
 	return filters, nil
+}
+
+// TranslateOrderBy преобразует только список ORDER BY ("name ASC, age DESC")
+// в OrderBy — пара к TranslateWhere. Отдельно, а не через Translate, чтобы
+// "id LIMIT 5" был ошибкой: лимит разобрался бы и молча пропал, ведь
+// вызывающему нужна только сортировка.
+func (t *Translator) TranslateOrderBy(orderBy string) (*packet.OrderBy, error) {
+	t.parser = NewParser("SELECT * FROM dummy ORDER BY " + orderBy)
+	stmt, err := t.parser.ParseSelect()
+	if err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+	if stmt.Where != nil || stmt.Limit != nil || stmt.Offset != nil {
+		return nil, fmt.Errorf("ORDER BY must list fields with ASC/DESC only, not WHERE, LIMIT or OFFSET")
+	}
+	return t.generator.generateOrderBy(stmt.OrderBy), nil
 }
 
 // GetAST возвращает AST для SQL запроса (для отладки)

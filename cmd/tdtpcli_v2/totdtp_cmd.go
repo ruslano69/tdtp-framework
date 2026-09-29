@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // toTDTPCommand is `tdtpcli_v2 to-tdtp` — re-filter/re-version a TDTP file
@@ -36,6 +37,29 @@ the target protocol version (default v1.4 with fresh xxh3 hashes).`
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's to-tdtp branch, resolved version included.
+// Like Run, no --output means in-place overwrite.
+func (c *toTDTPCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	target := c.output
+	if target == "" {
+		target = input
+	}
+	version, err := resolveTargetVersion(c.v1, c.v13, c.v14)
+	if err != nil {
+		version = "" // Validate/Run report the conflict; the audit keeps what it knows
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "to-tdtp",
+		"input":   input,
+		"output":  target,
+		"version": version,
+	}
 }
 
 // Validate needs exactly one input file.

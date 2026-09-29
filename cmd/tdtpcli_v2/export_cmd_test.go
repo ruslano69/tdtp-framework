@@ -166,3 +166,47 @@ func TestExportCmd_JSON(t *testing.T) {
 		t.Errorf("JSON should name the table, got %q", stdout)
 	}
 }
+
+// An explicitly given compression flag beats the config's export: section.
+// v1 compared against the default instead, so --compress=false could not
+// switch off config compress: true, and an explicit --compress-algo zstd
+// (the default) lost to a config algo.
+func TestExportCmd_FlagBeatsConfigCompression(t *testing.T) {
+	dir, cfg := writeExportDB(t)
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := "export:\n  compress: true\n  compress_algo: kanzi\n"
+	if err := os.WriteFile(cfg, append(data, extra...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		args []string
+		want string // expected compression attribute, "" = none
+	}{
+		{"config applies", nil, `compression="kanzi"`},
+		{"--compress=false", []string{"--compress=false"}, ""},
+		{"--compress-algo zstd", []string{"--compress-algo", "zstd"}, `compression="zstd"`},
+	}
+	for _, tc := range cases {
+		out := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "_")+".xml")
+		argv := append([]string{"--config", cfg, "export", "orders", "--output", out}, tc.args...)
+		if code, _, stderr := runApp(t, argv...); code != ExitOK {
+			t.Fatalf("%s: exit = %d: %s", tc.name, code, stderr)
+		}
+		got, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(got)
+		if tc.want == "" {
+			if strings.Contains(s, "compression=") {
+				t.Errorf("%s: output must be uncompressed", tc.name)
+			}
+		} else if !strings.Contains(s, tc.want) {
+			t.Errorf("%s: want %s in output", tc.name, tc.want)
+		}
+	}
+}

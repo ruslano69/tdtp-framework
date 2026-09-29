@@ -22,6 +22,15 @@ type Command interface {
 	Run(ctx context.Context, d *Deps, out Output, args []string) error
 }
 
+// FeatureGated is implemented by a command whose parsed flags can need a
+// licensed feature (--enc → "enc", --unsafe → "unsafe"). licenseMiddleware
+// checks every name it returns before Run. Report only what the flags
+// actually ask for: a feature listed unconditionally refuses the command
+// on Community even when the flag is off.
+type FeatureGated interface {
+	Features() []string
+}
+
 // Base implements the boilerplate of Command: embed it and fill the fields.
 type Base struct {
 	CmdName    string
@@ -45,9 +54,12 @@ func (b *Base) Flags() *pflag.FlagSet { return b.FlagSet }
 // tests substitute it with a buffer.
 type Output struct {
 	Human       func(format string, args ...any)
+	Notice      func(format string, args ...any) // stderr; not data (license banner)
 	JSON        func(v any)
 	JSONEnabled bool
+	Quiet       bool
 	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 // Discard is an Output that renders nothing (for tests).
@@ -57,8 +69,11 @@ func Discard(out io.Writer) Output {
 	}
 	return Output{
 		Human:       func(format string, args ...any) {},
+		Notice:      func(format string, args ...any) {},
 		JSON:        func(v any) {},
 		JSONEnabled: false,
+		Quiet:       true,
 		Stdout:      out,
+		Stderr:      io.Discard,
 	}
 }

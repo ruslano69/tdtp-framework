@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // exportXLSXCommand is `tdtpcli_v2 export-xlsx` — database table straight
 // to XLSX. Same engine as v1 (commands.ExportTableToXLSX).
 type exportXLSXCommand struct {
 	Base
-	table  string
-	sheet  string
-	output string
-	q      queryFlags
+	p        processorFlags
+	table    string
+	sheet    string
+	translit bool
+	output   string
+	q        queryFlags
 }
 
 func newExportXLSXCommand() *exportXLSXCommand {
@@ -28,10 +31,21 @@ Needs --config: this command talks to a database.`
 	fs := newCommandFlagSet("export-xlsx")
 	fs.StringVar(&c.table, "table", "", "table to export (required)")
 	fs.StringVar(&c.sheet, "sheet", "Sheet1", "worksheet name")
+	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII headers")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <table>.xlsx)")
 	addQueryFlags(fs, &c.q)
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's export-xlsx branch.
+func (c *exportXLSXCommand) AuditInfo(_ *Deps, _ []string) (audit.Operation, map[string]string) {
+	return audit.OpExport, map[string]string{
+		"command": "export-xlsx",
+		"table":   c.table,
+		"output":  outputFile(c.output, c.table, "xlsx"),
+	}
 }
 
 // Validate needs --table (or a positional table name).
@@ -57,10 +71,14 @@ type exportXLSXJSON struct {
 }
 
 func (c *exportXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = args
-	cfg, err := adapterConfig(d.ConfigPath)
+	procs, err := d.processors(&c.p) // flags, else config file; before any database work
 	if err != nil {
-		return UsageError{Err: err}
+		return err
+	}
+	_ = args
+	_, cfg, err := d.databaseConfig(c.Name())
+	if err != nil {
+		return err // typed in databaseConfig
 	}
 	query, err := c.q.build()
 	if err != nil {
@@ -68,10 +86,12 @@ func (c *exportXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args [
 	}
 	target := outputFile(c.output, c.table, "xlsx")
 	err = commands.ExportTableToXLSX(ctx, cfg, commands.XLSXOptions{
-		TableName:  c.table,
-		OutputFile: target,
-		SheetName:  c.sheet,
-		Query:      query,
+		ProcessorMgr: procs,
+		TableName:    c.table,
+		OutputFile:   target,
+		SheetName:    c.sheet,
+		Translit:     c.translit,
+		Query:        query,
 	})
 	if err != nil {
 		return err
@@ -102,6 +122,19 @@ writes a TDTP packet. No database needed.`
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <input>.tdtp.xml)")
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's from-xlsx branch.
+func (c *fromXLSXCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "from-xlsx",
+		"input":   input,
+		"output":  outputFile(c.output, input, "tdtp.xml"),
+	}
 }
 
 // Validate needs exactly one input file.
@@ -143,6 +176,7 @@ func (c *fromXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []s
 // table. Same engine as v1 (commands.ImportXLSXToTable).
 type importXLSXCommand struct {
 	Base
+	p        processorFlags
 	sheet    string
 	strategy string
 }
@@ -157,8 +191,22 @@ Needs --config: this command talks to a database.`
 	fs := newCommandFlagSet("import-xlsx")
 	fs.StringVar(&c.sheet, "sheet", "Sheet1", "worksheet to read")
 	fs.StringVar(&c.strategy, "strategy", "replace", "import strategy: replace, ignore, fail, copy")
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's import-xlsx branch.
+func (c *importXLSXCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	file := ""
+	if len(args) > 0 {
+		file = args[0]
+	}
+	return audit.OpImport, map[string]string{
+		"command":  "import-xlsx",
+		"file":     file,
+		"strategy": c.strategy,
+	}
 }
 
 // Validate needs exactly one input file.
@@ -176,22 +224,27 @@ type importXLSXJSON struct {
 }
 
 func (c *importXLSXCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
+	procs, err := d.processors(&c.p) // flags, else config file; before any database work
+	if err != nil {
+		return err
+	}
 	path := args[0]
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
-	cfg, err := adapterConfig(d.ConfigPath)
+	_, cfg, err := d.databaseConfig(c.Name())
 	if err != nil {
-		return UsageError{Err: err}
+		return err // typed in databaseConfig
 	}
 	strategy, err := commands.ParseImportStrategy(c.strategy)
 	if err != nil {
 		return UsageError{Err: err}
 	}
 	err = commands.ImportXLSXToTable(ctx, cfg, commands.XLSXOptions{
-		InputFile: path,
-		SheetName: c.sheet,
-		Strategy:  strategy,
+		ProcessorMgr: procs,
+		InputFile:    path,
+		SheetName:    c.sheet,
+		Strategy:     strategy,
 	})
 	if err != nil {
 		return err

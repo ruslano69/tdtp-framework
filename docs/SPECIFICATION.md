@@ -745,7 +745,7 @@ schema and the reference validator before shipping it:
   schema stays the single source of truth), then the semantics no XSD can
   express: row shape vs Schema, `RecordsInPart`, duplicate field names,
   version-vs-features consistency (compression → 1.2, compact → 1.3.1,
-  integrity → 1.4, encryption → 1.5), xxh3 verification, QueryContext
+  integrity → 1.4, encryption → 1.5; and v1.4+ must carry xxh3), xxh3 verification, QueryContext
   counters. It can also raise/lower the stamped version
   (`--stamp-integrity` / `--strip-integrity`).
 

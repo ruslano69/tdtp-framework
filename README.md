@@ -884,9 +884,11 @@ Full adapter-specific details: [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md).
 ## Roadmap
 
 Planned, not yet shipped:
-- Streaming export/import (`TotalParts=0`, "TCP for tables") — core is ready
-  (`pkg/core/packet/streaming.go`, channel-based `StreamingGenerator`), not yet wired to
-  the CLI (`--export-stream` / `--import-stream`)
+- Oracle database adapter for 2.0 (driver selection, implementation and live
+  export/import round-trip verification remain)
+- Streaming export/import (`TotalParts=0`, "TCP for tables") — bounded-memory
+  export to local files exists as beta `--stream`; live `TotalParts=0` transfer
+  and row-by-row `--import-stream` are not wired to the CLI yet
 - Parallel import workers
 - Schema migration (ALTER TABLE — add/drop columns, type changes)
 

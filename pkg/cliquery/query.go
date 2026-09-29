@@ -56,14 +56,14 @@ func BuildQuery(wheres []string, orderBy string, limit, offset int) (*packet.Que
 	}
 
 	// --- ORDER BY ---
-	// Wrap in a minimal SELECT so the TDTQL parser can handle it, then extract
-	// just the OrderBy from the resulting query.
+	// TranslateOrderBy, not Translate: "id LIMIT 5" used to parse, keep the
+	// sort and silently drop the limit.
 	if orderBy != "" {
-		q, err := tr.Translate("SELECT * FROM t ORDER BY " + orderBy)
+		ob, err := tr.TranslateOrderBy(orderBy)
 		if err != nil {
 			return nil, fmt.Errorf("--order-by %q: %w", orderBy, err)
 		}
-		query.OrderBy = q.OrderBy
+		query.OrderBy = ob
 	}
 
 	// --- LIMIT / OFFSET ---

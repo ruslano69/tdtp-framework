@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // exportCommand is `tdtpcli_v2 export` — database table to a TDTP file.
@@ -13,20 +15,27 @@ import (
 // and encryption travel in a later wave (config-driven, not flag-driven).
 type exportCommand struct {
 	Base
-	table         string
-	output        string
-	compress      bool
-	compressLevel int
-	compressAlgo  string
-	compact       bool
-	fixedFields   string
-	compactTail   bool
-	integrity     bool
-	mercuryURL    string
-	columnar      bool
-	readonly      bool
-	fast          bool
-	q             queryFlags
+	p                processorFlags
+	table            string
+	output           string
+	compress         bool
+	compressLevel    int
+	compressAlgo     string
+	hash             bool // deprecated no-op: checksum rides with --compress (v1-identical)
+	compact          bool
+	fixedFields      string
+	compactTail      bool
+	integrity        bool
+	mercuryURL       string
+	mercuryCaller    string
+	columnar         bool
+	readonly         bool
+	fast             bool
+	stream           bool
+	packetSize       int
+	fallbackRowLimit int64
+	enc              bool
+	q                queryFlags
 }
 
 func newExportCommand() *exportCommand {
@@ -43,6 +52,7 @@ self-describing packet (schema + rows + query context). Needs --config.`
 	fs.BoolVar(&c.compress, "compress", false, "compress with zstd/kanzi")
 	fs.IntVar(&c.compressLevel, "compress-level", 3, "compression level")
 	fs.StringVar(&c.compressAlgo, "compress-algo", "zstd", "compression algorithm: zstd or kanzi")
+	fs.BoolVar(&c.hash, "hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	fs.BoolVar(&c.compact, "compact", false, "compact v1.3.1 format (fixed fields once per group)")
 	fs.StringVar(&c.fixedFields, "fixed-fields", "", "comma-separated fixed field names for --compact")
 	fs.BoolVar(&c.compactTail, "compact-tail", false, "tail row with all fixed fields explicit")
@@ -51,9 +61,34 @@ self-describing packet (schema + rows + query context). Needs --config.`
 	fs.BoolVar(&c.columnar, "columnar", false, "column-major Data layout")
 	fs.BoolVar(&c.readonly, "readonly-fields", false, "include read-only (computed/identity) columns")
 	fs.BoolVar(&c.fast, "fast", false, "skip SpecialValues detection for speed")
+	fs.BoolVar(&c.stream, "stream", false, "[BETA] stream the export part by part instead of loading the whole table (requires --output, no S3)")
+	fs.IntVar(&c.packetSize, "packet-size", 0, "max packet size in MB (0 = built-in default ~1.9MB)")
+	fs.Int64Var(&c.fallbackRowLimit, "fallback-row-limit", 1000000, "max rows for in-memory fallback when SQL pushdown fails (0 = unlimited)")
+	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level encryption (needs Mercury)")
+	fs.StringVar(&c.mercuryCaller, "mercury-caller", "", "sender identity for Mercury registration (default: tdtpcli)")
 	addQueryFlags(fs, &c.q)
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
+}
+
+// Features: --enc needs the "enc" feature, as in v1. There is no
+// --enc13 in v2: new whole-blob (v1.3) encryption is disabled, only v1.5
+// section-level is written. Old v1.3 files still decrypt on import.
+func (c *exportCommand) Features() []string {
+	if c.enc {
+		return []string{"enc"}
+	}
+	return nil
+}
+
+// AuditInfo mirrors v1's export branch: table plus resolved output file.
+func (c *exportCommand) AuditInfo(_ *Deps, _ []string) (audit.Operation, map[string]string) {
+	return audit.OpExport, map[string]string{
+		"command": "export",
+		"table":   c.table,
+		"output":  outputFile(c.output, c.table, "tdtp.xml"),
+	}
 }
 
 // Validate needs --table (or a positional table name).
@@ -79,38 +114,84 @@ type exportJSON struct {
 }
 
 func (c *exportCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = args
-	cfg, err := adapterConfig(d.ConfigPath)
+	procs, err := d.processors(&c.p) // flags, else config file; before any database work
 	if err != nil {
-		return UsageError{Err: err} // missing/unreadable config is user error
+		return err
 	}
+	_ = args
+	yamlCfg, cfg, err := d.databaseConfig("export")
+	if err != nil {
+		return err // typed: bad config → usage, unlicensed adapter → operational
+	}
+	expCfg := yamlCfg.Export
 	query, err := c.q.build()
 	if err != nil {
 		return UsageError{Err: err}
 	}
+	// Compression: a flag given on the command line wins, otherwise the
+	// config file's export: section applies, otherwise the flag default.
+	// v1 (stdlib flag) could not tell "given" from "left at default" and
+	// used the value instead — so an explicit --compress-level 3 lost to a
+	// config level, and --compress=false could not switch off a config
+	// compress: true. pflag's Changed answers the actual question.
+	compress := c.compress
+	if !c.FlagSet.Changed("compress") {
+		compress = c.compress || expCfg.Compress
+	}
+	compressLevel := c.compressLevel
+	if !c.FlagSet.Changed("compress-level") && expCfg.CompressLevel > 0 {
+		compressLevel = expCfg.CompressLevel
+	}
+	compressAlgo := c.compressAlgo
+	if !c.FlagSet.Changed("compress-algo") && expCfg.CompressAlgo != "" {
+		compressAlgo = expCfg.CompressAlgo
+	}
+	// Mercury URL: flag first, config security section second (v1's order).
+	mercuryURL := c.mercuryURL
+	if mercuryURL == "" {
+		mercuryURL = yamlCfg.Security.MercuryURL
+	}
 	target := outputFile(c.output, c.table, "tdtp.xml")
+	// Resolve storage target: s3:// URI → object storage (v1's main.go
+	// pattern); otherwise a local file.
+	var exportStorageCfg *storage.Config
+	exportStorageKey := ""
+	display := target
+	if storage.IsRemote(target) {
+		exportStorageCfg, exportStorageKey = remoteStorage(yamlCfg.Storage, target)
+		target = "" // not writing to a local file
+	}
 	err = commands.ExportTable(ctx, cfg, commands.ExportOptions{
-		TableName:      c.table,
-		OutputFile:     target,
-		Query:          query,
-		Fields:         c.q.fieldsList(),
-		Compress:       c.compress,
-		CompressLevel:  c.compressLevel,
-		CompressAlgo:   c.compressAlgo,
-		EnableChecksum: c.compress,
-		ReadOnlyFields: c.readonly,
-		Fast:           c.fast,
-		Columnar:       c.columnar,
-		Compact:        c.compact,
-		FixedFields:    splitFields(c.fixedFields),
-		CompactTail:    c.compactTail,
-		IntegrityV14:   c.integrity,
-		MercuryURL:     c.mercuryURL,
+		ProcessorMgr:     procs,
+		TableName:        c.table,
+		OutputFile:       target,
+		Query:            query,
+		Fields:           c.q.fieldsList(),
+		Compress:         compress,
+		CompressLevel:    compressLevel,
+		CompressAlgo:     compressAlgo,
+		EnableChecksum:   compress, // checksum rides with compression (--hash is no-op, kept for compat)
+		ReadOnlyFields:   c.readonly,
+		Fast:             c.fast,
+		Columnar:         c.columnar,
+		Stream:           c.stream,
+		PacketSizeMB:     c.packetSize,
+		FallbackRowLimit: c.fallbackRowLimit,
+		Compact:          c.compact,
+		FixedFields:      splitFields(c.fixedFields),
+		CompactTail:      c.compactTail,
+		IntegrityV14:     c.integrity,
+		MercuryURL:       mercuryURL,
+		MercuryCaller:    c.mercuryCaller,
+		Encrypt:          c.enc,
+		EncryptLegacy:    false, // v1.3 whole-blob writing is disabled in v2
+		StorageCfg:       exportStorageCfg,
+		StorageKey:       exportStorageKey,
 	})
 	if err != nil {
 		return err // database/export failure is operational (exit 1)
 	}
-	out.Human("Exported %s to %s\n", c.table, target)
-	out.JSON(exportJSON{Valid: true, Table: c.table, Output: target})
+	out.Human("Exported %s to %s\n", c.table, display)
+	out.JSON(exportJSON{Valid: true, Table: c.table, Output: display})
 	return nil
 }

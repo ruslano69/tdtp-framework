@@ -81,13 +81,11 @@ func Write(ctx context.Context, w io.Writer, pkt *packet.DataPacket, query *pack
 	}
 	conv := schema.NewConverter()
 
+	// Pretty layout: the loop writes "\n" before every object, so "[" is
+	// followed by the first object's own newline — no separate one here
+	// (it used to add one, leaving a blank line after "[").
 	if _, err := io.WriteString(w, "["); err != nil {
 		return 0, err
-	}
-	if pretty && len(rows) > 0 {
-		if _, err := io.WriteString(w, "\n"); err != nil {
-			return 0, err
-		}
 	}
 	for i, values := range rows {
 		obj, err := marshalObject(fields, defs, values, conv)

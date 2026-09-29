@@ -6,7 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // pipelineCommand is `tdtpcli_v2 pipeline` — ETL from a YAML config.
@@ -17,7 +18,7 @@ type pipelineCommand struct {
 	unsafe     bool
 	unsafeCert string
 	enc        bool
-	encLegacy  bool
+	encDev     bool // --enc-dev in dev builds; always false under production
 	vars       map[string]string
 }
 
@@ -29,18 +30,50 @@ func newPipelineCommand() *pipelineCommand {
 
 Safe mode runs SELECT/WITH only. --unsafe allows all SQL (admin or
 --unsafe-cert required). @vars substitute into the config before the
-SQL allowlist check. --enc/--enc13 override the output encryption.`
+SQL allowlist check. --enc overrides the output encryption.`
 	fs := newCommandFlagSet("pipeline")
 	fs.BoolVar(&c.unsafe, "unsafe", false, "allow all SQL (requires admin or --unsafe-cert)")
 	fs.StringVar(&c.unsafeCert, "unsafe-cert", "", "capability certificate for unsafe mode")
 	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level output encryption (needs Mercury)")
-	fs.BoolVar(&c.encLegacy, "enc13", false, "legacy v1.3 whole-blob output encryption")
+	registerEncDevFlag(fs, &c.encDev)
 	c.FlagSet = fs
 	return c
 }
 
 // Validate takes the config path plus @name=value variables (same grammar
 // as v1: @ prefix, non-empty name, surrounding quotes stripped).
+// Features: the licensed capabilities this run's flags ask for — the same
+// two v1 gates up front (--enc → "enc", --unsafe → "unsafe").
+// --unsafe-cert alone unlocks nothing (v1: only --unsafe is gated), so it
+// asks for nothing.
+func (c *pipelineCommand) Features() []string {
+	var f []string
+	if c.enc {
+		f = append(f, "enc")
+	}
+	if c.unsafe {
+		f = append(f, "unsafe")
+	}
+	return f
+}
+
+// AuditInfo mirrors v1's pipeline branch: config plus safe/unsafe mode.
+func (c *pipelineCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	config := ""
+	if len(args) > 0 {
+		config = args[0]
+	}
+	mode := "safe"
+	if c.unsafe {
+		mode = "unsafe"
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "pipeline",
+		"config":  config,
+		"mode":    mode,
+	}
+}
+
 func (c *pipelineCommand) Validate(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("need a pipeline config file")
@@ -78,8 +111,9 @@ func (c *pipelineCommand) Run(ctx context.Context, d *Deps, out Output, args []s
 	err := commands.ExecutePipeline(ctx, configPath, commands.PipelineOptions{
 		Unsafe:         c.unsafe,
 		UnsafeCertPath: c.unsafeCert,
-		Encrypt:        c.enc || c.encLegacy,
-		EncryptLegacy:  c.encLegacy,
+		Encrypt:        c.enc,
+		EncryptLegacy:  false, // v1.3 whole-blob writing is disabled in v2
+		EncDev:         c.encDev,
 		Variables:      c.vars,
 	})
 	if err != nil {

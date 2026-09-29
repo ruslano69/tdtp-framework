@@ -4,43 +4,42 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 )
 
 // loadConfigs loads the YAML config and builds both the database and the
-// broker configs. The queue/topic comes exclusively from config, never
-// from CLI flags (same security rule as v1: the operator owns the
-// destination, the user only names the table).
-func loadConfigs(configPath string) (*adapters.Config, commands.BrokerConfig, error) {
-	if configPath == "" {
-		return nil, commands.BrokerConfig{}, fmt.Errorf("broker commands need --config with database and broker sections")
-	}
-	cfg, err := cliconfig.LoadConfig(configPath)
+// broker configs, plus the full file for callers that need other sections
+// (security.mercury_url fallback). The queue/topic comes exclusively from
+// config, never from CLI flags (same security rule as v1: the operator
+// owns the destination, the user only names the table). Errors are typed
+// by databaseConfig.
+func loadConfigs(d *Deps, cmdName string) (*adapters.Config, commands.BrokerConfig, *cliconfig.Config, error) {
+	cfg, adb, err := d.databaseConfig(cmdName)
 	if err != nil {
-		return nil, commands.BrokerConfig{}, fmt.Errorf("failed to load config: %w", err)
+		return nil, commands.BrokerConfig{}, nil, err
 	}
-	adb, err := adapterConfig(configPath)
-	if err != nil {
-		return nil, commands.BrokerConfig{}, err
-	}
-	_ = cfg
-	return adb, commands.BrokerConfigFromCliconfig(cfg), nil
+	return adb, commands.BrokerConfigFromCliconfig(cfg), cfg, nil
 }
 
 // exportBrokerCommand is `tdtpcli_v2 export-broker` — table to the queue.
 // Same engine as v1 (commands.ExportToBroker).
 type exportBrokerCommand struct {
 	Base
+	p             processorFlags
 	table         string
 	compress      bool
 	compressLevel int
 	compressAlgo  string
 	packetSize    int
+	batch         int  // deprecated no-op: use --batch-size (v1-identical)
+	hash          bool // deprecated no-op: checksum rides with --compress (v1-identical)
 	enc           bool
-	encLegacy     bool
+	integrity     bool
 	mercuryURL    string
+	mercuryCaller string
 	q             queryFlags
 }
 
@@ -58,15 +57,39 @@ Needs --config with database and broker sections.`
 	fs.IntVar(&c.compressLevel, "compress-level", 3, "compression level")
 	fs.StringVar(&c.compressAlgo, "compress-algo", "zstd", "compression algorithm")
 	fs.IntVar(&c.packetSize, "packet-size", 0, "packet size in MB (0 = built-in default)")
+	fs.IntVar(&c.batch, "batch", 1000, "[deprecated, no-op] use --batch-size")
+	fs.BoolVar(&c.hash, "hash", false, "[deprecated, no-op] XXH3 checksum is now always added when --compress is used")
 	fs.BoolVar(&c.enc, "enc", false, "v1.5 section-level encryption (needs Mercury)")
-	fs.BoolVar(&c.encLegacy, "enc13", false, "legacy v1.3 whole-blob encryption")
+	fs.BoolVar(&c.integrity, "integrity", false, "stamp v1.4 xxh3 hashes before compression (registered with --mercury-url)")
+	fs.StringVar(&c.mercuryCaller, "mercury-caller", "", "sender identity for Mercury registration (default: table name)")
 	fs.StringVar(&c.mercuryURL, "mercury-url", "", "xZMercury URL")
 	addQueryFlags(fs, &c.q)
+	addProcessorFlags(fs, &c.p)
 	c.FlagSet = fs
 	return c
 }
 
 // Validate needs --table (or a positional table name).
+// Features: --enc needs the "enc" feature, as in v1 (no --enc13 in v2).
+func (c *exportBrokerCommand) Features() []string {
+	if c.enc {
+		return []string{"enc"}
+	}
+	return nil
+}
+
+// AuditInfo mirrors v1's export-broker branch. The queue comes from the
+// config (never flags, same security rule); an unreadable config omits
+// broker/queue keys — Run itself then fails with the proper typed error.
+func (c *exportBrokerCommand) AuditInfo(d *Deps, _ []string) (audit.Operation, map[string]string) {
+	meta := map[string]string{"command": "export-broker", "table": c.table}
+	if _, bcc, _, err := loadConfigs(d, c.Name()); err == nil {
+		meta["broker"] = bcc.Type
+		meta["queue"] = bcc.Queue
+	}
+	return audit.OpExport, meta
+}
+
 func (c *exportBrokerCommand) Validate(args []string) error {
 	if c.table == "" {
 		if len(args) == 1 {
@@ -89,19 +112,38 @@ type exportBrokerJSON struct {
 }
 
 func (c *exportBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = args
-	adb, bcc, err := loadConfigs(d.ConfigPath)
+	procs, err := d.processors(&c.p) // flags, else config file; before any database work
 	if err != nil {
-		return UsageError{Err: err}
+		return err
+	}
+	_ = args
+	adb, bcc, yamlCfg, err := loadConfigs(d, c.Name())
+	if err != nil {
+		return err // typed in databaseConfig
 	}
 	query, err := c.q.build()
 	if err != nil {
 		return UsageError{Err: err}
 	}
+	// Mercury URL: flag first, config security section second (v1's order).
+	mercuryURL := c.mercuryURL
+	if mercuryURL == "" && yamlCfg != nil {
+		mercuryURL = yamlCfg.Security.MercuryURL
+	}
 	brokerCfg := bcc
-	err = commands.ExportToBroker(ctx, adb, &brokerCfg, c.table, query,
-		c.compress, c.compressLevel, c.compressAlgo, nil, c.packetSize,
-		c.mercuryURL, c.enc || c.encLegacy, c.encLegacy)
+	err = commands.ExportToBrokerWithOptions(ctx, adb, &brokerCfg, c.table, query,
+		commands.BrokerExportOptions{
+			Compress:      c.compress,
+			CompressLevel: c.compressLevel,
+			CompressAlgo:  c.compressAlgo,
+			ProcessorMgr:  procs,
+			PacketSizeMB:  c.packetSize,
+			MercuryURL:    mercuryURL,
+			Encrypt:       c.enc,
+			EncryptLegacy: false, // v1.3 whole-blob writing is disabled in v2
+			IntegrityV14:  c.integrity,
+			MercuryCaller: c.mercuryCaller,
+		})
 	if err != nil {
 		return err
 	}
@@ -144,6 +186,17 @@ batches stay queued. Needs --config with database and broker sections.`
 	return c
 }
 
+// AuditInfo mirrors v1's import-broker branch (queue from config, same
+// rule as export-broker above).
+func (c *importBrokerCommand) AuditInfo(d *Deps, _ []string) (audit.Operation, map[string]string) {
+	meta := map[string]string{"command": "import-broker", "strategy": c.strategy}
+	if _, bcc, _, err := loadConfigs(d, c.Name()); err == nil {
+		meta["broker"] = bcc.Type
+		meta["queue"] = bcc.Queue
+	}
+	return audit.OpImport, meta
+}
+
 // Validate parses the expect-vars.
 func (c *importBrokerCommand) Validate(args []string) error {
 	if len(args) > 0 {
@@ -165,9 +218,9 @@ type importBrokerJSON struct {
 
 func (c *importBrokerCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
 	_ = args
-	adb, bcc, err := loadConfigs(d.ConfigPath)
+	adb, bcc, _, err := loadConfigs(d, c.Name())
 	if err != nil {
-		return UsageError{Err: err}
+		return err // typed in databaseConfig
 	}
 	strategy, err := commands.ParseImportStrategy(c.strategy)
 	if err != nil {

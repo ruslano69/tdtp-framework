@@ -5,9 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
-	"github.com/ruslano69/tdtp-framework/pkg/adapters"
-	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // listCommand is `tdtpcli_v2 list` — tables (and views) in the database.
@@ -34,6 +33,19 @@ to a database.`
 	return c
 }
 
+// AuditInfo names the operation v1 logs per branch: list carries its
+// pattern, list-views is its own command there too.
+func (c *listCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	if c.views {
+		return audit.OpQuery, map[string]string{"command": "list-views"}
+	}
+	pattern := ""
+	if len(args) > 0 {
+		pattern = args[0]
+	}
+	return audit.OpQuery, map[string]string{"command": "list", "pattern": pattern}
+}
+
 // Validate takes at most one positional pattern.
 func (c *listCommand) Validate(args []string) error {
 	if len(args) > 1 {
@@ -49,78 +61,34 @@ type listJSON struct {
 	Views  []string `json:"views,omitempty"`
 }
 
-// adapterConfig builds the database adapter config from the v1-format
-// YAML file, the same way v1's main does.
-func adapterConfig(path string) (*adapters.Config, error) {
-	if path == "" {
-		return nil, fmt.Errorf("list needs --config with a database section")
-	}
-	cfg, err := cliconfig.LoadConfig(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-	return &adapters.Config{
-		Type:    cfg.Database.Type,
-		DSN:     cfg.Database.BuildDSN(),
-		Charset: cfg.Database.Charset,
-	}, nil
-}
-
 func (c *listCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	cfg, err := adapterConfig(d.ConfigPath)
+	_, cfg, err := d.databaseConfig("list")
 	if err != nil {
-		return UsageError{Err: err} // missing/unreadable config is user error
+		return err // typed: bad config → usage, unlicensed adapter → operational
 	}
 	pattern := ""
 	if len(args) == 1 {
 		pattern = args[0]
 	}
 	var buf bytes.Buffer
+	var names []string
 	if c.views {
-		err = commands.ListViewsTo(&buf, ctx, cfg)
+		names, err = commands.ListViewsReport(&buf, ctx, cfg)
 	} else {
-		err = commands.ListTablesTo(&buf, ctx, cfg, pattern)
+		names, err = commands.ListTablesReport(&buf, ctx, cfg, pattern)
 	}
 	if err != nil {
 		return err // database failure is operational (exit 1)
 	}
 	out.Human("%s", buf.String())
-	out.JSON(c.describe(ctx, cfg, pattern))
+	if out.JSONEnabled {
+		rep := listJSON{Valid: true}
+		if c.views {
+			rep.Views = names
+		} else {
+			rep.Tables = names
+		}
+		out.JSON(rep)
+	}
 	return nil
-}
-
-// describe builds the JSON contract with a direct adapter query. The
-// human text above stays the single formatter (shared with v1); JSON
-// carries the names pipelines iterate over. Runs only under --json
-// (see Output.JSONEnabled).
-func (c *listCommand) describe(ctx context.Context, cfg *adapters.Config, pattern string) listJSON {
-	rep := listJSON{Valid: true}
-	adapter, err := adapters.New(ctx, *cfg)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
-	defer func() { _ = adapter.Close(ctx) }()
-	if c.views {
-		views, err := adapter.GetViewNames(ctx)
-		if err != nil {
-			rep.Valid = false
-			return rep
-		}
-		for _, v := range views {
-			rep.Views = append(rep.Views, v.Name)
-		}
-		return rep
-	}
-	tables, err := adapter.GetTableNames(ctx)
-	if err != nil {
-		rep.Valid = false
-		return rep
-	}
-	for _, t := range tables {
-		if commands.MatchesPattern(t, pattern) {
-			rep.Tables = append(rep.Tables, t)
-		}
-	}
-	return rep
 }

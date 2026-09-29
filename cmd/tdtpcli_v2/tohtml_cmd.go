@@ -7,7 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // toHTMLCommand is `tdtpcli_v2 to-html` — TDTP file to a standalone HTML
@@ -36,6 +37,19 @@ Renders schema-aware column types without guessing. --row shows a slice
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's to-html branch.
+func (c *toHTMLCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	return audit.OpTransform, map[string]string{
+		"command": "to-html",
+		"input":   input,
+		"output":  outputFile(c.output, input, "html"),
+	}
 }
 
 // Validate needs exactly one input file.

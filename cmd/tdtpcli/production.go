@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver, for audit.database.type: postgres
@@ -13,15 +12,6 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/resilience"
 	"github.com/ruslano69/tdtp-framework/pkg/retry"
 )
-
-// auditDBDriverNames maps the audit.database.type config value to the
-// database/sql driver name registered for it in this binary.
-var auditDBDriverNames = map[string]string{
-	"sqlite":   "sqlite",
-	"mysql":    "mysql",
-	"mssql":    "mssql",
-	"postgres": "pgx",
-}
 
 // ProductionFeatures holds all production-ready components
 type ProductionFeatures struct {
@@ -158,51 +148,16 @@ func initAuditLogger(cfg AuditConfig) (*audit.AuditLogger, *sql.DB, error) {
 }
 
 // newAuditDatabaseAppender opens cfg's connection and wraps it in a
-// audit.DatabaseAppender. A separate connection from the pipeline's own
+// audit.DatabaseAppender. The connection itself comes from the shared
+// audit.OpenDatabaseSink (driver selection, sqlite DSN format and the
+// busy_timeout/WAL pragmas); a separate connection from the pipeline's own
 // Database config is intentional: reusing the same connection/credentials
 // would let the very process being audited also rewrite its own audit
 // trail — see AuditDatabaseConfig's doc comment.
 func newAuditDatabaseAppender(cfg AuditDatabaseConfig, level audit.Level) (*audit.DatabaseAppender, *sql.DB, error) {
-	driverName, ok := auditDBDriverNames[cfg.Type]
-	if !ok {
-		return nil, nil, fmt.Errorf("audit.database.type %q not supported (expected one of: sqlite, mysql, mssql, postgres)", cfg.Type)
-	}
-
-	dsn := cfg.DSN
-	if cfg.Type == "sqlite" {
-		dsn = withSQLiteTimeFormat(dsn)
-	}
-
-	db, err := sql.Open(driverName, dsn)
+	db, err := audit.OpenDatabaseSink(cfg.Type, cfg.DSN)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open audit database connection: %w", err)
-	}
-
-	// SQLite only allows one writer at a time; without a busy_timeout, a
-	// second concurrent tdtpcli process (writing its own audit entry, or
-	// racing AutoCreateTable's CREATE TABLE IF NOT EXISTS on first run)
-	// gets an immediate SQLITE_BUSY "database is locked" instead of
-	// waiting — confirmed by actually running 8 tdtpcli processes
-	// concurrently against the same audit DSN before this fix: 3 of 8
-	// failed outright. WAL mode lets readers proceed without blocking on a
-	// writer; busy_timeout makes a genuinely concurrent writer wait and
-	// retry instead of erroring immediately. Mirrors pkg/adapters/sqlite's
-	// own PRAGMA journal_mode=WAL (that adapter still lacks busy_timeout —
-	// a separate, pre-existing gap outside this feature's scope).
-	//
-	// busy_timeout MUST be set first: switching journal_mode itself takes
-	// SQLite's write lock, so if THAT statement is the one that races
-	// against another process, busy_timeout isn't active yet to make it
-	// wait — confirmed by a repeat run: with WAL applied first, "PRAGMA
-	// journal_mode = WAL" itself failed with SQLITE_BUSY twice in three
-	// 8-process bursts.
-	if cfg.Type == "sqlite" {
-		for _, pragma := range []string{"PRAGMA busy_timeout = 5000", "PRAGMA journal_mode = WAL"} {
-			if _, err := db.Exec(pragma); err != nil {
-				_ = db.Close()
-				return nil, nil, fmt.Errorf("failed to apply %q: %w", pragma, err)
-			}
-		}
+		return nil, nil, err
 	}
 
 	tableName := cfg.Table
@@ -361,38 +316,4 @@ func (pf *ProductionFeatures) LogWithMetadata(ctx context.Context, op audit.Oper
 		// Best-effort: a broken audit sink must not fail the CLI operation itself.
 		fmt.Fprintf(os.Stderr, "warning: audit log write failed: %v\n", logErr)
 	}
-}
-
-// sqliteTimeFormatParam makes modernc.org/sqlite write timestamps in the
-// canonical SQLite datetime format instead of Go's time.Time.String().
-//
-// The driver says so itself (conn.go, formatTime): "Before configurable write
-// time formats were supported, time.Time.String was used. Maintain that
-// default to keep existing driver users formatting times the same." That
-// default put values like
-//
-//	2026-07-28 11:12:31.8174159 +0300 EEST m=+10.312223101
-//
-// into the audit table's TIMESTAMP column — a zone abbreviation and a
-// monotonic clock reading, in a column every audit query sorts and filters on.
-// With this parameter the same instant is written as
-//
-//	2026-07-28 08:12:31.8174159+00:00
-//
-// which SQLite's own date functions understand and which any other reader can
-// parse. Only the sqlite backend needs it; pgx, mysql and mssql send time
-// natively.
-const sqliteTimeFormatParam = "_time_format=sqlite"
-
-// withSQLiteTimeFormat appends sqliteTimeFormatParam to a SQLite DSN, leaving
-// an explicit _time_format alone so an operator can still override it.
-func withSQLiteTimeFormat(dsn string) string {
-	if strings.Contains(dsn, "_time_format=") {
-		return dsn
-	}
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + sqliteTimeFormatParam
 }

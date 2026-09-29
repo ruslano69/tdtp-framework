@@ -5,9 +5,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/storage"
 )
 
 // testCommand is `tdtpcli_v2 test` — integrity of a TDTP file (or a
@@ -29,19 +29,15 @@ func newTestCommand() *testCommand {
 	c.CmdLong = `tdtpcli_v2 test file.tdtp.xml
 
 Verifies the data is undamaged (checksum, row count, part-set
-completeness) without a database. Remote s3:// input needs --config
-(wave 2).`
+completeness) without a database. Remote s3:// input needs --config.`
 	c.FlagSet = newCommandFlagSet("test")
 	return c
 }
 
-// Validate needs exactly one input path.
+// Validate needs exactly one input path (local or s3://).
 func (c *testCommand) Validate(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("need exactly one input file, got %d", len(args))
-	}
-	if strings.HasPrefix(args[0], "s3://") {
-		return fmt.Errorf("s3:// input needs --config (wave 2)")
 	}
 	return nil
 }
@@ -53,18 +49,35 @@ type testJSON struct {
 }
 
 func (c *testCommand) Run(ctx context.Context, d *Deps, out Output, args []string) error {
-	_ = d
 	path := args[0]
-	if _, err := os.Stat(path); err != nil {
+	// Remote s3:// input resolves its storage from --config (v1's main.go
+	// pattern); a missing config is user error, like a missing file.
+	var storageCfg *storage.Config
+	if storage.IsRemote(path) {
+		var err error
+		storageCfg, err = d.storageConfig()
+		if err != nil {
+			return err
+		}
+	} else if _, err := os.Stat(path); err != nil {
 		return err // unreadable input is operational (exit 1), not invalid data
 	}
 	var buf bytes.Buffer
-	if err := commands.TestFileTo(&buf, ctx, path, nil); err != nil {
+	writeReport := func() {
+		if out.Quiet && !out.JSONEnabled {
+			// The integrity verdict is the result, not a preamble. v1 keeps
+			// it under --quiet, including when invoked as a workflow step.
+			_, _ = out.Stdout.Write(buf.Bytes())
+			return
+		}
 		out.Human("%s", buf.String())
+	}
+	if err := commands.TestFileTo(&buf, ctx, path, storageCfg); err != nil {
+		writeReport()
 		out.JSON(testJSON{Valid: false, File: path})
 		return DataError{Err: err}
 	}
-	out.Human("%s", buf.String())
+	writeReport()
 	out.JSON(testJSON{Valid: true, File: path})
 	return nil
 }

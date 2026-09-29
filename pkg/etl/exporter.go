@@ -840,7 +840,7 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string
 	}
 
 	// Раскладка по колонкам — здесь, между материализацией и сжатием, как в
-	// compressPacketData (cmd/tdtpcli/commands/export.go). EnsureColumnar
+	// compressPacketData (pkg/cli/commands/export.go). EnsureColumnar
 	// идемпотентна.
 	if columnar {
 		packet.EnsureColumnar(dataPacket)
@@ -881,7 +881,7 @@ func (e *Exporter) compressDataPacket(dataPacket *packet.DataPacket, algo string
 	}
 
 	// Checksum сжатых байт (xxh3-64) — на CLI ставится безусловно при
-	// --compress (cmd/tdtpcli/commands/export.go: EnableChecksum: compress,
+	// --compress (pkg/cli/commands/export.go: EnableChecksum: compress,
 	// "--hash" давно deprecated ровно потому что это стало автоматическим).
 	// Здесь этого шага не было вовсе: compress: true — дефолт в шаблоне
 	// конфига, так что без этой строки практически ни один пайплайн не

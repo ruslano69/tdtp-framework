@@ -1,6 +1,9 @@
 package main
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // compat.go — the v1 flat-flag compatibility shim.
 //
@@ -24,27 +27,174 @@ type compatEntry struct {
 
 // compatTable is filled as commands port (wave 1+).
 var compatTable = map[string]compatEntry{
-	"diff":          {command: []string{"diff"}, notice: "--diff is deprecated, use 'tdtpcli_v2 diff'"},
-	"export":        {command: []string{"export"}, notice: "--export is deprecated, use 'tdtpcli_v2 export'"},
-	"export-broker": {command: []string{"export-broker"}, notice: "--export-broker is deprecated, use 'tdtpcli_v2 export-broker'"},
-	"import-broker": {command: []string{"import-broker"}, notice: "--import-broker is deprecated, use 'tdtpcli_v2 import-broker'"},
-	"export-xlsx":   {command: []string{"export-xlsx"}, notice: "--export-xlsx is deprecated, use 'tdtpcli_v2 export-xlsx'"},
-	"from-xlsx":     {command: []string{"from-xlsx"}, notice: "--from-xlsx is deprecated, use 'tdtpcli_v2 from-xlsx'"},
-	"import":        {command: []string{"import"}, notice: "--import is deprecated, use 'tdtpcli_v2 import'"},
-	"import-xlsx":   {command: []string{"import-xlsx"}, notice: "--import-xlsx is deprecated, use 'tdtpcli_v2 import-xlsx'"},
-	"inspect":       {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
-	"inspect-table": {command: []string{"inspect-table"}, notice: "--inspect-table is deprecated, use 'tdtpcli_v2 inspect-table'"},
-	"test":          {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
-	"to-csv":        {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
-	"to-compact":    {command: []string{"to-compact"}, notice: "--to-compact is deprecated, use 'tdtpcli_v2 to-compact'"},
-	"to-html":       {command: []string{"to-html"}, notice: "--to-html is deprecated, use 'tdtpcli_v2 to-html'"},
-	"to-tdtp":       {command: []string{"to-tdtp"}, notice: "--to-tdtp is deprecated, use 'tdtpcli_v2 to-tdtp'"},
-	"to-xlsx":       {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
-	"list":          {command: []string{"list"}, notice: "--list is deprecated, use 'tdtpcli_v2 list'"},
-	"list-views":    {command: []string{"list"}, args: []string{"--views"}, notice: "--list-views is deprecated, use 'tdtpcli_v2 list --views'"},
-	"merge":         {command: []string{"merge"}, splitComma: true, notice: "--merge is deprecated, use 'tdtpcli_v2 merge'"},
-	"pipeline":   {command: []string{"pipeline"}, notice: "--pipeline is deprecated, use 'tdtpcli_v2 pipeline'"},
-	"sync-incremental": {command: []string{"sync"}, notice: "--sync-incremental is deprecated, use 'tdtpcli_v2 sync'"},
+	"diff":             {command: []string{"diff"}, notice: "--diff is deprecated, use 'tdtpcli_v2 diff'"},
+	"export":           {command: []string{"export"}, notice: "--export is deprecated, use 'tdtpcli_v2 export'"},
+	"export-broker":    {command: []string{"export-broker"}, notice: "--export-broker is deprecated, use 'tdtpcli_v2 export-broker'"},
+	"import-broker":    {command: []string{"import-broker"}, notice: "--import-broker is deprecated, use 'tdtpcli_v2 import-broker'"},
+	"export-xlsx":      {command: []string{"export-xlsx"}, notice: "--export-xlsx is deprecated, use 'tdtpcli_v2 export-xlsx'"},
+	"from-xlsx":        {command: []string{"from-xlsx"}, notice: "--from-xlsx is deprecated, use 'tdtpcli_v2 from-xlsx'"},
+	"import":           {command: []string{"import"}, notice: "--import is deprecated, use 'tdtpcli_v2 import'"},
+	"import-xlsx":      {command: []string{"import-xlsx"}, notice: "--import-xlsx is deprecated, use 'tdtpcli_v2 import-xlsx'"},
+	"inspect":          {command: []string{"inspect"}, notice: "--inspect is deprecated, use 'tdtpcli_v2 inspect'"},
+	"test":             {command: []string{"test"}, notice: "--test is deprecated, use 'tdtpcli_v2 test'"},
+	"to-csv":           {command: []string{"to-csv"}, notice: "--to-csv is deprecated, use 'tdtpcli_v2 to-csv'"},
+	"to-compact":       {command: []string{"to-compact"}, notice: "--to-compact is deprecated, use 'tdtpcli_v2 to-compact'"},
+	"to-html":          {command: []string{"to-html"}, notice: "--to-html is deprecated, use 'tdtpcli_v2 to-html'"},
+	"to-tdtp":          {command: []string{"to-tdtp"}, notice: "--to-tdtp is deprecated, use 'tdtpcli_v2 to-tdtp'"},
+	"to-xlsx":          {command: []string{"to-xlsx"}, notice: "--to-xlsx is deprecated, use 'tdtpcli_v2 to-xlsx'"},
+	"list":             {command: []string{"list"}, notice: "--list is deprecated, use 'tdtpcli_v2 list'"},
+	"list-views":       {command: []string{"list"}, args: []string{"--views"}, notice: "--list-views is deprecated, use 'tdtpcli_v2 list --views'"},
+	"listen":           {command: []string{"listen"}, notice: "--listen is deprecated, use 'tdtpcli_v2 listen'"},
+	"map":              {command: []string{"map"}, notice: "--map is deprecated, use 'tdtpcli_v2 map'"},
+	"merge":            {command: []string{"merge"}, splitComma: true, notice: "--merge is deprecated, use 'tdtpcli_v2 merge'"},
+	"pipeline":         {command: []string{"pipeline"}, notice: "--pipeline is deprecated, use 'tdtpcli_v2 pipeline'"},
+	"process-request":  {command: []string{"process-request"}, notice: "--process-request is deprecated, use 'tdtpcli_v2 process-request'"},
+	"steps":            {command: []string{"steps"}, notice: "--steps is deprecated, use 'tdtpcli_v2 steps'"},
+	"sync-incremental": {command: []string{"sync-incremental"}, notice: "--sync-incremental is deprecated, use 'tdtpcli_v2 sync-incremental'"},
+}
+
+// tryCompat rewrites v1 argv with leading globals (`--config f.yaml
+// --export ...`, `--quiet --to-csv ...` — the shape the tests/cli suites
+// call with) into global flags plus a v2 command. Bare v1 argv
+// (`--to-csv f.xml`) resolves too, with no globals attached.
+//
+// v1 also allowed command flags BEFORE the verb (`--ignore-fields Balance
+// --diff a b`, with a NOTE in the suites about why): the verb is searched,
+// and everything before it is moved after the positionals, where pflag
+// parses it in place (`diff a b --ignore-fields Balance`).
+func tryCompat(argv []string) ([]string, string, bool) {
+	i := 0
+	var globals []string
+	for i < len(argv) {
+		n := globalFlagSpan(argv, i)
+		if n == 0 {
+			break
+		}
+		globals = append(globals, argv[i:i+n]...)
+		i += n
+	}
+	// Verb scan: the first token that resolves as a v1 verb wins.
+	// Tokens before it are that command's flags (v1 accepted them there);
+	// they travel after the positionals.
+	verb := -1
+	for j := i; j < len(argv); j++ {
+		if _, _, ok := compatResolve(argv[j:]); ok {
+			verb = j
+			break
+		}
+		// A "--flag value" pair: the value cannot be a verb, skip both.
+		// A bare "--flag" at the end is skipped singly by the loop itself.
+		if strings.HasPrefix(argv[j], "-") && j+1 < len(argv) && isFlagValue(argv[j+1]) {
+			j++
+		}
+	}
+	if verb < 0 {
+		return nil, "", false
+	}
+	newArgs, notice, ok := compatResolve(argv[verb:])
+	if !ok {
+		return nil, "", false // unreachable: the scan just matched it
+	}
+	// The resolved tail is complete as-is (it carries compatResolve's own
+	// transforms, e.g. --merge's comma split — do NOT rebuild it from the
+	// raw tokens). Pre-verb flags append at the end: pflag parses flags
+	// anywhere, positionals keep their order.
+	tail := append([]string{}, newArgs...)
+	tail = append(tail, argv[i:verb]...)
+	// v1 flags were global, so `--export users --config f.yaml` was as
+	// valid as the config-first form. In v2 --config/--license/--quiet/
+	// --json are globals and must precede the command; no command FlagSet
+	// declares them, so any found in the tail can only be the global —
+	// hoist it.
+	hoisted, tail := hoistGlobals(tail)
+	out := append([]string{}, globals...)
+	out = append(out, hoisted...)
+	out = append(out, tail...)
+	notice = stripImportLimits(&out, notice)
+	return out, notice, true
+}
+
+// hoistGlobals splits the global flags (globalFlagSpan) out of a rewritten
+// v1 tail. Returns (globals, rest).
+func hoistGlobals(tail []string) ([]string, []string) {
+	var globals, rest []string
+	for k := 0; k < len(tail); {
+		if n := globalFlagSpan(tail, k); n > 0 {
+			globals = append(globals, tail[k:k+n]...)
+			k += n
+			continue
+		}
+		rest = append(rest, tail[k])
+		k++
+	}
+	return globals, rest
+}
+
+// isFlagValue reports whether tok, following a value-taking flag, is its
+// value: anything not shaped like a flag, plus negative numbers
+// (`--limit -5` is v1's tail-N spelling, not a shorthand flag).
+func isFlagValue(tok string) bool {
+	if !strings.HasPrefix(tok, "-") {
+		return true
+	}
+	_, err := strconv.Atoi(tok)
+	return err == nil
+}
+
+// importIgnoredFlags are v1 query flags that --import accepts and ignores
+// (v1 warnUnusedFlags: "accepted, nothing acted on it" — the sqlite T14.7
+// suite pins rc=0 with all rows landed). Native v2 stays strict: a foreign
+// flag does not parse. The shim drops them with a notice so the v1 suite
+// passes unchanged; the shim (and this leniency) is deleted at wave 4.
+var importIgnoredFlags = map[string]bool{
+	"limit": true, "l": true, "offset": true,
+}
+
+// stripImportLimits removes --limit/--offset (+values, both spellings) from
+// a rewritten `import` invocation. Returns the (possibly extended) notice.
+func stripImportLimits(argv *[]string, notice string) string {
+	out := *argv
+	if !isImportCommand(out) {
+		return notice
+	}
+	kept := out[:0]
+	stripped := false
+	for k := 0; k < len(out); k++ {
+		tok := out[k]
+		name := strings.TrimLeft(tok, "-")
+		if eq := strings.IndexByte(name, '='); eq >= 0 {
+			name = name[:eq]
+		}
+		if strings.HasPrefix(tok, "-") && importIgnoredFlags[name] {
+			stripped = true
+			// "--flag value": drop the value too (the =form carries its
+			// value inline and needs no extra skip).
+			if !strings.Contains(tok, "=") && k+1 < len(out) && isFlagValue(out[k+1]) {
+				k++
+			}
+			continue
+		}
+		kept = append(kept, tok)
+	}
+	*argv = kept
+	if stripped {
+		notice += "; --limit/--offset have no effect on import (ignored, like v1)"
+	}
+	return notice
+}
+
+// isImportCommand reports whether rewritten argv runs the import command.
+// Globals (if any, with their values) precede it and are skipped; the first
+// remaining token is the command.
+func isImportCommand(argv []string) bool {
+	for k := 0; k < len(argv); {
+		if n := globalFlagSpan(argv, k); n > 0 {
+			k += n
+			continue
+		}
+		return argv[k] == "import"
+	}
+	return false
 }
 
 // compatResolve rewrites argv when it starts with a known v1 flag.
@@ -55,6 +205,14 @@ func compatResolve(argv []string) ([]string, string, bool) {
 		return nil, "", false
 	}
 	name := strings.TrimLeft(argv[0], "-")
+	// `--verb=value` form (stdlib flag spelling): the value becomes the
+	// first user argument. `--config=x` never reaches here — tryCompat
+	// strips globals before the verb scan.
+	var inline string
+	if eq := strings.IndexByte(name, '='); eq >= 0 {
+		inline = name[eq+1:]
+		name = name[:eq]
+	}
 	e, ok := compatTable[name]
 	if !ok {
 		return nil, "", false
@@ -62,6 +220,9 @@ func compatResolve(argv []string) ([]string, string, bool) {
 	out := append([]string{}, e.command...)
 	out = append(out, e.args...)
 	rest := argv[1:]
+	if inline != "" {
+		rest = append([]string{inline}, rest...)
+	}
 	if e.splitComma && len(rest) > 0 {
 		rest = append(strings.Split(rest[0], ","), rest[1:]...)
 	}

@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ruslano69/tdtp-framework/cmd/tdtpcli/commands"
+	"github.com/ruslano69/tdtp-framework/pkg/audit"
+	"github.com/ruslano69/tdtp-framework/pkg/cli/commands"
 )
 
 // toCSVCommand is `tdtpcli_v2 to-csv` — TDTP file to CSV. Same conversion
@@ -16,6 +17,7 @@ type toCSVCommand struct {
 	delimiter string
 	cp        string
 	bom       bool
+	translit  bool
 	output    string
 	q         queryFlags
 }
@@ -32,10 +34,26 @@ apply in memory, --delimiter/--cp/--bom control the CSV dialect.`
 	fs.StringVarP(&c.delimiter, "delimiter", "d", ",", "CSV field separator")
 	fs.StringVar(&c.cp, "cp", "utf8", "output code page: utf8, 1251, 866")
 	fs.BoolVar(&c.bom, "bom", false, "prepend UTF-8 BOM")
+	fs.BoolVar(&c.translit, "translit", false, "transliterate non-ASCII field names to ASCII headers")
 	fs.StringVarP(&c.output, "output", "o", "", "output file (default: <input>.csv)")
 	addQueryFlags(fs, &c.q)
 	c.FlagSet = fs
 	return c
+}
+
+// AuditInfo mirrors v1's to-csv branch, dialect included.
+func (c *toCSVCommand) AuditInfo(_ *Deps, args []string) (audit.Operation, map[string]string) {
+	input := ""
+	if len(args) > 0 {
+		input = args[0]
+	}
+	return audit.OpTransform, map[string]string{
+		"command":   "to-csv",
+		"input":     input,
+		"output":    outputFile(c.output, input, "csv"),
+		"delimiter": c.delimiter,
+		"cp":        c.cp,
+	}
 }
 
 // Validate needs exactly one input file.
@@ -91,6 +109,7 @@ func (c *toCSVCommand) Run(ctx context.Context, d *Deps, out Output, args []stri
 		Delimiter:  parseDelimiter(c.delimiter),
 		CP:         c.cp,
 		BOM:        c.bom,
+		Translit:   c.translit,
 		Query:      query,
 		MercuryURL: "",
 	})

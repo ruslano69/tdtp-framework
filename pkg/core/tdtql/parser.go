@@ -138,6 +138,19 @@ func (p *Parser) ParseSelect() (*SelectStatement, error) {
 		return nil, fmt.Errorf("parse errors: %v", p.errors)
 	}
 
+	// The whole input must have been consumed. Without this check anything
+	// after the last recognized clause was silently dropped: "dept = 'hr' AMD
+	// id > 5" (a typo for AND) filtered on dept alone and returned MORE rows
+	// than asked; "dept = 'hr')" and "ORDER BY dept SIDEWAYS" passed too.
+	// One trailing ';' is ordinary SQL punctuation and stays accepted.
+	if p.curToken.Type == TokenIllegal && p.curToken.Literal == ";" {
+		p.nextToken()
+	}
+	if p.curToken.Type != TokenEOF {
+		return nil, fmt.Errorf("unexpected %q after the end of the query (only WHERE, ORDER BY, LIMIT and OFFSET may follow the table)",
+			p.curToken.Literal)
+	}
+
 	return stmt, nil
 }
 

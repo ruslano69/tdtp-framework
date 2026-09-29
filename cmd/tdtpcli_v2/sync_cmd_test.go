@@ -1,106 +1,63 @@
 package main
 
-// sync_cmd_test.go — incremental sync through the dispatcher (sqlite):
-// watermark advance, second-run delta, exit codes.
-
 import (
 	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	_ "modernc.org/sqlite"
 )
 
-// writeSyncDB creates a sqlite database with an events table carrying an
-// updated_at watermark column, plus a v1-format config. Returns dir/cfg/db.
-func writeSyncDB(t *testing.T) (dir, cfg, db string) {
-	t.Helper()
-	dir = t.TempDir()
-	db = filepath.Join(dir, "ev.db")
-	sdb, err := sql.Open("sqlite", db)
+func TestSyncCmd_CheckpointAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "sync.db")
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = sdb.Close() }()
-	for _, q := range []string{
-		`CREATE TABLE events (ID INTEGER PRIMARY KEY, Name TEXT, updated_at TEXT)`,
-		`INSERT INTO events VALUES (1,'a','2026-01-01T00:00:00Z'),(2,'b','2026-01-02T00:00:00Z')`,
-	} {
-		if _, err := sdb.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cfg = filepath.Join(dir, "ev.yaml")
-	yaml := "database:\n  type: sqlite\n  database: " + db + "\n"
-	if err := os.WriteFile(cfg, []byte(yaml), 0o600); err != nil {
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, version INTEGER); INSERT INTO items VALUES (1, 'a', 1), (2, 'b', 2)"); err != nil {
 		t.Fatal(err)
 	}
-	return dir, cfg, db
-}
-
-func TestSyncCmd_FirstRunAllRows(t *testing.T) {
-	dir, cfg, _ := writeSyncDB(t)
-	out := filepath.Join(dir, "inc1.xml")
-	cp := filepath.Join(dir, "cp.yaml")
-	code, _, _ := runApp(t, "--config", cfg, "sync", "events",
-		"--output", out, "--checkpoint-file", cp)
-	if code != ExitOK {
-		t.Fatalf("exit = %d", code)
-	}
-	data, _ := os.ReadFile(out)
-	s := string(data)
-	if !strings.Contains(s, "|a|") || !strings.Contains(s, "|b|") {
-		t.Errorf("first run should export all rows:\n%.400s", s)
-	}
-	if _, err := os.Stat(cp); err != nil {
-		t.Errorf("checkpoint file not written: %v", err)
-	}
-}
-
-func TestSyncCmd_SecondRunDeltaOnly(t *testing.T) {
-	dir, cfg, db := writeSyncDB(t)
-	out1 := filepath.Join(dir, "inc1.xml")
-	cp := filepath.Join(dir, "cp.yaml")
-	base := []string{"--config", cfg, "sync", "events", "--checkpoint-file", cp}
-	if code, _, _ := runApp(t, append(append([]string{}, base...), "--output", out1)...); code != ExitOK {
-		t.Fatalf("first run exit = %d", code)
-	}
-	sdb, err := sql.Open("sqlite", db)
-	if err != nil {
+	cfg := filepath.Join(dir, "db.yaml")
+	if err := os.WriteFile(cfg, []byte("database:\n  type: sqlite\n  database: "+dbPath+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sdb.Exec(`INSERT INTO events VALUES (3,'c','2026-01-03T00:00:00Z')`); err != nil {
+	checkpoint := filepath.Join(dir, "checkpoint.yaml")
+	first := filepath.Join(dir, "first.xml")
+	args := []string{"--config", cfg, "--json", "sync-incremental", "items",
+		"--tracking-field", "version", "--checkpoint-file", checkpoint,
+		"--fields", "id,name", "--output", first}
+	code, stdout, stderr := runApp(t, args...)
+	if code != ExitOK || !strings.Contains(stdout, `"rows":2`) || strings.Contains(stdout, "Starting incremental") {
+		t.Fatalf("first sync exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if _, err := os.Stat(first); err != nil {
+		t.Fatalf("first output: %v", err)
+	}
+	if _, err := os.Stat(checkpoint); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO items VALUES (3, 'c', 3)"); err != nil {
 		t.Fatal(err)
 	}
-	_ = sdb.Close()
-	out2 := filepath.Join(dir, "inc2.xml")
-	code, _, _ := runApp(t, append(append([]string{}, base...), "--output", out2)...)
-	if code != ExitOK {
-		t.Fatalf("second run exit = %d", code)
+	second := filepath.Join(dir, "second.xml")
+	args[len(args)-1] = second
+	code, stdout, stderr = runApp(t, args...)
+	if code != ExitOK || !strings.Contains(stdout, `"rows":1`) {
+		t.Fatalf("second sync exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	data, _ := os.ReadFile(out2)
-	s := string(data)
-	if strings.Contains(s, "|a|") || strings.Contains(s, "|b|") {
-		t.Errorf("second run should hold only the new row:\n%.400s", s)
-	}
-	if !strings.Contains(s, "|c|") {
-		t.Errorf("second run should hold row c:\n%.400s", s)
+	code, stdout, stderr = runApp(t, args...)
+	if code != ExitOK || !strings.Contains(stdout, `"rows":0`) {
+		t.Fatalf("empty sync exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 
-func TestSyncCmd_NoTable(t *testing.T) {
-	_, cfg, _ := writeSyncDB(t)
-	code, _, _ := runApp(t, "--config", cfg, "sync")
-	if code != ExitUsage {
-		t.Errorf("exit = %d, want %d", code, ExitUsage)
+func TestSyncCmd_Validation(t *testing.T) {
+	if code, _, _ := runApp(t, "sync-incremental"); code != ExitUsage {
+		t.Errorf("missing table exit=%d", code)
 	}
-}
-
-func TestSyncCmd_NoConfig(t *testing.T) {
-	code, _, _ := runApp(t, "sync", "events")
-	if code != ExitUsage {
-		t.Errorf("exit = %d, want %d", code, ExitUsage)
+	if code, _, _ := runApp(t, "sync-incremental", "items", "--batch-size", "0"); code != ExitUsage {
+		t.Errorf("invalid batch size exit=%d", code)
 	}
 }

@@ -5,10 +5,12 @@ package main
 // contract: verdicts, exit codes, patterns, JSON.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -114,6 +116,40 @@ func TestListCmd_JSON(t *testing.T) {
 	}
 	if !v.Valid || len(v.Tables) != 1 || v.Tables[0] != "users" {
 		t.Errorf("unexpected payload: %+v", v)
+	}
+}
+
+func TestListCmd_ViewsJSON(t *testing.T) {
+	cfg := writeListDB(t)
+	code, stdout, stderr := runApp(t, "--config", cfg, "--json", "list", "--views")
+	var got listJSON
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil || code != ExitOK || !got.Valid || !slices.Contains(got.Views, "active_users") {
+		t.Fatalf("views JSON: exit=%d payload=%+v err=%v stderr=%q", code, got, err, stderr)
+	}
+}
+
+func TestListCmd_JSONUsesReportedSnapshot(t *testing.T) {
+	cfg := writeListDB(t)
+	dbPath := filepath.Join(filepath.Dir(cfg), "list.db")
+	var got listJSON
+	out := Output{
+		Human: func(string, ...any) {
+			db, err := sql.Open("sqlite", dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = db.Close() }()
+			if _, err := db.Exec("DROP TABLE users"); err != nil {
+				t.Fatal(err)
+			}
+		},
+		JSON: func(v any) { got = v.(listJSON) }, JSONEnabled: true,
+	}
+	if err := newListCommand().Run(context.Background(), &Deps{ConfigPath: cfg}, out, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || !slices.Contains(got.Tables, "users") {
+		t.Fatalf("JSON should describe the reported snapshot: %+v", got)
 	}
 }
 

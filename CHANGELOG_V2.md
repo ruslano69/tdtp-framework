@@ -7,24 +7,337 @@
 
 ## [Unreleased]
 
-### Wave 3: `sync` (incremental by watermark)
+### Merged CLI v2 inspect and sync work
 
-- Same engine (`commands.IncrementalSync`): `--tracking-field`
-  (default `updated_at`), `--checkpoint-file`, `--batch-size`,
-  `--fields`, `--to-broker`, compress trio. `--table`/positional.
-- `Deps.Quiet` now flows into engines that print progress themselves
-  (was process-global only) — `--quiet`/`--json` stay clean.
-- Proven: full first run, delta-only second run, v1-identical output
-  (normalized comparison).
+- `inspect-table --json` now returns the complete table report, including
+  columns, keys and row counts. The text report remains shared with v1.
+- `sync` remains an alias for `sync-incremental`.
 
-### Wave 1: `inspect-table`
+### Complete CLI help
 
-- Same engine (`commands.InspectTableTo` — v1 printers gained the
-  `io.Writer` parameter like the rest); `--json` renders the shared
-  `adapters.TableReport`, which grew `json:` tags next to its `yaml:`
-  ones (additive, v1 text untouched).
-- Proven against live postgres on a real table (uuid keys, FKs, custom
-  enum): text identical to v1 modulo the banner.
+- General `--help` now explains global flags, commands, examples, and exit
+  codes. `--help export`, `help export`, and `export --help` use one command
+  formatter with the command's actual flags and defaults.
+- Every registered command has a valid v2 synopsis and example. Unknown help
+  topics return usage exit code 2; tests cover all commands and help forms.
+
+### Preview completion: incremental sync, Kafka listener, request processing
+
+- Added native `sync-incremental` with checkpoint and broker output options,
+  standalone Kafka `listen`, and `process-request`, including flat-flag
+  compatibility. Their progress follows the v2 text/quiet/JSON output contract.
+- `listen` uses the application context for graceful shutdown and skips
+  automatic retries of a running daemon. Live Kafka sync-to-broker/listener
+  and SQLite import are covered by an opt-in end-to-end test.
+- `process-request` checks the recipient database adapter against the active
+  license, rejects recipient path traversal, and emits a TDTP response packet
+  rather than a reference packet. The shared response fix applies to v1 too.
+- Added `import --strict-schema`; the PostgreSQL CLI suite verifies that a
+  constrained source column keeps its declared length on import.
+- The release workflow now builds `tdtpcli_v2-preview-*` for the same five
+  platforms as v1 and includes those files in release checksums. Stable
+  `tdtpcli` assets remain v1 during the preview.
+- Community licensing remains as currently implemented for the preview. Row
+  limit, S3, and pipeline source/ETL enforcement decisions are deferred until
+  before 2.0. See [migration guide](docs/CLI_V2_MIGRATION.md).
+
+### Wave 3.5: config once per run, config-file processors, production tag
+
+- `Deps` parses the YAML once per run (`loadConfig` cached); every
+  accessor derives from it with byte-identical error texts.
+- `Deps.processors()`: flags first, config-file `processors:` section
+  as fallback per type (that section was dead in v1 — parsed, never
+  read). New `RowProcessors.AddMaskRules/AddValidateRules/
+  AddNormalizeRules`; unknown validate types fail loud. Proven live
+  (config mask masks emails, announces "from config").
+- `production` tag verified for v2: suite green under
+  `-tags "production nokafka"`, `--enc-dev` absent from prod help.
+- The next tagged release ships a separate `tdtpcli_v2` preview alongside
+  v1 with the same build flags; the stable-name switch remains wave 4.
+
+### Fixed: one result for text and JSON reports
+
+- `list` now queries the database once; its JSON names come from the same
+  listing as the text report, including when the database changes mid-run.
+- `inspect` reads and parses each local or S3 packet once. JSON for S3 now
+  includes the schema and row details already available to the text report.
+- `diff` compares the two packets once and uses that result for both formats.
+  The shared v1 reporting entry points retain their signatures and output.
+
+### Wave 3.7: `map` and broker loop modes
+
+- Added native `map mapping.yaml --input SRC` with `--dry-run`, `--drain`,
+  `--listen`, and `--mercury-url`; legacy `--map` resolves through the
+  compatibility shim. The mapping YAML supplies its own target DSN, and v2
+  checks that target adapter against the license before connecting.
+- Mapping progress uses the app output streams. `--json` keeps stdout as a
+  single verdict; `--quiet` keeps the row total. Broker loop mode records
+  audit entries for each processed message.
+- Tested file dry-run and SQLite import, plus live RabbitMQ one-shot,
+  `--drain`, and `--listen` with SQLite and per-message audit. Shutdown,
+  ACK, and NACK paths also have broker-independent tests.
+
+### Wave 3.7: `steps` workflows
+
+- `tdtpcli_v2 steps workflow.yaml [@name=value...]` runs the shared
+  dependency-wave engine; the `--steps` form resolves through the one-release
+  compatibility shim. Children use `os.Executable()`, so a v2 workflow runs
+  v2 commands, including a v2-only `to-json` step.
+- Workflow progress and child output use the app's streams. In `--json` mode
+  progress goes to stderr and stdout contains one verdict; `--quiet` reaches
+  child commands. The shared runner defaults to its former process streams
+  for v1 callers.
+- A binary end-to-end test covers the v2-only child, dependencies,
+  `on_error: skip`, compatibility, quiet propagation and JSON output.
+- Porting exposed a quiet-mode parity gap in `test`: v1 keeps the integrity
+  verdict under `--quiet`, while v2 suppressed it with the human preamble.
+  The same gap hid the entire `inspect` schema report. V2 now keeps both
+  results, so quiet workflows retain their useful output.
+
+### Wave 3.6: `--mercury-caller` (export, export-broker)
+
+- Sender identity on Mercury registration. `export` plumbs the flag
+  straight through (v1 parity). `export-broker` honors it for real:
+  sender is the caller when given, else the table (v1 accepts the flag
+  and silently ignores it there — same class as `--translit`).
+- Proven live: registered sender reads back `customcaller` (file),
+  `brokercaller` (broker), and `users` by default.
+
+### Wave 3.6: `--integrity` on `export-broker` (both features work)
+
+- `--hash` stays a v1-identical no-op (the XXH3-64 checksum of the
+  compressed blob rides with `--compress` automatically); `--integrity`
+  is new and real: v1.4 xxh3-128 hashes stamped before compression,
+  registered in Mercury with `--mercury-url` (local-only without it).
+  The two answer different questions — transport intact vs content
+  authentic — and the file export already had both.
+- Engine: `IntegrityV14` in `brokerSendOptions` (internal, no signature
+  churn) plus `ExportToBrokerWithOptions`; the 14-positional
+  `ExportToBroker` delegates with `false`, so v1 (frozen) is untouched.
+- Proven: unit on the wire bytes (1.4 + fingerprint, no broker needed);
+  live MSMQ roundtrip (10 rows), local-only and Mercury-registered
+  (`registered:true, match:true` on query).
+- Consumer enforcement verified live, not just wired: a tampered packet
+  (one row value changed, stale hashes) placed in the queue is refused
+  with `packet refused (message …): data hash mismatch` (stored vs
+  computed shown), rc=1, nothing written; the untampered twin imports
+  10 rows. The message ID rides in the refusal so the audit trail names
+  the poisoned packet. Both consume paths (batch and `--keep`) run
+  `applyV14SecurityGate`; only `--raw` skips it, by definition
+  (bytes as-is).
+- Known, out of scope: `import-broker --output` re-marshal resets the
+  version to 1.0 (hashes survive, `--test` passes) — pre-existing.
+
+### Wave 3.6: `export-broker` `--batch` / `--hash` (deprecated no-ops)
+
+- Accepted and ignored, exactly as v1 (both are `[deprecated, no-op]`
+  there; the engine never receives them). Pinned by a parse-level unit
+  test — the point is they must not exit 2.
+
+### Wave 3.6/3.7: `--translit` that works, `inspect-table`, `version`, `init-config`, `to-xlsx` over S3
+
+- `--translit` on `to-csv`/`to-xlsx`/`export-xlsx` is real in v2:
+  non-ASCII field names become ASCII headers after filtering/projection
+  (row values untouched). Deliberate difference: v1 accepts the flag on
+  these commands and silently ignores it (its allowlist claims them, no
+  engine code reads it — the exact class `flagscope.go` was built to
+  catch). Proven live (`Имя,Фамилия` → `Imia,Familiia`).
+- `inspect-table TABLE --config` (new `InspectTableTo` in shared code,
+  v1 delegates; reports byte-identical on sqlite and mssql).
+- `version` (command plus bare `--version` flag, from `pkg/core/version`)
+  and `init-config (postgres|mssql|mysql|sqlite)` (one command for v1's
+  four `create-config-*`, byte-identical files via the shared builders).
+- `to-xlsx` reads and writes `s3://` through `--config` storage (the
+  engine already did; v2 never passed it `StorageCfg`). Proven live
+  against weed both directions.
+
+### Wave 3.6: `--enc` on export, `--enc13` dropped, `--enc-dev` dev-gated
+
+- `export` grew `--enc` (license `enc` gate via `Features()`, Mercury URL
+  from flag with config `security.mercury_url` fallback, same engine) —
+  the last `--enc` writer missing in v2. Legacy whole-blob writing is
+  disabled everywhere in 2.0: `--enc13` exists on no v2 command (a
+  foreign flag fails at parse, exit 2); old v1.3 files still decrypt on
+  import. `pipeline --enc-dev` arrived under the `!production` tag, mirroring
+  v1's `flags_dev.go` (present in dev builds, absent in prod).
+- Proven live against a real xzMercury `--dev` (real HMAC, no mock
+  bypass): `test_encryption.py` 15/15 on both binaries.
+
+### Wave 3.5: `s3://` (storage config + driver)
+
+- `drivers_s3.go` (`!nos3`, one blank import, mirrors v1) — without it
+  every S3 path died with `unknown storage type` (found live: pipeline
+  to S3 failed in the engine's storage factory).
+- `Deps.storageConfig()` + `remoteStorage()` (bucket-from-URI-wins,
+  v1's main.go pattern) wired into `export` (output), `import` (input,
+  local-missing check still first), `test` and `inspect` (remote needs
+  `--config`, the old "wave 2" refusals are gone).
+- Fixed alongside, shared code: `pkg/audit.OpenDatabaseSink` sqlite
+  branch hardened — `_pragma` busy_timeout in the DSN (every pooled
+  connection), `SetMaxOpenConns(1)`, and `journal_mode=WAL` through a
+  bounded busy-only retry. `PRAGMA journal_mode` bypasses the busy
+  handler (proven: fails in ~1ms under lock), so concurrent first-opens
+  failed all but one; `-race` on the audit parallel test caught it.
+- Proven: T8 `test_sqlite.py` 5/5 live against weed, full suite 127/127,
+  `-race` clean over the touched packages.
+
+### Wave 3.5: resilience (middleware)
+
+- `resilienceMiddleware`, last in the chain (`recover → license → audit →
+  resilience`) so the trail records the post-retry outcome: breaker inside,
+  retry outside, both from the config's `resilience:` section, both off
+  unless configured — field-for-field v1's `initCircuitBreaker` /
+  `initRetryManager` / `ExecuteWithResilience` semantics (init failure
+  fails the run, exhaustion reports `max retry attempts (N) exceeded`
+  at exit 1). Per-run instances like v1's per-process ones.
+- Deliberate difference: breaker transitions go to `out.Notice` (stderr
+  in text mode, silent under `--quiet`/`--json`); v1 prints them always.
+- Proven: attempt-count unit tests (retry-then-success, exhaustion,
+  breaker-alone, constructor validation), `-race` clean, `test_sqlite.py`
+  122/122 unchanged (default configs take the passthrough), plus a live
+  retry demo (3 attempts, backoff delays, rc=1).
+
+### Wave 3.5: audit (middleware + `Audited`)
+
+- One chain element (`recover → license → audit`): init on entry (logger
+  from the config's `audit:` section, `WithOpMetrics` side channel),
+  one entry on exit with operation, metadata, resource, row count and
+  duration — success or failure. Logger init failure is fatal like v1;
+  a failed write or Close only warns, never fails the command.
+- Both sinks from one entry, like v1: console/file text appenders plus
+  the database appender. The DB connection opener (driver selection,
+  sqlite `_time_format`, `busy_timeout`-before-WAL) moved to shared
+  `pkg/audit.OpenDatabaseSink`; v1 delegates to it, zero behaviour change.
+- Commands opt in via `AuditInfo(d, args)` with v1's operation + metadata
+  per branch (17 commands). The file verdicts (`test`, `inspect`,
+  `validate`) stay out, like v1's early return. Native v2 stays strict
+  where v1 warned: `pipeline --mask` does not parse.
+- Proven by the acceptance suite itself: `test_audit_database.py` 8/8
+  against `tdtpcli_v2` (incl. A3 — 8 parallel processes, one audit DB),
+  plus in-process parallel writers and `-race` over the touched packages.
+- `-race` on the new parallel test found a real shared-code race:
+  `commands.ResolveLicense` reassigned the process-wide license on every
+  run; now `atomic.Pointer` (same shape as `quietOutput`). Fixes both CLIs.
+
+### Wave 3.6: `--mask` / `--validate` / `--normalize`
+
+- One bundle (`processorflags.go`, like `queryFlags`) on `export`,
+  `export-broker`, `export-xlsx`, `import`, `import-xlsx`; built in `Run`
+  before any database work; a bad or section-less rules file is a usage
+  error (exit 2).
+- Not on `pipeline` — processors belong in its YAML; `pipeline --mask` does
+  not parse (v1 accepted it and did nothing).
+- A test parses the package: every command holding the bundle must build it
+  in `Run`, and the five holders are pinned. That the built chain is then
+  passed on, the compiler enforces (an unused `procs` does not compile).
+- Porting it surfaced three bugs in the shared chain (broker never masked,
+  filter kept removed rows, escaped pipes shifted masked columns) — fixed
+  for both CLIs, see `CHANGELOG.md`.
+
+### Security — the license gate v2 did not have
+
+- v2 never resolved `tdtp.lic`. On the Community floor
+  `tdtpcli_v2 --config pg.yaml export t` read PostgreSQL, and
+  `pipeline --enc` / `--unsafe` and `export-broker --enc` ran — v1 refuses
+  all of them before any work.
+- `licenseMiddleware` (chain: recover → license) resolves the license the
+  way v1 does (`--license`, `TDTP_LICENSE`, `./tdtp.lic`, Community); an
+  invalid file is fatal. Commands declare licensed features through
+  `FeatureGated`; the adapter gate lives in `Deps.databaseConfig`, now the
+  only place that builds `adapters.Config`. Refusals use v1's texts
+  (shared `commands.CheckFeature`/`CheckAdapter`) and exit 1; in `--json`
+  mode they arrive in-band like any other failure.
+- Held by tests that do not rely on a hand-kept list: one parses the
+  package and fails if `adapters.Config` is built anywhere else; another
+  derives every DB command from the source and requires a Community
+  refusal test for it. A paid license is tested with `license.New`
+  through an injectable resolver, no vendor key needed.
+- New global `--license` (the compat shim hoists it from anywhere, like
+  `--config`); the global-flag list the shim consults is one function
+  now, not three copies.
+- Deliberate differences from v1: the adapter is gated where a database
+  is used, not whenever a config file is loaded; the `License:` banner
+  is a stderr notice (`Output.Notice`), since stdout carries data.
+- `database.strict_schema` from the config now reaches the adapter —
+  both old builders dropped it.
+- Found, not changed (`TODO_NEXT_V2.md` 3.5): in both CLIs the Community
+  50 000-row cap is never enforced, `s3` is never gated, pipeline source
+  adapters are never gated, and a mistyped `--license` path silently
+  means Community.
+
+### Changed — the engines moved to `pkg/cli/commands`
+
+- `cmd/tdtpcli/commands` → `pkg/cli/commands` (`git mv`, package name
+  unchanged, only import paths). v2 was importing its engines from under
+  the v1 binary, so the planned wave-4 `rm -rf cmd/tdtpcli` would have
+  deleted the code v2 runs on. Both binaries build under every tag
+  combination (`production`, `nokafka nosqlite`); `tests/cli` sqlite/csv/
+  xlsx pass against both. Path references in comments, live docs and
+  `.golangci.yml` exclusions follow; CHANGELOG history is left as written.
+- `TODO_NEXT_V2.md` rewritten from a wave sketch into the remaining plan:
+  status, wave 3.5 (license — a bypass today —, audit, resilience, a real
+  `Deps`, S3/production build parity), 3.6 (flag gaps per ported
+  command), 3.7 (unported commands by risk), and a wave-4 checklist.
+
+### Fixed — silent failures in the framework itself
+
+- An unknown or foreign flag exited 2 with **nothing on stderr**: pflag
+  prints parse errors only when it is *not* `ContinueOnError`, the one
+  mode v2 uses. `TestApp_ForeignFlagRejected` checked the exit code alone,
+  so "a foreign flag fails at parse time" held — silently. The error and a
+  `help <command>` hint are printed now.
+- `--json` failures a command did not render itself (missing config,
+  unreadable input, DB down) produced no output on either stream. App now
+  emits `{valid:false, error, exit_code}` on stdout unless the command
+  already wrote its own verdict (validate's `{valid:false, errors}` is not
+  followed by a second document).
+- Compat shim: `--config`/`--quiet`/`--json` after the v1 verb
+  (`--export users --config c.yaml`, valid in v1 where every flag was
+  global) are hoisted in front of the command; `--import ... --limit -5`
+  drops the negative value with the flag instead of leaving `-5` behind
+  for pflag to reject.
+- `merge --sort` put NULLs **last**: a declared `[NULL]` marker was
+  compared as text and sorts after `9`. Markers from `SpecialValues` now
+  rank before comparison — NULL/NoDate first, then -Infinity, values,
+  +Infinity, NaN (PostgreSQL's order), flipped with `--order desc`.
+- `to-json --pretty` left a blank line after `[`.
+- `export_cmd.go` was not gofmt-clean.
+- `diff`/`merge`: an input that cannot be opened is operational, exit 1,
+  the same as `inspect`/`test` and `docs/CLI_V2.md`. It was exit 3 (the
+  engines fold every failure into one error). A file that was read and
+  rejected (malformed, incomparable) stays a data verdict, exit 3.
+
+### Changed — `export`: a given flag beats the config
+
+- `--compress`, `--compress-level` and `--compress-algo` win over the
+  config's `export:` section when they are **given**, checked with pflag's
+  `Changed`. v1 (and v2 until now) compared the value with the default
+  instead: an explicit `--compress-level 3` or `--compress-algo zstd` lost
+  to the config, and `--compress=false` could not switch off
+  `compress: true`. Invocations that leave the flags alone produce the
+  same file as before; the tests/cli suites pass unchanged.
+
+### Compat shim: the `tests/cli` suites now run against v2 unchanged
+
+- The shim was unreachable: `parseGlobals` rejected a bare v1 flag
+  (`tdtpcli_v2 --to-csv f.xml`) and anything after `--config` short of a
+  bare command name (`--config f.yaml --export ...`, the shape every suite
+  uses) before `compatResolve` ever ran. `tryCompat` now resolves both,
+  plus flags-before-the-verb (`--ignore-fields B --diff a b`, a documented
+  v1 quirk the suites rely on) and the `--verb=value` spelling.
+- `export` grew the v1 flags it was missing: `--hash` (no-op, checksum
+  already rides with `--compress`), `--packet-size`, `--stream`,
+  `--fallback-row-limit` (default 1 000 000, like v1), and the
+  flag-over-config compression merge (`export.compress`,
+  `compress_level`, `compress_algo`).
+- `merge` accepts `--merge-strategy` as a deprecated alias of `--strategy`.
+- `import` drops `--limit`/`--offset` in the shim with a notice (v1
+  warnUnusedFlags: accepted, nothing acted on it — pinned by sqlite
+  T14.7). Native v2 stays strict: a foreign flag does not parse there.
+- Proven by the porting rule itself: `test_sqlite.py` 122/122,
+  `test_xlsx.py` 51/51, `test_csv.py` 43/43 against `tdtpcli_v2` via
+  `TDTPCLI_BIN` swap, from a clean outdir. DB suites (postgres/mysql)
+  use the same mechanism; they need live servers.
 
 ### v2-native: deterministic `merge --sort`
 
