@@ -33,7 +33,7 @@ func (a *Adapter) InspectTable(ctx context.Context, name string) (*adapters.Tabl
 		var length, precision, scale sql.NullInt64
 		if err := rows.Scan(&column, &nativeType, &length, &precision, &scale,
 			&nullable, &identity, &virtual); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		report.Columns = append(report.Columns, adapters.ColumnReport{
@@ -44,7 +44,7 @@ func (a *Adapter) InspectTable(ctx context.Context, name string) (*adapters.Tabl
 		})
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, err
 	}
 	if err := rows.Close(); err != nil {
@@ -63,13 +63,13 @@ func (a *Adapter) InspectTable(ctx context.Context, name string) (*adapters.Tabl
 	for fkRows.Next() {
 		var fk adapters.ForeignKeyReport
 		if err := fkRows.Scan(&fk.Column, &fk.ReferencesTable, &fk.ReferencesColumn, &fk.OnDelete); err != nil {
-			fkRows.Close()
+			_ = fkRows.Close()
 			return nil, err
 		}
 		report.ForeignKeys = append(report.ForeignKeys, fk)
 	}
 	if err := fkRows.Err(); err != nil {
-		fkRows.Close()
+		_ = fkRows.Close()
 		return nil, err
 	}
 	if err := fkRows.Close(); err != nil {

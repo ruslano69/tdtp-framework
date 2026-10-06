@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 
 	_ "github.com/sijms/go-ora/v2"
 
@@ -30,7 +29,7 @@ func init() {
 
 func (a *Adapter) Connect(ctx context.Context, cfg adapters.Config) error {
 	if cfg.DSN == "" {
-		return fmt.Errorf("Oracle DSN is required")
+		return fmt.Errorf("oracle: DSN is required")
 	}
 	db, err := sql.Open("oracle", cfg.DSN)
 	if err != nil {
@@ -76,7 +75,7 @@ func (a *Adapter) Close(context.Context) error {
 
 func (a *Adapter) Ping(ctx context.Context) error {
 	if a.db == nil {
-		return fmt.Errorf("Oracle adapter is not connected")
+		return fmt.Errorf("oracle: adapter is not connected")
 	}
 	return a.db.PingContext(ctx)
 }
@@ -107,7 +106,7 @@ func (a *Adapter) GetTableNames(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var names []string
 	for rows.Next() {
 		var name string
@@ -125,7 +124,7 @@ func (a *Adapter) GetViewNames(ctx context.Context) ([]adapters.ViewInfo, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var views []adapters.ViewInfo
 	for rows.Next() {
 		var name string
@@ -165,15 +164,4 @@ func (a *Adapter) BeginTx(ctx context.Context) (adapters.Tx, error) {
 		return nil, err
 	}
 	return &oracleTx{tx: tx}, nil
-}
-
-// normalizedColumn resolves the caller's case-insensitive spelling against
-// the metadata spelling returned by Oracle.
-func normalizedColumn(fields []string, wanted string) (string, bool) {
-	for _, field := range fields {
-		if strings.EqualFold(field, wanted) {
-			return field, true
-		}
-	}
-	return "", false
 }

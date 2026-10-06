@@ -48,7 +48,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, name string) (packet.Schem
 	if err != nil {
 		return packet.Schema{}, fmt.Errorf("read Oracle schema %s: %w", name, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var fields []packet.Field
 	for rows.Next() {
 		var column, nativeType, nullable, identity, virtual string
@@ -70,7 +70,7 @@ func (a *Adapter) GetTableSchema(ctx context.Context, name string) (packet.Schem
 		return packet.Schema{}, err
 	}
 	if len(fields) == 0 {
-		return packet.Schema{}, fmt.Errorf("Oracle table %s not found or has no columns", name)
+		return packet.Schema{}, fmt.Errorf("oracle: table %s not found or has no columns", name)
 	}
 	return packet.Schema{Fields: fields}, nil
 }
@@ -92,7 +92,7 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, query string, schema pack
 	if err != nil {
 		return nil, fmt.Errorf("execute Oracle export query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	values := make([]any, len(schema.Fields))
 	pointers := make([]any, len(values))
 	for i := range values {
@@ -108,7 +108,7 @@ func (a *Adapter) readRowsWithSQL(ctx context.Context, query string, schema pack
 			raw := a.converter.DBValueToString(values[i], field, AdapterType)
 			if strings.EqualFold(field.Type, "DECIMAL") || strings.EqualFold(field.Type, "INTEGER") {
 				if _, ok := values[i].(float64); ok {
-					return nil, fmt.Errorf("Oracle NUMBER %s arrived as float64; exact export requires TO_CHAR", field.Name)
+					return nil, fmt.Errorf("oracle: NUMBER %s arrived as float64; exact export requires TO_CHAR", field.Name)
 				}
 				row[i] = raw
 			} else if _, ok := values[i].(time.Time); ok {
@@ -145,7 +145,7 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 	for i, ct := range columnTypes {
 		name := ct.Name()
 		if seen[name] {
-			return nil, fmt.Errorf("Oracle source query has duplicate column %q", name)
+			return nil, fmt.Errorf("oracle: source query has duplicate column %q", name)
 		}
 		seen[name] = true
 		precision, scale, length := 0, 0, 0
@@ -188,7 +188,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, table string, cfg 
 		return nil, "", err
 	}
 	if cfg.BatchSize < 0 {
-		return nil, "", fmt.Errorf("Oracle incremental batch size must be non-negative")
+		return nil, "", fmt.Errorf("oracle: incremental batch size must be non-negative")
 	}
 	schema, err := a.GetTableSchema(ctx, table)
 	if err != nil {
@@ -202,7 +202,7 @@ func (a *Adapter) ExportTableIncremental(ctx context.Context, table string, cfg 
 		}
 	}
 	if index < 0 {
-		return nil, "", fmt.Errorf("Oracle tracking field %q not found", cfg.TrackingField)
+		return nil, "", fmt.Errorf("oracle: tracking field %q not found", cfg.TrackingField)
 	}
 	tableSQL, err := a.quotedTable(table)
 	if err != nil {
