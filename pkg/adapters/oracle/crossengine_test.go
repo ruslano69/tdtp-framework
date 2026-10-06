@@ -115,3 +115,41 @@ func crossEngine(t *testing.T, dsn string) {
 		}
 	}
 }
+
+// replace/ignore without key fields must refuse BEFORE creating the table:
+// Oracle commits DDL implicitly, and the refusal used to come from the row
+// insert, after CREATE TABLE had already left an empty table behind.
+func TestOracleLiveKeylessReplaceCreatesNothing(t *testing.T) {
+	for _, version := range []string{"18", "21"} {
+		dsn := os.Getenv("TDTP_ORACLE" + version + "_DSN")
+		if dsn == "" {
+			t.Run(version+"c", func(t *testing.T) { t.Skip("Oracle test DSN is not configured") })
+			continue
+		}
+		t.Run(version+"c", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			g, err := adapters.New(ctx, adapters.Config{Type: AdapterType, DSN: dsn})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := g.(*Adapter)
+			t.Cleanup(func() { _ = a.Close(context.Background()) })
+			table := fmt.Sprintf("tdtp_nokey_%d", time.Now().UnixNano()%1_000_000_000)
+			t.Cleanup(func() { _ = a.DropTable(context.Background(), table) })
+			pkts, err := packet.NewGenerator().GenerateReference(table,
+				packet.Schema{Fields: []packet.Field{{Name: "v", Type: "TEXT"}}}, [][]string{{"x"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range []adapters.ImportStrategy{adapters.StrategyReplace, adapters.StrategyIgnore} {
+				if err := a.ImportPacket(ctx, pkts[0], s); err == nil || !strings.Contains(err.Error(), "requires key fields") {
+					t.Errorf("%s without keys: %v, want a key-fields error", s, err)
+				}
+				if exists, err := a.TableExists(ctx, table); err != nil || exists {
+					t.Errorf("%s without keys left a table behind (exists=%v, err=%v)", s, exists, err)
+				}
+			}
+		})
+	}
+}

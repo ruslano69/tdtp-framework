@@ -27,6 +27,9 @@ packet; the existing contract test only used Oracle-made tables
   Now `VARCHAR2(255 CHAR)`; non-key lengthless text stays CLOB.
 - **`REAL` lost precision**: `BINARY_FLOAT` turned 1234.56789012345 into
   1234.5679. Now `BINARY_DOUBLE`.
+- **`replace`/`ignore` without key fields left an empty table behind.**
+  The refusal came from the row insert, after `CREATE TABLE` — which Oracle
+  commits implicitly. Now checked before any DDL.
 - The shared `tdtql.SQLGenerator` gained two optional hooks (`FieldName`,
   `Value`) that an export dialect can supply; unset, generation is
   byte-identical, so the other adapters are untouched.
