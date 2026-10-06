@@ -7,6 +7,34 @@
 
 ## [Unreleased]
 
+### Fixed — Oracle with packets from other engines
+
+Found running the adapter against Oracle XE 18c and 21c with a SQLite
+packet; the existing contract test only used Oracle-made tables
+(upper-case columns, sized types), where none of this shows.
+
+- **Every `--where`/`--order-by` on an imported table read the whole table
+  into memory.** Imported columns keep their names quoted (`"name"`); the
+  pushdown SQL left them bare, Oracle folded `name` to `NAME`, ORA-00904,
+  and the export fell back to a full scan — refusing outright past
+  `--fallback-row-limit`. Columns are now quoted with their exact schema
+  spelling (case-insensitive lookup).
+- **Every date filter did the same, on any table.** `born > '1995-01-01'`
+  went through the session's `NLS_DATE_FORMAT` (DD-MON-RR): ORA-01861.
+  DATE/DATETIME/TIMESTAMP comparisons now use ANSI literals.
+- **A lengthless text key made the import impossible** — SQLite
+  `TEXT PRIMARY KEY`, PostgreSQL `text`: it became a CLOB key (ORA-02329).
+  Now `VARCHAR2(255 CHAR)`; non-key lengthless text stays CLOB.
+- **`REAL` lost precision**: `BINARY_FLOAT` turned 1234.56789012345 into
+  1234.5679. Now `BINARY_DOUBLE`.
+- The shared `tdtql.SQLGenerator` gained two optional hooks (`FieldName`,
+  `Value`) that an export dialect can supply; unset, generation is
+  byte-identical, so the other adapters are untouched.
+- `TestOracleLiveCrossEngine` pins all four on 18c and 21c with the
+  fallback limit at one row, so a failed pushdown cannot hide behind a
+  correct result. Disabling any fix fails it.
+
+
 ### Merged CLI v2 inspect and sync work
 
 - `inspect-table --json` now returns the complete table report, including

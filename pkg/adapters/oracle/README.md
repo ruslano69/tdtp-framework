@@ -50,6 +50,16 @@ the latter two require key fields. Oracle DDL commits implicitly, so a missing
 target table is created before the transactional row import. A failed batch
 rolls back its rows, but leaves that newly created empty table.
 
+Packets from other engines (SQLite, PostgreSQL, …) are imported with their
+field names quoted as written, so columns can be lower case (`"name"`). The
+pushdown SQL for `--where` / `--order-by` quotes every column with its exact
+schema spelling, so such tables are filtered inside Oracle; the lookup is
+case-insensitive. Comparisons on DATE / DATETIME / TIMESTAMP columns use ANSI
+`DATE '…'` / `TIMESTAMP '…'` literals, which do not depend on the session's
+`NLS_DATE_FORMAT`. On import, a text key without a length becomes
+`VARCHAR2(255 CHAR)` (a LOB cannot be a key), other lengthless text becomes
+`CLOB`, and TDTP `REAL` becomes `BINARY_DOUBLE`.
+
 To run the live test suite, start Oracle XE 18c and 21c separately, create a
 user with `CREATE TABLE` and `CREATE VIEW` privileges, and set:
 

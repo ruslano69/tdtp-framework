@@ -58,7 +58,10 @@ func typeForField(f packet.Field) (string, error) {
 		}
 		return fmt.Sprintf("NUMBER(%d,%d)", f.Precision, f.Scale), nil
 	case "REAL", "FLOAT":
-		return "BINARY_FLOAT", nil
+		// BINARY_DOUBLE, not BINARY_FLOAT: TDTP REAL is a 64-bit double —
+		// SQLite REAL and PostgreSQL float8 both arrive as REAL — and the
+		// 32-bit type kept ~7 digits: 1234.56789012345 came back 1234.5679.
+		return "BINARY_DOUBLE", nil
 	case "DOUBLE":
 		return "BINARY_DOUBLE", nil
 	case "BOOLEAN", "BOOL":
@@ -71,6 +74,14 @@ func typeForField(f packet.Field) (string, error) {
 	case "VARCHAR", "STRING", "TEXT":
 		if f.Length >= 1 && f.Length <= 4000 {
 			return fmt.Sprintf("VARCHAR2(%d CHAR)", f.Length), nil
+		}
+		if f.Key {
+			// A key cannot be a LOB (ORA-02329), and lengthless text keys are
+			// ordinary: SQLite TEXT PRIMARY KEY, PostgreSQL text. 255 CHAR, as
+			// the MySQL adapter defaults to, keeps a composite of several such
+			// columns inside Oracle's index-key size; a longer value fails the
+			// insert loudly (ORA-12899) rather than being cut.
+			return "VARCHAR2(255 CHAR)", nil
 		}
 		return "CLOB", nil
 	case "DATE":

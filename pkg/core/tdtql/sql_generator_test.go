@@ -583,3 +583,47 @@ func TestSQLGenerator_OffsetWithExplicitLimitUnchanged(t *testing.T) {
 		t.Errorf("sentinel must not appear when LIMIT is explicit: %s", result)
 	}
 }
+
+// The dialect hooks: nil keeps the ANSI default byte for byte; set, they
+// render every field reference and every comparison value — never a LIKE
+// pattern.
+func TestSQLGenerator_DialectHooks(t *testing.T) {
+	q := packet.NewQuery()
+	q.Filters = &packet.Filters{And: &packet.LogicalGroup{Filters: []packet.Filter{
+		{Field: "born", Operator: "gt", Value: "1995-01-01"},
+		{Field: "name", Operator: "like", Value: "Ив%"},
+		{Field: "born", Operator: "in", Value: "2001-02-03,2002-03-04"},
+	}}}
+	q.OrderBy = &packet.OrderBy{Field: "name", Direction: "DESC"}
+
+	plain, err := NewSQLGenerator().GenerateSQL("t", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plain, "born > '1995-01-01'") || !strings.Contains(plain, "ORDER BY name DESC") {
+		t.Errorf("default rendering changed: %s", plain)
+	}
+
+	g := NewSQLGenerator()
+	g.FieldName = func(n string) string { return `"` + n + `"` }
+	g.Value = func(f, v string) (string, bool) {
+		if f == "born" {
+			return "DATE '" + v + "'", true
+		}
+		return "", false
+	}
+	hooked, err := g.GenerateSQL("t", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"born" > DATE '1995-01-01'`,
+		`"name" LIKE 'Ив%'`, // a pattern, not a typed value
+		`"born" IN (DATE '2001-02-03', DATE '2002-03-04')`,
+		`ORDER BY "name" DESC`,
+	} {
+		if !strings.Contains(hooked, want) {
+			t.Errorf("want %q in %s", want, hooked)
+		}
+	}
+}

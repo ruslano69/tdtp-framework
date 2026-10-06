@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
@@ -108,6 +109,65 @@ func selectExpressions(schema packet.Schema, requested []string) []string {
 var rowLimit = regexp.MustCompile(`(?i) LIMIT ([0-9]+)(?: OFFSET ([0-9]+))?(\)|$)`)
 
 type sqlDialect struct{ adapter *Adapter }
+
+// FieldNameRenderer quotes every field reference with the column's exact
+// spelling from the schema. Oracle folds unquoted identifiers to upper case,
+// and this adapter creates columns with their TDTP names quoted ("name"):
+// the generator's bare `name` became NAME, failed with ORA-00904, and every
+// filtered or sorted export of an imported table read the whole table into
+// memory (and refused past --fallback-row-limit). The lookup is
+// case-insensitive, so `NAME = 'x'` still reaches a column called "name".
+func (d sqlDialect) FieldNameRenderer(schema packet.Schema) func(string) string {
+	return func(name string) string {
+		bare := tdtql.StripBrackets(strings.Trim(name, `"`))
+		for _, f := range schema.Fields {
+			if strings.EqualFold(f.Name, bare) {
+				return quote(f.Name)
+			}
+		}
+		return quote(bare)
+	}
+}
+
+// ValueRenderer turns comparison values on date/time columns into ANSI
+// literals — DATE 'YYYY-MM-DD' for DATE, TIMESTAMP '…' for DATETIME and
+// TIMESTAMP '… +00:00' for TIMESTAMP WITH TIME ZONE. A plain '1995-01-01' is
+// converted through the session's NLS_DATE_FORMAT (DD-MON-RR by default):
+// ORA-01861, and every date filter fell back to a full scan. The value is
+// read by the same converter the rest of the framework uses, so ISO forms
+// with T/Z parse too; anything it cannot parse keeps the default quoting.
+func (d sqlDialect) ValueRenderer(sch packet.Schema) func(string, string) (string, bool) {
+	conv := schema.NewConverter()
+	return func(field, value string) (string, bool) {
+		if value == "" {
+			return "", false
+		}
+		bare := tdtql.StripBrackets(strings.Trim(field, `"`))
+		for _, f := range sch.Fields {
+			if !strings.EqualFold(f.Name, bare) {
+				continue
+			}
+			typ := schema.NormalizeType(schema.DataType(f.Type))
+			if typ != schema.TypeDate && typ != schema.TypeDatetime && typ != schema.TypeTimestamp {
+				return "", false
+			}
+			tv, err := conv.ParseValue(value, schema.FieldDef{Name: f.Name, Type: typ, Nullable: true})
+			if err != nil || tv == nil || tv.TimeValue == nil {
+				return "", false
+			}
+			t := tv.TimeValue.UTC()
+			switch typ {
+			case schema.TypeDate:
+				return "DATE '" + t.Format("2006-01-02") + "'", true
+			case schema.TypeDatetime:
+				return "TIMESTAMP '" + t.Format("2006-01-02 15:04:05.999999999") + "'", true
+			default:
+				return "TIMESTAMP '" + t.Format("2006-01-02 15:04:05.999999999") + " +00:00'", true
+			}
+		}
+		return "", false
+	}
+}
 
 func (d sqlDialect) AdaptSQL(standardSQL, tableName string, schema packet.Schema, query *packet.Query) string {
 	sql := standardSQL

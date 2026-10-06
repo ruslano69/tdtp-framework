@@ -34,3 +34,23 @@ func TestOracleTypeMapping(t *testing.T) {
 		t.Fatal("NUMBER precision beyond 38 must fail")
 	}
 }
+
+// Types a non-Oracle packet brings: a lengthless TEXT key (SQLite, PG text)
+// cannot be a CLOB — ORA-02329 made the import impossible — and TDTP REAL is
+// a 64-bit double, which BINARY_FLOAT cut to ~7 digits.
+func TestTypeForField_CrossEngine(t *testing.T) {
+	for _, c := range []struct {
+		f    packet.Field
+		want string
+	}{
+		{packet.Field{Name: "code", Type: "TEXT", Key: true}, "VARCHAR2(255 CHAR)"},
+		{packet.Field{Name: "code", Type: "TEXT", Key: true, Length: 20}, "VARCHAR2(20 CHAR)"},
+		{packet.Field{Name: "note", Type: "TEXT"}, "CLOB"},
+		{packet.Field{Name: "score", Type: "REAL"}, "BINARY_DOUBLE"},
+	} {
+		got, err := typeForField(c.f)
+		if err != nil || got != c.want {
+			t.Errorf("%+v → %q, %v; want %q", c.f, got, err, c.want)
+		}
+	}
+}

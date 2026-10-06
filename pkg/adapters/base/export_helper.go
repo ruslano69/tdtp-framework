@@ -40,6 +40,24 @@ type SQLAdapter interface {
 	AdaptSQL(standardSQL string, tableName string, schema packet.Schema, query *packet.Query) string
 }
 
+// FieldNameRenderer is optional on an SQLAdapter: it renders field
+// references for the pushdown query instead of the generator's ANSI
+// default (simple names bare). Oracle needs it — a bare `name` is folded to
+// NAME, so a column created as "name" (every table the adapter imports from
+// another engine) failed with ORA-00904 and every filtered export fell back
+// to reading the whole table into memory.
+type FieldNameRenderer interface {
+	FieldNameRenderer(schema packet.Schema) func(name string) string
+}
+
+// ValueRenderer is optional on an SQLAdapter: it renders comparison values
+// with knowledge of the column type (tdtql.SQLGenerator.Value). Oracle uses
+// it for ANSI DATE/TIMESTAMP literals, which do not depend on the session's
+// NLS settings the way a plain '1995-01-01' does.
+type ValueRenderer interface {
+	ValueRenderer(schema packet.Schema) func(field, value string) (string, bool)
+}
+
 // RowPostProcessor — опциональный интерфейс для постобработки строк после чтения.
 // Адаптеры реализуют его когда нужна специфичная фильтрация столбцов
 // (например, MSSQL фильтрует read-only поля: identity, computed, timestamp).
@@ -228,6 +246,12 @@ func (h *ExportHelper) ExportTableWithQuery(
 
 	// 4. Пробуем транслировать TDTQL → SQL для оптимизации (pushdown filtering)
 	sqlGenerator := tdtql.NewSQLGenerator()
+	if r, ok := h.sqlAdapter.(FieldNameRenderer); ok {
+		sqlGenerator.FieldName = r.FieldNameRenderer(fullSchema)
+	}
+	if r, ok := h.sqlAdapter.(ValueRenderer); ok {
+		sqlGenerator.Value = r.ValueRenderer(fullSchema)
+	}
 	if sqlGenerator.CanTranslateToSQL(query) {
 		// Оптимизированный путь: фильтрация на уровне SQL
 		standardSQL, err := sqlGenerator.GenerateSQL(tableName, query)

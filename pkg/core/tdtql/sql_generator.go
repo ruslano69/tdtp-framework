@@ -18,7 +18,42 @@ import (
 const OffsetOnlyLimit = 9223372036854775807
 
 // SQLGenerator конвертирует TDTQL запросы в SQL
-type SQLGenerator struct{}
+type SQLGenerator struct {
+	// FieldName, when set, renders every field reference (SELECT list,
+	// WHERE, ORDER BY) instead of the default quoteFieldName. A dialect
+	// whose identifiers are case-sensitive once quoted needs it: Oracle
+	// folds an unquoted `name` to NAME, so a column created as "name" was
+	// unreachable and every filtered export fell back to a full scan.
+	// nil keeps the ANSI default — simple names bare, others quoted.
+	FieldName func(name string) string
+
+	// Value, when set, renders the right-hand side of a comparison
+	// (=, !=, <, <=, >, >=, BETWEEN, IN) for field; ok=false falls back to
+	// the default quoting. LIKE patterns never go through it. A dialect that
+	// will not compare a typed column with a plain string literal needs it:
+	// Oracle reads '1995-01-01' through the session's NLS_DATE_FORMAT
+	// (DD-MON-RR by default) and fails with ORA-01861, so every date filter
+	// fell back to a full scan.
+	Value func(field, value string) (literal string, ok bool)
+}
+
+// value renders a comparison value for field.
+func (g *SQLGenerator) value(field, v string) string {
+	if g.Value != nil {
+		if lit, ok := g.Value(field, v); ok {
+			return lit
+		}
+	}
+	return g.escapeSQLValue(v)
+}
+
+// fieldName renders one field reference.
+func (g *SQLGenerator) fieldName(name string) string {
+	if g.FieldName != nil {
+		return g.FieldName(name)
+	}
+	return quoteFieldName(name)
+}
 
 // NewSQLGenerator создает новый SQL генератор
 func NewSQLGenerator() *SQLGenerator {
@@ -49,7 +84,7 @@ func (g *SQLGenerator) GenerateSQL(tableName string, query *packet.Query) (strin
 	if len(query.Fields) > 0 {
 		quoted := make([]string, len(query.Fields))
 		for i, f := range query.Fields {
-			quoted[i] = quoteFieldName(f)
+			quoted[i] = g.fieldName(f)
 		}
 		parts = append(parts, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), qTable))
 	} else {
@@ -198,14 +233,14 @@ func quoteFieldName(name string) string {
 
 // generateFilterCondition конвертирует Filter в SQL условие
 func (g *SQLGenerator) generateFilterCondition(filter packet.Filter) (string, error) {
-	field := quoteFieldName(filter.Field)
+	field := g.fieldName(filter.Field)
 	operator := filter.Operator
 	value := filter.Value
 	value2 := filter.Value2
 
-	// Экранируем значения для SQL
-	escapedValue := g.escapeSQLValue(value)
-	escapedValue2 := g.escapeSQLValue(value2)
+	// Экранируем значения для SQL (LIKE-шаблоны — без Value: это не значение типа)
+	escapedValue := g.value(filter.Field, value)
+	escapedValue2 := g.value(filter.Field, value2)
 
 	switch operator {
 	case "eq":
@@ -237,7 +272,7 @@ func (g *SQLGenerator) generateFilterCondition(filter packet.Filter) (string, er
 		values := strings.Split(value, ",")
 		var escapedValues []string
 		for _, v := range values {
-			escapedValues = append(escapedValues, g.escapeSQLValue(strings.TrimSpace(v)))
+			escapedValues = append(escapedValues, g.value(filter.Field, strings.TrimSpace(v)))
 		}
 		return fmt.Sprintf("%s IN (%s)", field, strings.Join(escapedValues, ", ")), nil
 
@@ -245,16 +280,16 @@ func (g *SQLGenerator) generateFilterCondition(filter packet.Filter) (string, er
 		values := strings.Split(value, ",")
 		var escapedValues []string
 		for _, v := range values {
-			escapedValues = append(escapedValues, g.escapeSQLValue(strings.TrimSpace(v)))
+			escapedValues = append(escapedValues, g.value(filter.Field, strings.TrimSpace(v)))
 		}
 		return fmt.Sprintf("%s NOT IN (%s)", field, strings.Join(escapedValues, ", ")), nil
 
 	case "like":
 		// value уже содержит wildcards (%, _)
-		return fmt.Sprintf("%s LIKE %s", field, escapedValue), nil
+		return fmt.Sprintf("%s LIKE %s", field, g.escapeSQLValue(value)), nil
 
 	case "not_like":
-		return fmt.Sprintf("%s NOT LIKE %s", field, escapedValue), nil
+		return fmt.Sprintf("%s NOT LIKE %s", field, g.escapeSQLValue(value)), nil
 
 	case "is_null":
 		return fmt.Sprintf("%s IS NULL", field), nil
@@ -332,11 +367,11 @@ func (g *SQLGenerator) generateReversedOrderByClause(orderBy *packet.OrderBy) st
 	parts := make([]string, 0, 1+len(orderBy.Fields))
 
 	if orderBy.Field != "" {
-		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(orderBy.Field), reverseDirection(orderBy.Direction)))
+		parts = append(parts, fmt.Sprintf("%s %s", g.fieldName(orderBy.Field), reverseDirection(orderBy.Direction)))
 	}
 
 	for _, field := range orderBy.Fields {
-		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(field.Name), reverseDirection(field.Direction)))
+		parts = append(parts, fmt.Sprintf("%s %s", g.fieldName(field.Name), reverseDirection(field.Direction)))
 	}
 
 	return strings.Join(parts, ", ")
@@ -356,7 +391,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 		if orderBy.Direction != "" {
 			direction = strings.ToUpper(orderBy.Direction)
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(orderBy.Field), direction))
+		parts = append(parts, fmt.Sprintf("%s %s", g.fieldName(orderBy.Field), direction))
 	}
 
 	// Множественная сортировка
@@ -365,7 +400,7 @@ func (g *SQLGenerator) generateOrderByClause(orderBy *packet.OrderBy) string {
 		if field.Direction != "" {
 			direction = strings.ToUpper(field.Direction)
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", quoteFieldName(field.Name), direction))
+		parts = append(parts, fmt.Sprintf("%s %s", g.fieldName(field.Name), direction))
 	}
 
 	return strings.Join(parts, ", ")
