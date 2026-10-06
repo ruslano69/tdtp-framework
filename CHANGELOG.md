@@ -4,6 +4,22 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+## [1.26.4] - 2026-10-06
+
+### Fixed — database adapter round trips
+
+- DECIMAL values now retain their exact digits and declared precision/scale
+  across PostgreSQL, MySQL, MSSQL and Oracle; scale zero is no longer treated
+  as an unspecified default. Large integers keep their `bigint` subtype
+  through Oracle and are rejected when they exceed an `int64` target.
+- Oracle's v2 adapter now pushes filters and sorting down for imported tables
+  with quoted or mixed-case columns, compares dates independently of the
+  session's NLS format, supports lengthless text keys, and checks keyless
+  `replace`/`ignore` before creating a table.
+- MySQL and MSSQL exports report DECIMAL precision and scale from the actual
+  column declaration. Oracle maps TDTP `REAL` to `BINARY_DOUBLE` to avoid
+  truncating source precision.
+
 ### Fixed — DECIMAL was rounded through float64, and scale 0 meant 2
 
 Found by importing the same packet into five live engines (SQLite,
