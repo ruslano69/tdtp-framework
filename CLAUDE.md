@@ -489,6 +489,16 @@ synthetic strings it manages 6–7×, which is still **30–50% denser than zstd
 
 - `nokafka` — excludes kafka-go and its dependencies, for offline builds or builds without Kafka
 - `nosqlite` — excludes modernc.org/sqlite, for builds without SQLite
+- `tdtp_devkey` — embeds the **development** license key
+  (`pkg/license/pubkey_devkey.go`) instead of the vendor key, so licenses
+  signed with the local throwaway key verify. For offline end-to-end runs of
+  licensed features (oracle, `--enc`). **Never for release builds**;
+  `TestReleaseBuildDoesNotEmbedDevKey` fails if the dev key ever lands in
+  `pubkey.go` itself. Do not paste a key into `pubkey.go` by hand.
+
+`go test` ignores the developer's `TDTP_LICENSE`: `cmd/tdtpcli_v2` and
+`cmd/orchestrator` clear it in `TestMain`. A user-wide `TDTP_LICENSE` for
+another tool's license (another key) used to fail 100+ tests there.
 
 A quick build without Kafka:
 ```bash
