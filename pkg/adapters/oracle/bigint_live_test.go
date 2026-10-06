@@ -11,6 +11,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -29,6 +30,8 @@ func TestOracleLiveBigintToOtherEngines(t *testing.T) {
 	targets := map[string]adapters.Config{
 		"mssql": {Type: "mssql", DSN: envOr("MSSQL_TEST_DSN_PROD",
 			"server=localhost,1434;user id=sa;password=ProdPassword123!;database=ProdSimDB;encrypt=disable")},
+		"postgres": {Type: "postgres", DSN: envOr("POSTGRES_TEST_DSN",
+			"postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test")},
 		"mysql": {Type: "mysql", DSN: envOr("MYSQL_TEST_DSN",
 			"tdtp_user:tdtp_dev_pass_2025@tcp(127.0.0.1:3306)/tdtp_test?parseTime=true")},
 	}
