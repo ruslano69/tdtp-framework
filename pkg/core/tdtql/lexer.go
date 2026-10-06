@@ -2,6 +2,7 @@ package tdtql
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
 )
 
@@ -149,14 +150,20 @@ func (l *Lexer) NextToken() Token {
 	case '*':
 		tok.Type = TokenStar
 		tok.Literal = string(l.ch)
-	case '\'':
+	case '\'', '"':
+		// '...' is a string; "..." is an ANSI identifier ("Field Name").
+		// readString has already advanced, so no l.readChar() here.
+		quote := l.ch
 		tok.Type = TokenString
-		tok.Literal = l.readString(l.ch)
-		return tok // не вызываем l.readChar() так как readString уже продвинулся
-	case '"':
-		// ANSI SQL: double-quoted identifier "Field Name" → TokenIdent "Field Name"
-		tok.Type = TokenIdent
-		tok.Literal = l.readString(l.ch)
+		if quote == '"' {
+			tok.Type = TokenIdent
+		}
+		lit, ok := l.readString(quote)
+		tok.Literal = lit
+		if !ok {
+			tok.Type = TokenIllegal
+			tok.Literal = unterminatedPrefix + string(quote) + lit
+		}
 		return tok
 	case '[':
 		// MSSQL/Access bracket-quoted identifier: [Field Name] → TokenIdent "Field Name"
@@ -246,26 +253,41 @@ func (l *Lexer) readBracketedIdent() string {
 	return str
 }
 
-// readString читает строку в кавычках
-func (l *Lexer) readString(quote byte) string {
-	l.readChar() // пропускаем открывающую кавычку
-	position := l.pos
+// unterminatedPrefix marks the TokenIllegal a literal without its closing
+// quote becomes, so the parser can say so instead of "expected value".
+const unterminatedPrefix = "unterminated string "
 
-	for l.ch != quote && l.ch != 0 {
-		// Обработка экранированных кавычек
-		if l.ch == '\\' && l.peekChar() == quote {
-			l.readChar() // пропускаем \
+// readString reads a quoted literal from its opening quote. The quote
+// written twice stands for one quote character, as in SQL (O, two single
+// quotes, Brien → O'Brien; the same for double quotes inside "..."); so
+// does a backslash before the quote (\' → '). Any other backslash is kept
+// as written, so 'C:\temp' stays C:\temp. ok is false when the input ends
+// before the closing quote.
+//
+// It used to return the raw span: \' kept its backslash, so 'O\'Brien'
+// filtered on O\'Brien and matched nothing, silently; the doubled quote was
+// no escape at all, so the SQL spelling of O'Brien ended after the O; and an
+// unterminated literal ran to the end of the input as if it had been closed.
+func (l *Lexer) readString(quote byte) (string, bool) {
+	var b strings.Builder
+	l.readChar() // opening quote
+	for {
+		switch {
+		case l.ch == 0:
+			return b.String(), false
+		case l.ch == '\\' && l.peekChar() == quote,
+			l.ch == quote && l.peekChar() == quote:
+			l.readChar()
+			b.WriteByte(quote)
+			l.readChar()
+		case l.ch == quote:
+			l.readChar() // closing quote
+			return b.String(), true
+		default:
+			b.WriteByte(l.ch)
+			l.readChar()
 		}
-		l.readChar()
 	}
-
-	str := l.input[position:l.pos]
-
-	if l.ch == quote {
-		l.readChar() // пропускаем закрывающую кавычку
-	}
-
-	return str
 }
 
 // skipWhitespace пропускает пробелы

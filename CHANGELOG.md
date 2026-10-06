@@ -39,6 +39,25 @@ type: NUMERIC affinity keeps a non-integer as REAL, so fractional values
 past 15–17 significant digits round there. Integers up to int64 are
 exact. The live test pins "no worse than float64" for those cells.
 
+### Fixed — TDTQL string literals with a quote inside
+
+A value containing an apostrophe could not be filtered on reliably:
+
+| `--where` | Before | Now |
+|---|---|---|
+| `name = 'O''Brien'` (SQL standard) | error | matches `O'Brien` |
+| `name = 'O\'Brien'` | value `O\'Brien` — **0 rows, no error** | matches `O'Brien` |
+| `name = 'plain` (no closing quote) | **accepted** as `'plain'` | error: the closing quote is missing |
+
+The lexer returned the raw span between the quotes: the backslash stayed in
+the value, the doubled quote was not an escape, and the end of the input was
+taken as a closing quote. Any other backslash is still kept as written
+(`'C:\temp'`), and `"O'Brien"` keeps working. A doubled quote inside a
+double-quoted identifier (`"a""b"`) is now `a"b`, as in ANSI SQL. Two lexer
+tests pinned the old behaviour (`'it\'s'` → `it\'s`, an unterminated literal
+as a string); they now assert the fix. Reaches the CLI (v1, v2),
+`tdtpserve` and the Python bindings.
+
 ### Fixed — `--map --quiet` one-shot reports its row total
 
 The one-shot mapping path suppressed progress but also omitted the final

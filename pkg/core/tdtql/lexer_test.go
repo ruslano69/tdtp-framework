@@ -99,7 +99,13 @@ func TestLexer_Strings(t *testing.T) {
 		{"'hello world'", "hello world"},
 		{"'123'", "123"},
 		{"''", ""},
-		{`'it\'s'`, "it\\'s"}, // escaped quote (backslash preserved)
+		// Escapes produce the quote itself. The backslash form used to keep
+		// its backslash (pinned here as "it\\'s"), so the filter matched
+		// nothing; '' was no escape at all.
+		{`'it\'s'`, "it's"},
+		{`'it''s'`, "it's"},
+		{`''''`, "'"},
+		{`'C:\temp'`, `C:\temp`}, // a backslash before anything else stays
 	}
 
 	for _, tt := range tests {
@@ -292,18 +298,19 @@ func TestLexer_OnlyWhitespace(t *testing.T) {
 	}
 }
 
+// An unterminated literal used to be read to the end of the input and
+// returned as a closed string, so `name = 'plain` filtered on "plain".
 func TestLexer_UnterminatedString(t *testing.T) {
-	input := "'unterminated"
-	lexer := NewLexer(input)
-	tok := lexer.NextToken()
-
-	if tok.Type != TokenString {
-		t.Errorf("expected TokenString, got %v", tok.Type)
+	tok := NewLexer("'unterminated").NextToken()
+	if tok.Type != TokenIllegal || tok.Literal != unterminatedPrefix+"'unterminated" {
+		t.Errorf("got %v %q, want TokenIllegal %q", tok.Type, tok.Literal, unterminatedPrefix+"'unterminated")
 	}
+}
 
-	// Строка должна содержать все до конца
-	if tok.Literal != "unterminated" {
-		t.Errorf("expected 'unterminated', got %q", tok.Literal)
+func TestLexer_DoubledQuoteInIdentifier(t *testing.T) {
+	tok := NewLexer(`"a""b"`).NextToken()
+	if tok.Type != TokenIdent || tok.Literal != `a"b` {
+		t.Errorf("got %v %q, want TokenIdent %q", tok.Type, tok.Literal, `a"b`)
 	}
 }
 
