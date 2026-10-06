@@ -347,6 +347,14 @@ func ConvertRowToSQLValues(
 			}
 		}
 
+		// Integer DECIMAL hinted "bigint" (Oracle NUMBER(19,0)): exact int64,
+		// never via the float64 the DECIMAL path below produces — that keeps
+		// ~16 digits and turned 9007199254740993 into …992.
+		if packet.BigintDecimal(field) {
+			args[i] = packet.BigintValue(value)
+			continue
+		}
+
 		// Для ключевых полей (PRIMARY KEY) NULL не допускается
 		nullable := true
 		if field.Key {

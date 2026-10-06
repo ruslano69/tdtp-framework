@@ -165,6 +165,9 @@ func TDTPToPostgreSQLStrict(field packet.Field, strict bool) string {
 		return "DOUBLE PRECISION"
 
 	case schema.TypeDecimal:
+		if packet.BigintDecimal(field) {
+			return "BIGINT" // integer DECIMAL hinted "bigint" (Oracle NUMBER(19,0))
+		}
 		precision := field.Precision
 		scale := field.Scale
 		if precision == 0 {

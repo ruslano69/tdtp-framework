@@ -28,6 +28,9 @@ func TDTPToMySQL(field packet.Field) string {
 		return "DOUBLE"
 
 	case "DECIMAL":
+		if packet.BigintDecimal(field) {
+			return "BIGINT" // integer DECIMAL hinted "bigint" (Oracle NUMBER(19,0))
+		}
 		precision := field.Precision
 		if precision == 0 {
 			precision = 18 // По умолчанию

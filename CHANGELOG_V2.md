@@ -27,6 +27,16 @@ packet; the existing contract test only used Oracle-made tables
   Now `VARCHAR2(255 CHAR)`; non-key lengthless text stays CLOB.
 - **`REAL` lost precision**: `BINARY_FLOAT` turned 1234.56789012345 into
   1234.5679. Now `BINARY_DOUBLE`.
+- **`INTEGER` came back as plain `DECIMAL` after a pass through Oracle**
+  and turned into `NUMERIC(19,…)` elsewhere. Oracle now reports
+  `NUMBER(19,0)` as `DECIMAL` + subtype `bigint` (the subtype PostgreSQL and
+  MSSQL already use); PostgreSQL, MSSQL and MySQL create `BIGINT` for it,
+  SQLite ignores the hint. `DECIMAL` keeps a native value above int64 exact;
+  such a value makes a `BIGINT` target refuse the row. The value travels as
+  an exact `int64` (`packet.BigintValue`) — the DECIMAL import path rounds
+  through `float64`, which turned 9007199254740993 into …992. Live:
+  INTEGER → Oracle → MSSQL `BIGINT` with 2^53+1 and min int64 exact, and
+  9500000000000000000 refused.
 - **`replace`/`ignore` without key fields left an empty table behind.**
   The refusal came from the row insert, after `CREATE TABLE` — which Oracle
   commits implicitly. Now checked before any DDL.
