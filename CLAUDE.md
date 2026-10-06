@@ -1015,6 +1015,28 @@ live driver — none of this is visible to a unit test) and the
 
 ---
 
+## DECIMAL: exact text, never float64 (IMPORTANT)
+
+`TypedValue.DecimalValue` is the exact decimal text; `FloatValue` is still
+set for DECIMAL but rounds past ~16 significant digits. **Anything that
+writes or prints a DECIMAL must take `DecimalValue`** — a float64 argument
+is how MSSQL silently stored `-9007199254740993` as `…992`.
+
+- **Scale 0 is a scale; precision 0 is unconstrained.** Neither is "unset".
+  Defaulting scale 0 to 2 made `DECIMAL(19,0)` refuse its own values.
+- **An export that declares the wrong (p,s) is invisible in the values.**
+  A cell that fails to parse goes into the packet raw, so the round trip
+  still matches. `TestDecimalExactAcrossEngines` (`pkg/adapters`) checks the
+  exported schema for exactly this reason — keep that assertion.
+- **SQLite cannot hold more than a double** for non-integer DECIMAL
+  (NUMERIC affinity → REAL). Not fixable without changing the column's
+  affinity; the test pins "no worse than float64" there.
+
+Run the live test against all five engines with the DSN variables from the
+table above plus `TDTP_ORACLE21_DSN`.
+
+---
+
 ## PostgreSQL dates: what pgx actually hands over (IMPORTANT)
 
 Scanned into `any` (which is what the adapters do), pgx v5 returns:

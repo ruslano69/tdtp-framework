@@ -506,3 +506,20 @@ func TestComparator_Errors(t *testing.T) {
 		}
 	})
 }
+
+// DECIMAL compares exactly: as floats 9007199254740993 equals …992, and a
+// --where id = 9007199254740993 would pick both rows.
+func TestComparator_DecimalExact(t *testing.T) {
+	comp := NewComparator()
+	conv := schema.NewConverter()
+	f := schema.FieldDef{Name: "n", Type: "DECIMAL"} // unconstrained
+	if eq, err := comp.Equals("9007199254740993", "9007199254740992", f, conv); err != nil || eq {
+		t.Errorf("…993 = …992: %v, %v", eq, err)
+	}
+	if eq, err := comp.Equals("0.10", "0.1", f, conv); err != nil || !eq {
+		t.Errorf("0.10 = 0.1: %v, %v", eq, err)
+	}
+	if gt, err := comp.GreaterThan("9007199254740993", "9007199254740992", f, conv); err != nil || !gt {
+		t.Errorf("…993 > …992: %v, %v", gt, err)
+	}
+}

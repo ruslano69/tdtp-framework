@@ -168,15 +168,13 @@ func TDTPToPostgreSQLStrict(field packet.Field, strict bool) string {
 		if packet.BigintDecimal(field) {
 			return "BIGINT" // integer DECIMAL hinted "bigint" (Oracle NUMBER(19,0))
 		}
-		precision := field.Precision
-		scale := field.Scale
-		if precision == 0 {
-			precision = 18
+		if field.Precision <= 0 {
+			// Unconstrained — the source said nothing about digits, so
+			// inventing (18,2) would refuse or round values it never limited.
+			return "NUMERIC"
 		}
-		if scale == 0 {
-			scale = 2
-		}
-		return fmt.Sprintf("NUMERIC(%d,%d)", precision, scale)
+		// Scale 0 is a scale: DECIMAL(19,0) is an integer column, not (19,2).
+		return fmt.Sprintf("NUMERIC(%d,%d)", field.Precision, field.Scale)
 
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:
 		if strict && field.Length > 0 {
@@ -256,14 +254,10 @@ func BuildFieldFromPGColumn(name, dataType string, isNullable, isPK bool, defaul
 			field.Length = length
 		}
 	case "numeric", "decimal":
+		// Bare numeric reads as precision 0 — unconstrained — and stays so:
+		// (18,2) would make the packet refuse 0.001 and 10^20 the column holds.
 		field.Precision = precision
 		field.Scale = scale
-		if field.Precision == 0 {
-			field.Precision = 18
-		}
-		if field.Scale == 0 {
-			field.Scale = 2
-		}
 	case "timestamp with time zone", "timestamptz":
 		field.Timezone = "UTC"
 	}

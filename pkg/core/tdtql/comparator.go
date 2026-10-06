@@ -1,6 +1,7 @@
 package tdtql
 
 import (
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -52,6 +53,12 @@ func compareTyped(normalized schema.DataType, rowTV, filterTV *schema.TypedValue
 		return 0
 
 	case schema.TypeReal, schema.TypeDecimal:
+		if rowTV.DecimalValue != nil && filterTV.DecimalValue != nil {
+			// Exact: as floats 9007199254740993 = 9007199254740992.
+			r, _ := new(big.Rat).SetString(*rowTV.DecimalValue)
+			f, _ := new(big.Rat).SetString(*filterTV.DecimalValue)
+			return r.Cmp(f)
+		}
 		if rowTV.FloatValue == nil || filterTV.FloatValue == nil {
 			return strings.Compare(rawRow, rawFilter)
 		}

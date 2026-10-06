@@ -231,15 +231,17 @@ func TDTPToMSSQL(field packet.Field) string {
 			return "SMALLMONEY"
 		}
 
-		precision := field.Precision
-		scale := field.Scale
-		if precision == 0 {
-			precision = 18
+		if field.Precision <= 0 {
+			// Unconstrained source (PostgreSQL numeric, Oracle NUMBER). MSSQL
+			// has no such type; DECIMAL(18,0) would round every fraction away,
+			// so take the widest: 20 integer digits, 18 after the point.
+			return "DECIMAL(38,18)"
 		}
+		scale := field.Scale
 		if scale < 0 {
 			scale = 2
 		}
-		return fmt.Sprintf("DECIMAL(%d,%d)", precision, scale)
+		return fmt.Sprintf("DECIMAL(%d,%d)", field.Precision, scale)
 
 	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble:
 		if subtype == "real" {
@@ -407,7 +409,10 @@ func BuildFieldFromColumn(columnName, dataType string, length, precision, scale 
 			fullType = fmt.Sprintf("%s(%d)", dataType, length)
 		}
 	case precision > 0:
-		if scale > 0 {
+		// decimal(19) would parse back as a length, and precision would fall
+		// to the default 18: a DECIMAL(19,0) column refused its own 19-digit
+		// values. Spell (p,0) out for the types that have a scale.
+		if scale > 0 || strings.EqualFold(dataType, "decimal") || strings.EqualFold(dataType, "numeric") {
 			fullType = fmt.Sprintf("%s(%d,%d)", dataType, precision, scale)
 		} else {
 			fullType = fmt.Sprintf("%s(%d)", dataType, precision)

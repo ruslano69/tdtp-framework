@@ -121,6 +121,24 @@ func TestWrite_BigIntAsString(t *testing.T) {
 	}
 }
 
+func TestWrite_DecimalPastDoubleAsString(t *testing.T) {
+	// The integer rule, for DECIMAL: a number while a double holds it
+	// exactly, a string past that.
+	pkt := testPacket(t, [][]string{
+		{"1", "x", "1234567890123450.1234", "1"},
+		{"2", "y", "0.10", "1"},
+	})
+	var b bytes.Buffer
+	if _, err := Write(context.Background(), &b, pkt, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"balance":"1234567890123450.1234"`, `"balance":0.1`} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("want %s in %s", want, b.String())
+		}
+	}
+}
+
 func TestWrite_ProjectionAndFilter(t *testing.T) {
 	pkt := testPacket(t, [][]string{
 		{"1", "Alice", "100", "1"},

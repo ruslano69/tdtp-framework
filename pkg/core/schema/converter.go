@@ -3,6 +3,7 @@ package schema
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -108,57 +109,110 @@ func (c *Converter) parseReal(tv *TypedValue, field FieldDef) (*TypedValue, erro
 
 // parseDecimal парсит DECIMAL (как float с проверкой precision/scale)
 func (c *Converter) parseDecimal(tv *TypedValue, field FieldDef) (*TypedValue, error) {
-	val, err := strconv.ParseFloat(tv.RawValue, 64)
-	if err != nil {
-		return nil, &ValidationError{
-			Field:   field.Name,
-			Message: "invalid decimal value",
-			Value:   tv.RawValue,
+	exact, intDigits, fracDigits, ok := canonicalDecimal(tv.RawValue)
+	if !ok {
+		// Not a decimal literal. ±Inf/NaN still parse as floats — the
+		// SpecialValues markers decode to them — and carry no exact text.
+		val, err := strconv.ParseFloat(tv.RawValue, 64)
+		if err != nil || !(math.IsInf(val, 0) || math.IsNaN(val)) {
+			return nil, &ValidationError{
+				Field:   field.Name,
+				Message: "invalid decimal value",
+				Value:   tv.RawValue,
+			}
+		}
+		tv.FloatValue = &val
+		return tv, nil
+	}
+
+	// Precision 0 is an unconstrained column (PostgreSQL numeric, Oracle
+	// NUMBER): no digit limits. With a precision, scale 0 means scale 0 —
+	// it used to mean "unset" and become 2, so DECIMAL(19,0) was checked
+	// as DECIMAL(19,2) and a 19-digit integer was refused as "precision
+	// exceeds 19". Digits are counted on the exact text, never via float.
+	if field.Precision > 0 {
+		if fracDigits > field.Scale {
+			return nil, &ValidationError{
+				Field:   field.Name,
+				Message: fmt.Sprintf("decimal scale exceeds %d", field.Scale),
+				Value:   tv.RawValue,
+			}
+		}
+		if intDigits > field.Precision-field.Scale {
+			return nil, &ValidationError{
+				Field:   field.Name,
+				Message: fmt.Sprintf("decimal precision exceeds %d", field.Precision),
+				Value:   tv.RawValue,
+			}
 		}
 	}
 
-	// Проверка precision и scale
-	precision := field.Precision
-	if precision == 0 {
-		precision = GetDefaultPrecision()
-	}
-	scale := field.Scale
-	if scale == 0 {
-		scale = GetDefaultScale()
-	}
-
-	// Проверяем scale по исходному значению (до нормализации),
-	// чтобы "123.456" с scale=2 давало ошибку.
-	rawParts := strings.Split(strings.TrimRight(strings.TrimRight(tv.RawValue, "0"), "."), ".")
-	if len(rawParts) > 1 && len(rawParts[1]) > scale {
-		return nil, &ValidationError{
-			Field:   field.Name,
-			Message: fmt.Sprintf("decimal scale exceeds %d", scale),
-			Value:   tv.RawValue,
-		}
-	}
-
-	// Нормализуем scientific notation (4.867895e+08 → "486789500")
-	// strconv.FormatFloat с 'f' всегда даёт обычную запись без экспоненты.
-	normalized := strconv.FormatFloat(val, 'f', scale, 64)
-
-	// Проверка количества цифр для precision
-	parts := strings.Split(normalized, ".")
-	totalDigits := len(strings.ReplaceAll(parts[0], "-", ""))
-	if len(parts) > 1 {
-		totalDigits += len(parts[1])
-	}
-
-	if totalDigits > precision {
-		return nil, &ValidationError{
-			Field:   field.Name,
-			Message: fmt.Sprintf("decimal precision exceeds %d", precision),
-			Value:   tv.RawValue,
-		}
-	}
-
-	tv.FloatValue = &val
+	f, _ := strconv.ParseFloat(exact, 64) // convenience only; may round
+	tv.FloatValue = &f
+	tv.DecimalValue = &exact
 	return tv, nil
+}
+
+// canonicalDecimal turns a decimal literal — optional sign, digits, optional
+// fraction, optional exponent (drivers hand over 4.867895e+08) — into exact
+// plain text: no exponent, no leading zeros in the integer part, no trailing
+// zeros in the fraction, "0" for zero. intDigits and fracDigits are the
+// significant digits on each side of the point. ok is false for anything
+// else (Inf, NaN, "1/3", empty).
+func canonicalDecimal(raw string) (exact string, intDigits, fracDigits int, ok bool) {
+	s := raw
+	neg := false
+	if s != "" && (s[0] == '+' || s[0] == '-') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	exp := 0
+	if k := strings.IndexAny(s, "eE"); k >= 0 {
+		e, err := strconv.Atoi(s[k+1:])
+		if err != nil {
+			return "", 0, 0, false
+		}
+		exp, s = e, s[:k]
+	}
+	intPart, fracPart := s, ""
+	if k := strings.IndexByte(s, '.'); k >= 0 {
+		intPart, fracPart = s[:k], s[k+1:]
+	}
+	if intPart == "" && fracPart == "" {
+		return "", 0, 0, false
+	}
+	for _, r := range intPart + fracPart {
+		if r < '0' || r > '9' {
+			return "", 0, 0, false
+		}
+	}
+	// Shift the point by the exponent.
+	digits := intPart + fracPart
+	point := len(intPart) + exp
+	switch {
+	case point <= 0:
+		digits = strings.Repeat("0", -point+1) + digits
+		point = 1
+	case point > len(digits):
+		digits += strings.Repeat("0", point-len(digits))
+	}
+	intPart = strings.TrimLeft(digits[:point], "0")
+	fracPart = strings.TrimRight(digits[point:], "0")
+	if intPart == "" {
+		intPart = "0"
+	}
+	exact = intPart
+	if fracPart != "" {
+		exact += "." + fracPart
+	}
+	if neg { // "-0" stays "-0": every reader takes it as zero, and it is what the bytes said
+		exact = "-" + exact
+	}
+	intDigits = len(intPart)
+	if intPart == "0" {
+		intDigits = 0
+	}
+	return exact, intDigits, len(fracPart), true
 }
 
 // parseText парсит TEXT/VARCHAR/STRING
@@ -373,6 +427,9 @@ func (c *Converter) FormatValue(tv *TypedValue) string {
 			return strconv.FormatInt(*tv.IntValue, 10)
 		}
 	case TypeReal, TypeDecimal:
+		if tv.DecimalValue != nil {
+			return *tv.DecimalValue // exact; FloatValue may have rounded
+		}
 		if tv.FloatValue != nil {
 			return strconv.FormatFloat(*tv.FloatValue, 'f', -1, 64)
 		}

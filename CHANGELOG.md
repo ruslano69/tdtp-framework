@@ -4,6 +4,41 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — DECIMAL was rounded through float64, and scale 0 meant 2
+
+Found by importing the same packet into five live engines (SQLite,
+PostgreSQL 16, MySQL 8, MSSQL, Oracle 21c) and exporting it back.
+`DECIMAL(20,4)`, `(38,10)`, `(19,0)`, `(10,2)`; only Oracle came back
+intact, because its adapter already bypassed the converter.
+
+- **Every DECIMAL went through a float64**, ~16 significant digits. MSSQL
+  stored `1234567890123450.1234` as `1234567890123450`, a 28-digit value
+  as `…6900000000000`, `-9007199254740993` as `…992` — silently.
+  `TypedValue.DecimalValue` now carries the exact text (exponents are
+  expanded by shifting digits, not by a float), and every writer and
+  `FormatValue` use it. `FloatValue` stays, as a convenience.
+- **Scale 0 meant "default 2", precision 0 meant "18".** `DECIMAL(19,0)`
+  was validated as `(19,2)` and refused its own 19-digit values; PostgreSQL
+  and MySQL created it as `NUMERIC(19,2)`. Scale 0 is now a scale, and
+  precision 0 is an unconstrained column: PostgreSQL and SQLite create a
+  bare `NUMERIC`, MySQL `DECIMAL(65,30)`, MSSQL `DECIMAL(38,18)` — not
+  `DECIMAL(18,0)`, which rounded every fraction away. A bare PostgreSQL
+  `numeric` and SQLite `NUMERIC` export as precision 0 instead of
+  inventing `(18,2)`.
+- **Two exports declared the wrong (p,s), unseen** because a cell that
+  fails to parse is passed through raw: MySQL read `data_type`, which has
+  no parameters, and declared every DECIMAL `(18,2)`; MSSQL spelled
+  `decimal(19,0)` as `decimal(19)`, which parsed back as a length, so
+  precision fell to 18. Both now declare the column as created.
+- `--to-json` writes a DECIMAL as a number while a double holds it
+  exactly and as a string past that — the rule BIGINT already followed.
+  TDTQL compares DECIMALs exactly: as floats `9007199254740993 = …992`.
+
+**SQLite stays limited, by design of its storage.** It has no decimal
+type: NUMERIC affinity keeps a non-integer as REAL, so fractional values
+past 15–17 significant digits round there. Integers up to int64 are
+exact. The live test pins "no worse than float64" for those cells.
+
 ### Fixed — `--map --quiet` one-shot reports its row total
 
 The one-shot mapping path suppressed progress but also omitted the final

@@ -51,15 +51,13 @@ func TDTPToSQLite(field packet.Field) string {
 		return "REAL"
 	case schema.TypeDecimal:
 		// SQLite не поддерживает DECIMAL нативно, используем NUMERIC
-		precision := field.Precision
-		scale := field.Scale
-		if precision == 0 {
-			precision = 18
+		if field.Precision <= 0 {
+			// Unconstrained — the source said nothing about digits, so
+			// inventing (18,2) would refuse or round values it never limited.
+			return "NUMERIC"
 		}
-		if scale == 0 {
-			scale = 2
-		}
-		return fmt.Sprintf("NUMERIC(%d,%d)", precision, scale)
+		// Scale 0 is a scale: DECIMAL(19,0) is an integer column, not (19,2).
+		return fmt.Sprintf("NUMERIC(%d,%d)", field.Precision, field.Scale)
 	case schema.TypeText, schema.TypeVarchar, schema.TypeChar, schema.TypeString:
 		// В SQLite TEXT не имеет ограничения длины
 		return "TEXT"
@@ -130,14 +128,10 @@ func BuildFieldFromColumn(name, dataType string, isPK bool) (packet.Field, error
 			field.Length = length
 		}
 	case "NUMERIC", "DECIMAL":
+		// Bare NUMERIC stays precision 0 — unconstrained; (18,2) would make
+		// the packet refuse values the column holds.
 		field.Precision = precision
 		field.Scale = scale
-		if field.Precision == 0 {
-			field.Precision = 18
-		}
-		if field.Scale == 0 {
-			field.Scale = 2
-		}
 	case "DATETIME", "TIMESTAMP":
 		field.Timezone = "UTC"
 	}
