@@ -31,15 +31,13 @@ func TDTPToMySQL(field packet.Field) string {
 		if packet.BigintDecimal(field) {
 			return "BIGINT" // integer DECIMAL hinted "bigint" (Oracle NUMBER(19,0))
 		}
-		precision := field.Precision
-		if precision == 0 {
-			precision = 18 // По умолчанию
+		if field.Precision <= 0 {
+			// MySQL has no unconstrained DECIMAL (bare DECIMAL is (10,0)), so
+			// take the widest exact one: 65 digits, 30 after the point.
+			return "DECIMAL(65,30)"
 		}
-		scale := field.Scale
-		if scale == 0 {
-			scale = 2 // По умолчанию
-		}
-		return fmt.Sprintf("DECIMAL(%d,%d)", precision, scale)
+		// Scale 0 is a scale: DECIMAL(19,0) is an integer column, not (19,2).
+		return fmt.Sprintf("DECIMAL(%d,%d)", field.Precision, field.Scale)
 
 	// Текстовые типы
 	case "TEXT":

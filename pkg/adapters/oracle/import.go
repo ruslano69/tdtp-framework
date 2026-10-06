@@ -46,7 +46,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	// later in insertRows used to leave a new empty table behind.
 	if strategy == adapters.StrategyReplace || strategy == adapters.StrategyIgnore {
 		if len(packet.ExtractKeyFields(canonical.Schema)) == 0 {
-			return fmt.Errorf("Oracle %s import requires key fields", strategy)
+			return fmt.Errorf("oracle: %s import requires key fields", strategy)
 		}
 	}
 	name := canonical.Header.TableName
@@ -63,7 +63,7 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for i, pkt := range packets {
 		if err := a.insertRows(ctx, tx, name, pkt.Schema, pkt.Data.Rows, strategy); err != nil {
 			return fmt.Errorf("import packet %d: %w", i, err)
@@ -126,7 +126,7 @@ func (a *Adapter) RenameTable(ctx context.Context, oldName, newName string) erro
 		return err
 	}
 	if oldOwner != newOwner {
-		return fmt.Errorf("Oracle RENAME cannot change table owner")
+		return fmt.Errorf("oracle: RENAME cannot change table owner")
 	}
 	_, err = a.db.ExecContext(ctx, "ALTER TABLE "+quote(oldOwner)+"."+quote(oldTable)+" RENAME TO "+quote(newTable))
 	return err
@@ -141,7 +141,7 @@ func (a *Adapter) insertRows(ctx context.Context, tx *sql.Tx, name string, schem
 		return err
 	}
 	if len(schema.Fields) == 0 {
-		return fmt.Errorf("Oracle import schema has no fields")
+		return fmt.Errorf("oracle: import schema has no fields")
 	}
 	columns := make([]string, len(schema.Fields))
 	binds := make([]string, len(schema.Fields))
@@ -164,7 +164,7 @@ func (a *Adapter) insertRows(ctx context.Context, tx *sql.Tx, name string, schem
 		statement = "INSERT INTO " + table + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(binds, ", ") + ")"
 	case adapters.StrategyReplace, adapters.StrategyIgnore:
 		if len(keyConditions) == 0 {
-			return fmt.Errorf("Oracle %s import requires key fields", strategy)
+			return fmt.Errorf("oracle: %s import requires key fields", strategy)
 		}
 		statement = "MERGE INTO " + table + " t USING (SELECT " + strings.Join(sources, ", ") + " FROM DUAL) s ON (" +
 			strings.Join(keyConditions, " AND ") + ")"
@@ -183,7 +183,7 @@ func (a *Adapter) insertRows(ctx context.Context, tx *sql.Tx, name string, schem
 	if err != nil {
 		return fmt.Errorf("prepare Oracle import: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for i, row := range rows {
 		raw := base.ParseRowValues(row)
 		args, err := base.ConvertRowToSQLValues(raw, schema, a.converter, AdapterType)

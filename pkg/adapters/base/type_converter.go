@@ -624,6 +624,9 @@ func (c *UniversalTypeConverter) TypedValueToSQL(tv schema.TypedValue, dbType st
 		}
 
 	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
+		if tv.DecimalValue != nil {
+			return *tv.DecimalValue // exact; float64 keeps ~16 digits
+		}
 		if tv.FloatValue != nil {
 			f := *tv.FloatValue
 			if math.IsInf(f, 0) || math.IsNaN(f) {

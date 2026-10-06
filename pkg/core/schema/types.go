@@ -39,15 +39,21 @@ type TypedValue struct {
 	// Precision повторяет FieldDef.Precision. Для DATETIME/TIMESTAMP это
 	// разрядность дробной части: адаптер обязан отдать в колонку ровно
 	// столько знаков, сколько она вмещает, иначе БД округлит сама.
-	Precision   int
-	RawValue    string
-	IsNull      bool
-	IntValue    *int64
-	FloatValue  *float64
-	StringValue *string
-	BoolValue   *bool
-	TimeValue   *time.Time
-	BlobValue   []byte
+	Precision  int
+	RawValue   string
+	IsNull     bool
+	IntValue   *int64
+	FloatValue *float64
+	// DecimalValue is the exact decimal text of a DECIMAL value — no
+	// exponent, no float rounding. FloatValue is still set for DECIMAL as a
+	// convenience, but float64 keeps ~16 significant digits: writers and
+	// formatters must use DecimalValue, or 1234567890123450.1234 becomes
+	// 1234567890123450 and 9007199254740993 becomes …992.
+	DecimalValue *string
+	StringValue  *string
+	BoolValue    *bool
+	TimeValue    *time.Time
+	BlobValue    []byte
 }
 
 // FieldDef расширенное определение поля с валидацией

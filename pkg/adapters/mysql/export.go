@@ -107,6 +107,12 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		if dtPrec.Valid && isFractionalSecondsType(field) {
 			field.Precision = clampFractionalPrecision(int(dtPrec.Int64))
 		}
+		// Same for DECIMAL: "decimal" carries no (p,s), and the (18,2)
+		// fallback refused DECIMAL(20,4) values — 0.0001 "exceeds scale 2" —
+		// so they reached the packet unvalidated, by the parse-error path.
+		if field.Type == "DECIMAL" && numPrec.Valid && numScale.Valid {
+			field.Precision, field.Scale = int(numPrec.Int64), int(numScale.Int64)
+		}
 
 		fields = append(fields, field)
 	}

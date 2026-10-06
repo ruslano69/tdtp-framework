@@ -183,6 +183,15 @@ func jsonValue(tv *schema.TypedValue, fieldType schema.DataType) ([]byte, error)
 			return json.Marshal(strconv.FormatInt(v, 10))
 		}
 		return json.Marshal(v)
+	case tv.DecimalValue != nil:
+		// The same rule as for integers: a number while a JS double holds it
+		// exactly, a string past that — 9007199254740993 must not arrive
+		// as …992 because the reader parsed it into a float.
+		d := *tv.DecimalValue
+		if f, err := strconv.ParseFloat(d, 64); err == nil && strconv.FormatFloat(f, 'f', -1, 64) == d {
+			return []byte(d), nil
+		}
+		return json.Marshal(d)
 	case tv.FloatValue != nil:
 		v := *tv.FloatValue
 		if math.IsNaN(v) || math.IsInf(v, 0) {

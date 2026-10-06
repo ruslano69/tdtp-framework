@@ -37,10 +37,9 @@ func (b *Builder) AddReal(name string) *Builder {
 // AddDecimal добавляет DECIMAL поле
 func (b *Builder) AddDecimal(name string, precision, scale int) *Builder {
 	if precision == 0 {
-		precision = GetDefaultPrecision()
-	}
-	if scale == 0 {
-		scale = GetDefaultScale()
+		// Defaults apply as a pair: AddDecimal(name, 19, 0) is an integer
+		// column and keeps scale 0.
+		precision, scale = GetDefaultPrecision(), GetDefaultScale()
 	}
 
 	b.fields = append(b.fields, packet.Field{

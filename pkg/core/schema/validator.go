@@ -56,16 +56,14 @@ func (v *Validator) ValidateSchema(schema packet.Schema) error {
 			// Реальная проверка длины данных выполняется в converter.parseText (только при Length > 0)
 
 		case TypeDecimal:
-			precision := field.Precision
+			// Precision 0 is an unconstrained DECIMAL; scale 0 with a
+			// precision is a real scale, not a request for the default.
+			precision, scale := field.Precision, field.Scale
 			if precision == 0 {
-				precision = GetDefaultPrecision()
-			}
-			scale := field.Scale
-			if scale == 0 {
-				scale = GetDefaultScale()
+				break
 			}
 
-			if precision <= 0 || precision > 38 {
+			if precision < 0 || precision > 38 {
 				return fmt.Errorf("field '%s' DECIMAL precision must be between 1 and 38", field.Name)
 			}
 

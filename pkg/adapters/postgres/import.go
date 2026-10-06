@@ -570,6 +570,9 @@ func (a *Adapter) convertValue(value string, field packet.Field) any {
 			return *typedValue.IntValue
 		}
 	case schema.TypeReal, schema.TypeDecimal:
+		if typedValue.DecimalValue != nil {
+			return *typedValue.DecimalValue // exact; float64 keeps ~16 digits
+		}
 		if typedValue.FloatValue != nil {
 			return *typedValue.FloatValue
 		}
