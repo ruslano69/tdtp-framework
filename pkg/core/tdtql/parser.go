@@ -3,6 +3,7 @@ package tdtql
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Parser SQL парсер
@@ -305,6 +306,11 @@ func (p *Parser) parseCondition() (Expression, error) {
 	switch p.curToken.Type {
 	case TokenString, TokenNumber, TokenIdent:
 		value = p.curToken.Literal
+	case TokenIllegal:
+		if err := p.unterminated(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("expected value after operator, got %q", p.curToken.Literal)
 	default:
 		return nil, fmt.Errorf("expected value after operator (use quotes for strings: \"value\" or 'value')")
 	}
@@ -330,6 +336,9 @@ func (p *Parser) parseInExpression(field string, not bool) (Expression, error) {
 			values = append(values, p.curToken.Literal)
 			p.nextToken()
 		} else {
+			if err := p.unterminated(); err != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("expected value in IN list, got %v", p.curToken.Type)
 		}
 
@@ -355,6 +364,9 @@ func (p *Parser) parseInExpression(field string, not bool) (Expression, error) {
 func (p *Parser) parseBetweenExpression(field string, not bool) (Expression, error) {
 	// Low value
 	if p.curToken.Type != TokenString && p.curToken.Type != TokenNumber {
+		if err := p.unterminated(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("expected value after BETWEEN")
 	}
 	low := p.curToken.Literal
@@ -367,6 +379,9 @@ func (p *Parser) parseBetweenExpression(field string, not bool) (Expression, err
 
 	// High value
 	if p.curToken.Type != TokenString && p.curToken.Type != TokenNumber {
+		if err := p.unterminated(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("expected value after AND in BETWEEN")
 	}
 	high := p.curToken.Literal
@@ -417,4 +432,13 @@ func (p *Parser) parseOrderBy() ([]*OrderByClause, error) {
 	}
 
 	return clauses, nil
+}
+
+// unterminated reports a string literal that lost its closing quote, in
+// whichever value position the parser met it (operator, IN list, BETWEEN).
+func (p *Parser) unterminated() error {
+	if p.curToken.Type == TokenIllegal && strings.HasPrefix(p.curToken.Literal, unterminatedPrefix) {
+		return fmt.Errorf("%s: the closing quote is missing", p.curToken.Literal)
+	}
+	return nil
 }
