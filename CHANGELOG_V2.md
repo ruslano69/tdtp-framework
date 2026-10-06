@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Stdlib S3 driver (AWS SDK removed)
+
+- `pkg/storage/s3` is now implemented on `net/http` alone (SigV4 in
+  `sign.go`): Put, Get, Head, ListV2, Delete, CreateBucket. No behavioural
+  change — the exchange is small packets, the SDK only added credential-chain
+  and multipart code the driver never used.
+- `aws-sdk-go-v2/*` and `smithy-go` are gone from `go.mod`; the release
+  `tdtpcli_v2` build shrank by ~3.9 MB. Proven 7/7 against SeaweedFS 4.48
+  (`TestS3*`, `-tags integration`) plus golden SigV4 vectors from an
+  independent Python reference.
+
 ### Fixed — Oracle with packets from other engines
 
 Found running the adapter against Oracle XE 18c and 21c with a SQLite
