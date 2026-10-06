@@ -60,6 +60,13 @@ case-insensitive. Comparisons on DATE / DATETIME / TIMESTAMP columns use ANSI
 `VARCHAR2(255 CHAR)` (a LOB cannot be a key), other lengthless text becomes
 `CLOB`, and TDTP `REAL` becomes `BINARY_DOUBLE`.
 
+TDTP `INTEGER` is created as `NUMBER(19,0)`, and `NUMBER(19,0)` is read back
+as `DECIMAL` with the subtype `bigint`: a native `NUMBER(19,0)` may hold
+values above int64, which `DECIMAL` keeps exact, while the subtype lets the
+PostgreSQL, MSSQL and MySQL importers create `BIGINT` instead of a numeric
+column. Values travel as exact `int64` (never `float64`); one above int64
+makes a `BIGINT` target refuse the row. SQLite ignores the hint.
+
 To run the live test suite, start Oracle XE 18c and 21c separately, create a
 user with `CREATE TABLE` and `CREATE VIEW` privileges, and set:
 

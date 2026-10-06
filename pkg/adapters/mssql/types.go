@@ -220,6 +220,9 @@ func TDTPToMSSQL(field packet.Field) string {
 		}
 
 	case schema.TypeDecimal:
+		if packet.BigintDecimal(field) {
+			return "BIGINT" // integer DECIMAL hinted "bigint" (Oracle NUMBER(19,0))
+		}
 		// Check for money types
 		if subtype == "money" {
 			return "MONEY"

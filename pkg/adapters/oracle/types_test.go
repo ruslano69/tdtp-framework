@@ -54,3 +54,18 @@ func TestTypeForField_CrossEngine(t *testing.T) {
 		}
 	}
 }
+
+// NUMBER(19,0) — what this adapter creates for TDTP INTEGER — reads back as
+// DECIMAL with the "bigint" hint: exact for native values above int64, and
+// an importer elsewhere creates BIGINT instead of NUMERIC(19,…).
+func TestNumber19ReadsAsBigintDecimal(t *testing.T) {
+	f := fieldFromColumn("ID", "NUMBER", 0, 19, 0, true, false)
+	if f.Type != "DECIMAL" || f.Subtype != "bigint" || !packet.BigintDecimal(f) {
+		t.Errorf("NUMBER(19,0) → %s/%q, want DECIMAL/bigint", f.Type, f.Subtype)
+	}
+	for _, p := range []int{18, 20} {
+		if f := fieldFromColumn("X", "NUMBER", 0, p, 0, false, false); f.Subtype != "" {
+			t.Errorf("NUMBER(%d,0) must not carry the bigint hint, got %q", p, f.Subtype)
+		}
+	}
+}

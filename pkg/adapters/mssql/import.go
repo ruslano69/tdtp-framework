@@ -558,6 +558,12 @@ func (a *Adapter) stringToValue(str string, field packet.Field) any {
 		return nil
 	}
 
+	// Integer DECIMAL hinted "bigint": exact int64, never via float64 (which
+	// is what the DECIMAL branch below does, and it keeps ~16 digits).
+	if packet.BigintDecimal(field) {
+		return packet.BigintValue(str)
+	}
+
 	// Конвертируем packet.Field в schema.FieldDef
 	fieldDef := fieldToFieldDef(field)
 

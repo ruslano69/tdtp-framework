@@ -13,9 +13,18 @@ func fieldFromColumn(name, nativeType string, length, precision, scale int, key,
 	switch {
 	case typ == "NUMBER":
 		f.Precision, f.Scale = precision, scale
-		if precision > 0 && precision <= 18 && scale == 0 {
+		switch {
+		case precision > 0 && precision <= 18 && scale == 0:
 			f.Type = "INTEGER"
-		} else {
+		case precision == 19 && scale == 0:
+			// NUMBER(19,0) is what this adapter creates for a TDTP INTEGER,
+			// but a native one can hold values above int64. DECIMAL keeps
+			// those exact; "bigint" lets an importer create BIGINT, so an
+			// INTEGER no longer turns into NUMERIC(19,…) after a pass
+			// through Oracle (packet.BigintDecimal).
+			f.Type = "DECIMAL"
+			f.Subtype = "bigint"
+		default:
 			f.Type = "DECIMAL"
 		}
 	case typ == "FLOAT", typ == "BINARY_FLOAT":
