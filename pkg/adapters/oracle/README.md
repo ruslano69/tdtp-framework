@@ -19,6 +19,21 @@ database:
   password: password
 ```
 
+The signed `tdtp.lic` must list `oracle` in its `adapters` array. The vendor
+can reissue a license with the original tier, features, limits and expiry,
+adding Oracle to the existing adapter list:
+
+```sh
+tdtp-license issue --key vendor.priv --out tdtp.lic --licensee "Customer" \
+  --tier professional --adapters sqlite,postgres,mysql,mssql,oracle \
+  --features etl,enc --expires 2027-12-31
+tdtp-license verify --in tdtp.lic
+```
+
+Use the signing key whose public half is embedded in the target CLI build.
+Editing the JSON by hand invalidates its signature. Keep the private key and
+issued license outside Git.
+
 ```sh
 tdtpcli_v2 --config oracle.yaml list
 tdtpcli_v2 --config oracle.yaml inspect-table ORDERS
