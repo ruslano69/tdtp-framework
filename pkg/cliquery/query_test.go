@@ -1,9 +1,12 @@
 package cliquery_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/cliquery"
+	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
 )
 
 // ─────────────────────────────────────────────────────────────────
@@ -464,6 +467,36 @@ func TestBuildQuery_RejectsTrailingTokens(t *testing.T) {
 	for _, c := range cases {
 		if _, err := cliquery.BuildQuery(c.wheres, c.orderBy, 0, 0); err == nil {
 			t.Errorf("where=%v order=%q: accepted, want an error", c.wheres, c.orderBy)
+		}
+	}
+}
+
+// A value containing an apostrophe, written every way a user would, must
+// find its row. The doubled quote was an error, \' kept its backslash and matched nothing,
+// and an unterminated literal was accepted as if closed.
+func TestBuildQuery_StringLiterals(t *testing.T) {
+	schema := packet.Schema{Fields: []packet.Field{{Name: "name", Type: "TEXT"}}}
+	rows := [][]string{{"O'Brien"}, {"plain"}, {`C:\temp`}}
+	for where, want := range map[string]string{
+		`name = 'O''Brien'`: "O'Brien",
+		`name = 'O\'Brien'`: "O'Brien",
+		`name = "O'Brien"`:  "O'Brien",
+		`name = 'C:\temp'`:  `C:\temp`,
+	} {
+		q, err := cliquery.BuildQuery([]string{where}, "", 0, 0)
+		if err != nil {
+			t.Errorf("%s: %v", where, err)
+			continue
+		}
+		res, err := tdtql.NewExecutor().Execute(q, rows, schema)
+		if err != nil || len(res.FilteredRows) != 1 || res.FilteredRows[0][0] != want {
+			t.Errorf("%s: rows %v, err %v; want only %q", where, res.FilteredRows, err, want)
+		}
+	}
+	for _, where := range []string{`name = 'plain`, `name IN ('a', 'b)`} {
+		_, err := cliquery.BuildQuery([]string{where}, "", 0, 0)
+		if err == nil || !strings.Contains(err.Error(), "closing quote") {
+			t.Errorf("%s: %v, want an unterminated-string error", where, err)
 		}
 	}
 }
