@@ -9,5 +9,6 @@ package main
 import (
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mssql"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/mysql"
+	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/oracle"
 	_ "github.com/ruslano69/tdtp-framework/pkg/adapters/postgres"
 )

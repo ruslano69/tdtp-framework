@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/cliconfig"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"gopkg.in/yaml.v3"
 )
@@ -85,6 +86,9 @@ func adapterConfigFromYAML(path string) (*adapters.Config, error) {
 	case "mysql":
 		dsn = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true",
 			db.User, db.Password, db.Host, db.Port, db.Database)
+	case "oracle":
+		dsn = (&cliconfig.DatabaseConfig{Type: db.Type, Host: db.Host, Port: db.Port,
+			Database: db.Database, User: db.User, Password: db.Password}).BuildDSN()
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", db.Type)
 	}

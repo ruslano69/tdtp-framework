@@ -48,6 +48,15 @@ defaults and examples without opening a database:
 Global options such as `--config` come before the command in examples.
 An unknown help topic returns exit code 2.
 
+### Oracle preview
+
+`init-config oracle` creates a connection template for an Oracle service
+such as `XEPDB1`. The v2 executable registers the Oracle adapter; it supports
+`list`, `inspect-table`, `export`, `import`, incremental sync and pipeline
+sources. Live integration tests pass on Oracle XE 18c and 21c. The intended
+range is 18c–21c; 19c still needs its own live verification. See the
+[adapter guide](../pkg/adapters/oracle/README.md) for config and limitations.
+
 ### Workflows
 
 Save a workflow as `workflow.yaml`:

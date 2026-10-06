@@ -127,7 +127,7 @@ output:
 			errMsg:  "at least one source is required",
 		},
 		{
-			name: "Invalid source type",
+			name: "Oracle source",
 			yaml: `
 name: "Test"
 sources:
@@ -146,8 +146,7 @@ output:
     format: "xml"
     destination: "./output.xml"
 `,
-			wantErr: true,
-			errMsg:  "unsupported type 'oracle'",
+			wantErr: false,
 		},
 		{
 			name: "Missing transform SQL",
@@ -393,11 +392,21 @@ func TestSourceConfig_Validate(t *testing.T) {
 			errMsg:  "query is required",
 		},
 		{
-			name: "Unsupported type",
+			name: "Oracle source",
 			source: SourceConfig{
 				Name:  "test",
 				Type:  "oracle",
 				DSN:   "oracle://localhost/test",
+				Query: "SELECT * FROM users",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Unsupported type",
+			source: SourceConfig{
+				Name:  "test",
+				Type:  "unknown",
+				DSN:   "unknown://localhost/test",
 				Query: "SELECT * FROM users",
 			},
 			wantErr: true,

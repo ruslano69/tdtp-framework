@@ -35,14 +35,14 @@ func TestVersion_FlagForm(t *testing.T) {
 }
 
 func TestInitConfig_ByteIdentical(t *testing.T) {
-	for _, db := range []string{"postgres", "mssql", "mysql", "sqlite"} {
+	for _, db := range []string{"postgres", "mssql", "mysql", "sqlite", "oracle"} {
 		dir := t.TempDir()
 		got := filepath.Join(dir, "config.yaml")
 		code, _, _ := runApp(t, "init-config", db, "--output", got)
 		if code != ExitOK {
 			t.Fatalf("%s: exit = %d", db, code)
 		}
-		// Same builders v1's create-config-* uses: identical bytes.
+		// The command must write exactly the shared sample config.
 		want := filepath.Join(dir, "want.yaml")
 		if err := cliconfig.SaveConfig(want, cliconfig.CreateSampleConfig(db)); err != nil {
 			t.Fatal(err)
@@ -56,7 +56,7 @@ func TestInitConfig_ByteIdentical(t *testing.T) {
 }
 
 func TestInitConfig_BadType(t *testing.T) {
-	code, _, _ := runApp(t, "init-config", "oracle")
+	code, _, _ := runApp(t, "init-config", "unknown")
 	if code != ExitUsage {
 		t.Errorf("exit = %d, want %d", code, ExitUsage)
 	}

@@ -20,7 +20,7 @@ func newInitConfigCommand() *initConfigCommand {
 	c := &initConfigCommand{}
 	c.CmdName = "init-config"
 	c.CmdShort = "write a sample database config file"
-	c.CmdLong = `tdtpcli_v2 init-config (postgres|mssql|mysql|sqlite) [--output config.yaml]
+	c.CmdLong = `tdtpcli_v2 init-config (postgres|mssql|mysql|sqlite|oracle) [--output config.yaml]
 
 Writes a sample config for the database type. Edit the credentials,
 then run e.g. tdtpcli_v2 --config config.yaml list.`
@@ -33,13 +33,13 @@ then run e.g. tdtpcli_v2 --config config.yaml list.`
 // Validate needs exactly one database type.
 func (c *initConfigCommand) Validate(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("need exactly one database type (postgres|mssql|mysql|sqlite), got %d", len(args))
+		return fmt.Errorf("need exactly one database type (postgres|mssql|mysql|sqlite|oracle), got %d", len(args))
 	}
 	switch args[0] {
-	case "postgres", "postgresql", "mssql", "sqlserver", "mysql", "sqlite", "pg":
+	case "postgres", "postgresql", "mssql", "sqlserver", "mysql", "sqlite", "oracle", "pg":
 		return nil
 	default:
-		return fmt.Errorf("unknown database type %q (postgres|mssql|mysql|sqlite)", args[0])
+		return fmt.Errorf("unknown database type %q (postgres|mssql|mysql|sqlite|oracle)", args[0])
 	}
 }
 

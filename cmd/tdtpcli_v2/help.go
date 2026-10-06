@@ -21,7 +21,7 @@ var commandHelp = map[string]helpSpec{
 	"import":           {"FILE.tdtp.xml [flags]", []string{"tdtpcli_v2 --config db.yaml import orders.tdtp.xml --strategy replace"}},
 	"import-broker":    {"[flags]", []string{"tdtpcli_v2 --config broker.yaml import-broker --strategy replace"}},
 	"import-xlsx":      {"FILE.xlsx [flags]", []string{"tdtpcli_v2 --config db.yaml import-xlsx orders.xlsx --strategy replace"}},
-	"init-config":      {"(postgres|sqlite|mysql|mssql) [flags]", []string{"tdtpcli_v2 init-config postgres --output pg.yaml"}},
+	"init-config":      {"(postgres|sqlite|mysql|mssql|oracle) [flags]", []string{"tdtpcli_v2 init-config oracle --output oracle.yaml"}},
 	"inspect":          {"FILE.tdtp.xml", []string{"tdtpcli_v2 inspect orders.tdtp.xml"}},
 	"inspect-table":    {"TABLE", []string{"tdtpcli_v2 --config db.yaml inspect-table orders"}},
 	"list":             {"[PATTERN] [flags]", []string{"tdtpcli_v2 --config db.yaml list 'order*'", "tdtpcli_v2 --config db.yaml list --views"}},

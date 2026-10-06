@@ -7,7 +7,10 @@ package cliconfig
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"strconv"
 
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
 	"gopkg.in/yaml.v3"
@@ -285,6 +288,12 @@ func CreateSampleConfig(dbType string) *Config {
 		config.Database.Database = "mydb"
 		config.Database.User = "root"
 		config.Database.Password = "password"
+	case "oracle":
+		config.Database.Host = "localhost"
+		config.Database.Port = 1521
+		config.Database.Database = "XEPDB1"
+		config.Database.User = "tdtp"
+		config.Database.Password = "password"
 	}
 
 	return config
@@ -327,6 +336,18 @@ func (c *DatabaseConfig) BuildDSN() string {
 	case "mysql":
 		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true",
 			c.User, c.Password, c.Host, c.Port, c.Database)
+	case "oracle":
+		port := c.Port
+		if port == 0 {
+			port = 1521
+		}
+		service := c.Database
+		if service == "" {
+			service = "XEPDB1"
+		}
+		u := url.URL{Scheme: "oracle", User: url.UserPassword(c.User, c.Password),
+			Host: net.JoinHostPort(c.Host, strconv.Itoa(port)), Path: "/" + service}
+		return u.String()
 
 	default:
 		return ""

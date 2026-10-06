@@ -886,8 +886,8 @@ Full adapter-specific details: [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md).
 ## Roadmap
 
 Planned, not yet shipped:
-- Oracle database adapter for 2.0 (driver selection, implementation and live
-  export/import round-trip verification remain)
+- Oracle database adapter for 2.0 (implemented and tested on XE 18c/21c in
+  the v2 branch; 19c and production connections remain to be verified)
 - Streaming export/import (`TotalParts=0`, "TCP for tables") — bounded-memory
   export to local files exists as beta `--stream`; live `TotalParts=0` transfer
   and row-by-row `--import-stream` are not wired to the CLI yet
