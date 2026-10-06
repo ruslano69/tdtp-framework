@@ -8,10 +8,10 @@
 
 ## Next
 
-- **Oracle adapter for 2.0** — implement the shared `adapters.Adapter`
-  contract for Oracle and verify export/import round trips against a live
-  Oracle database. Not started; driver choice and the test environment are
-  the first decisions (see `TODO_NEXT.md` → "Oracle adapter").
+- **Oracle adapter for 2.0** — implementation is in progress on the v2 branch.
+  Export/import, TDTQL paging, pipeline source queries and incremental export
+  pass live integration tests on Oracle XE 18c and 21c. Oracle 19c and a
+  production deployment still need verification before release.
 - **Streaming export/import** (`TotalParts=0`, "TCP for tables") — core is ready
   (`pkg/core/packet/streaming.go`, channel-based `StreamingGenerator`). Beta
   `export --stream` writes local files with bounded memory, then finalizes

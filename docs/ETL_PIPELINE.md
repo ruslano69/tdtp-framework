@@ -57,7 +57,7 @@ description: "..."          # optional
 # ─── SOURCES ──────────────────────────────────────────────────────────────────
 sources:
   - name: table_alias       # table name in the SQLite workspace (required)
-    type: sqlite            # sqlite | postgres | mssql | mysql | tdtp | tdtp-enc | tdtp-s3 | csv
+    type: sqlite            # sqlite | postgres | mssql | mysql | oracle (v2) | tdtp | tdtp-enc | tdtp-s3 | csv
     dsn: "path/to/db.db"    # DSN, or path to a TDTP/CSV file (or S3 key for tdtp-s3)
     query: |                # SQL query (not used by type: tdtp/tdtp-enc/tdtp-s3/csv)
       SELECT id, name FROM users

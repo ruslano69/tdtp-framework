@@ -249,6 +249,26 @@ func TestLicense_PaidLicensePassesGate(t *testing.T) {
 	}
 }
 
+func TestLicense_OracleRequiresAdapterEntitlement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oracle.yaml")
+	config := "database:\n  type: oracle\n  host: 127.0.0.1\n  port: 1521\n" +
+		"  database: XEPDB1\n  user: tdtp\n  password: password\n"
+	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lic := license.New("ACME", "2026-01-01", "2099-01-01", license.TierProfessional,
+		[]string{"postgres"}, nil, license.Limits{})
+	d := &Deps{ConfigPath: path, License: lic}
+	if _, _, err := d.databaseConfig("list"); err == nil || !strings.Contains(err.Error(), `database adapter "oracle" is not licensed`) {
+		t.Fatalf("Oracle without entitlement: %v", err)
+	}
+	lic.Adapters = append(lic.Adapters, "oracle")
+	_, cfg, err := d.databaseConfig("list")
+	if err != nil || cfg.Type != "oracle" || cfg.DSN == "" {
+		t.Fatalf("licensed Oracle config: cfg=%+v err=%v", cfg, err)
+	}
+}
+
 // A present-but-invalid license is fatal, not a quiet Community downgrade.
 func TestLicense_InvalidFileIsFatal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.lic")

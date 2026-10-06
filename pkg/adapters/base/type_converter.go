@@ -153,7 +153,7 @@ func (c *UniversalTypeConverter) DBValueToString(value any, field packet.Field, 
 		return c.pgValueToString(value, field)
 	case "mssql":
 		return c.mssqlValueToString(value, field)
-	case "sqlite", "mysql", "access":
+	case "sqlite", "mysql", "access", "oracle":
 		return c.genericValueToString(value, field)
 	default:
 		// Логируем неизвестный dbType для debugging

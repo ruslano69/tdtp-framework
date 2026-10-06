@@ -334,6 +334,7 @@ func (s *SourceConfig) Validate() error {
 		"postgres": true,
 		"mssql":    true,
 		"mysql":    true,
+		"oracle":   true,
 		"sqlite":   true,
 		"tdtp":     true, // TDTP XML/JSON file — DSN is the file path, query not required
 		"tdtp-enc": true, // Encrypted TDTP file — requires mercury_url for key retrieval
@@ -341,7 +342,7 @@ func (s *SourceConfig) Validate() error {
 		"csv":      true, // Local CSV file; values are loaded as raw TEXT
 	}
 	if !validTypes[s.Type] {
-		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, sqlite, tdtp, tdtp-enc, tdtp-s3, csv", s.Type)
+		return fmt.Errorf("unsupported type '%s', must be one of: postgres, mssql, mysql, oracle, sqlite, tdtp, tdtp-enc, tdtp-s3, csv", s.Type)
 	}
 
 	// query обязателен для DB-источников, для TDTP-файлов не нужен

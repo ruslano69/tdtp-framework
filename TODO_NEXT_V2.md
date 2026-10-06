@@ -79,8 +79,9 @@ flags are replaced by `init-config <db>`; `--version` is supported.
 The status above means the existing CLI commands have been ported. It does
 not close the product work in [`ROADMAP.md`](ROADMAP.md) → **Next**:
 
-- [ ] **Oracle adapter:** not started. Choose a driver, implement the shared
-      adapter contract, and verify real Oracle export/import round trips.
+- [ ] **Oracle adapter:** implemented for v2 with `go-ora/v2`; live 18c and 21c
+      export/import, pipeline query and incremental tests pass. Verify 19c and
+      production connection settings before declaring release support.
 - [ ] **Streaming export/import:** `export --stream` is a beta, bounded-memory
       export to local files; it finalizes parts after the total is known.
       A live `TotalParts=0` CLI transport and `--import-stream` are absent.

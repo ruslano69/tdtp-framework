@@ -403,7 +403,10 @@ Everything here is a capability change. **None of it goes into 1.x**, however
 ready it looks. Most entries are analysis for when 2.0 opens, not scheduled
 work. **Oracle is an explicit 2.0 commitment** (see `ROADMAP.md` → Next).
 
-### Oracle adapter — committed for 2.0, not started
+### Oracle adapter — committed for 2.0, in progress
+
+The v2 branch now contains the adapter and live 18c/21c integration tests.
+Oracle 19c and production connection settings remain to be verified.
 
 Raised while comparing the framework against Soft Review's integration services
 (their stack is Oracle PL/SQL + J2EE). Oracle is the one mainstream DBMS
