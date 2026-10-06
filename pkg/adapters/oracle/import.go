@@ -41,6 +41,14 @@ func (a *Adapter) ImportPackets(ctx context.Context, packets []*packet.DataPacke
 			return fmt.Errorf("packet %d has a different table or schema", i)
 		}
 	}
+	// replace/ignore need a key to MERGE on. Checked here, before any DDL:
+	// Oracle commits CREATE TABLE implicitly, and the same refusal raised
+	// later in insertRows used to leave a new empty table behind.
+	if strategy == adapters.StrategyReplace || strategy == adapters.StrategyIgnore {
+		if len(packet.ExtractKeyFields(canonical.Schema)) == 0 {
+			return fmt.Errorf("Oracle %s import requires key fields", strategy)
+		}
+	}
 	name := canonical.Header.TableName
 	exists, err := a.TableExists(ctx, name)
 	if err != nil {
