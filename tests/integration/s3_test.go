@@ -12,13 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
-
 	"github.com/ruslano69/tdtp-framework/pkg/storage"
-	_ "github.com/ruslano69/tdtp-framework/pkg/storage/s3"
+	"github.com/ruslano69/tdtp-framework/pkg/storage/s3"
 )
 
 // ─── S3 test configuration ────────────────────────────────────────────────────
@@ -53,27 +48,14 @@ func TestMain(m *testing.M) {
 // setupS3 checks if SeaweedFS is reachable and creates the test bucket.
 // Returns true when the environment is ready.
 func setupS3() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := newRawS3Client()
-
-	// ListBuckets is a lightweight probe: succeeds ↔ server is up & authenticated.
-	_, err := client.ListBuckets(ctx, &awss3.ListBucketsInput{})
-	if err != nil {
+	// EnsureBucket is a lightweight probe: server down ↔ connection error,
+	// missing bucket ↔ created here.
+	if err := s3.EnsureBucket(ctx, testStorageCfg()); err != nil {
 		return false
 	}
-
-	// Ensure the test bucket exists.
-	_, err = client.CreateBucket(ctx, &awss3.CreateBucketInput{
-		Bucket: aws.String(s3TestBucket),
-	})
-	if err != nil && !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou") &&
-		!strings.Contains(err.Error(), "BucketAlreadyExists") {
-		fmt.Fprintf(os.Stderr, "S3 setup: CreateBucket %q: %v\n", s3TestBucket, err)
-		return false
-	}
-
 	return true
 }
 
@@ -111,22 +93,6 @@ func testStorageCfg() storage.Config {
 			SecretKey: s3TestSecretKey,
 		},
 	}
-}
-
-// newRawS3Client returns a raw AWS S3 client pointed at the test SeaweedFS.
-// Used for bucket-level operations (CreateBucket, ListBuckets) that are not
-// part of the storage.ObjectStorage interface.
-func newRawS3Client() *awss3.Client {
-	awsCfg, _ := awsconfig.LoadDefaultConfig(context.Background(),
-		awsconfig.WithRegion(s3TestRegion),
-		awsconfig.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(s3TestAccessKey, s3TestSecretKey, ""),
-		),
-	)
-	return awss3.NewFromConfig(awsCfg, func(o *awss3.Options) {
-		o.UsePathStyle = true
-		o.BaseEndpoint = aws.String(s3TestEndpoint)
-	})
 }
 
 // testKey builds a unique object key under the integration-test/ prefix.
