@@ -363,6 +363,21 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 		return fmt.Errorf("decompression failed: %w", err)
 	}
 
+	// Пустая полезная нагрузка — это и «ноль записей», и «одна пустая
+	// запись»: записи склеиваются через "\n", а [] и [""] склеиваются в одно
+	// и то же "". Различает их только заголовок. Без этого одна строка из
+	// единственного пустого значения терялась при сжатии, и VerifyRowCount
+	// отвергал пакет. Найдено FuzzCompressRoundTrip.
+	if len(decompressedRows) == 0 {
+		expected := packet.Header.RecordsInPart
+		if packet.Data.Layout == LayoutColumns {
+			expected = len(packet.Schema.Fields) // записи здесь — колонки
+		}
+		if expected == 1 {
+			decompressedRows = []string{""}
+		}
+	}
+
 	// Восстанавливаем структуру Data
 	packet.Data.Compression = "" // Очищаем флаг сжатия
 	packet.Data.Rows = make([]Row, len(decompressedRows))
