@@ -4,6 +4,12 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Security — `golang.org/x/text` 0.39.0 → 0.41.0
+
+GO-2026-6629, reported by `govulncheck` on every branch once the advisory
+was published. `golang.org/x/sync` moves to 0.22.0 with it (required by the
+new x/text). No code changes.
+
 ### Fixed — compact rewrote empty strings; the text `[NULL]` became NULL
 
 Found by importing an exported SQLite table back and comparing it cell by
