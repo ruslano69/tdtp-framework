@@ -4,6 +4,8 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+## [1.26.6] - 2026-10-10
+
 ### Fixed — `IS NULL` on a packet file returned the opposite rows
 
 In a packet NULL is the field's marker (`[NULL]`, or `[NULL1]` where the
