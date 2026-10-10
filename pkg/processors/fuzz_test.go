@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 )
 
 func fuzzAlgo(kanzi bool) string {
@@ -64,6 +66,18 @@ func FuzzCompressRoundTrip(f *testing.F) {
 		algo := fuzzAlgo(kanzi)
 		lvl := 1 + int(level)%9 // valid for both: zstd 1–19, kanzi 1–9
 		blob, _, err := CompressDataForTdtpAlgo(rows, algo, lvl)
+		// Text XML 1.0 cannot carry is refused, compressed or not; the rest
+		// must come back unchanged.
+		clean := true
+		for _, r := range rows {
+			clean = clean && xmlchar.Clean(r)
+		}
+		if !clean {
+			if err == nil {
+				t.Fatalf("%s compressed text XML cannot carry: %q", algo, rows)
+			}
+			return
+		}
 		if err != nil {
 			t.Fatalf("compress %s level %d: %v", algo, lvl, err)
 		}
