@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ruslano69/tdtp-framework/pkg/cliquery"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -232,5 +233,40 @@ func TestWrite_DeclaredNullMarker(t *testing.T) {
 	}
 	if objs[1]["note"] != "[NULL]" {
 		t.Errorf("text [NULL] should stay text, got %v", objs[1]["note"])
+	}
+}
+
+// --to-json --where "note IS NULL" on a packet file: NULL is the field's
+// marker. The filter compared against "" and returned the empty string
+// instead of the NULL.
+func TestWrite_WhereIsNullOnPacket(t *testing.T) {
+	sch := packet.Schema{Fields: []packet.Field{{Name: "id", Type: "INTEGER", Key: true}, {Name: "note", Type: "TEXT"}}}
+	pkts, err := packet.NewGenerator().GenerateReference("t", sch, [][]string{{"1", "\x00"}, {"2", ""}, {"3", "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := packet.NewGenerator().ToXML(pkts[0], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkt, err := packet.NewParser().ParseBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for where, want := range map[string]string{
+		"note IS NULL":     `[{"id":1,"note":null}]`,
+		"note IS NOT NULL": `[{"id":2,"note":""},{"id":3,"note":"x"}]`,
+	} {
+		q, err := cliquery.BuildQuery([]string{where}, "", 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b bytes.Buffer
+		if _, err := Write(context.Background(), &b, pkt, q, false); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(b.String()); got != want {
+			t.Errorf("--where %q: got %s, want %s", where, got, want)
+		}
 	}
 }
