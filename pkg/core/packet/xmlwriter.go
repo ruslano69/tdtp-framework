@@ -236,13 +236,13 @@ func writeXMLAttrValue(w *bufio.Writer, s string) {
 //
 // Заменяет связку escapeValue + strings.Join + writeXMLChardata — ноль аллокаций.
 //
-// It also reports whether s is text XML 1.0 can carry, from the same pass:
-// C0 controls are seen byte by byte, and only a value holding non-ASCII pays
-// for a UTF-8 and U+FFFE/U+FFFF check (textOK). On false the caller abandons
-// the packet; what was written is discarded with it.
+// It also reports whether s is text XML 1.0 can carry, from the same pass —
+// a second pass per value (utf8.ValidString) doubled the cost of writing
+// all-Cyrillic data. On false the caller abandons the packet; what was
+// written is discarded with it.
 func writeRawValue(w *bufio.Writer, s string) bool {
 	start := 0
-	ctl, hi, ef := false, false, false
+	bad := false
 	for i := 0; i < len(s); i++ {
 		var esc string
 		switch c := s[i]; c {
@@ -259,11 +259,16 @@ func writeRawValue(w *bufio.Writer, s string) bool {
 		case '\r':
 			esc = escCR
 		default:
-			if c < 0x20 && c != '\t' && c != '\n' {
-				ctl = true
-			} else if c >= 0x80 {
-				hi = true
-				ef = ef || c == 0xEF
+			if c < 0x20 {
+				bad = bad || (c != '\t' && c != '\n')
+			} else if c >= utf8.RuneSelf {
+				// Decode the character here and step over its continuation
+				// bytes: no byte this loop escapes (| \ < > & CR) can occur
+				// inside a multi-byte sequence. For non-ASCII, XML 1.0's Char
+				// production comes down to valid UTF-8 minus U+FFFE/U+FFFF.
+				r, size := utf8.DecodeRuneInString(s[i:])
+				bad = bad || (r == utf8.RuneError && size == 1) || r == 0xFFFE || r == 0xFFFF
+				i += size - 1
 			}
 			continue
 		}
@@ -273,27 +278,7 @@ func writeRawValue(w *bufio.Writer, s string) bool {
 		start = i + 1
 	}
 	w.WriteString(s[start:])
-	return textOK(s, ctl, hi, ef)
-}
-
-// textOK finishes the check writeRawValue and writeXMLChardata start: no C0
-// control, and — only when there is non-ASCII — valid UTF-8 without U+FFFE
-// or U+FFFF, the rest of what XML 1.0 forbids (xmlchar.IsChar).
-//
-// U+FFFE and U+FFFF both start with byte EF, so the search for them runs only
-// when the loop saw one: Cyrillic or CJK text, which is all non-ASCII, would
-// otherwise pay two substring searches per value.
-func textOK(s string, ctl, hi, ef bool) bool {
-	if ctl {
-		return false
-	}
-	if !hi {
-		return true
-	}
-	if !utf8.ValidString(s) {
-		return false
-	}
-	return !ef || (!strings.Contains(s, "￾") && !strings.Contains(s, "￿"))
+	return !bad
 }
 
 // writeXMLChardata пишет строку с экранированием для XML chardata
@@ -301,7 +286,7 @@ func textOK(s string, ctl, hi, ef bool) bool {
 // текст нести в XML.
 func writeXMLChardata(w *bufio.Writer, s string) bool {
 	start := 0
-	ctl, hi, ef := false, false, false
+	bad := false
 	for i := 0; i < len(s); i++ {
 		var esc string
 		switch c := s[i]; c {
@@ -314,11 +299,16 @@ func writeXMLChardata(w *bufio.Writer, s string) bool {
 		case '\r':
 			esc = escCR
 		default:
-			if c < 0x20 && c != '\t' && c != '\n' {
-				ctl = true
-			} else if c >= 0x80 {
-				hi = true
-				ef = ef || c == 0xEF
+			if c < 0x20 {
+				bad = bad || (c != '\t' && c != '\n')
+			} else if c >= utf8.RuneSelf {
+				// Decode the character here and step over its continuation
+				// bytes: no byte this loop escapes (| \ < > & CR) can occur
+				// inside a multi-byte sequence. For non-ASCII, XML 1.0's Char
+				// production comes down to valid UTF-8 minus U+FFFE/U+FFFF.
+				r, size := utf8.DecodeRuneInString(s[i:])
+				bad = bad || (r == utf8.RuneError && size == 1) || r == 0xFFFE || r == 0xFFFF
+				i += size - 1
 			}
 			continue
 		}
@@ -328,7 +318,7 @@ func writeXMLChardata(w *bufio.Writer, s string) bool {
 		start = i + 1
 	}
 	w.WriteString(s[start:])
-	return textOK(s, ctl, hi, ef)
+	return !bad
 }
 
 // newPacketWriter создаёт bufio.Writer поверх w с буфером 4MB.
