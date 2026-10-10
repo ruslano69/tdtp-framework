@@ -764,12 +764,17 @@ not drop it as an "optimisation": it costs nothing measurable, and
 `FuzzFastParseMatchesReference` (`fuzz_test.go`) finds the hole in under a
 second without it.
 
-**One known, deliberate divergence remains:** the writer puts invalid UTF-8
-and XML-forbidden characters (U+0001, U+FFFE…) into rows as they came, and
-the fast path reads them back byte for byte where `encoding/xml` refuses the
-file. Making the reader strict would orphan packets already written; the fix
-is a write-side decision (TODO_NEXT.md). The fuzz oracle tolerates exactly
-that class of refusal and nothing else.
+**TDTP text is UTF-8 that XML 1.0 can carry — enforced, both ways.** The
+writer refuses anything else and names the spot (`xmltext.go`:
+`checkPacketText` for Header/Query/Schema via reflection, the row check
+folded into `writeRawValue`/`writeXMLChardata`); compression refuses it
+before it becomes an opaque blob; the fast path declines a body that holds it
+(`xmlchar.CleanBytes`, ~2.7 GB/s) so `encoding/xml` refuses it the same way;
+`DecompressData` checks what decompression yields. There were no packets
+with such text to stay compatible with, which is why the reader could become
+strict at all. **Do not let `xml.Marshal` see unchecked text** — it replaces
+a forbidden character with U+FFFD silently, which renamed tables and
+columns. The fuzz oracle tolerates no divergence.
 
 **`[]` and `[""]` look the same after a join.** Compression joins entries
 with `\n` and the columnar layout puts one entry per column, so "no entries"

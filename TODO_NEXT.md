@@ -97,16 +97,12 @@ freeze table.
   compression (zstd and kanzi), and a 60-byte kanzi stream costing ~810 MB on
   every reader but `--import`. Not yet fuzzed: the dictionary,
   decryption, and `VerifyIntegrity`.
-- **The writer emits XML that XML readers refuse.** A value holding invalid
-  UTF-8 (`caf\xe9` from a single-byte column) or a character XML 1.0 forbids
-  (U+0001, U+000B, U+FFFE) goes into `<R>` as it came. Our fast parser reads it
-  back byte for byte; `encoding/xml`, an XSD validator or any third-party
-  reader refuses the whole file. Found by the fuzzer, deliberately tolerated in
-  `FuzzFastParseMatchesReference` — making the reader strict would orphan
-  packets already written. The fix belongs on the write side and is a format
-  decision: refuse the export (naming field and row), or a row-level escape
-  (`\xHH`) that older readers would not decode. XML 1.0 cannot carry U+0001
-  even as `&#x1;`.
+- **~~The writer emits XML that XML readers refuse~~ — done.** Text that is
+  not UTF-8 or that XML 1.0 forbids is refused on write (naming the spot) and
+  on read, in every section. Chosen over a row-level escape (`\uXXXX`): no
+  packets with such text existed, and a new escape would be a format change
+  older readers decode literally. If a customer ever needs control characters
+  carried, that escape is the 2.0 route.
 - **Live adapters never run on CI.** The integration job runs after merge only,
   with PostgreSQL and RabbitMQ. MySQL, MSSQL and Oracle live tests — where the
   DECIMAL, compact and TEXT defects of 2026-10 were found — never run there.
