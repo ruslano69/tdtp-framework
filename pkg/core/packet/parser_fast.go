@@ -28,6 +28,12 @@ import (
 var bDataName = []byte("<Data")
 var bDataCloseTag = []byte("</Data>")
 
+// bCDATAEnd — "]]>" is forbidden in XML character data (§2.4). Our writer
+// never emits it raw (it escapes '>'), so the fast path declines a body that
+// holds one, and encoding/xml refuses it as every XML reader would. Found by
+// FuzzFastParseMatchesReference.
+var bCDATAEnd = []byte("]]>")
+
 var bSchemaName = []byte("<Schema")
 var bSchemaCloseTag = []byte("</Schema>")
 
@@ -136,6 +142,49 @@ func findDataSection(data []byte) (bodyStart, bodyEnd, afterClose int, ok bool) 
 		bodyEnd = bodyStart + j
 		afterClose = bodyEnd + len(bDataCloseTag)
 		return bodyStart, bodyEnd, afterClose, true
+	}
+}
+
+// dataIsRootChild reports whether the <Data ...> start tag that prefix ends
+// with is a direct child of the document's root element — the only <Data>
+// that encoding/xml binds to DataPacket.Data.
+//
+// findDataSection is a byte search, and found <Data> wherever the bytes
+// were: inside a comment, inside a CDATA section, inside <Query>, or as the
+// root itself. The fast path then read its <R> as the packet's rows, while
+// encoding/xml — and every other XML reader, an XSD validator included —
+// saw none. A packet whose only rows sat in `<!-- <Data>…</Data> -->` was
+// imported with those rows. Found by FuzzFastParseMatchesReference.
+//
+// A comment or CDATA never yields a StartElement, and a nested <Data> sits
+// at the wrong depth, so in every one of those cases the token at the end of
+// prefix is not a depth-1 <Data> and the input goes to the ordinary path.
+// Only the prefix is tokenized — Header, Query and Schema — never the rows.
+//
+// The root is the FIRST top-level element: encoding/xml binds it and ignores
+// any that follow, so <Data> inside a second top-level element is not the
+// root's child either, though it sits at depth 1 (found by the fuzzer once
+// the depth check was in).
+func dataIsRootChild(prefix []byte) bool {
+	d := xml.NewDecoder(bytes.NewReader(prefix))
+	depth, topLevel := 0, 0
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return false
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				topLevel++
+			}
+			if d.InputOffset() == int64(len(prefix)) {
+				return depth == 1 && topLevel == 1 && t.Name.Local == "Data"
+			}
+			depth++
+		case xml.EndElement:
+			depth--
+		}
 	}
 }
 
@@ -293,7 +342,13 @@ func tryFastParse(data []byte) (*DataPacket, bool) {
 	if hasAnotherDataTag(data[afterClose:]) {
 		return nil, false
 	}
+	if !dataIsRootChild(data[:bodyStart]) {
+		return nil, false
+	}
 
+	if bytes.Contains(data[bodyStart:bodyEnd], bCDATAEnd) {
+		return nil, false
+	}
 	rows, ok := scanDataRows(data[bodyStart:bodyEnd])
 	if !ok {
 		return nil, false
