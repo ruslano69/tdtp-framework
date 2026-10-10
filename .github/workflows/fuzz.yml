@@ -1,0 +1,54 @@
+name: Fuzz
+
+# The fuzz targets' seeds run with every `go test`; this job actually fuzzes.
+# Weekly and on demand, not per push: each target gets minutes, and the
+# findings it exists for are rare. A failing input is uploaded as an artifact
+# — commit it under testdata/fuzz/<Target>/ so it becomes a regression test.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: 'Time per target (Go duration)'
+        default: '3m'
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pkg: ./pkg/core/packet, target: FuzzFastParseMatchesReference }
+          - { pkg: ./pkg/core/packet, target: FuzzParseBytes }
+          - { pkg: ./pkg/core/packet, target: FuzzRowEscapeRoundTrip }
+          - { pkg: ./pkg/core/packet, target: FuzzCompactRoundTrip }
+          - { pkg: ./pkg/core/packet, target: FuzzColumnarRoundTrip }
+          - { pkg: ./pkg/core/packet, target: FuzzWriteParseRoundTrip }
+          - { pkg: ./pkg/processors, target: FuzzDecompress }
+          - { pkg: ./pkg/processors, target: FuzzCompressRoundTrip }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Fuzz
+        env:
+          GOWORK: off
+        run: go test ${{ matrix.pkg }} -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime ${{ inputs.fuzztime || '3m' }}
+
+      - name: Upload failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.target }}/
