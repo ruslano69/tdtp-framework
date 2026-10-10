@@ -470,6 +470,11 @@ func (g *Generator) partitionRows(rows [][]string, schema Schema) [][][]string {
 // escapeValue экранирует специальные символы в значении за один проход.
 // Backslash (\) → \\, Pipe (|) → \|, LF (\n) → \n (два символа).
 func escapeValue(value string) string {
+	// NULL without a declared marker (--fast skips DetectAndApply) is the
+	// empty value, not a raw 0x00 byte in the row. See writePacketTo.
+	if value == nullSentinel {
+		return ""
+	}
 	// fast-path: нет спецсимволов — возвращаем как есть без аллокаций
 	hasSpecial := false
 	for i := 0; i < len(value); i++ {

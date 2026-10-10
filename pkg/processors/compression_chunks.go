@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -23,6 +24,12 @@ import (
 func CompressChunksForTdtpAlgo(chunks [][]byte, algo string, level int) (compressedRow string, stats CompressionStats, err error) {
 	if len(chunks) == 0 {
 		return "", CompressionStats{}, nil
+	}
+	for i, c := range chunks {
+		if !xmlchar.CleanBytes(c) {
+			b, _ := xmlchar.FindBytes(c)
+			return "", CompressionStats{}, fmt.Errorf("entry %d: %s — TDTP text must be UTF-8 that XML 1.0 can carry", i+1, b)
+		}
 	}
 
 	// Разделитель ставится МЕЖДУ кусками, а не после каждого, — ровно как

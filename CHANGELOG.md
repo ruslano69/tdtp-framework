@@ -4,6 +4,39 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+## [1.26.5] - 2026-10-10
+
+### Changed — TDTP text is UTF-8 that XML 1.0 can carry, enforced both ways
+
+The requirement existed; nothing enforced it, and each section broke it
+differently:
+
+- **Header, Query and Schema** went through `xml.Marshal`, which silently
+  replaces a forbidden character with U+FFFD. A table named `ta\x01ble` was
+  exported as `ta�ble` and imported under that name; a column read from a
+  single-byte source as `caf\xe9` became `caf�`.
+- **Rows** were written raw, so such a file was not XML at all — `encoding/xml`,
+  an XSD validator or any third-party reader refused it. It was readable only
+  while our fast parser handled it; the moment that path fell back, ours
+  refused it too.
+- **`--fast` wrote every NULL as a raw 0x00 byte**, since it skips the step
+  that turns NULL into a marker. PostgreSQL refuses 0x00 in text on import.
+
+Now the writer refuses such text before writing, naming where it is —
+`part 1, row 2, field "note": U+0001 at offset 1` or
+`Schema.Fields[1].Name: invalid UTF-8 (byte 0xE9 at offset 3)` — and a failed
+file write leaves no truncated file behind. Compression refuses it before it
+disappears into a blob. The reader refuses it on the fast path exactly as
+`encoding/xml` does on the ordinary one, and after decompression. `--fast`
+writes NULL as the empty value, which is how the spec reads a NULL with no
+marker declared. Tab, LF and CR are legal and unaffected; C1 controls and
+NBSP are legal in XML 1.0 and pass.
+
+Cost: none measurable end to end (100k rows, interleaved, ASCII 484 vs 479 ms,
+Cyrillic 493 vs 491 ms; output byte-identical). In isolation the writer is
+about 2× slower on all-Cyrillic values — UTF-8 decoding is per character —
+and `ParseBytes` about 15%.
+
 ### Security — a 60-byte kanzi packet made every reader but `--import` allocate ~1 GB
 
 A kanzi stream with an honest header — level-6 codecs, 1 MiB blocks, valid

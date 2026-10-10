@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 	"io"
 	"log"
 	"os"
@@ -361,6 +362,16 @@ func (p *Parser) DecompressData(ctx context.Context, packet *DataPacket, decompr
 	decompressedRows, err := decompressor(ctx, compressedData, packet.Data.Compression)
 	if err != nil {
 		return fmt.Errorf("decompression failed: %w", err)
+	}
+
+	// Распакованные записи — тот же текст TDTP: UTF-8 и ничего, чего не
+	// допускает XML 1.0. Сжатие лишь прятало их от проверки, которую
+	// несжатый пакет проходит на разборе.
+	for i, r := range decompressedRows {
+		if !xmlchar.Clean(r) {
+			b, _ := xmlchar.Find(r)
+			return fmt.Errorf("decompressed entry %d: %s — TDTP text must be UTF-8 that XML 1.0 can carry", i+1, b)
+		}
 	}
 
 	// Пустая полезная нагрузка — это и «ноль записей», и «одна пустая

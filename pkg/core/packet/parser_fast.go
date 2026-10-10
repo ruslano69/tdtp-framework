@@ -349,6 +349,13 @@ func tryFastParse(data []byte) (*DataPacket, bool) {
 	if bytes.Contains(data[bodyStart:bodyEnd], bCDATAEnd) {
 		return nil, false
 	}
+	// TDTP is UTF-8 with nothing XML 1.0 forbids, rows included. The fast path
+	// used to read invalid UTF-8 and C0 controls back byte for byte where
+	// encoding/xml refuses the file; now it declines, and the ordinary parse
+	// refuses it the same way. ~2.7 GB/s on clean text (xmlchar.CleanBytes).
+	if !xmlchar.CleanBytes(data[bodyStart:bodyEnd]) {
+		return nil, false
+	}
 	rows, ok := scanDataRows(data[bodyStart:bodyEnd])
 	if !ok {
 		return nil, false

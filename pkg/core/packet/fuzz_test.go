@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 )
@@ -102,16 +101,6 @@ func FuzzFastParseMatchesReference(f *testing.F) {
 		}
 		var ref DataPacket
 		if err := xml.Unmarshal(data, &ref); err != nil {
-			// Known, deliberate leniency: the writer puts invalid UTF-8 and
-			// characters XML 1.0 forbids (U+0001, U+FFFE…) into rows as they
-			// came from the database, and the fast path reads them back
-			// byte for byte. encoding/xml refuses such a file. Being strict
-			// here would make packets we wrote unreadable, so the leniency
-			// stays until the writer stops producing them (TODO_NEXT.md).
-			// Every other refusal is a divergence.
-			if msg := err.Error(); strings.Contains(msg, "invalid UTF-8") || strings.Contains(msg, "illegal character code") {
-				return
-			}
 			t.Fatalf("fast path accepted input the reference rejects (%v):\n%q", err, data)
 		}
 		if !reflect.DeepEqual(fast, &ref) {
@@ -150,8 +139,17 @@ func FuzzRowEscapeRoundTrip(f *testing.F) {
 			escaped[i] = escapeValue(v)
 		}
 		got := NewParser().GetRowValues(Row{Value: strings.Join(escaped, "|")})
-		if !reflect.DeepEqual(got, values) {
-			t.Fatalf("round trip changed the row\n got %q\nwant %q", got, values)
+		// A value that is exactly the adapters' NULL sentinel is written as
+		// the empty value (NULL with no marker declared); anything else
+		// comes back unchanged.
+		want := make([]string, len(values))
+		for i, v := range values {
+			if v != nullSentinel {
+				want[i] = v
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("round trip changed the row\n got %q\nwant %q", got, want)
 		}
 	})
 }
@@ -223,13 +221,8 @@ func FuzzWriteParseRoundTrip(f *testing.F) {
 	f.Add("x\r\ny\x1f\t \x1f]]>")
 	f.Add("\x1f\x1e\x1f")
 	f.Fuzz(func(t *testing.T, s string) {
-		if !utf8.ValidString(s) {
-			t.Skip("not UTF-8")
-		}
-		for _, r := range s {
-			if r == 0 || (!xmlchar.IsChar(r) && r != 0x1e && r != 0x1f) {
-				t.Skip("character XML 1.0 cannot carry")
-			}
+		if strings.ContainsRune(s, 0) {
+			t.Skip("\\x00 is the NULL sentinel")
 		}
 		rows, n := fuzzRows(s, 6)
 		gen := NewGenerator()
@@ -238,6 +231,19 @@ func FuzzWriteParseRoundTrip(f *testing.F) {
 			t.Skip(err)
 		}
 		data, err := gen.ToXML(pkts[0], false)
+		// The writer refuses exactly the text XML 1.0 cannot carry.
+		clean := true
+		for _, r := range rows {
+			for _, v := range r {
+				clean = clean && xmlchar.Clean(v)
+			}
+		}
+		if !clean {
+			if err == nil {
+				t.Fatalf("writer accepted text XML cannot carry: %q", rows)
+			}
+			return
+		}
 		if err != nil {
 			t.Fatalf("ToXML: %v", err)
 		}

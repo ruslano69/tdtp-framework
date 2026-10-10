@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 	"strings"
 	"time"
 
@@ -202,6 +203,9 @@ func CompressDataForTdtp(rows []string, level int) (compressedRow string, stats 
 	if len(rows) == 0 {
 		return "", CompressionStats{}, nil
 	}
+	if err := checkRowsText(rows); err != nil {
+		return "", CompressionStats{}, err
+	}
 
 	originalData := []byte(strings.Join(rows, "\n"))
 
@@ -253,6 +257,9 @@ func CompressDataForTdtpAlgo(rows []string, algo string, level int) (compressedR
 	if len(rows) == 0 {
 		return "", CompressionStats{}, nil
 	}
+	if err := checkRowsText(rows); err != nil {
+		return "", CompressionStats{}, err
+	}
 
 	originalData := []byte(strings.Join(rows, "\n"))
 	start := time.Now()
@@ -300,4 +307,18 @@ func DryDecompress(compressed, algo string) error {
 // outside this repo.
 func DecompressDataForTdtpAlgo(compressed, algo string) ([]string, error) {
 	return DecompressDataForTdtpWithAlgo(compressed, algo)
+}
+
+// checkRowsText refuses rows XML 1.0 cannot carry before they are hidden in
+// a compressed blob, where the writer's own check cannot see them. TDTP text
+// is UTF-8 with nothing XML forbids, compressed or not; the reader applies
+// the same rule after decompression (packet.Parser.DecompressData).
+func checkRowsText(rows []string) error {
+	for i, r := range rows {
+		if !xmlchar.Clean(r) {
+			b, _ := xmlchar.Find(r)
+			return fmt.Errorf("row %d: %s — TDTP text must be UTF-8 that XML 1.0 can carry", i+1, b)
+		}
+	}
+	return nil
 }
