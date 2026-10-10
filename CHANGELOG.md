@@ -4,6 +4,8 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+## [1.26.5] - 2026-10-10
+
 ### Changed — TDTP text is UTF-8 that XML 1.0 can carry, enforced both ways
 
 The requirement existed; nothing enforced it, and each section broke it
