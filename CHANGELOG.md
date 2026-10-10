@@ -10,6 +10,13 @@ GO-2026-6629, reported by `govulncheck` on every branch once the advisory
 was published. `golang.org/x/sync` moves to 0.22.0 with it (required by the
 new x/text). No code changes.
 
+`cmd/tdtp-xray` (x/text 0.30.0) and `examples/05-streaming-rabbitmq`
+(0.28.0) are separate modules the Security workflow does not scan; both are
+moved to 0.41.0 too. Neither built on its own before (`GOWORK=off`: stale
+`go.mod`/`go.sum`), so `go mod tidy` also caught them up with the root module
+they replace. `tdtp-xray` gains the root's `replace` for `jacoelho/xsd`:
+replace directives are not inherited, and upstream xsd v0.5.1 needs go 1.27.
+
 ### Fixed — compact rewrote empty strings; the text `[NULL]` became NULL
 
 Found by importing an exported SQLite table back and comparing it cell by
