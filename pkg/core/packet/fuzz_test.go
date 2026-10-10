@@ -139,8 +139,17 @@ func FuzzRowEscapeRoundTrip(f *testing.F) {
 			escaped[i] = escapeValue(v)
 		}
 		got := NewParser().GetRowValues(Row{Value: strings.Join(escaped, "|")})
-		if !reflect.DeepEqual(got, values) {
-			t.Fatalf("round trip changed the row\n got %q\nwant %q", got, values)
+		// A value that is exactly the adapters' NULL sentinel is written as
+		// the empty value (NULL with no marker declared); anything else
+		// comes back unchanged.
+		want := make([]string, len(values))
+		for i, v := range values {
+			if v != nullSentinel {
+				want[i] = v
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("round trip changed the row\n got %q\nwant %q", got, want)
 		}
 	})
 }
