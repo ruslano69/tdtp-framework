@@ -126,6 +126,7 @@ func ExportToBrokerWithOptions(ctx context.Context, dbConfig *adapters.Config, b
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer func() { _ = adapter.Close(ctx) }()
+	defer reportParseFailures(os.Stderr, adapter)
 
 	// --quiet is read from the process rather than taken as a parameter: this
 	// signature is already fourteen positional arguments, and a fifteenth bool

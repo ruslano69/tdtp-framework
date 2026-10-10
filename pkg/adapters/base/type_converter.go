@@ -67,6 +67,7 @@ func formatTimeForField(t time.Time, field packet.Field) string {
 type UniversalTypeConverter struct {
 	converter       *schema.Converter
 	noDateSentinels map[string]bool // "1900-01-01", "1753-01-01" etc — MSSQL configured sentinels
+	failures        parseTally      // values that did not convert; see ParseFailure
 }
 
 // NewUniversalTypeConverter создает новый UniversalTypeConverter
@@ -133,9 +134,9 @@ func (c *UniversalTypeConverter) ConvertValueToTDTP(field packet.Field, value st
 	// Парсим значение
 	typedValue, err := c.converter.ParseValue(value, fieldDef)
 	if err != nil {
-		// Логируем ошибку парсинга для debugging
-		log.Printf("Failed to parse field %s (type %s): %v", field.Name, field.Type, err)
-		// Если ошибка парсинга, возвращаем как есть
+		// Значение уходит в пакет как есть — и это должно быть видно в итоге
+		// экспорта, а не строкой лога на каждую ячейку (ParseFailure).
+		c.failures.record(field, value, err, false)
 		return value
 	}
 
@@ -222,8 +223,9 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		// JSON/JSONB как map - конвертируем в JSON строку
 		jsonBytes, err := json.Marshal(v)
 		if err != nil {
-			log.Printf("Failed to marshal JSON map for field %s: %v", field.Name, err)
-			return "{}" // Возвращаем пустой JSON при ошибке
+			// Подмена, а не проброс: в пакет уходит "{}" вместо значения.
+			c.failures.record(field, fmt.Sprint(v), err, true)
+			return "{}"
 		}
 		return string(jsonBytes)
 
@@ -231,8 +233,8 @@ func (c *UniversalTypeConverter) pgValueToString(val any, field packet.Field) st
 		// JSON array
 		jsonBytes, err := json.Marshal(v)
 		if err != nil {
-			log.Printf("Failed to marshal JSON array for field %s: %v", field.Name, err)
-			return "[]" // Возвращаем пустой массив при ошибке
+			c.failures.record(field, fmt.Sprint(v), err, true)
+			return "[]"
 		}
 		return string(jsonBytes)
 
