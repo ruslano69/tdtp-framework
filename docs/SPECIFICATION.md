@@ -359,6 +359,11 @@ Declares string markers for values that cannot be expressed directly:
 - If a value equals a marker, apply the corresponding special value
 - For TEXT: an empty field `||` is `""`, an empty string that is stored; the `[NULL]` marker is NULL, which is not
 - For DATE: the NoDate marker is a sentinel meaning "no date", distinct from NULL
+- **The marker is per field and is not always `[NULL]`.** Compare against the
+  declared `marker`, never a constant. A writer whose column holds both NULL
+  and the text `[NULL]` declares another spelling (`[NULL1]`, `[NULL2]`, …) so
+  the two stay distinct. A field with no `<Null>` declaration is read with the
+  legacy `[NULL]`, which older writers emitted without declaring it
 
 ### Data
 
@@ -932,6 +937,14 @@ for each row:
       else:
         values[i] = currentFixed[i]   // gap → take from the carry
 ```
+
+**An empty value cannot be fixed.** The gap and the empty string `""` are the
+same bytes, so a decoder reads `""` in a fixed position as "same as above".
+A writer must therefore not mark a field `fixed` if any of its values in the
+packet is `""` — `tdtpcli` leaves such a field ordinary and says so. NULL is
+not affected: it travels as its marker, which is never empty. Signalling `""`
+some other way was rejected on purpose: every existing reader would decode it
+as a gap.
 
 **Note:** the decoder does not verify that `fixed="true"` is correct. That is
 the sender's responsibility.

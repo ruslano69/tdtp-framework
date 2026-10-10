@@ -140,6 +140,11 @@ func (e *CompactTailError) Error() string {
 //   - передавать carry-состояние следующему чанку через атрибут carry="...".
 //
 // Если в схеме нет ни одного fixed поля — возвращает обычный Data (compact=false).
+//
+// Предусловие: в fixed поле нет пустых значений. Пустая позиция в compact —
+// это «бери значение сверху», и настоящее "" декодер молча заменит значением
+// предыдущей группы. ApplyCompact это предусловие обеспечивает сам: поле с ""
+// он из fixed исключает.
 func RowsToCompactData(rows [][]string, schema Schema, tail bool) Data {
 	if len(rows) == 0 {
 		return Data{Compact: true}
@@ -238,12 +243,42 @@ func ResolveFixedFields(schema Schema, explicit []string) []string {
 // ApplyCompact применяет compact-формат к пакету:
 // помечает поля fixedFieldNames как fixed в схеме, стрипает _ prefix из имён,
 // перекодирует строки в compact-формат, устанавливает версию 1.3.1.
+//
+// Поле, в котором встречается пустое значение, fixed не становится — см.
+// ApplyCompactReport.
 func ApplyCompact(pkt *DataPacket, fixedFieldNames []string, tail bool) error {
+	_, err := ApplyCompactReport(pkt, fixedFieldNames, tail)
+	return err
+}
+
+// ApplyCompactReport — ApplyCompact, который возвращает имена полей,
+// исключённых из fixed из-за пустых значений.
+//
+// Пустая позиция fixed поля в compact означает «значение как в строке выше»,
+// и отличить от неё настоящую пустую строку формат не может. Без исключения
+// `Sales, "", Sales` уезжало как `Sales|…`, `|…`, `|…` и читалось как три
+// Sales — молча, с совпадающим хешем, потому что хеш считается по compact
+// строкам. А в tail-строке пустое fixed поле давало пакет, который наш же
+// ExpandCompactRows отвергает с CompactTailError.
+//
+// Менять формат ради этого нельзя: любой уже выпущенный читатель прочёл бы
+// новый способ записи "" как пропуск. Исключение поля из fixed стоит только
+// сжатия этого поля, а такой пакет читают все версии.
+//
+// NULL сюда не попадает: к этому моменту DetectAndApply уже заменил его
+// маркером. Пустое значение — это настоящая пустая строка TEXT колонки.
+func ApplyCompactReport(pkt *DataPacket, fixedFieldNames []string, tail bool) (dropped []string, err error) {
 	// Ensure rawRows (GenerateReference fast-path) are flushed into Data.Rows
 	// before we read them. Without this, GetRowValues below sees an empty slice
 	// and RowsToCompactData produces zero rows, while ToXML still uses rawRows
 	// (uncompacted original data) via the fast-path branch.
 	pkt.MaterializeRows()
+
+	parser := NewParser()
+	rows := make([][]string, len(pkt.Data.Rows))
+	for i, row := range pkt.Data.Rows {
+		rows[i] = parser.GetRowValues(row)
+	}
 
 	fixedSet := make(map[string]bool, len(fixedFieldNames))
 	for _, f := range fixedFieldNames {
@@ -253,23 +288,35 @@ func ApplyCompact(pkt *DataPacket, fixedFieldNames []string, tail bool) error {
 	for i := range pkt.Schema.Fields {
 		name := pkt.Schema.Fields[i].Name
 		stripped := strings.TrimPrefix(name, "_")
-		if fixedSet[name] || fixedSet[stripped] {
-			pkt.Schema.Fields[i].Fixed = true
-			if strings.HasPrefix(name, "_") {
-				pkt.Schema.Fields[i].Name = stripped
-			}
+		if !fixedSet[name] && !fixedSet[stripped] {
+			continue
 		}
-	}
-
-	parser := NewParser()
-	rows := make([][]string, len(pkt.Data.Rows))
-	for i, row := range pkt.Data.Rows {
-		rows[i] = parser.GetRowValues(row)
+		// Имя переименовывается в любом случае: соглашение о _ префиксе — про
+		// имя колонки, и у всех частей одного экспорта оно должно совпадать,
+		// даже если в одной из них поле fixed не стало.
+		pkt.Schema.Fields[i].Name = stripped
+		if hasEmptyValue(rows, i) {
+			dropped = append(dropped, stripped)
+			continue
+		}
+		pkt.Schema.Fields[i].Fixed = true
 	}
 
 	pkt.Data = RowsToCompactData(rows, pkt.Schema, tail)
 	// Compact is a v1.3.1 feature — stamp the version (BumpVersion, not
 	// assignment: a later step must never be able to downgrade this).
 	BumpVersion(pkt, "1.3.1")
-	return nil
+	return dropped, nil
+}
+
+// hasEmptyValue сообщает, есть ли в колонке col пустое значение. Короткая
+// строка считается пустой в недостающих позициях — так её запишет и
+// RowsToCompactData.
+func hasEmptyValue(rows [][]string, col int) bool {
+	for _, row := range rows {
+		if col >= len(row) || row[col] == "" {
+			return true
+		}
+	}
+	return false
 }

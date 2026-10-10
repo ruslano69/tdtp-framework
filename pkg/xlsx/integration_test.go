@@ -146,6 +146,23 @@ func TestIntegration_NormalFloat_Roundtrip(t *testing.T) {
 
 // ── NULL marker ──────────────────────────────────────────────────────────────
 
+// A column holding both NULL and the text "[NULL]" gets another marker
+// (packet.pickNullMarker): the marker is blank, the text stays text.
+func TestIntegration_NullMarker_DeclaredAlternative(t *testing.T) {
+	pkt := makePacket(
+		[]packet.Field{{Name: "id", Type: "INTEGER"}, {Name: "name", Type: "TEXT",
+			SpecialValues: &packet.SpecialValues{Null: &packet.MarkerValue{Marker: "[NULL1]"}}}},
+		[]string{"1|[NULL1]", "2|[NULL]"},
+	)
+	out := roundtrip(t, pkt)
+	if got := cellValue(t, out, 0, 1); got != "" {
+		t.Errorf("declared marker [NULL1] should be a blank cell, got %q", got)
+	}
+	if got := cellValue(t, out, 1, 1); got != "[NULL]" {
+		t.Errorf("text [NULL] in a column marked [NULL1] should stay text, got %q", got)
+	}
+}
+
 func TestIntegration_NullMarker_InTextField_BecomesBlank(t *testing.T) {
 	pkt := makePacket(
 		[]packet.Field{{Name: "id", Type: "INTEGER"}, {Name: "name", Type: "TEXT"}},

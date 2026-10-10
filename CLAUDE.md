@@ -699,6 +699,27 @@ switch to pairwise plus the full set, rather than quietly taking minutes.
 
 ---
 
+## Compact format: "" and the NULL marker (IMPORTANT)
+
+**In compact, an empty fixed position means "same as above" — so `""` cannot
+be a fixed value.** `ApplyCompactReport` leaves any field holding `""` out of
+`fixed` and the CLI warns. Do not "optimise" that check away, and do not add
+an escape for `""` to the format: every existing reader decodes it as a gap.
+The failure is silent — the `--integrity` hash covers the compact rows, so it
+matches.
+
+**The NULL marker is per field.** A column holding both NULL and the text
+`[NULL]` gets `[NULL1]` (`pickNullMarker`). Readers compare against
+`packet.NullMarkerOf(field)`, never `SpecNullMarker`. `DetectAndApply` moves
+the marker only when the column has a real NULL (the `\x00` sentinel): rows
+re-generated from a parsed packet carry `[NULL]` as the marker itself, and
+moving it there would turn their NULLs into text.
+
+`TestCompactRoundTrip_EmptyAndNullLiterals` (`pkg/cli/commands`) runs both
+through real export and import, with zstd, `--integrity` and the tail row.
+
+---
+
 ## The parser: a hybrid parse (IMPORTANT)
 
 The writer took reflection off the hot path long ago (`xmlwriter.go`): Header and

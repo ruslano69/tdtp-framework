@@ -159,6 +159,10 @@ func marshalObject(fields []packet.Field, defs []schema.FieldDef, values []strin
 		if i < len(values) {
 			raw = values[i]
 		}
+		if raw == packet.NullMarkerOf(fld) {
+			writeNullField(&b, fld.Name, i == 0)
+			continue
+		}
 		tv, err := conv.ParseValue(raw, defs[i])
 		if err != nil || tv.IsNull {
 			writeNullField(&b, fld.Name, i == 0)
@@ -206,9 +210,8 @@ func jsonValue(tv *schema.TypedValue, fieldType schema.DataType) ([]byte, error)
 		}
 		return json.Marshal(tv.TimeValue.UTC().Format("2006-01-02T15:04:05Z07:00"))
 	case tv.StringValue != nil:
-		if *tv.StringValue == packet.SpecNullMarker {
-			return []byte("null"), nil
-		}
+		// The NULL marker is handled by the caller, against the field's own
+		// declaration: "[NULL]" may be text in a column marked "[NULL1]".
 		return json.Marshal(*tv.StringValue)
 	default:
 		if tv.RawValue == "" {

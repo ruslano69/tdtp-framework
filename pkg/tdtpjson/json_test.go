@@ -209,3 +209,28 @@ func TestWrite_PrettyNoBlankLine(t *testing.T) {
 		t.Errorf("pretty = %q, want %q", got, want)
 	}
 }
+
+// A column holding both NULL and the text "[NULL]" declares another marker;
+// the marker becomes null and the text stays text.
+func TestWrite_DeclaredNullMarker(t *testing.T) {
+	sch := packet.Schema{Fields: []packet.Field{
+		{Name: "id", Type: "INTEGER", Key: true},
+		{Name: "note", Type: "TEXT", SpecialValues: &packet.SpecialValues{Null: &packet.MarkerValue{Marker: "[NULL1]"}}},
+	}}
+	pkts, err := packet.NewGenerator().GenerateReference("t", sch, [][]string{{"1", "[NULL1]"}, {"2", "[NULL]"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkts[0].MaterializeRows()
+	var b bytes.Buffer
+	if _, err := Write(context.Background(), &b, pkts[0], nil, false); err != nil {
+		t.Fatal(err)
+	}
+	objs := decodeObjects(t, b.String())
+	if objs[0]["note"] != nil {
+		t.Errorf("declared marker should be null, got %v", objs[0]["note"])
+	}
+	if objs[1]["note"] != "[NULL]" {
+		t.Errorf("text [NULL] should stay text, got %v", objs[1]["note"])
+	}
+}

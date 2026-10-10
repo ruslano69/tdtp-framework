@@ -1,6 +1,9 @@
 package packet
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Canonical SpecialValues markers per TDTP spec v1.3.1.
 // These are fixed by the specification and must not be changed.
@@ -107,6 +110,9 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 		hasInf    bool
 		hasNegInf bool
 		hasNoDate bool
+		// markerLike — значения колонки, которые сами выглядят как маркер
+		// NULL ("[NULL]", "[NULL1]"…). Почти всегда nil.
+		markerLike map[string]bool
 	}
 	det := make([]detected, cols)
 
@@ -116,6 +122,12 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 			if v == nullSentinel {
 				det[i].hasNull = true
 				continue
+			}
+			if len(v) >= len(SpecNullMarker) && v[0] == '[' && strings.HasPrefix(v, "[NULL") {
+				if det[i].markerLike == nil {
+					det[i].markerLike = map[string]bool{}
+				}
+				det[i].markerLike[v] = true
 			}
 			fieldType := sch.Fields[i].Type
 			switch {
@@ -156,13 +168,20 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 	// Phase 2: build updated schema fields.
 	updatedFields := make([]Field, cols)
 	copy(updatedFields, sch.Fields)
+	nullMarkers := make([]string, cols)
 	for i, d := range det {
+		// No NULL, no declaration — even if the column holds the text
+		// "[NULL]". Rows re-generated from a parsed packet (merge, to-tdtp)
+		// arrive here carrying "[NULL]" as the marker, not the sentinel, and
+		// their schema already declares it; moving the marker would turn those
+		// NULLs into text.
 		if !d.hasNull && !d.hasNaN && !d.hasInf && !d.hasNegInf && !d.hasNoDate {
 			continue
 		}
 		sv := &SpecialValues{}
 		if d.hasNull {
-			sv.Null = &MarkerValue{Marker: SpecNullMarker}
+			nullMarkers[i] = pickNullMarker(d.markerLike)
+			sv.Null = &MarkerValue{Marker: nullMarkers[i]}
 		}
 		if d.hasNaN {
 			sv.NaN = &MarkerValue{Marker: SpecNaNMarker}
@@ -191,7 +210,7 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 			switch {
 			case v == nullSentinel:
 				if d.hasNull {
-					updatedRow[i] = SpecNullMarker
+					updatedRow[i] = nullMarkers[i]
 				} else {
 					updatedRow[i] = "" // no SpecialValues: backward-compat empty string
 				}
@@ -206,4 +225,37 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 	}
 
 	return updatedRows, updatedSchema
+}
+
+// pickNullMarker returns the NULL marker for one column: the canonical
+// "[NULL]" unless the column holds that very text, then the first of
+// "[NULL1]", "[NULL2]"… it does not hold.
+//
+// The marker is declared per field (<Null marker="…"/>) and readers compare
+// against the declared one, so a different spelling costs nothing. Keeping
+// "[NULL]" regardless turned the text '[NULL]' into NULL on import — with or
+// without compact — because the reader cannot tell the two apart.
+func pickNullMarker(taken map[string]bool) string {
+	if !taken[SpecNullMarker] {
+		return SpecNullMarker
+	}
+	for n := 1; ; n++ {
+		m := "[NULL" + strconv.Itoa(n) + "]"
+		if !taken[m] {
+			return m
+		}
+	}
+}
+
+// NullMarkerOf returns the NULL marker a reader should apply to field f: the
+// one it declares, or "[NULL]" when it declares none — packets from other
+// producers and older writers mark NULL that way without a declaration.
+// Comparing against the constant instead would read a column whose marker was
+// moved to "[NULL1]" (see pickNullMarker) as NULL wherever it holds the text
+// "[NULL]".
+func NullMarkerOf(f Field) string {
+	if f.SpecialValues != nil && f.SpecialValues.Null != nil && f.SpecialValues.Null.Marker != "" {
+		return f.SpecialValues.Null.Marker
+	}
+	return SpecNullMarker
 }
