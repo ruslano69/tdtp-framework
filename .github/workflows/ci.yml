@@ -83,12 +83,16 @@ jobs:
     - name: Test tdtpcli binary
       run: /tmp/tdtpcli --help || echo "CLI help command executed"
 
-  # ── Integration tests (PostgreSQL + RabbitMQ) ────────────────────────────────
-  # Runs only on push/PR to main/master so feature branches don't spam emails.
+  # ── Integration tests (live databases + RabbitMQ) ────────────────────────────
+  # Runs on pull requests and on pushes to main/master; plain feature-branch
+  # pushes skip it. It used to run only after a merge, and only against
+  # PostgreSQL: the MySQL, MSSQL and Oracle live tests skipped on every CI run
+  # since they were written. That is where the DECIMAL, compact and TEXT
+  # defects of 2026-10 were found — by hand, after the fact.
   integration:
     name: Integration tests
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
 
     services:
       postgres:
@@ -104,6 +108,52 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: tdtp_ci_root
+          MYSQL_DATABASE: tdtp_test
+          MYSQL_USER: tdtp_user
+          MYSQL_PASSWORD: tdtp_dev_pass_2025
+        ports:
+          - 3306:3306
+        # TCP, not the socket: the init-time server listens on the socket only,
+        # so a socket ping would report ready before the real server is up.
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -ptdtp_ci_root"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: DevPassword123!
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DevPassword123! -Q 'SELECT 1' -b"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+      oracle:
+        # The slim-faststart image ships a ready database; ~10 s to healthy.
+        # APP_USER is created in XEPDB1 with the rights the adapter tests need.
+        image: gvenzl/oracle-xe:21.3.0-slim-faststart
+        env:
+          ORACLE_PASSWORD: tdtp_ci_oracle
+          APP_USER: tdtp
+          APP_USER_PASSWORD: tdtp_ci_pass
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 60
 
       rabbitmq:
         image: rabbitmq:3-management
@@ -128,6 +178,14 @@ jobs:
         go-version: '1.25.0'
         cache: true
 
+    - name: Create MSSQL test databases
+      # The adapter tests create their own tables; they need the two databases
+      # their DSNs name. sqlcmd runs inside the service container.
+      run: >-
+        docker exec ${{ job.services.mssql.id }} /opt/mssql-tools18/bin/sqlcmd
+        -C -S localhost -U sa -P 'DevPassword123!' -b
+        -Q "IF DB_ID('DevDB') IS NULL CREATE DATABASE DevDB; IF DB_ID('ProdSimDB') IS NULL CREATE DATABASE ProdSimDB;"
+
     - name: Run integration tests
       env:
         GOTOOLCHAIN: local  # honour the pinned go-version; go.mod's toolchain directive replaces it otherwise
@@ -139,3 +197,32 @@ jobs:
         # then hangs for the full 60s health-check wait before the suite
         # times out. Spanning both modules is what this job is for.
       run: go test -tags "integration nokafka" -v -timeout 120s ./tests/integration/ ./pkg/adapters/postgres/...
+
+    - name: Live adapter tests (PostgreSQL, MySQL, MSSQL, Oracle 21c)
+      # Every live test reads its DSN from these and skips when it cannot
+      # connect — so a misconfigured service shows up as SKIP, not as a pass.
+      # The grep below turns any skip of a live test into a failure.
+      env:
+        GOTOOLCHAIN: local
+        GOWORK: off
+        POSTGRES_TEST_DSN: postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test?sslmode=disable
+        MYSQL_TEST_DSN: tdtp_user:tdtp_dev_pass_2025@tcp(127.0.0.1:3306)/tdtp_test?parseTime=true
+        MSSQL_TEST_DSN_DEV: server=localhost,1433;user id=sa;password=DevPassword123!;database=DevDB;encrypt=disable
+        MSSQL_TEST_DSN_PROD: server=localhost,1433;user id=sa;password=DevPassword123!;database=ProdSimDB;encrypt=disable
+        TDTP_ORACLE21_DSN: oracle://tdtp:tdtp_ci_pass@localhost:1521/XEPDB1
+      run: |
+        status=0
+        go test -tags "integration nokafka" -count=1 -timeout 15m -v \
+          ./pkg/adapters/... ./pkg/cli/commands/ > live.log 2>&1 || status=$?
+        grep -E '^(--- FAIL|FAIL|ok|panic)' live.log || true
+        if [ "$status" -ne 0 ]; then
+          echo "::error::live adapter tests failed"
+          grep -E -B2 -A20 '^(--- FAIL|panic)' live.log | head -200
+          exit 1
+        fi
+        # A live test that skipped did not test anything. 18c has no service
+        # here, so its subtests are the only skips allowed.
+        if grep -E -- '--- SKIP: .*(MySQL|Integration_|OracleLive|DecimalExact|LiveEngines|PostgreSQL|Postgres)' live.log | grep -v '/18c'; then
+          echo "::error::a live adapter test skipped — its database was not reachable"
+          exit 1
+        fi
