@@ -234,6 +234,7 @@ func ExportTableToXLSX(ctx context.Context, config *adapters.Config, opts XLSXOp
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer func() { _ = adapter.Close(ctx) }()
+	defer reportParseFailures(os.Stderr, adapter)
 
 	fmt.Printf("Exporting table '%s' to XLSX...\n", opts.TableName)
 

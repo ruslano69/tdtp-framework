@@ -173,6 +173,7 @@ func ProcessRequest(ctx context.Context, opts ProcessRequestOptions) error {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer func() { _ = adapter.Close(ctx) }()
+	defer reportParseFailures(os.Stderr, adapter)
 
 	// 4. Выполняем запрос
 	printf("  Executing query on table '%s'...\n", tableName)

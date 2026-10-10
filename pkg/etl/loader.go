@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	tdtpcrypto "github.com/ruslano69/tdtp-framework/pkg/crypto"
 	"github.com/ruslano69/tdtp-framework/pkg/mercury"
@@ -321,6 +323,9 @@ type Loader struct {
 	// конфигурация, а не экзотика.
 	adaptersMu sync.Mutex
 	adapters   map[string]adapters.Adapter
+	// adapterSources — which sources went through each pooled adapter, so a
+	// conversion failure can be attributed when the adapter is closed.
+	adapterSources map[string][]string
 }
 
 // NewLoader создает новый загрузчик данных
@@ -470,6 +475,13 @@ func (l *Loader) adapterFor(ctx context.Context, source SourceConfig, fast bool)
 	l.adaptersMu.Lock()
 	defer l.adaptersMu.Unlock()
 
+	if l.adapterSources == nil {
+		l.adapterSources = make(map[string][]string)
+	}
+	if !slices.Contains(l.adapterSources[key], source.Name) {
+		l.adapterSources[key] = append(l.adapterSources[key], source.Name)
+	}
+
 	if a, ok := l.adapters[key]; ok {
 		return a, nil
 	}
@@ -506,8 +518,16 @@ func (l *Loader) closeAdapters(ctx context.Context) {
 	defer l.adaptersMu.Unlock()
 
 	for key, a := range l.adapters {
+		// Values a source's converter could not handle went into its packet
+		// as they came; say so before the adapter, and its tally, is gone.
+		if r, ok := a.(base.ParseFailureReporter); ok {
+			for _, f := range r.ParseFailures() {
+				fmt.Fprintf(os.Stderr, "  ⚠ source %s: %s\n", strings.Join(l.adapterSources[key], ", "), f)
+			}
+		}
 		_ = a.Close(ctx)
 		delete(l.adapters, key)
+		delete(l.adapterSources, key)
 	}
 }
 

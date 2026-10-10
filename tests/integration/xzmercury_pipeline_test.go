@@ -27,7 +27,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -160,10 +159,11 @@ quota:
 		"--config", cfgPath,
 	)
 	xzmCmd.Dir = root
-	// Setpgid: true — помещает дочерние процессы в отдельную группу.
-	// Без этого Kill() убивает только "go run", но не скомпилированный бинарник xzmercury,
-	// который становится orphan и мешает CI (GitHub Actions сообщает о нём в конце джоба).
-	xzmCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Своя группа процессов: без неё Kill() убивает только "go run", а
+	// скомпилированный им бинарник xzmercury остаётся сиротой и мешает CI
+	// (GitHub Actions сообщает о нём в конце джоба). Как это делается,
+	// зависит от ОС — см. procgroup_unix_test.go / procgroup_windows_test.go.
+	setProcGroup(xzmCmd)
 	// Pipe вместо os.Stderr: при Kill() pipe закрывается сразу,
 	// иначе Go test framework ждёт WaitDelay и считает прогон неудачным.
 	xzmPipe, _ := xzmCmd.StderrPipe()
@@ -187,7 +187,7 @@ quota:
 	t.Cleanup(func() {
 		// Убиваем всю группу процессов: и "go run" и скомпилированный xzmercury.
 		if xzmCmd.Process != nil {
-			_ = syscall.Kill(-xzmCmd.Process.Pid, syscall.SIGKILL)
+			killProcGroup(xzmCmd)
 			_ = xzmCmd.Wait()
 		}
 		_ = xzmPipe.Close()

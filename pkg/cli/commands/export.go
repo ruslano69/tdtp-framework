@@ -248,6 +248,7 @@ func ExportTable(ctx context.Context, config *adapters.Config, opts ExportOption
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	defer func() { _ = adapter.Close(ctx) }()
+	defer reportParseFailures(os.Stderr, adapter)
 
 	fmt.Printf("Exporting table '%s'...\n", opts.TableName)
 
@@ -958,4 +959,18 @@ func buildExportChain(schema packet.Schema, opts ExportOptions) (*processors.Pac
 		chain.Add(steps[name])
 	}
 	return chain, nil
+}
+
+// reportParseFailures prints, once an export through a is done, the values
+// its converter could not handle as their declared type. Each one went into
+// the packet as it came (or, for JSON, was replaced), and without this the
+// export reported success with only a per-cell log line as evidence.
+func reportParseFailures(w io.Writer, a any) {
+	r, ok := a.(base.ParseFailureReporter)
+	if !ok {
+		return
+	}
+	for _, f := range r.ParseFailures() {
+		_, _ = fmt.Fprintf(w, "⚠ %s\n", f)
+	}
 }

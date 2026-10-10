@@ -247,3 +247,14 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 	}
 	return &packet.DataPacket{Schema: schema}, nil
 }
+
+var _ base.ParseFailureReporter = (*Adapter)(nil)
+
+// ParseFailures implements base.ParseFailureReporter: values this adapter's
+// exports could not convert to their declared type, since the previous call.
+func (a *Adapter) ParseFailures() []base.ParseFailure {
+	if a.converter == nil {
+		return nil
+	}
+	return a.converter.TakeParseFailures()
+}

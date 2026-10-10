@@ -28,7 +28,7 @@ after 1.26.0," not as license to keep adding capability.
 
 ---
 
-## Current state — v1.26.0 (2026-08-31)
+## Current state — v1.26.4 (2026-10-10)
 
 ### Closed sprints
 
@@ -64,6 +64,8 @@ after 1.26.0," not as license to keep adding capability.
 | v1.25.0 | Datetime round-trip across SQLite/MySQL/PostgreSQL; cheaper escaped-row splitting; MSSQL datetime formatters |
 | v1.25.1 | Protocol-version comparison and validation hardening (three integrity-gate bypasses) |
 | v1.26.0 | `--columnar`/`--stream`, `pkg/transform` step ordering, the `--limit`/`--offset`/`--fields`/`--packet-size` silent-ignore fixes, the unread-flag checker, workspace driver bypass and box-reuse, PostgreSQL typed-scan read path |
+| v1.26.1–1.26.3 | Merge on compressed/compact files, XLSX export, `--mask`/`--validate`/`--normalize` actually applied, `--test` checks xxh3 |
+| v1.26.4 | Exact DECIMAL across engines, compact `""`/`[NULL]` fixes, TDTQL string literals, adapter round trips, conversion failures reported per field, `x/text` advisory |
 
 **The v1.5 encryption redesign is done** — shipped in v1.18.0, 2026-07-22. Its
 ~290-line design writeup lived on in this file for a month after the fact, which
@@ -75,6 +77,35 @@ belongs in a plan any more.
 ---
 
 ## Open in 1.x
+
+### Toward a stable 1.x — audit of 2026-10-10
+
+What stands between the frozen line and calling it stable. Race-clean
+(`-race` over core, CLI, ETL, orchestrator, tdtpserve), lint and
+`govulncheck` green, no open issues — the gaps are below, all inside the
+freeze table.
+
+- **Tags.** Releases up to `v.1.26.3` were tagged with a dot after `v`, which
+  Go modules do not read as versions: `go get …@latest` resolved to v1.18.1.
+  From v1.26.4 on, tags are `vX.Y.Z`. Re-tagging the older releases correctly
+  is additive and still open.
+- **No fuzz tests.** Packets arrive from other parties (see CLAUDE.md, "Reading
+  someone else's packet"). Fuzz `ParseBytes` (fast and fallback path),
+  decompression, compact/columnar expansion and the dictionary.
+- **Live adapters never run on CI.** The integration job runs after merge only,
+  with PostgreSQL and RabbitMQ. MySQL, MSSQL and Oracle live tests — where the
+  DECIMAL, compact and TEXT defects of 2026-10 were found — never run there.
+- **Known defects:** MySQL cannot import its own `TEXT` export
+  (`VARCHAR(65535)`); TDTQL `is_null` on packet files ignores the NULL marker;
+  MSSQL import drops sub-second precision; `\n` in the columnar arena; the
+  kanzi decompression limit untested at full scale; Access `DECIMAL` unverified.
+- **SQLite raw queries type `NUMERIC`/`DATE` columns as `TEXT`**
+  (`convertSQLiteTypeToTDTP`), so pipeline sources lose those types.
+- **Untested packages:** `pkg/storage`, `pkg/cliconfig`, `pkg/resultlog`,
+  `pkg/adapters/access`, and the `tdtp-license`, `tdtp-validate`, `tdtp-svg`,
+  `tdtp-constraints-probe` tools.
+- **Decide what "stable" promises** — the v1 CLI, the library API, or both.
+  `pkg/` has 40+ public packages; a compatibility promise needs a list.
 
 ### Optimization — measured, not yet done
 

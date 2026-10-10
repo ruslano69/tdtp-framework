@@ -4,6 +4,37 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+## [1.26.4] - 2026-10-10
+
+### Fixed — values that did not convert were reported one log line per cell
+
+A value the converter cannot read as its field's declared type — text in a
+`DECIMAL` column, a malformed date — still goes into the packet as it came.
+What changes is the report. It used to be one `log.Printf` per cell and an
+export that ended in success; the wrong `(p,s)` the MySQL export declared for
+every `DECIMAL` went unnoticed that way for months, because the raw values
+still round-tripped. Each export now ends with one line per affected field:
+
+```
+⚠ amount (DECIMAL): 2 value(s) did not convert and were written to the packet unchanged — first "n/a": …
+```
+
+`--export`, `--export-broker`, `--sync-incremental`, `--export-xlsx`, the
+request processor and pipeline sources (`⚠ source sales: …`) all report it.
+A PostgreSQL JSON value that cannot be serialised was silently replaced with
+`{}`/`[]`; that is counted too, as a replacement. Library callers get the
+tally through `base.ParseFailureReporter`, implemented by every adapter.
+`INTEGER`, `TEXT` and `BOOLEAN` are not parsed on export (identity fast path)
+and so never appear here.
+
+### Fixed — `tests/integration` did not compile on Windows
+
+`syscall.SysProcAttr.Setpgid` exists only on Unix, so the whole package
+failed to build on the project's main platform. Process-group handling moved
+into `procgroup_unix_test.go` / `procgroup_windows_test.go`; on Windows the
+child tree is ended with `taskkill /T`. `TestXzmercuryPipeline` passes on
+Windows and leaves no orphaned `xzmercury.exe`.
+
 ### Security — `golang.org/x/text` 0.39.0 → 0.41.0
 
 GO-2026-6629, reported by `govulncheck` on every branch once the advisory
@@ -41,8 +72,6 @@ cell. Neither was visible to `--integrity`: the hash covers the compact rows.
 
 Multi-part, zstd and `--integrity` with compact were checked end to end and
 were already correct; they are now covered by a round-trip test.
-
-## [1.26.4] - 2026-10-06
 
 ### Fixed — database adapter round trips
 
