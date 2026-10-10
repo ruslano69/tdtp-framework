@@ -41,13 +41,10 @@ func TestCompactRoundTrip_LiveEngines(t *testing.T) {
 		engines["oracle"] = adapters.Config{Type: "oracle", DSN: dsn}
 	}
 	const null = "\x00" // the adapters' NULL sentinel, as a DB read yields it
-	// Sized text: MySQL reads its own TEXT back as Length 65535 and then
-	// cannot create VARCHAR(65535) on import — a separate adapter bug that
-	// would fail this test before compact is reached.
 	schema := packet.Schema{Fields: []packet.Field{
 		{Name: "id", Type: "INTEGER", Key: true},
-		{Name: "dept", Type: "TEXT", Length: 50}, {Name: "city", Type: "TEXT", Length: 50},
-		{Name: "name", Type: "TEXT", Length: 50}, {Name: "note", Type: "TEXT", Length: 50},
+		{Name: "dept", Type: "TEXT"}, {Name: "city", Type: "TEXT"},
+		{Name: "name", Type: "TEXT"}, {Name: "note", Type: "TEXT"},
 	}}
 	rows := [][]string{
 		{"1", "Sales", "Moscow", "Ivan", "a"},

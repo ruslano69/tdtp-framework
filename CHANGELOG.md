@@ -4,6 +4,25 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — MySQL could not import its own export of a TEXT column
+
+A TEXT column exports as length 65 535, and the import turned any text field
+up to 65 535 into `VARCHAR(n)` — beyond what utf8mb4 allows ("Column length
+too big … max = 16383"). Every MySQL→MySQL transfer of a table with a TEXT
+column failed at `CREATE TABLE`. VARCHAR is now used only up to 16 383
+characters; MySQL's own TEXT and MEDIUMTEXT lengths come back as those
+types, and any other longer text gets the smallest type that holds it at four
+bytes a character (MEDIUMTEXT or LONGTEXT), so text from another engine is
+never cut. VARCHAR, STRING and CHAR past their limits follow the same rule.
+
+Found with it, the same shape as the DECIMAL bug: the export declared every
+`CHAR(n)` as `CHAR(1)` and every `VARCHAR(n)` as `VARCHAR(255)` —
+`data_type` carries no length, and the length the query already read was
+never used. The import then refused any CHAR value longer than one character.
+
+`TestMySQLTextRoundTrip` (TINYTEXT, TEXT, MEDIUMTEXT, LONGTEXT, VARCHAR,
+CHAR, multi-byte data) runs live on CI.
+
 ## [1.26.5] - 2026-10-10
 
 ### Changed — TDTP text is UTF-8 that XML 1.0 can carry, enforced both ways

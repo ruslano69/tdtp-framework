@@ -113,6 +113,13 @@ func (a *Adapter) GetTableSchema(ctx context.Context, tableName string) (packet.
 		if field.Type == "DECIMAL" && numPrec.Valid && numScale.Valid {
 			field.Precision, field.Scale = int(numPrec.Int64), int(numScale.Int64)
 		}
+		// And for CHAR/VARCHAR: "char" carries no length either, so CHAR(10)
+		// was declared as CHAR(1) and VARCHAR(100) as VARCHAR(255) — the
+		// fallbacks in BuildFieldFromColumn. The import then refused any
+		// CHAR value longer than one character ("text length exceeds 1").
+		if (field.Type == "CHAR" || field.Type == "VARCHAR") && charLength.Valid && charLength.Int64 > 0 {
+			field.Length = int(charLength.Int64)
+		}
 
 		fields = append(fields, field)
 	}
