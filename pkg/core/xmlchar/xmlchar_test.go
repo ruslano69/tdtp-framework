@@ -42,7 +42,8 @@ func TestDecodeRef(t *testing.T) {
 	}{
 		{"60", '<', true},
 		{"x3C", '<', true},
-		{"X3c", '<', true},
+		{"x3c", '<', true}, // hex digits in either case
+		{"X3c", 0, false},  // but only a lowercase x: CharRef is '&#x', and encoding/xml refuses &#X
 		{"65", 'A', true},
 		{"128512", 0x1F600, true},
 		{"x1F600", 0x1F600, true},

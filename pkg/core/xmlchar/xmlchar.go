@@ -52,7 +52,11 @@ func DecodeRef(ref []byte) (rune, bool) {
 		return 0, false
 	}
 	base := 10
-	if ref[0] == 'x' || ref[0] == 'X' {
+	// Lowercase x only: XML 1.0 §4.1 spells the hex form '&#x', and
+	// encoding/xml refuses '&#X'. Accepting it made a file readable on the
+	// fast path and unreadable the moment that path fell back. Found by
+	// FuzzFastParseMatchesReference.
+	if ref[0] == 'x' {
 		base = 16
 		ref = ref[1:]
 		if len(ref) == 0 {

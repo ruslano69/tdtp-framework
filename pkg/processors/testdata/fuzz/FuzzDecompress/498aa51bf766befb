@@ -1,0 +1,3 @@
+go test fuzz v1
+[]byte("KANZ`E\"\t\xa3\x00\x00\x00\x02\x00\x00\x88\x04z0go\xca\xfb)c+2-\bY}170")
+bool(true)

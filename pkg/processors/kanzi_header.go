@@ -233,13 +233,24 @@ func VerifyKanziStreamStrict(b64 string) error {
 // a header whose block size would make the decoder allocate far more than any
 // genuine tdtp stream needs, so a direct DecompressKanzi call (library API,
 // broker path) cannot be turned into a memory bomb even without the import gate.
+//
+// The block size alone was not enough. Each block also carries its own length
+// prefix, and the decoder sizes buffers from it: a 60-byte stream with an
+// honest header — level-6 codecs, 1 MiB blocks, valid checksum — but a block
+// declaring 6.8 Gbit made DecompressKanzi allocate about 810 MB before it
+// failed. VerifyKanziStreamStrict caught that, but only `--import` calls it;
+// every other reader (--to-csv, --to-xlsx, merge, map, broker, pipelines,
+// tdtpserve, libtdtp) reached the decoder unguarded. walkBlockPrefixes bounds
+// every block to 1.5× the block size and to the bytes actually present,
+// without decoding anything. Found by FuzzDecompress: 32 fuzz workers each
+// allocating ~1 GB took the process down.
 func guardKanziBlockSize(raw []byte) error {
-	h, _, err := parseKanziHeader(raw)
+	h, br, err := parseKanziHeader(raw)
 	if err != nil {
 		return err
 	}
 	if h.blockSize > kanziTDTPBlock {
 		return fmt.Errorf("kanzi block size %d exceeds the %d limit", h.blockSize, kanziTDTPBlock)
 	}
-	return nil
+	return walkBlockPrefixes(br, h.blockSize)
 }

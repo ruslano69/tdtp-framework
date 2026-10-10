@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<DataPacket><Data><R>&#X20;</R></Data></DataPacket>")
