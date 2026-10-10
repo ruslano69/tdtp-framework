@@ -89,9 +89,24 @@ freeze table.
   Go modules do not read as versions: `go get …@latest` resolved to v1.18.1.
   From v1.26.4 on, tags are `vX.Y.Z`. Re-tagging the older releases correctly
   is additive and still open.
-- **No fuzz tests.** Packets arrive from other parties (see CLAUDE.md, "Reading
-  someone else's packet"). Fuzz `ParseBytes` (fast and fallback path),
-  decompression, compact/columnar expansion and the dictionary.
+- **~~No fuzz tests~~ — done** (`fuzz_test.go` in `pkg/core/packet` and
+  `pkg/processors`, weekly `fuzz.yml`). The first runs found seven: the fast
+  parser reading rows from a comment/CDATA/`<Query>`, accepting a raw `]]>`,
+  `<Data>` under a second top-level element, `&#X` hex references, a single
+  all-empty row lost from a columnar packet, a single empty entry lost through
+  compression (zstd and kanzi), and a 60-byte kanzi stream costing ~810 MB on
+  every reader but `--import`. Not yet fuzzed: the dictionary,
+  decryption, and `VerifyIntegrity`.
+- **The writer emits XML that XML readers refuse.** A value holding invalid
+  UTF-8 (`caf\xe9` from a single-byte column) or a character XML 1.0 forbids
+  (U+0001, U+000B, U+FFFE) goes into `<R>` as it came. Our fast parser reads it
+  back byte for byte; `encoding/xml`, an XSD validator or any third-party
+  reader refuses the whole file. Found by the fuzzer, deliberately tolerated in
+  `FuzzFastParseMatchesReference` — making the reader strict would orphan
+  packets already written. The fix belongs on the write side and is a format
+  decision: refuse the export (naming field and row), or a row-level escape
+  (`\xHH`) that older readers would not decode. XML 1.0 cannot carry U+0001
+  even as `&#x1;`.
 - **Live adapters never run on CI.** The integration job runs after merge only,
   with PostgreSQL and RabbitMQ. MySQL, MSSQL and Oracle live tests — where the
   DECIMAL, compact and TEXT defects of 2026-10 were found — never run there.

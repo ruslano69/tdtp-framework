@@ -755,6 +755,33 @@ the writer measures (a test pins this).
 **An asymmetry, fixed by a test:** `Parse` and `ParseFile` expand the compact
 format; `ParseBytes` deliberately does not.
 
+**The `<Data>` the fast path cuts out must be the root's child.**
+`findDataSection` is a byte search and finds `<Data>` anywhere — in a comment,
+CDATA, `<Query>`. It used to read those rows; `encoding/xml` reads none, so a
+packet could carry rows only our importer saw. `dataIsRootChild` tokenises
+the prefix (Header/Query/Schema, never the rows) and declines otherwise. Do
+not drop it as an "optimisation": it costs nothing measurable, and
+`FuzzFastParseMatchesReference` (`fuzz_test.go`) finds the hole in under a
+second without it.
+
+**One known, deliberate divergence remains:** the writer puts invalid UTF-8
+and XML-forbidden characters (U+0001, U+FFFE…) into rows as they came, and
+the fast path reads them back byte for byte where `encoding/xml` refuses the
+file. Making the reader strict would orphan packets already written; the fix
+is a write-side decision (TODO_NEXT.md). The fuzz oracle tolerates exactly
+that class of refusal and nothing else.
+
+**`[]` and `[""]` look the same after a join.** Compression joins entries
+with `\n` and the columnar layout puts one entry per column, so "no entries"
+and "one empty entry" encode identically. `RecordsInPart` (or the column
+count) decides, in `ExpandColumnarRows` and `Parser.DecompressData` — any new
+place that splits a joined payload needs the same check.
+
+**Fuzz targets** live in `pkg/core/packet/fuzz_test.go` and
+`pkg/processors/fuzz_test.go`; their seeds and anything under
+`testdata/fuzz/` run with every `go test`. To fuzz:
+`go test ./pkg/core/packet -run '^$' -fuzz FuzzFastParseMatchesReference -fuzztime 60s`.
+
 ---
 
 ## `GetRows` — the shared node of both paths, and its parse is parallel (IMPORTANT)
@@ -881,6 +908,15 @@ section (and the bomb is in Data).
 Rejection on the kanzi path is **not verified at full scale** — compressing
 256 MB through kanzi takes tens of seconds. The test there only covers
 round-trip integrity.
+
+**`MaxDecompressedBytes` bounds the output, not the decoder's buffers.**
+kanzi sizes buffers from the stream's own block size and from each block's
+length prefix, before producing a byte. `guardKanziBlockSize` (inside
+`DecompressKanzi`, so every caller gets it) checks both: block size ≤ 1 MiB
+and every prefix ≤ 1.5× that and within the bytes present. The stricter
+`VerifyKanziStreamStrict` runs on `--import` only — do not rely on it for any
+other path. Without the prefix walk a 60-byte packet cost ~810 MB
+(`TestDecompressKanzi_RefusesBlockPrefixBomb`).
 
 ---
 

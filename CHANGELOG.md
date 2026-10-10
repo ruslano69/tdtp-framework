@@ -4,6 +4,61 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Security — a 60-byte kanzi packet made every reader but `--import` allocate ~1 GB
+
+A kanzi stream with an honest header — level-6 codecs, 1 MiB blocks, valid
+checksum — and one block whose length prefix declares 6.8 Gbit made
+`DecompressKanzi` allocate about 810 MB before failing; the prefix allows up
+to 2^34 bits. The strict forgery gate that catches it ran only on `--import`.
+`--to-csv`, `--to-xlsx`, `--to-tdtp`, merge, map, `--test`, broker
+listen/drain, pipeline sources, `tdtpserve` and libtdtp all reached the
+decoder with nothing but a block-size check. The decoder-side guard now walks
+every block prefix — bounded to 1.5× the block size and to the bytes present,
+decoding nothing — so the library is safe on its own. Found by fuzzing: 32
+workers each allocating a gigabyte took the process down.
+
+### Security — the fast parser read rows the XML did not contain
+
+`ParseBytes` took the first `<Data>` it found in the bytes and read its `<R>`
+as the packet's rows — wherever that `<Data>` was: in a comment, in a CDATA
+section, inside `<Query>`, or as the document root. `encoding/xml`, and so any
+XSD validator or other XML reader, saw no rows there. A packet whose only rows
+sat in `<!-- <Data><R>…</R></Data> -->` was imported with those rows: one
+file, two readings, with the import on the side nobody else could see. The
+fast path now checks that the `<Data>` it cut out is a direct child of the
+root (tokenising Header/Query/Schema only — the cost is inside benchmark
+noise) and hands anything else to the ordinary parse. A raw `]]>` in a row,
+which XML forbids and our writer never emits, is likewise left to the
+ordinary parse, which refuses it; so is `<Data>` under a second top-level
+element, and `&#X20;` — XML spells hex references `&#x` only, and
+`xmlchar.DecodeRef` (shared with the XLSX reader) accepted the capital.
+Found by fuzzing.
+
+### Fixed — a single all-empty row vanished from a columnar packet
+
+One row whose values are all empty lays out by column exactly like no rows at
+all, and was read back as none — after which `VerifyRowCount` refused the
+packet (header declares 1, found 0). `RecordsInPart` now tells the two apart.
+Found by fuzzing.
+
+### Fixed — a compressed packet lost a single empty entry
+
+Compression joins entries with `\n`, so no entries and one empty entry both
+compress to an empty payload. A one-column packet whose one row held `""`
+came back with no rows and was refused by `VerifyRowCount`; a compressed
+columnar packet of an empty one-column table did not read at all
+(`0 column(s) in Data, 1 field(s) in Schema`). `Parser.DecompressData`
+now restores the empty entry when the header expects exactly one (one row,
+or one column in the columnar layout). Both zstd and kanzi. Found by fuzzing.
+
+### Added — fuzz targets for the read side
+
+`pkg/core/packet`: the fast parser against `encoding/xml`, `ParseBytes` on
+arbitrary bytes, row escaping, compact, columnar, and write→parse round
+trips. `pkg/processors`: decompression of arbitrary input (bounded by
+`MaxDecompressedBytes`) and compress→decompress. Seeds run with every
+`go test`; `.github/workflows/fuzz.yml` fuzzes weekly and on demand.
+
 ## [1.26.4] - 2026-10-10
 
 ### Fixed — values that did not convert were reported one log line per cell
