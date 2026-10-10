@@ -4,6 +4,25 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+## [1.26.6] - 2026-10-10
+
+### Fixed — `IS NULL` on a packet file returned the opposite rows
+
+In a packet NULL is the field's marker (`[NULL]`, or `[NULL1]` where the
+column also holds that text). The in-memory TDTQL filter — `--where` on
+`--to-json`, `--to-csv`, merge and every other command that filters a packet
+file, plus the export fallback when SQL pushdown fails — compared against
+`""` and the adapters' 0x00 sentinel only. So `note IS NULL` skipped every
+NULL and returned the rows with an empty string; `IS NOT NULL` the reverse.
+
+It now uses the field's marker (`packet.NullMarkerOf`: the declared one, or
+the legacy `[NULL]` older writers used undeclared) and still the sentinel for
+rows straight from an adapter. `""` counts as NULL only where it cannot be a
+value: in a field that declares no marker (older packets, `--fast`) or in a
+non-text field. Where a marker is declared, `""` in a TEXT field is a real
+empty string, as the spec says. SQL pushdown was never affected — the
+database evaluates `IS NULL` there.
+
 ### Fixed — MySQL could not import its own export of a TEXT column
 
 A TEXT column exports as length 65 535, and the import turned any text field

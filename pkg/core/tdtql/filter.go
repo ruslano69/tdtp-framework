@@ -12,6 +12,38 @@ import (
 // for SQL NULL values before DetectAndApply / GenerateReference runs.
 const nullSentinel = "\x00"
 
+// fieldInfo is what a filter needs about one schema field.
+type fieldInfo struct {
+	idx  int
+	def  schema.FieldDef
+	null nullRule
+}
+
+// nullRule says which cell values of a field are NULL.
+//
+// In a packet NULL is the field's marker — packet.NullMarkerOf: the declared
+// one, or the legacy "[NULL]" older writers used without declaring it. is_null
+// used to compare against "" and the 0x00 sentinel only, so on a packet file
+// every NULL written as [NULL] was "not null" and every real empty string was
+// "null" — the opposite of the data. Rows straight from an adapter still carry
+// the sentinel, so it stays NULL. "" is NULL only where it cannot be a value:
+// in a field that declares no marker (older packets, --fast), or in a non-text
+// field, which has no empty value.
+type nullRule struct {
+	marker      string
+	emptyIsNull bool
+}
+
+func nullRuleFor(f packet.Field) nullRule {
+	declared := f.SpecialValues != nil && f.SpecialValues.Null != nil && f.SpecialValues.Null.Marker != ""
+	isText := schema.IsTextType(schema.NormalizeType(schema.DataType(strings.ToUpper(f.Type))))
+	return nullRule{marker: packet.NullMarkerOf(f), emptyIsNull: !declared || !isText}
+}
+
+func (r nullRule) is(v string) bool {
+	return v == nullSentinel || v == r.marker || (v == "" && r.emptyIsNull)
+}
+
 // FilterEngine применяет фильтры к данным
 type FilterEngine struct {
 	comparator *Comparator
@@ -35,13 +67,11 @@ func (f *FilterEngine) ApplyFilters(
 	stats := make(map[string]int)
 	result := [][]string{}
 
-	// Build name→index and name→FieldDef maps once (O(fields)) instead of per-row linear scan.
-	fieldIdx := make(map[string]int, len(schemaObj.Fields))
-	fieldDefs := make(map[string]schema.FieldDef, len(schemaObj.Fields))
+	// Build the name→field lookup once (O(fields)) instead of per-row linear scan.
+	fields := make(map[string]fieldInfo, len(schemaObj.Fields))
 	for i, sf := range schemaObj.Fields {
 		key := strings.ToLower(sf.Name)
-		fieldIdx[key] = i
-		fieldDefs[key] = schema.FieldDef{
+		fields[key] = fieldInfo{idx: i, null: nullRuleFor(sf), def: schema.FieldDef{
 			Name:      sf.Name,
 			Type:      schema.DataType(sf.Type),
 			Length:    sf.Length,
@@ -50,11 +80,11 @@ func (f *FilterEngine) ApplyFilters(
 			Timezone:  sf.Timezone,
 			Key:       sf.Key,
 			Nullable:  true,
-		}
+		}}
 	}
 
 	for _, row := range rows {
-		match, err := f.evaluateFilters(filters, row, converter, stats, fieldIdx, fieldDefs)
+		match, err := f.evaluateFilters(filters, row, converter, stats, fields)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -73,8 +103,7 @@ func (f *FilterEngine) evaluateFilters(
 	row []string,
 	converter *schema.Converter,
 	stats map[string]int,
-	fieldIdx map[string]int,
-	fieldDefs map[string]schema.FieldDef,
+	fields map[string]fieldInfo,
 ) (bool, error) {
 
 	if filters == nil {
@@ -83,12 +112,12 @@ func (f *FilterEngine) evaluateFilters(
 
 	// Проверяем And группу
 	if filters.And != nil {
-		return f.evaluateLogicalGroup(filters.And, "AND", row, converter, stats, fieldIdx, fieldDefs)
+		return f.evaluateLogicalGroup(filters.And, "AND", row, converter, stats, fields)
 	}
 
 	// Проверяем Or группу
 	if filters.Or != nil {
-		return f.evaluateLogicalGroup(filters.Or, "OR", row, converter, stats, fieldIdx, fieldDefs)
+		return f.evaluateLogicalGroup(filters.Or, "OR", row, converter, stats, fields)
 	}
 
 	return true, nil
@@ -101,8 +130,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 	row []string,
 	converter *schema.Converter,
 	stats map[string]int,
-	fieldIdx map[string]int,
-	fieldDefs map[string]schema.FieldDef,
+	fields map[string]fieldInfo,
 ) (bool, error) {
 
 	if operator == "AND" {
@@ -110,7 +138,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем фильтры
 		for _, filter := range group.Filters {
-			match, err := f.evaluateFilter(&filter, row, converter, fieldIdx, fieldDefs)
+			match, err := f.evaluateFilter(&filter, row, converter, fields)
 			if err != nil {
 				return false, err
 			}
@@ -126,7 +154,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные And группы
 		for _, andGroup := range group.And {
-			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, converter, stats, fieldIdx, fieldDefs)
+			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, converter, stats, fields)
 			if err != nil {
 				return false, err
 			}
@@ -137,7 +165,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные Or группы
 		for _, orGroup := range group.Or {
-			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, converter, stats, fieldIdx, fieldDefs)
+			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, converter, stats, fields)
 			if err != nil {
 				return false, err
 			}
@@ -153,7 +181,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем фильтры
 		for _, filter := range group.Filters {
-			match, err := f.evaluateFilter(&filter, row, converter, fieldIdx, fieldDefs)
+			match, err := f.evaluateFilter(&filter, row, converter, fields)
 			if err != nil {
 				return false, err
 			}
@@ -166,7 +194,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные And группы
 		for _, andGroup := range group.And {
-			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, converter, stats, fieldIdx, fieldDefs)
+			match, err := f.evaluateLogicalGroup(&andGroup, "AND", row, converter, stats, fields)
 			if err != nil {
 				return false, err
 			}
@@ -177,7 +205,7 @@ func (f *FilterEngine) evaluateLogicalGroup(
 
 		// Проверяем вложенные Or группы
 		for _, orGroup := range group.Or {
-			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, converter, stats, fieldIdx, fieldDefs)
+			match, err := f.evaluateLogicalGroup(&orGroup, "OR", row, converter, stats, fields)
 			if err != nil {
 				return false, err
 			}
@@ -195,22 +223,21 @@ func (f *FilterEngine) evaluateFilter(
 	filter *packet.Filter,
 	row []string,
 	converter *schema.Converter,
-	fieldIdx map[string]int,
-	fieldDefs map[string]schema.FieldDef,
+	fields map[string]fieldInfo,
 ) (bool, error) {
 
 	key := strings.ToLower(filter.Field)
-	fieldIndex, ok := fieldIdx[key]
+	field, ok := fields[key]
 	if !ok {
 		return false, fmt.Errorf("field '%s' not found in schema", filter.Field)
 	}
 
-	if fieldIndex >= len(row) {
+	if field.idx >= len(row) {
 		return false, fmt.Errorf("row has fewer fields than schema")
 	}
 
-	rowValue := row[fieldIndex]
-	fieldDef := fieldDefs[key]
+	rowValue := row[field.idx]
+	fieldDef := field.def
 
 	// Применяем оператор
 	switch filter.Operator {
@@ -240,9 +267,9 @@ func (f *FilterEngine) evaluateFilter(
 		result, err := f.comparator.Like(rowValue, filter.Value)
 		return !result, err
 	case "is_null":
-		return rowValue == "" || rowValue == nullSentinel, nil
+		return field.null.is(rowValue), nil
 	case "is_not_null":
-		return rowValue != "" && rowValue != nullSentinel, nil
+		return !field.null.is(rowValue), nil
 	default:
 		return false, fmt.Errorf("unknown operator: %s", filter.Operator)
 	}

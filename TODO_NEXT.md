@@ -28,7 +28,7 @@ after 1.26.0," not as license to keep adding capability.
 
 ---
 
-## Current state — v1.26.5 (2026-10-10)
+## Current state — v1.26.6 (2026-10-10)
 
 ### Closed sprints
 
@@ -67,6 +67,7 @@ after 1.26.0," not as license to keep adding capability.
 | v1.26.1–1.26.3 | Merge on compressed/compact files, XLSX export, `--mask`/`--validate`/`--normalize` actually applied, `--test` checks xxh3 |
 | v1.26.4 | Exact DECIMAL across engines, compact `""`/`[NULL]` fixes, TDTQL string literals, adapter round trips, conversion failures reported per field, `x/text` advisory |
 | v1.26.5 | Fuzzing of the read side and its seven findings (kanzi block-prefix bomb, fast parser reading `<Data>` outside the root), strict UTF-8/XML text on write and read, `--fast` NULL |
+| v1.26.6 | MySQL TEXT round trip and CHAR/VARCHAR export lengths, TDTQL `IS NULL` on packet files, live MySQL/MSSQL/Oracle tests on CI |
 
 **The v1.5 encryption redesign is done** — shipped in v1.18.0, 2026-07-22. Its
 ~290-line design writeup lived on in this file for a month after the fact, which
@@ -108,7 +109,7 @@ freeze table.
   every PR, with MySQL 8, SQL Server 2022 and Oracle XE 21c beside PostgreSQL,
   and fails when a live test skips. Not covered: Oracle 18c, and the
   benchmark-corpus tests (`benchmark_100k_dates.db` is not generated on CI).
-- **Known defects:** TDTQL `is_null` on packet files ignores the NULL marker;
+- **Known defects:**
   MSSQL import drops sub-second precision; `\n` in the columnar arena; the
   kanzi decompression limit untested at full scale; Access `DECIMAL` unverified.
 - **SQLite raw queries type `NUMERIC`/`DATE` columns as `TEXT`**
