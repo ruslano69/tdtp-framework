@@ -4,8 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"os"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/ruslano69/tdtp-framework/pkg/core/xmlchar"
 )
 
 // Фиксированные байтовые константы для горячего пути записи строк.
@@ -36,6 +41,12 @@ const (
 // Data (тысячи строк) — пишется вручную: нет reflection, нет промежуточных аллокаций.
 // Это устраняет главный bottleneck (xml.MarshalIndent 229ms на 100k строк).
 func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
+	// Text XML cannot carry is refused before a byte is written — not
+	// replaced (xml.Marshal would write U+FFFD) and not written raw.
+	if err := checkPacketText(packet); err != nil {
+		return err
+	}
+
 	// XML declaration
 	w.WriteString(xml.Header)
 
@@ -104,21 +115,44 @@ func writePacketTo(w *bufio.Writer, packet *DataPacket) error {
 		// Fast path: rawRows установлены GenerateReference.
 		// Пишем значения напрямую — ни RowsToData, ни strings.Join не нужны.
 		// TDTP-экранирование (|→\|, \→\\) + XML-экранирование (<>&) — один проход.
-		for _, row := range packet.rawRows {
+		for r, row := range packet.rawRows {
 			w.Write(bTagROpen)
 			for j, val := range row {
 				if j > 0 {
 					w.WriteByte('|')
 				}
-				writeRawValue(w, val)
+				if val == nullSentinel {
+					// --fast skips DetectAndApply, so NULL arrives as the
+					// adapters' 0x00 sentinel; with no marker declared it is
+					// the empty value, as the spec reads an undeclared NULL.
+					// It used to be written as a raw 0x00 byte.
+					continue
+				}
+				if !writeRawValue(w, val) {
+					b, _ := xmlchar.Find(val)
+					field := fmt.Sprintf("field #%d", j+1)
+					if j < len(packet.Schema.Fields) {
+						field = fmt.Sprintf("field %q", packet.Schema.Fields[j].Name)
+					}
+					return &textError{where: rowWhere(packet, r, field), bad: b}
+				}
 			}
 			w.Write(bTagRClose)
 		}
 	} else {
 		// Broker-путь или компрессия: Data.Rows уже содержат pipe-joined строки.
+		opaque := packet.Data.Compression != "" || packet.Data.Encryption != ""
 		for i := range packet.Data.Rows {
+			v := packet.Data.Rows[i].Value
 			w.Write(bTagROpen)
-			writeXMLChardata(w, packet.Data.Rows[i].Value)
+			if !writeXMLChardata(w, v) && !opaque {
+				b, _ := xmlchar.Find(v)
+				field := rowFieldAt(v, b.Offset, packet.Schema)
+				if packet.Data.Layout == LayoutColumns {
+					field = "column " + strings.TrimPrefix(field, "field ")
+				}
+				return &textError{where: rowWhere(packet, i, field), bad: b}
+			}
 			w.Write(bTagRClose)
 		}
 	}
@@ -201,11 +235,17 @@ func writeXMLAttrValue(w *bufio.Writer, s string) {
 // Про CR см. escCR — без него значение с CRLF не переживает round-trip.
 //
 // Заменяет связку escapeValue + strings.Join + writeXMLChardata — ноль аллокаций.
-func writeRawValue(w *bufio.Writer, s string) {
+//
+// It also reports whether s is text XML 1.0 can carry, from the same pass:
+// C0 controls are seen byte by byte, and only a value holding non-ASCII pays
+// for a UTF-8 and U+FFFE/U+FFFF check (textOK). On false the caller abandons
+// the packet; what was written is discarded with it.
+func writeRawValue(w *bufio.Writer, s string) bool {
 	start := 0
+	ctl, hi, ef := false, false, false
 	for i := 0; i < len(s); i++ {
 		var esc string
-		switch s[i] {
+		switch c := s[i]; c {
 		case '|':
 			esc = `\|`
 		case '\\':
@@ -219,6 +259,12 @@ func writeRawValue(w *bufio.Writer, s string) {
 		case '\r':
 			esc = escCR
 		default:
+			if c < 0x20 && c != '\t' && c != '\n' {
+				ctl = true
+			} else if c >= 0x80 {
+				hi = true
+				ef = ef || c == 0xEF
+			}
 			continue
 		}
 
@@ -227,15 +273,38 @@ func writeRawValue(w *bufio.Writer, s string) {
 		start = i + 1
 	}
 	w.WriteString(s[start:])
+	return textOK(s, ctl, hi, ef)
+}
+
+// textOK finishes the check writeRawValue and writeXMLChardata start: no C0
+// control, and — only when there is non-ASCII — valid UTF-8 without U+FFFE
+// or U+FFFF, the rest of what XML 1.0 forbids (xmlchar.IsChar).
+//
+// U+FFFE and U+FFFF both start with byte EF, so the search for them runs only
+// when the loop saw one: Cyrillic or CJK text, which is all non-ASCII, would
+// otherwise pay two substring searches per value.
+func textOK(s string, ctl, hi, ef bool) bool {
+	if ctl {
+		return false
+	}
+	if !hi {
+		return true
+	}
+	if !utf8.ValidString(s) {
+		return false
+	}
+	return !ef || (!strings.Contains(s, "￾") && !strings.Contains(s, "￿"))
 }
 
 // writeXMLChardata пишет строку с экранированием для XML chardata
-// (< > & и CR — см. escCR).
-func writeXMLChardata(w *bufio.Writer, s string) {
+// (< > & и CR — см. escCR) и, как writeRawValue, сообщает, можно ли такой
+// текст нести в XML.
+func writeXMLChardata(w *bufio.Writer, s string) bool {
 	start := 0
+	ctl, hi, ef := false, false, false
 	for i := 0; i < len(s); i++ {
 		var esc string
-		switch s[i] {
+		switch c := s[i]; c {
 		case '<':
 			esc = "&lt;"
 		case '>':
@@ -245,6 +314,12 @@ func writeXMLChardata(w *bufio.Writer, s string) {
 		case '\r':
 			esc = escCR
 		default:
+			if c < 0x20 && c != '\t' && c != '\n' {
+				ctl = true
+			} else if c >= 0x80 {
+				hi = true
+				ef = ef || c == 0xEF
+			}
 			continue
 		}
 
@@ -253,6 +328,7 @@ func writeXMLChardata(w *bufio.Writer, s string) {
 		start = i + 1
 	}
 	w.WriteString(s[start:])
+	return textOK(s, ctl, hi, ef)
 }
 
 // newPacketWriter создаёт bufio.Writer поверх w с буфером 4MB.
@@ -287,7 +363,10 @@ func (g *Generator) WriteToFileFast(packet *DataPacket, filename string) error {
 		return err
 	}
 	if err := writePacketTo(newPacketWriter(f), packet); err != nil {
+		// A refused packet (text XML cannot carry) or a failed write must
+		// not leave a truncated file behind that looks like an export.
 		_ = f.Close()
+		_ = os.Remove(filename)
 		return err
 	}
 	return f.Close()
