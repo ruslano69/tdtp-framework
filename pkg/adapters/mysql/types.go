@@ -46,30 +46,27 @@ func TDTPToMySQL(field packet.Field) string {
 		if field.Subtype == "time" {
 			return withFractionalPrecision("TIME", field.Precision)
 		}
-		if field.Length > 0 && field.Length <= 65535 {
-			return fmt.Sprintf("VARCHAR(%d)", field.Length)
+		if field.Length <= 0 {
+			return "TEXT"
 		}
-		return "TEXT"
+		return textColumnType(field.Length)
 
-	case "VARCHAR":
+	case "VARCHAR", "STRING":
 		length := field.Length
-		if length == 0 {
+		if length <= 0 {
 			length = 255
 		}
-		return fmt.Sprintf("VARCHAR(%d)", length)
+		return textColumnType(length)
 
 	case "CHAR":
 		length := field.Length
-		if length == 0 {
+		if length <= 0 {
 			length = 1
 		}
-		return fmt.Sprintf("CHAR(%d)", length)
-
-	case "STRING":
-		if field.Length > 0 {
-			return fmt.Sprintf("VARCHAR(%d)", field.Length)
+		if length <= mysqlMaxChar {
+			return fmt.Sprintf("CHAR(%d)", length)
 		}
-		return "VARCHAR(255)"
+		return textColumnType(length)
 
 	// Логический тип
 	case "BOOLEAN", "BOOL":
@@ -91,6 +88,39 @@ func TDTPToMySQL(field packet.Field) string {
 
 	default:
 		return "TEXT"
+	}
+}
+
+// Character limits under utf8mb4 — MySQL 8's default, four bytes a character.
+const (
+	mysqlMaxVarchar = 16383 // 65 535-byte row limit / 4
+	mysqlMaxChar    = 255
+
+	// What BuildFieldFromColumn reports as Length for MySQL's own text types.
+	mysqlTextLen       = 65535
+	mysqlMediumTextLen = 16777215
+)
+
+// textColumnType picks the column for text of n characters.
+//
+// A MySQL TEXT column exported as Length 65535 used to come back as
+// VARCHAR(65535), which utf8mb4 cannot hold ("Column length too big …
+// max = 16383") — so MySQL could not import its own export of any TEXT
+// column. VARCHAR is now used only up to its real limit. MySQL's own
+// lengths come back as their own types, so a MySQL→MySQL round trip keeps
+// TEXT and MEDIUMTEXT; any other length past VARCHAR gets the smallest type
+// that holds n four-byte characters, so text from another engine (a
+// PostgreSQL varchar(20000)) is never cut.
+func textColumnType(n int) string {
+	switch {
+	case n <= mysqlMaxVarchar:
+		return fmt.Sprintf("VARCHAR(%d)", n)
+	case n == mysqlTextLen:
+		return "TEXT"
+	case n == mysqlMediumTextLen || int64(n)*4 <= mysqlMediumTextLen:
+		return "MEDIUMTEXT"
+	default:
+		return "LONGTEXT"
 	}
 }
 
