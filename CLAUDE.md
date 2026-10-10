@@ -723,7 +723,9 @@ matches.
 
 **The NULL marker is per field.** A column holding both NULL and the text
 `[NULL]` gets `[NULL1]` (`pickNullMarker`). Readers compare against
-`packet.NullMarkerOf(field)`, never `SpecNullMarker`. `DetectAndApply` moves
+`packet.NullMarkerOf(field)`, never `SpecNullMarker` — the TDTQL filter's
+`is_null` included (`nullRule` in `filter.go`), where comparing against `""`
+returned exactly the opposite rows. `DetectAndApply` moves
 the marker only when the column has a real NULL (the `\x00` sentinel): rows
 re-generated from a parsed packet carry `[NULL]` as the marker itself, and
 moving it there would turn their NULLs into text.

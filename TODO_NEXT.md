@@ -108,7 +108,7 @@ freeze table.
   every PR, with MySQL 8, SQL Server 2022 and Oracle XE 21c beside PostgreSQL,
   and fails when a live test skips. Not covered: Oracle 18c, and the
   benchmark-corpus tests (`benchmark_100k_dates.db` is not generated on CI).
-- **Known defects:** TDTQL `is_null` on packet files ignores the NULL marker;
+- **Known defects:**
   MSSQL import drops sub-second precision; `\n` in the columnar arena; the
   kanzi decompression limit untested at full scale; Access `DECIMAL` unverified.
 - **SQLite raw queries type `NUMERIC`/`DATE` columns as `TEXT`**
