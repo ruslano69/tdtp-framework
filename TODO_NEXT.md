@@ -104,9 +104,10 @@ freeze table.
   packets with such text existed, and a new escape would be a format change
   older readers decode literally. If a customer ever needs control characters
   carried, that escape is the 2.0 route.
-- **Live adapters never run on CI.** The integration job runs after merge only,
-  with PostgreSQL and RabbitMQ. MySQL, MSSQL and Oracle live tests — where the
-  DECIMAL, compact and TEXT defects of 2026-10 were found — never run there.
+- **~~Live adapters never run on CI~~ — done.** The integration job runs on
+  every PR, with MySQL 8, SQL Server 2022 and Oracle XE 21c beside PostgreSQL,
+  and fails when a live test skips. Not covered: Oracle 18c, and the
+  benchmark-corpus tests (`benchmark_100k_dates.db` is not generated on CI).
 - **Known defects:** MySQL cannot import its own `TEXT` export
   (`VARCHAR(65535)`); TDTQL `is_null` on packet files ignores the NULL marker;
   MSSQL import drops sub-second precision; `\n` in the columnar arena; the

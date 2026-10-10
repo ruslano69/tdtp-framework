@@ -51,8 +51,9 @@ func TestFactory_PostgreSQLRegistration(t *testing.T) {
 
 	// Пробуем подключиться к PostgreSQL
 	cfg := adapters.Config{
-		Type:   "postgres",
-		DSN:    "postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test",
+		Type: "postgres",
+		DSN: liveEnv("POSTGRES_TEST_DSN",
+			"postgresql://tdtp_user:tdtp_dev_pass_2025@localhost:5432/tdtp_test"),
 		Schema: "public",
 	}
 

@@ -102,6 +102,19 @@ SQLite needs nothing — its tests use `t.TempDir()`.
 `[]byte` instead of `time.Time` for DATE/DATETIME/TIMESTAMP, and the tests
 would be exercising a code path the CLI never takes.
 
+**CI runs them live** — the `integration` job in `.github/workflows/ci.yml`,
+on every pull request and on pushes to main: PostgreSQL 16, MySQL 8, SQL
+Server 2022 (both DSNs on one server, `DevDB` and `ProdSimDB` created by a
+step), Oracle XE 21c (`gvenzl/oracle-xe:21.3.0-slim-faststart`,
+`TDTP_ORACLE21_DSN`). **A skipped live test fails that job**: skipping is how
+these tests behave without a database, so on CI a skip means a service was
+not reachable, not that there was nothing to test. Only the `/18c` subtests
+may skip — there is no 18c service. A new live test whose name the step's
+grep does not match is not guarded; extend the pattern with it.
+
+To reproduce the job locally, run the same images on other ports and point
+the variables above at them; the exact commands are in the job.
+
 ---
 
 ## DuckDB как рабочая БД пайплайна — измерено, не повторять
