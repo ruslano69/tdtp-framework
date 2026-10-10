@@ -4,6 +4,31 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — compact rewrote empty strings; the text `[NULL]` became NULL
+
+Found by importing an exported SQLite table back and comparing it cell by
+cell. Neither was visible to `--integrity`: the hash covers the compact rows.
+
+- **An empty string in a fixed field came back as the previous group's
+  value.** In compact a gap means "same as above", and `""` was written as
+  that same gap: `Sales, "", ""` imported as three `Sales`. With
+  `--compact-tail` an empty fixed value in the last row wrote a packet our own
+  import refused (`CompactTailError`). A field holding `""` is now left
+  ordinary — `⚠ compact: dept is not fixed — it holds empty strings…` — and
+  the others are still compacted. The format is unchanged, so every existing
+  reader reads these packets correctly; a new spelling for `""` would have
+  been read as a gap by all of them. NULL was never affected: it travels as a
+  marker.
+- **The text `[NULL]` in a column that also holds NULL was imported as NULL**,
+  with or without compact: value and marker were the same bytes. Such a column
+  now declares another marker (`<Null marker="[NULL1]"/>`); importers already
+  compare against the declared one. `--to-json` and `--to-xlsx` compared
+  against a hard-coded `[NULL]` and now use the declaration too (falling back
+  to `[NULL]` when a field declares none, as older packets do).
+
+Multi-part, zstd and `--integrity` with compact were checked end to end and
+were already correct; they are now covered by a round-trip test.
+
 ## [1.26.4] - 2026-10-06
 
 ### Fixed — database adapter round trips

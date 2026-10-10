@@ -142,6 +142,9 @@ func ToXLSX(pkt *packet.DataPacket, filePath, sheetName string) error {
 			if col >= len(values) {
 				continue
 			}
+			if values[col] == packet.NullMarkerOf(fld) {
+				continue // NULL → blank cell
+			}
 			tv, err := conv.ParseValue(values[col], fieldDefs[col])
 			if err != nil || tv.IsNull {
 				// Leave cell blank — do not call SetCellValue
@@ -362,10 +365,8 @@ func typedValueToExcel(tv *schema.TypedValue, fieldType schema.DataType) (any, b
 
 	case tv.StringValue != nil:
 		s := *tv.StringValue
-		// Trap 4: [NULL] SpecialValues marker → blank cell.
-		if s == packet.SpecNullMarker {
-			return nil, false
-		}
+		// Trap 4: the NULL marker → blank cell. Checked by the caller against
+		// the field's declared marker; "[NULL]" may be text there.
 		// Trap 5: all string cells use forceStr (→ SetCellStr) so that values
 		// starting with =, +, -, @ are stored as text, not interpreted as formulas.
 		return s, true

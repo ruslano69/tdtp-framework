@@ -100,12 +100,14 @@ func TestTypedValueToExcel_Post1900Date(t *testing.T) {
 	}
 }
 
-func TestTypedValueToExcel_NullMarker(t *testing.T) {
+// The NULL marker is recognised by the caller, against the field's declared
+// marker: at this level "[NULL]" is text, because a column whose marker is
+// "[NULL1]" holds it as text. TestIntegration_NullMarker_* cover the blank cell.
+func TestTypedValueToExcel_NullMarkerIsCallersJob(t *testing.T) {
 	s := packet.SpecNullMarker // "[NULL]"
 	tv := &schema.TypedValue{StringValue: &s}
-	val, _ := typedValueToExcel(tv, schema.TypeText)
-	if val != nil {
-		t.Fatalf("[NULL] marker must produce nil (blank cell), got %v", val)
+	if val, _ := typedValueToExcel(tv, schema.TypeText); val != "[NULL]" {
+		t.Fatalf("typedValueToExcel(\"[NULL]\") = %v, want the text", val)
 	}
 }
 

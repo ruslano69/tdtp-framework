@@ -92,7 +92,7 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	}
 	fmt.Printf("  Fixed fields: %s\n", strings.Join(fixedNames, ", "))
 
-	if err := applyCompactToPacket(pkt, fixedNames, opts.Tail); err != nil {
+	if err := applyCompactToPacket(pkt, fixedNames, opts.Tail, map[string]bool{}); err != nil {
 		return fmt.Errorf("failed to apply compact format: %w", err)
 	}
 	if opts.Tail {
@@ -119,9 +119,23 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	return nil
 }
 
-// applyCompactToPacket delegates to packet.ApplyCompact.
-func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string, tail bool) error {
-	return packet.ApplyCompact(pkt, fixedFieldNames, tail)
+// applyCompactToPacket delegates to packet.ApplyCompactReport and says which
+// requested fields stayed ordinary because they hold empty strings — an empty
+// fixed position means "same as above", so compacting them would rewrite ""
+// into the previous group's value. warned keeps it to one line per field.
+func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string, tail bool, warned map[string]bool) error {
+	dropped, err := packet.ApplyCompactReport(pkt, fixedFieldNames, tail)
+	if err != nil {
+		return err
+	}
+	for _, name := range dropped {
+		if warned[name] {
+			continue
+		}
+		warned[name] = true
+		fmt.Fprintf(os.Stderr, "⚠ compact: %s is not fixed — it holds empty strings, which compact cannot tell from \"same as above\"\n", name)
+	}
+	return nil
 }
 
 // resolveFixedFields determines which field names should be marked as fixed.
