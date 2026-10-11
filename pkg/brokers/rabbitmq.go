@@ -15,13 +15,19 @@ type RabbitMQ struct {
 	conn         *amqp.Connection
 	channel      *amqp.Channel
 	queue        amqp.Queue
-	lastDelivery *amqp.Delivery       // Последнее полученное сообщение (для manual ack)
-	deliveryChan <-chan amqp.Delivery // Канал для блокирующего получения сообщений
+	lastDelivery *amqp.Delivery           // Последнее полученное сообщение (для manual ack)
+	deliveryChan <-chan amqp.Delivery     // Канал для блокирующего получения сообщений
+	confirms     <-chan amqp.Confirmation // publisher confirms (PublisherConfirms only)
+	returns      <-chan amqp.Return       // unroutable publishes (PublisherConfirms only)
 }
 
 // NewRabbitMQ создает новый RabbitMQ брокер
 func NewRabbitMQ(cfg Config) (*RabbitMQ, error) {
-	if cfg.Queue == "" {
+	if cfg.PublishOnly {
+		if cfg.Exchange == "" {
+			return nil, fmt.Errorf("publish_only needs an exchange")
+		}
+	} else if cfg.Queue == "" {
 		return nil, fmt.Errorf("queue name is required for RabbitMQ")
 	}
 	if cfg.Host == "" {
@@ -95,6 +101,25 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to open channel: %w", err)
 	}
 
+	if r.config.PublisherConfirms {
+		if err := r.enableConfirms(); err != nil {
+			_ = r.channel.Close()
+			_ = r.conn.Close()
+			return err
+		}
+	}
+	if r.config.PublishOnly {
+		// The administrator declares the exchange and binds the queues. This side
+		// only checks that the exchange exists: a publisher that declared one would
+		// create a route nobody configured.
+		if err := r.channel.ExchangeDeclarePassive(r.config.Exchange, "", true, false, false, false, nil); err != nil {
+			_ = r.channel.Close()
+			_ = r.conn.Close()
+			return fmt.Errorf("exchange '%s' not found (publish_only): %w", r.config.Exchange, err)
+		}
+		return nil
+	}
+
 	// Объявляем очередь или проверяем существующую
 	if r.config.PassiveDeclare {
 		// PassiveDeclare: только проверить что очередь существует, не менять её параметры.
@@ -133,6 +158,9 @@ func (r *RabbitMQ) Connect(ctx context.Context) error {
 // RabbitMQ начинает пушить unacked deliveries обратно; никто их не читает,
 // TCP-буфер забивается и следующий PublishWithContext блокируется навсегда.
 func (r *RabbitMQ) startConsuming() error {
+	if r.config.PublishOnly {
+		return fmt.Errorf("publish-only broker cannot receive: it has no queue")
+	}
 	if r.deliveryChan != nil {
 		return nil // уже зарегистрирован
 	}
@@ -179,42 +207,6 @@ func (r *RabbitMQ) Close() error {
 			return fmt.Errorf("failed to close connection: %w", err)
 		}
 	}
-	return nil
-}
-
-// Send отправляет сообщение в RabbitMQ очередь
-func (r *RabbitMQ) Send(ctx context.Context, message []byte) error {
-	if r.channel == nil {
-		return fmt.Errorf("not connected to RabbitMQ")
-	}
-
-	// Определяем exchange (default = "")
-	exchange := r.config.Exchange
-
-	// Определяем routing key (default = имя очереди)
-	routingKey := r.config.RoutingKey
-	if routingKey == "" {
-		routingKey = r.config.Queue
-	}
-
-	err := r.channel.PublishWithContext(
-		ctx,
-		exchange,   // exchange (пустая строка = default exchange)
-		routingKey, // routing key
-		false,      // mandatory
-		false,      // immediate
-		amqp.Publishing{
-			ContentType:  "application/xml", // TDTP пакеты в XML формате
-			Body:         message,
-			DeliveryMode: amqp.Persistent, // Сообщения сохраняются на диск
-			Timestamp:    time.Now(),
-		},
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to publish message: %w", err)
-	}
-
 	return nil
 }
 

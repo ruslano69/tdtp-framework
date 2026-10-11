@@ -54,7 +54,7 @@ const (
 var (
 	knownEventTypes = []string{EventJobStarted, EventJobFinished}
 	knownJobStatus  = []string{string(JobDone), string(JobFailed), string(JobCancelled)}
-	knownSinkTypes  = []string{"log", "webhook"}
+	knownSinkTypes  = []string{"log", "webhook", "rabbitmq"}
 )
 
 // EventSinkDef is one entry of the events file.
@@ -71,6 +71,9 @@ type EventSinkDef struct {
 	URL               string `yaml:"url"`
 	Secret            string `yaml:"secret"`              // env:VARIABLE — never a literal
 	AllowInsecureHTTP bool   `yaml:"allow_insecure_http"` // plain http, localhost only
+
+	// rabbitmq only
+	RabbitMQ *rabbitmqSinkDef `yaml:"rabbitmq,omitempty"`
 }
 
 type eventsFile struct {
@@ -110,8 +113,13 @@ func LoadEvents(filePath string) ([]EventSinkDef, error) {
 	}
 	// A missing secret is found now, at startup, not on the first event.
 	for _, s := range ef.Sinks {
-		if s.Type == "webhook" {
+		switch s.Type {
+		case "webhook":
 			if _, err := sinkSecret(s); err != nil {
+				return nil, fmt.Errorf("events: %s: %w", filePath, err)
+			}
+		case "rabbitmq":
+			if _, err := newRabbitMQSink(s); err != nil {
 				return nil, fmt.Errorf("events: %s: %w", filePath, err)
 			}
 		}
@@ -139,11 +147,21 @@ func prepareSinks(sinks []EventSinkDef) error {
 		}
 		switch s.Type {
 		case "log":
+			if s.URL != "" || s.Secret != "" || s.AllowInsecureHTTP || s.RabbitMQ != nil {
+				return fmt.Errorf("sink %q: url, secret, allow_insecure_http and rabbitmq apply to their own sink types only", s.Name)
+			}
+		case "webhook":
+			if s.RabbitMQ != nil {
+				return fmt.Errorf("sink %q: the rabbitmq block applies to rabbitmq sinks only", s.Name)
+			}
+			if err := validateWebhookDef(*s); err != nil {
+				return fmt.Errorf("sink %q: %w", s.Name, err)
+			}
+		case "rabbitmq":
 			if s.URL != "" || s.Secret != "" || s.AllowInsecureHTTP {
 				return fmt.Errorf("sink %q: url, secret and allow_insecure_http apply to webhook sinks only", s.Name)
 			}
-		case "webhook":
-			if err := validateWebhookDef(*s); err != nil {
+			if err := validateRabbitMQDef(*s); err != nil {
 				return fmt.Errorf("sink %q: %w", s.Name, err)
 			}
 		}
@@ -371,6 +389,12 @@ func buildSink(def EventSinkDef) (EventSink, error) {
 			return nil, err
 		}
 		return sink, nil
+	case "rabbitmq":
+		sink, err := newRabbitMQSink(def)
+		if err != nil {
+			return nil, err
+		}
+		return sink, nil
 	default:
 		return nil, fmt.Errorf("sink %q: unsupported type %q", def.Name, def.Type)
 	}
@@ -547,5 +571,10 @@ func StartEventDispatcher(db *OrchestratorDB, defs []EventSinkDef) (func(), erro
 	return func() {
 		cancel()
 		<-done
+		for _, s := range d.sinks {
+			if c, ok := s.(io.Closer); ok {
+				_ = c.Close()
+			}
+		}
 	}, nil
 }

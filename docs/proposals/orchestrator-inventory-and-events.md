@@ -1,8 +1,8 @@
 # Proposal: orchestrator inventory and outbound events
 
-**Status: DRAFT.** Part 3, steps 1 and 2 (outbox, dispatcher, `log` and webhook
-sinks, admin routes, metrics) are implemented on `feat/orchestrator-inventory-events`.
-The RabbitMQ sink and Part 1 are not. Target: 2.0. Covers two items from the
+**Status: DRAFT.** Part 3, steps 1 to 3 (outbox, dispatcher, `log`, webhook and
+RabbitMQ sinks, admin routes, metrics) are implemented on
+`feat/orchestrator-inventory-events`. Part 1 is not. Target: 2.0. Covers two items from the
 "Behind the freeze" list in `TODO_NEXT.md`: pre-run inventory of scenario
 targets (item 1) and outbound job events (item 3). Nothing here changes how a
 scenario runs; both features only observe the orchestrator's state.
@@ -458,6 +458,16 @@ Rough sizes, for planning only:
    receiver that verifies the HMAC and answers 503 once.*
 3. **RabbitMQ publisher confirms** (shared `pkg/brokers`), then the RabbitMQ
    sink with live CI. About 2–3 days.
+   *Implemented. Confirms are opt-in (`publisher_confirms`), so `Send` is
+   unchanged for existing users. Deviations from §3.5.2: the sink publishes
+   with `mandatory`, so an unroutable message is an error and not an ack; the
+   confirm wait judges each publish by its own sequence number, so a late ack
+   from an abandoned publish is not mistaken for the current one; `publish_only`
+   replaces the queue requirement, and the sink checks the exchange passively. A
+   lost connection is rebuilt by the next send. Checked: four live publish
+   tests and three live sink tests, run in CI with a skip guard; six
+   deterministic tests drive the confirm logic directly, and two faults in it
+   (ignoring the return, not skipping stale acks) each fail a test.*
 4. **Inventory: derivation and probes, `--inventory-once`.** About 2–3 days.
 5. **Inventory: storage, routes, interval, metrics.** About 2 days.
 

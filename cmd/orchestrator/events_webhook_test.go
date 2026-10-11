@@ -269,7 +269,7 @@ func TestWebhookDef_Validation(t *testing.T) {
 
 func TestPrepareSinks_WebhookFieldsOnlyForWebhook(t *testing.T) {
 	defs := []EventSinkDef{{Name: "a", Type: "log", URL: "https://x.example.com/"}}
-	if err := prepareSinks(defs); err == nil || !strings.Contains(err.Error(), "webhook sinks only") {
+	if err := prepareSinks(defs); err == nil || !strings.Contains(err.Error(), "their own sink types only") {
 		t.Fatalf("log sink with a url accepted: %v", err)
 	}
 }

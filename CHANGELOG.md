@@ -4,7 +4,7 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
-### Added — orchestrator job events (outbox, `log` and webhook sinks)
+### Added — orchestrator job events (outbox; `log`, webhook and RabbitMQ sinks)
 
 The orchestrator publishes `job.started` and `job.finished` for each job, to
 the sinks named in an events file (`--events events.yaml`). Without the flag
@@ -34,8 +34,16 @@ Also: a job's status, its artifact hash and its schedule's `last_status` are
 now written in one transaction. Before, a crash between the status update and
 the schedule update could leave them disagreeing.
 
-RabbitMQ sink not yet: it waits for publisher confirms in `pkg/brokers`
-(see `docs/proposals/orchestrator-inventory-and-events.md`, §3.5.2).
+RabbitMQ sink: publishes to an exchange the administrator declared, with
+publisher confirms; an event counts as sent only once a queue has taken it.
+An unroutable event is retried until a queue is bound, then delivered.
+It never declares anything (`publish_only`), and it reconnects after a lost
+connection. Credentials come from environment variables only.
+
+`pkg/brokers` gains the pieces the sink needs, all opt-in: `publisher_confirms`
+and `publish_only` on `brokers.Config`, `PublishWith` for a publish with an
+explicit route and message id, and `ErrorClass` for a broker error's failure
+class. Existing callers of `Send` see no change.
 
 ### Fixed — multipart compact preserves empty strings and supports parallel export
 

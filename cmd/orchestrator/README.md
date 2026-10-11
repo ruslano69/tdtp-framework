@@ -360,7 +360,22 @@ sinks:
     url: https://crm.example.com/hooks/tdtp
     secret: env:CRM_HOOK_SECRET   # read at startup; a literal secret is refused
     types: [job.finished]
+
+  - name: ops-queue
+    type: rabbitmq
+    types: [job.started, job.finished]
+    rabbitmq:
+      host: mq.internal
+      port: 5672
+      user: env:OPS_MQ_USER         # literal values are refused
+      password: env:OPS_MQ_PASS
+      exchange: tdtp.events         # must already exist; never declared here
+      routing_key: job              # empty = the event type
 ```
+
+A RabbitMQ event is sent only when a queue has taken it. Until one is bound
+to the routing key, the event waits and is retried; after `max_attempts` it is
+dead, like any other.
 
 A webhook receiver checks `X-TDTP-Signature` against
 `HMAC-SHA256(secret, X-TDTP-Timestamp + "." + body)` and rejects a stale
