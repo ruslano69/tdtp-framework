@@ -104,6 +104,29 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_outbox_job ON outbox(job_id, sink);
+
+-- Inventory (inventory.go): one row per endpoint per run. Kept for history, so
+-- "unreachable since when" can be answered, and written in one transaction per
+-- run, so a run is either all there or not there.
+CREATE TABLE IF NOT EXISTS inventory_snapshots (
+	run_id      TEXT NOT NULL,
+	run_at      TEXT NOT NULL,            -- fixed-width UTC, compared as text
+	target_key  TEXT NOT NULL,            -- an endpoint key, or scenario:<name>
+	kind        TEXT NOT NULL,            -- db | file | s3 | broker | redis | dir | scenario
+	status      TEXT NOT NULL,            -- ok | degraded | unresolved
+	error_class TEXT,                     -- a class, never the driver's text
+	latency_ms  INTEGER,
+	scenarios   TEXT NOT NULL,            -- JSON array of scenario names using it
+	PRIMARY KEY (run_id, target_key)
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_run_at ON inventory_snapshots(run_at);
+-- A run exists even when it has no rows (a scenario set with no endpoints), so
+-- the TTL and "latest" are answered from here, not from the snapshots.
+CREATE TABLE IF NOT EXISTS inventory_runs (
+	run_id  TEXT PRIMARY KEY,
+	run_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_runs_at ON inventory_runs(run_at);
 `
 
 // OrchestratorDB wraps the orchestrator SQLite database.

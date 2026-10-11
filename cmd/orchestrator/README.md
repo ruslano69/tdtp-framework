@@ -395,6 +395,32 @@ and then marked `dead` — kept in the `outbox` table, never dropped. Delivery i
 at-least-once: a receiver dedupes on `event_id`. Events never contain the job
 log.
 
+## Endpoint inventory
+
+The inventory asks whether every endpoint the scenarios depend on answers,
+before cron finds out at 03:00. It reads each scenario's pipeline YAML with its
+parameters filled in, and probes each distinct endpoint once. Probes connect,
+stat, HEAD or passively declare; nothing is created, written or consumed.
+
+```bash
+orchestrator --scenarios ./scenarios --db orchestrator.db --inventory-once
+```
+
+prints one line per endpoint and exits 1 if any is degraded, 2 if it could not
+run. `--inventory-interval 15m` runs it while serving.
+
+- `GET /inventory` (admin): the latest run, every endpoint with its status,
+  class and latency. Endpoints carry hosts and paths; that is why this is admin
+  only.
+- `POST /inventory/run` (admin): start a run. Within a minute of the last run,
+  the last run is reported instead.
+- `GET /scenarios/{name}/inventory` (consumer): `ok`, `degraded`, `unresolved`
+  or `unknown` for one scenario, with no host.
+
+An endpoint's key has no credentials. A scenario whose required parameter has
+no value is `unresolved`, not `degraded`: nothing is wrong with an endpoint, the
+scenario just cannot be read yet.
+
 ## Pub/sub triggers
 
 `pkg/resultlog` already publishes after every `tdtpcli --pipeline` run

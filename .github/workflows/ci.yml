@@ -218,7 +218,7 @@ jobs:
         # sink. Only the Live tests run here; the rest of the broker package
         # needs the management plugin and skips without it.
         go test -tags "integration nokafka" -count=1 -timeout 5m -v \
-          -run 'RabbitMQPublish_Live|RabbitMQSink_Live' \
+          -run 'RabbitMQPublish_Live|RabbitMQSink_Live|Inventory_Live' \
           ./pkg/brokers/ ./cmd/orchestrator/ >> live.log 2>&1 || status=$?
         grep -E '^(--- FAIL|FAIL|ok|panic)' live.log || true
         if [ "$status" -ne 0 ]; then
@@ -228,7 +228,7 @@ jobs:
         fi
         # A live test that skipped did not test anything. 18c has no service
         # here, so its subtests are the only skips allowed.
-        if grep -E -- '--- SKIP: .*(MySQL|Integration_|OracleLive|DecimalExact|LiveEngines|PostgreSQL|Postgres|RabbitMQPublish_Live|RabbitMQSink_Live)' live.log | grep -v '/18c'; then
+        if grep -E -- '--- SKIP: .*(MySQL|Integration_|OracleLive|DecimalExact|LiveEngines|PostgreSQL|Postgres|RabbitMQPublish_Live|RabbitMQSink_Live|Inventory_Live)' live.log | grep -v '/18c'; then
           echo "::error::a live adapter test skipped — its database was not reachable"
           exit 1
         fi

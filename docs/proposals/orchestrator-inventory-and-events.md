@@ -1,8 +1,9 @@
 # Proposal: orchestrator inventory and outbound events
 
-**Status: DRAFT.** Part 3, steps 1 to 3 (outbox, dispatcher, `log`, webhook and
-RabbitMQ sinks, admin routes, metrics) are implemented on
-`feat/orchestrator-inventory-events`. Part 1 is not. Target: 2.0. Covers two items from the
+**Status: implemented** on `feat/orchestrator-inventory-events`, with the
+deviations noted under each step. Not built: the optional `SELECT 1` probe, and
+the dead-man alert (item 5 of the 2.0 list), which needs the inventory history
+and an alert channel. Target: 2.0. Covers two items from the
 "Behind the freeze" list in `TODO_NEXT.md`: pre-run inventory of scenario
 targets (item 1) and outbound job events (item 3). Nothing here changes how a
 scenario runs; both features only observe the orchestrator's state.
@@ -469,7 +470,25 @@ Rough sizes, for planning only:
    deterministic tests drive the confirm logic directly, and two faults in it
    (ignoring the return, not skipping stale acks) each fail a test.*
 4. **Inventory: derivation and probes, `--inventory-once`.** About 2–3 days.
+   *Implemented: `inventory_targets.go`, `inventory_probe.go`, `inventory.go`,
+   `inventory_routes.go`, and `ProbeBucket` in `pkg/storage/s3`. Deviations: a
+   directory destination is checked to exist and be a directory, not writable;
+   writability cannot be tested without creating a file. Each target's probe is
+   deduplicated by an in-memory fingerprint of its full identity, secrets
+   included, so two credential sets reaching one endpoint are two rows, and the
+   second key carries a ` #2` suffix. A probe is abandoned at 5 s even if its
+   driver ignores the context. A Kafka target with a `nokafka` build reports
+   degraded, class `other`.*
 5. **Inventory: storage, routes, interval, metrics.** About 2 days.
+   *Implemented. Deviations: the gauges are
+   `orchestrator_inventory_targets{kind,status}` and
+   `orchestrator_inventory_last_run_timestamp_seconds`, not a 0/1 gauge per
+   target, which would put every endpoint's key into a label; runs are kept 30
+   days, a fixed figure. Checked: unit tests for derivation, classification,
+   the TTL, the single-run rule, the consumer's view, and the exit codes; a live
+   test against PostgreSQL in CI, where a wrong password must come back as
+   `degraded`/`auth`; and a run of the binary against a missing file, which
+   exits 1.*
 
 Events and inventory are independent. Item 4 can run in parallel with 1–3.
 The event `inventory.degraded` waits for both sides.

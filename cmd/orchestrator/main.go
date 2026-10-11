@@ -71,6 +71,8 @@ func main() {
 	redisDB := flag.Int("redis-db", 0, "Redis DB number (pubsub trigger only)")
 	pubsubPath := flag.String("pubsub", "", "path to pubsub.yaml mapping pipeline result_name -> scenario (requires --redis-addr)")
 	eventsPath := flag.String("events", "", "path to events.yaml: sinks that receive job.started / job.finished (empty = no events)")
+	inventoryOnce := flag.Bool("inventory-once", false, "probe every scenario endpoint once, print the result and exit (1 if any is degraded)")
+	inventoryInterval := flag.Duration("inventory-interval", 0, "run the inventory this often while serving (0 = off)")
 	logRetentionWeeks := flag.Int("log-retention-weeks", 4,
 		fmt.Sprintf("clear job log text older than this many weeks (%d-%d, 0 = keep forever)",
 			MinRetentionWeeks, MaxRetentionWeeks))
@@ -134,6 +136,13 @@ func main() {
 		fatal(err, "load scenarios: "+*scenariosDir)
 	}
 	log.Info().Int("count", len(scenes)).Str("dir", *scenariosDir).Msg("scenarios loaded")
+
+	inventory := NewInventoryService(db, scenes)
+	if *inventoryOnce {
+		code := runInventoryOnce(context.Background(), inventory, db, os.Stdout)
+		_ = db.Close()
+		os.Exit(code)
+	}
 
 	// Runners: named execution backends. --runners config takes precedence;
 	// otherwise synthesize the legacy single-tdtpcli behavior so existing
@@ -204,6 +213,11 @@ func main() {
 	scheduler.Start()
 	defer scheduler.Stop()
 
+	if *inventoryInterval > 0 {
+		stopInventory := StartInventoryTicker(inventory, *inventoryInterval)
+		defer stopInventory()
+	}
+
 	// Seed active-job gauge from DB (jobs may have been in-flight before restart).
 	SyncActiveJobs(db)
 
@@ -218,6 +232,7 @@ func main() {
 		subscriber:     subscriber,
 		mercuryURL:     *mercuryURL,
 		eventSinks:     eventSinks,
+		inventory:      inventory,
 	})
 
 	log.Info().Str("addr", *addr).Bool("auth", !*noAuth).Msg("orchestrator started")

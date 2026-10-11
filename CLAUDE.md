@@ -109,7 +109,8 @@ step), Oracle XE 21c (`gvenzl/oracle-xe:21.3.0-slim-faststart`,
 `TDTP_ORACLE21_DSN`), and RabbitMQ 3 for the publishing tests
 (`RabbitMQPublish_Live*` in `pkg/brokers`, `RabbitMQSink_Live*` in
 `cmd/orchestrator`; the step runs them with `-run`, so the rest of the broker
-package, which needs the management plugin, does not run there). **A skipped live test fails that job**: skipping is how
+package, which needs the management plugin, does not run there), and the
+inventory against the same PostgreSQL service (`Inventory_Live*`). **A skipped live test fails that job**: skipping is how
 these tests behave without a database, so on CI a skip means a service was
 not reachable, not that there was nothing to test. Only the `/18c` subtests
 may skip — there is no 18c service. A new live test whose name the step's

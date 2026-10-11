@@ -45,6 +45,25 @@ and `publish_only` on `brokers.Config`, `PublishWith` for a publish with an
 explicit route and message id, and `ErrorClass` for a broker error's failure
 class. Existing callers of `Send` see no change.
 
+### Added — orchestrator endpoint inventory
+
+`orchestrator --inventory-once` probes every endpoint the scenarios depend on
+(databases, files, S3 objects and buckets, RabbitMQ queues, Kafka, Redis) and
+prints the result; it exits 1 if any endpoint is degraded. `--inventory-interval`
+runs it while serving. Probes only connect, stat, HEAD or passively declare: they
+create and write nothing, and they never run a scenario.
+
+Admins see every endpoint with its class, through `GET /inventory`, and can start
+a run with `POST /inventory/run` (the TTL applies). A consumer sees one word per
+scenario, through `GET /scenarios/{name}/inventory`, and no host. Each run is kept,
+so "unreachable since when" can be answered; runs older than 30 days are pruned.
+
+An endpoint's key carries no credentials. Two scenarios that reach the same
+endpoint with different credentials are probed separately, and the second key
+gets a ` #2` suffix. A probe error's text goes to the log; the snapshot keeps only
+its class (`auth`, `network`, `timeout`, `not_found`, `permission`, `config`,
+`other`).
+
 ### Fixed — multipart compact preserves empty strings and supports parallel export
 
 Compact now copies each part's field definitions before changing names or
