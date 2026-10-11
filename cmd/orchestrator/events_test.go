@@ -519,3 +519,38 @@ func TestEventBackoff_DoublesAndCaps(t *testing.T) {
 		t.Fatalf("eventBackoff(20) = %v, want cap %v", got, maxEventBackoff)
 	}
 }
+
+// A delivered row whose "sent" state cannot be recorded does not stop the pass:
+// the other rows still go out, the failure comes back in the error, and the row
+// stays pending, so it is sent again rather than silently treated as done.
+func TestDispatcher_RecordFailureIsReturnedNotSwallowed(t *testing.T) {
+	db := newScheduleStatusDB(t)
+	if err := db.AddOutbox([]OutboxEvent{
+		{ID: "rec-1", JobID: "ja", Sink: "s", Type: EventJobFinished, Payload: []byte(`{}`), CreatedAt: time.Now()},
+		{ID: "rec-2", JobID: "jb", Sink: "s", Type: EventJobFinished, Payload: []byte(`{}`), CreatedAt: time.Now()},
+	}); err != nil {
+		t.Fatalf("AddOutbox: %v", err)
+	}
+	if _, err := db.db.Exec(`CREATE TRIGGER refuse_sent BEFORE UPDATE OF status ON outbox
+		WHEN NEW.status = 'sent' BEGIN SELECT RAISE(ABORT, 'refused'); END`); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+
+	sink := &fakeSink{}
+	d := newTestDispatcher(db, map[string]EventSink{"s": sink}, 5)
+	n, err := d.RunOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "rec-1") {
+		t.Fatalf("record failure swallowed: err = %v", err)
+	}
+	if got := sink.sent(); len(got) != 2 {
+		t.Fatalf("pass stopped early: sends = %v, want both rows attempted", got)
+	}
+	if n != 0 {
+		t.Fatalf("delivered = %d, want 0: no state was recorded", n)
+	}
+	for _, row := range readOutbox(t, db) {
+		if row.Status != "pending" {
+			t.Fatalf("row %s is %s, want pending so it is sent again", row.ID, row.Status)
+		}
+	}
+}

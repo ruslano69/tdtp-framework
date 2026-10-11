@@ -254,15 +254,15 @@ func recordInventoryMetrics(rows []invRow, at time.Time) {
 
 // WriteInventoryTable prints a run for a terminal, one endpoint per line.
 func WriteInventoryTable(w io.Writer, runAt time.Time, rows []invRow) {
-	fmt.Fprintf(w, "inventory run at %s\n", runAt.UTC().Format(time.RFC3339))
+	_, _ = fmt.Fprintf(w, "inventory run at %s\n", runAt.UTC().Format(time.RFC3339))
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tKIND\tCLASS\tMS\tENDPOINT\tSCENARIOS")
+	_, _ = fmt.Fprintln(tw, "STATUS\tKIND\tCLASS\tMS\tENDPOINT\tSCENARIOS")
 	for _, r := range rows {
 		class := r.Class
 		if class == "" {
 			class = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", r.Status, r.Kind, class, r.LatencyMs, r.Key,
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", r.Status, r.Kind, class, r.LatencyMs, r.Key,
 			strings.Join(r.Scenarios, ","))
 	}
 	_ = tw.Flush()

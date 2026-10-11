@@ -448,12 +448,17 @@ func eventBackoff(attempt int) time.Duration {
 }
 
 // RunOnce makes one pass over the due rows and returns how many were sent.
+// A failure to record a row's new state (sent, dead, retry) does not stop the
+// pass: the other rows still go out. Those failures come back joined in the
+// error, so the caller logs them. A delivered row whose state was not recorded
+// is sent again later, which is the at-least-once guarantee.
 func (d *EventDispatcher) RunOnce(ctx context.Context) (int, error) {
 	due, err := d.db.dueOutbox(d.now(), d.batch)
 	if err != nil {
 		return 0, fmt.Errorf("outbox: due: %w", err)
 	}
 	delivered := 0
+	var bookkeeping error
 	for _, r := range due {
 		if ctx.Err() != nil {
 			break // shutting down: leave the rest pending, they are not failures
@@ -462,7 +467,7 @@ func (d *EventDispatcher) RunOnce(ctx context.Context) (int, error) {
 		if !ok {
 			// The sink was in the events file when the row was written and is
 			// not now. Nothing will ever deliver it: dead, and loud about it.
-			_ = d.db.markOutboxDead(r.ID, r.Attempts, "no_sink")
+			bookkeeping = errors.Join(bookkeeping, d.db.markOutboxDead(r.ID, r.Attempts, "no_sink"))
 			log.Error().Str("event_id", r.ID).Str("sink", r.Sink).Msg("job event dead: sink no longer configured")
 			continue
 		}
@@ -472,7 +477,7 @@ func (d *EventDispatcher) RunOnce(ctx context.Context) (int, error) {
 		if sendErr == nil {
 			if err := d.db.markOutboxSent(r.ID, d.now()); err != nil {
 				// Delivered, but not recorded: it will be sent again. At-least-once.
-				log.Error().Err(err).Str("event_id", r.ID).Msg("job event sent but not marked")
+				bookkeeping = errors.Join(bookkeeping, fmt.Errorf("mark %s sent: %w", r.ID, err))
 				continue
 			}
 			eventsSentTotal.WithLabelValues(r.Sink, r.Type).Inc()
@@ -487,17 +492,17 @@ func (d *EventDispatcher) RunOnce(ctx context.Context) (int, error) {
 		eventsFailedTotal.WithLabelValues(r.Sink, class).Inc()
 		attempts := r.Attempts + 1
 		if permanent || attempts >= d.maxAttempts[r.Sink] {
-			_ = d.db.markOutboxDead(r.ID, attempts, class)
+			bookkeeping = errors.Join(bookkeeping, d.db.markOutboxDead(r.ID, attempts, class))
 			log.Error().Err(sendErr).Str("event_id", r.ID).Str("sink", r.Sink).
 				Str("class", class).Int("attempts", attempts).Msg("job event dead")
 			continue
 		}
 		next := d.now().Add(d.backoff(attempts))
-		_ = d.db.markOutboxRetry(r.ID, attempts, next, class)
+		bookkeeping = errors.Join(bookkeeping, d.db.markOutboxRetry(r.ID, attempts, next, class))
 		log.Warn().Err(sendErr).Str("event_id", r.ID).Str("sink", r.Sink).
 			Str("class", class).Int("attempts", attempts).Time("next", next).Msg("job event retry scheduled")
 	}
-	return delivered, nil
+	return delivered, bookkeeping
 }
 
 // Run delivers until ctx is cancelled. It also prunes delivered rows past

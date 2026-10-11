@@ -178,10 +178,10 @@ func classifyProbeErr(err error) string {
 
 	var se *s3store.Error
 	if errors.As(err, &se) {
-		switch {
-		case se.StatusCode == 404:
+		switch se.StatusCode {
+		case 404:
 			return "not_found"
-		case se.StatusCode == 401 || se.StatusCode == 403:
+		case 401, 403:
 			return "auth"
 		}
 		return "other"
