@@ -61,6 +61,11 @@ type Config struct {
 	Brokers       []string `yaml:"brokers,omitempty"`        // Список Kafka brokers
 	Topic         string   `yaml:"topic,omitempty"`          // Имя Kafka topic
 	ConsumerGroup string   `yaml:"consumer_group,omitempty"` // Consumer group ID
+
+	// Publishing for the orchestrator's event sink. Both are off by default, so
+	// existing users see no change.
+	PublisherConfirms bool `yaml:"publisher_confirms,omitempty"` // wait until the broker routed each publish
+	PublishOnly       bool `yaml:"publish_only,omitempty"`       // no queue; the exchange must already exist
 }
 
 // New создает новый MessageBroker на основе конфигурации

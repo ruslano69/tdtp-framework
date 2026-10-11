@@ -4,6 +4,66 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Added — orchestrator job events (outbox; `log`, webhook and RabbitMQ sinks)
+
+The orchestrator publishes `job.started` and `job.finished` for each job, to
+the sinks named in an events file (`--events events.yaml`). Without the flag
+nothing changes: no sinks, no outbox rows.
+
+Each event is written to an `outbox` table in the same transaction as the job
+state it describes, so a finished job cannot exist without its event. A
+dispatcher delivers pending rows with backoff; after `max_attempts` a row is
+dead and kept, not dropped. Delivery is at-least-once; order is kept per job
+and sink. The job log is never part of an event.
+
+Webhook sink: a POST per event, signed with HMAC-SHA256 over
+`timestamp + "." + body` (`X-TDTP-Signature`), with `X-TDTP-Event-ID` and
+`X-TDTP-Timestamp`. The secret comes from an environment variable, never a
+literal; redirects are not followed; plain http only for localhost with
+`allow_insecure_http`.
+
+Admin routes: `GET /events/sinks` (totals per sink, no URL),
+`GET /events/outbox?status=&sink=&limit=`, and
+`POST /events/outbox/{id}/retry`, which moves a dead event back to pending.
+
+Metrics: `orchestrator_events_sent_total{sink,type}`,
+`orchestrator_events_failed_total{sink,class}`, `orchestrator_outbox_pending`,
+`orchestrator_outbox_dead`.
+
+Also: a job's status, its artifact hash and its schedule's `last_status` are
+now written in one transaction. Before, a crash between the status update and
+the schedule update could leave them disagreeing.
+
+RabbitMQ sink: publishes to an exchange the administrator declared, with
+publisher confirms; an event counts as sent only once a queue has taken it.
+An unroutable event is retried until a queue is bound, then delivered.
+It never declares anything (`publish_only`), and it reconnects after a lost
+connection. Credentials come from environment variables only.
+
+`pkg/brokers` gains the pieces the sink needs, all opt-in: `publisher_confirms`
+and `publish_only` on `brokers.Config`, `PublishWith` for a publish with an
+explicit route and message id, and `ErrorClass` for a broker error's failure
+class. Existing callers of `Send` see no change.
+
+### Added — orchestrator endpoint inventory
+
+`orchestrator --inventory-once` probes every endpoint the scenarios depend on
+(databases, files, S3 objects and buckets, RabbitMQ queues, Kafka, Redis) and
+prints the result; it exits 1 if any endpoint is degraded. `--inventory-interval`
+runs it while serving. Probes only connect, stat, HEAD or passively declare: they
+create and write nothing, and they never run a scenario.
+
+Admins see every endpoint with its class, through `GET /inventory`, and can start
+a run with `POST /inventory/run` (the TTL applies). A consumer sees one word per
+scenario, through `GET /scenarios/{name}/inventory`, and no host. Each run is kept,
+so "unreachable since when" can be answered; runs older than 30 days are pruned.
+
+An endpoint's key carries no credentials. Two scenarios that reach the same
+endpoint with different credentials are probed separately, and the second key
+gets a ` #2` suffix. A probe error's text goes to the log; the snapshot keeps only
+its class (`auth`, `network`, `timeout`, `not_found`, `permission`, `config`,
+`other`).
+
 ### Fixed — multipart compact preserves empty strings and supports parallel export
 
 Compact now copies each part's field definitions before changing names or

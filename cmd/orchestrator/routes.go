@@ -29,6 +29,8 @@ type routerDeps struct {
 	authMiddleware func(http.Handler) http.Handler
 	subscriber     *Subscriber // nil when --redis-addr wasn't set
 	mercuryURL     string
+	eventSinks     []EventSinkDef // events.yaml sinks; empty = none configured
+	inventory      *InventoryService
 }
 
 // newRouter builds the full HTTP API: public health/metrics endpoints, then
@@ -57,6 +59,8 @@ func newRouter(deps routerDeps) chi.Router {
 		registerScheduleRoutes(r, deps)
 		registerTokenRoutes(r, deps)
 		registerRequestRoutes(r, deps)
+		registerEventRoutes(r, deps)
+		registerInventoryRoutes(r, deps)
 	}) // end authenticated group
 
 	return r

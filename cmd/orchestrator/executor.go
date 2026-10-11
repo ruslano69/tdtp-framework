@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // JobStatus represents the execution state of a scenario run.
@@ -100,6 +101,7 @@ type Executor struct {
 	tmpDir        string
 	logDir        string
 	db            *OrchestratorDB
+	events        *eventRouter // nil = no sinks configured; see events.go
 	run           runnerFunc
 	// done, when non-nil, receives each job ID after its run completes.
 	// Used by tests to await async completion without polling.
@@ -195,7 +197,7 @@ func (e *Executor) Submit(s *Scenario, params map[string]string, scheduleID, sub
 		if jobCtx.Err() != nil {
 			// Cancel() ran before we ever got here — never dispatch the subprocess.
 			e.mu.Unlock()
-			_ = e.db.UpdateJobDone(job.ID, JobCancelled, "", "")
+			e.finishJob(job, JobCancelled, "", "", nil)
 			RecordJobDone(job.Scenario, string(JobCancelled), job.StartedAt)
 			if e.done != nil {
 				e.done <- job.ID
@@ -206,6 +208,9 @@ func (e *Executor) Submit(s *Scenario, params map[string]string, scheduleID, sub
 		e.mu.Unlock()
 
 		_ = e.db.UpdateJobStatus(job.ID, JobRunning)
+		if err := e.db.AddOutbox(e.events.build(EventJobStarted, job, string(JobRunning), nil, "", time.Now())); err != nil {
+			log.Error().Err(err).Str("job_id", job.ID).Msg("job started event not recorded")
+		}
 
 		out, runErr := e.run(jobCtx, spec.Binary, runArgs...)
 
@@ -229,16 +234,17 @@ func (e *Executor) Submit(s *Scenario, params map[string]string, scheduleID, sub
 			logStr = "[truncated — full log: " + logPath + "]\n" + string(tail)
 		}
 
-		_ = e.db.UpdateJobDone(job.ID, status, logStr, errMsg)
-		RecordJobDone(job.Scenario, string(status), job.StartedAt)
-
-		// Compute artifact metadata after a successful run.
+		// Artifact metadata is computed before the finish, so the job's status,
+		// its artifact and the job.finished event land in one transaction.
+		var art *ArtifactMeta
 		if status == JobDone && outputPath != "" {
 			if sha256hex, size, err := fileHashAndSize(outputPath); err == nil {
-				_ = e.db.UpdateJobArtifact(job.ID, outputPath, sha256hex, size)
+				art = &ArtifactMeta{Path: outputPath, SHA256: sha256hex, Size: size}
 			}
 			// If the file doesn't exist (e.g. dry-run), skip silently.
 		}
+		e.finishJob(job, status, logStr, errMsg, art)
+		RecordJobDone(job.Scenario, string(status), job.StartedAt)
 
 		if e.done != nil {
 			e.done <- job.ID
@@ -246,6 +252,16 @@ func (e *Executor) Submit(s *Scenario, params map[string]string, scheduleID, sub
 	}()
 
 	return job, nil
+}
+
+// finishJob records a job's terminal state together with its job.finished
+// event. A failure is logged, not returned: the job has already run, and the
+// caller has nothing useful to do with a database error at this point.
+func (e *Executor) finishJob(job *Job, status JobStatus, logStr, errMsg string, art *ArtifactMeta) {
+	rows := e.events.build(EventJobFinished, job, string(status), art, errMsg, time.Now())
+	if err := e.db.FinishJob(job.ID, status, logStr, errMsg, art, rows); err != nil {
+		log.Error().Err(err).Str("job_id", job.ID).Str("status", string(status)).Msg("job outcome not recorded")
+	}
 }
 
 // Cancel aborts a job that has not started running yet (status=pending).

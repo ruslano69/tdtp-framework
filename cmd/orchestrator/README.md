@@ -339,6 +339,88 @@ show what really ran them, not what the scenario currently says. A scenario
 naming an unregistered runner fails the orchestrator's startup with a clear
 error, and `Submit()` refuses it at request time too, before touching the DB.
 
+## Job events
+
+`--events events.yaml` names the sinks that receive `job.started` and
+`job.finished`. The file is the administrator's, not a scenario's: a scenario
+cannot send events anywhere.
+
+```yaml
+sinks:
+  - name: ops-log
+    type: log                  # or: webhook
+    types: [job.started, job.finished]
+    scenarios: ["sync-*"]      # path.Match globs; empty = all
+    statuses: [failed]         # job.finished only; empty = all
+    include_params: false      # params leave the orchestrator only if asked
+    max_attempts: 10           # empty = 10
+
+  - name: crm
+    type: webhook
+    url: https://crm.example.com/hooks/tdtp
+    secret: env:CRM_HOOK_SECRET   # read at startup; a literal secret is refused
+    types: [job.finished]
+
+  - name: ops-queue
+    type: rabbitmq
+    types: [job.started, job.finished]
+    rabbitmq:
+      host: mq.internal
+      port: 5672
+      user: env:OPS_MQ_USER         # literal values are refused
+      password: env:OPS_MQ_PASS
+      exchange: tdtp.events         # must already exist; never declared here
+      routing_key: job              # empty = the event type
+```
+
+A RabbitMQ event is sent only when a queue has taken it. Until one is bound
+to the routing key, the event waits and is retried; after `max_attempts` it is
+dead, like any other.
+
+A webhook receiver checks `X-TDTP-Signature` against
+`HMAC-SHA256(secret, X-TDTP-Timestamp + "." + body)` and rejects a stale
+timestamp; `X-TDTP-Event-ID` is the key to dedupe on. Redirects are not
+followed. Plain http is accepted only for localhost, with
+`allow_insecure_http: true`, for development.
+
+Admins inspect and repair delivery with `GET /events/sinks`,
+`GET /events/outbox?status=dead`, and `POST /events/outbox/{id}/retry`.
+
+Unknown keys are an error: a misspelled `scenarios:` would otherwise be read
+as "all scenarios".
+
+Each event is written in the same transaction as the job state it reports, so
+a finished job always has its event. A failed delivery is retried with backoff
+and then marked `dead` — kept in the `outbox` table, never dropped. Delivery is
+at-least-once: a receiver dedupes on `event_id`. Events never contain the job
+log.
+
+## Endpoint inventory
+
+The inventory asks whether every endpoint the scenarios depend on answers,
+before cron finds out at 03:00. It reads each scenario's pipeline YAML with its
+parameters filled in, and probes each distinct endpoint once. Probes connect,
+stat, HEAD or passively declare; nothing is created, written or consumed.
+
+```bash
+orchestrator --scenarios ./scenarios --db orchestrator.db --inventory-once
+```
+
+prints one line per endpoint and exits 1 if any is degraded, 2 if it could not
+run. `--inventory-interval 15m` runs it while serving.
+
+- `GET /inventory` (admin): the latest run, every endpoint with its status,
+  class and latency. Endpoints carry hosts and paths; that is why this is admin
+  only.
+- `POST /inventory/run` (admin): start a run. Within a minute of the last run,
+  the last run is reported instead.
+- `GET /scenarios/{name}/inventory` (consumer): `ok`, `degraded`, `unresolved`
+  or `unknown` for one scenario, with no host.
+
+An endpoint's key has no credentials. A scenario whose required parameter has
+no value is `unresolved`, not `degraded`: nothing is wrong with an endpoint, the
+scenario just cannot be read yet.
+
 ## Pub/sub triggers
 
 `pkg/resultlog` already publishes after every `tdtpcli --pipeline` run

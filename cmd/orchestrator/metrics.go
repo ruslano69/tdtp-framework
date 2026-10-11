@@ -43,6 +43,28 @@ var (
 		Help: "Outcome of a schedule's last run: 1=done, 0=failed/cancelled/refused. Absent until the first outcome.",
 	}, []string{"id", "scenario"})
 
+	// Job events (events.go). Sent and failed count delivery attempts; the two
+	// gauges show what is waiting or has given up, refreshed every 15 s.
+	eventsSentTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "orchestrator_events_sent_total",
+		Help: "Job events delivered, by sink and event type.",
+	}, []string{"sink", "type"})
+
+	eventsFailedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "orchestrator_events_failed_total",
+		Help: "Failed delivery attempts by sink and failure class; each is retried or ends in dead.",
+	}, []string{"sink", "class"})
+
+	outboxPending = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "orchestrator_outbox_pending",
+		Help: "Job events waiting for delivery.",
+	})
+
+	outboxDead = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "orchestrator_outbox_dead",
+		Help: "Job events that gave up after max_attempts and need an operator.",
+	})
+
 	httpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "orchestrator_http_requests_total",
 		Help: "HTTP requests by method, route pattern, and status code.",
