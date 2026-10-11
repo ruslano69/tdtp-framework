@@ -279,16 +279,19 @@ func ApplyCompactReport(pkt *DataPacket, fixedFieldNames []string, tail bool) (d
 	for i, row := range pkt.Data.Rows {
 		rows[i] = parser.GetRowValues(row)
 	}
+	// Generated parts share their schema. Only this part's fixed flags and
+	// names may change, including when parts are processed concurrently.
+	pkt.Schema.Fields = append([]Field(nil), pkt.Schema.Fields...)
 
 	fixedSet := make(map[string]bool, len(fixedFieldNames))
 	for _, f := range fixedFieldNames {
-		fixedSet[f] = true
+		fixedSet[strings.TrimPrefix(f, "_")] = true
 	}
 
 	for i := range pkt.Schema.Fields {
 		name := pkt.Schema.Fields[i].Name
 		stripped := strings.TrimPrefix(name, "_")
-		if !fixedSet[name] && !fixedSet[stripped] {
+		if !fixedSet[stripped] && !pkt.Schema.Fields[i].Fixed {
 			continue
 		}
 		// Имя переименовывается в любом случае: соглашение о _ префиксе — про
@@ -296,6 +299,7 @@ func ApplyCompactReport(pkt *DataPacket, fixedFieldNames []string, tail bool) (d
 		// даже если в одной из них поле fixed не стало.
 		pkt.Schema.Fields[i].Name = stripped
 		if hasEmptyValue(rows, i) {
+			pkt.Schema.Fields[i].Fixed = false
 			dropped = append(dropped, stripped)
 			continue
 		}

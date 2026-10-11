@@ -4,6 +4,33 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — multipart compact preserves empty strings and supports parallel export
+
+Compact now copies each part's field definitions before changing names or
+fixed flags. Generated parts shared that slice: one part could rename a field
+or mark it fixed in every other part. A later part containing `Sales, ""`
+then came back as `Sales, Sales`, or failed the tail check. Excluding a field
+with empty values now clears an existing fixed flag too, and `_`-prefixed
+selectors keep matching after a rename.
+
+Parallel file/S3 export also shared an unprotected compact warning map.
+Concurrent exclusions could terminate the export with `concurrent map writes`.
+Warning deduplication is now locked, while packet transformations run in
+parallel. Each excluded field is reported once per export.
+
+### Fixed — literal `[NULL]` survives even when a column has no SQL NULL
+
+Special-value detection now declares a collision-free NULL marker for raw text
+containing `[NULL]`, even without a NULL sentinel. Previously it left the
+marker undeclared, so JSON, XLSX and database import interpreted that text as
+NULL. Already declared markers and other schema metadata are preserved during
+regeneration; readers still accept legacy undeclared NULL markers.
+
+Regressions cover actual multipart generation and parallel file export/import,
+tail, integrity, zstd/kanzi, JSON/CSV/XLSX, TDTQL NULL filters, and live
+PostgreSQL/MySQL/MSSQL/Oracle round trips. Focused concurrency tests run clean
+under `-race`; the warning test reproduced the original runtime crash.
+
 ## [1.26.6] - 2026-10-10
 
 ### Fixed — `IS NULL` on a packet file returned the opposite rows

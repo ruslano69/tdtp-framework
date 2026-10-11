@@ -80,12 +80,83 @@ belongs in a plan any more.
 
 ## Open in 1.x
 
+### Next patch — compact and NULL review findings (2026-10-11)
+
+Target: the next 1.x patch after v1.26.6 (candidate v1.26.7). These are
+data-integrity and concurrency fixes in shared packages, so both CLI versions
+must be verified. No new flags or packet-format changes are needed.
+
+**Implemented in `codex/compact-null-integrity` (2026-10-11).** Local
+regressions, focused Linux race tests and live PostgreSQL/MySQL/MSSQL/Oracle
+18c/21c checks pass. Release remains pending merge and green PR CI.
+
+The review reproduced two failures despite green unit and live adapter suites:
+multipart compact changed a real empty string to the previous value; exporting
+the literal text `[NULL]` from a column with no SQL NULL produced JSON `null`.
+The warning-map regression also reproduced `concurrent map writes` on the
+parallel path before the fix.
+
+Implement in this order, with failing regression tests before each fix:
+
+1. **[x] P1 — isolate compact schemas between parts and clear rejected fixed fields.**
+   `Generator.GenerateReference` assigns the same `Schema.Fields` slice to all
+   parts. `ApplyCompactReport` mutates it, and excluding a field with an empty
+   value leaves an existing `Fixed=true` intact. Give each transformed part its
+   own field definitions; explicitly clear `Fixed` when a field is excluded.
+   Resolve requested names consistently before and after stripping `_`, so the
+   first part's rename cannot bypass later parts' checks. Audit other writers
+   of shared schema state used by the same parallel export path.
+
+   Regressions: generate several actual parts, with `Sales, ""` in a later
+   part; repeat with `dept` and `_dept`, empty values in the first and last
+   parts, pre-existing fixed fields, and compact tail on/off. Serialise, parse
+   and expand every part, then compare every cell with the source. Assert that
+   processing one part does not change another part's schema. Run the same
+   dataset through parallel file export and reassemble its output.
+
+2. **[x] P1 — preserve literal NULL-marker text even without SQL NULL.**
+   `DetectAndApply` currently chooses a collision-free marker only when a
+   sentinel occurs. A literal `[NULL]` alone leaves the marker undeclared,
+   so `NullMarkerOf` and downstream readers treat the text as NULL. Declare a
+   collision-free marker for raw text containing the legacy marker even when
+   no SQL NULL is present. Preserve the meaning of markers already declared
+   by parsed packets during merge/re-export; do not relabel existing NULLs as
+   text. Keep legacy undeclared-marker packets readable.
+
+   Regressions: `[NULL]` alone; `[NULL]`, `[NULL1]`, `[NULL2]` and `""` with
+   and without a sentinel; declared alternative markers; regeneration of a
+   parsed packet; and legacy undeclared markers. Verify JSON, CSV, XLSX,
+   `IS NULL` / `IS NOT NULL`, and export/import cell equality on SQLite and
+   live PostgreSQL, MySQL, MSSQL and Oracle. Include compact and compressed
+   packets so the same values remain distinct across transformations.
+
+3. **[x] P1 — synchronise compact warnings during parallel export.**
+   `compactProc` is shared by all workers in `parallelProcessAndWrite`;
+   lazy initialisation and reads/writes of `warned` are unsynchronised.
+   Protect state initialisation and warning deduplication with a mutex,
+   keeping the per-packet transformation parallel. Emit at most
+   one warning per excluded field for the whole export.
+
+   Regressions: concurrent processing of many independent parts that exclude
+   the same field and different fields; concurrent first use; captured warning
+   counts; and the real multipart file-export path. Run these with `-race`
+   on CI using a toolchain/platform that supports it, as well as checking cell
+   equality. Exercise the shared file/S3 worker path without requiring live S3.
+
+**Completion gate:** all new regressions fail on v1.26.6 and pass after the
+fixes; focused race tests are clean; existing core, processors, CLI, ETL,
+JSON and XLSX suites pass; live adapter tests pass without unexpected skips
+(Oracle 18c locally, 21c on CI); both CLI builds and help/version smoke checks
+pass. Update CHANGELOG with the reproduced before/after behaviour. Bump and
+tag the patch only after the fixes are merged and CI is green.
+
 ### Toward a stable 1.x — audit of 2026-10-10
 
-What stands between the frozen line and calling it stable. Race-clean
-(`-race` over core, CLI, ETL, orchestrator, tdtpserve), lint and
-`govulncheck` green, no open issues — the gaps are below, all inside the
-freeze table.
+What stands between the frozen line and calling it stable. The 2026-10-10
+audit had green race tests over core, CLI, ETL, orchestrator and tdtpserve,
+lint and `govulncheck`. The 2026-10-11 review above found cases those tests
+did not cover; a green run is not evidence that those defects are closed.
+The remaining gaps below are all inside the freeze table.
 
 - **Tags.** Releases up to `v.1.26.3` were tagged with a dot after `v`, which
   Go modules do not read as versions: `go get …@latest` resolved to v1.18.1.

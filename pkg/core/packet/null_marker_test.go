@@ -1,6 +1,46 @@
 package packet
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestDetectAndApply_LiteralWithoutNull(t *testing.T) {
+	rows := [][]string{{"[NULL]"}, {"[NULL1]"}, {"[NULL2]"}, {""}}
+	for _, typ := range []string{"TEXT", "VARCHAR", "CHAR", "STRING"} {
+		t.Run(typ, func(t *testing.T) {
+			sch := Schema{Fields: []Field{{Name: "note", Type: typ}}, Dictionary: &Dictionary{Entries: []DictEntry{{Short: "@x", Full: "value"}}}}
+			out, got := DetectAndApply(rows, sch)
+			if NullMarkerOf(got.Fields[0]) != "[NULL3]" {
+				t.Fatalf("marker = %q, want [NULL3]", NullMarkerOf(got.Fields[0]))
+			}
+			if !reflect.DeepEqual(out, rows) {
+				t.Fatalf("literal values changed: %q", out)
+			}
+			if got.Dictionary != sch.Dictionary {
+				t.Fatal("dictionary lost")
+			}
+			if sch.Fields[0].SpecialValues != nil {
+				t.Fatal("input schema mutated")
+			}
+		})
+	}
+}
+
+func TestDetectAndApply_PreserveDeclaredSpecials(t *testing.T) {
+	sv := &SpecialValues{Null: &MarkerValue{Marker: "[NULL1]"}, NaN: &MarkerValue{Marker: "NaN"}}
+	sch := Schema{Fields: []Field{{Name: "n", Type: "REAL", SpecialValues: sv}}}
+	out, got := DetectAndApply([][]string{{"[NULL1]"}, {nullSentinel}, {"Infinity"}}, sch)
+	if NullMarkerOf(got.Fields[0]) != "[NULL1]" || out[0][0] != "[NULL1]" || out[1][0] != "[NULL1]" {
+		t.Fatalf("declared NULL moved: %q", out)
+	}
+	if got.Fields[0].SpecialValues.NaN == nil {
+		t.Fatal("declared NaN lost")
+	}
+	if sv.Infinity != nil {
+		t.Fatal("input special values mutated")
+	}
+}
 
 // A column holding both NULL and the text "[NULL]" used to write both as
 // "[NULL]", and the text came back as NULL — with or without compact.
