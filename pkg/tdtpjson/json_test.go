@@ -91,7 +91,7 @@ func TestWrite_KeyOrder(t *testing.T) {
 
 func TestWrite_NullAndSpecials(t *testing.T) {
 	pkt := testPacket(t, [][]string{
-		{"2", "[NULL]", "NaN", "0"},
+		{"2", "\x00", "NaN", "0"},
 	})
 	var b bytes.Buffer
 	if _, err := Write(context.Background(), &b, pkt, nil, false); err != nil {
@@ -100,13 +100,37 @@ func TestWrite_NullAndSpecials(t *testing.T) {
 	objs := decodeObjects(t, b.String())
 	o := objs[0]
 	if o["name"] != nil {
-		t.Errorf("name [NULL] should be null, got %v", o["name"])
+		t.Errorf("SQL NULL should be null, got %v", o["name"])
 	}
 	if o["balance"] != nil {
 		t.Errorf("balance NaN should be null, got %v", o["balance"])
 	}
 	if o["active"] != false {
 		t.Errorf("active = %v, want false", o["active"])
+	}
+}
+
+// Legacy producers wrote the marker without declaring it. Reading such a
+// packet must keep the legacy interpretation; raw source text is different.
+func TestWrite_LegacyUndeclaredNullMarker(t *testing.T) {
+	p := packet.NewDataPacket(packet.TypeReference, "t")
+	p.Schema = packet.Schema{Fields: []packet.Field{{Name: "note", Type: "TEXT"}}}
+	p.Header.RecordsInPart = 1
+	p.SetRows([][]string{{"[NULL]"}})
+	x, err := packet.NewGenerator().ToXML(p, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := packet.NewParser().ParseBytes(x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	if _, err := WritePacket(context.Background(), &b, back, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(b.String()); got != `[{"note":null}]` {
+		t.Fatalf("legacy NULL changed: %s", got)
 	}
 }
 

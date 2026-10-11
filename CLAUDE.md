@@ -721,14 +721,23 @@ an escape for `""` to the format: every existing reader decodes it as a gap.
 The failure is silent — the `--integrity` hash covers the compact rows, so it
 matches.
 
+Generated parts share `Schema.Fields`: `ApplyCompactReport` copies that slice
+before changing a name or fixed flag, and clears an existing flag when a field
+has empty values. Keep this isolation on the parallel file/S3 path. The shared
+`compactWarnings` state is protected by a mutex; transformation runs outside
+that lock. `TestParallelCompact_MultipartRoundTrip` and
+`TestCompactWarnings_Concurrent` cover both paths and run under `-race` in CI.
+
 **The NULL marker is per field.** A column holding both NULL and the text
 `[NULL]` gets `[NULL1]` (`pickNullMarker`). Readers compare against
 `packet.NullMarkerOf(field)`, never `SpecNullMarker` — the TDTQL filter's
 `is_null` included (`nullRule` in `filter.go`), where comparing against `""`
-returned exactly the opposite rows. `DetectAndApply` moves
-the marker only when the column has a real NULL (the `\x00` sentinel): rows
-re-generated from a parsed packet carry `[NULL]` as the marker itself, and
-moving it there would turn their NULLs into text.
+returned exactly the opposite rows. Raw text containing `[NULL]` needs a
+collision-free declaration even if the column has no real NULL: otherwise
+the legacy fallback reads the literal text as NULL. `DetectAndApply` preserves
+already declared markers and other special values during regeneration; rows
+from parsed packets may carry the marker itself rather than the `\x00`
+sentinel. Legacy undeclared markers are still read as NULL.
 
 `TestCompactRoundTrip_EmptyAndNullLiterals` (`pkg/cli/commands`) runs both
 through real export and import, with zstd, `--integrity` and the tail row.

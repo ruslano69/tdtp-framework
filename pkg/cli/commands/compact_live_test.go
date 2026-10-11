@@ -40,6 +40,9 @@ func TestCompactRoundTrip_LiveEngines(t *testing.T) {
 	if dsn := os.Getenv("TDTP_ORACLE21_DSN"); dsn != "" {
 		engines["oracle"] = adapters.Config{Type: "oracle", DSN: dsn}
 	}
+	if dsn := os.Getenv("TDTP_ORACLE18_DSN"); dsn != "" {
+		engines["oracle18"] = adapters.Config{Type: "oracle", DSN: dsn}
+	}
 	const null = "\x00" // the adapters' NULL sentinel, as a DB read yields it
 	schema := packet.Schema{Fields: []packet.Field{
 		{Name: "id", Type: "INTEGER", Key: true},
@@ -56,6 +59,12 @@ func TestCompactRoundTrip_LiveEngines(t *testing.T) {
 		{"7", null, "Kazan", "Petr", "[NULL]"},
 		{"8", "[NULL]", "Kazan", "Rita", "e"},
 		{"9", "IT", "", "Sergey", "f"},
+	}
+	// Unlike dept/note, this column has marker-like text and no SQL NULL.
+	// It must be protected before the first import, not only on re-export.
+	schema.Fields = append(schema.Fields, packet.Field{Name: "literal", Type: "TEXT"})
+	for i := range rows {
+		rows[i] = append(rows[i], []string{"[NULL]", "[NULL1]", "[NULL2]", ""}[i%4])
 	}
 
 	for name, cfg := range engines {
@@ -106,7 +115,7 @@ func TestCompactRoundTrip_LiveEngines(t *testing.T) {
 			for _, r := range rows {
 				for c := 1; c < len(r); c++ {
 					var w any = r[c]
-					if r[c] == null || (name == "oracle" && r[c] == "") {
+					if r[c] == null || (cfg.Type == "oracle" && r[c] == "") {
 						w = nil
 					}
 					if g := want[r[0]][c]; !reflect.DeepEqual(g, w) {

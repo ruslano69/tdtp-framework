@@ -83,15 +83,12 @@ type ProcessorManager interface {
 type compactProc struct {
 	fixedNames []string
 	writeTail  bool
-	warned     map[string]bool // one warning per field, not per part
+	warnings   compactWarnings // one warning per field, not per part
 }
 
 func (p *compactProc) Name() string { return "compact" }
 func (p *compactProc) ProcessPacket(_ context.Context, pkt *packet.DataPacket) error {
-	if p.warned == nil {
-		p.warned = map[string]bool{}
-	}
-	return applyCompactToPacket(pkt, p.fixedNames, p.writeTail, p.warned)
+	return applyCompactToPacket(pkt, p.fixedNames, p.writeTail, &p.warnings)
 }
 
 // compressProc адаптирует compressPacketData в PacketProcessor.

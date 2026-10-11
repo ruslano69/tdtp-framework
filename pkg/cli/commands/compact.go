@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/tdtql"
@@ -92,7 +93,7 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	}
 	fmt.Printf("  Fixed fields: %s\n", strings.Join(fixedNames, ", "))
 
-	if err := applyCompactToPacket(pkt, fixedNames, opts.Tail, map[string]bool{}); err != nil {
+	if err := applyCompactToPacket(pkt, fixedNames, opts.Tail, &compactWarnings{}); err != nil {
 		return fmt.Errorf("failed to apply compact format: %w", err)
 	}
 	if opts.Tail {
@@ -119,20 +120,34 @@ func ConvertToCompact(opts ConvertCompactOptions) error {
 	return nil
 }
 
-// applyCompactToPacket delegates to packet.ApplyCompactReport and says which
-// requested fields stayed ordinary because they hold empty strings — an empty
-// fixed position means "same as above", so compacting them would rewrite ""
-// into the previous group's value. warned keeps it to one line per field.
-func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string, tail bool, warned map[string]bool) error {
+// compactWarnings keeps warnings to one line per field across export workers.
+type compactWarnings struct {
+	mu     sync.Mutex
+	warned map[string]bool
+}
+
+// applyCompactToPacket transforms this part and reports fields excluded from
+// fixed encoding because they hold real empty strings.
+func applyCompactToPacket(pkt *packet.DataPacket, fixedFieldNames []string, tail bool, warnings *compactWarnings) error {
 	dropped, err := packet.ApplyCompactReport(pkt, fixedFieldNames, tail)
 	if err != nil {
 		return err
 	}
+	if len(dropped) == 0 {
+		return nil
+	}
+	// Only warning deduplication is serialised; packet transformation above
+	// remains independent across workers. First use is safe too.
+	warnings.mu.Lock()
+	defer warnings.mu.Unlock()
+	if warnings.warned == nil {
+		warnings.warned = make(map[string]bool)
+	}
 	for _, name := range dropped {
-		if warned[name] {
+		if warnings.warned[name] {
 			continue
 		}
-		warned[name] = true
+		warnings.warned[name] = true
 		fmt.Fprintf(os.Stderr, "⚠ compact: %s is not fixed — it holds empty strings, which compact cannot tell from \"same as above\"\n", name)
 	}
 	return nil

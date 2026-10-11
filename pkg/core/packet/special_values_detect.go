@@ -105,11 +105,12 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 
 	// Phase 1: detect which specials appear in each column.
 	type detected struct {
-		hasNull   bool
-		hasNaN    bool
-		hasInf    bool
-		hasNegInf bool
-		hasNoDate bool
+		hasNull     bool
+		hasNaN      bool
+		hasInf      bool
+		hasNegInf   bool
+		hasNoDate   bool
+		literalNull bool // undeclared [NULL] is text from a raw source
 		// markerLike — значения колонки, которые сами выглядят как маркер
 		// NULL ("[NULL]", "[NULL1]"…). Почти всегда nil.
 		markerLike map[string]bool
@@ -152,11 +153,19 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 			}
 		}
 	}
+	for i := range det {
+		f := sch.Fields[i]
+		declared := f.SpecialValues != nil && f.SpecialValues.Null != nil && f.SpecialValues.Null.Marker != ""
+		switch strings.ToUpper(f.Type) {
+		case "TEXT", "VARCHAR", "CHAR", "STRING":
+			det[i].literalNull = !declared && det[i].markerLike[SpecNullMarker]
+		}
+	}
 
 	// Check if anything was detected at all (fast path: nothing to do).
 	anyDetected := false
 	for _, d := range det {
-		if d.hasNull || d.hasNaN || d.hasInf || d.hasNegInf || d.hasNoDate {
+		if d.hasNull || d.literalNull || d.hasNaN || d.hasInf || d.hasNegInf || d.hasNoDate {
 			anyDetected = true
 			break
 		}
@@ -170,18 +179,20 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 	copy(updatedFields, sch.Fields)
 	nullMarkers := make([]string, cols)
 	for i, d := range det {
-		// No NULL, no declaration — even if the column holds the text
-		// "[NULL]". Rows re-generated from a parsed packet (merge, to-tdtp)
-		// arrive here carrying "[NULL]" as the marker, not the sentinel, and
-		// their schema already declares it; moving the marker would turn those
-		// NULLs into text.
-		if !d.hasNull && !d.hasNaN && !d.hasInf && !d.hasNegInf && !d.hasNoDate {
+		if !d.hasNull && !d.literalNull && !d.hasNaN && !d.hasInf && !d.hasNegInf && !d.hasNoDate {
 			continue
 		}
 		sv := &SpecialValues{}
-		if d.hasNull {
-			nullMarkers[i] = pickNullMarker(d.markerLike)
-			sv.Null = &MarkerValue{Marker: nullMarkers[i]}
+		if sch.Fields[i].SpecialValues != nil {
+			*sv = *sch.Fields[i].SpecialValues
+		}
+		if d.hasNull || d.literalNull {
+			// A declared marker already carries NULLs in parsed packets. Keep
+			// it and the other declarations when new raw values are added.
+			if sv.Null == nil || sv.Null.Marker == "" {
+				sv.Null = &MarkerValue{Marker: pickNullMarker(d.markerLike)}
+			}
+			nullMarkers[i] = sv.Null.Marker
 		}
 		if d.hasNaN {
 			sv.NaN = &MarkerValue{Marker: SpecNaNMarker}
@@ -197,7 +208,8 @@ func DetectAndApply(rows [][]string, sch Schema) ([][]string, Schema) {
 		}
 		updatedFields[i].SpecialValues = sv
 	}
-	updatedSchema := Schema{Fields: updatedFields}
+	updatedSchema := sch
+	updatedSchema.Fields = updatedFields
 
 	// Phase 3: re-encode rows using canonical markers.
 	updatedRows := make([][]string, len(rows))
