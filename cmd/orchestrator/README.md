@@ -348,13 +348,28 @@ cannot send events anywhere.
 ```yaml
 sinks:
   - name: ops-log
-    type: log                  # only "log" for now
+    type: log                  # or: webhook
     types: [job.started, job.finished]
     scenarios: ["sync-*"]      # path.Match globs; empty = all
     statuses: [failed]         # job.finished only; empty = all
     include_params: false      # params leave the orchestrator only if asked
     max_attempts: 10           # empty = 10
+
+  - name: crm
+    type: webhook
+    url: https://crm.example.com/hooks/tdtp
+    secret: env:CRM_HOOK_SECRET   # read at startup; a literal secret is refused
+    types: [job.finished]
 ```
+
+A webhook receiver checks `X-TDTP-Signature` against
+`HMAC-SHA256(secret, X-TDTP-Timestamp + "." + body)` and rejects a stale
+timestamp; `X-TDTP-Event-ID` is the key to dedupe on. Redirects are not
+followed. Plain http is accepted only for localhost, with
+`allow_insecure_http: true`, for development.
+
+Admins inspect and repair delivery with `GET /events/sinks`,
+`GET /events/outbox?status=dead`, and `POST /events/outbox/{id}/retry`.
 
 Unknown keys are an error: a misspelled `scenarios:` would otherwise be read
 as "all scenarios".

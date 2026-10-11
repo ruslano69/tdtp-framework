@@ -1,7 +1,8 @@
 # Proposal: orchestrator inventory and outbound events
 
-**Status: DRAFT.** Part 3, step 1 (outbox, dispatcher, `log` sink) is
-implemented on `feat/orchestrator-inventory-events`; the rest is not. Target: 2.0. Covers two items from the
+**Status: DRAFT.** Part 3, steps 1 and 2 (outbox, dispatcher, `log` and webhook
+sinks, admin routes, metrics) are implemented on `feat/orchestrator-inventory-events`.
+The RabbitMQ sink and Part 1 are not. Target: 2.0. Covers two items from the
 "Behind the freeze" list in `TODO_NEXT.md`: pre-run inventory of scenario
 targets (item 1) and outbound job events (item 3). Nothing here changes how a
 scenario runs; both features only observe the orchestrator's state.
@@ -449,6 +450,12 @@ Rough sizes, for planning only:
    `events_test.go`. Fault checks: making the finish non-atomic, or dropping
    the per-job ordering, each fails a test.*
 2. **Webhook sink, admin routes, metrics.** About 2 days.
+   *Implemented: `events_webhook.go`, `events_routes.go`, metrics in
+   `metrics.go`. Deviations from the text above: a literal `secret` is refused
+   rather than warned about; a 3xx reply is a permanent refusal (`http_3xx`),
+   not a redirect to follow; transport errors have the URL removed from their
+   text, since the URL can carry a token. Checked end to end against a Python
+   receiver that verifies the HMAC and answers 503 once.*
 3. **RabbitMQ publisher confirms** (shared `pkg/brokers`), then the RabbitMQ
    sink with live CI. About 2–3 days.
 4. **Inventory: derivation and probes, `--inventory-once`.** About 2–3 days.

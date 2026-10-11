@@ -8,6 +8,8 @@ package main
 // after "…05.12Z" as text, which is the wrong way round.
 
 import (
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -138,4 +140,152 @@ func (d *OrchestratorDB) PruneSentOutbox(before time.Time) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// outboxStatusCounts counts the rows that need attention: pending and dead.
+// The status filter lets the index answer without reading delivered rows.
+func (d *OrchestratorDB) outboxStatusCounts() (map[string]int, error) {
+	rows, err := d.db.Query(`
+		SELECT status, COUNT(*) FROM outbox
+		 WHERE status IN ('pending', 'dead')
+		 GROUP BY status`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	counts := map[string]int{}
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, err
+		}
+		counts[status] = n
+	}
+	return counts, rows.Err()
+}
+
+// outboxSinkTotals is one sink's row counts, for the admin view.
+type outboxSinkTotals struct {
+	Pending    int
+	Sent       int
+	Dead       int
+	LastSentAt *string
+}
+
+// outboxTotalsBySink counts every row per sink and status. It reads delivered
+// rows as well, so it is for on-demand requests, not for the dispatcher loop.
+func (d *OrchestratorDB) outboxTotalsBySink() (map[string]*outboxSinkTotals, error) {
+	rows, err := d.db.Query(`
+		SELECT sink, status, COUNT(*), MAX(sent_at)
+		  FROM outbox
+		 GROUP BY sink, status`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]*outboxSinkTotals{}
+	for rows.Next() {
+		var sink, status string
+		var n int
+		var lastSent *string
+		if err := rows.Scan(&sink, &status, &n, &lastSent); err != nil {
+			return nil, err
+		}
+		t := out[sink]
+		if t == nil {
+			t = &outboxSinkTotals{}
+			out[sink] = t
+		}
+		switch status {
+		case "pending":
+			t.Pending = n
+		case "sent":
+			t.Sent = n
+			t.LastSentAt = lastSent
+		case "dead":
+			t.Dead = n
+		}
+	}
+	return out, rows.Err()
+}
+
+// outboxView is one row as an operator sees it. The payload is left out: it
+// is the event as a receiver got it, and it is not needed to find a problem.
+type outboxView struct {
+	ID            string  `json:"id"`
+	JobID         string  `json:"job_id"`
+	Scenario      string  `json:"scenario"`
+	Sink          string  `json:"sink"`
+	Type          string  `json:"type"`
+	Status        string  `json:"status"`
+	Attempts      int     `json:"attempts"`
+	LastError     *string `json:"last_error"`
+	CreatedAt     string  `json:"created_at"`
+	NextAttemptAt string  `json:"next_attempt_at"`
+	SentAt        *string `json:"sent_at"`
+}
+
+// listOutbox returns the newest rows first, optionally narrowed to one status
+// and/or one sink. Callers validate status and limit.
+func (d *OrchestratorDB) listOutbox(status, sink string, limit int) ([]outboxView, error) {
+	q := `
+		SELECT o.id, o.job_id, COALESCE(j.scenario, ''), o.sink, o.type, o.status,
+		       o.attempts, o.last_error, o.created_at, o.next_attempt_at, o.sent_at
+		  FROM outbox o
+		  LEFT JOIN jobs j ON j.id = o.job_id
+		 WHERE 1=1`
+	var args []any
+	if status != "" {
+		q += ` AND o.status = ?`
+		args = append(args, status)
+	}
+	if sink != "" {
+		q += ` AND o.sink = ?`
+		args = append(args, sink)
+	}
+	q += ` ORDER BY o.rowid DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []outboxView{}
+	for rows.Next() {
+		var v outboxView
+		if err := rows.Scan(&v.ID, &v.JobID, &v.Scenario, &v.Sink, &v.Type, &v.Status,
+			&v.Attempts, &v.LastError, &v.CreatedAt, &v.NextAttemptAt, &v.SentAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// requeueDead moves a dead row back to pending with a fresh attempt budget.
+// It reports whether the row exists and whether this call moved it: a row
+// that is pending or sent exists, but is not requeued.
+func (d *OrchestratorDB) requeueDead(id string, now time.Time) (exists, requeued bool, err error) {
+	res, err := d.db.Exec(`
+		UPDATE outbox SET status='pending', attempts=0, next_attempt_at=?, last_error=NULL
+		 WHERE id=? AND status='dead'`, outboxTS(now), id)
+	if err != nil {
+		return false, false, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return false, false, err
+	} else if n == 1 {
+		return true, true, nil
+	}
+	var status string
+	err = d.db.QueryRow(`SELECT status FROM outbox WHERE id=?`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return true, false, nil
 }

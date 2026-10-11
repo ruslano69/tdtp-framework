@@ -217,6 +217,7 @@ func main() {
 		authMiddleware: authMiddleware,
 		subscriber:     subscriber,
 		mercuryURL:     *mercuryURL,
+		eventSinks:     eventSinks,
 	})
 
 	log.Info().Str("addr", *addr).Bool("auth", !*noAuth).Msg("orchestrator started")

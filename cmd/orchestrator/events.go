@@ -48,12 +48,13 @@ const (
 	outboxTick         = time.Second
 	outboxRetention    = 7 * 24 * time.Hour
 	outboxPruneEvery   = time.Hour
+	outboxGaugeEvery   = 15 * time.Second
 )
 
 var (
 	knownEventTypes = []string{EventJobStarted, EventJobFinished}
 	knownJobStatus  = []string{string(JobDone), string(JobFailed), string(JobCancelled)}
-	knownSinkTypes  = []string{"log"}
+	knownSinkTypes  = []string{"log", "webhook"}
 )
 
 // EventSinkDef is one entry of the events file.
@@ -65,6 +66,11 @@ type EventSinkDef struct {
 	Statuses      []string `yaml:"statuses"`       // job.finished only; empty = all
 	IncludeParams bool     `yaml:"include_params"` // off: params stay inside the orchestrator
 	MaxAttempts   int      `yaml:"max_attempts"`   // empty = 10
+
+	// webhook only
+	URL               string `yaml:"url"`
+	Secret            string `yaml:"secret"`              // env:VARIABLE — never a literal
+	AllowInsecureHTTP bool   `yaml:"allow_insecure_http"` // plain http, localhost only
 }
 
 type eventsFile struct {
@@ -102,6 +108,14 @@ func LoadEvents(filePath string) ([]EventSinkDef, error) {
 	if err := prepareSinks(ef.Sinks); err != nil {
 		return nil, fmt.Errorf("events: %s: %w", filePath, err)
 	}
+	// A missing secret is found now, at startup, not on the first event.
+	for _, s := range ef.Sinks {
+		if s.Type == "webhook" {
+			if _, err := sinkSecret(s); err != nil {
+				return nil, fmt.Errorf("events: %s: %w", filePath, err)
+			}
+		}
+	}
 	return ef.Sinks, nil
 }
 
@@ -121,7 +135,17 @@ func prepareSinks(sinks []EventSinkDef) error {
 		seen[s.Name] = true
 
 		if !slices.Contains(knownSinkTypes, s.Type) {
-			return fmt.Errorf("sink %q: type %q is not supported yet (supported: %v)", s.Name, s.Type, knownSinkTypes)
+			return fmt.Errorf("sink %q: type %q is not supported (supported: %v)", s.Name, s.Type, knownSinkTypes)
+		}
+		switch s.Type {
+		case "log":
+			if s.URL != "" || s.Secret != "" || s.AllowInsecureHTTP {
+				return fmt.Errorf("sink %q: url, secret and allow_insecure_http apply to webhook sinks only", s.Name)
+			}
+		case "webhook":
+			if err := validateWebhookDef(*s); err != nil {
+				return fmt.Errorf("sink %q: %w", s.Name, err)
+			}
 		}
 		if len(s.Types) == 0 {
 			s.Types = []string{EventJobFinished}
@@ -341,6 +365,12 @@ func buildSink(def EventSinkDef) (EventSink, error) {
 	switch def.Type {
 	case "log":
 		return logSink{name: def.Name}, nil
+	case "webhook":
+		sink, err := newWebhookSink(def)
+		if err != nil {
+			return nil, err
+		}
+		return sink, nil
 	default:
 		return nil, fmt.Errorf("sink %q: unsupported type %q", def.Name, def.Type)
 	}
@@ -421,6 +451,7 @@ func (d *EventDispatcher) RunOnce(ctx context.Context) (int, error) {
 				log.Error().Err(err).Str("event_id", r.ID).Msg("job event sent but not marked")
 				continue
 			}
+			eventsSentTotal.WithLabelValues(r.Sink, r.Type).Inc()
 			delivered++
 			continue
 		}
@@ -429,6 +460,7 @@ func (d *EventDispatcher) RunOnce(ctx context.Context) (int, error) {
 		}
 
 		class, permanent := classifySinkErr(sendErr)
+		eventsFailedTotal.WithLabelValues(r.Sink, class).Inc()
 		attempts := r.Attempts + 1
 		if permanent || attempts >= d.maxAttempts[r.Sink] {
 			_ = d.db.markOutboxDead(r.ID, attempts, class)
@@ -445,13 +477,17 @@ func (d *EventDispatcher) RunOnce(ctx context.Context) (int, error) {
 }
 
 // Run delivers until ctx is cancelled. It also prunes delivered rows past
-// their retention, once at start and then hourly.
+// their retention, once at start and then hourly, and refreshes the queue
+// gauges every few seconds.
 func (d *EventDispatcher) Run(ctx context.Context) {
 	d.prune()
+	d.refreshGauges()
 	tick := time.NewTicker(outboxTick)
 	defer tick.Stop()
 	pruneTick := time.NewTicker(outboxPruneEvery)
 	defer pruneTick.Stop()
+	gaugeTick := time.NewTicker(outboxGaugeEvery)
+	defer gaugeTick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -462,8 +498,22 @@ func (d *EventDispatcher) Run(ctx context.Context) {
 			}
 		case <-pruneTick.C:
 			d.prune()
+		case <-gaugeTick.C:
+			d.refreshGauges()
 		}
 	}
+}
+
+// refreshGauges publishes how many rows are waiting and how many have given
+// up. Counted from the index, so it stays cheap while delivered rows age out.
+func (d *EventDispatcher) refreshGauges() {
+	counts, err := d.db.outboxStatusCounts()
+	if err != nil {
+		log.Error().Err(err).Msg("job events: gauge refresh failed")
+		return
+	}
+	outboxPending.Set(float64(counts["pending"]))
+	outboxDead.Set(float64(counts["dead"]))
 }
 
 func (d *EventDispatcher) prune() {

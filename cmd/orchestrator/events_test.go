@@ -450,7 +450,7 @@ func TestPrepareSinks_Validation(t *testing.T) {
 	}{
 		{"valid defaults", EventSinkDef{Name: "a", Type: "log"}, ""},
 		{"no name", EventSinkDef{Type: "log"}, "name is required"},
-		{"webhook not yet", EventSinkDef{Name: "a", Type: "webhook"}, "not supported yet"},
+		{"unknown sink type", EventSinkDef{Name: "a", Type: "kafka"}, "not supported"},
 		{"unknown event type", EventSinkDef{Name: "a", Type: "log", Types: []string{"job.exploded"}}, "unknown event type"},
 		{"unknown status", EventSinkDef{Name: "a", Type: "log", Statuses: []string{"ok"}}, "unknown status"},
 		{"bad glob", EventSinkDef{Name: "a", Type: "log", Scenarios: []string{"sync-["}}, "scenario pattern"},
