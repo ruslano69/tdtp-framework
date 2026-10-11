@@ -339,6 +339,32 @@ show what really ran them, not what the scenario currently says. A scenario
 naming an unregistered runner fails the orchestrator's startup with a clear
 error, and `Submit()` refuses it at request time too, before touching the DB.
 
+## Job events
+
+`--events events.yaml` names the sinks that receive `job.started` and
+`job.finished`. The file is the administrator's, not a scenario's: a scenario
+cannot send events anywhere.
+
+```yaml
+sinks:
+  - name: ops-log
+    type: log                  # only "log" for now
+    types: [job.started, job.finished]
+    scenarios: ["sync-*"]      # path.Match globs; empty = all
+    statuses: [failed]         # job.finished only; empty = all
+    include_params: false      # params leave the orchestrator only if asked
+    max_attempts: 10           # empty = 10
+```
+
+Unknown keys are an error: a misspelled `scenarios:` would otherwise be read
+as "all scenarios".
+
+Each event is written in the same transaction as the job state it reports, so
+a finished job always has its event. A failed delivery is retried with backoff
+and then marked `dead` — kept in the `outbox` table, never dropped. Delivery is
+at-least-once: a receiver dedupes on `event_id`. Events never contain the job
+log.
+
 ## Pub/sub triggers
 
 `pkg/resultlog` already publishes after every `tdtpcli --pipeline` run

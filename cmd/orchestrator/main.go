@@ -70,6 +70,7 @@ func main() {
 	redisPassword := flag.String("redis-password", "", "Redis password (pubsub trigger only)")
 	redisDB := flag.Int("redis-db", 0, "Redis DB number (pubsub trigger only)")
 	pubsubPath := flag.String("pubsub", "", "path to pubsub.yaml mapping pipeline result_name -> scenario (requires --redis-addr)")
+	eventsPath := flag.String("events", "", "path to events.yaml: sinks that receive job.started / job.finished (empty = no events)")
 	logRetentionWeeks := flag.Int("log-retention-weeks", 4,
 		fmt.Sprintf("clear job log text older than this many weeks (%d-%d, 0 = keep forever)",
 			MinRetentionWeeks, MaxRetentionWeeks))
@@ -85,6 +86,13 @@ func main() {
 	retention := RetentionPolicy{Weeks: *logRetentionWeeks, VacuumMB: *vacuumThresholdMB}
 	if err := retention.Validate(); err != nil {
 		log.Fatal().Err(err).Msg("invalid retention policy")
+	}
+
+	// Same reasoning as retention: a bad events file is found before the
+	// licence check and the database, not after.
+	eventSinks, err := LoadEvents(*eventsPath)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid events file")
 	}
 
 	// Trust gate: verify own license (offline) and preflight Mercury (online).
@@ -150,6 +158,7 @@ func main() {
 
 	// Wire executor and scheduler.
 	executor := NewExecutor(runners, defaultRunnerName, filepath.Join(*tmpDir, "orch-pipelines"), db)
+	executor.events = newEventRouter(eventSinks)
 	scheduler := NewScheduler(executor, scenes, db, gate)
 
 	// Seed schedules from YAML → DB (idempotent: ON CONFLICT DO UPDATE).
@@ -183,6 +192,14 @@ func main() {
 	// first schedule could fire would stall that job behind the copy.
 	stopRetention := StartRetention(db, retention)
 	defer stopRetention()
+
+	// Started before the scheduler for the same reason: the outbox left by a
+	// crash is delivered from the first tick, not after the first job.
+	stopEvents, err := StartEventDispatcher(db, eventSinks)
+	if err != nil {
+		fatal(err, "events setup failed")
+	}
+	defer stopEvents()
 
 	scheduler.Start()
 	defer scheduler.Stop()

@@ -84,6 +84,26 @@ CREATE TABLE IF NOT EXISTS scenarios (
 	approved_at  DATETIME NOT NULL,
 	enabled      INTEGER NOT NULL DEFAULT 1
 );
+
+-- Outbox: job events waiting for delivery to a sink (see events.go). A row is
+-- written in the same transaction as the job state it describes, so a crash
+-- cannot leave a finished job without its event. id is the event_id a
+-- receiver deduplicates on.
+CREATE TABLE IF NOT EXISTS outbox (
+	id              TEXT PRIMARY KEY,
+	job_id          TEXT NOT NULL,
+	sink            TEXT NOT NULL,
+	type            TEXT NOT NULL,
+	payload         TEXT NOT NULL,            -- JSON, built once per row
+	status          TEXT NOT NULL,            -- pending | sent | dead
+	attempts        INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL,            -- fixed-width UTC, compared as text
+	last_error      TEXT,                     -- error class, never raw driver text
+	created_at      TEXT NOT NULL,
+	sent_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_outbox_job ON outbox(job_id, sink);
 `
 
 // OrchestratorDB wraps the orchestrator SQLite database.
@@ -334,15 +354,65 @@ func (d *OrchestratorDB) MarkCancelRequested(id, requestedBy string) error {
 	return err
 }
 
-// UpdateJobDone updates status, finished_at, log, error when a job completes,
-// and carries the outcome back to the schedule that started it.
+// UpdateJobDone records a job's outcome with no events to deliver. Callers
+// that have sinks configured use FinishJob, which also writes the events.
 func (d *OrchestratorDB) UpdateJobDone(id string, status JobStatus, log, errMsg string) error {
-	if _, err := d.db.Exec(`
+	return d.FinishJob(id, status, log, errMsg, nil, nil)
+}
+
+// ArtifactMeta describes a finished job's output file.
+type ArtifactMeta struct {
+	Path   string
+	SHA256 string
+	Size   int64
+}
+
+// execer is what *sql.DB and *sql.Tx have in common, so the statements that
+// belong to a finish can run either alone or inside FinishJob's transaction.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// FinishJob writes a job's terminal state — status, finished_at, log, error,
+// the artifact if there is one, the schedule's last_status and the outbox rows
+// for its events — in ONE transaction. Either all of it is visible or none of
+// it is: a job never shows as done without the event announcing it, and an
+// event never announces a status that did not commit.
+//
+// The schedule update and the outbox insert are inside the transaction, so
+// they cannot run through d.db: the connection pool is a single connection
+// (SetMaxOpenConns(1)), and a second statement on it would wait forever.
+func (d *OrchestratorDB) FinishJob(id string, status JobStatus, log, errMsg string, art *ArtifactMeta, events []OutboxEvent) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("finish job %s: begin: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op once committed
+
+	if _, err := tx.Exec(`
 		UPDATE jobs SET status=?, finished_at=?, log=?, error=? WHERE id=?`,
 		string(status), time.Now().UTC().Format(time.RFC3339), log, errMsg, id); err != nil {
-		return err
+		return fmt.Errorf("finish job %s: status: %w", id, err)
 	}
-	return d.syncScheduleStatus(id, status)
+	if art != nil {
+		if _, err := tx.Exec(
+			`UPDATE jobs SET artifact_path=?, artifact_sha256=?, artifact_size=? WHERE id=?`,
+			art.Path, art.SHA256, art.Size, id); err != nil {
+			return fmt.Errorf("finish job %s: artifact: %w", id, err)
+		}
+	}
+	res, err := syncScheduleStatus(tx, id, status)
+	if err != nil {
+		return fmt.Errorf("finish job %s: schedule: %w", id, err)
+	}
+	if err := insertOutboxTx(tx, events); err != nil {
+		return fmt.Errorf("finish job %s: outbox: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("finish job %s: commit: %w", id, err)
+	}
+	d.recordScheduleGauge(res, id, status)
+	return nil
 }
 
 // syncScheduleStatus writes a finished job's outcome onto its schedule.
@@ -366,8 +436,8 @@ func (d *OrchestratorDB) UpdateJobDone(id string, status JobStatus, log, errMsg 
 // tick because the previous one is still going, so a slow job finishing after
 // the next one started would otherwise overwrite a fresh "running" with a
 // stale outcome. Only the newest job of a schedule may set its status.
-func (d *OrchestratorDB) syncScheduleStatus(jobID string, status JobStatus) error {
-	res, err := d.db.Exec(`
+func syncScheduleStatus(ex execer, jobID string, status JobStatus) (sql.Result, error) {
+	return ex.Exec(`
 		UPDATE schedules
 		   SET last_status = ?
 		 WHERE id = (SELECT schedule_id FROM jobs WHERE id = ?)
@@ -377,11 +447,6 @@ func (d *OrchestratorDB) syncScheduleStatus(jobID string, status JobStatus) erro
 		            AND newer.started_at > (SELECT started_at FROM jobs WHERE id = ?)
 		       )`,
 		string(status), jobID, jobID)
-	if err != nil {
-		return err
-	}
-	d.recordScheduleGauge(res, jobID, status)
-	return nil
 }
 
 // recordScheduleGauge mirrors a schedule's new status onto the Prometheus
@@ -412,14 +477,6 @@ func (d *OrchestratorDB) recordScheduleGauge(res sql.Result, jobID string, statu
 // UpdateJobStatus updates just the status field (e.g. pending→running).
 func (d *OrchestratorDB) UpdateJobStatus(id string, status JobStatus) error {
 	_, err := d.db.Exec(`UPDATE jobs SET status=? WHERE id=?`, string(status), id)
-	return err
-}
-
-// UpdateJobArtifact records the output file path, SHA-256, and size for a completed job.
-func (d *OrchestratorDB) UpdateJobArtifact(id, path, sha256 string, size int64) error {
-	_, err := d.db.Exec(
-		`UPDATE jobs SET artifact_path=?, artifact_sha256=?, artifact_size=? WHERE id=?`,
-		path, sha256, size, id)
 	return err
 }
 

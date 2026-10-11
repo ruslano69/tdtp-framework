@@ -4,6 +4,26 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Added — orchestrator job events (outbox, `log` sink)
+
+The orchestrator now publishes `job.started` and `job.finished` for each job,
+to the sinks named in an events file (`--events events.yaml`). Without the
+flag nothing changes: no sinks, no outbox rows.
+
+Each event is written to an `outbox` table in the same transaction as the job
+state it describes, so a finished job cannot exist without its event. A
+dispatcher delivers pending rows with backoff; after `max_attempts` a row is
+dead and kept, not dropped. Delivery is at-least-once; order is kept per job
+and sink. The job log is never part of an event.
+
+Only the `log` sink exists so far. Webhook and RabbitMQ sinks, the admin routes
+for dead events, and the inventory are the next steps (see
+`docs/proposals/orchestrator-inventory-and-events.md`).
+
+Also: a job's status, its artifact hash and its schedule's `last_status` are
+now written in one transaction. Before, a crash between the status update and
+the schedule update could leave them disagreeing.
+
 ### Fixed — multipart compact preserves empty strings and supports parallel export
 
 Compact now copies each part's field definitions before changing names or

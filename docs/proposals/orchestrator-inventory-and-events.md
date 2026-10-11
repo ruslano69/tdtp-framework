@@ -1,6 +1,7 @@
 # Proposal: orchestrator inventory and outbound events
 
-**Status: DRAFT — not implemented.** Target: 2.0. Covers two items from the
+**Status: DRAFT.** Part 3, step 1 (outbox, dispatcher, `log` sink) is
+implemented on `feat/orchestrator-inventory-events`; the rest is not. Target: 2.0. Covers two items from the
 "Behind the freeze" list in `TODO_NEXT.md`: pre-run inventory of scenario
 targets (item 1) and outbound job events (item 3). Nothing here changes how a
 scenario runs; both features only observe the orchestrator's state.
@@ -277,19 +278,30 @@ transaction as the status update.
 
 ```sql
 CREATE TABLE IF NOT EXISTS outbox (
-  id              TEXT PRIMARY KEY,       -- = event_id
+  id              TEXT PRIMARY KEY,       -- = event_id, one per row
+  job_id          TEXT NOT NULL,          -- ordering key with sink (added in implementation)
   sink            TEXT NOT NULL,
   type            TEXT NOT NULL,
-  payload         TEXT NOT NULL,          -- JSON, built once, sent byte-for-byte
+  payload         TEXT NOT NULL,          -- JSON, built once per row
   status          TEXT NOT NULL,          -- pending | sent | dead
   attempts        INTEGER NOT NULL DEFAULT 0,
-  next_attempt_at DATETIME NOT NULL,
+  next_attempt_at TEXT NOT NULL,          -- fixed-width UTC, compared as text
   last_error      TEXT,                   -- error class, not raw text (see 1.4)
-  created_at      DATETIME NOT NULL,
-  sent_at         DATETIME
+  created_at      TEXT NOT NULL,
+  sent_at         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_outbox_job ON outbox(job_id, sink);
 ```
+
+Two rules the implementation adds to the list above:
+
+- **`event_id` is per row, not per job.** A job that notifies two sinks
+  produces two rows with two ids. A receiver dedupes within its own sink, which
+  is all it can see anyway.
+- **A row waits for an earlier pending row of the same job and sink.** This is
+  what makes "`job.started` before `job.finished`" true when the first attempt
+  of `job.started` fails. A dead row does not hold anything back.
 
 **Delivery guarantee: at-least-once.** A receiver deduplicates on `event_id`.
 Ordering is guaranteed only within one job (`job.started` before
@@ -433,6 +445,9 @@ Rough sizes, for planning only:
 
 1. **Outbox and `job.finished` to a logging-only sink** — the riskiest part
    (transactions), no network. Recovery test first. About 2–3 days.
+   *Implemented: `events.go`, `outbox.go`, `FinishJob` in `db.go`, tests in
+   `events_test.go`. Fault checks: making the finish non-atomic, or dropping
+   the per-job ordering, each fails a test.*
 2. **Webhook sink, admin routes, metrics.** About 2 days.
 3. **RabbitMQ publisher confirms** (shared `pkg/brokers`), then the RabbitMQ
    sink with live CI. About 2–3 days.
