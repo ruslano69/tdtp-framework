@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
+
+// nonDigitRegex — компилируется один раз (раньше — на каждое значение в maskMiddle).
+var nonDigitRegex = regexp.MustCompile(`\D`)
 
 // MaskPattern определяет тип маскирования
 type MaskPattern string
@@ -49,6 +53,35 @@ func NewFieldMasker(fieldsToMask map[string]MaskPattern) *FieldMasker {
 // Name возвращает имя процессора
 func (m *FieldMasker) Name() string {
 	return m.name
+}
+
+// MaskedFieldType — тип, в который переводится замаскированная колонка.
+// Маска ("3***8", "1***0", "Ð***½") не является валидным INTEGER/DECIMAL/DATE/UUID,
+// поэтому замаскированная колонка в схеме — всегда строка без ограничений длины.
+const MaskedFieldType = "TEXT"
+
+// TransformSchema возвращает копию схемы, где замаскированные колонки переведены в TEXT:
+// тип → TEXT, Length/Precision/Scale/Timezone/Subtype сброшены (маска может быть длиннее
+// исходного VARCHAR(n) и не соответствует исходному типу). Исходная схема не меняется
+// (Fields могут делиться между частями пакета).
+func (m *FieldMasker) TransformSchema(schema packet.Schema) packet.Schema {
+	if len(m.fieldsToMask) == 0 {
+		return schema
+	}
+	fields := make([]packet.Field, len(schema.Fields))
+	copy(fields, schema.Fields)
+	for i := range fields {
+		if _, ok := m.fieldsToMask[fields[i].Name]; ok {
+			fields[i].Type = MaskedFieldType
+			fields[i].Length = 0
+			fields[i].Precision = 0
+			fields[i].Scale = 0
+			fields[i].Timezone = ""
+			fields[i].Subtype = ""
+		}
+	}
+	schema.Fields = fields
+	return schema
 }
 
 // Process реализует интерфейс PreProcessor
@@ -112,24 +145,19 @@ func (m *FieldMasker) maskPartial(value string) string {
 	if m.emailRegex.MatchString(value) {
 		matches := m.emailRegex.FindStringSubmatch(value)
 		if len(matches) == 3 {
-			localPart := matches[1]
-			domain := matches[2]
-
-			if len(localPart) <= 2 {
-				return string(localPart[0]) + "***@" + domain
-			}
-
-			// Показываем первый и последний символ локальной части
-			return string(localPart[0]) + "***@" + domain
+			// Локальная часть (regex) — только ASCII, поэтому [0] — целый символ.
+			// Показываем только первый символ локальной части.
+			return string(matches[1][0]) + "***@" + matches[2]
 		}
 	}
 
-	// Обычная строка
-	if len(value) <= 2 {
+	// Обычная строка — работаем по рунам, а не по байтам (кириллица = 2 байта на символ).
+	runes := []rune(value)
+	if len(runes) <= 2 {
 		return "***"
 	}
 
-	return string(value[0]) + "***" + string(value[len(value)-1])
+	return string(runes[0]) + "***" + string(runes[len(runes)-1])
 }
 
 // maskMiddle маскирует среднюю часть, оставляя начало и конец
@@ -138,10 +166,10 @@ func (m *FieldMasker) maskPartial(value string) string {
 //   - Card: 1234 5678 9012 3456 → 1234 **** **** 3456
 func (m *FieldMasker) maskMiddle(value string) string {
 	// Убираем все не-цифры для определения длины
-	digitsOnly := regexp.MustCompile(`\D`).ReplaceAllString(value, "")
+	digitsOnly := nonDigitRegex.ReplaceAllString(value, "")
 
 	if len(digitsOnly) <= 4 {
-		return strings.Repeat("X", len(value))
+		return strings.Repeat("X", utf8.RuneCountInString(value))
 	}
 
 	// Для телефонов и карт показываем первые 4 и последние 4 цифры
@@ -185,38 +213,39 @@ func (m *FieldMasker) maskStars(value string) string {
 //   - Passport: "1234 567890" → "12** ****90"
 //   - Account: "40817810123456789012" → "40**************12"
 func (m *FieldMasker) maskFirst2Last2(value string) string {
-	// Убираем пробелы для обработки
-	cleaned := strings.ReplaceAll(value, " ", "")
+	// Убираем пробелы для обработки; всё по рунам, а не по байтам.
+	cleaned := []rune(strings.ReplaceAll(value, " ", ""))
 
 	if len(cleaned) <= 4 {
-		return strings.Repeat("*", len(value))
+		return strings.Repeat("*", utf8.RuneCountInString(value))
 	}
 
 	// Показываем первые 2 и последние 2 символа
-	first := cleaned[:2]
-	last := cleaned[len(cleaned)-2:]
-	middle := strings.Repeat("*", len(cleaned)-4)
-
-	masked := first + middle + last
+	masked := make([]rune, len(cleaned))
+	for i := range cleaned {
+		if i < 2 || i >= len(cleaned)-2 {
+			masked[i] = cleaned[i]
+		} else {
+			masked[i] = '*'
+		}
+	}
 
 	// Восстанавливаем пробелы в оригинальных позициях
 	if strings.Contains(value, " ") {
-		result := []rune(masked)
+		result := make([]rune, 0, utf8.RuneCountInString(value))
 		maskedIdx := 0
-		newResult := make([]rune, 0, len(value))
-
 		for _, r := range value {
 			if r == ' ' {
-				newResult = append(newResult, ' ')
-			} else if maskedIdx < len(result) {
-				newResult = append(newResult, result[maskedIdx])
+				result = append(result, ' ')
+			} else if maskedIdx < len(masked) {
+				result = append(result, masked[maskedIdx])
 				maskedIdx++
 			}
 		}
-		return string(newResult)
+		return string(result)
 	}
 
-	return masked
+	return string(masked)
 }
 
 // NewFieldMaskerFromConfig создает FieldMasker из конфигурации

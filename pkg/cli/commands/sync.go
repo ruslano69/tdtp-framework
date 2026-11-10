@@ -323,8 +323,9 @@ func extractLastSyncValue(packets []*packet.DataPacket, trackingField string) (s
 		}
 
 		// Find max value in this packet
+		parser := packet.NewParser()
 		for _, row := range pkt.Data.Rows {
-			values := strings.Split(row.Value, "|")
+			values := parser.GetRowValues(row)
 			if fieldIndex < len(values) {
 				value := values[fieldIndex]
 				if maxValue == "" || trackingGreater(value, maxValue) {
