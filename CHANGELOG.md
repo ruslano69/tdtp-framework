@@ -4,6 +4,21 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — masking and TDTP row escaping
+
+- `--mask` works on runes, not bytes. Cyrillic (and any non-ASCII) values were
+  cut in the middle of a UTF-8 sequence (`Іван` → `Ð***½`); `first2_last2` and
+  `middle` also changed the length of the value. Both now keep it.
+- A masked column is retyped to `TEXT` in the packet schema (length, precision,
+  scale, timezone and subtype cleared). A mask such as `3***8` is not an
+  INTEGER, DATE or UUID, and can be longer than the original `VARCHAR(n)`.
+- `--sync` took the maximum of the tracking field with `strings.Split(row, "|")`;
+  an escaped `\|` in an earlier column shifted the index. It now uses the
+  packet parser.
+- `FromXLSX` joined cells with a bare `|`, so a cell holding `|`, `\` or a
+  line break broke the row. Rows are now escaped like every other writer
+  (`packet.JoinRowEscaped`), symmetric with `ToXLSX`.
+
 ### Added — orchestrator job events (outbox; `log`, webhook and RabbitMQ sinks)
 
 The orchestrator publishes `job.started` and `job.finished` for each job, to
