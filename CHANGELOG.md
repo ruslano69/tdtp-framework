@@ -4,6 +4,8 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+## [1.26.7] - 2026-11-10
+
 ### Fixed — masking and TDTP row escaping
 
 - `--mask` works on runes, not bytes. Cyrillic (and any non-ASCII) values were

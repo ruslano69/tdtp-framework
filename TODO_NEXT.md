@@ -28,7 +28,7 @@ after 1.26.0," not as license to keep adding capability.
 
 ---
 
-## Current state — v1.26.6 (2026-10-10)
+## Current state — v1.26.7 (2026-11-10)
 
 ### Closed sprints
 
@@ -68,6 +68,7 @@ after 1.26.0," not as license to keep adding capability.
 | v1.26.4 | Exact DECIMAL across engines, compact `""`/`[NULL]` fixes, TDTQL string literals, adapter round trips, conversion failures reported per field, `x/text` advisory |
 | v1.26.5 | Fuzzing of the read side and its seven findings (kanzi block-prefix bomb, fast parser reading `<Data>` outside the root), strict UTF-8/XML text on write and read, `--fast` NULL |
 | v1.26.6 | MySQL TEXT round trip and CHAR/VARCHAR export lengths, TDTQL `IS NULL` on packet files, live MySQL/MSSQL/Oracle tests on CI |
+| v1.26.7 | `--mask` by runes (Cyrillic), masked columns retyped to `TEXT`, `FromXLSX` and `--sync` row escaping/parsing |
 
 **The v1.5 encryption redesign is done** — shipped in v1.18.0, 2026-07-22. Its
 ~290-line design writeup lived on in this file for a month after the fact, which
