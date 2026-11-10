@@ -278,8 +278,9 @@ func FromXLSX(filePath, sheetName string) (*packet.DataPacket, error) {
 			values[col] = convertFromExcel(raw, schema.DataType(field.Type))
 		}
 
-		// Join values with pipe delimiter
-		rowStr := strings.Join(values, "|")
+		// Join values with pipe delimiter — с TDTP-экранированием (\| \\ \n),
+		// иначе ячейка с "|" или "\" ломает строку. Симметрично ToXLSX (GetRowValues).
+		rowStr := packet.JoinRowEscaped(values)
 		pkt.Data.Rows = append(pkt.Data.Rows, packet.Row{Value: rowStr})
 	}
 

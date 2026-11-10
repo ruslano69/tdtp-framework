@@ -663,7 +663,7 @@ func uploadBlobToStorage(ctx context.Context, store storage.ObjectStorage, blob 
 
 	if _, err := io.Copy(pw, bytes.NewReader(blob)); err != nil {
 		pw.CloseWithError(err)
-		<-errCh
+		<-errCh //nolint:errcheck // drain only: the write error below is the one reported
 		return fmt.Errorf("failed to write to storage pipe: %w", err)
 	}
 	_ = pw.Close()
@@ -695,7 +695,7 @@ func uploadXMLBytesToStorage(ctx context.Context, store storage.ObjectStorage, x
 
 	if _, err := io.Copy(pw, bytes.NewReader(xmlBytes)); err != nil {
 		pw.CloseWithError(err)
-		<-errCh
+		<-errCh //nolint:errcheck // drain only: the write error below is the one reported
 		return fmt.Errorf("failed to write to storage pipe: %w", err)
 	}
 	_ = pw.Close()
@@ -733,7 +733,7 @@ func uploadPacketToStorage(ctx context.Context, store storage.ObjectStorage, pkt
 
 	if _, err := io.Copy(pw, bytes.NewReader(xmlBytes)); err != nil {
 		pw.CloseWithError(err)
-		<-errCh
+		<-errCh //nolint:errcheck // drain only: the write error below is the one reported
 		return fmt.Errorf("failed to write to storage pipe: %w", err)
 	}
 	_ = pw.Close()

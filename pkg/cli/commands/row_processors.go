@@ -16,7 +16,8 @@ import (
 // from flags (v1 through its ProcessorManager alias). It satisfies the
 // ProcessorManager interface the engines take.
 type RowProcessors struct {
-	chain *processors.Chain
+	chain   *processors.Chain
+	maskers []*processors.FieldMasker // для перетипизации замаскированных колонок в TEXT
 }
 
 // NewRowProcessors creates a new processor manager
@@ -50,6 +51,7 @@ func (pm *RowProcessors) AddMaskProcessor(maskFields string) error { //nolint:un
 	if len(fieldsToMask) > 0 {
 		masker := processors.NewFieldMasker(fieldsToMask)
 		pm.chain.Add(masker)
+		pm.maskers = append(pm.maskers, masker)
 		if !QuietOutput() {
 			fmt.Printf("✓ Added field masker: %d field(s)\n", len(fieldsToMask))
 		}
@@ -182,7 +184,9 @@ func (pm *RowProcessors) AddMaskRules(rules []cliconfig.MaskRule) error {
 	if len(fieldsToMask) == 0 {
 		return nil
 	}
-	pm.chain.Add(processors.NewFieldMasker(fieldsToMask))
+	masker := processors.NewFieldMasker(fieldsToMask)
+	pm.chain.Add(masker)
+	pm.maskers = append(pm.maskers, masker)
 	if !QuietOutput() {
 		fmt.Printf("✓ Added field masker from config: %d field(s)\n", len(fieldsToMask))
 	}
@@ -282,6 +286,12 @@ func (pm *RowProcessors) ProcessPacket(ctx context.Context, pkt *packet.DataPack
 		return fmt.Errorf("processor chain failed: %w", err)
 	}
 	matrixToPacket(pkt, processed)
+
+	// Замаскированная колонка перестаёт быть INTEGER/DATE/UUID/VARCHAR(n): маска — это
+	// строка произвольной формы и длины. Самый дешёвый корректный вариант — тип TEXT.
+	for _, m := range pm.maskers {
+		pkt.Schema = m.TransformSchema(pkt.Schema)
+	}
 	return nil
 }
 
