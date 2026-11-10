@@ -444,7 +444,7 @@ func (e *Exporter) uploadToStorage(ctx context.Context, data []byte, destination
 
 	if _, err := io.Copy(pw, bytes.NewReader(data)); err != nil {
 		pw.CloseWithError(err)
-		<-errCh
+		<-errCh //nolint:errcheck // drain only: the write error below is the one reported
 		return fmt.Errorf("etl: upload pipe write failed: %w", err)
 	}
 	_ = pw.Close()
