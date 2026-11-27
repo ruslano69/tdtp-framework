@@ -36,6 +36,7 @@ func (p *Processor) loadByPart(ctx context.Context, source SourceConfig) (*packe
 		if first == nil {
 			fields = slices.Clone(pkt.Schema.Fields)
 			p.sanitizeSource(source.Name, pkt)
+			p.workspace.SetSourceType(source.Name, source.Type)
 			if err := p.workspace.CreateTable(ctx, source.Name, pkt.Schema.Fields); err != nil {
 				insertErr = fmt.Errorf("failed to create table '%s': %w", source.Name, err)
 				return insertErr
@@ -73,10 +74,11 @@ func (p *Processor) loadByPart(ctx context.Context, source SourceConfig) (*packe
 // Строки вставляются по позициям, а результат описывается схемой первой части,
 // поэтому колонки, их имена и типы обязаны совпадать.
 //
-// Маркеры особых значений могут законно различаться: в compact-формате они
-// выбираются для каждой части. Расхождение — ошибка, только когда в строках
-// этой части есть значение, равное одному из двух маркеров: по схеме первой
-// части оно прочиталось бы не тем, что означает.
+// Маркер NULL может быть у каждой части свой (compact-формат выбирает его для
+// части): LoadData разбирает строки по маркеру самой части. Остальные маркеры
+// остаются в workspace текстом и описываются первой частью, поэтому их
+// расхождение — ошибка, когда в строках части есть значение, равное одному из
+// двух: по схеме первой части оно прочиталось бы не тем, что означает.
 func checkPartSchema(first []packet.Field, pkt *packet.DataPacket) error {
 	fields := pkt.Schema.Fields
 	if len(fields) != len(first) {
@@ -113,14 +115,13 @@ func checkPartSchema(first []packet.Field, pkt *packet.DataPacket) error {
 	return nil
 }
 
-// specialMarkers — действующие маркеры поля; пустая строка — маркера нет.
-// У NULL он есть всегда: без объявления читатели понимают прежний "[NULL]".
-func specialMarkers(f packet.Field) [5]string {
-	markers := [5]string{packet.NullMarkerOf(f)}
+// specialMarkers — маркеры поля, кроме NULL; пустая строка — маркера нет.
+func specialMarkers(f packet.Field) [4]string {
+	var markers [4]string
 	if sv := f.SpecialValues; sv != nil {
 		for i, m := range []*packet.MarkerValue{sv.Infinity, sv.NegInfinity, sv.NaN, sv.NoDate} {
 			if m != nil {
-				markers[i+1] = m.Marker
+				markers[i] = m.Marker
 			}
 		}
 	}

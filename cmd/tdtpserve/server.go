@@ -129,6 +129,7 @@ func loadDatasets(ctx context.Context, cfg *ServeConfig) (map[string]*Dataset, [
 			if sd.Error != nil || sd.Packet == nil {
 				continue
 			}
+			workspace.SetSourceType(sd.TableName, sourceTypes[sd.SourceName])
 			if err := workspace.CreateTable(ctx, sd.TableName, sd.Packet.Schema.Fields); err != nil {
 				return nil, nil, fmt.Errorf("workspace create table %q: %w", sd.TableName, err)
 			}

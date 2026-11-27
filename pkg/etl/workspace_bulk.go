@@ -43,7 +43,7 @@ var errBulkUnsupported = errors.New("bulk load not available for this driver")
 // версия этого пути дала 306 мс против 174 ровно потому, что транзакции не
 // было.
 func (w *Workspace) bulkLoadViaDriver(ctx context.Context, tableName string,
-	fields []packet.Field, rows [][]string, batchRows int) error {
+	fields []packet.Field, nulls []columnNull, rows [][]string, batchRows int) error {
 
 	n := len(fields)
 	rowTuple := "(" + strings.TrimSuffix(strings.Repeat("?, ", n), ", ") + ")"
@@ -146,7 +146,7 @@ func (w *Workspace) bulkLoadViaDriver(ctx context.Context, tableName string,
 					pos++
 					continue // то же значение в той же колонке — упаковка цела
 				}
-				args[pos].Value = w.convertValue(val, fields[j].Type)
+				args[pos].Value = w.convertValue(val, fields[j].Type, nulls[j])
 				raw[pos] = val
 				filled[pos] = true
 				pos++
@@ -260,8 +260,7 @@ func (w *Workspace) bulkReadViaDriver(ctx context.Context, sqlQuery, resultTable
 			allRows = append(allRows, rec)
 		}
 
-		pkt.Data = packet.RowsToData(allRows)
-		pkt.Header.RecordsInPart = len(allRows)
+		canonicalResult(pkt, allRows)
 		result = pkt
 		return nil
 	})

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 )
@@ -20,6 +21,8 @@ type Workspace struct {
 	adapter adapters.Adapter
 	db      *sql.DB
 	tables  map[string]bool // Список созданных таблиц
+	// nullStyles — обозначение NULL в источнике таблицы, см. SetSourceType
+	nullStyles map[string]nullStyle
 }
 
 // NewWorkspace создает новый :memory: workspace
@@ -96,13 +99,15 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 		}
 	}
 
+	nulls := nullRules(fields, w.nullStyles[tableName])
+
 	rowTuple := "(" + strings.TrimSuffix(strings.Repeat("?, ", numFields), ", ") + ")"
 	batchRows := insertBatchRows(numFields)
 
 	// Быстрый путь: вставка минуя обвязку database/sql. errBulkUnsupported
 	// означает "драйвер не подошёл, ничего не записано" — только тогда откат на
 	// общий путь ниже безопасен.
-	if err := w.bulkLoadViaDriver(ctx, tableName, fields, rows, batchRows); err == nil {
+	if err := w.bulkLoadViaDriver(ctx, tableName, fields, nulls, rows, batchRows); err == nil {
 		return nil
 	} else if !errors.Is(err, errBulkUnsupported) {
 		return err
@@ -142,7 +147,7 @@ func (w *Workspace) LoadData(ctx context.Context, tableName string, dataPacket *
 
 	for i, values := range rows {
 		for j, val := range values {
-			args = append(args, w.convertValue(val, fields[j].Type))
+			args = append(args, w.convertValue(val, fields[j].Type, nulls[j]))
 		}
 
 		if len(args) == batchRows*numFields {
@@ -276,8 +281,7 @@ func (w *Workspace) executeSQLGeneric(ctx context.Context, sqlQuery, resultTable
 		return nil, fmt.Errorf("error reading rows: %w", err)
 	}
 
-	result.Data = packet.RowsToData(allRows)
-	result.Header.RecordsInPart = len(allRows)
+	canonicalResult(result, allRows)
 
 	return result, nil
 }
@@ -441,10 +445,9 @@ func (w *Workspace) mapSQLiteTypeToTDTP(sqliteType string) string {
 	}
 }
 
-// convertValue конвертирует строковое значение в правильный тип для SQLite
-func (w *Workspace) convertValue(value, fieldType string) any {
-	// NULL значения
-	if value == "" || value == "NULL" {
+// convertValue конвертирует строковое значение в значение для SQLite
+func (w *Workspace) convertValue(value, fieldType string, null columnNull) any {
+	if null.is(value) {
 		return nil
 	}
 
@@ -506,12 +509,14 @@ func dateColumnKinds(columnTypes []*sql.ColumnType) []string {
 // строкой — тем же представлением, которое convertValue понимает как NULL при
 // загрузке обратно.
 func (w *Workspace) formatCell(val any, kind string) string {
+	// NULL — не пустая строка: он помечается так же, как у адаптеров баз.
+	if val == nil {
+		return base.NullSentinel
+	}
 	if kind == "" {
 		return w.formatValue(val)
 	}
 	switch v := val.(type) {
-	case nil:
-		return ""
 	case time.Time:
 		if kind == "DATE" {
 			return v.Format("2006-01-02")

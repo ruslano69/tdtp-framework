@@ -140,6 +140,11 @@ func (v *FieldValidator) Process(ctx context.Context, data [][]string, schema pa
 			}
 
 			value := row[colIdx]
+			// NULL — отсутствие значения: правила видят пустое значение, а не
+			// маркер, иначе required пропустил бы NULL. Сама строка не меняется.
+			if isNullCell(schema.Fields[colIdx], value) {
+				value = ""
+			}
 			fieldName := schema.Fields[colIdx].Name
 
 			for _, rule := range rules {

@@ -230,6 +230,8 @@ func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceD
 
 		p.sanitizeSource(source.SourceName, source.Packet)
 
+		p.workspace.SetSourceType(source.TableName, p.sourceType(source.SourceName))
+
 		// Создаем таблицу в workspace
 		if err := p.workspace.CreateTable(ctx, source.TableName, source.Packet.Schema.Fields); err != nil {
 			return fmt.Errorf("failed to create table '%s': %w", source.TableName, err)
@@ -260,6 +262,16 @@ func (p *Processor) sanitizeSource(sourceName string, pkt *packet.DataPacket) {
 			break
 		}
 	}
+}
+
+// sourceType возвращает sources[].type источника по имени.
+func (p *Processor) sourceType(name string) string {
+	for i := range p.config.Sources {
+		if p.config.Sources[i].Name == name {
+			return p.config.Sources[i].Type
+		}
+	}
+	return ""
 }
 
 // executeTransformation выполняет SQL трансформацию
@@ -413,9 +425,44 @@ func (p *Processor) applySchemaPassthrough(result *ExecutionResult, sourcesData 
 		result.Packet.Schema.Fields[i].Length = orig.Length
 		result.Packet.Schema.Fields[i].Precision = orig.Precision
 		result.Packet.Schema.Fields[i].Scale = orig.Scale
-		result.Packet.Schema.Fields[i].SpecialValues = orig.SpecialValues
+		result.Packet.Schema.Fields[i].SpecialValues = mergeSpecialValues(
+			result.Packet.Schema.Fields[i].SpecialValues, orig.SpecialValues)
 		result.Packet.Schema.Fields[i].Timezone = orig.Timezone
 	}
+}
+
+// mergeSpecialValues returns the markers of an output field: the ones read from
+// the workspace result plus the source's declarations for values the workspace
+// keeps as text (NaN, ±Infinity, NoDate).
+//
+// The source's NULL marker is not restored. NULL leaves the workspace as a real
+// NULL and gets a marker chosen from the result's own values; the source's marker
+// could be a text another source put into the same column.
+func mergeSpecialValues(result, source *packet.SpecialValues) *packet.SpecialValues {
+	var merged packet.SpecialValues
+	if source != nil {
+		merged = *source
+		merged.Null = nil
+	}
+	if result != nil {
+		merged.Null = result.Null
+		if result.NaN != nil {
+			merged.NaN = result.NaN
+		}
+		if result.Infinity != nil {
+			merged.Infinity = result.Infinity
+		}
+		if result.NegInfinity != nil {
+			merged.NegInfinity = result.NegInfinity
+		}
+		if result.NoDate != nil {
+			merged.NoDate = result.NoDate
+		}
+	}
+	if merged == (packet.SpecialValues{}) {
+		return nil
+	}
+	return &merged
 }
 
 // tdtpTypeToWorkspaceSQLite maps a TDTP field type to the SQLite column type
