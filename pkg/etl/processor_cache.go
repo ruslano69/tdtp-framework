@@ -56,15 +56,29 @@ func (p *Processor) prepareWorkspace(ctx context.Context) ([]SourceData, error) 
 		return nil, fmt.Errorf("workspace.cache.indexes: %w", err)
 	}
 
-	if keyErr != nil {
-		return sourcesData, nil
+	if keyErr == nil {
+		p.saveCache(ctx, key, sourcesData)
 	}
+
+	return sourcesData, nil
+}
+
+// saveCache сохраняет рабочую БД под ключом key, посчитанным до загрузки.
+// Ошибки не возвращает намеренно: без кеша пайплайн всё равно даёт тот же
+// результат, поэтому неудача сохранения — только предупреждение.
+func (p *Processor) saveCache(ctx context.Context, key string, sourcesData []SourceData) {
+	cache := p.config.Workspace.Cache
 
 	// Файл мог измениться, пока мы его читали: тогда в базе новые данные под
 	// старым ключом.
-	if after, err := workspaceCacheKey(p.config.Sources, cache.Indexes); err != nil || after != key {
+	after, err := workspaceCacheKey(p.config.Sources, cache.Indexes)
+	if err != nil {
+		fmt.Printf("WARNING: workspace cache not saved: %v\n", err)
+		return
+	}
+	if after != key {
 		fmt.Println("WARNING: workspace cache not saved: source files changed during loading")
-		return sourcesData, nil
+		return
 	}
 
 	header := workspaceCacheHeader{Key: key}
@@ -77,15 +91,13 @@ func (p *Processor) prepareWorkspace(ctx context.Context) ([]SourceData, error) 
 		})
 	}
 
-	started = time.Now()
+	started := time.Now()
 	if err := p.workspace.saveWorkspaceCache(ctx, cache.Path, header); err != nil {
 		fmt.Printf("WARNING: workspace cache not saved: %v\n", err)
-		return sourcesData, nil
+		return
 	}
 	p.stats.CacheSaved = true
 	fmt.Printf("Workspace cache: saved %s in %s\n", cache.Path, time.Since(started).Round(time.Millisecond))
-
-	return sourcesData, nil
 }
 
 func (p *Processor) loadAndPopulate(ctx context.Context) ([]SourceData, error) {
