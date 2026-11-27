@@ -25,6 +25,8 @@ What changes:
   `tdtpserve` views mark it the same way.
 - `field_masker` and `field_normalizer`, and `--mask`, no longer rewrite NULL
   cells: a masked NULL turned into asterisks.
+- `field_validator`, and `--validate`, treat a NULL cell as an empty value, so
+  `required` rejects NULL. Before, a NULL marked by the source passed it.
 - Parts of a multi-part set may use different NULL markers; each is read with
   its own.
 

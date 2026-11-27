@@ -275,7 +275,8 @@ empty string. What counts as NULL depends on the source:
 In a column that is not text, an empty value is NULL for every source. A NULL in
 the result, including one made by the transform (an unmatched `LEFT JOIN`), is
 written with the field's declared NULL marker; in XLSX it is a blank cell.
-`field_masker` and `field_normalizer` leave NULL cells alone.
+`field_masker` and `field_normalizer` leave NULL cells alone; `field_validator`
+checks a NULL cell as an empty value, so `required` rejects it.
 
 **Known limitation: SQLite sources and column types.** A `sqlite` source reports
 `DECIMAL`, `NUMERIC`, `BOOLEAN`, `DATE` and `DATETIME` columns as `TEXT`, so the

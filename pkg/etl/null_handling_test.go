@@ -317,3 +317,23 @@ func TestNull_SurvivesWorkspaceCache(t *testing.T) {
 		t.Fatalf("built %q, restored %q, want %q", built, restored, want)
 	}
 }
+
+// NULL — это отсутствие значения: required обязан его отклонить, откуда бы он
+// ни взялся. Пустую ячейку от текста "[NULL]" отличает объявленный маркер.
+func TestNull_RequiredRejectsNull(t *testing.T) {
+	f := newNullSources(t)
+	required := processors.Config{Type: "field_validator", Params: map[string]any{
+		"rules": map[string]any{"v": "required"}, "on_error": "filter",
+	}}
+	for kind, source := range f.sources {
+		got := pipelineValues(t, source, "SELECT id, name AS v FROM t ORDER BY id", required)
+		if want := []string{"1;full", "4;[NULL]", "5;NULL"}; !slices.Equal(got, want) {
+			t.Errorf("source=%s, NULL from the source: got %q want %q", kind, got, want)
+		}
+		got = pipelineValues(t, source,
+			"SELECT id, CASE WHEN id = 1 THEN 'x' END AS v FROM t WHERE id <= 3 ORDER BY id", required)
+		if want := []string{"1;x"}; !slices.Equal(got, want) {
+			t.Errorf("source=%s, NULL from the transform: got %q want %q", kind, got, want)
+		}
+	}
+}
