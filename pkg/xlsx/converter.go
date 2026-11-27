@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+	"unicode/utf16"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
@@ -25,6 +25,13 @@ var pre1900Cutoff = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
 // as IEEE-754 float64 (15 significant digits). Larger values must be strings.
 const maxExcelInt int64 = 999_999_999_999_999
 
+const (
+	// maxExcelDigits is how many significant digits an Excel number keeps.
+	maxExcelDigits = 15
+	// maxExcelNumber is the largest magnitude an Excel cell holds.
+	maxExcelNumber = 9.99999999999999e307
+)
+
 // Excel worksheet hard limits (ECMA-376 / Excel 2007+). A file that exceeds
 // them opens as "corrupt" with silent data loss, so ToXLSX refuses loudly
 // instead of writing one. Package vars (not consts) so unit tests can shrink
@@ -34,7 +41,8 @@ var (
 	maxExcelRows = 1_048_576
 	// maxExcelCols is column XFD.
 	maxExcelCols = 16_384
-	// maxExcelCellChars is the 32_767-character limit per cell.
+	// maxExcelCellChars is the 32_767-character limit per cell, counted in
+	// UTF-16 code units as Excel counts them.
 	maxExcelCellChars = 32_767
 )
 
@@ -55,11 +63,33 @@ func checkExcelLimits(table string, ncols, nrows int) error {
 // checkExcelCellChars rejects a single cell value longer than Excel stores.
 // Numbers and serial dates are short by construction; only strings are checked.
 func checkExcelCellChars(table, col string, row int, s string) error {
-	if n := utf8.RuneCountInString(s); n > maxExcelCellChars {
+	if n := utf16Len(s); n > maxExcelCellChars {
 		return fmt.Errorf("table %q cell %s%d (%d characters) exceeds the Excel per-cell limit of %d",
 			table, col, row, n, maxExcelCellChars)
 	}
 	return nil
+}
+
+// utf16Len is the length of s in UTF-16 code units: a character outside the
+// Basic Multilingual Plane (most emoji) takes two.
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+	return n
+}
+
+// significantDigits counts the digits of a decimal number from the first
+// non-zero one to the last, ignoring sign and decimal point.
+func significantDigits(decimal string) int {
+	digits := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, decimal)
+	return len(strings.Trim(digits, "0"))
 }
 
 // ToXLSX - convert TDTP packet to XLSX file
@@ -70,6 +100,8 @@ func checkExcelCellChars(table, col string, row int, s string) error {
 //
 // Handles the following Excel traps automatically:
 //   - BIGINT precision: int64 values with >15 significant digits → string cell
+//   - DECIMAL precision: the same rule, written from the exact decimal text
+//   - Numbers beyond Excel's range (|v| > 9.99999999999999E+307) → string cell
 //   - NaN / ±Inf: written as blank cells (canonical NULL in Excel)
 //   - Pre-1900 dates: written as ISO text strings (Excel serial cannot represent them)
 //   - Formula injection: string cells use SetCellStr so leading =, +, -, @ are safe
@@ -335,12 +367,20 @@ func typedValueToExcel(tv *schema.TypedValue, fieldType schema.DataType) (any, b
 		}
 		return val, false
 
+	// DECIMAL also sets FloatValue, which rounds past ~16 digits. Excel keeps
+	// 15, so a longer value goes in as its exact text, like a big integer.
+	case tv.DecimalValue != nil && significantDigits(*tv.DecimalValue) > maxExcelDigits:
+		return *tv.DecimalValue, true
+
 	case tv.FloatValue != nil:
 		val := *tv.FloatValue
 		// Trap 2: Excel has no NaN or ±Infinity numeric type.
 		// Write as blank cell (canonical Excel NULL) rather than a misleading string.
 		if math.IsNaN(val) || math.IsInf(val, 0) {
 			return nil, false
+		}
+		if math.Abs(val) > maxExcelNumber {
+			return strconv.FormatFloat(val, 'g', -1, 64), true
 		}
 		return val, false
 
