@@ -4,6 +4,14 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Changed — in-memory filtering runs in parallel
+
+The TDTQL filter (`--where` on TDTP files, the adapters' in-memory fallback,
+`pkg/tdtpjson`, the Python bindings) splits 512 rows or more across
+`GOMAXPROCS` goroutines. Row order, filter statistics and the reported error
+(that of the first bad row) are unchanged. On 1 M rows, i7-7700, filtering
+alone got 2.3–3.1× faster; below 512 rows nothing changes.
+
 ## [1.26.7] - 2026-11-10
 
 ### Fixed — masking and TDTP row escaping

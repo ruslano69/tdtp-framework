@@ -2,7 +2,9 @@ package tdtql
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
@@ -56,16 +58,22 @@ func NewFilterEngine() *FilterEngine {
 	}
 }
 
-// ApplyFilters применяет фильтры к строкам данных
+// parallelFilterThreshold — с какого числа строк фильтрация идёт в несколько
+// потоков. Строка стоит 270–400 нс, так что на пороге работы больше 100 мкс.
+// Тот же порог, что у разбора строк в packet.GetRows.
+const parallelFilterThreshold = 512
+
+// ApplyFilters применяет фильтры к строкам данных.
+//
+// Начиная с parallelFilterThreshold строк работа делится на GOMAXPROCS потоков.
+// Результат тот же, что в один поток: строки в исходном порядке, та же
+// статистика, а при ошибке — ошибка первой по порядку плохой строки.
 func (f *FilterEngine) ApplyFilters(
 	filters *packet.Filters,
 	rows [][]string,
 	schemaObj packet.Schema,
 	converter *schema.Converter,
 ) ([][]string, map[string]int, error) {
-
-	stats := make(map[string]int)
-	result := [][]string{}
 
 	// Build the name→field lookup once (O(fields)) instead of per-row linear scan.
 	fields := make(map[string]fieldInfo, len(schemaObj.Fields))
@@ -83,18 +91,80 @@ func (f *FilterEngine) ApplyFilters(
 		}}
 	}
 
-	for _, row := range rows {
-		match, err := f.evaluateFilters(filters, row, converter, stats, fields)
-		if err != nil {
-			return nil, nil, err
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 2 || len(rows) < parallelFilterThreshold {
+		chunk := f.filterChunk(filters, rows, converter, fields)
+		if chunk.err != nil {
+			return nil, nil, chunk.err
 		}
+		return chunk.matched, chunk.stats, nil
+	}
 
-		if match {
-			result = append(result, row)
+	// Всё, что потоки делят, они только читают: filters, fields, rows.
+	// Конвертер без состояния, кеши LIKE и IN — sync.Map.
+	chunks := make([]filteredChunk, min(workers, len(rows)))
+	var wg sync.WaitGroup
+	for i := range chunks {
+		part := rows[len(rows)*i/len(chunks) : len(rows)*(i+1)/len(chunks)]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			chunks[i] = f.filterChunk(filters, part, converter, fields)
+		}()
+	}
+	wg.Wait()
+
+	// Порции идут по порядку строк, поэтому первая встреченная ошибка — та же,
+	// что дал бы один поток: все порции до неё прошли без ошибок.
+	total := 0
+	for i := range chunks {
+		if chunks[i].err != nil {
+			return nil, nil, chunks[i].err
+		}
+		total += len(chunks[i].matched)
+	}
+
+	result := make([][]string, 0, total)
+	stats := make(map[string]int)
+	for i := range chunks {
+		result = append(result, chunks[i].matched...)
+		for field, count := range chunks[i].stats {
+			stats[field] += count
 		}
 	}
 
 	return result, stats, nil
+}
+
+// filteredChunk — итог фильтрации одной порции строк
+type filteredChunk struct {
+	matched [][]string
+	stats   map[string]int
+	err     error
+}
+
+// filterChunk фильтрует строки в один поток, останавливаясь на первой ошибке
+func (f *FilterEngine) filterChunk(
+	filters *packet.Filters,
+	rows [][]string,
+	converter *schema.Converter,
+	fields map[string]fieldInfo,
+) filteredChunk {
+	chunk := filteredChunk{matched: [][]string{}, stats: make(map[string]int)}
+
+	for _, row := range rows {
+		match, err := f.evaluateFilters(filters, row, converter, chunk.stats, fields)
+		if err != nil {
+			chunk.err = err
+			return chunk
+		}
+
+		if match {
+			chunk.matched = append(chunk.matched, row)
+		}
+	}
+
+	return chunk
 }
 
 // evaluateFilters проверяет соответствие строки фильтрам
