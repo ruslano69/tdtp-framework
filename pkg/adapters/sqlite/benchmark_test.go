@@ -47,43 +47,15 @@ func BenchmarkSimpleFilter_InMemory(b *testing.B) {
 	}
 	defer adapter.Close(ctx)
 
-	// Запрос для in-memory фильтрации
 	translator := tdtql.NewTranslator()
 	query, err := translator.Translate("SELECT * FROM Users WHERE Balance > 10000")
 	if err != nil {
 		b.Fatalf("Failed to translate query: %v", err)
 	}
 
-	// Получаем схему один раз (вне бенчмарка)
-	schemaPackets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Bench", "Test")
-	if err != nil || len(schemaPackets) == 0 {
-		b.Fatalf("Failed to get schema: %v", err)
-	}
-	schema := schemaPackets[0].Schema
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Выгружаем ВСЕ данные - используем пустой фильтр
-		emptyQuery := &packet.Query{}
-		allPackets, err := adapter.ExportTableWithQuery(ctx, "Users", emptyQuery, "Bench", "Test")
-		if err != nil {
-			b.Fatalf("Export failed: %v", err)
-		}
-
-		// Фильтруем в памяти
-		executor := tdtql.NewExecutor()
-		var allRows [][]string
-		for _, pkt := range allPackets {
-			for _, row := range pkt.Data.Rows {
-				allRows = append(allRows, parseRow(row.Value))
-			}
-		}
-
-		result, err := executor.Execute(query, allRows, schema)
-		if err != nil {
-			b.Fatalf("Execute failed: %v", err)
-		}
-		_ = result
+		runInMemory(ctx, b, adapter, query)
 	}
 }
 
@@ -130,36 +102,9 @@ func BenchmarkComplexFilter_InMemory(b *testing.B) {
 		b.Fatalf("Failed to translate query: %v", err)
 	}
 
-	// Получаем схему один раз
-	schemaPackets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Bench", "Test")
-	if err != nil || len(schemaPackets) == 0 {
-		b.Fatalf("Failed to get schema: %v", err)
-	}
-	schema := schemaPackets[0].Schema
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Выгружаем ВСЕ данные
-		emptyQuery := &packet.Query{}
-		allPackets, err := adapter.ExportTableWithQuery(ctx, "Users", emptyQuery, "Bench", "Test")
-		if err != nil {
-			b.Fatalf("Export failed: %v", err)
-		}
-
-		// Фильтруем в памяти
-		executor := tdtql.NewExecutor()
-		var allRows [][]string
-		for _, pkt := range allPackets {
-			for _, row := range pkt.Data.Rows {
-				allRows = append(allRows, parseRow(row.Value))
-			}
-		}
-
-		result, err := executor.Execute(query, allRows, schema)
-		if err != nil {
-			b.Fatalf("Execute failed: %v", err)
-		}
-		_ = result
+		runInMemory(ctx, b, adapter, query)
 	}
 }
 
@@ -206,36 +151,9 @@ func BenchmarkWithPagination_InMemory(b *testing.B) {
 		b.Fatalf("Failed to translate query: %v", err)
 	}
 
-	// Получаем схему один раз
-	schemaPackets, err := adapter.ExportTableWithQuery(ctx, "Users", query, "Bench", "Test")
-	if err != nil || len(schemaPackets) == 0 {
-		b.Fatalf("Failed to get schema: %v", err)
-	}
-	schema := schemaPackets[0].Schema
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Выгружаем ВСЕ данные
-		emptyQuery := &packet.Query{}
-		allPackets, err := adapter.ExportTableWithQuery(ctx, "Users", emptyQuery, "Bench", "Test")
-		if err != nil {
-			b.Fatalf("Export failed: %v", err)
-		}
-
-		// Фильтруем в памяти
-		executor := tdtql.NewExecutor()
-		var allRows [][]string
-		for _, pkt := range allPackets {
-			for _, row := range pkt.Data.Rows {
-				allRows = append(allRows, parseRow(row.Value))
-			}
-		}
-
-		result, err := executor.Execute(query, allRows, schema)
-		if err != nil {
-			b.Fatalf("Execute failed: %v", err)
-		}
-		_ = result
+		runInMemory(ctx, b, adapter, query)
 	}
 }
 
@@ -258,36 +176,31 @@ func BenchmarkFullExport(b *testing.B) {
 	}
 }
 
-// Helper: парсит строку в массив значений
-func parseRow(rowValue string) []string {
-	var values []string
-	var current string
-	escaped := false
+// runInMemory повторяет запасной путь ExportHelper.ExportTableWithQuery: чтение
+// всей таблицы, фильтрация и сортировка в памяти, сборка Response-пакетов.
+//
+// Раньше бенчмарк экспортировал всю таблицу в пакеты и разбирал строки обратно
+// своим парсером, склеивавшим значения по символу. Рабочий путь так не делает,
+// и этот разбор занимал больше половины измеренного времени.
+func runInMemory(ctx context.Context, b *testing.B, adapter *Adapter, query *packet.Query) {
+	b.Helper()
 
-	for i := 0; i < len(rowValue); i++ {
-		ch := rowValue[i]
-
-		if escaped {
-			current += string(ch)
-			escaped = false
-			continue
-		}
-
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-
-		if ch == '|' {
-			values = append(values, current)
-			current = ""
-		} else {
-			current += string(ch)
-		}
+	schema, err := adapter.GetTableSchema(ctx, "Users")
+	if err != nil {
+		b.Fatalf("Failed to get schema: %v", err)
 	}
-
-	values = append(values, current)
-	return values
+	rows, err := adapter.ReadAllRows(ctx, "Users", schema)
+	if err != nil {
+		b.Fatalf("Read failed: %v", err)
+	}
+	result, err := tdtql.NewExecutor().Execute(query, rows, schema)
+	if err != nil {
+		b.Fatalf("Execute failed: %v", err)
+	}
+	if _, err := packet.NewGenerator().GenerateResponse("Users", packet.InReplyToDirectExport,
+		schema, result.FilteredRows, result.QueryContext, "Bench", "Test"); err != nil {
+		b.Fatalf("Generate failed: %v", err)
+	}
 }
 
 // TestBenchmarkSetup проверяет что БД доступна перед запуском бенчмарков
