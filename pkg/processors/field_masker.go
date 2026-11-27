@@ -109,7 +109,7 @@ func (m *FieldMasker) Process(ctx context.Context, data [][]string, schema packe
 		copy(newRow, row)
 
 		for colIndex, pattern := range fieldIndices {
-			if colIndex < len(newRow) && newRow[colIndex] != "" {
+			if colIndex < len(newRow) && newRow[colIndex] != "" && !isNullCell(schema.Fields[colIndex], newRow[colIndex]) {
 				newRow[colIndex] = m.maskValue(newRow[colIndex], pattern)
 			}
 		}

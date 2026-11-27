@@ -4,6 +4,34 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — pipelines computed wrong results over NULL
+
+**Check reports built over columns that can be empty.** The workspace took only
+`""` and the word `NULL` for NULL. A database NULL was stored as a one-byte text,
+a TDTP NULL as the text `[NULL]`, and an empty string became NULL. `AVG`,
+`COUNT(column)`, `IS NULL`, `COALESCE`, comparisons, `MIN`/`MAX` and joins on
+such columns were silently wrong; a NULL `BOOLEAN` from a TDTP source became
+false. In XLSX output a database NULL showed as `U+FFFD`. The condition dates
+from the first version of the pipeline.
+
+Seen on PostgreSQL and SQLite: with one NULL and one empty string in five rows,
+`COUNT(qty)` returned 5 instead of 4.
+
+What changes:
+
+- NULL is NULL and `""` is `""`. The text `NULL` from a database or a TDTP file
+  stays text. CSV reads empty cells and `NULL` as NULL, as before.
+- A NULL made by the transform is written as NULL, not as an empty string.
+  `tdtpserve` views mark it the same way.
+- `field_masker` and `field_normalizer`, and `--mask`, no longer rewrite NULL
+  cells: a masked NULL turned into asterisks.
+- Parts of a multi-part set may use different NULL markers; each is read with
+  its own.
+
+Not fixed here: a `sqlite` source still types `DECIMAL`, `BOOLEAN` and dates as
+`TEXT`, which makes `MAX`, `ORDER BY` and comparisons on them wrong; computed
+columns are `TEXT` for every source.
+
 ### Security — `pre_export` processors were skipped on some outputs
 
 Masking, normalizing and validation from `processors.pre_export` were applied by

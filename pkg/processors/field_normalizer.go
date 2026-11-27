@@ -80,7 +80,7 @@ func (n *FieldNormalizer) Process(ctx context.Context, data [][]string, schema p
 		copy(newRow, row)
 
 		for colIndex, rule := range fieldIndices {
-			if colIndex < len(newRow) && newRow[colIndex] != "" {
+			if colIndex < len(newRow) && newRow[colIndex] != "" && !isNullCell(schema.Fields[colIndex], newRow[colIndex]) {
 				normalized, err := n.normalizeValue(newRow[colIndex], rule)
 				if err != nil {
 					// Логируем ошибку, но не останавливаем обработку

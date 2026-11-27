@@ -297,6 +297,35 @@ func TestLoadByPart_CancelledContext(t *testing.T) {
 	}
 }
 
+// У каждой части свой маркер NULL, и во второй "[NULL]" — настоящий текст.
+func TestLoadByPart_NullMarkerPerPart(t *testing.T) {
+	declare := func(m string) []packet.Field {
+		fields := partFields()
+		fields[1].SpecialValues = &packet.SpecialValues{Null: &packet.MarkerValue{Marker: m}}
+		return fields
+	}
+	row := func(id, city string) []string { return []string{id, city, "1.00", "1990-05-15"} }
+	first := writeParts(t, t.TempDir(), "users",
+		testPart{declare("[NULL]"), [][]string{row("1", "[NULL]"), row("2", "")}},
+		testPart{declare("[NULL1]"), [][]string{row("3", "[NULL1]"), row("4", "[NULL]")}},
+	)
+
+	p := partsProcessor(t, SourceConfig{Name: "users", Type: "tdtp", MultiPart: true, DSN: first})
+	if _, err := p.loadAndPopulate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, rows := tableRows(t, p.workspace,
+		"SELECT Id, CASE WHEN City IS NULL THEN 'null' ELSE 'text:' || City END FROM users ORDER BY Id")
+	got := make([]string, len(rows))
+	for i, r := range rows {
+		got[i] = r[0] + " " + r[1]
+	}
+	want := []string{"1 null", "2 text:", "3 null", "4 text:[NULL]"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestCheckPartSchema(t *testing.T) {
 	marker := func(m string) *packet.SpecialValues {
 		return &packet.SpecialValues{Null: &packet.MarkerValue{Marker: m}}
@@ -317,14 +346,10 @@ func TestCheckPartSchema(t *testing.T) {
 		"declared legacy equal": {change: func(_, part []packet.Field) { part[1].SpecialValues = marker("[NULL]") }, city: "[NULL]"},
 		"markers differ, unused": {change: func(_, part []packet.Field) { part[1].SpecialValues = marker("[NULL1]") },
 			city: "Omsk"},
-		// "[NULL1]" здесь означает NULL, а по схеме первой части — текст.
-		"own marker used": {change: func(_, part []packet.Field) { part[1].SpecialValues = marker("[NULL1]") },
-			city: "[NULL1]", want: "markers differ"},
-		// Здесь "[NULL]" — текст, а по схеме первой части — NULL.
-		"first marker as text": {change: func(_, part []packet.Field) { part[1].SpecialValues = marker("[NULL1]") },
-			city: "[NULL]", want: "markers differ"},
-		"first declares its own": {change: func(first, _ []packet.Field) { first[1].SpecialValues = marker("[NULL1]") },
-			city: "[NULL]", want: "markers differ"},
+		// NULL разбирается по маркеру самой части, поэтому его расхождение
+		// принимается — см. TestLoadByPart_NullMarkerPerPart.
+		"own null marker used": {change: func(_, part []packet.Field) { part[1].SpecialValues = marker("[NULL1]") },
+			city: "[NULL1]"},
 		"infinity only here": {change: func(_, part []packet.Field) { part[2].SpecialValues = infinity },
 			total: "INF", want: "markers differ"},
 		"infinity declared, absent": {change: func(_, part []packet.Field) { part[2].SpecialValues = infinity }},

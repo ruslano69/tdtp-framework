@@ -263,12 +263,33 @@ prints the size of every packet in the batch.
 | `tdtp-s3` | `s3://bucket/key`, or just `key` with `s3.bucket` set | not used |
 | `csv` | local file path; configure `csv.columns` | not used |
 
+**NULL.** A NULL reaches the workspace as SQL NULL, and an empty string stays an
+empty string. What counts as NULL depends on the source:
+
+| Source | NULL is |
+|---|---|
+| `tdtp`, `tdtp-enc`, `tdtp-s3` | the field's NULL marker (declared, or `[NULL]` when none is declared) |
+| database | the database's NULL; the text `[NULL]` stays text |
+| `csv` | an empty cell or the word `NULL`; CSV has no other way to say it |
+
+In a column that is not text, an empty value is NULL for every source. A NULL in
+the result, including one made by the transform (an unmatched `LEFT JOIN`), is
+written with the field's declared NULL marker; in XLSX it is a blank cell.
+`field_masker` and `field_normalizer` leave NULL cells alone.
+
+**Known limitation: SQLite sources and column types.** A `sqlite` source reports
+`DECIMAL`, `NUMERIC`, `BOOLEAN`, `DATE` and `DATETIME` columns as `TEXT`, so the
+workspace compares them as text: `MAX`, `MIN`, `ORDER BY` and `amount > 50` on
+such a column give wrong results. Computed columns (`SUM`, `COUNT`, `AVG`) of any
+source are typed `TEXT` in the result, so XLSX stores them as text.
+
 A `tdtp` source is loaded part by part: each part is read, inserted into the
 workspace and released before the next one is read. The parts of a set are
 described by the schema of the first one, so every part must have the same
 fields in the same order, with the same names, types and subtypes. Parts may
-declare different special-value markers (compact export chooses them per part),
-unless a part contains a value that the first part's markers would read
+declare different NULL markers (compact export chooses them per part): each part
+is read with its own. Other special-value markers (NaN, infinity, "no date") may
+differ only if the part holds no value the first part's markers would read
 differently. Either mismatch, like any unreadable part, stops the pipeline
 before the transform runs. The loaded tables stay in memory: on files of
 1 M and 5 M rows × 10 columns the peak memory of `tdtpcli` was about 0.44 GB and

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
 )
 
@@ -45,8 +46,8 @@ func TestWorkspace_NullDateDoesNotBreakRead(t *testing.T) {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
 	for i, name := range []string{"D", "DT", "TS"} {
-		if got := rows[0][i+1]; got != "" {
-			t.Errorf("%s = %q, want the empty string (workspace's NULL)", name, got)
+		if got := rows[0][i+1]; got != packet.SpecNullMarker {
+			t.Errorf("%s = %q, want the NULL marker", name, got)
 		}
 	}
 	if rows[0][4] != "all dates null" {
@@ -117,9 +118,9 @@ func TestWorkspace_MixedNullAndFilledDates(t *testing.T) {
 	}
 	want := [][]string{
 		{"1", "2001-12-31", "both", "2001-12-31 23:59:59"},
-		{"2", "", "no date", "2002-01-01 00:00:00"},
-		{"3", "2003-03-03", "no time", ""},
-		{"4", "", "neither", ""},
+		{"2", "[NULL]", "no date", "2002-01-01 00:00:00"},
+		{"3", "2003-03-03", "no time", "[NULL]"},
+		{"4", "[NULL]", "neither", "[NULL]"},
 	}
 	got := res.GetRows()
 	if len(got) != len(want) {
@@ -165,8 +166,8 @@ func TestWorkspace_NullDateInStream(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
-	if rows[0][1] != "" {
-		t.Errorf("NULL came back as %q, want the empty string", rows[0][1])
+	if rows[0][1] != base.NullSentinel {
+		t.Errorf("NULL came back as %q, want the NULL sentinel", rows[0][1])
 	}
 	if rows[1][1] != "2025-01-02 03:04:05" {
 		t.Errorf("filled value came back as %q", rows[1][1])
@@ -233,8 +234,8 @@ func TestWorkspace_LeftJoinUnmatchedDate(t *testing.T) {
 	want := [][]string{
 		{"1", "2020-01-01"},
 		{"2", "2020-02-02"},
-		{"3", ""},
-		{"4", ""},
+		{"3", "[NULL]"},
+		{"4", "[NULL]"},
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("rows = %d, want %d", len(rows), len(want))
