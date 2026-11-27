@@ -177,10 +177,10 @@ func (p *Processor) initWorkspace(ctx context.Context) error {
 	return nil
 }
 
-// loadSources загружает данные из всех источников
-func (p *Processor) loadSources(ctx context.Context) ([]SourceData, error) {
+// loadSources загружает перечисленные источники целиком в память
+func (p *Processor) loadSources(ctx context.Context, sources []SourceConfig) ([]SourceData, error) {
 	// Загружаем данные параллельно
-	sourcesData, err := p.loader.LoadAll(ctx)
+	sourcesData, err := p.loader.loadAll(ctx, sources)
 
 	// Если on_source_error = "continue", ошибки могут быть, но продолжаем
 	// Если on_source_error = "fail", err != nil означает критичную ошибку
@@ -196,7 +196,7 @@ func (p *Processor) loadSources(ctx context.Context) ([]SourceData, error) {
 			p.stats.TotalRowsLoaded += data.Packet.Header.RecordsInPart
 		}
 	}
-	p.stats.SourcesLoaded = successCount
+	p.stats.SourcesLoaded += successCount
 
 	// Возвращаем все результаты (включая ошибочные, если on_source_error = "continue")
 	return sourcesData, err
@@ -228,21 +228,7 @@ func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceD
 			return fmt.Errorf("source '%s' has no data", source.SourceName)
 		}
 
-		// Sanitize field names if configured for this source.
-		// Applied to schema only — row data is positional and never modified.
-		for i := range p.config.Sources {
-			if p.config.Sources[i].Name == source.SourceName && p.config.Sources[i].Sanitize.IsActive() {
-				sc := p.config.Sources[i].Sanitize
-				opts := sanitize.Options{Clear: sc.Clear, Translit: sc.Translit}
-				if changed := sanitize.ApplyToSchema(&source.Packet.Schema, opts); len(changed) > 0 {
-					fmt.Printf("  Source '%s': sanitized %d field name(s):\n", source.SourceName, len(changed))
-					for _, r := range changed {
-						fmt.Printf("    '%s' → '%s'\n", r.OriginalName, r.SafeName)
-					}
-				}
-				break
-			}
-		}
+		p.sanitizeSource(source.SourceName, source.Packet)
 
 		// Создаем таблицу в workspace
 		if err := p.workspace.CreateTable(ctx, source.TableName, source.Packet.Schema.Fields); err != nil {
@@ -256,6 +242,24 @@ func (p *Processor) populateWorkspace(ctx context.Context, sourcesData []SourceD
 	}
 
 	return nil
+}
+
+// sanitizeSource санитайзит имена полей источника, если это настроено.
+// Меняется только схема — данные строк позиционные.
+func (p *Processor) sanitizeSource(sourceName string, pkt *packet.DataPacket) {
+	for i := range p.config.Sources {
+		if p.config.Sources[i].Name == sourceName && p.config.Sources[i].Sanitize.IsActive() {
+			sc := p.config.Sources[i].Sanitize
+			opts := sanitize.Options{Clear: sc.Clear, Translit: sc.Translit}
+			if changed := sanitize.ApplyToSchema(&pkt.Schema, opts); len(changed) > 0 {
+				fmt.Printf("  Source '%s': sanitized %d field name(s):\n", sourceName, len(changed))
+				for _, r := range changed {
+					fmt.Printf("    '%s' → '%s'\n", r.OriginalName, r.SafeName)
+				}
+			}
+			break
+		}
+	}
 }
 
 // executeTransformation выполняет SQL трансформацию

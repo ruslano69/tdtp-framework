@@ -262,6 +262,17 @@ prints the size of every packet in the batch.
 | `tdtp-s3` | `s3://bucket/key`, or just `key` with `s3.bucket` set | not used |
 | `csv` | local file path; configure `csv.columns` | not used |
 
+A `tdtp` source is loaded part by part: each part is read, inserted into the
+workspace and released before the next one is read. The parts of a set are
+described by the schema of the first one, so every part must have the same
+fields in the same order, with the same names, types and subtypes. Parts may
+declare different special-value markers (compact export chooses them per part),
+unless a part contains a value that the first part's markers would read
+differently. Either mismatch, like any unreadable part, stops the pipeline
+before the transform runs. The loaded tables stay in memory: on files of
+1 M and 5 M rows × 10 columns the peak memory of `tdtpcli` was about 0.44 GB and
+1.9 GB.
+
 CSV cells enter the SQLite workspace as raw TEXT. Use `transform.sql` to check
 business types and rules before casting; this preserves invalid input for a
 single TDTP result with diagnostic columns. The reader supports quoted fields,

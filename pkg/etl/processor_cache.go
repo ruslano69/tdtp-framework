@@ -15,8 +15,8 @@ import (
 // Неисправность самого кеша пайплайн не роняет: он работает как без кеша и
 // пишет предупреждение. Ошибка в списке индексов — это ошибка конфига.
 //
-// Возвращает данные источников для applySchemaPassthrough. После чтения из кеша
-// в пакетах есть только схема и число строк.
+// Возвращает данные источников для applySchemaPassthrough. В пакетах TDTP-файлов
+// и всего прочитанного из кеша есть только схема и число строк.
 func (p *Processor) prepareWorkspace(ctx context.Context) ([]SourceData, error) {
 	cache := p.config.Workspace.Cache
 	if cache == nil {
@@ -100,14 +100,44 @@ func (p *Processor) saveCache(ctx context.Context, key string, sourcesData []Sou
 	fmt.Printf("Workspace cache: saved %s in %s\n", cache.Path, time.Since(started).Round(time.Millisecond))
 }
 
+// loadAndPopulate наполняет workspace из источников. Локальные TDTP-файлы
+// грузятся по частям (loadByPart), остальные источники — целиком.
+//
+// Любая ошибка обрывает пайплайн, так что наполовину заполненная таблица до
+// transform не доходит.
 func (p *Processor) loadAndPopulate(ctx context.Context) ([]SourceData, error) {
-	sourcesData, err := p.loadSources(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load sources: %w", err)
+	var whole, byPart []SourceConfig
+	for _, source := range p.config.Sources {
+		if source.Type == "tdtp" {
+			byPart = append(byPart, source)
+		} else {
+			whole = append(whole, source)
+		}
 	}
-	if err := p.populateWorkspace(ctx, sourcesData); err != nil {
-		return nil, fmt.Errorf("failed to populate workspace: %w", err)
+
+	var sourcesData []SourceData
+	// Пустой список источников доходит до loadSources ради прежней ошибки.
+	if len(whole) > 0 || len(byPart) == 0 {
+		loaded, err := p.loadSources(ctx, whole)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load sources: %w", err)
+		}
+		if err := p.populateWorkspace(ctx, loaded); err != nil {
+			return nil, fmt.Errorf("failed to populate workspace: %w", err)
+		}
+		sourcesData = loaded
 	}
+
+	for _, source := range byPart {
+		pkt, err := p.loadByPart(ctx, source)
+		if err != nil {
+			return nil, err
+		}
+		sourcesData = append(sourcesData, SourceData{SourceName: source.Name, TableName: source.Name, Packet: pkt})
+		p.stats.SourcesLoaded++
+		p.stats.TotalRowsLoaded += pkt.Header.RecordsInPart
+	}
+
 	return sourcesData, nil
 }
 
