@@ -76,8 +76,34 @@ func decompressTDTPPacket(pkt *packet.DataPacket) error {
 // Поведение совпадает с ImportFile: multi-part-набор объединяется в один пакет,
 // сжатые данные распаковываются до загрузки в SQLite workspace.
 func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
+	var merged *packet.DataPacket
+
+	err := forEachTDTPPart(source, func(_ string, pkt *packet.DataPacket) error {
+		if merged == nil {
+			merged = pkt
+		} else {
+			// Склеиваем строки последующих частей в первый пакет.
+			merged.Data.Rows = append(merged.Data.Rows, pkt.Data.Rows...)
+			merged.Header.RecordsInPart += pkt.Header.RecordsInPart
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Переименовываем таблицу в alias источника — workspace использует это
+	// имя как имя SQLite-таблицы, и именно это имя используется в transform SQL.
+	merged.Header.TableName = source.Name
+	return merged, nil
+}
+
+// forEachTDTPPart читает части TDTP-источника по порядку и отдаёт каждую —
+// распакованную и развёрнутую из compact — в handle. Сам ссылок на пройденные
+// части не держит. Ошибка handle останавливает обход и возвращается как есть.
+func forEachTDTPPart(source SourceConfig, handle func(path string, pkt *packet.DataPacket) error) error {
 	if source.DSN == "" {
-		return nil, fmt.Errorf("tdtp source requires 'dsn' to be the file path")
+		return fmt.Errorf("tdtp source requires 'dsn' to be the file path")
 	}
 
 	var filePaths []string
@@ -89,34 +115,24 @@ func loadTDTPFile(source SourceConfig) (*packet.DataPacket, error) {
 	}
 
 	parser := packet.NewParser()
-	var merged *packet.DataPacket
-
 	for _, fp := range filePaths {
 		pkt, err := parser.ParseFile(fp)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse TDTP file '%s': %w", fp, err)
+			return fmt.Errorf("failed to parse TDTP file '%s': %w", fp, err)
 		}
 		if err := decompressTDTPPacket(pkt); err != nil {
-			return nil, fmt.Errorf("file '%s': %w", fp, err)
+			return fmt.Errorf("file '%s': %w", fp, err)
 		}
 		if pkt.Data.Compact {
 			if err := packet.ExpandCompactRows(pkt); err != nil {
-				return nil, fmt.Errorf("file '%s': compact expansion failed: %w", fp, err)
+				return fmt.Errorf("file '%s': compact expansion failed: %w", fp, err)
 			}
 		}
-		if merged == nil {
-			merged = pkt
-		} else {
-			// Склеиваем строки последующих частей в первый пакет.
-			merged.Data.Rows = append(merged.Data.Rows, pkt.Data.Rows...)
-			merged.Header.RecordsInPart += pkt.Header.RecordsInPart
+		if err := handle(fp, pkt); err != nil {
+			return err
 		}
 	}
-
-	// Переименовываем таблицу в alias источника — workspace использует это
-	// имя как имя SQLite-таблицы, и именно это имя используется в transform SQL.
-	merged.Header.TableName = source.Name
-	return merged, nil
+	return nil
 }
 
 // loadEncryptedTDTPFile читает зашифрованный TDTP-файл, получает ключ через xZMercury
@@ -345,20 +361,25 @@ func (l *Loader) SetFast(fast bool) {
 
 // LoadAll загружает данные из всех источников параллельно
 func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
-	if len(l.sources) == 0 {
+	return l.loadAll(ctx, l.sources)
+}
+
+// loadAll — LoadAll для части источников загрузчика.
+func (l *Loader) loadAll(ctx context.Context, sources []SourceConfig) ([]SourceData, error) {
+	if len(sources) == 0 {
 		return nil, fmt.Errorf("no sources configured")
 	}
 
 	defer l.closeAdapters(ctx)
 
 	// Канал для результатов
-	results := make(chan SourceData, len(l.sources))
+	results := make(chan SourceData, len(sources))
 
 	// WaitGroup для ожидания завершения всех горутин
 	var wg sync.WaitGroup
 
 	// Запускаем загрузку из каждого источника параллельно
-	for _, source := range l.sources {
+	for _, source := range sources {
 		wg.Add(1)
 		go func(src SourceConfig) {
 			defer wg.Done()
@@ -388,7 +409,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]SourceData, error) {
 	}()
 
 	// Собираем результаты
-	allResults := make([]SourceData, 0, len(l.sources))
+	allResults := make([]SourceData, 0, len(sources))
 	var sourceErrors []error
 
 	for result := range results {

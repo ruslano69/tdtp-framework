@@ -4,6 +4,21 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Changed — pipelines load TDTP files part by part
+
+A `type: tdtp` source used to be merged into one packet before loading. Each
+part is now inserted into the workspace and released. Peak memory of the
+`tdtpcli` process on one source of 10 columns fell from about 1.0–1.1 GB to
+0.44–0.50 GB on 1 M rows and from 4.8–5.3 GB to 1.9–2.2 GB on 5 M rows, with
+about the same run time and identical output. Several TDTP sources are now read
+one after another, not in parallel.
+
+**A set whose parts disagree is now refused.** Rows were taken by position under
+the first part's schema without any check. A part with a different number,
+order, name, type or subtype of fields now fails the pipeline, and so does one
+whose special-value markers differ from the first part's while it contains a
+value they would read differently.
+
 ### Changed — in-memory filtering runs in parallel
 
 The TDTQL filter (`--where` on TDTP files, the adapters' in-memory fallback,
