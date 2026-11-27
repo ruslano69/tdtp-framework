@@ -4,6 +4,17 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Changed — faster in-memory `ORDER BY`
+
+- The TDTQL sorter parses each sort value once instead of on every comparison.
+  With `LIMIT` (and `OFFSET` or tail mode) covering less than half of the rows
+  it selects them with a heap instead of sorting everything; columns holding
+  values that do not parse still get the full sort. Row order is unchanged. On
+  66k rows by one REAL column: 200 ms → 31 ms, and 2.8 ms with `LIMIT 1000`.
+- The SQLite `*_InMemory` benchmarks now follow the real fallback path (read,
+  filter and sort, build packets). They used to include a test-only row parser
+  that took more than half of the measured time.
+
 ## [1.26.7] - 2026-11-10
 
 ### Fixed — masking and TDTP row escaping
