@@ -178,6 +178,14 @@ func (e *Exporter) Export(ctx context.Context, dataPacket *packet.DataPacket) (*
 		return nil, fmt.Errorf("data packet is nil")
 	}
 
+	// Маскирование, нормализация и валидация — здесь, один раз и до выбора
+	// канала. Пока вызов стоял в отдельных ветках, XLSX и пакетная отправка в
+	// RabbitMQ и Kafka уходили с немаскированными данными. А повтор в fallback
+	// после primary применил бы цепочку к тем же строкам дважды.
+	if err := e.applyPreExport(ctx, dataPacket); err != nil {
+		return nil, err
+	}
+
 	// Если fallback не настроен — обычный экспорт без CB
 	if e.config.Fallback == nil || e.cb == nil {
 		return e.exportDirect(ctx, dataPacket, e.config)
@@ -284,11 +292,6 @@ func (e *Exporter) exportToTDTP(ctx context.Context, dataPacket *packet.DataPack
 	destination := e.config.TDTP.Destination
 	if destination == "" {
 		return fmt.Errorf("TDTP destination is not set")
-	}
-
-	// Процессоры маскирования/нормализации/валидации
-	if err := e.applyPreExport(ctx, dataPacket); err != nil {
-		return err
 	}
 
 	// Расщепляем на части через GenerateReference (тот же лимит ~3.8MB что и --export).
@@ -679,11 +682,6 @@ func (e *Exporter) exportToKafka(ctx context.Context, dataPacket *packet.DataPac
 func (e *Exporter) exportToKafkaSpool(ctx context.Context, dataPacket *packet.DataPacket) error {
 	cfg := e.config.Kafka
 
-	// Применяем pre-export цепочку (маскирование, нормализация и т.д.)
-	if err := e.applyPreExport(ctx, dataPacket); err != nil {
-		return err
-	}
-
 	// Разбиваем на части с учётом PacketKB
 	partSizeBytes := cfg.PacketKB * 1024
 	if partSizeBytes <= 0 {
@@ -821,6 +819,14 @@ func (e *Exporter) ValidateConfig() error {
 		}
 		if e.config.Kafka.Topic == "" {
 			return fmt.Errorf("kafka topic is required")
+		}
+
+	case "xlsx":
+		if e.config.XLSX == nil {
+			return fmt.Errorf("xlsx config is required for xlsx output")
+		}
+		if e.config.XLSX.Destination == "" {
+			return fmt.Errorf("xlsx destination is required")
 		}
 
 	default:

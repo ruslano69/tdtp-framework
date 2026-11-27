@@ -4,6 +4,31 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Security — `pre_export` processors were skipped on some outputs
+
+Masking, normalizing and validation from `processors.pre_export` were applied by
+the TDTP writer, the Kafka spool and broker streaming only. **A batch delivery to
+RabbitMQ, or to Kafka without `packet_kb`, `spool_dir` and `mem_limit_mb`, sent
+the rows unprocessed.** Brokers are delivered in batch when `output.fallback` is
+configured. The chain now runs once, before the output is chosen, so every
+channel gets processed rows and a fallback does not apply it a second time.
+
+If such a pipeline used `pre_export` masking with a fallback, check what was
+delivered to the broker.
+
+### Fixed — pipeline XLSX output, and Excel limits
+
+- `output.type: xlsx` failed with `unsupported output type: xlsx`: the
+  exporter's own config check did not know the type.
+- A `DECIMAL` with more than 15 significant digits was rounded on the way into a
+  number cell (`9007199254740993` became `…992`), in `--to-xlsx` and
+  `--export-xlsx` too. It is now written as text.
+- The cell limit counted characters, not UTF-16 units: a cell of 20 000 emoji
+  was accepted and Excel 2010 refused to open the file.
+- Numbers beyond Excel's range are written as text.
+- Sheet names with an apostrophe at either end, `History`, blank names and long
+  names with emoji are adjusted to Excel's rules.
+
 ### Changed — pipelines load TDTP files part by part
 
 A `type: tdtp` source used to be merged into one packet before loading. Each

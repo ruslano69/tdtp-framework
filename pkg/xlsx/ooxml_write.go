@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 // Style indices into the cellXfs list written by styleSheetXML. Excel resolves
@@ -194,22 +195,36 @@ func workbookXML(sheetName string) string {
 }
 
 // sanitizeSheetName enforces Excel's own rules so the file opens: at most 31
-// characters, none of : \ / ? * [ ], and never empty.
+// UTF-16 code units, none of : \ / ? * [ ], no apostrophe at either end, not
+// blank, and not "History", which Excel keeps for itself.
 func sanitizeSheetName(name string) string {
-	if name == "" {
-		return "Sheet1"
-	}
 	name = strings.Map(func(r rune) rune {
 		if strings.ContainsRune(`:\/?*[]`, r) {
 			return '_'
 		}
 		return r
 	}, name)
-	if runes := []rune(name); len(runes) > 31 {
-		name = string(runes[:31])
+
+	units := 0
+	for i, r := range name {
+		if units += utf16.RuneLen(r); units > maxSheetNameUnits {
+			name = name[:i]
+			break
+		}
+	}
+
+	// После обрезки: она сама может оставить апостроф на конце.
+	name = strings.Trim(name, "'")
+	switch {
+	case strings.TrimSpace(name) == "":
+		return "Sheet1"
+	case strings.EqualFold(name, "History"):
+		return name + "_"
 	}
 	return name
 }
+
+const maxSheetNameUnits = 31
 
 func (s *sheetBuilder) xml() string {
 	var sb strings.Builder

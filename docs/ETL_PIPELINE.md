@@ -14,15 +14,16 @@ Reference for `tdtpcli --pipeline`.
 
 1. [Overview](#overview)
 2. [Configuration reference](#configuration-reference)
-3. [Workspace cache](#workspace-cache)
-4. [Pipeline variables](#pipeline-variables)
-5. [Scenario 1: two TDTP sources, joined](#scenario-1-two-tdtp-sources-joined)
-6. [Scenario 2: PostgreSQL to TDTP](#scenario-2-postgresql-to-tdtp)
-7. [Scenario 3: encrypted output through xZMercury](#scenario-3-encrypted-output-through-xzmercury)
-8. [Scenario 4: Redis orchestration](#scenario-4-redis-orchestration)
-9. [Scenario 5: graceful degradation](#scenario-5-graceful-degradation)
-10. [Pipeline CLI flags](#pipeline-cli-flags)
-11. [Exit codes](#exit-codes)
+3. [XLSX output limits](#xlsx-output-limits)
+4. [Workspace cache](#workspace-cache)
+5. [Pipeline variables](#pipeline-variables)
+6. [Scenario 1: two TDTP sources, joined](#scenario-1-two-tdtp-sources-joined)
+7. [Scenario 2: PostgreSQL to TDTP](#scenario-2-postgresql-to-tdtp)
+8. [Scenario 3: encrypted output through xZMercury](#scenario-3-encrypted-output-through-xzmercury)
+9. [Scenario 4: Redis orchestration](#scenario-4-redis-orchestration)
+10. [Scenario 5: graceful degradation](#scenario-5-graceful-degradation)
+11. [Pipeline CLI flags](#pipeline-cli-flags)
+12. [Exit codes](#exit-codes)
 
 ---
 
@@ -280,6 +281,37 @@ embedded newlines, UTF-8 (with optional BOM), and Windows-1251. Invalid CSV
 structure, header mismatches, and invalid UTF-8 stop the source. See
 the [practical CSV validation case](../examples/pfu-csv/README.md) for a
 reproducible date-and-duration validation example.
+
+---
+
+## XLSX output limits
+
+`output.type: xlsx` writes one worksheet, so the result has to fit Excel. A
+result that does not is refused before any file is written:
+
+| Limit | Value |
+|---|---|
+| data rows | 1 048 575 (plus the header row) |
+| columns | 16 384 |
+| characters in a cell | 32 767, counted as Excel does, in UTF-16 units: most emoji take two |
+
+There is no splitting into several sheets or files. Narrow the result in
+`transform.sql`, or write TDTP.
+
+**Numbers Excel cannot hold exactly are written as text.** Excel keeps 15
+significant digits. An integer past that, a `DECIMAL` with more significant
+digits, and a number beyond ±9.99999999999999E+307 go into text cells with all
+their digits. `SUM` and other numeric functions skip text cells. In a pipeline a
+`DECIMAL` has already passed through the SQLite workspace as a floating-point
+number, so precision beyond a double is lost before the export; `--to-xlsx` and
+`--export-xlsx` do not go through the workspace.
+
+A sheet name is adjusted to Excel's rules: at most 31 UTF-16 units, `: \ / ? * [ ]`
+replaced by `_`, no apostrophe at either end, `History` becomes `History_`, a
+blank name becomes `Sheet1`.
+
+The whole sheet is built in memory. A run that wrote 1 048 575 rows of one
+column peaked at about 0.74 GB; wide results will need more.
 
 ---
 
