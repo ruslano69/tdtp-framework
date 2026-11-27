@@ -14,14 +14,15 @@ Reference for `tdtpcli --pipeline`.
 
 1. [Overview](#overview)
 2. [Configuration reference](#configuration-reference)
-3. [Pipeline variables](#pipeline-variables)
-4. [Scenario 1: two TDTP sources, joined](#scenario-1-two-tdtp-sources-joined)
-5. [Scenario 2: PostgreSQL to TDTP](#scenario-2-postgresql-to-tdtp)
-6. [Scenario 3: encrypted output through xZMercury](#scenario-3-encrypted-output-through-xzmercury)
-7. [Scenario 4: Redis orchestration](#scenario-4-redis-orchestration)
-8. [Scenario 5: graceful degradation](#scenario-5-graceful-degradation)
-9. [Pipeline CLI flags](#pipeline-cli-flags)
-10. [Exit codes](#exit-codes)
+3. [Workspace cache](#workspace-cache)
+4. [Pipeline variables](#pipeline-variables)
+5. [Scenario 1: two TDTP sources, joined](#scenario-1-two-tdtp-sources-joined)
+6. [Scenario 2: PostgreSQL to TDTP](#scenario-2-postgresql-to-tdtp)
+7. [Scenario 3: encrypted output through xZMercury](#scenario-3-encrypted-output-through-xzmercury)
+8. [Scenario 4: Redis orchestration](#scenario-4-redis-orchestration)
+9. [Scenario 5: graceful degradation](#scenario-5-graceful-degradation)
+10. [Pipeline CLI flags](#pipeline-cli-flags)
+11. [Exit codes](#exit-codes)
 
 ---
 
@@ -85,6 +86,11 @@ sources:
 workspace:
   type: sqlite
   mode: ":memory:"          # ":memory:" or a file path ("workspace.db")
+  # cache:                  # optional, tdtp sources only — see "Workspace cache"
+  #   path: "cache/report.wscache.zst"
+  #   indexes:
+  #     - table: table_alias          # a source name
+  #       columns: [city, balance]    # in index order
 
 # ─── TRANSFORM ────────────────────────────────────────────────────────────────
 transform:
@@ -263,6 +269,72 @@ embedded newlines, UTF-8 (with optional BOM), and Windows-1251. Invalid CSV
 structure, header mismatches, and invalid UTF-8 stop the source. See
 the [practical CSV validation case](../examples/pfu-csv/README.md) for a
 reproducible date-and-duration validation example.
+
+---
+
+## Workspace cache
+
+A pipeline that reads the same TDTP files again and again can keep the loaded
+workspace between runs: the SQLite database with its tables and indexes,
+compressed with zstd level 3. A later run restores it into memory and skips
+parsing, inserting and index building.
+
+```yaml
+workspace:
+  type: sqlite
+  mode: ":memory:"
+  cache:
+    path: "cache/report.wscache.zst"
+    indexes:
+      - table: users
+        columns: [Email]
+      - table: users
+        columns: [City, Balance]
+```
+
+**Only `type: tdtp` sources.** A database cannot be checked for changes by
+hashing, and caching decrypted (`tdtp-enc`) or downloaded (`tdtp-s3`) data is
+not supported. A config with any other source type is rejected.
+
+**When the cache is rebuilt.** The key covers the content of every source file
+(all parts of a multi-part set), the source settings, the index list and the
+`tdtpcli` executable itself. A change in any of them loads the sources again
+and replaces the cache. File size and modification time are not trusted: the
+content is hashed on every run. Changing only `transform` or `output` keeps the
+cache.
+
+**Failures.** A damaged or unreadable cache prints a warning, and the pipeline
+loads the sources as if there were no cache. A cache that cannot be written
+also only warns. `path` is never overwritten if it holds a file that is not a
+workspace cache. An index naming an unknown column fails the pipeline.
+
+**The cache holds the source data unencrypted** (compression is not
+protection). A matching key proves which inputs the cache was built from, not
+that nobody edited it: keep it in a directory you trust as much as the sources.
+While restoring, an uncompressed copy of the database is written to a private
+temporary directory next to `path` and removed afterwards; a process killed at
+that moment leaves a `.tdtp-wscache-*` directory behind. Saving normally writes
+no uncompressed copy, except for a database too large to copy in memory (about
+2 GB). Saving also needs memory for a second copy of the database.
+
+**Is it worth it?** Measured on one source of 1 M rows × 10 columns (85 parts,
+zstd) with three indexes, i7-7700, `GROUP BY`, whole `tdtpcli` process, three
+runs each:
+
+| Run | Time |
+|---|---|
+| no cache | 4.6–5.5 s |
+| first run, builds and saves the cache | 10.1–10.2 s |
+| later runs | 1.7–1.9 s |
+
+The cache file was 83 MB. Here the first run's extra cost is repaid by the
+second or third repeat; other data and queries will differ.
+
+**Choose indexes by measuring.** An index speeds up selective filters and
+joins, and can slow down a query that selects a large share of a table: on the
+same data an aggregate over 35 % of the rows took twice as long through an index
+as with a full scan. `EXPLAIN QUERY PLAN` shows that an index is used, not that
+the query got faster.
 
 ---
 

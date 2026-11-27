@@ -113,6 +113,22 @@ type WorkspaceConfig struct {
 	Type   string         `yaml:"type"`   // Тип: sqlite (только sqlite поддерживается)
 	Mode   string         `yaml:"mode"`   // Режим: memory (:memory:) или путь к файлу
 	Config map[string]any `yaml:"config"` // Дополнительные настройки SQLite
+	// Cache включает кеш рабочей БД. Не задан — кеша нет.
+	Cache *WorkspaceCacheConfig `yaml:"cache,omitempty"`
+}
+
+// WorkspaceCacheConfig — кеш рабочей БД: SQLite с индексами, сжатый zstd 3.
+// Только для источников type: tdtp, чьё содержимое можно сверить по хешу.
+// В кеше лежат открытые данные источников.
+type WorkspaceCacheConfig struct {
+	Path    string                 `yaml:"path"`    // Локальный файл кеша
+	Indexes []WorkspaceIndexConfig `yaml:"indexes"` // Индексы, строятся после загрузки
+}
+
+// WorkspaceIndexConfig — один индекс рабочей БД.
+type WorkspaceIndexConfig struct {
+	Table   string   `yaml:"table"`   // Имя источника
+	Columns []string `yaml:"columns"` // Колонки в порядке индекса
 }
 
 // TransformConfig определяет SQL трансформацию данных в workspace
@@ -299,6 +315,10 @@ func (c *PipelineConfig) Validate() error {
 		return fmt.Errorf("workspace: %w", err)
 	}
 
+	if err := c.validateWorkspaceCache(); err != nil {
+		return fmt.Errorf("workspace.cache: %w", err)
+	}
+
 	// Проверка transform
 	if err := c.Transform.Validate(); err != nil {
 		return fmt.Errorf("transform: %w", err)
@@ -404,6 +424,40 @@ func (w *WorkspaceConfig) Validate() error {
 	}
 	if w.Mode == "" {
 		return fmt.Errorf("mode is required (use 'memory' for in-memory database)")
+	}
+	return nil
+}
+
+func (c *PipelineConfig) validateWorkspaceCache() error {
+	cache := c.Workspace.Cache
+	if cache == nil {
+		return nil
+	}
+	if cache.Path == "" {
+		return fmt.Errorf("path is required")
+	}
+	if storage.IsRemote(cache.Path) {
+		return fmt.Errorf("path must be a local file")
+	}
+
+	tables := make(map[string]bool, len(c.Sources))
+	for _, source := range c.Sources {
+		// Базу данных нельзя сверить по хешу, а кеш расшифрованного или
+		// скачанного источника — отдельное решение.
+		if source.Type != "tdtp" {
+			return fmt.Errorf("only sources of type 'tdtp' can be cached, source '%s' is '%s'",
+				source.Name, source.Type)
+		}
+		tables[strings.ToLower(source.Name)] = true
+	}
+
+	for i, index := range cache.Indexes {
+		if !tables[strings.ToLower(index.Table)] {
+			return fmt.Errorf("indexes[%d]: table '%s' is not a source name", i, index.Table)
+		}
+		if len(index.Columns) == 0 {
+			return fmt.Errorf("indexes[%d]: columns are required", i)
+		}
 	}
 	return nil
 }
