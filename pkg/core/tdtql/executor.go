@@ -70,49 +70,39 @@ func (e *Executor) Execute(query *packet.Query, rows [][]string, schemaObj packe
 	}
 	result.MatchedRows = len(filteredRows)
 
-	// 2. Сортировка
-	if query.OrderBy != nil {
-		var err error
-		filteredRows, err = e.sorter.Sort(filteredRows, query.OrderBy, schemaObj, e.converter)
-		if err != nil {
-			return nil, fmt.Errorf("sort error: %w", err)
-		}
-	}
-
-	// 3. Пагинация (OFFSET, LIMIT)
-	offset := query.Offset
+	// 2. Пагинация (OFFSET, LIMIT): окно [from, to) считается ещё до сортировки,
+	// чтобы не сортировать строки, которые в ответ не попадут.
+	offset := max(query.Offset, 0)
 	limit := query.Limit
 
-	if offset < 0 {
-		offset = 0
-	}
+	from, to := min(offset, len(filteredRows)), len(filteredRows)
 
-	// Применяем OFFSET
-	if offset > 0 {
-		if offset >= len(filteredRows) {
-			filteredRows = [][]string{}
-		} else {
-			filteredRows = filteredRows[offset:]
-		}
-	}
-
-	// Применяем LIMIT
 	// Positive = first N; negative = last N (tail mode, like tail -n).
 	switch {
 	case limit > 0:
-		if limit < len(filteredRows) {
-			filteredRows = filteredRows[:limit]
+		if limit < to-from {
+			to = from + limit
 			result.MoreAvailable = true
 			result.NextOffset = offset + limit
 		}
 	case limit < 0:
-		n := -limit
-		if n < len(filteredRows) {
-			filteredRows = filteredRows[len(filteredRows)-n:]
+		if n := -limit; n > 0 && n < to-from {
+			from = to - n
 		}
-		result.MoreAvailable = false
+	}
+
+	// 3. Сортировка и вырезание окна
+	switch {
+	case query.OrderBy != nil:
+		var err error
+		filteredRows, err = e.sorter.sortWindow(filteredRows, query.OrderBy, schemaObj, e.converter, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("sort error: %w", err)
+		}
+	case offset > 0 && offset >= len(filteredRows):
+		filteredRows = [][]string{}
 	default:
-		result.MoreAvailable = false
+		filteredRows = filteredRows[from:to]
 	}
 
 	result.FilteredRows = filteredRows

@@ -12,6 +12,28 @@ The TDTQL filter (`--where` on TDTP files, the adapters' in-memory fallback,
 (that of the first bad row) are unchanged. On 1 M rows, i7-7700, filtering
 alone got 2.3–3.1× faster; below 512 rows nothing changes.
 
+### Added — pipeline workspace cache (`workspace.cache`)
+
+For pipelines whose sources are all local TDTP files, the loaded workspace —
+SQLite tables plus the indexes listed in `workspace.cache.indexes` — can be
+saved between runs, compressed with zstd level 3, and restored into memory. The
+cache is keyed by the content of every source file, the source settings, the
+index list and the executable. It holds the data unencrypted. Off unless
+configured. On 1 M rows with three indexes a `GROUP BY` pipeline took
+1.7–1.9 s from the cache against 4.6–5.5 s without it; the run that builds the
+cache took about 10 s. See `docs/ETL_PIPELINE.md`.
+
+### Changed — faster in-memory `ORDER BY`
+
+- The TDTQL sorter parses each sort value once instead of on every comparison.
+  With `LIMIT` (and `OFFSET` or tail mode) covering less than half of the rows
+  it selects them with a heap instead of sorting everything; columns holding
+  values that do not parse still get the full sort. Row order is unchanged. On
+  66k rows by one REAL column: 200 ms → 31 ms, and 2.8 ms with `LIMIT 1000`.
+- The SQLite `*_InMemory` benchmarks now follow the real fallback path (read,
+  filter and sort, build packets). They used to include a test-only row parser
+  that took more than half of the measured time.
+
 ## [1.26.7] - 2026-11-10
 
 ### Fixed — masking and TDTP row escaping
