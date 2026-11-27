@@ -35,6 +35,12 @@ func (w *Workspace) SetSourceType(tableName, sourceType string) {
 	if w.nullStyles == nil {
 		w.nullStyles = make(map[string]nullStyle)
 	}
+	if sourceType == "sqlite" {
+		if w.sqliteTables == nil {
+			w.sqliteTables = make(map[string]bool)
+		}
+		w.sqliteTables[tableName] = true
+	}
 	switch sourceType {
 	case "", "tdtp", "tdtp-enc", "tdtp-s3":
 		w.nullStyles[tableName] = nullsTDTP

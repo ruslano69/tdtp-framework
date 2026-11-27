@@ -10,6 +10,7 @@ import (
 	"github.com/ruslano69/tdtp-framework/pkg/adapters"
 	"github.com/ruslano69/tdtp-framework/pkg/adapters/base"
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
+	"github.com/ruslano69/tdtp-framework/pkg/core/schema"
 	_ "modernc.org/sqlite" // register sqlite driver
 )
 
@@ -377,44 +378,57 @@ func (a *Adapter) ExecuteRawQuery(ctx context.Context, query string) (*packet.Da
 		_ = rows.Close()
 		return nil, fmt.Errorf("failed to get column types: %w", err)
 	}
-	schema := packet.Schema{Fields: make([]packet.Field, len(columns))}
+	pktSchema := packet.Schema{Fields: make([]packet.Field, len(columns))}
 	for i, col := range columns {
-		tdtpType, length := convertSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName())
-		schema.Fields[i] = packet.Field{Name: col, Type: tdtpType, Length: length}
+		field, err := queryColumnField(col, columnTypes[i].DatabaseTypeName())
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("failed to describe column %s: %w", col, err)
+		}
+		pktSchema.Fields[i] = field
 	}
 	_ = rows.Close()
 
 	// Используем ReadRowsWithSQL — единственный путь конвертации типов в этом адаптере.
-	scannedRows, err := a.ReadRowsWithSQL(ctx, query, schema)
+	scannedRows, err := a.ReadRowsWithSQL(ctx, query, pktSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read rows: %w", err)
 	}
 
 	dataPacket := packet.NewDataPacket(packet.TypeReference, "query_result")
-	dataPacket.Schema = schema
+	dataPacket.Schema = pktSchema
 	dataPacket.Data = packet.RowsToData(scannedRows)
 	dataPacket.Header.RecordsInPart = len(scannedRows)
 
 	return dataPacket, nil
 }
 
-// convertSQLiteTypeToTDTP конвертирует SQLite тип в TDTP тип
-func convertSQLiteTypeToTDTP(sqliteType string) (string, int) {
-	sqliteType = strings.ToUpper(sqliteType)
-
-	switch {
-	case strings.Contains(sqliteType, "INT"):
-		return "INTEGER", 0
-	case strings.Contains(sqliteType, "REAL"), strings.Contains(sqliteType, "FLOAT"), strings.Contains(sqliteType, "DOUBLE"):
-		return "REAL", 0
-	case strings.Contains(sqliteType, "BLOB"):
-		return "BLOB", 0
-	case strings.Contains(sqliteType, "CHAR"), strings.Contains(sqliteType, "TEXT"):
-		// Для TEXT полей устанавливаем разумное значение по умолчанию
-		return "TEXT", 1000
-	default:
-		return "TEXT", 1000
+// queryColumnField описывает колонку произвольного запроса по её объявленному
+// типу — так же, как ExportTable (BuildFieldFromColumn). Раньше DECIMAL, BOOLEAN
+// и даты становились здесь TEXT, и пайплайн сравнивал их как текст.
+//
+// Названия, которых BuildFieldFromColumn не знает (INT8, UNSIGNED BIG INT,
+// DOUBLE PRECISION), разбираются по правилам родства типов SQLite. У
+// вычисленного выражения объявленного типа нет — это TEXT.
+func queryColumnField(name, declared string) (packet.Field, error) {
+	field, err := BuildFieldFromColumn(name, declared, false)
+	if err != nil || field.Type != string(schema.TypeText) {
+		return field, err
 	}
+
+	upper := strings.ToUpper(declared)
+	switch {
+	case strings.Contains(upper, "INT"):
+		return packet.Field{Name: name, Type: string(schema.TypeInteger)}, nil
+	case strings.Contains(upper, "REAL"), strings.Contains(upper, "FLOA"), strings.Contains(upper, "DOUB"): //nolint:misspell // фрагмент имени типа, как в правилах SQLite
+		return packet.Field{Name: name, Type: string(schema.TypeReal)}, nil
+	case strings.Contains(upper, "BLOB"):
+		return packet.Field{Name: name, Type: string(schema.TypeBlob)}, nil
+	}
+
+	// Для TEXT полей — разумное значение длины по умолчанию.
+	field.Length = 1000
+	return field, nil
 }
 
 var _ base.ParseFailureReporter = (*Adapter)(nil)

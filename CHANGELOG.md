@@ -4,6 +4,25 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — pipelines compared SQLite-source columns as text
+
+**Check reports built from a `sqlite` source.** Its `DECIMAL`, `NUMERIC`,
+`BOOLEAN`, `DATE` and `DATETIME` columns reached the workspace as `TEXT`. With
+the amounts 1500.25, 2 and 100, `MAX(amount)` returned 2, `amount > 50` matched
+nothing and `ORDER BY amount` sorted alphabetically. They now keep their
+declared types, as in `--export`.
+
+What changes in the output of a `sqlite` source:
+
+- the schema declares those types instead of `TEXT`;
+- a `DATE` is written as `1990-05-15`, no longer as `1990-05-15T00:00:00Z`, and
+  a `DATETIME` as `2026-08-21 14:38:11.527`, as other sources already were.
+
+Fixed for every source along the way:
+
+- a date-time kept no fraction of a second in the pipeline result;
+- a `BOOLEAN` value other than 1/0/true/false became false; it now stays as is.
+
 ### Fixed — pipelines computed wrong results over NULL
 
 **Check reports built over columns that can be empty.** The workspace took only
@@ -30,9 +49,7 @@ What changes:
 - Parts of a multi-part set may use different NULL markers; each is read with
   its own.
 
-Not fixed here: a `sqlite` source still types `DECIMAL`, `BOOLEAN` and dates as
-`TEXT`, which makes `MAX`, `ORDER BY` and comparisons on them wrong; computed
-columns are `TEXT` for every source.
+Computed columns are still typed `TEXT` for every source.
 
 ### Security — `pre_export` processors were skipped on some outputs
 

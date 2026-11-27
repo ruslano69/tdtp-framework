@@ -238,7 +238,7 @@ func (w *Workspace) bulkReadViaDriver(ctx context.Context, sqlQuery, resultTable
 			dbTypes[i] = namer.ColumnTypeDatabaseTypeName(i)
 			pkt.Schema.Fields[i] = packet.Field{
 				Name: col,
-				Type: w.mapSQLiteTypeToTDTP(dbTypes[i]),
+				Type: mapSQLiteTypeToTDTP(dbTypes[i]),
 			}
 		}
 		kinds := dateColumnKindsFromNames(dbTypes)

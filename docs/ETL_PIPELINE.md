@@ -278,11 +278,21 @@ written with the field's declared NULL marker; in XLSX it is a blank cell.
 `field_masker` and `field_normalizer` leave NULL cells alone; `field_validator`
 checks a NULL cell as an empty value, so `required` rejects it.
 
-**Known limitation: SQLite sources and column types.** A `sqlite` source reports
-`DECIMAL`, `NUMERIC`, `BOOLEAN`, `DATE` and `DATETIME` columns as `TEXT`, so the
-workspace compares them as text: `MAX`, `MIN`, `ORDER BY` and `amount > 50` on
-such a column give wrong results. Computed columns (`SUM`, `COUNT`, `AVG`) of any
-source are typed `TEXT` in the result, so XLSX stores them as text.
+**SQLite source column types.** A column keeps its declared type (`DECIMAL`,
+`BOOLEAN`, `DATE`, `DATETIME`, …), as in `--export`. An integer `DECIMAL` with
+more than 15 digits, or with no declared precision, stays exact in the workspace,
+and dividing it by an integer truncates, as in SQLite itself.
+
+**Known limitations.**
+
+- Computed columns (`SUM`, `COUNT`, `AVG`) of any source are typed `TEXT` in the
+  result, so XLSX stores them as text.
+- `DATETIME` values are held as text in the form `2026-08-21T14:38:11Z`. A
+  literal written with a space (`seen > '2026-08-21 12:00:00'`) therefore compares
+  wrongly within the same day. Write the literal with `T`, or wrap both sides in
+  `datetime()`.
+- Sources other than `sqlite` hold `DECIMAL` as a double in the workspace, which
+  is exact to about 15 significant digits.
 
 A `tdtp` source is loaded part by part: each part is read, inserted into the
 workspace and released before the next one is read. The parts of a set are
