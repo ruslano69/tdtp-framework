@@ -4,6 +4,17 @@ All notable changes to tdtp-framework are documented in this file.
 
 ## [Unreleased]
 
+### Added — pipeline workspace cache (`workspace.cache`)
+
+For pipelines whose sources are all local TDTP files, the loaded workspace —
+SQLite tables plus the indexes listed in `workspace.cache.indexes` — can be
+saved between runs, compressed with zstd level 3, and restored into memory. The
+cache is keyed by the content of every source file, the source settings, the
+index list and the executable. It holds the data unencrypted. Off unless
+configured. On 1 M rows with three indexes a `GROUP BY` pipeline took
+1.7–1.9 s from the cache against 4.6–5.5 s without it; the run that builds the
+cache took about 10 s. See `docs/ETL_PIPELINE.md`.
+
 ### Changed — faster in-memory `ORDER BY`
 
 - The TDTQL sorter parses each sort value once instead of on every comparison.

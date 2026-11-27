@@ -19,6 +19,8 @@ type ProcessorStats struct {
 	SourcesLoaded     int
 	TotalRowsLoaded   int
 	TotalRowsExported int
+	CacheHit          bool // workspace восстановлен из кеша
+	CacheSaved        bool // кеш записан этим запуском
 	Errors            []error
 }
 
@@ -87,15 +89,10 @@ func (p *Processor) Execute(ctx context.Context) error {
 	}
 	defer p.closeWorkspace(ctx)
 
-	// 2. Загружаем данные из всех источников
-	sourcesData, err := p.loadSources(ctx)
+	// 2-3. Наполняем workspace: из источников или из кеша (workspace.cache)
+	sourcesData, err := p.prepareWorkspace(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to load sources: %w", err)
-	}
-
-	// 3. Создаем таблицы в workspace и загружаем данные
-	if err := p.populateWorkspace(ctx, sourcesData); err != nil {
-		return fmt.Errorf("failed to populate workspace: %w", err)
+		return err
 	}
 
 	// 4. Выполняем трансформацию и экспорт
