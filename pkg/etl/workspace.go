@@ -23,6 +23,8 @@ type Workspace struct {
 	tables  map[string]bool // Список созданных таблиц
 	// nullStyles — обозначение NULL в источнике таблицы, см. SetSourceType
 	nullStyles map[string]nullStyle
+	// sqliteTables — таблицы из SQLite-источников, см. workspaceColumnType
+	sqliteTables map[string]bool
 }
 
 // NewWorkspace создает новый :memory: workspace
@@ -250,7 +252,7 @@ func (w *Workspace) executeSQLGeneric(ctx context.Context, sqlQuery, resultTable
 	for i, col := range columns {
 		result.Schema.Fields[i] = packet.Field{
 			Name: col,
-			Type: w.mapSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName()),
+			Type: mapSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName()),
 		}
 	}
 
@@ -322,7 +324,7 @@ func (w *Workspace) ExecuteSQLStream(ctx context.Context, sqlQuery, resultTableN
 	for i, col := range columns {
 		pktSchema.Fields[i] = packet.Field{
 			Name: col,
-			Type: w.mapSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName()),
+			Type: mapSQLiteTypeToTDTP(columnTypes[i].DatabaseTypeName()),
 		}
 	}
 
@@ -396,7 +398,7 @@ func (w *Workspace) generateCreateTableDDL(tableName string, fields []packet.Fie
 	columns := make([]string, 0, len(fields))
 
 	for _, field := range fields {
-		sqliteType := w.mapTDTPTypeToSQLite(schema.DataType(field.Type))
+		sqliteType := w.workspaceColumnType(tableName, field)
 		column := fmt.Sprintf("%q %s", field.Name, sqliteType)
 		columns = append(columns, column)
 	}
@@ -404,8 +406,30 @@ func (w *Workspace) generateCreateTableDDL(tableName string, fields []packet.Fie
 	return fmt.Sprintf("CREATE TABLE %q (%s)", tableName, strings.Join(columns, ", "))
 }
 
+// maxExactRealDigits — сколько значащих цифр double хранит без потерь.
+const maxExactRealDigits = 15
+
+// workspaceColumnType выбирает объявленный тип колонки рабочей БД.
+//
+// Целочисленный DECIMAL с точностью больше 15 цифр хранится как NUMERIC: такие
+// целые SQLite держит точно (в пределах int64), а колонка REAL округлила бы
+// 9007199254740993 до 9007199254740992. Цена — NUMERIC делит целые нацело.
+//
+// DECIMAL без заданной точности получает NUMERIC только у SQLite-источника, где
+// деление нацело совпадает с самой базой. У остальных такая колонка может
+// держать дробные суммы, и деление целых значений в ней менять нельзя.
+//
+// Дробные DECIMAL остаются REAL: точного десятичного типа в SQLite нет.
+func (w *Workspace) workspaceColumnType(tableName string, field packet.Field) string {
+	if schema.DataType(field.Type) == schema.TypeDecimal && field.Scale == 0 &&
+		(field.Precision > maxExactRealDigits || field.Precision == 0 && w.sqliteTables[tableName]) {
+		return "NUMERIC"
+	}
+	return mapTDTPTypeToSQLite(schema.DataType(field.Type))
+}
+
 // mapTDTPTypeToSQLite конвертирует TDTP тип в SQLite тип
-func (w *Workspace) mapTDTPTypeToSQLite(tdtpType schema.DataType) string {
+func mapTDTPTypeToSQLite(tdtpType schema.DataType) string {
 	switch tdtpType {
 	case schema.TypeInteger, schema.TypeInt:
 		return "INTEGER"
@@ -427,7 +451,7 @@ func (w *Workspace) mapTDTPTypeToSQLite(tdtpType schema.DataType) string {
 // mapSQLiteTypeToTDTP конвертирует SQLite тип в TDTP тип.
 // Для DATE/DATETIME колонок SQLite сохраняет объявленное имя типа —
 // DatabaseTypeName() возвращает "DATE"/"DATETIME", а не "TEXT".
-func (w *Workspace) mapSQLiteTypeToTDTP(sqliteType string) string {
+func mapSQLiteTypeToTDTP(sqliteType string) string {
 	sqliteType = strings.ToUpper(sqliteType)
 	switch {
 	case strings.Contains(sqliteType, "INT"):
@@ -436,6 +460,8 @@ func (w *Workspace) mapSQLiteTypeToTDTP(sqliteType string) string {
 		return "REAL"
 	case strings.Contains(sqliteType, "BLOB"):
 		return "BLOB"
+	case sqliteType == "NUMERIC":
+		return "DECIMAL"
 	case sqliteType == "DATE":
 		return "DATE"
 	case strings.Contains(sqliteType, "DATETIME"), strings.Contains(sqliteType, "TIMESTAMP"):
@@ -465,10 +491,15 @@ func (w *Workspace) convertValue(value, fieldType string, null columnNull) any {
 		// int64, а не int: быстрый путь отдаёт значения драйверу напрямую, а
 		// driver.Value принимает только int64. Раньше это чинил convertAssign
 		// внутри database/sql — тот самый слой, который путь обходит.
-		if value == "true" || value == "1" || value == "TRUE" {
+		switch value {
+		case "1", "true", "TRUE":
 			return int64(1)
+		case "0", "false", "FALSE":
+			return int64(0)
 		}
-		return int64(0)
+		// Динамическая типизация SQLite допускает в BOOLEAN что угодно; такое
+		// значение остаётся собой, а не превращается молча в false.
+		return value
 	default:
 		return value
 	}
@@ -504,8 +535,8 @@ func dateColumnKinds(columnTypes []*sql.ColumnType) []string {
 // formatCell приводит значение к строке пакета с учётом того, датовая колонка
 // или нет.
 //
-// Байты для непустых дат те же, что давал normalizeDateString: "2006-01-02"
-// для DATE и "2006-01-02 15:04:05" для остальных. NULL становится пустой
+// "2006-01-02" для DATE и "2006-01-02 15:04:05" с дробной частью секунды, если
+// она есть, для остальных. NULL становится пустой
 // строкой — тем же представлением, которое convertValue понимает как NULL при
 // загрузке обратно.
 func (w *Workspace) formatCell(val any, kind string) string {
@@ -521,7 +552,7 @@ func (w *Workspace) formatCell(val any, kind string) string {
 		if kind == "DATE" {
 			return v.Format("2006-01-02")
 		}
-		return v.Format("2006-01-02 15:04:05")
+		return v.Format(workspaceDateTimeLayout)
 	case string:
 		return normalizeDateString(v, kind)
 	case []byte:
@@ -530,6 +561,10 @@ func (w *Workspace) formatCell(val any, kind string) string {
 		return w.formatValue(val)
 	}
 }
+
+// workspaceDateTimeLayout срезает нулевую дробную часть вместе с точкой, так что
+// целые секунды пишутся без неё.
+const workspaceDateTimeLayout = "2006-01-02 15:04:05.999999999"
 
 // normalizeDateString нормализует строку даты/времени после round-trip через modernc.
 // modernc при *string scan для DATE-колонок возвращает RFC3339 ("1990-05-15T00:00:00Z"),
@@ -544,7 +579,7 @@ func normalizeDateString(s, dbType string) string {
 			if dbType == "DATE" {
 				return t.Format("2006-01-02")
 			}
-			return t.Format("2006-01-02 15:04:05")
+			return t.Format(workspaceDateTimeLayout)
 		}
 	}
 	return s // если не распознали — вернуть как есть

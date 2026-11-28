@@ -278,11 +278,38 @@ written with the field's declared NULL marker; in XLSX it is a blank cell.
 `field_masker` and `field_normalizer` leave NULL cells alone; `field_validator`
 checks a NULL cell as an empty value, so `required` rejects it.
 
-**Known limitation: SQLite sources and column types.** A `sqlite` source reports
-`DECIMAL`, `NUMERIC`, `BOOLEAN`, `DATE` and `DATETIME` columns as `TEXT`, so the
-workspace compares them as text: `MAX`, `MIN`, `ORDER BY` and `amount > 50` on
-such a column give wrong results. Computed columns (`SUM`, `COUNT`, `AVG`) of any
-source are typed `TEXT` in the result, so XLSX stores them as text.
+**SQLite source column types.** A column keeps its declared type (`DECIMAL`,
+`BOOLEAN`, `DATE`, `DATETIME`, …), as in `--export`.
+
+**DECIMAL in the workspace.** SQLite has no exact decimal type, so only integer
+`DECIMAL` is held exactly:
+
+| Column | Held as |
+|---|---|
+| scale 0, precision over 15 (e.g. `DECIMAL(19,0)`), any source | exact 64-bit integer |
+| no declared precision, `sqlite` source | exact if whole, otherwise a double |
+| everything else, including all fractional `DECIMAL` | a double |
+
+**Known limitations.**
+
+- An exact column divides like an integer: `5 / 2` is `2`. Write `big / 2.0` or
+  `CAST(big AS REAL) / 2` for a fractional result. This also applies to
+  expressions over it, such as `SUM(big) / COUNT(*)`.
+- `SUM` over an exact column stops with `integer overflow` when the total leaves
+  the 64-bit range (about 9.2 × 10¹⁸). `TOTAL` returns an approximate sum
+  instead.
+- A whole number outside the 64-bit range, possible from `DECIMAL(20,0)` up, is
+  rounded to a double.
+- A double is exact to about 15 significant digits. Longer fractional values,
+  such as `DECIMAL(30,6)`, are rounded in the pipeline result.
+- In XLSX, a number with more than 15 significant digits is written as text, so
+  Excel formulas such as `SUM` skip it.
+- Computed columns (`SUM`, `COUNT`, `AVG`) of any source are typed `TEXT` in the
+  result, so XLSX stores them as text.
+- `DATETIME` values are held as text in the form `2026-08-21T14:38:11Z`. A
+  literal written with a space (`seen > '2026-08-21 12:00:00'`) therefore compares
+  wrongly within the same day. Write the literal with `T`, or wrap both sides in
+  `datetime()`.
 
 A `tdtp` source is loaded part by part: each part is read, inserted into the
 workspace and released before the next one is read. The parts of a set are

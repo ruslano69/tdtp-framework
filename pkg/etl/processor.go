@@ -417,7 +417,10 @@ func (p *Processor) applySchemaPassthrough(result *ExecutionResult, sourcesData 
 		// type would produce in the workspace. A mismatch means transform.sql
 		// intentionally cast the field (e.g. CAST(work_years AS TEXT) AS work_years)
 		// and the result schema must not be overwritten with the stale source type.
-		if outField.Type != tdtpTypeToWorkspaceSQLite(orig.Type) {
+		// "DECIMAL" в результате даёт только колонка NUMERIC, см.
+		// workspaceColumnType.
+		exactDecimal := outField.Type == string(schema.TypeDecimal) && orig.Type == outField.Type
+		if !exactDecimal && outField.Type != mapSQLiteTypeToTDTP(mapTDTPTypeToSQLite(schema.DataType(orig.Type))) {
 			continue
 		}
 		result.Packet.Schema.Fields[i].Type = orig.Type
@@ -463,25 +466,4 @@ func mergeSpecialValues(result, source *packet.SpecialValues) *packet.SpecialVal
 		return nil
 	}
 	return &merged
-}
-
-// tdtpTypeToWorkspaceSQLite maps a TDTP field type to the SQLite column type
-// the Workspace would create for it. Mirrors Workspace.mapTDTPTypeToSQLite.
-func tdtpTypeToWorkspaceSQLite(tdtpType string) string {
-	switch schema.DataType(tdtpType) {
-	case schema.TypeInteger, schema.TypeInt:
-		return "INTEGER"
-	case schema.TypeReal, schema.TypeFloat, schema.TypeDouble, schema.TypeDecimal:
-		return "REAL"
-	case schema.TypeBoolean, schema.TypeBool:
-		return "INTEGER"
-	case schema.TypeDate:
-		return "DATE"
-	case schema.TypeDatetime, schema.TypeTimestamp:
-		return "DATETIME"
-	case schema.TypeBlob:
-		return "BLOB"
-	default:
-		return "TEXT"
-	}
 }
