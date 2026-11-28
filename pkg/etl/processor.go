@@ -417,8 +417,8 @@ func (p *Processor) applySchemaPassthrough(result *ExecutionResult, sourcesData 
 		// type would produce in the workspace. A mismatch means transform.sql
 		// intentionally cast the field (e.g. CAST(work_years AS TEXT) AS work_years)
 		// and the result schema must not be overwritten with the stale source type.
-		// "DECIMAL" в результате даёт только колонка NUMERIC, которую получает
-		// целочисленный DECIMAL SQLite-источника.
+		// "DECIMAL" в результате даёт только колонка NUMERIC, см.
+		// workspaceColumnType.
 		exactDecimal := outField.Type == string(schema.TypeDecimal) && orig.Type == outField.Type
 		if !exactDecimal && outField.Type != mapSQLiteTypeToTDTP(mapTDTPTypeToSQLite(schema.DataType(orig.Type))) {
 			continue

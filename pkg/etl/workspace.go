@@ -411,14 +411,18 @@ const maxExactRealDigits = 15
 
 // workspaceColumnType выбирает объявленный тип колонки рабочей БД.
 //
-// У SQLite-источника целочисленный DECIMAL, не помещающийся в double (или без
-// заданной точности), хранится как NUMERIC: такие целые остаются точными, а
-// колонка REAL округлила бы 9007199254740993 до 9007199254740992. NUMERIC делит
-// целые нацело — так же, как сама база-источник. У остальных источников это
-// изменило бы результат деления, поэтому их DECIMAL остаётся REAL.
+// Целочисленный DECIMAL с точностью больше 15 цифр хранится как NUMERIC: такие
+// целые SQLite держит точно (в пределах int64), а колонка REAL округлила бы
+// 9007199254740993 до 9007199254740992. Цена — NUMERIC делит целые нацело.
+//
+// DECIMAL без заданной точности получает NUMERIC только у SQLite-источника, где
+// деление нацело совпадает с самой базой. У остальных такая колонка может
+// держать дробные суммы, и деление целых значений в ней менять нельзя.
+//
+// Дробные DECIMAL остаются REAL: точного десятичного типа в SQLite нет.
 func (w *Workspace) workspaceColumnType(tableName string, field packet.Field) string {
-	if w.sqliteTables[tableName] && schema.DataType(field.Type) == schema.TypeDecimal &&
-		field.Scale == 0 && (field.Precision == 0 || field.Precision > maxExactRealDigits) {
+	if schema.DataType(field.Type) == schema.TypeDecimal && field.Scale == 0 &&
+		(field.Precision > maxExactRealDigits || field.Precision == 0 && w.sqliteTables[tableName]) {
 		return "NUMERIC"
 	}
 	return mapTDTPTypeToSQLite(schema.DataType(field.Type))

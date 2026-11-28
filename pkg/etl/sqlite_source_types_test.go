@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ruslano69/tdtp-framework/pkg/core/packet"
@@ -97,23 +98,99 @@ func TestSQLiteSource_SelectAllKeepsValuesAndTypes(t *testing.T) {
 	}
 }
 
-// Деление нацело — свойство SQLite. Целочисленный DECIMAL остальных источников
-// делится по-прежнему с дробной частью.
-func TestWorkspace_DecimalDivisionOfOtherSources(t *testing.T) {
+// decimalColumn загружает значения в колонку DECIMAL(p,s) источника данного типа.
+func decimalColumn(t *testing.T, source string, precision, scale int, values ...string) *Workspace {
+	t.Helper()
 	ctx := context.Background()
-	for source, want := range map[string]string{"sqlite": "2", "mssql": "2.5", "tdtp": "2.5"} {
-		w := newTestWorkspace(t, ctx)
-		w.SetSourceType("t", source)
-		fields := []packet.Field{{Name: "n", Type: "DECIMAL", Precision: 19}}
-		if err := w.CreateTable(ctx, "t", fields); err != nil {
-			t.Fatal(err)
+	w := newTestWorkspace(t, ctx)
+	w.SetSourceType("t", source)
+	fields := []packet.Field{{Name: "n", Type: "DECIMAL", Precision: precision, Scale: scale}}
+	if err := w.CreateTable(ctx, "t", fields); err != nil {
+		t.Fatal(err)
+	}
+	rows := make([][]string, len(values))
+	for i, v := range values {
+		rows[i] = []string{v}
+	}
+	pkt := &packet.DataPacket{Schema: packet.Schema{Fields: fields}, Data: packet.RowsToData(rows)}
+	if err := w.LoadData(ctx, "t", pkt); err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+// Точно хранится целочисленный DECIMAL длиннее 15 цифр, у любого источника;
+// без заданной точности — только у SQLite. Ценой этого такие целые делятся
+// нацело. Остальные DECIMAL — double, как раньше.
+func TestWorkspace_ExactIntegerDecimals(t *testing.T) {
+	const big = "9007199254740993" // 2^53+1: double его не вмещает
+	for _, c := range []struct {
+		source           string
+		precision, scale int
+		exact            bool
+	}{
+		{"tdtp", 19, 0, true},
+		{"mssql", 16, 0, true},
+		{"sqlite", 19, 0, true},
+		{"sqlite", 0, 0, true},
+		{"tdtp", 0, 0, false},
+		{"mssql", 15, 0, false},
+		{"tdtp", 19, 2, false},
+		{"sqlite", 12, 2, false},
+	} {
+		_, kept := tableRows(t, decimalColumn(t, c.source, c.precision, c.scale, big), "SELECT n FROM t")
+		_, half := tableRows(t, decimalColumn(t, c.source, c.precision, c.scale, "5"), "SELECT n / 2 FROM t")
+		wantHalf := "2.5"
+		if c.exact {
+			wantHalf = "2"
 		}
-		if err := w.LoadData(ctx, "t", &packet.DataPacket{Schema: packet.Schema{Fields: fields}, Data: packet.RowsToData([][]string{{"5"}})}); err != nil {
-			t.Fatal(err)
+		if (kept[0][0] == big) != c.exact || half[0][0] != wantHalf {
+			t.Errorf("%s DECIMAL(%d,%d): %s kept as %s, 5 / 2 = %s; want exact=%t and %s",
+				c.source, c.precision, c.scale, big, kept[0][0], half[0][0], c.exact, wantHalf)
 		}
-		_, rows := tableRows(t, w, "SELECT n / 2 FROM t")
-		if rows[0][0] != want {
-			t.Errorf("source=%s: 5 / 2 = %s, want %s", source, rows[0][0], want)
-		}
+	}
+}
+
+// Известные ограничения точной колонки, описаны в docs/ETL_PIPELINE.md.
+func TestWorkspace_ExactIntegerDecimalLimits(t *testing.T) {
+	ctx := context.Background()
+
+	w := decimalColumn(t, "tdtp", 19, 0, "9000000000000000000", "9000000000000000000")
+	if _, err := w.ExecuteSQL(ctx, "SELECT SUM(n) FROM t", "r"); err == nil || !strings.Contains(err.Error(), "integer overflow") {
+		t.Errorf("SUM past 64 bits: err = %v, want integer overflow", err)
+	}
+	_, rows := tableRows(t, w, "SELECT TOTAL(n), n / 2.0 FROM t LIMIT 1")
+	if rows[0][0] == "" {
+		t.Error("TOTAL must return an approximate sum")
+	}
+
+	const beyond64 = "12345678901234567890123"
+	_, rows = tableRows(t, decimalColumn(t, "tdtp", 38, 0, beyond64), "SELECT n FROM t")
+	if rows[0][0] == beyond64 {
+		t.Errorf("a value past 64 bits is now exact; update the documented limitation")
+	}
+}
+
+// Большое целое доходит из TDTP-файла до результата пайплайна без округления.
+func TestTDTPSource_KeepsLargeIntegerDecimal(t *testing.T) {
+	f := typedSources(t)
+	file := filepath.Join(t.TempDir(), "t.tdtp.xml")
+	loader := NewLoader(nil, ErrorHandlingConfig{})
+	adapter, err := loader.adapterFor(context.Background(), f.sources["sqlite"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packets, err := adapter.ExportTable(context.Background(), "t")
+	loader.closeAdapters(context.Background())
+	if err != nil || len(packets) != 1 {
+		t.Fatalf("export: %d packets, %v", len(packets), err)
+	}
+	if err := packet.NewGenerator().WriteToFile(packets[0], file); err != nil {
+		t.Fatal(err)
+	}
+
+	got := pipelineValues(t, SourceConfig{Name: "t", Type: "tdtp", DSN: file}, "SELECT big FROM t WHERE id = 1")
+	if want := []string{"9007199254740993"}; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

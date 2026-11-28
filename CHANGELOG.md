@@ -22,6 +22,11 @@ Fixed for every source along the way:
 
 - a date-time kept no fraction of a second in the pipeline result;
 - a `BOOLEAN` value other than 1/0/true/false became false; it now stays as is.
+- an integer `DECIMAL` with more than 15 digits was rounded: 9007199254740993
+  came out as 9007199254740992. It is now exact. **Such a column divides like an
+  integer** (`5 / 2` is `2`; write `/ 2.0`), and `SUM` past 64 bits stops with
+  `integer overflow`. Fractional `DECIMAL` is still a double; see "Known
+  limitations" in `docs/ETL_PIPELINE.md`.
 
 ### Fixed — pipelines computed wrong results over NULL
 
